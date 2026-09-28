@@ -15,7 +15,7 @@ One record per load-bearing decision. Status: `Proposed` (recommended, not yet a
 | [0008](0008-mid-rollout-policy-change.md) | Policy may change mid-rollout; split generations by abort-and-resubmit | Accepted (requirement) · mechanism Proposed |
 | [0009](0009-stale-kv-importance-sampling.md) | Reuse stale KV across weight updates; correct with importance sampling | Accepted · amended by 0015 |
 | [0010](0010-envlet-fork-e2b.md) | microVMs via a node daemon (envlet) forked from E2B's orchestrator | Deferred (environment system) |
-| [0011](0011-stack.md) | Language stack | Proposed · amended by 0016, 0017 |
+| [0011](0011-stack.md) | Language stack | Superseded by 0023 |
 | [0012](0012-task-agent-loop.md) | Tasks, agents, and one framework-owned loop; `Observation` | Accepted · amended by 0014 |
 | [0013](0013-replay-durability.md) | Durability of task and agent code by deterministic replay | Proposed · amended by 0017, 0020 |
 | [0014](0014-no-forks-template-recipes.md) | No forks; setup cost paid by templates | Accepted (templates belong to the deferred environment system) |
@@ -27,6 +27,7 @@ One record per load-bearing decision. Status: `Proposed` (recommended, not yet a
 | [0020](0020-deterministic-event-loop.md) | A deterministic asyncio event loop in the task host | Proposed |
 | [0021](0021-trust-tiers.md) | Isolate task code by trust tier, in one execution architecture | Proposed |
 | [0022](0022-rl-interface-extensions.md) | RL interface extensions (routing replay accepted) | Proposed |
+| [0023](0023-development-baseline.md) | Development baseline: Python 3.13, `rollout` package, Qwen3, vLLM first, reference trainer | Accepted |
 
 ## Template
 

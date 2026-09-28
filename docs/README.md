@@ -30,6 +30,7 @@ docs/
 ├── environments/                      PRELIMINARY: a separate system, designed later
 ├── durability/                        optional: DurableRunner on DBOS, the pump, the task host
 ├── platform/                          optional: cells, trust tiers, Control API, tool router
+├── development/plan.md                milestones, exit criteria, first tasks
 ├── decisions/                         ADRs: why each load-bearing choice was made
 └── research/                          investigations behind the decisions (evidence, not normative)
 ```

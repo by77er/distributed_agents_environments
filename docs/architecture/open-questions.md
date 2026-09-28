@@ -15,14 +15,20 @@ Decided *not* to decide yet (P14).
 | Which trust tiers are needed, and whether T3 (public) is in scope | [trust tiers](../platform/trust-tiers.md) | before external tenants |
 | Human approval of tool calls, run budgets, streaming to clients beyond the Control API | [research](../research/interfaces-agent-frameworks.md#9-recommended-interface-changes-concrete) | when product use cases need them |
 
+## Settled for development
+
+See [ADR-0023](../decisions/0023-development-baseline.md): Python 3.13 and the `rollout` package; target models
+Qwen3 / Qwen3.5; vLLM first for the local profile; a minimal reference trainer; `score` does not run after a hook
+raised; strict-priority admission with one cursor per job; the durable pump in Python. The order of work is in the
+[development plan](../development/plan.md).
+
 ## Open interface questions
+
+None of these blocks the next milestone.
 
 | # | Question | Owner |
 |---|---|---|
-| Q1 | Should `score` also run after a hook raised, to score partial work? | [harness](../core/harness/README.md) |
-| Q2 | Priority semantics across rows of one rollout job; a cursor per consumer when several trainers share a job | [rollouts](../core/rollouts/README.md) |
 | Q3 | Where enrichment (teacher / reference logprobs via `score_tokens`) runs: assembler or trainer | [trajectories](../core/trajectories/README.md) |
-| Q4 | Whether the durable pump is written in Python or Go (DBOS Go feature parity) | [durability](../durability/README.md) |
 | Q5 | Pool strategy for weight transitions at fleet scale; capacity for pinned historical versions | [inference](../inference/README.md) |
 | Q6 | Tenancy model and quota dimensions | [control API](../platform/control-api/README.md) |
 
@@ -32,7 +38,6 @@ Decided *not* to decide yet (P14).
 |---|---|---|
 | W1 | Distribution of run lifetimes (seconds-long RL episodes vs days-long conversations) and their mix | durable vs best-effort runs; database sizing |
 | W2 | Largest expected swarm | cell sizing (swarms stay in one cell) |
-| W3 | Target model families | renderer coverage; routing replay |
 
 ## Validation spikes
 

@@ -1,7 +1,17 @@
-# Distributed agents and environments
+# rollout
 
-Design for a durable, horizontally scalable system of AI agents and the computer environments they work in:
-headless agent runs that survive crashes, pluggable tools and environments (microVMs, containers, VPSs), and
-first-class support for large swarms, reinforcement-learning pipelines, and remote stateful coding agents.
+Durable, scalable agents and environments for agent products and reinforcement learning. The core is a Python library
+that runs on one machine (one GPU is enough); durability, fleet-scale execution and environments are optional layers.
 
-The design is specified before any implementation. Start with [docs/README.md](docs/README.md).
+- Design: [docs/README.md](docs/README.md)
+- Development plan: [docs/development/plan.md](docs/development/plan.md)
+
+## Development
+
+```sh
+uv sync                     # base install (no GPU needed)
+uv sync --extra vllm        # local inference engine (Linux, NVIDIA GPU)
+uv run pytest
+uv run ruff check && uv run ruff format --check
+uv run pyright
+```

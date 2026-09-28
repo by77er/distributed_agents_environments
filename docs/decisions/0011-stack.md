@@ -1,6 +1,6 @@
 # 0011 — Go for control and environment planes, Python for recorder and RL plane
 
-Status: **Proposed**, amended by [0016](0016-layers-and-profiles.md) and [0017](0017-dbos-substrate.md) · Date: 2026-09-26
+Status: **Superseded** by [0023](0023-development-baseline.md) · Date: 2026-09-26
 
 ## Context
 

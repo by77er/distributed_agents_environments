@@ -74,7 +74,7 @@ async for group in complete_groups(job.samples(), by="group", size=8):
 ## Semantics and guarantees
 
 - **Admission**: runs are created while `runs in flight + unacknowledged samples < buffer_samples`. Otherwise
-  `run` requests wait in the job's queue (by priority, then arrival). `admit_together` admits all `count` runs of a
+  `run` requests wait in the job's queue (strict priority, then arrival). `admit_together` admits all `count` runs of a
   ticket at once or none; it is an admission rule, not grouping semantics.
 - **Runs** receive the row as program parameters and the labels, which propagate to the run, its recorder sessions
   and its samples. `count` creates independent runs.
@@ -102,6 +102,5 @@ samples in the durable sample log, so a caller that crashes resumes from its las
 
 ## Open questions
 
-- Priority semantics across rows of one job (strict vs weighted).
-- A cursor per consumer when several trainers share one job.
+- A cursor per consumer when several trainers share one job (one cursor per job until then).
 - Samples from runs outside jobs (e.g. production conversations): a policy question first.

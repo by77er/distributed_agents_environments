@@ -146,5 +146,3 @@ adapter. Task hosts, programs, the recorder and the RL plane do not depend on DB
 - Retention at our write rate (DBOS deletes rows rather than dropping partitions), recovery storms, `NOTIFY`
   pressure from messaging, and fencing under network partitions: spikes S-D1 to S-D9 in the
   [research report](../research/substrate-dbos.md#10-risks-open-questions-spike-tests).
-- Whether the pump is written in Python or Go (DBOS Go parity with partitioned queues and durable wait-any is
-  unverified).

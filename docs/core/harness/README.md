@@ -60,7 +60,8 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
 ```
 
 - `setup` runs first; `teardown` runs whenever `setup` began (success, failure, cancellation).
-- `score` runs only when the loop ends with an `Ending`.
+- `score` runs only when the loop ends with an `Ending`; after a hook raised it does not run and the run fails
+  with `TASK_ERROR`.
 - A `WaitFor` suspends the run until a message of the requested kind arrives or the timeout passes
   ([conversations](conversations.md)). Under a durable runner, a suspended run holds no compute.
 - Messages delivered with mode `STEER` are merged into the next observation by `Task.steer` (default: appended as
@@ -148,6 +149,5 @@ class RunHandle(Protocol):
 
 ## Open questions
 
-- Should `score` also run after a hook raised, to score partial work?
 - Branching partway through an episode (tree search, Monte Carlo value estimates) is not supported
   ([ADR-0014](../../decisions/0014-no-forks-template-recipes.md)); add it only when an algorithm needs it.
