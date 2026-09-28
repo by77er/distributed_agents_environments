@@ -66,13 +66,14 @@ lists to `Model.sample`; the core computes the delta.
 ```python
 @dataclass(frozen=True)
 class ContextDelta:
-    parent_digest: bytes | None     # digest of the previous request's context in this slot; None = full context
+    parent_digest: str | None       # digest of the previous request's context in this slot; None = full context
     keep_prefix: int                # number of parent items retained (== parent length for pure append)
     append: Sequence[Message]       # items appended after the retained prefix
-    digest: bytes                   # digest of the resulting context
+    digest: str                     # digest of the resulting context (hexadecimal)
 ```
 
-**Digest chain**: `d₀ = sha256("")`, `dᵢ = sha256(dᵢ₋₁ ‖ sha256(JCS(itemᵢ)))`. The digest of a context of length
+**Digest chain**: `d₀ = sha256("")`, `dᵢ = sha256(dᵢ₋₁ ‖ sha256(JCS(itemᵢ)))` over raw digest bytes, with items
+canonicalized as in [canonical content](canonical-content.md#digests). The digest of a context of length
 `k` is `d_k`, so any retained prefix is identifiable by its own chain value. Compaction is `keep_prefix < len` plus
 appended summary items; pure continuation is `keep_prefix == len`.
 

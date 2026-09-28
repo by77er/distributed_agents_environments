@@ -73,7 +73,7 @@ The environment system; the platform layer (cells, trust tiers, Control API, con
 ## First tasks (M0)
 
 1. Repository scaffold: `pyproject.toml`, `src/rollout/`, tooling, a smoke test. **Done with this plan.**
-2. Contract types and digests, with round-trip and canonical-JSON tests.
+2. Contract types and digests, with round-trip and canonical-JSON tests. **Done** (`rollout.core.contracts`).
 3. `Task`, `Agent`, `Observation`, `WaitFor` and the loop, driven by a scripted fake model endpoint.
 4. `@tool` → `ToolSpecification` (pydantic JSON Schema), tool execution and `ToolResult` normalization.
 5. `LocalRunner` with conversations and delivery modes.

@@ -33,7 +33,7 @@ message Block {
     Text        text        = 1;
     Media       media       = 2;  // image, audio, document
     ToolCall    tool_call   = 3;
-    ToolResult  tool_result = 4;
+    ToolResultBlock tool_result = 4;
     Reasoning   reasoning   = 5;
   }
 }
@@ -41,6 +41,7 @@ message Block {
 message Text      { string text = 1; }
 message Media     { string media_type = 1; BlobReference source = 2; }
 message ToolCall  { string call_id = 1; string name = 2; Json arguments = 3; }   // arguments: JSON object
+message ToolResultBlock { string call_id = 1; ToolResult result = 2; }          // answers the ToolCall with call_id
 message Reasoning {
   Scope   scope   = 1;  // PORTABLE: plain text any renderer may render (or drop)
                         // POLICY:   opaque, valid only for `producer`
@@ -59,6 +60,15 @@ message BlobReference {
 
 `POLICY`-scoped reasoning (e.g. encrypted provider reasoning) is dropped or summarized at renderer-epoch
 boundaries by the recorder, according to the channel's configuration. Task and agent code never need to know.
+
+## Digests
+
+Digests of canonical content (`spec_hash`, context digests, argument digests) are lowercase hexadecimal SHA-256 of
+the RFC 8785 canonical JSON of the value, with two rules that keep them stable:
+
+- Fields whose value is absent (`null`) are omitted, so adding an optional field does not change existing digests.
+  New optional fields MUST default to absent. `null` inside JSON values (tool arguments, schemas) is kept.
+- A message's digest excludes `meta`, which is never model-visible.
 
 ## ToolSpecification
 
