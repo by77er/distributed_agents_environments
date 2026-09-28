@@ -38,7 +38,9 @@ the next milestone builds on. Later milestones start only when a consumer needs 
 - The minimal reference GRPO trainer.
 
 **Exit criteria**
-- GRPO on Qwen3-1.7B improves arithmetic and Wordle reward on the development GPU.
+- GRPO on the local training model improves arithmetic and Wordle reward on the development GPU. The model is
+  open: Qwen3-0.6B fully fine-tuned, or Qwen3-1.7B with frozen embeddings
+  ([ADR-0023](../decisions/0023-development-baseline.md#colocation-spike)).
 - Recorded behavior logprobs match the trainer's recomputation at the same weights: mean absolute difference
   within tolerance (bf16 decode and prefill disagree per token by up to ~0.15; see
   [ADR-0023](../decisions/0023-development-baseline.md#local-engine-spike)).

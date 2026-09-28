@@ -32,8 +32,9 @@ block writing the first line of code; everything else stays deferred (P14).
 
 **Models**
 - Target family: **Qwen3 / Qwen3.5**. The recorder's first renderers are for this family.
-- Local development: Qwen3-0.6B for tests, Qwen3-1.7B for local training (colocated train + inference must fit a
-  16 GB GPU). Mixture-of-experts plumbing (routing replay) is developed against a small, randomly initialized
+- Local development: Qwen3-0.6B for tests. The local training model is **open**: Qwen3-1.7B with full fine-tuning
+  does not fit a 16 GB GPU next to a sleeping engine ([colocation spike](#colocation-spike)). Candidates: Qwen3-0.6B
+  with full fine-tuning, or Qwen3-1.7B with the tied embeddings and output head frozen. Mixture-of-experts plumbing (routing replay) is developed against a small, randomly initialized
   Qwen3-MoE configuration; real MoE models (e.g. Qwen3-30B-A3B) run in the cluster profile.
 
 **Local engine**
@@ -71,6 +72,43 @@ bf16, eager mode, 25% of GPU memory, `logprobs_mode="processed_logprobs"`.
 Decode and prefill kernels disagree slightly in bf16, so the recorder keeps the logprobs observed while sampling
 (they are the behavior distribution); `score_tokens` is not a substitute for them. Parity checks compare means,
 not maxima.
+
+Rerun at the planned settings (2026-09-28, 45% of GPU memory, 4,096-token context): all five checks pass for
+Qwen3-0.6B and Qwen3-1.7B. Sleeping frees 7.1 GiB with either model (7.2–7.3 → 14.4 GiB free). Sampled vs. re-scored
+logprobs for 1.7B: mean |Δ| 0.011, max 0.257.
+
+## Colocation spike
+
+2026-09-28 · same machine and versions · one local RL cycle with Qwen3-1.7B: generate a group of 8 × 192 tokens →
+engine sleeps (level 1) → AdamW step (bf16 states, gradient checkpointing) → weights pushed with
+`collective_rpc(load_weights)` while only the engine's weights are awake → trainer offloaded → KV cache wakes →
+generate at the new weights → trainer recomputes that sample's logprobs.
+
+| Measurement | Result |
+|---|---|
+| The cycle runs end to end | yes; waking weights and KV cache separately (`wake_up(tags=...)`) works |
+| Behavior logprobs vs. trainer recomputation, after a real update | mean \|Δ\| 0.013, max 0.365; per-token ratio 0.69–1.18 |
+| Generation throughput, warm, group of 8 | 402 tokens/s eager; **1,284 tokens/s with CUDA graphs** |
+
+Trainer memory for one step on 8 sequences of 224 tokens (device: 15.9 GiB; about 1.5 GiB is taken by the desktop
+and the sleeping engine):
+
+| Configuration | Trainable parameters | Peak allocated | Fits | Seconds per step |
+|---|---|---|---|---|
+| Qwen3-1.7B, full, micro-batch 8 | 1,721 M | 19.2 GiB | no | 12.7 (spilled) |
+| Qwen3-1.7B, full, micro-batch 1 | 1,721 M | 16.1 GiB | no | 4.5 (spilled) |
+| Qwen3-1.7B, embeddings and head frozen, micro-batch 1 | 1,409 M | 13.8 GiB | yes, narrowly | 1.3 |
+| Qwen3-0.6B, full, micro-batch 8 | 596 M | 10.8 GiB | yes | 0.6 |
+
+Findings:
+
+- **WSL hides out-of-memory.** The Windows driver spills GPU allocations into system memory instead of failing, so
+  an oversized step runs slowly rather than crashing. Local runs must check peak allocation against device memory;
+  on native Linux the same step fails.
+- **Per-token ratios reach ±30% at identical weights** (bf16 kernels), so the reference trainer uses truncated
+  importance weights from the start.
+- **Use CUDA graphs locally** (3.2× throughput). Their interaction with sleep, wake and weight updates is not yet
+  measured.
 
 ## Consequences
 

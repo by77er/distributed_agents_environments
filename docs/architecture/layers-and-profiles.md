@@ -43,7 +43,7 @@ Rules:
 ### The local profile, concretely
 
 ```python
-engine = LocalEngine("Qwen/Qwen3-1.7B", gpu_memory_fraction=0.45)            # vLLM in process, sleep mode enabled
+engine = LocalEngine("Qwen/Qwen3-0.6B", gpu_memory_fraction=0.45)            # vLLM in process, sleep mode enabled
 recorder = Recorder(engines={"exp/latest": engine}, mode=RecorderMode.ACTIVE)
 jobs = LocalRolloutJobs(runner=LocalRunner(recorder=recorder))
 
