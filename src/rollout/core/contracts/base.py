@@ -16,4 +16,4 @@ class ContractModel(BaseModel):
     what it does not understand (contracts evolution rule 4).
     """
 
-    model_config = ConfigDict(frozen=True, extra="allow")
+    model_config = ConfigDict(frozen=True, extra="allow", use_attribute_docstrings=True)

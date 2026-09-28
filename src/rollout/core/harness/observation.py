@@ -12,6 +12,8 @@ type ObservationContent = str | Message | Sequence[Message]
 
 
 class Ending(StrEnum):
+    """How an episode ended."""
+
     TERMINATED = "terminated"
     """A real end state (value methods do not bootstrap)."""
     TRUNCATED = "truncated"
@@ -27,6 +29,7 @@ class Observation:
     """
 
     messages: tuple[Message, ...]
+    """Shown to the model next: USER and TOOL messages only."""
     reward: float | None
     """Bound to the reply this observation answers."""
     end: Ending | None

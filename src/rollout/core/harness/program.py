@@ -7,6 +7,8 @@ from rollout.core.harness.task import Task
 
 
 class Program:
+    """What a run executes. `AgentProgram` is the task loop; plain durable workflows are other programs."""
+
     async def main(self, run: RunContext) -> None:
         raise NotImplementedError
 

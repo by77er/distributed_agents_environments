@@ -14,6 +14,8 @@ RUN_EVENT_SCHEMA_VERSION = 1
 
 
 class RunEventType(StrEnum):
+    """The closed catalog of run events."""
+
     # Lifecycle
     RUN_CREATED = "run.created"
     GENERATION_STARTED = "generation.started"
@@ -43,6 +45,8 @@ TERMINAL_EVENT_TYPES = frozenset({RunEventType.RUN_COMPLETED, RunEventType.RUN_F
 
 
 class RunFailureClass(StrEnum):
+    """Why a run failed (the `class` of a `run.failed` event)."""
+
     TASK_ERROR = "task_error"
     INVALID_OBSERVATION = "invalid_observation"
     NON_DETERMINISM = "non_determinism"
@@ -51,6 +55,8 @@ class RunFailureClass(StrEnum):
 
 
 class RunEvent(ContractModel):
+    """One entry in a run's event stream."""
+
     run_id: str
     seq: int
     """Position in this run's event stream, gapless from 0; `run.created` is 0."""
@@ -59,3 +65,4 @@ class RunEvent(ContractModel):
     recorded_at: datetime
     """Exposed to code as `run.now()` for inputs."""
     payload: JsonValue = None
+    """Type-specific; see docs/contracts/run-events.md."""

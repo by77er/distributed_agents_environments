@@ -11,6 +11,8 @@ from rollout.core.contracts.content import RetryClass
 
 
 class EffectKind(StrEnum):
+    """The catalog of effects."""
+
     MODEL_SAMPLE = "model.sample"
     TOOL_CALL = "tool.call"
     ENVIRONMENT_CALL = "environment.call"
@@ -23,6 +25,8 @@ class EffectKind(StrEnum):
 
 
 class EffectStatus(StrEnum):
+    """How an effect completed."""
+
     OK = "ok"
     FAILED = "failed"
     OUTCOME_UNKNOWN = "outcome_unknown"

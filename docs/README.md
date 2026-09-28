@@ -1,6 +1,7 @@
 # Design docs
 
-This tree defines the system's **boundaries and interfaces** before any implementation. It is organized by layer:
+This tree defines the system's **boundaries and interfaces**. To build with the code as it exists, start with the
+[developer guide](guide/README.md). It is organized by layer:
 a **core library** that runs on one machine, plus **optional layers** that deploy the same protocols with durability,
 at fleet scale, or with computers for tasks ([layers and profiles](architecture/layers-and-profiles.md)).
 
@@ -31,6 +32,7 @@ docs/
 ├── durability/                        optional: DurableRunner on DBOS, the pump, the task host
 ├── platform/                          optional: cells, trust tiers, Control API, tool router
 ├── development/plan.md                milestones, exit criteria, first tasks
+├── guide/                             developer guide to the code as built; generated API reference
 ├── decisions/                         ADRs: why each load-bearing choice was made
 └── research/                          investigations behind the decisions (evidence, not normative)
 ```

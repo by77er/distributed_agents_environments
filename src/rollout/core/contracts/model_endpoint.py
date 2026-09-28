@@ -14,12 +14,16 @@ from rollout.core.contracts.content import Message, Role, ToolSpecification
 
 
 class ToolChoiceMode(StrEnum):
+    """Whether the model may, must not, or must call a tool."""
+
     AUTO = "auto"
     NONE = "none"
     REQUIRED = "required"
 
 
 class NamedToolChoice(ContractModel):
+    """The model must call this tool."""
+
     name: str
 
 
@@ -27,6 +31,8 @@ type ToolChoice = ToolChoiceMode | NamedToolChoice
 
 
 class FinishReason(StrEnum):
+    """Why a sample stopped."""
+
     STOP = "stop"
     LENGTH = "length"
     TOOL_USE = "tool_use"
@@ -34,6 +40,8 @@ class FinishReason(StrEnum):
 
 
 class ReasoningSupport(StrEnum):
+    """Which kinds of reasoning blocks a model slot produces."""
+
     NONE = "none"
     PORTABLE = "portable"
     POLICY_SCOPED = "policy_scoped"
@@ -68,6 +76,8 @@ class ContextDelta(ContractModel):
 
 
 class SampleRequest(ContractModel):
+    """A request for one reply. Sampling parameters are not here: they belong to the policy."""
+
     effect_id: str
     """Required: the idempotency key."""
     arguments_digest: str
@@ -89,6 +99,8 @@ class SampleRequest(ContractModel):
 
 
 class Usage(ContractModel):
+    """Context use after a sample."""
+
     context_used: int
     """Drives the agent's compaction decisions."""
     context_limit: int
@@ -111,8 +123,16 @@ class SampleResult(ContractModel):
 
 
 class ModelEndpoint(Protocol):
-    def describe(self, session_id: str) -> CapabilityContract: ...
-    async def sample(self, request: SampleRequest) -> SampleResult: ...
+    """Serves model slots: implemented by the recorder and by direct adapters."""
+
+    def describe(self, session_id: str) -> CapabilityContract:
+        """The capability contract of the session's model slot."""
+        ...
+
+    async def sample(self, request: SampleRequest) -> SampleResult:
+        """One reply. Where the endpoint deduplicates, a repeated `effect_id` returns the recorded result."""
+        ...
+
     async def cancel(self, effect_id: str) -> None:
         """Best-effort."""
         ...
@@ -123,6 +143,8 @@ class ModelEndpointError(Exception):
 
 
 class Overloaded(ModelEndpointError):
+    """Admission control: retry after `retry_after` seconds."""
+
     def __init__(self, retry_after: float | None = None) -> None:
         super().__init__(f"overloaded; retry after {retry_after}s")
         self.retry_after = retry_after
@@ -133,6 +155,8 @@ class NeedFullContext(ModelEndpointError):
 
 
 class ContextOverflow(ModelEndpointError):
+    """The context exceeds the contract's limit; agents compact and retry."""
+
     def __init__(self, context_limit: int) -> None:
         super().__init__(f"context exceeds the limit of {context_limit} tokens")
         self.context_limit = context_limit
@@ -147,8 +171,8 @@ class Conflict(ModelEndpointError):
 
 
 class DeadlineExceeded(ModelEndpointError):
-    pass
+    """The request's deadline passed."""
 
 
 class InternalError(ModelEndpointError):
-    pass
+    """The endpoint failed."""

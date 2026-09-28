@@ -20,9 +20,14 @@ class Turn:
 
 
 class HistoryShape(StrEnum):
+    """How much of the history the model should see."""
+
     FULL = "full"
+    """Everything."""
     LATEST_OBSERVATION = "latest_observation"
+    """Only the latest observation: observations are complete states."""
     WINDOW = "window"
+    """The start observation and the most recent `window` turns."""
 
 
 @dataclass(frozen=True)
@@ -42,9 +47,11 @@ class History:
 
     @property
     def turns(self) -> tuple[Turn, ...]:
+        """Every turn, the start observation first."""
         return tuple(self._turns)
 
     def append(self, turn: Turn) -> None:
+        """For run contexts only."""
         self._turns.append(turn)
 
     def messages(self, hints: ContextHints | None = None) -> list[Message]:

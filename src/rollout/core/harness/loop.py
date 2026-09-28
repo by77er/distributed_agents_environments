@@ -8,6 +8,7 @@ from rollout.core.harness.task import Task
 
 
 async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
+    """Run one episode of `task` with `agent`. Raises `InvalidObservation` or whatever a hook raised."""
     try:
         await task.setup(run)
         observation = _checked(await task.start(run), reply=None)

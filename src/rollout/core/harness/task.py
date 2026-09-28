@@ -22,12 +22,19 @@ class ModelSlot:
 
 
 class Task:
+    """The environment an agent acts in: tools, the first observation, responses to replies, and scoring.
+
+    Subclass it and implement `start`; override the other hooks as needed. Declarations are class attributes.
+    """
+
     models: ClassVar[dict[str, ModelSlot]] = {"policy": ModelSlot()}
+    """The model slots the task uses. The agent acts through `policy`."""
     imports: ClassVar[list[str]] = []
     """External tool sets, bound per run."""
     max_turns: ClassVar[int | None] = None
     """The loop truncates the episode after this many model turns."""
     context_hints: ClassVar[ContextHints] = ContextHints()
+    """Advisory for the agent: how much history the model should see."""
 
     declared_tools: ClassVar[dict[str, DeclaredTool]] = {}
     """The `@tool` methods of this class, collected when the class is defined."""
@@ -37,6 +44,7 @@ class Task:
         cls.declared_tools = collect_tools(cls)
 
     def __init__(self, parameters: Any = None) -> None:
+        """Once per run, with the row's parameters. Subclasses may define their own signature."""
         self.parameters = parameters
 
     # Lifecycle hooks

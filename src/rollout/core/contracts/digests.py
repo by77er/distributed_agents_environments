@@ -18,12 +18,14 @@ EMPTY_DIGEST = hashlib.sha256(b"").hexdigest()
 
 
 def canonical_json(value: JsonValue | BaseModel) -> bytes:
+    """RFC 8785 canonical JSON; a model is dumped with `None` fields omitted."""
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="json", exclude_none=True)
     return rfc8785.dumps(value)
 
 
 def digest(value: JsonValue | BaseModel) -> str:
+    """Lowercase hexadecimal SHA-256 of the canonical JSON."""
     return hashlib.sha256(canonical_json(value)).hexdigest()
 
 

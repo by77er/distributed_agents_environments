@@ -22,6 +22,8 @@ from rollout.core.contracts import (
 from rollout.core.harness.task import Task
 from rollout.core.local.context import LocalRunContext
 
+__all__ = ["ScriptedModelEndpoint", "ScriptedReply", "events_of", "local_run", "payload", "tool_call_reply"]
+
 type ScriptedReply = Message | str | Callable[[SampleRequest], Message | Awaitable[Message]]
 """A reply, its text, or a function of the request (which may await, e.g. to hold a sample open)."""
 
@@ -74,6 +76,7 @@ def local_run(task: Task, replies: Iterable[ScriptedReply] = ()) -> tuple[LocalR
 
 
 def events_of(run: LocalRunContext, event_type: RunEventType) -> list[RunEvent]:
+    """The run's events of one type, in order."""
     return [event for event in run.events if event.type is event_type]
 
 

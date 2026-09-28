@@ -1,0 +1,32 @@
+# rollout
+
+> Durable, scalable agents and environments for agent products and reinforcement learning. A Python 3.13 library
+> (`rollout`, managed with uv): tasks define environments and tools, agents decide what the model sees, and a
+> framework-owned loop runs episodes. Status: milestone M0 (the core loop, no GPU). The developer guide describes
+> the code as built; the design docs describe the whole system, including parts not built yet.
+
+Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
+are frozen pydantic models; type names are never abbreviated. Every Python example in the guide runs in the test
+suite, and the API reference is generated from the source.
+
+## Developer guide
+
+- [Guide index](docs/guide/README.md): what is available now, concepts, where each name lives
+- [Getting started](docs/guide/getting-started.md): install, a first task, one episode against a scripted model
+- [Tasks](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, extra model slots
+- [Tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as observations
+- [Agents](docs/guide/agents.md): context selection, context hints, acting, the `Model` interface
+- [Conversations](docs/guide/conversations.md): `WaitFor`, message kinds, priorities, queue / steer / interrupt
+- [Content](docs/guide/content.md): messages, blocks, tool results, immutability, digests
+- [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, failures
+- [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
+
+## Reference
+
+- [API reference](docs/guide/reference.md): every public name in `rollout.core.harness`, `rollout.core.contracts`,
+  `rollout.core.local` and `rollout.core.testing`, with signatures, fields and docstrings
+
+## Design
+
+- [Design docs](docs/README.md): requirements, principles, layers, contracts, decisions (normative)
+- [Development plan](docs/development/plan.md): milestones and what is done

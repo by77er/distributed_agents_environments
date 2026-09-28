@@ -10,12 +10,16 @@ from rollout.core.contracts import Block, ContractModel, FrozenSequence
 
 
 class Address(ContractModel):
+    """Where a message or output goes."""
+
     kind: Literal["conversation", "run", "external"]
     value: str
     """`{deployment}/{key}`, a `run_id`, or a connector target."""
 
 
 class ConversationKey(ContractModel):
+    """Identifies a conversation: a deployment and a caller-chosen key. One live run per conversation."""
+
     deployment: str
     """e.g. `acme/support-bot`."""
     key: str
@@ -25,7 +29,10 @@ class ConversationKey(ContractModel):
 
 
 class Envelope(ContractModel):
+    """A message delivered to a run."""
+
     kind: str = "message"
+    """`message`, or an application-defined kind that `WaitFor` can select."""
     content: FrozenSequence[Block] = ()
     data: JsonValue = None
     """A structured payload."""
@@ -37,12 +44,16 @@ class Envelope(ContractModel):
 
 
 class Priority(StrEnum):
+    """A sender's priority; the run's `DeliveryPolicy` maps it to a delivery mode."""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
 
 
 class DeliveryMode(StrEnum):
+    """How a message reaches a run that is busy."""
+
     QUEUE = "queue"
     """Deliver only when the run next waits (`WaitFor`)."""
     STEER = "steer"
@@ -63,11 +74,14 @@ _PRIORITY_ORDER = (Priority.LOW, Priority.NORMAL, Priority.HIGH)
 
 
 class DeliveryPolicy(ContractModel):
+    """Maps priorities to delivery modes. Default: LOW → QUEUE, NORMAL → STEER, HIGH → INTERRUPT."""
+
     modes: Mapping[Priority, DeliveryMode] = Field(default_factory=_default_modes)
     max_priority_by_sender: Mapping[str, Priority] = Field(default_factory=dict[str, Priority])
     """Caps per sender class, so an external system cannot interrupt when it should only queue."""
 
     def mode(self, priority: Priority, sender: str | None = None) -> DeliveryMode:
+        """The delivery mode for a message, after capping the priority by sender."""
         cap = self.max_priority_by_sender.get(sender) if sender is not None else None
         if cap is not None and _PRIORITY_ORDER.index(priority) > _PRIORITY_ORDER.index(cap):
             priority = cap

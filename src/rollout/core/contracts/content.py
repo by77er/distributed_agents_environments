@@ -20,6 +20,8 @@ class BlobReference(ContractModel):
 
 
 class Text(ContractModel):
+    """Plain text."""
+
     type: Literal["text"] = "text"
     text: str
 
@@ -33,13 +35,19 @@ class Media(ContractModel):
 
 
 class ToolCall(ContractModel):
+    """A request by the model to call a tool. Appears only in ASSISTANT messages."""
+
     type: Literal["tool_call"] = "tool_call"
     call_id: str
+    """Unique within the context; the `ToolResultBlock` that answers the call repeats it."""
     name: str
     arguments: Mapping[str, JsonValue]
+    """A JSON object."""
 
 
 class ReasoningScope(StrEnum):
+    """Who can consume a reasoning block."""
+
     PORTABLE = "portable"
     """Plain text that any renderer may render or drop."""
     POLICY = "policy"
@@ -47,6 +55,8 @@ class ReasoningScope(StrEnum):
 
 
 class Reasoning(ContractModel):
+    """The model's reasoning. `POLICY`-scoped reasoning is handled by the recorder; code never needs to."""
+
     type: Literal["reasoning"] = "reasoning"
     scope: ReasoningScope
     text: str | None = None
@@ -66,6 +76,8 @@ class Reasoning(ContractModel):
 
 
 class Provenance(ContractModel):
+    """Where a tool result came from."""
+
     untrusted: bool = False
     """True for anything originating in a guest or a third-party server."""
     binding_kind: str | None = None
@@ -101,6 +113,8 @@ type Block = Annotated[Text | Media | ToolCall | ToolResultBlock | Reasoning, Fi
 
 
 class Role(StrEnum):
+    """Who a message is from. Observations contain only USER and TOOL messages."""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -108,6 +122,11 @@ class Role(StrEnum):
 
 
 class Message(ContractModel):
+    """A message in canonical form: a role and a sequence of content blocks.
+
+    TOOL messages contain only `ToolResultBlock`s, and `ToolCall`s appear only in ASSISTANT messages.
+    """
+
     role: Role
     content: FrozenSequence[Block] = ()
     name: str | None = None
@@ -133,18 +152,22 @@ class Message(ContractModel):
 
     @property
     def tool_calls(self) -> list[ToolCall]:
+        """The tool calls, in order."""
         return [block for block in self.content if isinstance(block, ToolCall)]
 
     @classmethod
     def user(cls, text: str) -> "Message":
+        """A USER message with one text block."""
         return cls(role=Role.USER, content=[Text(text=text)])
 
     @classmethod
     def assistant(cls, text: str) -> "Message":
+        """An ASSISTANT message with one text block."""
         return cls(role=Role.ASSISTANT, content=[Text(text=text)])
 
     @classmethod
     def system(cls, text: str) -> "Message":
+        """A SYSTEM message with one text block."""
         return cls(role=Role.SYSTEM, content=[Text(text=text)])
 
 

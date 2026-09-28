@@ -47,6 +47,8 @@ class Interrupted(Exception):
 
 
 class RunContext(Protocol):
+    """Everything task and agent code can reach during a run. Passed to every hook as `run`."""
+
     # For task and agent code.
     @property
     def run_id(self) -> str: ...
@@ -74,11 +76,25 @@ class RunContext(Protocol):
     @property
     def context_hints(self) -> ContextHints: ...
 
-    def now(self) -> datetime: ...
-    def reward(self, value: float, *, slot: str = "policy", key: str = "default") -> None: ...
-    def exclude_from_training(self, reason: str) -> None: ...
-    async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]: ...
-    def patched(self, change_id: str) -> bool: ...
+    def now(self) -> datetime:
+        """The current time. Use it instead of the wall clock, which durable runs cannot replay."""
+        ...
+
+    def reward(self, value: float, *, slot: str = "policy", key: str = "default") -> None:
+        """Assign a reward to a model slot outside an observation (e.g. to an opponent, or several keyed rewards)."""
+        ...
+
+    def exclude_from_training(self, reason: str) -> None:
+        """Mark the run as unsuitable for training, e.g. after an infrastructure fault that is not the policy's."""
+        ...
+
+    async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]:
+        """Await concurrently, in order. Equivalent to `asyncio.gather`."""
+        ...
+
+    def patched(self, change_id: str) -> bool:
+        """`True` unless replaying history recorded before the change (see docs/core/harness/determinism.md)."""
+        ...
 
     # For the loop.
     def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None:

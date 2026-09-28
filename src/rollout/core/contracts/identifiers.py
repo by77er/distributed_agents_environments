@@ -21,10 +21,12 @@ def new_ulid() -> str:
 
 
 def new_run_id() -> str:
+    """`r_{ulid}`."""
     return f"r_{new_ulid()}"
 
 
 def new_job_id() -> str:
+    """`j_{ulid}`."""
     return f"j_{new_ulid()}"
 
 
@@ -52,6 +54,7 @@ class EffectIdentity:
 
 
 def effect_id(run_id: str, generation: int, ordinal: int) -> str:
+    """`{run_id}:{generation}:{ordinal}`: the same on every re-execution, so it is the universal idempotency key."""
     return str(EffectIdentity(run_id, generation, ordinal))
 
 
@@ -76,4 +79,5 @@ class SessionIdentity:
 
 
 def session_id(run_id: str, model_slot: str) -> str:
+    """`{run_id}/{model_slot}`: one recorder session per model slot per run."""
     return str(SessionIdentity(run_id, model_slot))
