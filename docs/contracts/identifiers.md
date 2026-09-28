@@ -5,38 +5,45 @@ Status: **Proposed**
 All identifiers are opaque strings to consumers unless a structure is listed here as normative. ULIDs give
 time-ordering and collision resistance without coordination.
 
-| Identifier | Normative format | Scope | Minted by | Notes |
-|---|---|---|---|---|
-| `cell_id` | `[a-z0-9]{2,12}` | global | operator | e.g. `use1a` |
-| `run_id` | `r_{cell_id}_{ulid}` | global | Control API (cell) | **Embeds the home cell.** Runs never migrate, so routing needs no lookup |
-| `partition` | `fnv1a64(run_id) mod P` | cell | derived | `P` is fixed at cell creation (default 4096) and never changes |
-| `seq` | uint64, from 0, gapless | run | Run Store (by append) | `seq = 0` is always `run.created` |
-| `effect_id` | `{run_id}:{seq}` | global | derived | `seq` of the committed `*.requested` event. Deterministic across retries → the universal idempotency key |
-| `lease_epoch` | uint64, monotonic | partition | Run Store | fencing token |
-| `worker_id` | `{pod_name}.{boot_nonce}` | cell | runtime | distinguishes restarts of the same pod |
-| `session_id` | `{run_id}/{model_slot}` (managed) · `u_{ulid}/{model_slot}` (unmanaged) | global | runtime / Control API | one recorder session per model slot per run |
-| `env_id` | `e_{cell_id}_{ulid}` | global | Environment Manager | environments are cell-scoped |
-| `attachment_id` | `{env_id}/{run_id}` | cell | Environment Manager | one per (env, run) |
-| `snapshot_id` | `s_{region}_{ulid}` | region | Environment Manager | snapshots live in regional object storage and may be restored in any cell of the region |
-| `template_id` | `tpl_{sha256}` of the recipe (JCS, `base` resolved to a digest) | region | Environment Manager | content-addressed; equal recipes share one build |
-| `pool_id` | `pool/{name}` | cell | operator / API | |
-| `policy_id` | `[a-z0-9-]+` | global | Policy Registry | a weights lineage, e.g. `exp42` |
-| `weights_version` | uint64, monotonic per `policy_id` | lineage | Policy Registry | `exp42@1731` is a policy version ref |
-| `channel` | `{namespace}/{name}` | global | Policy Registry | movable pointer, e.g. `exp42/latest` |
-| `renderer_id` | `{family}@{version}` | global | Recorder | e.g. `qwen3@2` |
-| `spec_hash` | `sha256(JCS(model-visible ToolSpecification fields))` | global | Tool Router | see [canonical-content](canonical-content.md#toolspecification) |
-| `context_digest` | hash chain, see [model-endpoint](model-endpoint.md#contextdelta) | session | runtime / recorder | |
-| `job_id` | `j_{ulid}` | global | Rollout Controller | |
-| `sample_id` | `{session_id}#{leaf_node_id}` | global | Trajectory Assembler | deterministic → consumers deduplicate on it |
-| `cursor` | uint64, gapless per job | job | sample log | position in a job's sample log |
-| `request_id` | client-chosen string ≤ 128 B | tenant | client | idempotency key for Control API creates |
-| `code_reference` | `{package}@{sha256 of package contents}` | global | package registry | task and agent code; runs are pinned to it |
-| checkpoint identity | `{method name}#{ordinal}` | run | task host | ordinal counts calls of that method within the run |
+## Core
+
+| Identifier | Normative format | Minted by | Notes |
+|---|---|---|---|
+| `run_id` | `r_{ulid}`; in the platform layer `r_{cell_id}_{ulid}` | runner / Control API | never reused |
+| `generation` | uint32, from 0 | runner | increments at each hand-over ([determinism](../core/harness/determinism.md#generations)) |
+| `seq` | uint64, from 0, gapless per run | runner | position in the run's event stream; `seq = 0` is `run.created` |
+| `effect_id` | `{run_id}:{generation}:{ordinal}` | derived | `ordinal` = position of the effect in the generation's deterministic request order; identical across re-executions → the universal idempotency key |
+| `arguments_digest` | `sha256(JCS(arguments))` | derived | sent with every `effect_id`; receivers reject a known `effect_id` with a different digest |
+| `conversation key` | `{deployment}/{key}` | caller | `key` is caller-chosen, e.g. `slack:T1/C2/171.2` |
+| `message_id` | the sender's `effect_id`, or the caller's idempotency key | runner | deduplication key for envelopes |
+| deployment name | `{namespace}/{name}` | operator / API | e.g. `acme/support-bot` |
+| `code_reference` | `{package}@{sha256 of package contents}` | package registry | runs are pinned to it |
+| `spec_hash` | `sha256(JCS(model-visible ToolSpecification fields))` | core | see [canonical-content](canonical-content.md#toolspecification) |
+| `session_id` | `{run_id}/{model_slot}` (runs) · `u_{ulid}/{model_slot}` (unmanaged) | runner / recorder | one recorder session per model slot per run |
+| `context_digest` | hash chain, see [model-endpoint](model-endpoint.md#contextdelta) | core / recorder | |
+| `renderer_id` | `{family}@{version}` | recorder | e.g. `qwen3@2` |
+| `policy_id` | `[a-z0-9-]+` | policy registry | a weights lineage, e.g. `exp42` |
+| `weights_version` | uint64, monotonic per `policy_id` | policy registry | `exp42@1731` is a policy version reference |
+| `channel` | `{namespace}/{name}` | policy registry | movable pointer, e.g. `exp42/latest` |
+| `job_id` | `j_{ulid}` | rollout API | |
+| `sample_id` | `{session_id}#{leaf_node_id}` | trajectory assembler | deterministic → consumers deduplicate on it |
+| `cursor` | uint64, gapless per job | sample log | position in a job's sample log |
+| `request_id` | client-chosen string ≤ 128 B | client | idempotency key for creates |
+
+## Platform layer
+
+| Identifier | Normative format | Notes |
+|---|---|---|
+| `cell_id` | `[a-z0-9]{2,12}` | embedded in `run_id`; runs never migrate between cells |
+| `executor_id` | `{pod_name}` | stable identity of a durable executor, used for recovery |
+
+Environment identifiers (environments, templates, snapshots) are defined by the
+[environment system](../environments/README.md).
 
 ## Rules
 
-- Identifiers MUST NOT be reused. Deleting a resource does not free its id.
-- Components MUST NOT parse identifiers except where a structure is normative above (`run_id` → cell,
-  `effect_id` → run and seq, `session_id` → run and slot).
-- Labels (free-form key/value metadata on runs, sessions, environments) are for filtering and joining; they are
-  never used for routing or authorization.
+- Identifiers MUST NOT be reused. Deleting a resource does not free its identifier.
+- Components MUST NOT parse identifiers except where a structure is normative above (`run_id` → cell in the
+  platform layer, `effect_id` → run, generation and ordinal, `session_id` → run and slot).
+- Labels (free-form key/value metadata on runs and sessions) are for filtering and joining; they are never used for
+  routing or authorization.

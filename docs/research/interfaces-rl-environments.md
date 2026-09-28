@@ -4,10 +4,10 @@ Status: **Draft** · 2026-09-27 · Question: how do our Task / Agent / Template 
 interfaces compare with RL environment specifications and RL training frameworks, and how should the system
 operate for synchronous RL, asynchronous RL and multi-agent training?
 
-Scope of the design under evaluation: [harness](../components/harness/README.md) ([task](../components/harness/task.md),
-[agent](../components/harness/agent.md)), [rollouts](../components/rollouts/README.md),
-[trajectories](../components/trajectories/README.md), [recorder](../components/recorder/README.md),
-[inference](../components/inference/README.md), ADRs [0007](../decisions/0007-active-recorder.md),
+Scope of the design under evaluation: [harness](../core/harness/README.md) ([task](../core/harness/task.md),
+[agent](../core/harness/agent.md)), [rollouts](../core/rollouts/README.md),
+[trajectories](../core/trajectories/README.md), [recorder](../core/recorder/README.md),
+[inference](../inference/README.md), ADRs [0007](../decisions/0007-active-recorder.md),
 [0008](../decisions/0008-mid-rollout-policy-change.md), [0009](../decisions/0009-stale-kv-importance-sampling.md),
 [0012](../decisions/0012-task-agent-loop.md), [0014](../decisions/0014-no-forks-template-recipes.md),
 [0015](../decisions/0015-rollout-interface.md).

@@ -1,105 +1,66 @@
 # Delivery semantics
 
-Status: **Proposed** · Defines exactly what each boundary guarantees under failure. Component docs MUST NOT
-weaken these; they MAY strengthen them.
+Status: **Proposed** · See [ADR-0018](../decisions/0018-effects-at-least-once.md) · Defines what effects and messages
+guarantee under failure. Component documents MUST NOT weaken these; they MAY strengthen them.
 
 ## Summary
 
 | Mechanism | Guarantee |
 |---|---|
-| Fenced append | At most one worker advances a run at a time; a deposed worker cannot commit |
-| Persist-then-dispatch | No effect exists that the log does not know was requested (durable runs) |
-| Run log as outbox | Every committed `*.requested` event is dispatched at least once |
-| Receiver idempotency | Duplicate dispatches of one `effect_id` execute at most once *if the receiver can dedupe* |
-| Retry classes | When a receiver cannot dedupe, recovery is explicit (`outcome_unknown`), never a silent retry |
+| Deterministic effect identity | Every re-execution of an effect carries the same `effect_id` and argument digest |
+| Durable steps (durable runner) | Every effect a run requested is performed at least once; its first recorded result is final |
+| Receiver deduplication | Duplicate executions of one `effect_id` happen at most once where the receiver deduplicates |
+| Argument digests | A reused `effect_id` with different arguments is rejected, never answered from a cache |
+| Attempt markers | Where the receiver cannot deduplicate, a possible duplicate is reported as `OUTCOME_UNKNOWN`, never silently retried |
+| Ownership fencing | A deposed executor cannot record results; at most the steps it had started are duplicated |
 
-Together: **effectively-once** for dedupe-capable receivers, **at-most-once-or-flagged** for the rest.
+Together: **effectively-once** for deduplicating receivers, **at-most-once-or-flagged** for the rest. The
+`LocalRunner` gives none of this: a crash loses in-flight runs.
 
-## Fencing
+## Receiver deduplication
 
-- Leases are held per **partition**, not per run. A lease row holds `(partition, owner, epoch, expires_at)`.
-- Acquiring a lease increments `epoch`. Every append includes the caller's epoch; the store checks it **in the
-  same transaction** as the insert and rejects on mismatch (`FENCED`).
-- Every append also carries `expected_seq`; a mismatch is `SEQ_CONFLICT` (indicates a bug or a race during
-  takeover — the worker MUST evict and reload the run).
-- A worker that receives `FENCED` for any run in a partition MUST drop the entire partition immediately.
+Every receiver that can keys on `(effect_id, arguments_digest)`:
 
-## The run log is the outbox
-
-A committed `*.requested` event *is* the outbox entry. There is no separate outbox table on the hot path.
-
-```
-commit [input, …, X.requested]   fenced
-  ok     → dispatch X            eager, in-process
-  FENCED → drop; never dispatch
-takeover → pending = requested − completed − failed   (derived by replay)
-         → re-dispatch each pending effect per retry_class
-```
-
-### Three delivery patterns
-
-| Pattern | Effects | Mechanism |
+| State of `effect_id` | Same digest | Different digest |
 |---|---|---|
-| **Eager dispatch** | `model.request`, `tool.request` | Owner dispatches after commit; recovery scan on takeover |
-| **Same-transaction write** | intra-cell `send`, `spawn`, timer creation | Written into the target's inbox / `timers` table in the same transaction. Only a best-effort nudge remains |
-| **Relayed outbox** | cross-cell `send`/`spawn`, due timers, outbound webhooks | A relay polls with `SKIP LOCKED` and delivers; used where no shared transaction exists or dispatch is deferred |
+| absent | execute; record *in progress* | — |
+| in progress | join the running execution and return its result | reject (`CONFLICT`) |
+| done | return the recorded result | reject (`CONFLICT`) |
 
-## Receiver idempotency
-
-Every effect receiver keys on `effect_id` and implements three states:
-
-| State | Behavior on receipt |
-|---|---|
-| absent | execute; record *in progress* |
-| **in progress** | **join** the running execution and return its result |
-| done | return the cached result |
-
-- Retention MUST cover the maximum takeover window: lease TTL + max effect deadline + margin. Default: 24 h.
-- Receivers that implement this: **envd**, **recorder**, **Environment Manager**, **tool router agent/human bindings**,
-  **Run Store** (inbox/timer writes are keyed).
-- Receivers that may not: third-party `http` and `mcp` bindings. The tool router forwards `effect_id` (header or
-  `_meta.idempotency_key`) and relies on `retry_class`.
+- Retention must cover the longest recovery window (default 24 h).
+- Receivers that implement this: the recorder, environment services (required of the environment system), tool
+  bindings of kind `agent` and `human`, and message delivery (by `message_id`).
+- Third-party HTTP and MCP tools receive `effect_id` (`Idempotency-Key`, `_meta.idempotency_key`) and may or may not
+  honor it; their `retry_class` decides.
 
 ## Retry classes
 
-Every tool has a `retry_class`, resolved at tool-resolution time and pinned in `tools.resolved`:
-
-| Class | On pending-at-takeover | On transport error |
-|---|---|---|
-| `pure` | re-dispatch | retry |
-| `idempotent` | re-dispatch | retry |
-| `side_effecting` + receiver dedupes | re-dispatch same key | retry same key |
-| `side_effecting` / `unknown`, no dedupe | append `tool.outcome_unknown` | append `tool.outcome_unknown` |
-
-Precedence (lowest → highest): MCP annotation hints (only from trusted servers) → binding default → operator
-provider config → RunBinding override.
-
-`model.request` is always `idempotent`: the recorder dedupes; direct provider adapters may re-sample, which costs
-tokens but not correctness (non-trainable path).
-
-## Completion routing
-
-| Effect duration | Route |
+| Class | After a crash, the effect is… |
 |---|---|
-| Short (≤ deadline the worker can await; default 15 min) | Owner awaits the call; completion enters the mailbox in-process |
-| Long (human policy, long tools, child runs) | Receiver acknowledges; completion is later written to the run's **inbox** (keyed by `effect_id`) and the owner is nudged |
+| `PURE`, `IDEMPOTENT` | re-executed |
+| `SIDE_EFFECTING` with a deduplicating receiver | re-executed with the same identity |
+| `SIDE_EFFECTING` / `UNKNOWN` without | guarded by an attempt marker: `OUTCOME_UNKNOWN` if the marker exists |
 
-Late or duplicate completions are dropped by dedupe on `effect_id` against the log.
+Precedence (lowest → highest): tool annotations from trusted servers → binding default → operator configuration →
+`RunBinding` override.
 
-## Deadlines, timeouts, cancellation
+## Why digests and zero-data-loss replication
 
-- Every effect carries an absolute `deadline`. On expiry the owner appends `*.failed{class: DEADLINE}` and
-  issues a best-effort `Cancel(effect_id)` to the receiver.
-- A completion arriving after a `failed{DEADLINE}` is dropped (dedupe) — the log's first terminal event wins.
-- Run cancellation: `run.cancel_requested` input → harness step decides wind-down (MAY be immediate) → runtime
-  cancels all pending effects → `run.cancelled`.
+`effect_id` is derived from position. If a database failover lost an acknowledged record, replay could reach the same
+position with *different* arguments (a different message arrived first, for example), and a receiver would return the
+cached result of the old request. So: the durable runner's database uses synchronous replication with zero data loss
+on failover, and receivers compare argument digests.
 
-## Run durability tiers
+## Messages
 
-| | `durable` | `best_effort` |
-|---|---|---|
-| Append timing | before every dispatch | buffered; flushed periodically and at completion |
-| Dispatch | after commit | immediately |
-| Worker crash | resume from log | run marked `crashed`; owner (e.g. rollout controller) resamples |
-| Use | coding agents, swarms, long runs | short RL rollouts |
-| Hazard | write load | crash-correlated sampling bias (long episodes crash more) — monitor `crashed` rate by episode length |
+- Delivery into a conversation's or run's mailbox is idempotent by `message_id`; order is first-in, first-out per
+  (sender, conversation).
+- Delivering to an idle conversation and scheduling its next activation happen in one transaction, so no message is
+  delivered without a consumer being scheduled, and parking re-checks the mailbox so none is stranded.
+
+## Deadlines and cancellation
+
+- Every effect carries an absolute deadline; on expiry the runner records a failure (`DEADLINE`) and sends a
+  best-effort cancel. A late completion is dropped: the first recorded result wins.
+- Run cancellation is cooperative: `run.cancel_requested` is delivered at the next turn boundary and `teardown`
+  runs. Hard cancellation skips cleanup, so a reaper destroys what the run still owns.

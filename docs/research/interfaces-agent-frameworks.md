@@ -1150,7 +1150,7 @@ reason the `Program` layer is worth having.
 
 These are listed in priority order. "Where" names the document the change would land in.
 
-**R1. Deterministic asyncio event loop driver** ([durability.md](../components/harness/durability.md)).
+**R1. Deterministic asyncio event loop driver** ([durability.md](../core/harness/determinism.md)).
 - Replace generator-style driving with a custom `asyncio.AbstractEventLoop` that:
   - runs ready callbacks in a deterministic order;
   - forbids real I/O (`sock_*`, `create_connection`, `run_in_executor`, subprocess) by raising

@@ -1,6 +1,11 @@
 # Research
 
-Status: **Draft** · Started 2026-09-27
+Status: **Complete** · 2026-09-27
+
+> These reports record the evidence and proposals as of 2026-09-27 and describe the design as it stood then. The
+> resulting decisions are ADR-0016 to ADR-0022; where they differ from a report, the ADRs and the normative docs win.
+> In particular, *durable agent identities* (charter item 6) were not adopted: an addressable agent is a deployment and a
+> conversation is a keyed run ([ADR-0019](../decisions/0019-conversations-and-priority-delivery.md)); memory is a tool.
 
 Investigations that inform design decisions. Reports here are evidence and analysis, not normative design; when a
 report changes the design, the change lands in `architecture/`, `contracts/`, `components/` or an ADR.
@@ -15,9 +20,9 @@ asynchronous)**, **swarms**, and **durable agent identities** — in enough deta
 
 The normative design is in [`docs/`](../README.md). Read at least: [requirements](../architecture/requirements.md),
 [principles](../architecture/principles.md), [overview](../architecture/overview.md),
-[harness](../components/harness/README.md) (and its `task.md`, `agent.md`, `durability.md`),
-[rollouts](../components/rollouts/README.md), [trajectories](../components/trajectories/README.md),
-[environments](../components/environments/README.md), [recorder](../components/recorder/README.md), and the
+[harness](../core/harness/README.md) (and its `task.md`, `agent.md`, `durability.md`),
+[rollouts](../core/rollouts/README.md), [trajectories](../core/trajectories/README.md),
+[environments](../environments/README.md), [recorder](../core/recorder/README.md), and the
 [decision records](../decisions/README.md).
 
 Design point: 300k concurrent runs, ~30k model turns/s, cells of ~25k runs with one Postgres each, multi-cloud

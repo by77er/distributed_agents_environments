@@ -8,17 +8,17 @@ redefine them.
 | Contract | Crosses |
 |---|---|
 | [identifiers](identifiers.md) | everything |
-| [canonical-content](canonical-content.md) | harness, runtime, run store, model endpoint, tool router, recorder, trajectories |
-| [run-events](run-events.md) | harness, runtime, run store, control API (event streams) |
-| [effects](effects.md) | runtime, model endpoint, tool router, environment manager, run store |
-| [model-endpoint](model-endpoint.md) | runtime ↔ recorder / direct provider adapters (B5, B18) |
+| [canonical-content](canonical-content.md) | harness, runners, model endpoint, tool bindings, recorder, trajectories |
+| [run-events](run-events.md) | runners, trajectory assembler, client event streams |
+| [effects](effects.md) | runners, model endpoint, tool bindings, environment layer |
+| [model-endpoint](model-endpoint.md) | runners ↔ recorder / direct adapters |
 
 ## Evolution rules
 
 Persisted data outlives code. These rules apply to every contract here and every persisted record elsewhere.
 
 1. **Every persisted record carries `schema_version`.** Readers dispatch on it.
-2. **Events are forever.** A reader (in particular a harness `Apply`) MUST handle every version of every event
+2. **Events are forever.** A reader (in particular a durable runner replaying history) MUST handle every version of every event
    type ever committed, for as long as runs containing them can be replayed or exported.
 3. **Additive within a major version.** New optional fields and new enum values only. Readers MUST ignore
    unknown fields and MUST treat unknown enum values as a defined fallback (usually "unknown/other").

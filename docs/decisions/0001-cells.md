@@ -1,6 +1,6 @@
 # 0001 — Cells are the unit of scale and failure
 
-Status: **Proposed** · Date: 2026-09-26
+Status: **Proposed**, scoped by [0016](0016-layers-and-profiles.md) to the fleet profile · Date: 2026-09-26
 
 ## Context
 
@@ -27,3 +27,8 @@ region/global scope.
 - **One global store (DynamoDB/Scylla) + one big cluster**: removes the per-cell ceiling but fights Kubernetes
   limits, loses transactional scheduling, and makes every failure global.
 - **Shard only the database**: fixes writes but not cluster limits or blast radius.
+
+## Amendment ([0016](0016-layers-and-profiles.md), [0017](0017-dbos-substrate.md))
+
+Cells exist only in the fleet profile. A cell's Postgres is the DBOS system database; the run store and runtime workers
+are replaced by DBOS executors ([platform/cells](../platform/cells.md)).

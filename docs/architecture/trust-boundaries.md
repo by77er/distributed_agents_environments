@@ -1,73 +1,49 @@
 # Trust boundaries
 
-Status: **Proposed** · Environments run untrusted code (R7). This document fixes what is trusted, what crosses
-each boundary, and where enforcement lives.
+Status: **Proposed** · What is trusted, what crosses each boundary, and where enforcement lives. Environment
+isolation is part of the [environment system](../environments/README.md) and is designed there; task-code isolation
+by tenant is in [trust tiers](../platform/trust-tiers.md).
 
 ## Zones
 
 | Zone | Members | Trust | Holds credentials? |
 |---|---|---|---|
-| Z0 Control plane | Control API, Global Router, Environment Manager, Policy Registry, Rollout Controller | trusted | platform credentials |
-| Z1 Execution plane | Runtime, Tool Router, Recorder | trusted | **no** tool/guest credentials; only credential *references* and attachment tokens |
-| Z1t Task hosts | task and agent code (possibly tenant-authored) | **untrusted code**, sandboxed | never; no network except the runtime socket |
-| Z2 Env host | envlet, egress proxy, credential broker | trusted, hardened | **yes** — the only zone that materializes tool credentials |
-| Z3 Guest | everything inside an environment, including envd | **untrusted** | never |
-| Z4 External tool servers | MCP / HTTP services we call | semi-trusted | their own |
-| Z5 Model output | assistant messages, tool arguments | **untrusted content** everywhere | n/a |
+| Z0 Control | Control API, policy registry, rollout service (platform layer) | trusted | platform credentials |
+| Z1 Execution | runners (the durable pump), recorder, tool bindings / tool router, weight update controller | trusted | credential *references*; tool bindings inject credentials where they call out |
+| Z1t Task hosts | program, task and agent code (possibly tenant-authored) | **untrusted code** under the durable runner, sandboxed per [trust tier](../platform/trust-tiers.md) | never; no network except the local socket to the pump |
+| Z2 Environments | whatever the environment system runs | **untrusted** | never ([environments](../environments/README.md)) |
+| Z3 External tool servers | MCP / HTTP services we call | semi-trusted | their own |
+| Z4 Model output | assistant messages, tool arguments | **untrusted content** everywhere | n/a |
+
+In the local profile everything runs in one trusted process; these zones apply when code or tenants are not
+trusted.
 
 ## Rules
 
-1. **Enforcement outside the guest (P7).** Isolation, network policy, resource limits and credential injection are
-   implemented by the VMM, host networking (per-VM tap + nftables), and the egress proxy. Nothing in Z3 is relied on.
-2. **Control over vsock only.** The Environment API is reachable only via envlet → vsock. The guest network has no
-   route to any Z0/Z1/Z2 service. `network: none` means no network at all.
-3. **envd is untrusted.** envlet enforces response size caps, rate limits and timeouts on everything envd returns.
-   A compromised guest can lie about *its own* tool results; it cannot affect any other run.
-4. **Attachment tokens.** A runtime call into an environment presents a token scoped to
-   `(environment_id, run_id, attachment)`. envlet rejects calls from runs not attached to the environment. Task
-   code holds environment identifiers only; the runtime rejects requests for environments the run neither owns nor
-   is attached to, so a forged identifier gets nothing.
-5. **Secrets never enter guests (P8).** A `SecurityProfile` lists credential *grants*; the egress proxy injects the
-   secret into matching outbound requests. The guest sees only the effect (an authenticated response).
-6. **Model output is data.** Tool arguments are validated against the pinned `input_schema` before dispatch.
-   Tool results and third-party tool descriptions are untrusted content: RunBinding MAY override descriptions,
-   and results carry `untrusted: true` provenance for agents that want to treat them differently.
-7. **Scoring doesn't trust the agent's environment.** `Task.score` should compute rewards in a scratch environment
-   (`run.environments.scratch`) using artifacts extracted from the agent's environment, never by running checks
-   inside an environment the agent controlled. The SDK makes this the easy path; it cannot enforce it. See
-   [task](../components/harness/task.md#environments).
-9. **Task hosts are sandboxes.** Task and agent code runs in a sandbox (gVisor) with no network except the socket to
-   the runtime, no credentials, and no persistent filesystem. It can act only through effects the runtime validates.
-   The same sandbox enforces determinism ([durability](../components/harness/durability.md#determinism-rules)).
-   Credentialed external access goes through imported tools, whose bindings hold broker references.
-8. **Z4 servers are network-isolated per tenant**, receive credentials only via the broker, and their MCP
-   annotations (`readOnlyHint`, `idempotentHint`, …) are ignored unless the server is operator-trusted.
+1. **Enforcement outside the untrusted code (P8).** Task hosts are constrained by their sandbox and by the pump's
+   validation of every effect; environments by the environment system's host-side enforcement.
+2. **Task code acts only through validated effects.** The pump checks schemas, sizes, budgets and resource ownership
+   for every effect request; a forged environment or run identifier gets nothing (effects rule 4).
+3. **Secrets never reach untrusted code (P9).** Credentialed external access goes through imported tools, whose
+   bindings resolve credentials at call time. Nothing secret is written to run events, the recorder or tool results.
+4. **Model output is data.** Tool arguments are validated against the pinned `input_schema` before dispatch. Tool
+   results and third-party tool descriptions are untrusted content: a `RunBinding` may override descriptions, and
+   results carry `untrusted: true` provenance.
+5. **Scoring does not trust what the agent controlled.** Rewards should be computed from state the agent could not
+   tamper with (e.g. a clean environment built from the same template). The core cannot enforce this; task authors
+   must.
+6. **Shared inference caches are per tenant** from trust tier T2 upward (prefix-cache salt), so tenants cannot probe
+   each other's prompts through cache timing.
+7. **External tool servers** are isolated per tenant, receive credentials only through bindings, and their MCP
+   annotations are ignored unless the server is operator-trusted.
 
-## Credential flow
-
-```
-RunBinding / SecurityProfile:  grant { destination: "api.github.com", scheme: bearer, secret_ref: "vault://…" }
-                                   │
-Environment Manager ──compiles──▶ envlet: nftables allowlist + proxy route with secret_ref
-                                   │
-guest: curl https://api.github.com/…  ──▶  egress proxy (Z2): match grant → fetch secret → inject header → forward
-```
-
-- Secrets are resolved by the broker at injection time; they are never written to the guest, the run log,
-  the recorder, or tool results.
-- Destination matching is by SNI / CONNECT host for TLS; header injection requires the proxy to terminate TLS for
-  granted destinations only (guest trusts a per-env CA installed at boot). Non-granted TLS is passed through
-  or blocked per `network` mode, never terminated.
-
-## Threats explicitly in scope
+## Threats in scope
 
 | Threat | Mitigation |
 |---|---|
-| Guest escape via kernel | microVM isolation (hardware virtualization) for `isolation ≥ microvm`; jailer; seccomp on VMM |
-| Guest exfiltration | `network` mode + allowlist enforced on host; egress byte limits |
-| Guest attacks control plane | no route; vsock only; envlet input validation |
-| Cross-run interference in shared env | attachment tokens; per-run process users (optional); envs default to single-run attachment |
-| Reward hacking via env tampering | scoring in scratch environments (rule 7) |
-| Malicious task code | task host sandbox; effect validation; environment ownership checks (rules 4, 9) |
-| Prompt injection via tool results / descriptions | untrusted provenance; description overrides; tool allowlists per run |
-| Credential theft | broker + injection (rule 5) |
+| Malicious or buggy task code | task-host sandbox and pooling per trust tier; effect validation; ownership checks |
+| Credential theft | credentials only in trusted bindings (rule 3) |
+| Reward hacking by tampering with scoring state | scoring from untampered state (rule 5) |
+| Prompt injection via tool results or descriptions | untrusted provenance; description overrides; per-run tool allowlists |
+| Cross-tenant prompt inference through caches | per-tenant cache salt (rule 6) |
+| Environment escape, exfiltration, attacks on the control plane | the environment system's design |

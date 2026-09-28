@@ -1,94 +1,56 @@
 # Lifecycle of a turn
 
-Status: **Proposed** · Walks one turn of the [loop](../components/harness/README.md#the-loop-normative) across
-every execution-plane boundary, including failure branches. Normative definitions live in the linked contracts;
-this document is the integration view.
+Status: **Proposed** · Walks one turn of the [loop](../core/harness/README.md#the-loop-normative) under both runners.
+Normative definitions live in the linked documents; this is the integration view.
 
-## Preconditions
+## The turn
 
-- Run `R` (durable) lives in partition `p`, owned by worker `W` at lease epoch `e`.
-- `W`'s task host has `R` loaded: the loop is suspended inside `task.respond`, awaiting environment effect `E1`
-  (an `EXECUTE` issued by the task's `bash` tool). The last committed event is at `seq = n-1`.
-- `R` owns environment `environment_1` (attached at creation; attachment token held by the runtime).
-- Model slot `policy` is bound to recorder session `R/policy` on trainable channel `exp42/latest`.
-
-## Happy path
+A turn is: the agent samples a reply, the task responds with an observation. With a tool call and an environment:
 
 ```
- W (runtime)            Task host          Run Store       Recorder        Engine       envlet → envd
- ───────────            ─────────          ─────────       ────────        ──────       ─────────────
- ① completion E1 ─────▶ Step: resume bash tool → respond returns Observation
-                        → loop: agent.act → model.sample awaits
-                     ② [observation.recorded, model.requested]
- ③ Append([environment.completed E1 @n, observation.recorded @n+1, model.requested @n+2], fence=e) ─▶ ok
- ④ Sample(effect_id=R:n+2) ───────────────────────────▶ ⑤ deduplicate, match tree,
-                                                          render delta, validate ──▶ ⑥ generate
-                                                       ◀─ tokens, logprobs, version
-                                                       ⑦ append span, parse
- ⑧ ◀──────────────────────────────────── canonical assistant message + usage
- ⑨ Step(model.completed) ─▶ loop: task.respond(reply) → run_tools → bash, read_file (gather)
-                        ─▶ [environment.requested E3 (EXECUTE), environment.requested E4 (GET)]
- ⑩ Append(...) ─▶ ok; dispatch E3, E4 concurrently ─────────────────────────────────────▶ ⑪ Execute / Get
- ⑫ ◀──────────────────────────────────────────────────────────────── results E3, E4
- ⑬ Step(E3) → [] (gather waits); Append · Step(E4) → Observation(tool results) → next model.requested
+agent.act ──▶ Model.sample ──▶ recorder ──▶ engine          (tokens in; tokens, logprobs, version, routed experts out)
+                                 │  records the sampled span; parses tokens into a canonical reply
+          ◀────────────── canonical reply + usage
+task.respond(reply) ──▶ run_tools ──▶ @tool bash ──▶ environment.execute ──▶ environment system
+          ◀────────────── Observation(tool results) ──▶ steering messages merged ──▶ next turn
 ```
 
-1. **Completion arrives.** `E1`'s result reaches `W` in-process (it awaited the call) or via `R`'s inbox plus a
-   nudge. `W` enqueues it on `R`'s mailbox; mailboxes are processed serially per run.
-2. **Step.** `W` checks the completion is not already in the log, then calls `Step(R, environment.completed{E1})`.
-   The task host resumes the awaiting coroutine: the `bash` tool returns, `run_tools` assembles the TOOL message,
-   `respond` returns an `Observation`, the loop records it and calls `agent.act`, which awaits `model.sample`.
-   `Step` returns the resulting events. Host state has advanced speculatively.
-3. **Persist.** One fenced transaction appends the input and the step's events
-   ([run-store](../components/run-store/README.md)). Nothing has been dispatched yet (P5). On `FENCED` or
-   `SEQ_CONFLICT` the worker calls `Evict` on the host and drops the run (or partition).
-4. **Dispatch.** `W` derives effect `E2 = R:n+2` from `model.requested` and calls the model endpoint.
-5. **Recorder request path.** Deduplicate on `effect_id`; match the context against the session tree; extend
-   tokens with the rendered delta (or re-render and start a new renderer epoch); reject sampling parameters outside
-   the channel contract.
-6. **Generate.** Tokens-in request to an engine replica chosen by session affinity. Every engine response is
-   produced by exactly one weights version ([engine-adapter](../components/recorder/engine-adapter.md)).
-7. **Record.** Append the sampled span (tokens, behavior logprobs, weights version); parse into a canonical message.
-8. **Return.** Canonical message + usage (`context_used`, `context_limit`). No tokens or versions cross B5.
-9. **Next step.** `model.completed` → `Step` → the loop calls `task.respond(reply)`; the default `respond` runs the
-   reply's tool calls concurrently; each tool body awaits environment handles → two `environment.requested` events.
-10. **Persist, then dispatch** both effects. The runtime checks `R` owns `environment_1` and attaches the token
-    from `CallContext`.
-11. **Environment call.** envlet verifies the attachment token, applies limits, forwards `Execute(effect_id=E3)`
-    and `Get(E4)` to envd over vsock.
-12. **Results** return as `ExecutionResult` and file bytes (oversized output moved to blob references).
-13. **Partial completion.** Each completion is its own step; `gather` resumes when both are done, the tools
-    return, and the next `Observation` + `model.requested` start the next turn.
+## Under the `LocalRunner` (local profile)
 
-**Environment-driven tasks** follow the same path with a different step 9: `respond` computes the observation in
-Python (or with its own environment calls) instead of running tools.
+Every arrow is a Python call in one process. The recorder calls a local engine; `environment.execute` calls a local
+environment driver, if the task uses one. Nothing is persisted except the recorder's session trees and the sample
+log. A crash loses in-flight runs; a rollout job resamples them.
 
-**In-flight policy change** (step 6): if the Weight Update Controller transitions the replica, the engine aborts
-the request and returns the partial output; the recorder records it as a span at the old version and resubmits
-prompt + partial as tokens-in at the new version. Task and agent receive one ordinary message.
+## Under the `DurableRunner`
 
-## Failure branches
+The task host (sandboxed) runs the code; the pump (a DBOS workflow) performs each effect as a step.
+
+1. The task host requests the effect `model.sample` with `effect_id = {run_id}:{generation}:{ordinal}` and an
+   argument digest.
+2. The pump authorizes it and runs a DBOS step that calls the recorder with those identifiers. The recorder
+   deduplicates on them.
+3. The step's result is recorded; the pump records the completion order and feeds the reply to the task host.
+4. The task host runs `task.respond`; the tool body requests `environment.execute`; the pump runs it as another
+   step with its own `effect_id`; the environment system deduplicates on it.
+5. The observation is projected as run events (`observation.recorded`, rewards); the next turn begins.
+
+**In-flight policy change** (step 2): if the weight update controller commits a new version while the sample is
+generating, the engine aborts the request; the recorder records the partial span at the old version and resubmits
+prompt + partial at the new version. The task and agent receive one ordinary reply.
+
+**Messages during the turn**: a `STEER` message is merged into the observation after step 4; an `INTERRUPT` message
+cancels the model sample at step 2 and the loop calls `Task.resume`
+([conversations](../core/harness/conversations.md)).
+
+## Failure branches (durable runner)
 
 | Failure | What happens | Lost |
 |---|---|---|
-| `W` dies before ③ commits | New owner loads `R` (replay to `n-1`); `E1` is pending → re-dispatched; envd returns the cached result | nothing |
-| `W` dies after ③, before ④ | New owner replays; `E2` requested without completion → re-dispatched with the same `effect_id` | nothing |
-| `W` dies during ⑤–⑦ | Recorder finishes and caches under `E2`; re-dispatch returns the cached completion; no duplicate sample | nothing |
-| Task host crashes | Worker evicts the host's runs and reloads them on another host (replay) | nothing |
-| `W` loses its lease but keeps running | Its next append fails fencing → evict, stop. It never dispatches uncommitted effects | nothing |
-| A deposed worker dispatched just before losing its lease | New owner re-dispatches the same `effect_id`; the receiver's state is *in progress* → join | nothing |
-| Replay requests a different effect than the log | `run.failed{NON_DETERMINISM}`; run quarantined | the run |
-| Recorder instance dies mid-sample | Runtime retries `E2`; unflushed tree state lost → session flagged **incomplete** | training data for that session |
-| Engine replica dies | Recorder retries on another replica (fresh prefill) | latency |
-| Environment host dies | `environment.failed{LOST}` raised in the tool body → becomes an `is_error` tool result, or the task handles it | environment state since its last snapshot |
-| Run Store primary fails over | Appends stall for the failover window (cell-local); leases survive | latency |
-
-## Latency budget (per half-turn, excluding model, tool and task compute)
-
-| Stage | Target p99 |
-|---|---|
-| Mailbox + `Step` + validation | ≤ 5 ms |
-| Fenced append (one transaction) | ≤ 20 ms |
-| Dispatch to endpoint / envlet / router | ≤ 5 ms |
-| Recorder overhead (match + render delta + record) | ≤ 20 ms |
-| **Total control overhead** | **≤ 50 ms** (N5) |
+| Executor dies before the step's result is recorded | The recovery controller re-enqueues the run; the pump replays; the step re-runs with the same `effect_id`; the recorder or environment returns the recorded result, or joins the execution in progress | nothing |
+| Executor dies with a non-deduplicating tool call in flight | The attempt marker exists → the completion is `OUTCOME_UNKNOWN`; the model sees it | the call's result |
+| An executor declared dead keeps running | Its next record fails DBOS's ownership check; at most the steps it had started run twice and are absorbed by receivers | nothing |
+| Task host crashes | The pump restarts it and re-feeds recorded completions | nothing |
+| Replay requests a different effect, or produces a different observation or reward | `run.failed{NON_DETERMINISM}`; quarantined | the run |
+| A run crash-loops its task host during recovery | `run.failed{POISONED}` | the run |
+| Recorder instance dies mid-sample (service form) | The step retries; unflushed tree state is lost → the session is marked incomplete | training data for that session |
+| Database failover | Recording stalls for the failover window; zero-data-loss replication means no acknowledged record is lost | latency |

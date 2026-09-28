@@ -1,6 +1,6 @@
 # 0003 — The run log is the outbox; eager dispatch
 
-Status: **Proposed** · Date: 2026-09-26
+Status: **Superseded** by [0018](0018-effects-at-least-once.md) · Date: 2026-09-26
 
 ## Context
 

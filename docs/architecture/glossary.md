@@ -4,49 +4,45 @@ Status: **Proposed**
 
 | Term | Meaning |
 |---|---|
-| **Task** | The environment an agent acts in, in the reinforcement-learning sense: compute environments, tools, lifecycle hooks, responses to model turns, scoring. A Python class. See [task](../components/harness/task.md). |
-| **Agent** | The policy side of the loop: selects what the model sees and produces one action per turn. A Python class. See [agent](../components/harness/agent.md). |
-| **Harness** | The framework-owned rollout loop that drives a task with an agent. See [harness](../components/harness/README.md). |
-| **Task host** | Python process that runs the loop, task and agent code under deterministic replay; implements `HarnessHost` for the runtime. |
-| **Run** | One episode: a task and an agent under a `RunBinding`. Identified by `run_id`. Its durable state is its log. |
-| **RunSpecification** | What a client submits: task reference + parameters, agent reference + configuration, `RunBinding`. |
-| **RunBinding** | Deployment-specific part of a run: which endpoint serves each model slot, which binding serves each imported tool set, concrete security profiles per class, placement preferences, durability. |
+| **Core** | The Python library that defines and runs everything task authors, agent authors and trainers use. See [layers and profiles](layers-and-profiles.md). |
+| **Layer** | Core, inference, environments, durability or platform. Only the core and some form of inference are required. |
+| **Deployment profile** | Local, cluster or fleet: which layers are present and which implementation each protocol uses. |
+| **Program** | Durable-able `async` code with a `main(run)` method. The agent loop is one program (`AgentProgram`). |
+| **Task** | The environment an agent acts in, in the reinforcement-learning sense: tools, lifecycle hooks, responses to model turns, scoring. See [task](../core/harness/task.md). |
+| **Agent** | The policy side of the loop: selects what the model sees and produces one action per turn. See [agent](../core/harness/agent.md). |
+| **Harness** | The framework-owned loop that drives a task with an agent. See [harness](../core/harness/README.md). |
+| **Run** | One episode of a program under a `RunBinding`. Identified by `run_id`. |
+| **RunSpecification / RunBinding** | What to run (program reference and parameters) / how it is bound in this deployment (model endpoints, imported tools, environment binding, delivery policy). |
+| **Deployment** | A named, addressable `RunSpecification`, e.g. `acme/support-bot`. |
+| **Runner** | Executes runs: `LocalRunner` (core, in process) or `DurableRunner` (durability layer). |
 | **Observation** | The environment's response to a model turn: messages shown to the model next, optional reward, optional ending, logged info. |
 | **Ending** | How an episode ended: `TERMINATED` (a real end state) or `TRUNCATED` (stopped by a limit). |
-| **Model slot** | A named model a task declares (`policy`, `user`, …). Each slot is bound to an endpoint and recorded as its own session. |
-| **Replay** | Re-running task and agent code while resolving its effects from the log. The mechanism of durability. |
-| **Checkpoint** | A memoized unit of work (`@checkpoint`): on replay its recorded return value and task state are restored instead of re-running it. |
-| **Snapshot (task)** | Pickled task and agent state at a resumable point; bounds replay. Never moves between runs. Disposable. |
-| **Partition** | `hash(run_id) mod P` bucket within a cell. The unit of leasing and failover. |
-| **Lease / epoch** | Time-bounded ownership of a partition by one worker. The epoch is a monotonically increasing fencing token checked on every append. |
-| **Event** | An immutable record in a run's log at position `seq`. |
-| **Effect** | Side-effecting work requested by task code (model sample, environment operation, imported tool call, spawn, send, timer). Identified by `effect_id`. |
-| **Inbox** | Per-run queue of externally delivered inputs (signals, messages, long-running completions). Consumed into the log. |
-| **Signal** | External input to a run: user message, cancel, custom. |
-| **Canonical content** | Model-agnostic messages and content blocks. The only content form task and agent code, the run log and the tool router use. |
-| **Tool** | A `ToolSpecification` (what the model sees) plus its implementation: a `@tool` method in the task, an environment-provided tool, or an imported tool. |
-| **Imported tool** | An external tool (MCP server, HTTP service, another agent, a human) declared by name in a task and bound per run; executed by the tool router. |
-| **Binding** | An implementation of an imported tool set: `mcp`, `http`, `agent`, `human`. |
-| **Environment** | A stateful compute resource with a lifecycle, reached through the Environment API. In task code, a handle object. |
-| **EnvironmentSpecification** | What a task asks for when creating an environment: image or template, resources, security class, persistence, lifetime. |
-| **Driver** | An implementation of environment lifecycle for one backend (firecracker, pod, vps, local). |
-| **envlet** | Per-host daemon that runs microVMs, enforces security profiles, and proxies the Environment API over vsock. |
-| **envd** | In-guest daemon that serves the Environment API. Untrusted. |
-| **SecurityProfile / security class** | Declared isolation, network, credential, limit requirements of an environment; a class is a named minimum that a `RunBinding` maps to a concrete profile. |
-| **Template** | A content-addressed build recipe (base image + files + commands). Built once per distinct recipe into a golden snapshot; every environment from it restores that snapshot. |
-| **Pool** | A warm set of restored environments of one template. |
-| **Model endpoint** | Anything implementing the [model endpoint contract](../contracts/model-endpoint.md): the recorder, or a direct provider adapter. |
-| **Channel** | A named, movable pointer to a policy version, with a capability contract (like a container tag). |
-| **Policy** | Whatever produces tokens: a weights version + renderer + sampling configuration, an API model, or a human. |
-| **Weights version** | Monotonic integer identifying one set of weights within a policy lineage. |
-| **Renderer** | Chat template + tokenizer + parser for one model family. Owned by the recorder. |
-| **Renderer epoch** | A span of a session within which the token sequence is extended incrementally with one renderer. |
-| **Recorder** | Optional proxy between the runtime and inference that owns tokenization and records session trees. |
-| **Session** | Recorder-side record of one model slot of one run: `session_id = {run_id}/{model_slot}`. |
-| **Session tree** | Prefix tree of token spans for a session. A trajectory is a path in it. |
+| **WaitFor** | A return value of `start`, `respond` or `resume` that suspends the run until a message arrives or a timeout passes. |
+| **Conversation** | A sequence of runs of one deployment keyed by a conversation key; at most one run consumes its messages at a time. See [conversations](../core/harness/conversations.md). |
+| **Envelope** | A message: kind, canonical content, optional data, sender, reply address, `message_id`. |
+| **Priority / delivery mode** | `LOW` / `NORMAL` / `HIGH`, mapped by the deployment to `QUEUE` (wait for the next `WaitFor`), `STEER` (merge into the next observation) or `INTERRUPT` (cancel the in-flight sample). |
+| **Model slot** | A named model a task declares (`policy`, `user`, …); each is bound to an endpoint and recorded as its own session. |
+| **Effect** | An operation that reaches outside code (model sample, tool call, environment operation, message, child run, timer). Identified by `effect_id = {run_id}:{generation}:{ordinal}` plus an argument digest. |
+| **Generation** | A segment of a long run; a run hands over to a new generation from exported state to bound replay. |
+| **Replay** | Re-running code while resolving its effects from recorded results; how a durable runner resumes. |
+| **Pump** | The trusted DBOS workflow in the durable runner that performs each effect a task host requests as a durable step. |
+| **Task host** | The sandboxed process that runs program, task and agent code for the durable runner on a deterministic event loop. |
+| **Trust tier** | T0–T3: how task hosts are sandboxed, pooled and placed depending on who writes the code. |
+| **Tool** | A `ToolSpecification` (what the model sees) plus its implementation: a `@tool` method, or an imported tool. Memory and other cross-run state are tools. |
+| **Imported tool / ToolBinding** | An external tool set (MCP server, HTTP service, another agent, a human) declared by a task and bound per run. |
+| **Canonical content** | Model-agnostic messages and content blocks; the only content form code, run events and tool bindings use. |
+| **Model endpoint** | Anything implementing the [model endpoint contract](../contracts/model-endpoint.md): the recorder or a direct adapter. |
+| **Recorder** | The model endpoint that owns tokenization for recorded channels and records session trees. |
+| **Session / session tree** | The recorder's record of one model slot of one run; a prefix tree of token spans whose paths are trajectories. |
+| **Renderer / renderer epoch** | Chat template + tokenizer + parser for one model family / a stretch of a session extended incrementally with one renderer. |
 | **Behavior logprob** | Log-probability of a sampled token under the distribution it was actually sampled from. |
-| **Weight Update Controller (WUC)** | Coordinates weight loads on engines: pause admission, abort in-flight, load, resume. |
-| **Rollout job** | Runs task rows submitted by a caller and delivers their `Sample`s through one ordered, durable log. Knows no algorithm concepts. |
-| **Sample** | Training record for one run and trainable slot: token sequences, loss mask, behavior logprobs, per-token weights versions, rewards at token positions, ending, caller labels. |
-| **Cell** | Self-contained slice of the system; unit of scale and failure. |
-| **Managed / unmanaged run** | Managed: a task and agent hosted by the runtime (durable). Unmanaged: a foreign harness using the recorder and tool facade directly (trainable, not durable). |
+| **Routed experts** | For mixture-of-experts policies, the experts selected at each position; recorded for routing replay in training. |
+| **Channel** | A named, movable pointer to a policy version, with a capability contract. |
+| **Policy / weights version** | Whatever produces tokens (a weights version + renderer + sampling configuration, or an API model) / a monotonic version within a policy lineage. |
+| **Weight update controller** | Moves engines to new weights: stage while serving, then pause, abort in-flight requests, swap, resume. |
+| **WeightsSource** | How new weights are provided: in-process tensors, a checkpoint, a delta, a LoRA adapter, or a distributed transfer the trainer joins. |
+| **Rollout job** | Runs task rows submitted by a caller and delivers their `Sample`s through one ordered log. Knows no algorithm concepts. |
+| **Sample** | Training record for one run and trainable slot: token sequences, loss mask, behavior logprobs, per-token weights versions, turn spans, routed experts, rewards at token positions, ending, outcome, labels. |
+| **Environment** | A computer a task can create through the `Environments` protocol; provided by the separately designed [environment system](../environments/README.md). |
+| **Cell** | Fleet profile only: a self-contained slice (cluster, Postgres, executors); the unit of scale and failure. |
+| **Unmanaged harness** | A third-party agent that uses the recorder's compatible endpoints (and optionally the tool router's MCP facade) directly: trainable, not durable. |

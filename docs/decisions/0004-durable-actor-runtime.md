@@ -1,6 +1,6 @@
 # 0004 — Harness is a pure step function hosted by a durable actor runtime
 
-Status: **Proposed**, authoring model superseded by [0012](0012-task-agent-loop.md) and [0013](0013-replay-durability.md) · Date: 2026-09-26
+Status: **Superseded** by [0017](0017-dbos-substrate.md) (runtime) and [0012](0012-task-agent-loop.md) (authoring model) · Date: 2026-09-26
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 Status: **Proposed**
 
-The model-agnostic representation of everything a model reads or writes. Task and agent code, the run log, the tool router and
+The model-agnostic representation of everything a model reads or writes. Task and agent code, run events, tool bindings and
 the model endpoint contract use **only** this form (P4). Rendering to tokens happens exclusively in the recorder (or
 inside a provider for direct adapters).
 
@@ -58,7 +58,7 @@ message BlobReference {
 ```
 
 `POLICY`-scoped reasoning (e.g. encrypted provider reasoning) is dropped or summarized at renderer-epoch
-boundaries by the recorder, according to the channel's configuration. The harness never needs to know.
+boundaries by the recorder, according to the channel's configuration. Task and agent code never need to know.
 
 ## ToolSpecification
 

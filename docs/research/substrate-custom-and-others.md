@@ -26,9 +26,9 @@ vendor performance claims without published methodology are marked.
    X1/X2 (§6) fail. Ray is our callers' compute plane: integrate with it, do not adopt it.
 ## 2. Our own runtime
 
-This section evaluates the runtime specified in [run-store](../components/run-store/README.md),
-[runtime](../components/runtime/README.md), [delivery-semantics](../architecture/delivery-semantics.md),
-[durability](../components/harness/durability.md) and ADR-0002/0003/0004/0013, as if it were one more product on
+This section evaluates the runtime specified in [run-store](../durability/README.md),
+[runtime](../durability/README.md), [delivery-semantics](../architecture/delivery-semantics.md),
+[durability](../core/harness/determinism.md) and ADR-0002/0003/0004/0013, as if it were one more product on
 the shelf. It is the only option whose behaviour we can specify exactly, and the only one whose bugs we would own.
 
 ### 2.1 What the specification already is

@@ -1,6 +1,7 @@
 # Synthesis: substrate, interfaces, and how the system operates
 
-Status: **Draft** · 2026-09-27 · Inputs: [substrate-dbos](substrate-dbos.md), [substrate-restate](substrate-restate.md),
+Status: **Complete** · 2026-09-27 · Decisions taken from it: ADR-0016 to ADR-0022. Sections 5 and 6.5 (durable
+agent identities) and I4 / I8 were **not adopted** — see [ADR-0019](../decisions/0019-conversations-and-priority-delivery.md). · Inputs: [substrate-dbos](substrate-dbos.md), [substrate-restate](substrate-restate.md),
 [substrate-temporal](substrate-temporal.md), [substrate-custom-and-others](substrate-custom-and-others.md),
 [interfaces-agent-frameworks](interfaces-agent-frameworks.md), [interfaces-rl-environments](interfaces-rl-environments.md)
 

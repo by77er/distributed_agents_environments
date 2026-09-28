@@ -1,6 +1,6 @@
 # 0013 — Durability of task and agent code by deterministic replay
 
-Status: **Proposed** · Date: 2026-09-27
+Status: **Proposed**, amended by [0017](0017-dbos-substrate.md) and [0020](0020-deterministic-event-loop.md) · Date: 2026-09-27
 
 ## Context
 
@@ -45,3 +45,10 @@ generators or coroutines, so resuming in the middle of a method requires re-runn
 ## Amendment ([0014](0014-no-forks-template-recipes.md))
 
 Group forks are removed. Snapshots never move between runs; they only bound replay.
+
+## Amendment ([0017](0017-dbos-substrate.md), [0020](0020-deterministic-event-loop.md))
+
+Replay is performed by the DBOS pump re-feeding recorded completions to a fresh task host; there is no separate
+log of our own. The generator driver is replaced by a deterministic asyncio event loop. Pickled snapshots and
+`@checkpoint` are replaced by exported state at resumable points (generations, `WaitFor`). The determinism rules are
+stated in [determinism](../core/harness/determinism.md).

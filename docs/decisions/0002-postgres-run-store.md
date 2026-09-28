@@ -1,6 +1,6 @@
 # 0002 — Postgres per cell for the run store
 
-Status: **Proposed** · Date: 2026-09-26
+Status: **Superseded** by [0017](0017-dbos-substrate.md) (Postgres per cell remains, as the DBOS system database) · Date: 2026-09-26
 
 ## Context
 

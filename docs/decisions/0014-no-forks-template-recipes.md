@@ -1,6 +1,6 @@
 # 0014 — No forks: setup cost is paid by content-addressed template builds
 
-Status: **Accepted** · Date: 2026-09-27
+Status: **Accepted** (no forks); the template design belongs to the deferred environment system · Date: 2026-09-27
 
 ## Context
 

@@ -13,7 +13,7 @@ slightly more divergence than recomputing.
 - Keep the prefix cache across weight updates. Tokens sampled over stale KV come from a different but fully
   specified conditional distribution μ(yₜ | prefix); the recorded behavior logprob is exactly that distribution.
 - Correct for all off-policyness (stale weights, stale KV, in-flight updates, inference/training numeric
-  mismatch) with importance sampling against recorded behavior logprobs (P9). The estimator is the trainer's
+  mismatch) with importance sampling against recorded behavior logprobs (P10). The estimator is the trainer's
   choice.
 - Bound KV age per channel (`max_kv_age` versions): shared prefixes would otherwise stay hot, and stale, forever.
   Initially enforced by staggered whole-cache flushes; version-tagged eviction is a desirable upstream patch.

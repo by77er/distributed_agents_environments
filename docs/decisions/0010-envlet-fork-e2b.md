@@ -1,6 +1,6 @@
 # 0010 — microVMs via a node daemon (envlet) forked from E2B's orchestrator
 
-Status: **Proposed** · Date: 2026-09-26
+Status: **Deferred** — the environment system is designed separately ([environments](../environments/README.md)) · Date: 2026-09-26
 
 ## Context
 

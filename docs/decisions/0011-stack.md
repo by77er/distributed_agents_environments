@@ -1,6 +1,6 @@
 # 0011 — Go for control and environment planes, Python for recorder and RL plane
 
-Status: **Proposed** · Date: 2026-09-26
+Status: **Proposed**, amended by [0016](0016-layers-and-profiles.md) and [0017](0017-dbos-substrate.md) · Date: 2026-09-26
 
 ## Context
 
@@ -27,3 +27,9 @@ tooling are Python.
 - **Rust core** (earlier lean): strong fit for envd and performance, but fights the reuse gradient (E2B, llm-d,
   controller-runtime are Go).
 - **All Python**: fastest iteration; heavier envd and weaker fit for the environment plane.
+
+## Amendment ([0016](0016-layers-and-profiles.md), [0017](0017-dbos-substrate.md))
+
+The core, the recorder, the rollout API and the durable runner (DBOS) are Python. The Go runtime is gone. Whether the
+pump is written in Python or Go (DBOS Go) is open; platform services and the environment system choose their languages
+when they are designed.

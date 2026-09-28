@@ -1,77 +1,65 @@
 # Effects
 
-Status: **Proposed** · Delivery guarantees are defined in [delivery-semantics](../architecture/delivery-semantics.md).
+Status: **Proposed** · Delivery guarantees: [delivery-semantics](../architecture/delivery-semantics.md) · See [ADR-0018](../decisions/0018-effects-at-least-once.md)
 
-An **effect** is side-effecting work derived from a committed `*.requested` event. Task and agent code never
-perform effects; they `await` handles, the task host turns each await into a requested event, and the runtime
-performs the effect only after commit (P5).
+An **effect** is an operation that reaches outside task, agent or program code: a model sample, an imported tool
+call, an environment operation, a message, a child run, a timer. Code requests effects by awaiting `run` methods
+and handles; a runner performs them. Under the `LocalRunner` an effect is a direct call. Under a durable runner it is
+a recorded step ([durability](../durability/README.md)).
 
 ## Catalog
 
-| Effect | Requested by | Executor (boundary) | Completion events | Delivery pattern | Default retry class | Receiver deduplicates |
-|---|---|---|---|---|---|---|
-| `model.request` | task host | Model endpoint (B5) | `model.completed` / `model.failed` | eager | idempotent | recorder: yes · direct adapter: no (re-sampling is safe) |
-| `environment.lifecycle` | task host | Environment Manager (B10) | `environment.completed` / `environment.failed` | eager | idempotent | yes (`request_id = effect_id`) |
-| `environment.call` | task host | envlet → envd (B9) | `environment.completed` / `environment.failed` | eager | per operation (below) | yes (three-state, envd) |
-| `tool.request` | task host | Tool Router (B7), imported tools only | `tool.completed` / `tool.failed` / `tool.outcome_unknown` | eager | per tool | per binding |
-| `spawn.request` | task host | Run Store (same transaction) or relay | `child.completed` (via inbox when the child terminates) | same-transaction / relay | n/a | keyed insert |
-| `message.send` | task host | Run Store (same transaction) or relay | none | same-transaction / relay | n/a | keyed insert |
-| `timer.request` | task host | Run Store `timers` + timer relay | `timer.fired` | same-transaction + relay | n/a | keyed insert |
-| `session.open` | runtime | Recorder (B5) | `session.opened` | eager | idempotent | yes |
-| `environment.attach` | runtime | Environment Manager (B10) | `environment.attached` | eager | idempotent | yes |
-| `environment.release` | runtime | Environment Manager (B10) | `environment.released` | eager | idempotent | yes |
+| Effect | Requested through | Executor | Completion | Receiver deduplicates |
+|---|---|---|---|---|
+| `model.sample` | `run.models[slot].sample` | model endpoint (recorder or direct adapter) | reply message | recorder: yes · direct adapter: no (re-sampling is harmless) |
+| `tool.call` | an imported tool in the action space | `ToolBinding` (in process, or the tool router) | `ToolResult` or failure | per binding |
+| `environment.call` | `Environment` handle methods | environment layer | operation result or failure | yes (required of environment services) |
+| `environment.lifecycle` | `run.environments.create`, `destroy`, … | environment layer | handle or failure | yes |
+| `message.send` | `run.send` | runner | none | yes (by `message_id`) |
+| `message.wait` | `WaitFor` | runner | the envelope, or timeout | n/a |
+| `run.spawn` | `run.spawn` | runner | child outcome | yes (by child `run_id`) |
+| `timer.sleep` | `run.sleep` | runner | wake-up | n/a |
+| `output.emit` | `run.emit` | runner → connectors | none | yes (by `effect_id`) |
 
-`environment.requested` events map to `environment.lifecycle` (`CREATE`, `SNAPSHOT`, `HIBERNATE`,
-`RESUME`, `DESTROY`) or `environment.call` (everything else). Retry classes for calls: `GET`, `GET_REFERENCE`,
-`LIST`, `STAT`, `LIST_PROVIDED_TOOLS` are `pure`; `EXECUTE`, `PUT`, `REMOVE`, `MOVE`, `CALL_PROVIDED_TOOL` are
-`side_effecting` with receiver deduplication, so they are re-dispatched with the same key.
+`@tool` methods are task code, not effects; the effects they make (e.g. environment calls) are.
 
-## Envelopes
+## Envelope
 
-What executors receive and return. Transport is per boundary; these fields are mandatory on all of them.
+What an executor receives. Transport is per implementation; these fields are mandatory everywhere.
 
-```proto
-message Effect {
-  string      effect_id = 1;   // idempotency key; identical on every attempt
-  string      run_id    = 2;
-  string      kind      = 3;
-  uint32      attempt   = 4;   // 1-based; informational
-  Timestamp   deadline  = 5;   // absolute
-  bytes       payload   = 6;   // the *.requested payload
-  CallContext context   = 7;
-}
+```python
+@dataclass(frozen=True)
+class EffectRequest:
+    effect_id: str                 # {run_id}:{generation}:{ordinal}; identical on every attempt
+    arguments_digest: str          # sha256 of the canonical JSON of the arguments
+    kind: str
+    run_id: str
+    attempt: int                   # 1-based; informational
+    deadline: datetime             # absolute
+    payload: JsonValue             # JSON only
+    retry_class: RetryClass        # PURE | IDEMPOTENT | SIDE_EFFECTING | UNKNOWN
+    context: CallContext           # assembled by the runner, never by task code (tenant, labels, grants, attachments)
 
-message CallContext {             // assembled by the runtime from R-visible events
-  string run_id = 1;
-  string tenant = 2;
-  map<string,string> labels = 3;
-  map<string, EnvironmentAttachment> environments = 4;   // environment_id → {attachment_id, attachment_token}
-  map<string, string> sessions = 5;                      // model slot → session endpoint
-}
-
-message Completion {
-  string    effect_id   = 1;
-  uint32    attempt     = 2;
-  Status    status      = 3;   // OK | FAILED | OUTCOME_UNKNOWN
-  bytes     payload     = 4;   // e.g. ExecutionResult, ToolResult, SampleResult
-  string    error_class = 5;   // matches the *.failed class enums
-  string    detail      = 6;
-}
+@dataclass(frozen=True)
+class EffectCompletion:
+    effect_id: str
+    status: Status                 # OK | FAILED | OUTCOME_UNKNOWN
+    payload: JsonValue
+    error_class: str | None = None
 ```
-
-Attachment tokens live only in `CallContext`, which the runtime assembles; task code holds environment
-identifiers, never tokens.
 
 ## Rules
 
-1. **Identity.** `effect_id` MUST be forwarded to every downstream system that can use an idempotency key
-   (envd, Environment Manager, recorder, HTTP `Idempotency-Key` header, MCP `_meta.idempotency_key`).
-2. **Authorization.** The runtime rejects `environment.requested` for any environment the run neither owns nor is
-   attached to (task code is untrusted; identifiers can be forged).
-3. **Concurrency.** Effects requested in one `Step` are dispatched concurrently. There is no ordering guarantee
-   between them; code that needs ordering awaits one before requesting the next.
-4. **Limits.** The runtime enforces per-run in-flight effects (default 16) and per-worker in-flight effects.
-   Excess effects wait in the worker's dispatch queue — they are already committed, so a crash loses nothing.
-5. **Terminal-once.** The first terminal event for an `effect_id` in the log wins; later completions are dropped.
-6. **Cancellation** is best-effort: `Cancel(effect_id)` to the executor. The log records the outcome that
-   actually arrives (or `DEADLINE`).
+1. **Identity.** `effect_id` and `arguments_digest` are forwarded to every receiver that can use them (the
+   recorder, environment services, HTTP `Idempotency-Key`, MCP `_meta.idempotency_key`).
+2. **Three-state deduplication** at receivers that support it: absent → execute; in progress → join the running
+   execution; done → return the recorded result. A known `effect_id` with a different digest is rejected with
+   `CONFLICT` — never answered from the cache.
+3. **Non-deduplicating receivers.** For `SIDE_EFFECTING` or `UNKNOWN` tools whose binding cannot deduplicate, a
+   durable runner writes an attempt marker before dispatch; a re-execution that finds the marker completes with
+   `OUTCOME_UNKNOWN` instead of calling again.
+4. **Authorization.** Runners reject effects that address resources the run does not own or is not attached to.
+   Task code can forge identifiers; `CallContext` is assembled by the runner.
+5. **Concurrency.** Effects awaited concurrently are dispatched concurrently; there is no ordering between them.
+6. **Terminal-once.** The first completion recorded for an `effect_id` wins; later ones are dropped.
+7. **Cancellation** is best-effort and reported by the completion that actually arrives.

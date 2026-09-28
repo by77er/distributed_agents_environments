@@ -195,7 +195,7 @@ IDs, so tool calls must run one at a time or each as a child workflow (about 4 e
 deploy is a new DBOS application version.
 
 **Pump mode (recommended).** A generic trusted workflow drives our task host, the no-network gVisor sandbox with our
-replay driver ([durability.md](../components/harness/durability.md)), over the existing `HarnessHost` socket. The
+replay driver ([durability.md](../core/harness/determinism.md)), over the existing `HarnessHost` socket. The
 sandbox is a pure function of the inputs it is fed. So the pump does **not** record the sandbox's decisions: on
 recovery DBOS re-executes the pump, the pump re-feeds each recorded completion, and the sandbox regenerates the same
 effect requests. Our driver's deterministic scheduler orders requests, and the pump starts steps in exactly that
@@ -279,7 +279,7 @@ async def tool_step(run_id: str, request: EffectRequest) -> EffectCompletion:
 ```
 
 The cost is one extra write per non-deduplicating tool call only. Markers are retained for 24 h
-([delivery-semantics](../architecture/delivery-semantics.md#receiver-idempotency)). A zombie executor (§6) can dispatch
+([delivery-semantics](../architecture/delivery-semantics.md#receiver-deduplication)). A zombie executor (§6) can dispatch
 at most the steps it had already started. Its checkpoint then fails the `owner_xid` check and the execution parks.
 ADR-0003 already accepts this.
 
@@ -474,7 +474,7 @@ async def best_effort_run(run_id: str, specification: RunSpecification) -> RunOu
     return await episode_step(run_id, specification)     # crash → recovery re-runs the whole episode = resample
 ```
 
-  That is the `best_effort` tier of [delivery-semantics](../architecture/delivery-semantics.md#run-durability-tiers):
+  That is the `best_effort` tier of [delivery-semantics](../durability/README.md#run-kinds):
   about 6 writes per episode. `recovery_attempts` gives the crash rate by episode length, which is the sampling-bias
   monitor. The recorder session for an attempt should be `{run_id}~{attempt}/{slot}`, a deviation from the normative
   `session_id` format that needs deciding. A **middle tier** is possible: a `chunk_step` that runs *K* turns and
