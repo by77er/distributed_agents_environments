@@ -45,6 +45,8 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
+# Task subclasses declare `models`, `imports` and hints as plain class attributes; the base declares the ClassVar.
+ignore = ["RUF012"]
 
 [tool.pyright]
 include = ["src", "tests"]

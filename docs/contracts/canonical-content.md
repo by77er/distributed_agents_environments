@@ -117,4 +117,5 @@ message Provenance {
 ```
 
 `is_error` is for failures the model should reason about (non-zero exit, file not found). Platform failures
-(environment lost, deadline) are `tool.failed` events, not results — see [run-events](run-events.md).
+(environment lost, deadline) are failed `tool.call` effects (`effect.completed` with status `FAILED`), not results —
+see [run-events](run-events.md).

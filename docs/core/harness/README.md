@@ -27,31 +27,32 @@ tasks and conversations differ only in how `Task.start`, `Task.respond` and `Tas
 
 ```python
 async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
-    await task.setup(run)
     try:
+        await task.setup(run)
         observation = await task.start(run)
-        run.history.record_start(observation)
+        run.record(observation)
         while True:
             if isinstance(observation, WaitFor):
                 envelope = await run.wait_for_message(observation)            # suspends; see conversations.md
                 observation = (await task.resume(run, envelope)) if envelope else observation.on_timeout
-                run.history.record_resume(envelope, observation)
+                run.record(observation)
                 continue
             if observation.end is not None:
                 break
             if task.max_turns is not None and run.turn >= task.max_turns:
-                run.history.record_end(End(truncated=True))
+                run.record(End(truncated=True))
                 break
             try:
-                reply = await agent.act(run, run.history, task.tools_for_turn(run))
+                reply = await run.interruptible(agent.act(run, run.history, task.tools_for_turn(run)))
             except Interrupted as interruption:                                    # a message with mode INTERRUPT
                 observation = await task.resume(run, interruption.envelope)
-                run.history.record_interrupted(interruption, observation)
+                run.record(observation)
                 continue
             observation = await task.respond(run, reply)                           # validated; see task.md
-            if isinstance(observation, Observation):
-                observation = await task.steer(run, run.take_steering_messages(), observation)
-            run.history.record(reply, observation)                                 # observation.reward binds to reply
+            if isinstance(observation, Observation) and observation.end is None:
+                if steering := run.take_steering_messages():
+                    observation = await task.steer(run, steering, observation)
+            run.record(observation, reply=reply)                                   # observation.reward binds to reply
         episode_reward = await task.score(run)
         if episode_reward is not None:
             run.reward(episode_reward)
@@ -60,13 +61,16 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
 ```
 
 - `setup` runs first; `teardown` runs whenever `setup` began (success, failure, cancellation).
+- Every observation a hook returns is validated ([task](task.md#observation-ending-waitfor)) before it is
+  recorded. `run.record` appends a turn to the history and emits `observation.recorded`.
 - `score` runs only when the loop ends with an `Ending`; after a hook raised it does not run and the run fails
   with `TASK_ERROR`.
 - A `WaitFor` suspends the run until a message of the requested kind arrives or the timeout passes
   ([conversations](conversations.md)). Under a durable runner, a suspended run holds no compute.
-- Messages delivered with mode `STEER` are merged into the next observation by `Task.steer` (default: appended as
-  USER content). Mode `INTERRUPT` during a model sample cancels it (`agent.act` raises `Interrupted`) and the loop
-  calls `Task.resume` with the message; during tool execution the tools finish and the message is merged like
+- Messages delivered with mode `STEER` are merged into the next non-terminal observation by `Task.steer` (default:
+  appended as USER content). Mode `INTERRUPT` while the agent is acting cancels `agent.act`, including any model
+  sample in flight (`run.interruptible` raises `Interrupted`), and the loop calls `Task.resume` with the message;
+  agents need no handling of their own; during tool execution the tools finish and the message is merged like
   `STEER`. Messages delivered with mode `QUEUE` wait for the next `WaitFor`.
 - A task with no tools and one turn (`start` → one reply → `respond` returns `End`) is a complete task. No
   environment is involved unless the task creates one.

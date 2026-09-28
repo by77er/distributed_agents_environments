@@ -62,6 +62,6 @@ SHOULD honor them; the default agent does.
   tree. Auxiliary reasoning that should not be trained belongs on a separate slot.
 - Agent attributes are part of the run's state and, under a durable runner, follow the same
   [determinism rules](determinism.md) as task code.
-- **Interruption.** A message delivered with mode `INTERRUPT` cancels the in-flight model sample inside `act`
-  ([conversations](conversations.md)). `act` raises `Interrupted`; the partial reply is recorded as an aborted
+- **Interruption.** A message delivered with mode `INTERRUPT` cancels `act`, including the model sample in flight
+  ([conversations](conversations.md)); the loop receives `Interrupted`. The partial reply is recorded as an aborted
   branch and never trained on. Agents that sample several times per action need no special handling.
