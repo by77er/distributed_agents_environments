@@ -39,7 +39,7 @@ scheduled wake-up brings them back ([evicting idle runs](../durability/eviction.
 | Piece | Built from |
 |---|---|
 | The session | a durable conversation of the deployment `agents/session`, keyed by its name; it waits for messages and never ends until stopped |
-| Its computer | an environment from `run.environments`: by default a private copy of Alpine Linux in unprivileged namespaces, root inside, with internet access; or a workspace on the host (`--environment local`). Tools: `shell`, `read_file`, `write_file`. A command interrupted by a crash reports that it may or may not have run instead of running twice |
+| Its computer | an environment from `run.environments`: by default a private copy of Alpine Linux in unprivileged namespaces, root inside, with internet access; or a workspace on the host (`--environment local`). Tools, from `ComputerTools`: `shell` (long output keeps its end; the rest is saved to a file), `read_file` (paged), `write_file`, `edit_file` (exact replacements) and `read_image` (images are scaled to 2000 px and kept in `state/blobs`). A command interrupted by a crash reports that it may or may not have run instead of running twice |
 | Sessions | `SessionTools` from `rollout.coordination`: `list_sessions`, `create_session`, `send_message` (urgent messages interrupt) |
 | The board | `BoardTools`: channels of notes and tasks; `claim_task` is exclusive; `subscribe` pushes new posts to subscribers as low-priority messages |
 | Delivery | tools write to the coordination store's outbox; a relay delivers through the runner, exactly once |

@@ -80,3 +80,20 @@ async def test_creation_is_idempotent_and_destroy_removes_everything(
 async def test_only_the_host_image_is_provided(environments: LocalEnvironments) -> None:
     with pytest.raises(ValueError, match="only provides the image 'host'"):
         await environments.create("e_alpine", EnvironmentSpecification(image="alpine"))
+
+
+async def test_long_output_keeps_its_end_and_saves_the_rest(environments: LocalEnvironments) -> None:
+    await environments.create("e_long", HOST)
+    result = await environments.execute("e_long", "seq 1 5000", timeout_seconds=30, cwd=None, effect_id="e1")
+    assert result.truncated and result.full_output_path is not None
+    lines = result.output.splitlines()
+    assert (len(lines), lines[0], lines[-1]) == (2000, "3001", "5000")
+    full = await environments.get("e_long", result.full_output_path)
+    assert full.decode().splitlines() == [str(n) for n in range(1, 5001)]
+    again = await environments.execute("e_long", "seq 1 5000", timeout_seconds=30, cwd=None, effect_id="e1")
+    assert again.full_output_path == result.full_output_path  # a retried effect overwrites the same file
+
+    wide = await environments.execute("e_long", "head -c 200000 /dev/zero | tr '\\0' x", timeout_seconds=30, cwd=None)
+    assert wide.truncated and len(wide.output) == 50 * 1024
+    short = await environments.execute("e_long", "seq 1 2000", timeout_seconds=30, cwd=None)
+    assert not short.truncated and short.full_output_path is None

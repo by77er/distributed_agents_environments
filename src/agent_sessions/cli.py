@@ -113,7 +113,7 @@ def _serve(arguments: argparse.Namespace) -> None:
         evict_after=timedelta(seconds=arguments.evict_after) if arguments.evict_after > 0 else None,
         environment=arguments.environment,
     )
-    service = SessionsService(settings, providers={"codex": codex_provider()})
+    service = SessionsService(settings, providers={"codex": codex_provider(blobs=settings.blobs())})
     print(f"agent sessions: state in {settings.state}", file=sys.stderr)
     uvicorn.run(create_app(service), host=arguments.host, port=arguments.port, log_level="warning")
 

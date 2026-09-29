@@ -21,6 +21,7 @@ from dbos import DBOS
 from pydantic import JsonValue
 
 from rollout.core.contracts import EffectKind, ModelEndpoint, OutcomeUnknown, RunEvent, RunEventType
+from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.context import Interrupted
 from rollout.core.harness.conversations import ConversationKey, DeliveryMode, Envelope
 from rollout.core.harness.environments import EnvironmentService
@@ -57,6 +58,7 @@ class DurableRunContext(LocalRunContext):
         context_hints: ContextHints | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
         environment_service: EnvironmentService | None = None,
+        blobs: Blobs | None = None,
         conversation: ConversationKey | None = None,
         on_event: Callable[[RunEvent], None] | None = None,
         mark_attempt: Callable[[str], bool] = lambda effect_id: True,
@@ -69,6 +71,7 @@ class DurableRunContext(LocalRunContext):
             context_hints=context_hints,
             tool_sets=tool_sets,
             environment_service=environment_service,
+            blobs=blobs,
             conversation=conversation,
             on_event=on_event,
             retain_events=False,  # the runner's store has them; an idle run should hold as little as possible

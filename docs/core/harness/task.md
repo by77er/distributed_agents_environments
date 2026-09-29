@@ -138,6 +138,19 @@ class Environment(Protocol):                        # a handle; serializes as a 
 Environments created by a run are owned by it (P12); `teardown` should destroy them, and runners destroy any the run
 still owns when it ends.
 
+A task whose agent works on the computer can mix in `rollout.environments.tools.ComputerTools` and set
+`environment_id`: it provides `shell`, `read_file` (paged: 2000 lines or 50 KB at a time), `write_file`, `edit_file`
+(exact, unique replacements, several per call) and `read_image`. Long command output keeps its end and saves the full
+output to a file in the environment; writes and edits to one file run one at a time even when called together.
+
+## Blobs (optional)
+
+Bytes too large for events, such as images, go to `run.blobs`, a content-addressed store: `await run.blobs.put(data,
+media_type)` returns a `BlobReference` for a `Media` block. Storing is not an effect: the reference depends only on the
+bytes, so a replay gets the same one. Model adapters read the bytes back when they render the block (the Responses
+adapter sends images as `input_image`, in user messages and in tool results). `FileBlobStore(directory)` keeps one
+file per blob; runners take it as `blobs=`.
+
 ## RunContext
 
 ```python
@@ -150,6 +163,7 @@ class RunContext:
     model: Model                                      # models["policy"]
     tools: Tools                                      # imported tools
     environments: Environments | None
+    blobs: Blobs | None                               # content-addressed bytes for Media blocks
     random: random.Random                             # seeded from run_id
     context_hints: ContextHints                       # the task's declared hints, for the agent
 

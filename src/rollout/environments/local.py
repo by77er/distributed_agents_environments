@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from rollout.core.harness.environments import EnvironmentSpecification, ExecutionResult
-from rollout.environments.processes import execution_result, remove_tree
+from rollout.environments.processes import execution_result, output_name, remove_tree
 
 HOST_IMAGE = "host"
 
@@ -82,9 +82,15 @@ class LocalEnvironments:
                 await process.wait()
             output.seek(0)
             data = await asyncio.to_thread(output.read)
-        if timed_out:
-            return execution_result(None, data, timed_out=True)
-        return execution_result(process.returncode, data)
+
+        def save(full: bytes) -> str:
+            target = self.directory / environment_id / "outputs" / output_name(effect_id)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(full)
+            return str(target)
+
+        exit_code = None if timed_out else process.returncode
+        return execution_result(exit_code, data, timed_out=timed_out, save=save)
 
     async def put(self, environment_id: str, path: str, data: bytes) -> None:
         target = self._resolve(environment_id, path)

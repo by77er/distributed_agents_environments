@@ -14,6 +14,7 @@ from rollout.core.contracts import (
     ContextDelta,
     ContextOverflow,
     FinishReason,
+    Media,
     Message,
     NamedToolChoice,
     Overloaded,
@@ -26,7 +27,7 @@ from rollout.core.contracts import (
     ToolSpecification,
     context_digests,
 )
-from rollout.core.harness import SamplingParameters
+from rollout.core.harness import FileBlobStore, SamplingParameters
 
 
 def events(*items: dict[str, Any], status: str = "completed", usage: dict[str, int] | None = None) -> str:
@@ -36,13 +37,16 @@ def events(*items: dict[str, Any], status: str = "completed", usage: dict[str, i
     return "\n\n".join(lines) + "\n\n"
 
 
-def endpoint(handler: Callable[[httpx.Request], httpx.Response], credentials: Any = None) -> ResponsesEndpoint:
+def endpoint(
+    handler: Callable[[httpx.Request], httpx.Response], credentials: Any = None, blobs: FileBlobStore | None = None
+) -> ResponsesEndpoint:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return ResponsesEndpoint(
         credentials or ApiKey("test-key"),
         "gpt-test",
         sampling=SamplingParameters(reasoning_effort="low"),
         client=client,
+        blobs=blobs,
     )
 
 
@@ -87,6 +91,37 @@ def test_canonical_messages_render_to_responses_items() -> None:
     assert body["tool_choice"] == {"type": "function", "name": "weather"}
     assert body["reasoning"] == {"effort": "low"}
     assert body["store"] is False and body["stream"] is True
+
+
+async def test_images_are_sent_as_input_images_from_the_blob_store(tmp_path: Path) -> None:
+    blobs = FileBlobStore(tmp_path)
+    picture = Media(media_type="image/png", source=await blobs.put(b"png bytes", "image/png"))
+    audio = Media(media_type="audio/wav", source=await blobs.put(b"wav bytes", "audio/wav"))
+    messages = [
+        Message(role=Role.USER, content=[Text(text="What is this?"), picture]),
+        Message(role=Role.ASSISTANT, content=[ToolCall(call_id="c1", name="read_image", arguments={"path": "a.png"})]),
+        Message(
+            role=Role.TOOL,
+            content=[ToolResultBlock(call_id="c1", result=ToolResult(content=[Text(text="a.png"), picture, audio]))],
+        ),
+    ]
+    sent: list[dict[str, Any]] = []
+
+    def handler(incoming: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(incoming.content))
+        return httpx.Response(200, text=events({"type": "message", "content": [{"type": "output_text", "text": "A"}]}))
+
+    with pytest.raises(ValueError, match="no blob store"):
+        await endpoint(handler).sample(request(messages))
+    await endpoint(handler, blobs=blobs).sample(request(messages))
+    image = {"type": "input_image", "image_url": f"data:image/png;base64,{base64.b64encode(b'png bytes').decode()}"}
+    user, _, output = sent[0]["input"]
+    assert user["content"] == [{"type": "input_text", "text": "What is this?"}, image]
+    assert output["output"] == [
+        {"type": "input_text", "text": "a.png"},
+        image,
+        {"type": "input_text", "text": "[audio/wav content omitted: this model reads only images]"},
+    ]
 
 
 async def test_text_and_tool_calls_come_back_as_canonical_content() -> None:

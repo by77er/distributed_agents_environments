@@ -4,26 +4,25 @@ The session is a conversation run keyed by its name. It creates an environment w
 is stopped. Messages from other sessions and from the operator arrive as observations, labelled with their sender.
 """
 
-from rollout.core.contracts import Message, OutcomeUnknown, Role, Text, ToolSpecification
+from rollout.core.contracts import Message, Role, Text, ToolSpecification
 from rollout.core.harness import (
     Agent,
     Envelope,
-    Environment,
     EnvironmentSpecification,
     History,
     Observation,
     RunContext,
     Task,
     WaitFor,
-    tool,
 )
+from rollout.environments.tools import ComputerTools
 
 OPERATOR = "operator"
 
 SYSTEM_PROMPT = """You are "{name}", one of several independent agent sessions that work alongside each other. The \
 time is {now}.
 
-{computer} Use the shell, read_file and write_file tools on it.
+{computer} Use the shell, read_file, write_file, edit_file and read_image tools on it.
 
 You can coordinate with other sessions:
 - list_sessions, create_session (starts a new session with its own workspace) and send_message;
@@ -52,7 +51,9 @@ def _as_observation_message(envelope: Envelope) -> Message:
     return Message(role=Role.USER, content=[Text(text=text)])
 
 
-class AgentSession(Task):
+class AgentSession(ComputerTools, Task):
+    """The computer tools come from `ComputerTools`; the coordination tools are imported."""
+
     imports = ["sessions", "board"]
 
     def __init__(self, parameters: dict[str, str] | None = None) -> None:
@@ -87,39 +88,6 @@ class AgentSession(Task):
     async def teardown(self, run: RunContext) -> None:
         if run.environments is not None and self.environment_id is not None:
             await run.environments.attach(self.environment_id).destroy()
-
-    # The computer
-
-    @tool
-    async def shell(self, run: RunContext, command: str, timeout_seconds: float = 120) -> str:
-        """Run a shell command on your computer, in your workspace unless it changes directory. Each call starts a fresh
-        shell: nothing keeps running between calls. Returns the exit code and the combined output."""
-        try:
-            result = await self._environment(run).execute(command, timeout_seconds=min(timeout_seconds, 1800))
-        except OutcomeUnknown:
-            return (
-                "The command may or may not have run: the system restarted while it was running. "
-                "Check its effects before running it again."
-            )
-        if result.timed_out:
-            return f"timed out after {timeout_seconds} seconds\n{result.output}"
-        return f"exit {result.exit_code}\n{result.output}"
-
-    @tool
-    async def read_file(self, run: RunContext, path: str) -> str:
-        """Read a text file from your computer (relative paths are under your workspace)."""
-        return (await self._environment(run).get(path)).decode("utf-8", errors="replace")
-
-    @tool
-    async def write_file(self, run: RunContext, path: str, content: str) -> str:
-        """Write a text file on your computer (relative paths are under your workspace), creating directories."""
-        await self._environment(run).put(path, content)
-        return f"Wrote {len(content.encode())} bytes to {path}."
-
-    def _environment(self, run: RunContext) -> Environment:
-        if run.environments is None or self.environment_id is None:
-            raise RuntimeError("this session has no environment")
-        return run.environments.attach(self.environment_id)
 
 
 class SessionAgent(Agent):

@@ -30,6 +30,7 @@ from rollout.core.contracts import (
     new_run_id,
     new_ulid,
 )
+from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope, Priority
 from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.imports import ToolSet
@@ -121,6 +122,7 @@ class DurableRunner:
         providers: Mapping[str, EndpointFactory] | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
         environments: EnvironmentService | None = None,
+        blobs: Blobs | None = None,
         application: str = "rollout",
         evict_after: timedelta | None = timedelta(minutes=5),
         eviction_interval: float = 5.0,
@@ -129,6 +131,7 @@ class DurableRunner:
         `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
         """
         self._environment_service = environments
+        self._blobs = blobs
         self._evict_after = evict_after
         self._eviction_interval = eviction_interval
         self._run_locks: dict[str, asyncio.Lock] = {}
@@ -279,6 +282,7 @@ class DurableRunner:
             context_hints=program.context_hints(),
             tool_sets=resolve_tool_sets(program, specification.binding, self._tool_sets),
             environment_service=self._environment_service,
+            blobs=self._blobs,
             conversation=conversation,
             on_event=self.store.append,
             mark_attempt=self.store.mark_attempt,

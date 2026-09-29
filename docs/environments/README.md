@@ -12,7 +12,9 @@ Status: **Preliminary** · Layer: environments (separate system, designed later)
 a per-environment copy of a minimal image in unprivileged Linux namespaces ([ADR-0025](../decisions/0025-agent-sessions.md));
 and `LocalEnvironments`, a workspace directory on the host with no isolation, whose only image is `host` (asking it
 for another image is an error, not a silent downgrade). Both keep environments as directories, so they survive
-restarts, and neither keeps processes running between commands.
+restarts, and neither keeps processes running between commands. Output longer than 2000 lines or 50 KB keeps its end,
+and the full output is saved inside the environment (`full_output_path`). `rollout.environments.tools.ComputerTools`
+gives a task's agent the usual coding-agent tools over any backend.
 
 ## Purpose
 

@@ -32,6 +32,7 @@ from rollout.core.harness import (
     DirectModel,
     Envelope,
     EnvironmentService,
+    FileBlobStore,
     ModelBinding,
     Priority,
     RunBinding,
@@ -66,6 +67,11 @@ class Settings:
     environment: Literal["namespaces", "local"] = "namespaces"
     """Where sessions' commands run: a private Alpine computer in namespaces, or a workspace directory on the host
     itself, with no sandbox (for uses where convenience matters more than isolation)."""
+
+    def blobs(self) -> FileBlobStore:
+        """Where images the sessions look at are kept; model endpoints read them from here too."""
+        return FileBlobStore(self.state / "blobs")
+
     """Unload sessions that have waited this long for a message; they wake when messaged (durable runner only)."""
 
 
@@ -122,11 +128,14 @@ class SessionsService:
                 providers=providers,
                 tool_sets=tool_sets,
                 environments=self.environments,
+                blobs=settings.blobs(),
                 evict_after=settings.evict_after,
                 eviction_interval=min(5.0, settings.evict_after.total_seconds() / 2) if settings.evict_after else 5.0,
             )
         else:
-            self.runner = LocalRunner(providers=providers, tool_sets=tool_sets, environments=self.environments)
+            self.runner = LocalRunner(
+                providers=providers, tool_sets=tool_sets, environments=self.environments, blobs=settings.blobs()
+            )
         provider = next(iter(providers))
         sampling = SamplingParameters(reasoning_effort=settings.reasoning_effort)
         binding = RunBinding(

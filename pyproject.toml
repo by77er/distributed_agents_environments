@@ -22,6 +22,7 @@ mcp = ["mcp>=1.20"]
 anthropic = ["anthropic>=0.70"]
 openai = ["openai>=2.0"]
 assistant = [
+    "pillow>=11",
     "starlette>=0.48",
     "uvicorn>=0.37",
 ]

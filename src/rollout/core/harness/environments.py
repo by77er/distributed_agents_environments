@@ -31,7 +31,10 @@ class ExecutionResult(ContractModel):
     output: str
     """Standard output and standard error, interleaved."""
     truncated: bool = False
+    """`output` is only the end of the output (see `full_output_path`)."""
     timed_out: bool = False
+    full_output_path: str | None = None
+    """When truncated: where, inside the environment, the full output was saved."""
 
 
 class EnvironmentService(Protocol):

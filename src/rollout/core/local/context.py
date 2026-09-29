@@ -23,6 +23,7 @@ from rollout.core.contracts import (
     effect_id,
     session_id,
 )
+from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.context import Interrupted, Model
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope
 from rollout.core.harness.environments import Environments, EnvironmentService
@@ -50,6 +51,7 @@ class LocalRunContext:
         context_hints: ContextHints | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
         environment_service: EnvironmentService | None = None,
+        blobs: Blobs | None = None,
         conversation: ConversationKey | None = None,
         generation: int = 0,
         on_event: Callable[[RunEvent], None] | None = None,
@@ -77,6 +79,7 @@ class LocalRunContext:
 
         self._tools = Tools(tool_sets or {}, self)
         self._environments = Environments(environment_service, self) if environment_service is not None else None
+        self._blobs = blobs
 
         # Mailbox. `_held` keeps undelivered messages in arrival order with their delivery mode.
         self._held: list[tuple[Envelope, DeliveryMode]] = []
@@ -119,6 +122,10 @@ class LocalRunContext:
     @property
     def environments(self) -> Environments | None:
         return self._environments
+
+    @property
+    def blobs(self) -> Blobs | None:
+        return self._blobs
 
     @property
     def random(self) -> random.Random:

@@ -12,6 +12,7 @@ from typing import Protocol
 from pydantic import JsonValue
 
 from rollout.core.contracts import CapabilityContract, Message, ToolChoice, ToolSpecification, Usage
+from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope
 from rollout.core.harness.environments import Environments
 from rollout.core.harness.history import ContextHints, History
@@ -80,6 +81,11 @@ class RunContext(Protocol):
     @property
     def environments(self) -> Environments | None:
         """Creates environments the run owns; None when the runner has no environment backend."""
+        ...
+
+    @property
+    def blobs(self) -> Blobs | None:
+        """Stores bytes such as images for `Media` blocks; None when the runner has no blob store."""
         ...
 
     @property

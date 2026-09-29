@@ -1,6 +1,7 @@
 """The framework-owned loop and the interfaces task and agent code are written against (docs/core/harness/)."""
 
 from rollout.core.harness.agent import Agent
+from rollout.core.harness.blobs import Blobs, FileBlobStore
 from rollout.core.harness.context import Interrupted, Model, RunContext
 from rollout.core.harness.conversations import (
     Address,
@@ -48,6 +49,7 @@ __all__ = [
     "Address",
     "Agent",
     "AgentProgram",
+    "Blobs",
     "ContextHints",
     "ConversationKey",
     "DeliveryMode",
@@ -64,6 +66,7 @@ __all__ = [
     "EnvironmentSpecification",
     "Environments",
     "ExecutionResult",
+    "FileBlobStore",
     "History",
     "HistoryShape",
     "Interrupted",

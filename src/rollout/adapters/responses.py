@@ -30,6 +30,7 @@ from rollout.core.contracts import (
     ContextOverflow,
     FinishReason,
     InternalError,
+    Media,
     Message,
     NamedToolChoice,
     Overloaded,
@@ -43,6 +44,7 @@ from rollout.core.contracts import (
     ToolSpecification,
     Usage,
 )
+from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.runner import DirectModel, SamplingParameters
 
 __all__ = ["ApiKey", "CodexLogin", "Credentials", "ResponsesContract", "ResponsesEndpoint", "codex_provider"]
@@ -145,8 +147,11 @@ class ResponsesEndpoint:
         contract: ResponsesContract | None = None,
         client: httpx.AsyncClient | None = None,
         timeout: float = 600.0,
+        blobs: Blobs | None = None,
     ) -> None:
+        """`blobs` reads the bytes of `Media` blocks (images); without it, a context with media cannot be sent."""
         self._credentials = credentials
+        self._blobs = blobs
         self._model = model
         self._sampling = sampling or SamplingParameters()
         limits = contract or ResponsesContract()
@@ -162,7 +167,7 @@ class ResponsesEndpoint:
         """Nothing to do: the request stops when the task awaiting `sample` is cancelled."""
 
     async def sample(self, request: SampleRequest) -> SampleResult:
-        body = self.request_body(request)
+        body = self.request_body(request, await self._read_media(request.context.append))
         for attempt in (1, 2):
             headers = await self._credentials.headers(self._client, force_refresh=attempt == 2)
             headers["Accept"] = "text/event-stream"
@@ -175,9 +180,10 @@ class ResponsesEndpoint:
                 return _result(await _completed_response(response.aiter_lines()), self._contract)
         raise PermissionError("the model API rejected the credentials after a refresh")
 
-    def request_body(self, request: SampleRequest) -> dict[str, JsonValue]:
-        """The Responses API request for a sample request (public for tests and debugging)."""
-        instructions, items = _render(request.context.append)
+    def request_body(self, request: SampleRequest, media: Mapping[str, bytes] | None = None) -> dict[str, JsonValue]:
+        """The Responses API request for a sample request (public for tests and debugging). `media` holds the bytes
+        of the context's `Media` blocks by SHA-256."""
+        instructions, items = _render(request.context.append, media or {})
         body: dict[str, JsonValue] = {
             "model": self._model,
             "instructions": instructions,
@@ -194,14 +200,27 @@ class ResponsesEndpoint:
             body["reasoning"] = {"effort": self._sampling.reasoning_effort}
         return body
 
+    async def _read_media(self, messages: Sequence[Message]) -> dict[str, bytes]:
+        media: dict[str, bytes] = {}
+        for block in _media_blocks(messages):
+            if block.source.sha256 not in media:
+                if self._blobs is None:
+                    raise ValueError("the context has media, but this endpoint was given no blob store to read it")
+                media[block.source.sha256] = await self._blobs.read(block.source)
+        return media
 
-def codex_provider(contract: ResponsesContract | None = None) -> Callable[[DirectModel], ResponsesEndpoint]:
+
+def codex_provider(
+    contract: ResponsesContract | None = None, *, blobs: Blobs | None = None
+) -> Callable[[DirectModel], ResponsesEndpoint]:
     """An endpoint factory for `LocalRunner(providers={"codex": codex_provider()})`, using the local Codex login."""
     credentials = CodexLogin()
     client = httpx.AsyncClient(timeout=600.0)
 
     def factory(model: DirectModel) -> ResponsesEndpoint:
-        return ResponsesEndpoint(credentials, model.model, sampling=model.sampling, contract=contract, client=client)
+        return ResponsesEndpoint(
+            credentials, model.model, sampling=model.sampling, contract=contract, client=client, blobs=blobs
+        )
 
     return factory
 
@@ -209,16 +228,14 @@ def codex_provider(contract: ResponsesContract | None = None) -> Callable[[Direc
 # Rendering canonical content to Responses API items ---------------------------------------------------------------
 
 
-def _render(messages: Sequence[Message]) -> tuple[str, list[JsonValue]]:
+def _render(messages: Sequence[Message], media: Mapping[str, bytes]) -> tuple[str, list[JsonValue]]:
     instructions: list[str] = []
     items: list[JsonValue] = []
     for message in messages:
         if message.role is Role.SYSTEM:
             instructions.append(message.text)
         elif message.role is Role.USER:
-            content: list[JsonValue] = [
-                {"type": "input_text", "text": block.text} for block in message.content if isinstance(block, Text)
-            ]
+            content = [_input(block, media) for block in message.content if isinstance(block, Text | Media)]
             items.append({"type": "message", "role": "user", "content": content})
         elif message.role is Role.ASSISTANT:
             text = message.text
@@ -238,11 +255,42 @@ def _render(messages: Sequence[Message]) -> tuple[str, list[JsonValue]]:
         else:
             for block in message.content:
                 if isinstance(block, ToolResultBlock):
-                    output = "".join(part.text for part in block.result.content if isinstance(part, Text))
-                    if block.result.is_error:
-                        output = f"Error: {output}"
-                    items.append({"type": "function_call_output", "call_id": block.call_id, "output": output})
+                    items.append(
+                        {"type": "function_call_output", "call_id": block.call_id, "output": _output(block, media)}
+                    )
     return "\n\n".join(instructions) or "You are a helpful assistant.", items
+
+
+def _output(block: ToolResultBlock, media: Mapping[str, bytes]) -> JsonValue:
+    """A tool's output: a string, or a list of content items when it has media."""
+    parts = block.result.content
+    if not any(isinstance(part, Media) for part in parts):
+        output = "".join(part.text for part in parts if isinstance(part, Text))
+        return f"Error: {output}" if block.result.is_error else output
+    items = [_input(part, media) for part in parts]
+    if block.result.is_error:
+        items.insert(0, {"type": "input_text", "text": "Error:"})
+    return items
+
+
+def _input(block: Text | Media, media: Mapping[str, bytes]) -> JsonValue:
+    if isinstance(block, Text):
+        return {"type": "input_text", "text": block.text}
+    if not block.media_type.startswith("image/"):
+        return {"type": "input_text", "text": f"[{block.media_type} content omitted: this model reads only images]"}
+    data = base64.b64encode(media[block.source.sha256]).decode()
+    return {"type": "input_image", "image_url": f"data:{block.media_type};base64,{data}"}
+
+
+def _media_blocks(messages: Sequence[Message]) -> list[Media]:
+    found: list[Media] = []
+    for message in messages:
+        for block in message.content:
+            if isinstance(block, Media):
+                found.append(block)
+            elif isinstance(block, ToolResultBlock):
+                found.extend(part for part in block.result.content if isinstance(part, Media))
+    return found
 
 
 def _tool(specification: ToolSpecification) -> JsonValue:

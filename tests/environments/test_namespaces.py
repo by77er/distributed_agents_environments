@@ -72,3 +72,12 @@ async def test_commands_time_out_and_report_failures(environments: NamespaceEnvi
     assert slow.timed_out and slow.exit_code is None
     failing = await environments.execute("e_slow", "echo oops >&2; exit 3", timeout_seconds=30, cwd=None)
     assert (failing.exit_code, failing.output) == (3, "oops\n")
+
+
+async def test_long_output_is_saved_inside_the_environment(environments: NamespaceEnvironments) -> None:
+    await environments.create("e_long", EnvironmentSpecification())
+    result = await environments.execute("e_long", "seq 1 5000", timeout_seconds=30, cwd=None, effect_id="e1")
+    assert result.truncated and result.output.splitlines()[0] == "3001"
+    assert result.full_output_path is not None and result.full_output_path.startswith("/var/tmp/output-")
+    inside = await environments.execute("e_long", f"wc -l < {result.full_output_path}", timeout_seconds=30, cwd=None)
+    assert inside.output.strip() == "5000"  # the environment's own shell can read it

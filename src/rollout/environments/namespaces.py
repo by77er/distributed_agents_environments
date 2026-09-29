@@ -19,7 +19,7 @@ from pathlib import Path
 
 from rollout.core.harness.environments import EnvironmentSpecification, ExecutionResult
 from rollout.environments.images import ImageStore
-from rollout.environments.processes import execution_result, remove_tree
+from rollout.environments.processes import execution_result, output_name, remove_tree
 
 # Runs inside the new namespaces, before entering the environment: mounts, then chroot with a clean environment.
 ENTER = r"""
@@ -77,8 +77,18 @@ class NamespaceEnvironments:
         except TimeoutError:
             os.killpg(process.pid, signal.SIGKILL)
             output, _ = await process.communicate()
-            return execution_result(None, output, timed_out=True)
-        return execution_result(process.returncode, output)
+            exit_code, timed_out = None, True
+        else:
+            exit_code, timed_out = process.returncode, False
+
+        def save(full: bytes) -> str:
+            inside = f"/var/tmp/{output_name(effect_id)}"
+            target = root / inside.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(full)
+            return inside
+
+        return execution_result(exit_code, output, timed_out=timed_out, save=save)
 
     async def put(self, environment_id: str, path: str, data: bytes) -> None:
         target = self._inside(environment_id, path)

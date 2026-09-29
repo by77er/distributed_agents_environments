@@ -15,6 +15,7 @@ from rollout.core.contracts import (
     new_run_id,
     new_ulid,
 )
+from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope, Priority
 from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.imports import ToolSet
@@ -129,10 +130,12 @@ class LocalRunner:
         providers: Mapping[str, EndpointFactory] | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
         environments: EnvironmentService | None = None,
+        blobs: Blobs | None = None,
     ) -> None:
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
         self._environment_service = environments
+        self._blobs = blobs
         self._runs: dict[str, LocalRunHandle] = {}
         self._deployments: dict[str, Deployment] = {}
         self._conversations: dict[str, _Conversation] = {}
@@ -180,6 +183,7 @@ class LocalRunner:
             context_hints=program.context_hints(),
             tool_sets=tool_sets,
             environment_service=self._environment_service,
+            blobs=self._blobs,
             conversation=conversation,
             on_event=handle.notify,
         )
