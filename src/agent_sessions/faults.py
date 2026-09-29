@@ -41,6 +41,10 @@ INSTRUCTIONS = (
     "When all three are resolved, send the operator one message summarizing the answers."
 )
 EXPECTED = ["3.14", "Example Domain", "a4fa034cc780dbd72a36bf51ba5ee7afd509020953aae10021794638543fd997"]
+FOLLOW_UP = (
+    "Ask w1 to write the three answers, one per line, to /workspace/answers.txt on its own computer, and to tell the "
+    "operator when the file is written."
+)
 
 
 class Server:
@@ -55,7 +59,7 @@ class Server:
         self.process = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "agent_sessions.cli", "serve", "--state", str(self.work / "state"),
             "--port", str(self.port), "--model-ledger", str(self.work / "models.jsonl"),
-            "--command-ledger", str(self.work / "commands.jsonl"),
+            "--command-ledger", str(self.work / "commands.jsonl"), "--evict-after", "5",
             stdout=self.log, stderr=asyncio.subprocess.STDOUT,
         )  # fmt: skip
         async with httpx.AsyncClient() as client:
@@ -105,7 +109,22 @@ async def run_faults(*, kills: int = 3, seed: int = 1, deadline_seconds: float =
                     if not kill_times and _summary(await _inbox(client, server)):
                         break
                     await asyncio.sleep(0.5)
-                await asyncio.sleep(3)  # let final deliveries settle
+                # Phase 2: every session is evicted, the server dies while they sleep, and a message wakes them.
+                report["all_slept"] = await _until_all_sleeping(client, server, seconds=90)
+                if not report["all_slept"]:
+                    report["problems"].append("the sessions were never all evicted")
+                await server.kill()
+                report["kills"] += 1
+                await server.start()
+                await _retry(lambda: client.post(f"{server.url}/sessions/lead/messages", json={"text": FOLLOW_UP}))
+                await asyncio.sleep(rng.uniform(1, 4))  # kill again while they wake
+                await server.kill()
+                report["kills"] += 1
+                await server.start()
+                confirmed = time.monotonic() + 300
+                while time.monotonic() < confirmed and not _confirmation(await _inbox(client, server)):  # noqa: ASYNC110 - polling the server over HTTP
+                    await asyncio.sleep(1)
+                report["quiet"] = await _until_quiet(client, server, seconds=60)  # messages in flight land
                 report["seconds"] = round(time.monotonic() - started, 1)
                 inbox = await _inbox(client, server)
         finally:
@@ -125,6 +144,12 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
         report["operator_messages"] = len(inbox)
         if summary is None:
             problems.append("the operator never received a summary with every answer")
+        if _confirmation(inbox) is None:
+            problems.append("the woken sessions never confirmed the follow-up")
+        written = [path.read_text() for path in (state / "environments").glob("e_*/rootfs/workspace/answers.txt")]
+        report["answers_file_written"] = bool(written) and EXPECTED[2] in written[0]
+        if not report["answers_file_written"]:
+            problems.append("answers.txt was not written with the answers")
 
         sessions = [p.name for p in coordination.participants() if p.name != "operator"]
         report["sessions"] = sessions
@@ -162,6 +187,27 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
             problems.append(f"{len(duplicated)} messages reached their recipient more than once")
         if missing:
             problems.append(f"{len(missing)} messages never reached their recipient")
+            details = coordination.read(
+                lambda db: db.execute(
+                    f"SELECT key, recipient, sender, substr(text, 1, 80), created_at, delivered_at FROM outbox "
+                    f"WHERE key IN ({','.join('?' * len(missing))})",
+                    missing,
+                ).fetchall()
+            )
+            report["missing_messages"] = [
+                {
+                    "key": k,
+                    "to": to,
+                    "from": sender,
+                    "text": text,
+                    "created": created,
+                    "delivered": delivered,
+                    "recipient_evicted": any(
+                        runs.is_evicted(r) for r in runs.conversation_runs(f"agents/session/{to}")
+                    ),
+                }
+                for k, to, sender, text, created, delivered in details
+            ]
 
         commands = Counter(entry["effect_id"] for entry in read_ledger(work / "commands.jsonl"))
         report["commands"] = sum(commands.values())
@@ -185,6 +231,9 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
         if repeated > report["kills"] * max(len(sessions), 1):
             problems.append(f"{repeated} repeated model calls for {report['kills']} kills")
 
+        report["evictions"] = runs.evictions()
+        if report["evictions"] < len(sessions):
+            problems.append(f"only {report['evictions']} evictions for {len(sessions)} sessions")
         environments = [path for path in (state / "environments").iterdir() if path.name.startswith("e_")]
         report["environments"] = len(environments)
         if len(environments) != len(sessions):
@@ -192,6 +241,33 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
     finally:
         coordination.close()
         runs.close()
+
+
+def _confirmation(inbox: list[dict[str, str]]) -> str | None:
+    for message in inbox:
+        if "answers.txt" in message["text"]:
+            return message["text"]
+    return None
+
+
+async def _until_all_sleeping(client: httpx.AsyncClient, server: Server, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        sessions = (await _retry(lambda: client.get(f"{server.url}/sessions"))).json()["sessions"]
+        if sessions and all(session["status"] == "sleeping" for session in sessions):
+            return True
+        await asyncio.sleep(1)
+    return False
+
+
+async def _until_quiet(client: httpx.AsyncClient, server: Server, seconds: float) -> bool:
+    """Until every session has been waiting or sleeping for a few seconds in a row."""
+    deadline, calm = time.monotonic() + seconds, 0
+    while time.monotonic() < deadline and calm < 3:
+        sessions = (await _retry(lambda: client.get(f"{server.url}/sessions"))).json()["sessions"]
+        calm = calm + 1 if all(session["status"] in ("waiting", "sleeping") for session in sessions) else 0
+        await asyncio.sleep(1.5)
+    return calm >= 3
 
 
 def _summary(inbox: list[dict[str, str]]) -> str | None:

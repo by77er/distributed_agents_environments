@@ -1780,7 +1780,7 @@ Implements `RunContext` and `Effects` in process.
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None, retain_events: bool = True) -> None`
 - `@property def run_id(self) -> str`
 - `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int`
@@ -2047,7 +2047,8 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 
 **Methods**
 
-- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, application: str = 'rollout') -> None`
+- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
+  `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
 - `async def launch(self) -> None` — Start DBOS, which recovers the runs a crash left unfinished, and follow them.
 - `async def close(self) -> None`
 - `def deploy(self, deployment: Deployment) -> None`
@@ -2088,7 +2089,13 @@ class RunStore
 - `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None`
 - `def run(self, run_id: str) -> RunRecord | None`
 - `def read_all_run_ids(self) -> list[str]`
-- `def unfinished_runs(self) -> list[str]`
+- `def unfinished_runs(self) -> list[str]` — Running runs that are resident (not evicted).
+- `def evict(self, run_id: str, wake_at: str | None) -> None`
+- `def wake(self, run_id: str) -> None`
+- `def evictions(self) -> int` — How many times runs were evicted, in total.
+- `def is_evicted(self, run_id: str) -> bool`
+- `def due_for_waking(self, now: str) -> list[str]` — Evicted runs whose wait times out by `now`.
+- `def last_events(self) -> list[RunEvent]` — The latest event of every resident running run.
 - `def live_run(self, address: str) -> str | None`
 - `def conversation_key(self, address: str) -> JsonValue`
 - `def conversation_runs(self, address: str) -> list[str]`

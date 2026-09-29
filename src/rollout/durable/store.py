@@ -50,6 +50,12 @@ class RunStore:
             CREATE TABLE IF NOT EXISTS attempts (effect_id TEXT PRIMARY KEY);
             """
         )
+        columns = {row[1] for row in self._database.execute("PRAGMA table_info(runs)")}
+        if "evicted" not in columns:  # added with eviction; older stores gain the columns
+            self._database.execute("ALTER TABLE runs ADD COLUMN evicted INTEGER NOT NULL DEFAULT 0")
+            self._database.execute("ALTER TABLE runs ADD COLUMN wake_at TEXT")
+        if "evictions" not in columns:
+            self._database.execute("ALTER TABLE runs ADD COLUMN evictions INTEGER NOT NULL DEFAULT 0")
         self._signals: dict[str, asyncio.Event] = defaultdict(asyncio.Event)
 
     # Runs
@@ -96,8 +102,55 @@ class RunStore:
             return [row[0] for row in self._database.execute("SELECT run_id FROM runs")]
 
     def unfinished_runs(self) -> list[str]:
+        """Running runs that are resident (not evicted)."""
         with self._lock:
-            return [row[0] for row in self._database.execute("SELECT run_id FROM runs WHERE status = 'running'")]
+            return [
+                row[0]
+                for row in self._database.execute("SELECT run_id FROM runs WHERE status = 'running' AND evicted = 0")
+            ]
+
+    # Eviction
+
+    def evict(self, run_id: str, wake_at: str | None) -> None:
+        with self._lock:
+            self._database.execute(
+                "UPDATE runs SET evicted = 1, wake_at = ?, evictions = evictions + 1 WHERE run_id = ?",
+                (wake_at, run_id),
+            )
+
+    def wake(self, run_id: str) -> None:
+        with self._lock:
+            self._database.execute("UPDATE runs SET evicted = 0, wake_at = NULL WHERE run_id = ?", (run_id,))
+
+    def evictions(self) -> int:
+        """How many times runs were evicted, in total."""
+        with self._lock:
+            return int(self._database.execute("SELECT COALESCE(SUM(evictions), 0) FROM runs").fetchone()[0])
+
+    def is_evicted(self, run_id: str) -> bool:
+        with self._lock:
+            row = self._database.execute("SELECT evicted FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        return bool(row and row[0])
+
+    def due_for_waking(self, now: str) -> list[str]:
+        """Evicted runs whose wait times out by `now`."""
+        with self._lock:
+            rows = self._database.execute(
+                "SELECT run_id FROM runs WHERE status = 'running' AND evicted = 1 AND wake_at IS NOT NULL "
+                "AND wake_at <= ?",
+                (now,),
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def last_events(self) -> list[RunEvent]:
+        """The latest event of every resident running run."""
+        with self._lock:
+            rows = self._database.execute(
+                "SELECT e.event FROM events e JOIN runs r ON r.run_id = e.run_id "
+                "WHERE r.status = 'running' AND r.evicted = 0 "
+                "AND e.seq = (SELECT MAX(seq) FROM events WHERE run_id = e.run_id)"
+            ).fetchall()
+        return [RunEvent.model_validate_json(row[0]) for row in rows]
 
     # Conversations and messages
 

@@ -17,13 +17,14 @@ import argparse
 import json
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 DEFAULT_URL = "http://127.0.0.1:8421"
-STATUS_MARK = {"working": "●", "waiting": "○", "starting": "◌", "stopped": "-"}
+STATUS_MARK = {"working": "●", "waiting": "○", "sleeping": "z", "starting": "◌", "stopped": "-"}
 
 
 def main() -> None:
@@ -36,6 +37,9 @@ def main() -> None:
     serve.add_argument("--model", default="gpt-6-astra")
     serve.add_argument("--reasoning-effort", default="low", choices=["low", "medium", "high"])
     serve.add_argument("--in-memory", action="store_true", help="use the LocalRunner: nothing survives a restart")
+    serve.add_argument(
+        "--evict-after", type=float, default=300, help="seconds of waiting before a session is unloaded from memory"
+    )
     serve.add_argument("--model-ledger", type=Path, help=argparse.SUPPRESS)
     serve.add_argument("--command-ledger", type=Path, help=argparse.SUPPRESS)
     faults = commands.add_parser("faults", help="kill the server during a fan-out and check nothing was lost")
@@ -97,6 +101,7 @@ def _serve(arguments: argparse.Namespace) -> None:
         durable=not arguments.in_memory,
         model_ledger=arguments.model_ledger,
         command_ledger=arguments.command_ledger,
+        evict_after=timedelta(seconds=arguments.evict_after) if arguments.evict_after > 0 else None,
     )
     service = SessionsService(settings, providers={"codex": codex_provider()})
     print(f"agent sessions: state in {settings.state}", file=sys.stderr)

@@ -1,14 +1,20 @@
 """The framework-owned rollout loop (docs/core/harness/README.md#the-loop-normative)."""
 
+import asyncio
+
 from rollout.core.contracts import Message, Role, ToolResultBlock
 from rollout.core.harness.agent import Agent
 from rollout.core.harness.context import Interrupted, RunContext
 from rollout.core.harness.observation import End, InvalidObservation, Observation, WaitFor
 from rollout.core.harness.task import Task
 
+UNLOAD = "rollout: unload"
+"""The message of a cancellation that unloads a waiting run from memory without ending it (no `teardown`)."""
+
 
 async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
     """Run one episode of `task` with `agent`. Raises `InvalidObservation` or whatever a hook raised."""
+    unloading = False
     try:
         await task.setup(run)
         observation = _checked(await task.start(run), reply=None)
@@ -45,8 +51,12 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
         episode_reward = await task.score(run)
         if episode_reward is not None:
             run.reward(episode_reward)
+    except asyncio.CancelledError as cancelled:
+        unloading = cancelled.args == (UNLOAD,)  # an evicted run has not ended: it resumes by replay
+        raise
     finally:
-        await task.teardown(run)
+        if not unloading:
+            await task.teardown(run)
 
 
 def _checked(observation: Observation | WaitFor, *, reply: Message | None) -> Observation | WaitFor:

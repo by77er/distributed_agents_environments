@@ -7,6 +7,7 @@ too: sessions can message them, and those messages land in the operator's inbox.
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -60,6 +61,8 @@ class Settings:
     """If set, every model call is appended here (for fault evaluations)."""
     command_ledger: Path | None = None
     """If set, every command started in an environment is appended here (for fault evaluations)."""
+    evict_after: timedelta | None = timedelta(minutes=5)
+    """Unload sessions that have waited this long for a message; they wake when messaged (durable runner only)."""
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,12 @@ class SessionsService:
         self.runner: LocalRunner | DurableRunner
         if settings.durable:
             self.runner = DurableRunner(
-                settings.state / "runs", providers=providers, tool_sets=tool_sets, environments=self.environments
+                settings.state / "runs",
+                providers=providers,
+                tool_sets=tool_sets,
+                environments=self.environments,
+                evict_after=settings.evict_after,
+                eviction_interval=min(5.0, settings.evict_after.total_seconds() / 2) if settings.evict_after else 5.0,
             )
         else:
             self.runner = LocalRunner(providers=providers, tool_sets=tool_sets, environments=self.environments)
@@ -187,6 +195,8 @@ class SessionsService:
             return "starting"
         if runs[-1].done:
             return "stopped"
+        if isinstance(self.runner, DurableRunner) and self.runner.store.is_evicted(runs[-1].run_id):
+            return "sleeping"  # evicted from memory; wakes when messaged
         events = runs[-1].recorded_events()
         return "waiting" if events and events[-1].type is RunEventType.RUN_SUSPENDED else "working"
 

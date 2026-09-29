@@ -71,6 +71,7 @@ class DurableRunContext(LocalRunContext):
             environment_service=environment_service,
             conversation=conversation,
             on_event=on_event,
+            retain_events=False,  # the runner's store has them; an idle run should hold as little as possible
         )
         self._cancel_reason: str | None = None
 

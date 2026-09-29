@@ -12,7 +12,7 @@ uv sync --extra assistant --extra durable
 uv run agents serve                                   # http://127.0.0.1:8421; state in ~/.local/state/agent-sessions
 
 uv run agents new lead "Create two workers, post three tasks to the board channel 'jobs', report to me when done."
-uv run agents list                                    # sessions: working ●, waiting ○, starting ◌, stopped -
+uv run agents list                                    # working ●, waiting ○, sleeping z, starting ◌, stopped -
 uv run agents tail lead -f                            # messages in, replies out, tool calls, as they happen
 uv run agents send lead "Also check the licence" [--urgent]
 uv run agents board --channel jobs
@@ -21,6 +21,8 @@ uv run agents stop w1                                 # its computer is destroye
 ```
 
 Sessions survive restarts of the server: they run on the `DurableRunner`, and their computers are directories.
+Sessions idle for 5 minutes (`--evict-after SECONDS`) are unloaded from memory and shown as sleeping; a message or a
+scheduled wake-up brings them back ([evicting idle runs](../durability/eviction.md)).
 
 ## What a session is
 
@@ -65,8 +67,25 @@ gapless, each session has one environment, and the operator gets a correct summa
 
 A command in flight at a kill is reported to the session as "may or may not have run", and is never run again.
 
+Since eviction (2026-09-29), the evaluation has a second phase: after the fan-out it waits until every session is
+evicted (`sleeping`, with a 5-second threshold), kills the server while they sleep, messages `lead` to have `w1`
+write the answers to a file, and kills the server again while they wake. It then also checks that the file exists
+in `w1`'s environment with the answers, that the confirmation reached the operator, and that every session was
+evicted; checks run once the system is quiet (every session waiting or sleeping).
+
+| Run | Kills | Evictions | Messages | Commands with unknown outcome | Repeated model calls | Result |
+|---|---|---|---|---|---|---|
+| seed 11 | 5 | 4 | 19, each once | 1 | 9 | passed in 113 s |
+| seed 12 | 5 | 4 | 16, each once | 1 | 6 | passed in 94 s |
+| seed 13 | 5 | 4 | 15, each once | 2 | 5 | passed in 110 s |
+
+One earlier run (seed 9) reported a message that never reached its recipient; the harness then stopped the server
+three seconds after the confirmation, which could leave a message in flight to a waking session. The harness now
+waits for quiet and reports any missing message with its recipient's state; five runs since passed, but the cause
+of that one miss is not proven.
+
 ## Not yet
 
 - Isolation beyond namespaces (Firecracker microVMs), resource limits, and control over network access.
-- Unloading idle sessions from memory; context compaction for sessions that run for hours.
+- Context compaction for sessions that run for hours.
 - A web page on the same API.

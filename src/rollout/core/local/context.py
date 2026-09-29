@@ -53,6 +53,7 @@ class LocalRunContext:
         conversation: ConversationKey | None = None,
         generation: int = 0,
         on_event: Callable[[RunEvent], None] | None = None,
+        retain_events: bool = True,
     ) -> None:
         self._run_id = run_id
         self._conversation = conversation
@@ -64,6 +65,9 @@ class LocalRunContext:
         self._next_ordinal = 0
         self._on_event = on_event
         self.events: list[RunEvent] = []
+        """Every event, in memory; empty when `retain_events` is False (a durable runner keeps them in its store)."""
+        self._retain_events = retain_events
+        self._next_seq = 0
         self.rewards: list[RewardAssignment] = []
         self.excluded_from_training: str | None = None
 
@@ -304,9 +308,11 @@ class LocalRunContext:
 
     def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent:
         event = RunEvent(
-            run_id=self._run_id, seq=len(self.events), type=event_type, recorded_at=self.now(), payload=payload
+            run_id=self._run_id, seq=self._next_seq, type=event_type, recorded_at=self.now(), payload=payload
         )
-        self.events.append(event)
+        self._next_seq += 1
+        if self._retain_events:
+            self.events.append(event)
         if self._on_event is not None:
             self._on_event(event)
         return event

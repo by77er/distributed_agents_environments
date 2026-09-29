@@ -15,7 +15,7 @@ Only one `DurableRunner` can be active in a process, because DBOS is a process-w
 import asyncio
 import concurrent.futures
 from collections.abc import AsyncIterator, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,7 @@ from rollout.core.contracts import (
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope, Priority
 from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.imports import ToolSet
+from rollout.core.harness.loop import UNLOAD
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.runner import Deployment, RunOutcome, RunSpecification, RunStatus, instantiate
 from rollout.core.local.runner import EndpointFactory, RunNotLive, resolve_endpoints, resolve_tool_sets
@@ -57,7 +58,15 @@ async def run_workflow(
     started_at: str,
 ) -> dict[str, Any]:
     """One run. Re-executed from the start on recovery; recorded steps and receives return their recorded results."""
-    return await _runner().execute(run_id, specification, conversation, labels, started_at)
+    runner = _runner()
+    task = asyncio.current_task()
+    if task is not None:
+        runner.workflow_tasks[run_id] = task  # so eviction can unload it
+    try:
+        return await runner.execute(run_id, specification, conversation, labels, started_at)
+    finally:
+        if runner.workflow_tasks.get(run_id) is task:
+            del runner.workflow_tasks[run_id]
 
 
 class DurableRunHandle:
@@ -113,15 +122,28 @@ class DurableRunner:
         tool_sets: Mapping[str, ToolSet] | None = None,
         environments: EnvironmentService | None = None,
         application: str = "rollout",
+        evict_after: timedelta | None = timedelta(minutes=5),
+        eviction_interval: float = 5.0,
     ) -> None:
+        """`evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
+        `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
+        """
         self._environment_service = environments
+        self._evict_after = evict_after
+        self._eviction_interval = eviction_interval
+        self._run_locks: dict[str, asyncio.Lock] = {}
+        self._last_activity: dict[str, datetime] = {}
+        """When each run last received a message or was woken; a run is evictable only if it suspended since."""
+        self._evictor: asyncio.Task[None] | None = None
+        self.workflow_tasks: dict[str, asyncio.Task[Any]] = {}
+        """The asyncio task executing each resident run's workflow."""
         directory.mkdir(parents=True, exist_ok=True)
         self.store = RunStore(directory / "runs.sqlite")
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
         self._deployments: dict[str, Deployment] = {}
         self._locks: dict[str, asyncio.Lock] = {}
-        self._watchers: set[asyncio.Task[None]] = set()
+        self._watchers: dict[str, asyncio.Task[None]] = {}
         DBOS(config={"name": application, "system_database_url": f"sqlite:///{directory / 'dbos.sqlite'}"})
 
     async def launch(self) -> None:
@@ -130,13 +152,17 @@ class DurableRunner:
         if _active is not None and _active is not self:
             raise RuntimeError("another DurableRunner is active in this process")
         _active = self
-        DBOS.launch()
+        DBOS.launch()  # recovers resident runs; evicted runs are CANCELLED in DBOS and stay unloaded
         for run_id in self.store.unfinished_runs():
             self._watch(run_id)
+        if self._evict_after is not None:
+            self._evictor = asyncio.create_task(self._evict_idle_runs(), name="evictor")
 
     async def close(self) -> None:
         global _active
-        for watcher in list(self._watchers):
+        if self._evictor is not None:
+            self._evictor.cancel()
+        for watcher in list(self._watchers.values()):
             watcher.cancel()
         DBOS.destroy(destroy_registry=False)
         # DBOS installed its own thread pool as the loop's default executor and just shut it down; restore one so
@@ -227,8 +253,10 @@ class DurableRunner:
         if record is None or record.status != "running":
             return
         item = {"type": "cancel", "reason": reason, "sent_at": _now()}
-        await DBOS.send_async(run_id, item, INBOX, idempotency_key=f"cancel:{run_id}")
-        await DBOS.send_async(run_id, {"cancel": True}, INTERRUPT, idempotency_key=f"cancel-signal:{run_id}")
+        async with self._run_lock(run_id):
+            await DBOS.send_async(run_id, item, INBOX, idempotency_key=f"cancel:{run_id}")
+            await DBOS.send_async(run_id, {"cancel": True}, INTERRUPT, idempotency_key=f"cancel-signal:{run_id}")
+            await self._wake_if_evicted(run_id)  # an evicted run must run again to tear down
         await DurableRunHandle(self, run_id).result()
 
     # The workflow body
@@ -310,20 +338,73 @@ class DurableRunner:
 
     async def _deliver(self, run_id: str, envelope: Envelope, mode: DeliveryMode) -> None:
         item = {"type": "message", "envelope": envelope.model_dump(mode="json"), "mode": mode.value, "sent_at": _now()}
-        await DBOS.send_async(run_id, item, INBOX, idempotency_key=f"{run_id}:{envelope.message_id}")
-        if mode is DeliveryMode.INTERRUPT:
-            signal = {"message_id": envelope.message_id}
-            await DBOS.send_async(run_id, signal, INTERRUPT, idempotency_key=f"{run_id}:{envelope.message_id}:signal")
+        async with self._run_lock(run_id):
+            await DBOS.send_async(run_id, item, INBOX, idempotency_key=f"{run_id}:{envelope.message_id}")
+            if mode is DeliveryMode.INTERRUPT:
+                signal = {"message_id": envelope.message_id}
+                key = f"{run_id}:{envelope.message_id}:signal"
+                await DBOS.send_async(run_id, signal, INTERRUPT, idempotency_key=key)
+            self._last_activity[run_id] = datetime.now(UTC)
+            await self._wake_if_evicted(run_id)
+
+    # Eviction (docs/durability/eviction.md)
+
+    def _run_lock(self, run_id: str) -> asyncio.Lock:
+        return self._run_locks.setdefault(run_id, asyncio.Lock())
+
+    async def _wake_if_evicted(self, run_id: str) -> None:
+        """Resume an evicted run; its replay returns recorded steps and then takes the new message. Hold its lock."""
+        if not self.store.is_evicted(run_id):
+            return
+        self._last_activity[run_id] = datetime.now(UTC)  # until it suspends again, it must not be re-evicted
+        self.store.wake(run_id)
+        await DBOS.resume_workflow_async(run_id)
+        self._watch(run_id)
+
+    async def _evict_idle_runs(self) -> None:
+        assert self._evict_after is not None
+        while True:
+            await asyncio.sleep(self._eviction_interval)
+            now = datetime.now(UTC)
+            for run_id in self.store.due_for_waking(_timestamp(now)):
+                async with self._run_lock(run_id):
+                    await self._wake_if_evicted(run_id)
+            for event in self.store.last_events():
+                if event.type is not RunEventType.RUN_SUSPENDED or now - event.recorded_at < self._evict_after:
+                    continue
+                async with self._run_lock(event.run_id):
+                    latest = self.store.events(event.run_id, event.seq)
+                    active = self._last_activity.get(event.run_id)
+                    if len(latest) != 1 or (active is not None and active >= event.recorded_at):
+                        continue  # it moved on, or it was messaged or woken since it suspended
+                    self.store.evict(event.run_id, _wake_at(event))
+                    await DBOS.cancel_workflow_async(event.run_id)  # DBOS stops tracking it; wake resumes it
+                    resident = self.workflow_tasks.pop(event.run_id, None)
+                    if resident is not None:
+                        resident.cancel(UNLOAD)  # unload now: the coroutine would otherwise linger in its receive
+                    watcher = self._watchers.pop(event.run_id, None)
+                    if watcher is not None:
+                        watcher.cancel()  # a new watcher follows the run when it wakes
 
     def _watch(self, run_id: str) -> None:
+        previous = self._watchers.get(run_id)
+        if previous is not None and not previous.done():
+            return
         task = asyncio.create_task(self._follow(run_id), name=f"follow {run_id}")
-        self._watchers.add(task)
-        task.add_done_callback(self._watchers.discard)
+        self._watchers[run_id] = task
+        task.add_done_callback(
+            lambda done: self._watchers.pop(run_id, None) if self._watchers.get(run_id) is done else None
+        )
 
     async def _follow(self, run_id: str) -> None:
         """When a conversation's run ends, messages it never consumed start the conversation's next run."""
         handle: WorkflowHandleAsync[dict[str, Any]] = await DBOS.retrieve_workflow_async(run_id)
-        result = await handle.get_result()
+        try:
+            result = await handle.get_result()
+        except Exception:
+            if self.store.is_evicted(run_id):
+                return  # evicted, not ended: a new watcher follows it when it wakes
+            raise
         undelivered = [Envelope.model_validate(item) for item in result.get("undelivered", [])]
         record = self.store.run(run_id)
         if not undelivered or record is None or record.conversation is None:
@@ -338,3 +419,17 @@ class DurableRunner:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _timestamp(moment: datetime) -> str:
+    return moment.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+def _wake_at(suspended: RunEvent) -> str | None:
+    """When an evicted run's wait times out, from its `run.suspended` event."""
+    data = suspended.payload if isinstance(suspended.payload, dict) else {}
+    waiting = data.get("waiting_for")
+    timeout = waiting.get("timeout") if isinstance(waiting, dict) else None
+    if not isinstance(timeout, int | float):
+        return None
+    return _timestamp(suspended.recorded_at + timedelta(seconds=timeout))

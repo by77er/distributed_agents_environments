@@ -60,7 +60,9 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
         await task.teardown(run)
 ```
 
-- `setup` runs first; `teardown` runs whenever `setup` began (success, failure, cancellation).
+- `setup` runs first; `teardown` runs whenever `setup` began (success, failure, cancellation). A durable runner that
+  unloads an idle run from memory cancels it with the message `rollout: unload`; that is not an ending, so `teardown`
+  does not run ([evicting idle runs](../../durability/eviction.md)).
 - Every observation a hook returns is validated ([task](task.md#observation-ending-waitfor)) before it is
   recorded. `run.record` appends a turn to the history and emits `observation.recorded`.
 - `score` runs only when the loop ends with an `Ending`; after a hook raised it does not run and the run fails

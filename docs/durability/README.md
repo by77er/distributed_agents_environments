@@ -25,7 +25,7 @@ not do yet:
 | Run events as a projection, idempotent on `(run_id, seq)` | built |
 | Recovery after `kill -9` on the next launch, no duplicated effects except the one in flight | built and tested |
 | The pump / sandboxed task host split over `HarnessHost` | **not yet**: the program runs inside the workflow, in the runner's process, so only T0 and T1 code may run durably |
-| Suspension without compute | **not yet**: a waiting run holds a coroutine in memory and is polled by DBOS; see [evicting idle runs](eviction.md) for measurements and a proposal |
+| Suspension without compute | built: runs idle past a threshold are evicted and woken by a message or their deadline ([evicting idle runs](eviction.md)); one activation per message with exported state is still to come |
 | Generations and state export | not yet |
 | Conversation activations on a partitioned queue | not yet: a conversation's run is one long workflow; sends are serialized per conversation in process |
 | Attempt markers for side effects without deduplication | not yet: a tool call in flight at a crash runs again, so such tools must deduplicate by `effect_id` (the project assistant's notes do) |

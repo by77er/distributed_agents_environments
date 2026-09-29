@@ -1,6 +1,6 @@
 # Evicting idle runs
 
-Status: **Proposed** (investigation, 2026-09-29) · Layer: durability · See [durability](README.md)
+Status: **Implemented** (options D and A, 2026-09-29) · Layer: durability · See [durability](README.md)
 
 A conversation that waits for its next message is a DBOS workflow blocked in a receive. Agent sessions spend most of
 their life like that. This document measures what idle runs cost, compares ways to unload them, and proposes one.
@@ -48,11 +48,38 @@ DBOS receive timeouts are durable (measured earlier: a timeout fires relative to
 restart), so a run evicted while waiting with a timeout, such as a scheduled follow-up, only needs to be resumed at
 its deadline; the replayed receive then returns immediately.
 
-## Proposal
+## Implementation
 
-Do **D** now and **A** next; keep **B** as the end state once generations and state export exist.
+**D** and **A** are implemented in the `DurableRunner`; **B** stays the end state once generations and state export
+exist. `DurableRunner(evict_after=timedelta(minutes=5), eviction_interval=5.0)`; `evict_after=None` keeps every run
+resident. The agent sessions server takes `--evict-after SECONDS` and shows evicted sessions as `sleeping`.
 
-Option A in the `DurableRunner`:
+Results (100 conversations of 10 turns, idle; the model endpoint keeps nothing, so only the runtime is measured):
+
+| | Python heap | Idle CPU | Asyncio tasks |
+|---|---|---|---|
+| Resident | +13 MiB (128 KiB each) | 8.9% of a core | 201 |
+| Evicted | +4 MiB (37 KiB each) | 0.4% of a core | 2 |
+
+At 300 idle conversations, idle CPU fell from 36% of a core to 0.4%.
+
+Two things the implementation had to add to the plan below:
+
+- **Unloading the coroutine.** `cancel_workflow` stops DBOS tracking a workflow, but a coroutine blocked in a receive
+  only notices at its next database re-check, so the runner also cancels the workflow's asyncio task. That
+  cancellation carries the message `rollout: unload`, and the loop does not call `teardown` for it: an evicted run has
+  not ended, and tearing it down would, for example, destroy its environment.
+- **Not re-evicting a run that was just woken.** A woken run's latest event is still its old `run.suspended` until it
+  processes the message or timeout, so the runner remembers when it last delivered to or woke each run, and only
+  evicts runs that suspended after that. A run woken by a message it then ignores (another kind) and that suspends
+  again without an effect stays resident; that errs on the safe side.
+
+Verified by `tests/durable/test_eviction.py` (evict and wake by message, with no model call on replay and gapless
+events; wake at a wait's deadline; cancel an evicted run, which tears it down) and by the agent sessions fault
+evaluation with a 5-second eviction threshold, which kills the server while every session is evicted and again
+while they wake (see [agent sessions](../products/agent-sessions.md#durability-under-faults)).
+
+The design as proposed:
 
 1. **Store.** A run's liveness in `runs.sqlite` gains `evicted`, and a `wake_at` time for runs waiting with a timeout.
    The store, not DBOS's status, is the source of truth: DBOS shows evicted runs as `CANCELLED`.
