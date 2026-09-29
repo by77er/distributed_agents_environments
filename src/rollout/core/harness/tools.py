@@ -70,6 +70,8 @@ class DeclaredTool:
     specification: ToolSpecification
     arguments_model: type[BaseModel]
     timeout: timedelta | None
+    wants_run: bool = False
+    """The method takes a `run` parameter: the framework passes the run context, and the model never sees it."""
 
 
 def collect_tools(cls: type) -> dict[str, DeclaredTool]:
@@ -95,7 +97,11 @@ def _declare(attribute: str, function: Callable[..., Any], options: ToolOptions)
     signature = inspect.signature(function)
     hints = get_type_hints(function, include_extras=True)
     fields: dict[str, Any] = {}
+    wants_run = False
     for parameter in list(signature.parameters.values())[1:]:  # skip self
+        if parameter.name == "run":
+            wants_run = True
+            continue
         if parameter.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             raise TypeError(f"tool {function.__qualname__} cannot take *args or **kwargs")
         annotation = hints.get(parameter.name, Any)
@@ -114,10 +120,12 @@ def _declare(attribute: str, function: Callable[..., Any], options: ToolOptions)
         retry_class=options.retry_class,
         timeout_ms=int(options.timeout.total_seconds() * 1000) if options.timeout else None,
     )
-    return DeclaredTool(attribute, specification, arguments_model, options.timeout)
+    return DeclaredTool(attribute, specification, arguments_model, options.timeout, wants_run)
 
 
-async def execute_tool(owner: object, declared: DeclaredTool, arguments: Mapping[str, JsonValue]) -> ToolResult:
+async def execute_tool(
+    owner: object, declared: DeclaredTool, arguments: Mapping[str, JsonValue], run: object = None
+) -> ToolResult:
     """Validate the arguments, run the tool body and normalize what it returns. Failures become error results."""
     try:
         validated = declared.arguments_model.model_validate(arguments)
@@ -125,6 +133,8 @@ async def execute_tool(owner: object, declared: DeclaredTool, arguments: Mapping
         return error_result(f"invalid arguments for {declared.specification.name}: {error}")
     method: Callable[..., Any] = getattr(owner, declared.attribute)
     keyword_arguments = {name: getattr(validated, name) for name in type(validated).model_fields}
+    if declared.wants_run:
+        keyword_arguments["run"] = run
     try:
         async with asyncio.timeout(declared.timeout.total_seconds() if declared.timeout else None):
             value = method(**keyword_arguments)

@@ -560,7 +560,8 @@ class Runner(Protocol)
 **Methods**
 
 - `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> RunHandle`
-- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None) -> None` — Deliver a message; a message to a conversation starts its run when none is live.
+- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None) -> str` — Deliver a message and return its `message_id`; a message to a conversation starts its run when none
+  is live.
 - `async def cancel(self, run_id: str, *, reason: str) -> None`
 
 ### `RunOutcome`
@@ -1744,7 +1745,7 @@ time, and messages a run never consumed start the conversation's next run.
 - `def run(self, run_id: str) -> LocalRunHandle`
 - `def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]` — The conversation's runs, oldest first.
 - `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> LocalRunHandle`
-- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> None`
+- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str`
 - `async def cancel(self, run_id: str, *, reason: str) -> None`
 
 ### `RewardAssignment`

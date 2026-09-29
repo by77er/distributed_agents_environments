@@ -115,3 +115,22 @@ def test_duplicate_tool_names_are_rejected() -> None:
             @tool(name="first")
             async def second(self) -> str:
                 return ""
+
+
+class Clocked(Task):
+    async def start(self, run: RunContext) -> Observation:
+        return Observation("go")
+
+    @tool
+    async def remind(self, run: RunContext, minutes: int) -> str:
+        """Schedule a reminder."""
+        return f"due at {run.now().year} + {minutes} minutes"
+
+
+async def test_a_run_parameter_receives_the_context_and_stays_out_of_the_schema() -> None:
+    (declared,) = Clocked.declared_tools.values()
+    assert list(declared.specification.input_schema["properties"]) == ["minutes"]  # type: ignore[arg-type]
+    task = Clocked()
+    run, _ = local_run(task)
+    results = results_of(await task.run_tools(run, Message(role=Role.ASSISTANT, content=[call("remind", minutes=5)])))
+    assert results["c1"].content[0].text.startswith("due at 20")  # type: ignore[union-attr]

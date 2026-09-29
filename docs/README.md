@@ -33,6 +33,7 @@ docs/
 ├── platform/                          optional: cells, trust tiers, Control API, tool router
 ├── development/plan.md                milestones, exit criteria, first tasks
 ├── guide/                             developer guide to the code as built; generated API reference
+├── products/                          products built on the system (the project assistant)
 ├── decisions/                         ADRs: why each load-bearing choice was made
 └── research/                          investigations behind the decisions (evidence, not normative)
 ```

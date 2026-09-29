@@ -51,6 +51,8 @@ assert specification.input_schema == {
 - Parameters can use any type pydantic can validate, including pydantic models. Arguments are validated before the
   body runs; unknown arguments are rejected.
 - `*args` and `**kwargs` are not allowed: every argument must appear in the schema.
+- A parameter named `run` receives the run context (for `run.now()`, `run.emit`, other model slots). It is not
+  part of the schema, so the model never sees it.
 - Methods may be `async` or plain functions.
 - `@tool` methods are collected when the class is defined (`Task.declared_tools`); subclasses inherit them.
   Two tools with the same name in one class hierarchy are an error.

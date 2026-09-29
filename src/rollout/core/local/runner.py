@@ -196,7 +196,7 @@ class LocalRunner:
         priority: Priority = Priority.NORMAL,
         idempotency_key: str | None = None,
         sender: str | None = None,
-    ) -> None:
+    ) -> str:
         message_id = idempotency_key or f"m_{new_ulid()}"
         envelope = envelope.model_copy(update={"message_id": message_id, "sender": sender})
         if to.kind == "run":
@@ -204,17 +204,18 @@ class LocalRunner:
             if handle is None or handle.done:
                 raise RunNotLive(to.value)
             handle.context.deliver(envelope, handle.specification.binding.delivery.mode(priority, sender))
-            return
+            return message_id
         if to.kind != "conversation":
             raise ValueError(f"the local runner cannot deliver to {to.kind} addresses")
         conversation = self._conversation(to.value, envelope.reply_to)
         if message_id in conversation.seen:
-            return  # deduplicated by message_id
+            return message_id  # deduplicated by message_id
         conversation.seen.add(message_id)
         handle = conversation.live
         if handle is None or handle.done:
             handle = await self._start_conversation_run(conversation)
         handle.context.deliver(envelope, handle.specification.binding.delivery.mode(priority, sender))
+        return message_id
 
     async def cancel(self, run_id: str, *, reason: str) -> None:
         handle = self._runs[run_id]

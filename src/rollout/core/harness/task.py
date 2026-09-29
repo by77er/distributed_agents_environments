@@ -98,7 +98,7 @@ class Task:
     async def _call(self, run: RunContext, name: str, arguments: Any) -> ToolResult:
         declared = self.declared_tools.get(name)
         if declared is not None:
-            return await execute_tool(self, declared, arguments)
+            return await execute_tool(self, declared, arguments, run)
         if name in run.tools:
             try:
                 return await run.tools.call(name, arguments)

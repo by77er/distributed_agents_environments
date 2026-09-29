@@ -120,8 +120,9 @@ class Runner(Protocol):
         *,
         priority: Priority = Priority.NORMAL,
         idempotency_key: str | None = None,
-    ) -> None:
-        """Deliver a message; a message to a conversation starts its run when none is live."""
+    ) -> str:
+        """Deliver a message and return its `message_id`; a message to a conversation starts its run when none
+        is live."""
         ...
 
     async def cancel(self, run_id: str, *, reason: str) -> None: ...

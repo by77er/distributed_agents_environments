@@ -34,6 +34,9 @@ third-party model validates the loop, conversations, tools and the durable runne
 A long-lived conversational agent about a local code repository, on a third-party model
 ([ADR-0024](../decisions/0024-product-before-rl.md)).
 
+Status: the adapter, the assistant (task, repository and notes tool sets, follow-ups) and the HTTP API are built
+([project assistant](../products/project-assistant.md)); the evaluation harness is next.
+
 **Scope**
 - The Responses API adapter on the local Codex login, with token refresh.
 - The `ProjectAssistant` task: read-only repository tools (search, read, list, git history), notes as an imported
