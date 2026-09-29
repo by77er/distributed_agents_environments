@@ -5,8 +5,9 @@ Status: **Proposed** · See [ADR-0023](../decisions/0023-development-baseline.md
 Work is ordered so that each milestone produces something that runs on one machine and validates the interfaces
 the next milestone builds on. Later milestones start only when a consumer needs them (P14).
 
-**Order of work: M0 → P1 → M2 → M1 → M3** ([ADR-0024](../decisions/0024-product-before-rl.md)). A product on a
-third-party model validates the loop, conversations, tools and the durable runner before RL work resumes.
+**Order of work: M0 → P1 → M2 → P2 → M1 → M3** ([ADR-0024](../decisions/0024-product-before-rl.md),
+[ADR-0025](../decisions/0025-agent-sessions.md)). Products on a third-party model validate the loop, conversations,
+tools, environments and the durable runner before RL work resumes.
 
 ## Milestones
 
@@ -52,6 +53,22 @@ follow-up firing is verified in seconds; surviving a pause of days needs the dur
 
 **Continues in M2**: the product moves onto `DurableRunner` unchanged, and the durability-under-faults evaluation
 kills processes at random points (no lost messages, no duplicated model calls or note writes).
+
+### P2 — Agent sessions
+
+Independent agent sessions with isolated environments that create and message each other, share a board, and are
+managed from a CLI ([ADR-0025](../decisions/0025-agent-sessions.md)).
+
+**Scope**
+- The environment protocol in the core and `run.environments`; a namespace backend over an Alpine image.
+- Attempt markers in the `DurableRunner` for side effects that cannot be deduplicated.
+- Coordination tool sets: sessions (list, create, message) and a board (channels, notes, tasks, claims,
+  subscriptions).
+- The agent sessions product: the session task and agent, an HTTP API and an `agents` CLI.
+
+**Exit criteria**
+- A coordinator session fans three tasks out over the board; workers in their own environments claim, complete and
+  report them; the whole scenario passes, also with the server killed at random points.
 
 ### M1 — Recorder and local RL on one GPU
 

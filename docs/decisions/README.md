@@ -29,6 +29,7 @@ One record per load-bearing decision. Status: `Proposed` (recommended, not yet a
 | [0022](0022-rl-interface-extensions.md) | RL interface extensions (routing replay accepted) | Proposed |
 | [0023](0023-development-baseline.md) | Development baseline: Python 3.13, `rollout` package, Qwen3, vLLM first, reference trainer | Accepted |
 | [0024](0024-product-before-rl.md) | Validate with a product (a project assistant on a third-party model) before RL | Accepted |
+| [0025](0025-agent-sessions.md) | Agent sessions: environments, attempt markers and coordination tools as general pieces | Accepted |
 
 ## Template
 
