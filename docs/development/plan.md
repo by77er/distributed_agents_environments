@@ -59,6 +59,9 @@ kills processes at random points (no lost messages, no duplicated model calls or
 Independent agent sessions with isolated environments that create and message each other, share a board, and are
 managed from a CLI ([ADR-0025](../decisions/0025-agent-sessions.md)).
 
+Status: **working**: environments, attempt markers, coordination tools and the product are built; a live fan-out
+over the board succeeded ([agent sessions](../products/agent-sessions.md)). Remaining: the fault evaluation.
+
 **Scope**
 - The environment protocol in the core and `run.environments`; a namespace backend over an Alpine image.
 - Attempt markers in the `DurableRunner` for side effects that cannot be deduplicated.

@@ -59,6 +59,7 @@ nav:
       - "API reference": guide/reference.md
   - Products:
       - "Project assistant": products/project-assistant.md
+      - "Agent sessions": products/agent-sessions.md
   - Development plan: development/plan.md
   - Architecture:
       - "Requirements": architecture/requirements.md
@@ -134,6 +135,7 @@ nav:
       - "0022 — RL interface extensions": decisions/0022-rl-interface-extensions.md
       - "0023 — Development baseline": decisions/0023-development-baseline.md
       - "0024 — Validate with a product before RL": decisions/0024-product-before-rl.md
+      - "0025 — Agent sessions, and the pieces they are built from": decisions/0025-agent-sessions.md
   - Research:
       - "Research": research/README.md
       - "Synthesis: substrate, interfaces, and how the system operates": research/synthesis.md
