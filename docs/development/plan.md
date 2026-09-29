@@ -35,12 +35,12 @@ the next milestone builds on. Later milestones start only when a consumer needs 
   updates ([engine adapter](../core/recorder/engine-adapter.md)).
 - The in-process weight update controller and policy registry.
 - `LocalRolloutJobs`, the trajectory assembler, the local sample log.
-- The minimal reference GRPO trainer.
+- The minimal reference GRPO trainer, with LoRA (`peft`); the adapter is merged into the engine's weights after
+  each step.
 
 **Exit criteria**
-- GRPO on the local training model improves arithmetic and Wordle reward on the development GPU. The model is
-  open: Qwen3-0.6B fully fine-tuned, or Qwen3-1.7B with frozen embeddings
-  ([ADR-0023](../decisions/0023-development-baseline.md#colocation-spike)).
+- GRPO with LoRA on Qwen3-1.7B improves arithmetic and Wordle reward on the development GPU
+  ([ADR-0023](../decisions/0023-development-baseline.md#lora-spike)).
 - Recorded behavior logprobs match the trainer's recomputation at the same weights: mean absolute difference
   within tolerance (bf16 decode and prefill disagree per token by up to ~0.15; see
   [ADR-0023](../decisions/0023-development-baseline.md#local-engine-spike)).

@@ -43,7 +43,7 @@ Rules:
 ### The local profile, concretely
 
 ```python
-engine = LocalEngine("Qwen/Qwen3-0.6B", gpu_memory_fraction=0.45)            # vLLM in process, sleep mode enabled
+engine = LocalEngine("Qwen/Qwen3-1.7B", gpu_memory_fraction=0.45)            # vLLM in process, sleep mode enabled
 recorder = Recorder(engines={"exp/latest": engine}, mode=RecorderMode.ACTIVE)
 jobs = LocalRolloutJobs(runner=LocalRunner(recorder=recorder))
 
@@ -54,7 +54,7 @@ for row in rows:
     job.run(row, labels={"group": row["id"]}, count=8, admit_together=True)
 async for group in complete_groups(job.samples(), by="group", size=8):
     trainer.step(group)                                   # same process, same GPU
-    await job.publish("exp/latest", WeightsSource(tensors=trainer.state_dict()))   # engine sleeps during the step
+    await job.publish("exp/latest", WeightsSource(tensors=trainer.merged_weights()))   # LoRA merged into the base
 ```
 
 With one GPU, training and generation cannot overlap. The weight update protocol still applies, reduced to

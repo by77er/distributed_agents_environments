@@ -32,9 +32,10 @@ block writing the first line of code; everything else stays deferred (P14).
 
 **Models**
 - Target family: **Qwen3 / Qwen3.5**. The recorder's first renderers are for this family.
-- Local development: Qwen3-0.6B for tests. The local training model is **open**: Qwen3-1.7B with full fine-tuning
-  does not fit a 16 GB GPU next to a sleeping engine ([colocation spike](#colocation-spike)). Candidates: Qwen3-0.6B
-  with full fine-tuning, or Qwen3-1.7B with the tied embeddings and output head frozen. Mixture-of-experts plumbing (routing replay) is developed against a small, randomly initialized
+- Local development: Qwen3-0.6B for tests; **Qwen3-1.7B trained with LoRA** for the local RL loop (rank 32 on every
+  attention and MLP projection). Full fine-tuning of 1.7B does not fit a 16 GB GPU; LoRA fits with the trainer
+  resident next to the engine ([LoRA spike](#lora-spike)). After each step the adapter is merged into the base
+  weights, pushed into the engine in place, and unmerged, so the engine serves plain weights. Mixture-of-experts plumbing (routing replay) is developed against a small, randomly initialized
   Qwen3-MoE configuration; real MoE models (e.g. Qwen3-30B-A3B) run in the cluster profile.
 
 **Local engine**
@@ -47,7 +48,8 @@ block writing the first line of code; everything else stays deferred (P14).
   `if __name__ == "__main__":`.
 
 **Reference trainer**
-- A **minimal in-repository GRPO trainer** (plain PyTorch, importance-weighted, routing-replay-aware later) exists
+- A **minimal in-repository GRPO trainer** (plain PyTorch with `peft` LoRA, importance-weighted, routing-replay-aware
+  later) exists
   to validate the `Sample` contract and colocated weight updates end to end. It is test and example code, not the
   production trainer, whose choice stays deferred.
 
@@ -109,6 +111,26 @@ Findings:
   importance weights from the start.
 - **Use CUDA graphs locally** (3.2× throughput). Their interaction with sleep, wake and weight updates is not yet
   measured.
+
+## LoRA spike
+
+2026-09-28 · same machine and versions · Qwen3-1.7B, CUDA graphs on, LoRA rank 32 (34.9 M trainable parameters) on
+q/k/v/o and gate/up/down projections, `peft` 0.21. Two cycles of: two LoRA steps on a group of 8 × 192 tokens (engine
+asleep) → `merge_adapter()` → wake the engine's weights → `collective_rpc(load_weights)` with the merged weights →
+`unmerge_adapter()` → wake the KV cache → sample at the new weights → recompute its logprobs with the adapter active.
+
+| Measurement | Result |
+|---|---|
+| Train step, micro-batch 8 | peak 13.4 GiB allocated (most of it full-vocabulary logits in fp32); 0.4–0.7 s |
+| Engine and trainer resident together | 11.0 GiB used with the engine awake; no offload needed |
+| Merge, push and wake | 0.5–0.7 s per cycle |
+| Behavior vs. trainer logprobs | cycle 1: mean \|Δ\| 0.006, max 0.104 · cycle 2: mean 0.004, max 0.042 (17-token samples) |
+| Update reaches the engine | engine vs. base model: mean \|Δ\| 0.387 |
+| CUDA graphs across sleep, wake and weight updates | work; 1,294 tokens/s for a group of 8 |
+
+The samples were short (17 tokens), so the agreement figures rest on few tokens; M1's exit criterion measures them
+over full episodes. Computing logprobs in chunks instead of materializing fp32 logits for the whole batch would cut
+the step's peak memory substantially.
 
 ## Consequences
 
