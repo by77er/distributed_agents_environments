@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 project-assistant = "project_assistant.__main__:main"
+agents = "agent_sessions.cli:main"
 
 [project.optional-dependencies]
 vllm = ["vllm>=0.30; sys_platform == 'linux'", "transformers>=4.57"]
@@ -46,7 +47,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/rollout", "src/project_assistant"]
+packages = ["src/rollout", "src/project_assistant", "src/agent_sessions"]
 
 [tool.ruff]
 line-length = 120
