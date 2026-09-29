@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+from rollout.core.contracts import ToolSpecification
 from rollout.core.harness.agent import Agent
 from rollout.core.harness.context import RunContext
 from rollout.core.harness.history import ContextHints
@@ -19,6 +20,14 @@ class Program:
     def context_hints(self) -> ContextHints:
         return ContextHints()
 
+    def imports(self) -> list[str]:
+        """The imported tool sets the program needs; the run's binding says how each is served."""
+        return []
+
+    def tool_specifications(self) -> list[ToolSpecification]:
+        """Tools the program itself defines (`@tool` methods), for the run's `tools.resolved` event."""
+        return []
+
     async def main(self, run: RunContext) -> None:
         raise NotImplementedError
 
@@ -35,6 +44,12 @@ class AgentProgram(Program):
 
     def context_hints(self) -> ContextHints:
         return self.task.context_hints
+
+    def imports(self) -> list[str]:
+        return list(self.task.imports)
+
+    def tool_specifications(self) -> list[ToolSpecification]:
+        return [declared.specification for declared in self.task.declared_tools.values()]
 
     async def main(self, run: RunContext) -> None:
         await rollout(self.task, self.agent, run)

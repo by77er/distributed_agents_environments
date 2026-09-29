@@ -6,7 +6,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`Turn`](#turn), [`WaitFor`](#waitfor)
+- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
 - **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
@@ -79,6 +79,8 @@ The task loop: a task and an agent.
 - `def __init__(self, task: Task, agent: Agent) -> None`
 - `def model_slots(self) -> Mapping[str, ModelSlot]`
 - `def context_hints(self) -> ContextHints`
+- `def imports(self) -> list[str]`
+- `def tool_specifications(self) -> list[ToolSpecification]`
 - `async def main(self, run: RunContext) -> None`
 
 ### `ContextHints`
@@ -422,6 +424,8 @@ What a run executes. `AgentProgram` is the task loop; plain durable workflows ar
 
 - `def model_slots(self) -> Mapping[str, ModelSlot]` — The model slots the program samples; a runner binds an endpoint to each.
 - `def context_hints(self) -> ContextHints`
+- `def imports(self) -> list[str]` — The imported tool sets the program needs; the run's binding says how each is served.
+- `def tool_specifications(self) -> list[ToolSpecification]` — Tools the program itself defines (`@tool` methods), for the run's `tools.resolved` event.
 - `async def main(self, run: RunContext) -> None`
 
 ### `ProgramReference`
@@ -496,6 +500,7 @@ class RunBinding(ContractModel)
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `models` | `Mapping[str, ModelBinding]` | required | Model slot → how it is served. |
+| `imports` | `Mapping[str, ToolBinding]` | `Field(default_factory=dict[str, ToolBinding])` | Import name → how the tool set is served. |
 | `delivery` | `DeliveryPolicy` | `DeliveryPolicy()` |  |
 
 ### `RunContext`
@@ -516,6 +521,7 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `@property def history(self) -> History`
 - `@property def models(self) -> Mapping[str, Model]`
 - `@property def model(self) -> Model` — `models["policy"]`.
+- `@property def tools(self) -> Tools` — Imported tools; each call is a `tool.call` effect.
 - `@property def random(self) -> random.Random` — Seeded from `run_id`.
 - `@property def context_hints(self) -> ContextHints`
 - `def now(self) -> datetime` — The current time. Use it instead of the wall clock, which durable runs cannot replay.
@@ -648,7 +654,7 @@ Subclass it and implement `start`; override the other hooks as needed. Declarati
 - `async def steer(self, run: RunContext, envelopes: list[Envelope], observation: Observation) -> Observation` — Merge messages delivered with mode `STEER` into the next observation. Default: append as USER content.
 - `async def score(self, run: RunContext) -> float | None` — Episode-level reward, attached to the end of the trajectory.
 - `async def teardown(self, run: RunContext) -> None` — Always runs if `setup` began; must be idempotent.
-- `def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]` — The tools offered this turn. Default: every declared tool.
+- `def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]` — The tools offered this turn. Default: every `@tool` method and every imported tool.
 - `async def run_tools(self, run: RunContext, reply: Message) -> Observation` — Execute every tool call in `reply` concurrently; one TOOL message answers them all.
 
 ### `tool`
@@ -660,6 +666,51 @@ def tool[F: Callable[..., Any]](function: F | None = None, /, *, name: str | Non
 ```
 
 Declare a task method as a tool: `@tool` or `@tool(name=..., retry_class=..., timeout=...)`.
+
+### `ToolBinding`
+
+*class* · `src/rollout/core/harness/imports.py`
+
+```python
+class ToolBinding(ContractModel)
+```
+
+How an import is served. Exactly one kind is set; more kinds (MCP, HTTP, agent, human) come later.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `local` | `str \| None` | `None` | The name of a tool set registered with the runner, in process. |
+
+### `Tools`
+
+*class* · `src/rollout/core/harness/imports.py`
+
+```python
+class Tools
+```
+
+The imported tools of a run (`run.tools`).
+
+**Methods**
+
+- `def __init__(self, tool_sets: Mapping[str, ToolSet], effects: Effects) -> None`
+- `def specifications(self) -> list[ToolSpecification]`
+- `async def call(self, name: str, arguments: Mapping[str, JsonValue]) -> ToolResult` — Call an imported tool as a `tool.call` effect.
+
+### `ToolSet`
+
+*class* · `src/rollout/core/harness/imports.py`
+
+```python
+class ToolSet(Protocol)
+```
+
+A provider of tools: in process, or a client of an MCP server, an HTTP service or another agent.
+
+**Methods**
+
+- `def specifications(self) -> Sequence[ToolSpecification]`
+- `async def call(self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str) -> ToolResult` — Perform one call. Tool-level errors are results with `is_error`; exceptions are platform failures.
 
 ### `Turn`
 
@@ -1624,13 +1675,14 @@ Implements `RunContext` and `Effects` in process.
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
 - `@property def run_id(self) -> str`
 - `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int`
 - `@property def history(self) -> History`
 - `@property def models(self) -> Mapping[str, Model]`
 - `@property def model(self) -> Model`
+- `@property def tools(self) -> Tools`
 - `@property def random(self) -> random.Random`
 - `@property def context_hints(self) -> ContextHints`
 - `def now(self) -> datetime`
@@ -1687,7 +1739,7 @@ time, and messages a run never consumed start the conversation's next run.
 
 **Methods**
 
-- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None) -> None`
+- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None) -> None`
 - `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
 - `def run(self, run_id: str) -> LocalRunHandle`
 - `def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]` — The conversation's runs, oldest first.

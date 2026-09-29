@@ -5,11 +5,12 @@ from collections.abc import AsyncIterator, Mapping
 from enum import StrEnum
 from typing import Any, Protocol
 
-from pydantic import JsonValue
+from pydantic import Field, JsonValue
 
 from rollout.core.contracts import ContractModel, FrozenSequence, RunEvent, RunFailureClass
 from rollout.core.harness.agent import Agent
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryPolicy, Envelope, Priority
+from rollout.core.harness.imports import ToolBinding
 from rollout.core.harness.program import AgentProgram, Program
 from rollout.core.harness.task import Task
 
@@ -63,6 +64,8 @@ class ProgramReference(ContractModel):
 class RunBinding(ContractModel):
     models: Mapping[str, ModelBinding]
     """Model slot → how it is served."""
+    imports: Mapping[str, ToolBinding] = Field(default_factory=dict[str, ToolBinding])
+    """Import name → how the tool set is served."""
     delivery: DeliveryPolicy = DeliveryPolicy()
 
 

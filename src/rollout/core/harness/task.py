@@ -79,22 +79,32 @@ class Task:
     # Tools
 
     def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]:
-        """The tools offered this turn. Default: every declared tool."""
-        return [declared.specification for declared in self.declared_tools.values()]
+        """The tools offered this turn. Default: every `@tool` method and every imported tool."""
+        declared = [declared.specification for declared in self.declared_tools.values()]
+        imported = run.tools.specifications()
+        clashes = {specification.name for specification in imported} & set(self.declared_tools)
+        if clashes:
+            raise ValueError(f"imported tools clash with @tool methods: {sorted(clashes)}")
+        return declared + imported
 
     async def run_tools(self, run: RunContext, reply: Message) -> Observation:
         """Execute every tool call in `reply` concurrently; one TOOL message answers them all."""
         calls = reply.tool_calls
         if not calls:
             return End()
-        results = await asyncio.gather(*(self._call(call.name, call.arguments) for call in calls))
+        results = await asyncio.gather(*(self._call(run, call.name, call.arguments) for call in calls))
         return Observation(tool_message(calls, results))
 
-    async def _call(self, name: str, arguments: Any) -> ToolResult:
+    async def _call(self, run: RunContext, name: str, arguments: Any) -> ToolResult:
         declared = self.declared_tools.get(name)
-        if declared is None:
-            return error_result(f"unknown tool {name!r}")
-        return await execute_tool(self, declared, arguments)
+        if declared is not None:
+            return await execute_tool(self, declared, arguments)
+        if name in run.tools:
+            try:
+                return await run.tools.call(name, arguments)
+            except Exception as error:  # a platform failure: recorded as a failed effect, shown to the model
+                return error_result(f"{name} is unavailable: {type(error).__name__}: {error}")
+        return error_result(f"unknown tool {name!r}")
 
 
 def _as_user_message(envelope: Envelope) -> Message:

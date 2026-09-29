@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 
+from pydantic import JsonValue
+
 from rollout.core.contracts import (
     TERMINAL_EVENT_TYPES,
     ModelEndpoint,
@@ -14,6 +16,7 @@ from rollout.core.contracts import (
     new_ulid,
 )
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope, Priority
+from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.program import Program
 from rollout.core.harness.runner import (
@@ -115,8 +118,14 @@ class LocalRunner:
     time, and messages a run never consumed start the conversation's next run.
     """
 
-    def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        providers: Mapping[str, EndpointFactory] | None = None,
+        tool_sets: Mapping[str, ToolSet] | None = None,
+    ) -> None:
         self._providers = dict(providers or {})
+        self._tool_sets = dict(tool_sets or {})
         self._runs: dict[str, LocalRunHandle] = {}
         self._deployments: dict[str, Deployment] = {}
         self._conversations: dict[str, _Conversation] = {}
@@ -151,9 +160,15 @@ class LocalRunner:
             raise ValueError(f"run {run_id} already exists")
         program = instantiate(specification.program)
         endpoints = {slot: self._endpoint(slot, specification.binding) for slot in program.model_slots()}
+        tool_sets = {name: self._tool_set(name, specification.binding) for name in program.imports()}
         handle = LocalRunHandle(run_id, specification, conversation)
         handle.context = LocalRunContext(
-            run_id, endpoints, context_hints=program.context_hints(), conversation=conversation, on_event=handle.notify
+            run_id,
+            endpoints,
+            context_hints=program.context_hints(),
+            tool_sets=tool_sets,
+            conversation=conversation,
+            on_event=handle.notify,
         )
         handle.context.record_event(
             RunEventType.RUN_CREATED,
@@ -163,6 +178,12 @@ class LocalRunner:
                 "labels": dict(labels or {}),
             },
         )
+        specifications = program.tool_specifications() + handle.context.tools.specifications()
+        if specifications:
+            resolved: list[JsonValue] = [
+                specification.model_dump(mode="json", exclude_none=True) for specification in specifications
+            ]
+            handle.context.record_event(RunEventType.TOOLS_RESOLVED, {"specifications": resolved})
         self._runs[run_id] = handle
         handle.attach(asyncio.create_task(self._execute(handle, program), name=f"run {run_id}"))
         return handle
@@ -216,6 +237,15 @@ class LocalRunner:
                 raise ValueError(f"no endpoint factory registered for provider {model.direct.provider!r}")
             return factory(model.direct)
         raise NotImplementedError("recorded model bindings need the recorder (milestone M1)")
+
+    def _tool_set(self, name: str, binding: RunBinding) -> ToolSet:
+        tool_binding = binding.imports.get(name)
+        if tool_binding is None or tool_binding.local is None:
+            raise ValueError(f"the binding does not say how to serve the import {name!r}")
+        tool_set = self._tool_sets.get(tool_binding.local)
+        if tool_set is None:
+            raise ValueError(f"no tool set registered as {tool_binding.local!r}")
+        return tool_set
 
     def _conversation(self, address: str, reply_to: Address | None) -> _Conversation:
         existing = self._conversations.get(address)

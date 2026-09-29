@@ -25,6 +25,7 @@ from rollout.core.contracts import (
 from rollout.core.harness.context import Interrupted, Model
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope
 from rollout.core.harness.history import ContextHints, History, Turn
+from rollout.core.harness.imports import Tools, ToolSet
 from rollout.core.harness.model import EFFECT_ID_META, EndpointModel
 from rollout.core.harness.observation import Observation, WaitFor
 
@@ -45,6 +46,7 @@ class LocalRunContext:
         endpoints: Mapping[str, ModelEndpoint],
         *,
         context_hints: ContextHints | None = None,
+        tool_sets: Mapping[str, ToolSet] | None = None,
         conversation: ConversationKey | None = None,
         generation: int = 0,
         on_event: Callable[[RunEvent], None] | None = None,
@@ -65,6 +67,8 @@ class LocalRunContext:
         self._models: dict[str, Model] = {
             slot: EndpointModel(endpoint, session_id(run_id, slot), self) for slot, endpoint in endpoints.items()
         }
+
+        self._tools = Tools(tool_sets or {}, self)
 
         # Mailbox. `_held` keeps undelivered messages in arrival order with their delivery mode.
         self._held: list[tuple[Envelope, DeliveryMode]] = []
@@ -99,6 +103,10 @@ class LocalRunContext:
     @property
     def model(self) -> Model:
         return self._models["policy"]
+
+    @property
+    def tools(self) -> Tools:
+        return self._tools
 
     @property
     def random(self) -> random.Random:

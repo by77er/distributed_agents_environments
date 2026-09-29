@@ -11,6 +11,7 @@ from rollout.core.harness.conversations import (
     Priority,
 )
 from rollout.core.harness.history import ContextHints, History, HistoryShape, Turn
+from rollout.core.harness.imports import ToolBinding, Tools, ToolSet
 from rollout.core.harness.loop import rollout
 from rollout.core.harness.model import Effects, EndpointModel
 from rollout.core.harness.observation import End, Ending, InvalidObservation, Observation, WaitFor
@@ -72,6 +73,9 @@ __all__ = [
     "Runner",
     "SamplingParameters",
     "Task",
+    "ToolBinding",
+    "ToolSet",
+    "Tools",
     "Turn",
     "WaitFor",
     "agent_program",

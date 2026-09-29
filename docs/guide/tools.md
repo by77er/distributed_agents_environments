@@ -152,10 +152,75 @@ def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]:
     return [tool for tool in tools if tool.name != "submit"] if run.turn < 2 else tools
 ```
 
+## Imported tools
+
+Tools that live outside the task are **imported**: a task declares an import by name, and the run's binding says
+which tool set serves it. Anything that keeps state across runs, such as memory or notes, belongs here rather than
+in a `@tool` body. Each call to an imported tool is a `tool.call` effect: the tool set receives the call's
+`effect_id` and arguments digest, and can use them to perform each call at most once.
+
+A tool set implements `ToolSet`: `specifications()` and `call(name, arguments, *, effect_id, arguments_digest)`.
+The `LocalRunner` serves imports with in-process tool sets registered by name; MCP, HTTP and agent bindings come
+later.
+
+```python
+from collections.abc import Mapping, Sequence
+
+from pydantic import JsonValue
+
+from rollout.core.contracts import Text, ToolResult, ToolSpecification
+from rollout.core.harness import DirectModel, ModelBinding, RunBinding, RunSpecification, ToolBinding, agent_program
+from rollout.core.local import LocalRunner
+from rollout.core.testing import ScriptedModelEndpoint
+
+
+class Bookmarks:
+    """An in-process tool set that remembers bookmarks across runs, once per effect."""
+
+    def __init__(self) -> None:
+        self.saved: dict[str, str] = {}      # effect_id → title
+
+    def specifications(self) -> Sequence[ToolSpecification]:
+        return [ToolSpecification(
+            name="bookmark",
+            description="Save a book title for later.",
+            input_schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+        )]
+
+    async def call(self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str,
+                   arguments_digest: str) -> ToolResult:
+        self.saved.setdefault(effect_id, str(arguments["title"]))     # a repeated effect_id is not saved twice
+        return ToolResult(content=[Text(text=f"Saved. {len(self.saved)} bookmarks.")])
+
+
+class Librarian(Library):
+    imports = ["bookmarks"]
+
+
+async def imported() -> None:
+    bookmarks = Bookmarks()
+    call = ToolCall(call_id="call_1", name="bookmark", arguments={"title": "The Rocky Shore"})
+    endpoint = ScriptedModelEndpoint([tool_call_reply(call), "Saved it."])
+    runner = LocalRunner(providers={"scripted": lambda model: endpoint}, tool_sets={"bookmark-store": bookmarks})
+    binding = RunBinding(
+        models={"policy": ModelBinding(direct=DirectModel(provider="scripted", model="script"))},
+        imports={"bookmarks": ToolBinding(local="bookmark-store")},
+    )
+    handle = await runner.start(RunSpecification(program=agent_program(Librarian), binding=binding))
+    await handle.result()
+
+    assert [tool.name for tool in endpoint.requests[0].tools] == ["search", "bookmark"]   # @tool methods, then imports
+    assert list(bookmarks.saved.values()) == ["The Rocky Shore"]
+
+
+asyncio.run(imported())
+```
+
+If a tool set raises, the effect is recorded as failed and the model receives an error result, so every tool call
+still gets an answer.
+
 ## What tools are not
 
 - **Tool bodies are task code, not effects.** Under the durable runner (M2), a tool body may run again during
   replay. Work that must happen exactly once belongs in effects: model samples, environment operations, imported
   tools.
-- **Imported tools** (`imports = ["github"]`: MCP servers, HTTP services, other agents) are designed but not built
-  yet. See [task](../core/harness/task.md#tools).

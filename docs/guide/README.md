@@ -13,7 +13,7 @@ comes P1, a project assistant on a third-party model, then the durable runner (M
 
 | Available now | Not yet |
 |---|---|
-| Tasks, agents, `@tool` methods, observations, rewards | Imported tools (`imports`, `ToolBinding`) |
+| Tasks, agents, `@tool` methods, imported tools, observations, rewards | MCP and HTTP tool bindings |
 | `LocalRunner`: start, send, cancel, event streams, conversations | The durable runner (M2) |
 | Message delivery by mode: queue, steer, interrupt | The recorder, rollout jobs, samples, weight updates (M1) |
 | Effect identities, argument digests, run events, `run.emit` | |
