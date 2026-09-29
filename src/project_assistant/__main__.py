@@ -7,6 +7,7 @@ from pathlib import Path
 
 import uvicorn
 
+from project_assistant.evaluation.faults import run_faults, summarize_faults
 from project_assistant.evaluation.harness import EvaluationSettings, evaluate, save, summarize
 from project_assistant.http import create_app
 from project_assistant.service import AssistantService, Settings
@@ -22,6 +23,11 @@ def main() -> None:
     serve.add_argument("--reasoning-effort", default="low", choices=["low", "medium", "high"])
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8420)
+    serve.add_argument(
+        "--state", type=Path, default=None, help="durable state directory: conversations survive restarts"
+    )
+    serve.add_argument("--notes", type=Path, default=None, help="the notes database (default: in the repository)")
+    serve.add_argument("--ledger", type=Path, default=None, help="append every model call to this file")
     evaluate = commands.add_parser("evaluate", help="run the evaluation scenarios")
     evaluate.add_argument("--model", default="gpt-6-astra")
     evaluate.add_argument("--reasoning-effort", default="low", choices=["low", "medium", "high"])
@@ -30,13 +36,36 @@ def main() -> None:
     evaluate.add_argument("--no-judge", action="store_true")
     evaluate.add_argument("--scenario", action="append", default=[], help="run only this scenario (repeatable)")
     evaluate.add_argument("--output", type=Path, default=None, help="where to save the results as JSON")
+    evaluate.add_argument("--durable", action="store_true", help="run on the DurableRunner (one scenario at a time)")
+    faults = commands.add_parser("faults", help="the durability-under-faults evaluation")
+    faults.add_argument("--kills", type=int, default=3)
+    faults.add_argument("--seed", type=int, default=1)
+    faults.add_argument("--model", default="gpt-6-astra")
+    faults.add_argument("--reasoning-effort", default="low", choices=["low", "medium", "high"])
     arguments = parser.parse_args()
+
+    if arguments.command == "faults":
+        report = asyncio.run(
+            run_faults(
+                kills=arguments.kills,
+                seed=arguments.seed,
+                model=arguments.model,
+                reasoning_effort=arguments.reasoning_effort,
+            )
+        )
+        print(summarize_faults(report))
+        raise SystemExit(0 if report.passed else 1)
 
     if arguments.command == "evaluate":
         asyncio.run(_evaluate(arguments))
         return
     settings = Settings(
-        repository=arguments.repository, model=arguments.model, reasoning_effort=arguments.reasoning_effort
+        repository=arguments.repository,
+        model=arguments.model,
+        reasoning_effort=arguments.reasoning_effort,
+        notes_path=arguments.notes,
+        state=arguments.state,
+        model_ledger=arguments.ledger,
     )
     service = AssistantService(settings, providers={"codex": codex_provider()})
     uvicorn.run(create_app(service), host=arguments.host, port=arguments.port)
@@ -50,6 +79,7 @@ async def _evaluate(arguments: argparse.Namespace) -> None:
         concurrency=arguments.concurrency,
         judge=not arguments.no_judge,
         scenarios=arguments.scenario,
+        durable=arguments.durable,
     )
     runs = await evaluate(settings, providers={"codex": codex_provider()})
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

@@ -1,15 +1,26 @@
 """Assembles the project assistant: a runner, its tool sets and the deployment, plus conversation helpers."""
 
-from collections.abc import AsyncIterator, Mapping
+import json
+import time
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import JsonValue
 
 from project_assistant.assistant import ProjectAgent, ProjectAssistant
 from project_assistant.notes import NotesStore
 from project_assistant.repository import RepositoryTools
-from rollout.core.contracts import RunEvent, RunEventType, Text
+from rollout.core.contracts import (
+    CapabilityContract,
+    ModelEndpoint,
+    RunEvent,
+    RunEventType,
+    SampleRequest,
+    SampleResult,
+    Text,
+)
 from rollout.core.harness import (
     Address,
     Deployment,
@@ -18,12 +29,15 @@ from rollout.core.harness import (
     ModelBinding,
     Priority,
     RunBinding,
+    RunOutcome,
     RunSpecification,
     SamplingParameters,
     ToolBinding,
+    ToolSet,
     agent_program,
 )
-from rollout.core.local import EndpointFactory, LocalRunHandle, LocalRunner
+from rollout.core.local import EndpointFactory, LocalRunner
+from rollout.durable import DurableRunner
 
 NAMESPACE = "assistant"
 
@@ -35,6 +49,43 @@ class Settings:
     reasoning_effort: str | None = "low"
     notes_path: Path | None = None
     """Default: `.rollout/notes.sqlite` inside the repository."""
+    state: Path | None = None
+    """A directory for the durable runner's state. When set, conversations survive restarts (`DurableRunner`);
+    otherwise they live in memory (`LocalRunner`)."""
+    model_ledger: Path | None = None
+    """If set, every model call is appended to this file (for the durability evaluation)."""
+
+
+class ConversationRun(Protocol):
+    """What the service needs from a run handle; both runners' handles provide it."""
+
+    @property
+    def run_id(self) -> str: ...
+    @property
+    def done(self) -> bool: ...
+    @property
+    def outcome(self) -> RunOutcome | None: ...
+    def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]: ...
+    def recorded_events(self) -> list[RunEvent]: ...
+
+
+class LedgerEndpoint:
+    """Appends each sample's effect_id to a file, then delegates."""
+
+    def __init__(self, inner: ModelEndpoint, ledger: Path) -> None:
+        self._inner = inner
+        self._ledger = ledger
+
+    def describe(self, session_id: str) -> CapabilityContract:
+        return self._inner.describe(session_id)
+
+    async def sample(self, request: SampleRequest) -> SampleResult:
+        with self._ledger.open("a") as file:
+            file.write(json.dumps({"effect_id": request.effect_id, "at": time.time()}) + "\n")
+        return await self._inner.sample(request)
+
+    async def cancel(self, effect_id: str) -> None:
+        await self._inner.cancel(effect_id)
 
 
 @dataclass(frozen=True)
@@ -52,9 +103,18 @@ class AssistantService:
         repository = settings.repository.resolve()
         self.repository_tools = RepositoryTools(repository)
         self.notes = NotesStore(settings.notes_path or repository / ".rollout" / "notes.sqlite")
-        self.runner = LocalRunner(
-            providers=providers, tool_sets={"repository": self.repository_tools, "notes": self.notes}
-        )
+        if settings.model_ledger is not None:
+            ledger = settings.model_ledger
+            providers = {
+                name: (lambda model, factory=factory: LedgerEndpoint(factory(model), ledger))
+                for name, factory in providers.items()
+            }
+        tool_sets: dict[str, ToolSet] = {"repository": self.repository_tools, "notes": self.notes}
+        self.runner: LocalRunner | DurableRunner
+        if settings.state is not None:
+            self.runner = DurableRunner(settings.state, providers=providers, tool_sets=tool_sets)
+        else:
+            self.runner = LocalRunner(providers=providers, tool_sets=tool_sets)
         self.deployment_name = f"{NAMESPACE}/{repository.name}"
         provider = next(iter(providers))
         binding = RunBinding(
@@ -76,15 +136,24 @@ class AssistantService:
             Deployment(name=self.deployment_name, specification=RunSpecification(program=program, binding=binding))
         )
 
+    async def start(self) -> None:
+        """Launch the runner; a durable runner recovers the conversations a crash interrupted."""
+        if isinstance(self.runner, DurableRunner):
+            await self.runner.launch()
+
+    async def close(self) -> None:
+        if isinstance(self.runner, DurableRunner):
+            await self.runner.close()
+
     def address(self, conversation: str) -> Address:
         return Address(kind="conversation", value=f"{self.deployment_name}/{conversation}")
 
-    def runs(self, conversation: str) -> list[LocalRunHandle]:
+    def runs(self, conversation: str) -> Sequence[ConversationRun]:
         return self.runner.conversation_runs(self.deployment_name, conversation)
 
     async def send(
         self, conversation: str, text: str, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None
-    ) -> tuple[str, LocalRunHandle]:
+    ) -> tuple[str, ConversationRun]:
         """Deliver a message; returns its message_id and the run that received it."""
         envelope = Envelope(content=[Text(text=text)], reply_to=Address(kind="external", value="http"))
         message_id = await self.runner.send(
@@ -92,7 +161,7 @@ class AssistantService:
         )
         return message_id, self.runs(conversation)[-1]
 
-    async def reply_to(self, run: LocalRunHandle, message_id: str) -> str | None:
+    async def reply_to(self, run: ConversationRun, message_id: str) -> str | None:
         """The first reply the run emits after it received `message_id`, or None if the run ends first."""
         received = False
         async for event in run.events():
@@ -108,7 +177,7 @@ class AssistantService:
     def transcript(self, conversation: str) -> list[TranscriptEntry]:
         entries: list[TranscriptEntry] = []
         for run in self.runs(conversation):
-            for event in run.context.events:
+            for event in run.recorded_events():
                 entry = _transcript_entry(event)
                 if entry is not None:
                     entries.append(entry)

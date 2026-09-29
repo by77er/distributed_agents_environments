@@ -69,6 +69,8 @@ class EvaluationSettings:
     judge: bool = True
     scenarios: Sequence[str] = ()
     """Names to run; empty runs all."""
+    durable: bool = False
+    """Run on the DurableRunner. DBOS allows one runner per process, so scenario runs then go one at a time."""
 
 
 async def evaluate(settings: EvaluationSettings, providers: Mapping[str, EndpointFactory]) -> list[ScenarioRun]:
@@ -79,26 +81,32 @@ async def evaluate(settings: EvaluationSettings, providers: Mapping[str, Endpoin
             provider=provider_name, model=settings.judge_model, sampling=SamplingParameters(reasoning_effort="low")
         )
     )
-    limit = asyncio.Semaphore(settings.concurrency)
+    limit = asyncio.Semaphore(1 if settings.durable else settings.concurrency)
     with tempfile.TemporaryDirectory(prefix="tidepool-") as directory:
         repository = create_fixture_repository(Path(directory) / "tidepool")
         truth = ground_truth(repository)
 
         async def one(scenario: Scenario, repeat: int) -> ScenarioRun:
             async with limit:
-                notes = Path(directory) / f"notes-{scenario.name.replace(' ', '-')}-{repeat}.sqlite"
+                name = f"{scenario.name.replace(' ', '-')}-{repeat}"
                 service = AssistantService(
                     Settings(
                         repository=repository,
                         model=settings.model,
                         reasoning_effort=settings.reasoning_effort,
-                        notes_path=notes,
+                        notes_path=Path(directory) / f"notes-{name}.sqlite",
+                        state=Path(directory) / f"state-{name}" if settings.durable else None,
                     ),
                     providers,
                 )
-                result = await run_scenario(service, scenario, repeat)
-                if settings.judge and result.error is None:
-                    result.judgments = await judge_replies(judge, scenario, result, truth)
+                await service.start()
+                try:
+                    result = await run_scenario(service, scenario, repeat)
+                    # Judge before closing: closing DBOS shuts down the event loop's default executor.
+                    if settings.judge and result.error is None:
+                        result.judgments = await judge_replies(judge, scenario, result, truth)
+                finally:
+                    await service.close()
                 return result
 
         return list(await asyncio.gather(*(one(s, r) for s in selected for r in range(settings.repeats))))
@@ -151,20 +159,24 @@ async def _unprompted_reply(service: AssistantService, turn: AwaitUnprompted) ->
 
 
 def _collect(service: AssistantService, conversations: set[str], observed: Observed, result: ScenarioRun) -> None:
+    """Tool calls, model calls and tokens, from the runs' events (the same for both runners)."""
     for conversation in conversations:
         for run in service.runs(conversation):
-            for turn in run.context.history.turns:
-                if turn.reply is not None:
-                    observed.tool_calls.extend(call.name for call in turn.reply.tool_calls)
-            for event in run.context.events:
+            for event in run.recorded_events():
                 data = event.payload if isinstance(event.payload, dict) else {}
                 completion = data.get("payload")
-                if event.type is RunEventType.EFFECT_COMPLETED and isinstance(completion, dict):
-                    usage = completion.get("usage")
-                    if isinstance(usage, dict):
-                        result.model_calls += 1
-                        result.input_tokens += int(usage.get("input_tokens") or 0)  # type: ignore[arg-type]
-                        result.output_tokens += int(usage.get("output_tokens") or 0)  # type: ignore[arg-type]
+                if event.type is not RunEventType.EFFECT_COMPLETED or not isinstance(completion, dict):
+                    continue
+                usage, message = completion.get("usage"), completion.get("message")
+                if not isinstance(usage, dict) or not isinstance(message, dict):
+                    continue
+                result.model_calls += 1
+                result.input_tokens += int(usage.get("input_tokens") or 0)  # type: ignore[arg-type]
+                result.output_tokens += int(usage.get("output_tokens") or 0)  # type: ignore[arg-type]
+                content = message.get("content")
+                for block in content if isinstance(content, list) else []:
+                    if isinstance(block, dict) and block.get("type") == "tool_call":
+                        observed.tool_calls.append(str(block.get("name")))
     observed.notes = [f"{title}\n{body}" for _, title, body in service.notes.notes()]
     result.tool_calls = len(observed.tool_calls)
 

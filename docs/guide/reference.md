@@ -1720,6 +1720,7 @@ A run started by a `LocalRunner`. Its context is available for inspection in tes
 - `@property def outcome(self) -> RunOutcome | None`
 - `async def result(self) -> RunOutcome`
 - `async def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]`
+- `def recorded_events(self) -> list[RunEvent]` — Every event recorded so far.
 - `@property def task(self) -> asyncio.Task[None] | None`
 - `def attach(self, task: asyncio.Task[None]) -> None`
 - `def finish(self, outcome: RunOutcome) -> None`

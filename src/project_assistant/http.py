@@ -71,11 +71,25 @@ def create_app(service: AssistantService) -> Starlette:
         return JSONResponse({"status": "ok", "deployment": service.deployment_name})
 
     return Starlette(
+        lifespan=lambda app: _Lifespan(service),
         routes=[
             Route("/conversations/{key}/messages", send_message, methods=["POST"]),
             Route("/conversations/{key}/transcript", transcript),
             Route("/conversations/{key}/events", events),
             Route("/conversations/{key}/cancel", cancel, methods=["POST"]),
             Route("/health", health),
-        ]
+        ],
     )
+
+
+class _Lifespan:
+    """Starts the service's runner with the app, and closes it on shutdown."""
+
+    def __init__(self, service: AssistantService) -> None:
+        self._service = service
+
+    async def __aenter__(self) -> None:
+        await self._service.start()
+
+    async def __aexit__(self, *exception: object) -> None:
+        await self._service.close()

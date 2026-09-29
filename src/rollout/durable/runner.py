@@ -13,6 +13,7 @@ Only one `DurableRunner` can be active in a process, because DBOS is a process-w
 """
 
 import asyncio
+import concurrent.futures
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -135,6 +136,9 @@ class DurableRunner:
         for watcher in list(self._watchers):
             watcher.cancel()
         DBOS.destroy(destroy_registry=False)
+        # DBOS installed its own thread pool as the loop's default executor and just shut it down; restore one so
+        # the rest of the process (DNS lookups, to_thread) keeps working.
+        asyncio.get_running_loop().set_default_executor(concurrent.futures.ThreadPoolExecutor())
         self.store.close()
         _active = None
 

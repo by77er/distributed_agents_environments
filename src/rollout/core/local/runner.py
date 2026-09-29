@@ -83,6 +83,10 @@ class LocalRunHandle:
                 return
             await signal.wait()
 
+    def recorded_events(self) -> list[RunEvent]:
+        """Every event recorded so far."""
+        return list(self.context.events)
+
     # For the runner
 
     @property
