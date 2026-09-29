@@ -13,17 +13,13 @@ directories, so they survive restarts of the runner.
 
 import asyncio
 import os
-import shutil
 import signal
-import stat
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
 
 from rollout.core.harness.environments import EnvironmentSpecification, ExecutionResult
 from rollout.environments.images import ImageStore
-
-MAX_OUTPUT_CHARACTERS = 60_000
+from rollout.environments.processes import execution_result, remove_tree
 
 # Runs inside the new namespaces, before entering the environment: mounts, then chroot with a clean environment.
 ENTER = r"""
@@ -81,8 +77,8 @@ class NamespaceEnvironments:
         except TimeoutError:
             os.killpg(process.pid, signal.SIGKILL)
             output, _ = await process.communicate()
-            return _result(None, output, timed_out=True)
-        return _result(process.returncode, output)
+            return execution_result(None, output, timed_out=True)
+        return execution_result(process.returncode, output)
 
     async def put(self, environment_id: str, path: str, data: bytes) -> None:
         target = self._inside(environment_id, path)
@@ -97,7 +93,7 @@ class NamespaceEnvironments:
         return await asyncio.to_thread(self._inside(environment_id, path).read_bytes)
 
     async def destroy(self, environment_id: str) -> None:
-        await asyncio.to_thread(_remove, self.directory / environment_id)
+        await asyncio.to_thread(remove_tree, self.directory / environment_id)
 
     def _inside(self, environment_id: str, path: str) -> Path:
         root = self.root(environment_id).resolve()
@@ -108,37 +104,15 @@ class NamespaceEnvironments:
         return resolved
 
 
-def _result(exit_code: int | None, output: bytes, timed_out: bool = False) -> ExecutionResult:
-    text = output.decode("utf-8", errors="replace")
-    truncated = len(text) > MAX_OUTPUT_CHARACTERS
-    if truncated:
-        half = MAX_OUTPUT_CHARACTERS // 2
-        text = f"{text[:half]}\n… ({len(text) - MAX_OUTPUT_CHARACTERS} characters omitted) …\n{text[-half:]}"
-    return ExecutionResult(exit_code=exit_code, output=text, truncated=truncated, timed_out=timed_out)
-
-
 def _unpack(tarball: Path, home: Path) -> None:
     """Unpack the image into a fresh root filesystem, with a workspace and the host's DNS settings."""
     staging = home / "staging"
-    _remove(staging)
+    remove_tree(staging)
     staging.mkdir(parents=True)
     subprocess.run(["tar", "-xzf", str(tarball), "-C", str(staging)], check=True, capture_output=True)
     (staging / "workspace").mkdir(exist_ok=True)
     resolver = Path("/etc/resolv.conf")
     if resolver.exists():
         (staging / "etc" / "resolv.conf").write_text(resolver.read_text())
-    _remove(home / "rootfs")
+    remove_tree(home / "rootfs")
     staging.replace(home / "rootfs")
-
-
-def _remove(path: Path) -> None:
-    """Remove a tree, including read-only directories a package manager may have left."""
-
-    def allow_and_retry(function: Callable[[str], object], target: str, error: BaseException) -> None:
-        os.chmod(os.path.dirname(target), stat.S_IRWXU)
-        if os.path.isdir(target):
-            os.chmod(target, stat.S_IRWXU)
-        function(target)
-
-    if path.exists() or path.is_symlink():
-        shutil.rmtree(path, onexc=allow_and_retry)

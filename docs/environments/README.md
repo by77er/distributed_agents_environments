@@ -8,6 +8,12 @@ Status: **Preliminary** · Layer: environments (separate system, designed later)
 > record earlier thinking and research; none of it is decided.
 
 
+**Built so far** (`rollout.environments`, both implementing the core's `EnvironmentService`): `NamespaceEnvironments`,
+a per-environment copy of a minimal image in unprivileged Linux namespaces ([ADR-0025](../decisions/0025-agent-sessions.md));
+and `LocalEnvironments`, a workspace directory on the host with no isolation, whose only image is `host` (asking it
+for another image is an error, not a silent downgrade). Both keep environments as directories, so they survive
+restarts, and neither keeps processes running between commands.
+
 ## Purpose
 
 Durable, fast, pluggable computers for agents. An environment is a first-class resource with its own lifecycle,

@@ -1,6 +1,7 @@
 """`agents`: run and manage agent sessions.
 
     agents serve [--state DIR] [--port 8421]      run the server (sessions survive restarts)
+                 [--environment local]        sessions work on this machine, not in a sandbox
     agents list                                   sessions and their status
     agents new NAME "instructions"                start a session
     agents send NAME "text" [--urgent]            message a session (urgent interrupts it)
@@ -38,6 +39,13 @@ def main() -> None:
     serve.add_argument("--reasoning-effort", default="low", choices=["low", "medium", "high"])
     serve.add_argument("--in-memory", action="store_true", help="use the LocalRunner: nothing survives a restart")
     serve.add_argument(
+        "--environment",
+        choices=["namespaces", "local"],
+        default="namespaces",
+        help="namespaces: a private Alpine computer per session; local: a workspace directory on this machine, "
+        "with no sandbox",
+    )
+    serve.add_argument(
         "--evict-after", type=float, default=300, help="seconds of waiting before a session is unloaded from memory"
     )
     serve.add_argument("--model-ledger", type=Path, help=argparse.SUPPRESS)
@@ -45,6 +53,7 @@ def main() -> None:
     faults = commands.add_parser("faults", help="kill the server during a fan-out and check nothing was lost")
     faults.add_argument("--kills", type=int, default=3)
     faults.add_argument("--seed", type=int, default=1)
+    faults.add_argument("--environment", choices=["namespaces", "local"], default="namespaces")
     commands.add_parser("list", help="sessions and their status")
     new = commands.add_parser("new", help="start a session")
     new.add_argument("name")
@@ -77,7 +86,7 @@ def main() -> None:
 
         from agent_sessions.faults import run_faults
 
-        report = asyncio.run(run_faults(kills=arguments.kills, seed=arguments.seed))
+        report = asyncio.run(run_faults(kills=arguments.kills, seed=arguments.seed, environment=arguments.environment))
         print(json.dumps(report, indent=2))
         sys.exit(0 if report["passed"] else 1)
     client = httpx.Client(base_url=os.environ.get("AGENTS_URL", DEFAULT_URL), timeout=60)
@@ -102,6 +111,7 @@ def _serve(arguments: argparse.Namespace) -> None:
         model_ledger=arguments.model_ledger,
         command_ledger=arguments.command_ledger,
         evict_after=timedelta(seconds=arguments.evict_after) if arguments.evict_after > 0 else None,
+        environment=arguments.environment,
     )
     service = SessionsService(settings, providers={"codex": codex_provider()})
     print(f"agent sessions: state in {settings.state}", file=sys.stderr)

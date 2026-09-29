@@ -22,7 +22,10 @@ def namespaces_available() -> bool:
     return subprocess.run(probe, check=False).returncode == 0
 
 
-pytestmark = pytest.mark.skipif(not namespaces_available(), reason="unprivileged namespaces are not available")
+NAMESPACES = pytest.param(
+    "namespaces",
+    marks=pytest.mark.skipif(not namespaces_available(), reason="unprivileged namespaces are not available"),
+)
 
 
 def call(tool: str, /, **arguments: object) -> Message:
@@ -43,20 +46,22 @@ def script(request: SampleRequest) -> Message:
             return call("create_session", name="worker", instructions="Compute 6*7 in your shell and send it to lead.")
         return Message.assistant("I started a worker.")
     if last.role is Role.USER:
-        return call("shell", command="echo $((6*7)) && cat /etc/alpine-release")
+        return call("shell", command="echo $((6*7)) && (cat /etc/alpine-release 2>/dev/null || echo $WORKSPACE)")
     if last_text.startswith("exit 0"):
         return call("send_message", to="lead", text=last_text.splitlines()[1])
     return Message.assistant("Reported to lead.")
 
 
-@pytest.mark.parametrize("durable", [False, True], ids=["local", "durable"])
-async def test_a_session_spawns_a_worker_that_reports_back(tmp_path: Path, durable: bool) -> None:
+@pytest.mark.parametrize("environment", [NAMESPACES, "local"])
+@pytest.mark.parametrize("durable", [False, True], ids=["in-memory", "durable"])
+async def test_a_session_spawns_a_worker_that_reports_back(tmp_path: Path, durable: bool, environment: str) -> None:
     endpoint = ScriptedModelEndpoint([script] * 20)
 
     def factory(model: DirectModel) -> ScriptedModelEndpoint:
         return endpoint
 
-    service = SessionsService(Settings(state=tmp_path, durable=durable, image_cache=IMAGE_CACHE), {"scripted": factory})
+    settings = Settings(state=tmp_path, durable=durable, image_cache=IMAGE_CACHE, environment=environment)  # type: ignore[arg-type]
+    service = SessionsService(settings, {"scripted": factory})
     await service.start()
     try:
         await service.create("lead", "Find out what 6*7 is, using a worker session.")
@@ -81,7 +86,11 @@ async def test_a_session_spawns_a_worker_that_reports_back(tmp_path: Path, durab
             for part in block.result.content
             if isinstance(part, Text)
         ]
-        assert any(output.startswith("exit 0\n42\n3.") for output in shell_outputs)  # 42, then the Alpine release
+        # 42, then the Alpine release inside namespaces, or the workspace on the host
+        after = "3." if environment == "namespaces" else f"{tmp_path / 'environments'}/e_"
+        assert any(output.startswith(f"exit 0\n42\n{after}") for output in shell_outputs)
+        system_prompt = endpoint.requests[0].context.append[0].text
+        assert ("Alpine" in system_prompt) == (environment == "namespaces")
         environments = list((tmp_path / "environments").iterdir())
         assert len([e for e in environments if e.name.startswith("e_")]) == 2  # one computer per session
 
@@ -90,3 +99,9 @@ async def test_a_session_spawns_a_worker_that_reports_back(tmp_path: Path, durab
         assert len([e for e in (tmp_path / "environments").iterdir() if e.name.startswith("e_")]) == 1
     finally:
         await service.close()
+
+
+async def test_a_state_directory_keeps_its_environment_backend(tmp_path: Path) -> None:
+    SessionsService(Settings(state=tmp_path, durable=False, environment="local"), {"scripted": lambda model: None})  # type: ignore[arg-type, return-value]
+    with pytest.raises(ValueError, match="use 'local' environments"):
+        SessionsService(Settings(state=tmp_path, durable=False), {"scripted": lambda model: None})  # type: ignore[arg-type, return-value]

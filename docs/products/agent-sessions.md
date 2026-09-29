@@ -21,6 +21,16 @@ uv run agents stop w1                                 # its computer is destroye
 ```
 
 Sessions survive restarts of the server: they run on the `DurableRunner`, and their computers are directories.
+
+Where sessions' commands run is a server option (a state directory keeps the one it started with):
+
+| `--environment` | Each session gets | Isolation |
+|---|---|---|
+| `namespaces` (default) | a private copy of Alpine Linux in unprivileged namespaces, root inside | its own files and process tree; not a security boundary against hostile code |
+| `local` | a workspace directory on this machine (`$WORKSPACE`); commands run as you, with your programs, files and environment variables | none: for uses where convenience matters more than a sandbox |
+
+Sessions are told which they have: on `local` they are asked to stay in their workspace and not to install software
+system-wide unless asked, but nothing enforces it.
 Sessions idle for 5 minutes (`--evict-after SECONDS`) are unloaded from memory and shown as sleeping; a message or a
 scheduled wake-up brings them back ([evicting idle runs](../durability/eviction.md)).
 
@@ -29,7 +39,7 @@ scheduled wake-up brings them back ([evicting idle runs](../durability/eviction.
 | Piece | Built from |
 |---|---|
 | The session | a durable conversation of the deployment `agents/session`, keyed by its name; it waits for messages and never ends until stopped |
-| Its computer | an environment from `run.environments`: a private copy of Alpine Linux in unprivileged namespaces, root inside, with internet access. Tools: `shell`, `read_file`, `write_file`. A command interrupted by a crash reports that it may or may not have run instead of running twice |
+| Its computer | an environment from `run.environments`: by default a private copy of Alpine Linux in unprivileged namespaces, root inside, with internet access; or a workspace on the host (`--environment local`). Tools: `shell`, `read_file`, `write_file`. A command interrupted by a crash reports that it may or may not have run instead of running twice |
 | Sessions | `SessionTools` from `rollout.coordination`: `list_sessions`, `create_session`, `send_message` (urgent messages interrupt) |
 | The board | `BoardTools`: channels of notes and tasks; `claim_task` is exclusive; `subscribe` pushes new posts to subscribers as low-priority messages |
 | Delivery | tools write to the coordination store's outbox; a relay delivers through the runner, exactly once |
@@ -78,6 +88,10 @@ evicted; checks run once the system is quiet (every session waiting or sleeping)
 | seed 11 | 5 | 4 | 19, each once | 1 | 9 | passed in 113 s |
 | seed 12 | 5 | 4 | 16, each once | 1 | 6 | passed in 94 s |
 | seed 13 | 5 | 4 | 15, each once | 2 | 5 | passed in 110 s |
+
+The evaluation also runs on the local backend (`agents faults --environment local`): seed 21 passed in 123 s with
+5 kills, 5 evictions, 17 messages each delivered once, 10 commands (none with an unknown outcome) and 10 repeated
+model calls of 67.
 
 One earlier run (seed 9) reported a message that never reached its recipient; the harness then stopped the server
 three seconds after the confirmation, which could leave a message in flight to a waking session. The harness now

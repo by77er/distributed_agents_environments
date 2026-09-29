@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import JsonValue
 
@@ -44,7 +44,8 @@ from rollout.core.harness import (
 from rollout.core.local import EndpointFactory, LocalRunner
 from rollout.core.testing import LedgerEndpoint, LedgerEnvironments
 from rollout.durable import DurableRunner
-from rollout.environments import ImageStore, NamespaceEnvironments
+from rollout.environments import ImageStore, LocalEnvironments, NamespaceEnvironments
+from rollout.environments.local import HOST_IMAGE
 
 DEPLOYMENT = "agents/session"
 
@@ -62,6 +63,9 @@ class Settings:
     command_ledger: Path | None = None
     """If set, every command started in an environment is appended here (for fault evaluations)."""
     evict_after: timedelta | None = timedelta(minutes=5)
+    environment: Literal["namespaces", "local"] = "namespaces"
+    """Where sessions' commands run: a private Alpine computer in namespaces, or a workspace directory on the host
+    itself, with no sandbox (for uses where convenience matters more than isolation)."""
     """Unload sessions that have waited this long for a message; they wake when messaged (durable runner only)."""
 
 
@@ -86,9 +90,13 @@ class SessionsService:
     def __init__(self, settings: Settings, providers: Mapping[str, EndpointFactory]) -> None:
         self.settings = settings
         settings.state.mkdir(parents=True, exist_ok=True)
-        self.environments: EnvironmentService = NamespaceEnvironments(
-            settings.state / "environments", ImageStore(settings.image_cache)
-        )
+        _keep_environment_backend(settings.state / "environments", settings.environment)
+        self.environments: EnvironmentService
+        if settings.environment == "local":
+            self.environments, image = LocalEnvironments(settings.state / "environments"), HOST_IMAGE
+        else:
+            self.environments = NamespaceEnvironments(settings.state / "environments", ImageStore(settings.image_cache))
+            image = "alpine"
         if settings.command_ledger is not None:
             self.environments = LedgerEnvironments(self.environments, settings.command_ledger)
         if settings.model_ledger is not None:
@@ -130,7 +138,15 @@ class SessionsService:
         self.runner.deploy(
             Deployment(
                 name=DEPLOYMENT,
-                specification=RunSpecification(program=agent_program(AgentSession, SessionAgent), binding=binding),
+                specification=RunSpecification(
+                    program=agent_program(
+                        AgentSession,
+                        SessionAgent,
+                        task_parameters={"image": image},
+                        agent_configuration={"image": image},
+                    ),
+                    binding=binding,
+                ),
             )
         )
         self.relay = Relay(self.coordination, self._deliver)
@@ -271,3 +287,12 @@ def describe(event: RunEvent) -> dict[str, JsonValue] | None:
     if event.type in (RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED, RunEventType.RUN_COMPLETED):
         return {"at": at, "kind": "ended", "text": event.type.value}
     return None
+
+
+def _keep_environment_backend(directory: Path, backend: str) -> None:
+    """Existing sessions' computers belong to the backend that made them: refuse to serve them with another."""
+    marker = directory / "backend"
+    if marker.exists() and (existing := marker.read_text().strip()) != backend:
+        raise ValueError(f"the sessions in {directory.parent} use {existing!r} environments, not {backend!r}")
+    directory.mkdir(parents=True, exist_ok=True)
+    marker.write_text(backend)

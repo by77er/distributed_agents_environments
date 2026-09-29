@@ -11,7 +11,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout.durable`](#rolloutdurable)** — The durability layer: runs that survive crashes and restarts, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
-- **[`rollout.environments`](#rolloutenvironments)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`NamespaceEnvironments`](#namespaceenvironments)
+- **[`rollout.environments`](#rolloutenvironments)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
 - **[`rollout.coordination`](#rolloutcoordination)** — Coordination between runs: participants, messages and a shared board. [`BoardTools`](#boardtools), [`CoordinationStore`](#coordinationstore), [`Deliver`](#deliver), [`Delivery`](#delivery), [`Identify`](#identify), [`Participant`](#participant), [`Post`](#post), [`post`](#post), [`register`](#register), [`Relay`](#relay), [`SessionTools`](#sessiontools), [`Status`](#status), [`subscribe`](#subscribe)
 - **[`rollout.adapters.responses`](#rolloutadaptersresponses)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 
@@ -2124,6 +2124,26 @@ Resolves image names (`alpine`, `alpine:3.24.2`) to verified, cached root filesy
 
 - `def __init__(self, directory: Path) -> None`
 - `async def tarball(self, image: str) -> Path`
+
+### `LocalEnvironments`
+
+*class* · `src/rollout/environments/local.py`
+
+```python
+class LocalEnvironments
+```
+
+Implements `EnvironmentService`.
+
+**Methods**
+
+- `def __init__(self, directory: Path, *, variables: Mapping[str, str] | None = None) -> None` — `variables` replaces the inherited environment variables when given.
+- `def workspace(self, environment_id: str) -> Path`
+- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
+- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult`
+- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
+- `async def get(self, environment_id: str, path: str) -> bytes`
+- `async def destroy(self, environment_id: str) -> None`
 
 ### `NamespaceEnvironments`
 

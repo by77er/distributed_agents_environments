@@ -42,14 +42,15 @@ INSTRUCTIONS = (
 )
 EXPECTED = ["3.14", "Example Domain", "a4fa034cc780dbd72a36bf51ba5ee7afd509020953aae10021794638543fd997"]
 FOLLOW_UP = (
-    "Ask w1 to write the three answers, one per line, to /workspace/answers.txt on its own computer, and to tell the "
-    "operator when the file is written."
+    "Ask w1 to write the three answers, one per line, to answers.txt in its workspace, and to tell the operator "
+    "when the file is written."
 )
 
 
 class Server:
-    def __init__(self, work: Path) -> None:
+    def __init__(self, work: Path, environment: str) -> None:
         self.work = work
+        self.environment = environment
         self.port = _free_port()
         self.url = f"http://127.0.0.1:{self.port}"
         self.process: asyncio.subprocess.Process | None = None
@@ -60,6 +61,7 @@ class Server:
             sys.executable, "-m", "agent_sessions.cli", "serve", "--state", str(self.work / "state"),
             "--port", str(self.port), "--model-ledger", str(self.work / "models.jsonl"),
             "--command-ledger", str(self.work / "commands.jsonl"), "--evict-after", "5",
+            "--environment", self.environment,
             stdout=self.log, stderr=asyncio.subprocess.STDOUT,
         )  # fmt: skip
         async with httpx.AsyncClient() as client:
@@ -86,13 +88,15 @@ class Server:
                 await self.process.wait()
 
 
-async def run_faults(*, kills: int = 3, seed: int = 1, deadline_seconds: float = 420) -> dict[str, Any]:
+async def run_faults(
+    *, kills: int = 3, seed: int = 1, environment: str = "namespaces", deadline_seconds: float = 420
+) -> dict[str, Any]:
     rng = random.Random(seed)
     kill_times = sorted(rng.uniform(4, 45) for _ in range(kills))
     report: dict[str, Any] = {"kills": 0, "kill_seconds": [round(t, 1) for t in kill_times], "problems": []}
     with tempfile.TemporaryDirectory(prefix="session-faults-") as directory:
         work = Path(directory)
-        server = Server(work)
+        server = Server(work, environment)
         await server.start()
         started = time.monotonic()
         try:
@@ -146,7 +150,12 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
             problems.append("the operator never received a summary with every answer")
         if _confirmation(inbox) is None:
             problems.append("the woken sessions never confirmed the follow-up")
-        written = [path.read_text() for path in (state / "environments").glob("e_*/rootfs/workspace/answers.txt")]
+        workspaces = ("e_*/rootfs/workspace", "e_*/workspace")  # namespaces, local
+        written = [
+            path.read_text()
+            for pattern in workspaces
+            for path in (state / "environments").glob(f"{pattern}/answers.txt")
+        ]
         report["answers_file_written"] = bool(written) and EXPECTED[2] in written[0]
         if not report["answers_file_written"]:
             problems.append("answers.txt was not written with the answers")

@@ -23,17 +23,26 @@ OPERATOR = "operator"
 SYSTEM_PROMPT = """You are "{name}", one of several independent agent sessions that work alongside each other. The \
 time is {now}.
 
-You have your own Linux computer (Alpine Linux; you are root; install software with `apk add`; it has internet \
-access). Use the shell, read_file and write_file tools on it. Your files persist until your session is stopped.
+{computer} Use the shell, read_file and write_file tools on it.
 
 You can coordinate with other sessions:
-- list_sessions, create_session (starts a new session with its own computer) and send_message;
+- list_sessions, create_session (starts a new session with its own workspace) and send_message;
 - a shared board of channels: post notes or tasks, read_board, claim_task before working on a task, resolve_task with \
 the result, and subscribe to channels to be told about new posts.
 
 Messages from other sessions arrive as "[message from NAME]" and board notices as "[board #CHANNEL]". The operator is \
 the person managing all sessions; you can message them with send_message(to="operator"). When another session gives \
 you work, report the result back to it when you are done. Keep your replies short."""
+
+COMPUTERS = {
+    "alpine": "You have your own Linux computer (Alpine Linux; you are root; install software with `apk add`; it has "
+    "internet access). Your workspace is /workspace; your files persist until your session is stopped.",
+    "host": "You work in your own workspace directory on the operator's machine (its path is in $WORKSPACE): commands "
+    "run as the operator's user, with the machine's programs and internet access. This is not a sandbox. Keep your "
+    "files in your workspace, and do not install software system-wide or change anything outside your workspace "
+    "unless you are asked to. Your workspace is deleted when your session is stopped.",
+}
+"""What a session is told about its computer, by the environment image it runs on."""
 
 
 def _as_observation_message(envelope: Envelope) -> Message:
@@ -48,6 +57,8 @@ class AgentSession(Task):
 
     def __init__(self, parameters: dict[str, str] | None = None) -> None:
         self.image = (parameters or {}).get("image", "alpine")
+        if self.image not in COMPUTERS:
+            raise ValueError(f"no description of the image {self.image!r} for sessions")
         self.environment_id: str | None = None
 
     async def setup(self, run: RunContext) -> None:
@@ -81,7 +92,7 @@ class AgentSession(Task):
 
     @tool
     async def shell(self, run: RunContext, command: str, timeout_seconds: float = 120) -> str:
-        """Run a shell command on your computer, in /workspace unless it changes directory. Each call starts a fresh
+        """Run a shell command on your computer, in your workspace unless it changes directory. Each call starts a fresh
         shell: nothing keeps running between calls. Returns the exit code and the combined output."""
         try:
             result = await self._environment(run).execute(command, timeout_seconds=min(timeout_seconds, 1800))
@@ -96,12 +107,12 @@ class AgentSession(Task):
 
     @tool
     async def read_file(self, run: RunContext, path: str) -> str:
-        """Read a text file from your computer (relative paths are under /workspace)."""
+        """Read a text file from your computer (relative paths are under your workspace)."""
         return (await self._environment(run).get(path)).decode("utf-8", errors="replace")
 
     @tool
     async def write_file(self, run: RunContext, path: str, content: str) -> str:
-        """Write a text file on your computer (relative paths are under /workspace), creating directories."""
+        """Write a text file on your computer (relative paths are under your workspace), creating directories."""
         await self._environment(run).put(path, content)
         return f"Wrote {len(content.encode())} bytes to {path}."
 
@@ -112,7 +123,14 @@ class AgentSession(Task):
 
 
 class SessionAgent(Agent):
+    """Configured with {"image": ...}, the same image as the session's task."""
+
+    def __init__(self, configuration: dict[str, str] | None = None) -> None:
+        super().__init__(configuration)
+        self.image = (configuration or {}).get("image", "alpine")
+
     async def act(self, run: RunContext, history: History, tools: list[ToolSpecification]) -> Message:
         name = run.conversation.key if run.conversation else "session"
-        system = Message.system(SYSTEM_PROMPT.format(name=name, now=run.now().isoformat(timespec="minutes")))
+        now = run.now().isoformat(timespec="minutes")
+        system = Message.system(SYSTEM_PROMPT.format(name=name, now=now, computer=COMPUTERS[self.image]))
         return await run.model.sample([system, *history.messages(run.context_hints)], tools=tools)
