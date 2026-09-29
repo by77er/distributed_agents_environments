@@ -159,8 +159,8 @@ class LocalRunner:
         if run_id in self._runs:
             raise ValueError(f"run {run_id} already exists")
         program = instantiate(specification.program)
-        endpoints = {slot: self._endpoint(slot, specification.binding) for slot in program.model_slots()}
-        tool_sets = {name: self._tool_set(name, specification.binding) for name in program.imports()}
+        endpoints = resolve_endpoints(program, specification.binding, self._providers)
+        tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
         handle = LocalRunHandle(run_id, specification, conversation)
         handle.context = LocalRunContext(
             run_id,
@@ -228,26 +228,6 @@ class LocalRunner:
 
     # Internals
 
-    def _endpoint(self, slot: str, binding: RunBinding) -> ModelEndpoint:
-        model = binding.models.get(slot)
-        if model is None:
-            raise ValueError(f"the binding has no model for slot {slot!r}")
-        if model.direct is not None:
-            factory = self._providers.get(model.direct.provider)
-            if factory is None:
-                raise ValueError(f"no endpoint factory registered for provider {model.direct.provider!r}")
-            return factory(model.direct)
-        raise NotImplementedError("recorded model bindings need the recorder (milestone M1)")
-
-    def _tool_set(self, name: str, binding: RunBinding) -> ToolSet:
-        tool_binding = binding.imports.get(name)
-        if tool_binding is None or tool_binding.local is None:
-            raise ValueError(f"the binding does not say how to serve the import {name!r}")
-        tool_set = self._tool_sets.get(tool_binding.local)
-        if tool_set is None:
-            raise ValueError(f"no tool set registered as {tool_binding.local!r}")
-        return tool_set
-
     def _conversation(self, address: str, reply_to: Address | None) -> _Conversation:
         existing = self._conversations.get(address)
         if existing is not None:
@@ -310,3 +290,35 @@ class LocalRunner:
         task = asyncio.create_task(continue_conversation())
         self._background.add(task)
         task.add_done_callback(self._background.discard)
+
+
+def resolve_endpoints(
+    program: Program, binding: RunBinding, providers: Mapping[str, EndpointFactory]
+) -> dict[str, ModelEndpoint]:
+    """An endpoint for each model slot of the program, from the binding and the registered providers."""
+    endpoints: dict[str, ModelEndpoint] = {}
+    for slot in program.model_slots():
+        model = binding.models.get(slot)
+        if model is None:
+            raise ValueError(f"the binding has no model for slot {slot!r}")
+        if model.direct is None:
+            raise NotImplementedError("recorded model bindings need the recorder (milestone M1)")
+        factory = providers.get(model.direct.provider)
+        if factory is None:
+            raise ValueError(f"no endpoint factory registered for provider {model.direct.provider!r}")
+        endpoints[slot] = factory(model.direct)
+    return endpoints
+
+
+def resolve_tool_sets(program: Program, binding: RunBinding, tool_sets: Mapping[str, ToolSet]) -> dict[str, ToolSet]:
+    """The tool set serving each import of the program, from the binding and the registered tool sets."""
+    resolved: dict[str, ToolSet] = {}
+    for name in program.imports():
+        tool_binding = binding.imports.get(name)
+        if tool_binding is None or tool_binding.local is None:
+            raise ValueError(f"the binding does not say how to serve the import {name!r}")
+        tool_set = tool_sets.get(tool_binding.local)
+        if tool_set is None:
+            raise ValueError(f"no tool set registered as {tool_binding.local!r}")
+        resolved[name] = tool_set
+    return resolved

@@ -10,6 +10,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
+- **[`rollout.durable`](#rolloutdurable)** — The durability layer: runs that survive crashes and restarts, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout.adapters.responses`](#rolloutadaptersresponses)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 
 ## `rollout.core.harness`
@@ -532,7 +533,7 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Durable output, such as a reply to a person; a connector or client delivers it.
 - `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None` — Append a turn to the history. A `WaitFor` records only the reply it answers.
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None` — Suspend until a message of `wait.kind` arrives; `None` on timeout.
-- `def take_steering_messages(self) -> list[Envelope]` — Messages delivered with mode `STEER` since the last turn boundary.
+- `async def take_steering_messages(self) -> list[Envelope]` — Messages delivered with mode `STEER` since the last turn boundary.
 - `async def interruptible[T](self, reply: Awaitable[T]) -> T` — Await an agent's reply; raises `Interrupted` if a message with mode `INTERRUPT` arrives meanwhile.
 
 ### `RunHandle`
@@ -1694,7 +1695,7 @@ Implements `RunContext` and `Effects` in process.
 - `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Durable output, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect.
 - `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None`
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
-- `def take_steering_messages(self) -> list[Envelope]`
+- `async def take_steering_messages(self) -> list[Envelope]`
 - `async def interruptible[T](self, reply: Awaitable[T]) -> T`
 - `def take_undelivered(self) -> list[Envelope]` — Messages the run never consumed; the runner hands them to the conversation's next run.
 - `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/core/harness/conversations.md#priority-and-delivery-mode).
@@ -1842,6 +1843,108 @@ def tool_call_reply(*calls: ToolCall, text: str = '') -> Message
 ```
 
 An assistant reply that makes tool calls.
+
+## `rollout.durable`
+
+The durability layer: runs that survive crashes and restarts, on DBOS.
+
+### `DurableRunContext`
+
+*class* · `src/rollout/durable/context.py`
+
+```python
+class DurableRunContext(LocalRunContext)
+```
+
+**Methods**
+
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, started_at: datetime, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def now(self) -> datetime`
+- `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
+- `async def take_steering_messages(self) -> list[Envelope]`
+- `async def interruptible[T](self, reply: Awaitable[T]) -> T`
+- `async def undelivered(self) -> list[Envelope]` — Messages the run never consumed, including any still in the inbox; handed to the next run.
+
+### `DurableRunHandle`
+
+*class* · `src/rollout/durable/runner.py`
+
+```python
+class DurableRunHandle
+```
+
+A durable run, read from the store: valid across processes and restarts.
+
+**Methods**
+
+- `def __init__(self, runner: 'DurableRunner', run_id: str) -> None`
+- `@property def run_id(self) -> str`
+- `@property def outcome(self) -> RunOutcome | None`
+- `@property def done(self) -> bool`
+- `async def result(self) -> RunOutcome`
+- `async def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]`
+- `def recorded_events(self) -> list[RunEvent]` — Every event recorded so far.
+
+### `DurableRunner`
+
+*class* · `src/rollout/durable/runner.py`
+
+```python
+class DurableRunner
+```
+
+Implements `Runner` on DBOS. Call `await launch()` before use and `await close()` after.
+
+**Methods**
+
+- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, application: str = 'rollout') -> None`
+- `async def launch(self) -> None` — Start DBOS, which recovers the runs a crash left unfinished, and follow them.
+- `async def close(self) -> None`
+- `def deploy(self, deployment: Deployment) -> None`
+- `def run(self, run_id: str) -> DurableRunHandle`
+- `def conversation_runs(self, deployment: str, key: str) -> list[DurableRunHandle]`
+- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> DurableRunHandle`
+- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str`
+- `async def cancel(self, run_id: str, *, reason: str) -> None` — Ask the run to stop at its next effect, wait or turn boundary; `teardown` runs.
+- `async def execute(self, run_id: str, specification_json: dict[str, Any], conversation_json: dict[str, Any] | None, labels: dict[str, str], started_at: str) -> dict[str, Any]`
+
+### `RunCancelled`
+
+*class* · `src/rollout/durable/context.py`
+
+```python
+class RunCancelled(Exception)
+```
+
+A cancellation request reached the run; the program unwinds and `teardown` runs.
+
+**Methods**
+
+- `def __init__(self, reason: str) -> None`
+
+### `RunStore`
+
+*class* · `src/rollout/durable/store.py`
+
+```python
+class RunStore
+```
+
+**Methods**
+
+- `def __init__(self, path: Path) -> None`
+- `def create_run(self, run_id: str, specification: JsonValue, conversation: str | None, conversation_key: JsonValue = None) -> None`
+- `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None`
+- `def run(self, run_id: str) -> RunRecord | None`
+- `def unfinished_runs(self) -> list[str]`
+- `def live_run(self, address: str) -> str | None`
+- `def conversation_key(self, address: str) -> JsonValue`
+- `def conversation_runs(self, address: str) -> list[str]`
+- `def claim_message(self, message_id: str, address: str) -> bool` — Record a message as delivered; False if it already was (a retry).
+- `def append(self, event: RunEvent) -> None`
+- `def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]`
+- `async def changed(self, run_id: str, wait_seconds: float) -> None` — Wait until the run records something, or `wait_seconds` pass (other processes write without notifying).
+- `def close(self) -> None`
 
 ## `rollout.adapters.responses`
 

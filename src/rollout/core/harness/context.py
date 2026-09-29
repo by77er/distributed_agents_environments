@@ -117,7 +117,7 @@ class RunContext(Protocol):
         """Suspend until a message of `wait.kind` arrives; `None` on timeout."""
         ...
 
-    def take_steering_messages(self) -> list[Envelope]:
+    async def take_steering_messages(self) -> list[Envelope]:
         """Messages delivered with mode `STEER` since the last turn boundary."""
         ...
 

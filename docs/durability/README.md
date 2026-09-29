@@ -9,6 +9,32 @@ process and machine failures, suspend for days without holding compute, and resu
 It is built on **DBOS** (MIT, a durable-workflow library over Postgres or SQLite). Task, agent and program code is
 unchanged; it only has to follow the [determinism rules](../core/harness/determinism.md).
 
+## Implementation status
+
+`rollout.durable.DurableRunner` exists in a first, **trusted-mode** form (2026-09-28). What it does and what it does
+not do yet:
+
+| Design element | Status |
+|---|---|
+| Runs as DBOS workflows (workflow id = `run_id`), SQLite system database | built |
+| Effects as recorded steps with deterministic `effect_id`s; replay by re-execution | built: model samples, imported tool calls, outputs |
+| `run.now()` = time of the latest recorded input | built |
+| Durable `WaitFor` (a recorded receive with a durable timeout) | built |
+| Delivery modes: queue and steer read at turn boundaries; interrupt races the reply through `DBOS.asyncio_wait` | built |
+| Cooperative cancellation through the inbox; `teardown` runs | built |
+| Run events as a projection, idempotent on `(run_id, seq)` | built |
+| Recovery after `kill -9` on the next launch, no duplicated effects except the one in flight | built and tested |
+| The pump / sandboxed task host split over `HarnessHost` | **not yet**: the program runs inside the workflow, in the runner's process, so only T0 and T1 code may run durably |
+| Suspension without compute | **not yet**: a waiting run holds a coroutine in memory; it resumes after a restart, but idle runs are not unloaded |
+| Generations and state export | not yet |
+| Conversation activations on a partitioned queue | not yet: a conversation's run is one long workflow; sends are serialized per conversation in process |
+| Attempt markers for side effects without deduplication | not yet: a tool call in flight at a crash runs again, so such tools must deduplicate by `effect_id` (the project assistant's notes do) |
+| Recovery controller for other executors, reaper, poison-run quarantine | not yet: one executor per system database |
+| Postgres | not yet |
+
+A known window: a message sent to a conversation at the moment its run finishes can be left unconsumed. The
+activation queue closes it.
+
 ## Design: the pump and the task host
 
 ```

@@ -50,7 +50,7 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
                 continue
             observation = await task.respond(run, reply)                           # validated; see task.md
             if isinstance(observation, Observation) and observation.end is None:
-                if steering := run.take_steering_messages():
+                if steering := await run.take_steering_messages():
                     observation = await task.steer(run, steering, observation)
             run.record(observation, reply=reply)                                   # observation.reward binds to reply
         episode_reward = await task.score(run)

@@ -38,7 +38,7 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
                 raise TypeError(f"{type(agent).__name__}.act returned a {reply.role} message, not an ASSISTANT one")
             observation = _checked(await task.respond(run, reply), reply=reply)
             if isinstance(observation, Observation) and observation.end is None:
-                steering = run.take_steering_messages()
+                steering = await run.take_steering_messages()
                 if steering:
                     observation = _checked(await task.steer(run, steering, observation), reply=reply)
             run.record(observation, reply=reply)

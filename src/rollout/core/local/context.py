@@ -141,10 +141,12 @@ class LocalRunContext:
         if to is not None:
             arguments["to"] = to.model_dump(mode="json")
 
-        async def execute(effect_id: str, arguments_digest: str) -> None:
-            self.record_event(RunEventType.OUTPUT_EMITTED, {**arguments, "effect_id": effect_id})
+        async def execute(effect_id: str, arguments_digest: str) -> str:
+            return effect_id
 
-        await self.perform(EffectKind.OUTPUT_EMIT, arguments, execute, completion=lambda _: None)
+        # Recorded after the effect, not inside it: a durable runner replays effects without executing them.
+        identifier = await self.perform(EffectKind.OUTPUT_EMIT, arguments, execute, completion=lambda _: None)
+        self.record_event(RunEventType.OUTPUT_EMITTED, {**arguments, "effect_id": identifier})
 
     # RunContext, for the loop
 
@@ -188,7 +190,7 @@ class LocalRunContext:
         finally:
             self._waiting = None
 
-    def take_steering_messages(self) -> list[Envelope]:
+    async def take_steering_messages(self) -> list[Envelope]:
         steering = [envelope for envelope, mode in self._held if mode is not DeliveryMode.QUEUE]
         self._held = [(envelope, mode) for envelope, mode in self._held if mode is DeliveryMode.QUEUE]
         return steering
@@ -254,7 +256,7 @@ class LocalRunContext:
         if kind is EffectKind.MODEL_SAMPLE:
             self._samples_in_flight.append(identifier)
         try:
-            result = await execute(identifier, arguments_hash)
+            result = await self._execute_effect(kind, identifier, arguments_hash, execute)
         except asyncio.CancelledError:
             self._effect_completed(identifier, EffectStatus.FAILED, None, error_class="cancelled")
             raise
@@ -266,6 +268,12 @@ class LocalRunContext:
                 self._samples_in_flight.remove(identifier)
         self._effect_completed(identifier, EffectStatus.OK, completion(result))
         return result
+
+    async def _execute_effect[T](
+        self, kind: EffectKind, identifier: str, arguments_hash: str, execute: Callable[[str, str], Awaitable[T]]
+    ) -> T:
+        """Perform the effect. The durable run context overrides this to make it a recorded step."""
+        return await execute(identifier, arguments_hash)
 
     def _effect_completed(
         self, identifier: str, status: EffectStatus, payload: JsonValue, *, error_class: str | None = None
