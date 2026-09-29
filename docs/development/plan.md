@@ -5,6 +5,9 @@ Status: **Proposed** · See [ADR-0023](../decisions/0023-development-baseline.md
 Work is ordered so that each milestone produces something that runs on one machine and validates the interfaces
 the next milestone builds on. Later milestones start only when a consumer needs them (P14).
 
+**Order of work: M0 → P1 → M2 → M1 → M3** ([ADR-0024](../decisions/0024-product-before-rl.md)). A product on a
+third-party model validates the loop, conversations, tools and the durable runner before RL work resumes.
+
 ## Milestones
 
 ### M0 — Core loop, no GPU
@@ -25,6 +28,26 @@ the next milestone builds on. Later milestones start only when a consumer needs 
 - Examples run end to end against an API model and against a scripted fake model endpoint.
 - Loop semantics covered by tests: validation rules, `WaitFor` / `resume` / timeout, `STEER` merge, `INTERRUPT`
   during a sample and during tools, `teardown` on every path, reward binding.
+
+### P1 — Project assistant
+
+A long-lived conversational agent about a local code repository, on a third-party model
+([ADR-0024](../decisions/0024-product-before-rl.md)).
+
+**Scope**
+- The Responses API adapter on the local Codex login, with token refresh.
+- The `ProjectAssistant` task: read-only repository tools (search, read, list, git history), notes as an imported
+  tool, follow-ups through `WaitFor` timeouts.
+- A small HTTP API: send a message to a conversation, stream its events, read its transcript, cancel.
+- The evaluation harness: scenarios with scripted users; task-success checks; judged quality with a rubric; cost and
+  latency from run events.
+
+**Exit criteria**
+- The evaluation suite runs end to end against the model through the HTTP API, and baseline numbers are recorded.
+- A conversation survives a pause of days through `WaitFor`, and a scheduled follow-up fires.
+
+**Continues in M2**: the product moves onto `DurableRunner` unchanged, and the durability-under-faults evaluation
+kills processes at random points (no lost messages, no duplicated model calls or note writes).
 
 ### M1 — Recorder and local RL on one GPU
 
@@ -56,7 +79,8 @@ the next milestone builds on. Later milestones start only when a consumer needs 
   ([task host](../durability/task-host.md)).
 
 **Exit criteria**
-- The M0 and M1 examples pass unchanged under `DurableRunner`, including with processes killed at random.
+- The M0 examples and the P1 evaluation suite pass unchanged under `DurableRunner`, including with processes killed
+  at random (the durability-under-faults evaluation).
 - Phase-1 durability spikes pass ([open questions](../architecture/open-questions.md#validation-spikes)).
 
 ### M3 — RL at scale
@@ -80,5 +104,6 @@ The environment system; the platform layer (cells, trust tiers, Control API, con
    (`rollout.core.harness`, `rollout.core.local.LocalRunContext`, `rollout.core.testing`).
 4. `@tool` → `ToolSpecification` (pydantic JSON Schema), tool execution and `ToolResult` normalization. **Done**.
 5. `LocalRunner` with conversations and delivery modes.
-6. Direct adapters and `ContextDelta`.
+6. The Responses API adapter on the Codex login (P1 needs it first); the Anthropic adapter and `ContextDelta`
+   computation follow when a consumer needs them.
 7. Examples.
