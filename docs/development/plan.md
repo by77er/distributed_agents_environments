@@ -75,9 +75,11 @@ kills processes at random points (no lost messages, no duplicated model calls or
 
 ### M2 — Durable runner
 
-Status: `DurableRunner` in trusted mode is built: recorded effects, durable waits, delivery modes, cancellation,
-and recovery after `kill -9` ([status](../durability/README.md#implementation-status)). Next: the project
-assistant on it, the durability-under-faults evaluation, then the sandboxed task host.
+Status: `DurableRunner` in trusted mode is built ([status](../durability/README.md#implementation-status)). The
+project assistant runs on it unchanged, and the durability-under-faults evaluation passes: across 8 SIGKILLs, no
+lost messages, no duplicated replies or notes, one repeated model call per kill
+([results](../products/project-assistant.md#durability-under-faults)). Next: the sandboxed task host, suspension
+without compute, generations, Postgres.
 
 **Scope**
 - `DurableRunner` on DBOS, SQLite first then Postgres: the pump, effects as steps with identities and digests,

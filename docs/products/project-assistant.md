@@ -36,7 +36,7 @@ curl -s localhost:8420/conversations/dev-1/transcript
 | Notes | `NotesStore`, an imported tool set in SQLite (`.rollout/notes.sqlite`): `save_note`, `search_notes`, `list_notes`. Shared by every conversation; saves deduplicate by `effect_id` |
 | Follow-ups | the `schedule_follow_up` `@tool` records a due time with `run.now()`; the task's `WaitFor` times out at the next one and wakes the assistant with a follow-up observation |
 | Model | `gpt-6-astra` through the Responses API adapter on the local Codex login, reasoning effort `low` by default |
-| Runner | `LocalRunner` today; `DurableRunner` in M2, unchanged task code |
+| Runner | `LocalRunner` by default; `DurableRunner` with `--state`, with unchanged task code |
 
 Source: `src/project_assistant/`.
 
@@ -81,8 +81,33 @@ ambiguous questions) are needed before it can tell two versions of the assistant
 A first version of the judge saw only the key facts and marked correct extra details (line numbers, commit hashes)
 as unsupported; giving it the repository as ground truth fixed that.
 
+### On the durable runner
+
+`uv run project-assistant serve --state DIR` runs conversations on the `DurableRunner`, so they survive restarts.
+`uv run project-assistant evaluate --durable` runs the scenario suite on it: 7/7 passed (2026-09-28, one repeat), with
+cost and latency close to the `LocalRunner` baseline (10.7 seconds and 4.1 model calls per turn).
+
+### Durability under faults
+
+```bash
+uv run project-assistant faults --kills 3 --seed 1
+```
+
+A scripted client holds a six-message conversation (questions, and two facts to remember) with the server running
+on the `DurableRunner`. While a reply is being produced, the client kills the server with SIGKILL at a random moment,
+restarts it, and resends the message with the same idempotency key. It passes when no message is lost, no reply or
+note is duplicated, no model call repeats except the one in flight at each kill, and the last reply recalls both
+facts.
+
+| Run (2026-09-28) | Kills | Lost messages | Duplicate replies | Duplicate notes | Repeated model calls | Recalls both | Seconds from restart to reply |
+|---|---|---|---|---|---|---|---|
+| seed 1 | 3 | 0 | 0 | 0 | 3 (one per kill) | yes | 12.1, 10.1, 9.9 |
+| seed 2 | 5 | 0 | 0 | 0 | 5 (one per kill) | yes | 11.2, 14.4, 15.5, 10.4, 13.0 |
+
+The seconds after a restart include starting the server, DBOS recovery, and finishing the interrupted reply.
+
 ## Next
 
-- M2: the same product on the durable runner, and the durability-under-faults evaluation: processes killed at
-  random points, with no lost messages and no duplicated model calls or note writes.
+- The sandboxed task host behind `HarnessHost`, so untrusted code can run durably.
+- Suspending idle conversations without holding them in memory.
 - Harder scenarios.
