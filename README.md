@@ -16,4 +16,6 @@ uv run pytest
 uv run ruff check && uv run ruff format --check
 uv run pyright
 uv run python scripts/generate_reference.py   # after changing public names or docstrings
+uv run --group docs mkdocs serve             # the docs as a local site: http://127.0.0.1:8000
+uv run --group docs mkdocs build             # or write it to site/ (opens straight from disk)
 ```
