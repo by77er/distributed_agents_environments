@@ -25,6 +25,8 @@ PUBLIC_MODULES = [
     ("rollout.core.local", "In-process implementations for the local profile."),
     ("rollout.core.testing", "Test doubles: a scripted model endpoint and helpers."),
     ("rollout.durable", "The durability layer: runs that survive crashes and restarts, on DBOS."),
+    ("rollout.environments", "Environment backends: services that give runs computers."),
+    ("rollout.coordination", "Coordination between runs: participants, messages and a shared board."),
     ("rollout.adapters.responses", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
 ]
 

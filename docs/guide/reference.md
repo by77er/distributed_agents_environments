@@ -11,6 +11,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout.durable`](#rolloutdurable)** — The durability layer: runs that survive crashes and restarts, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
+- **[`rollout.environments`](#rolloutenvironments)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`NamespaceEnvironments`](#namespaceenvironments)
+- **[`rollout.coordination`](#rolloutcoordination)** — Coordination between runs: participants, messages and a shared board. [`BoardTools`](#boardtools), [`CoordinationStore`](#coordinationstore), [`Deliver`](#deliver), [`Delivery`](#delivery), [`Identify`](#identify), [`Participant`](#participant), [`Post`](#post), [`post`](#post), [`register`](#register), [`Relay`](#relay), [`SessionTools`](#sessiontools), [`Status`](#status), [`subscribe`](#subscribe)
 - **[`rollout.adapters.responses`](#rolloutadaptersresponses)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 
 ## `rollout.core.harness`
@@ -1847,6 +1849,7 @@ time, and messages a run never consumed start the conversation's next run.
 - `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None) -> None`
 - `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
 - `def run(self, run_id: str) -> LocalRunHandle`
+- `def conversation_of(self, run_id: str) -> ConversationKey | None` — The conversation a run serves, if any.
 - `def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]` — The conversation's runs, oldest first.
 - `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> LocalRunHandle`
 - `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str`
@@ -2005,6 +2008,7 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 - `async def close(self) -> None`
 - `def deploy(self, deployment: Deployment) -> None`
 - `def run(self, run_id: str) -> DurableRunHandle`
+- `def conversation_of(self, run_id: str) -> ConversationKey | None` — The conversation a run serves, if any.
 - `def conversation_runs(self, deployment: str, key: str) -> list[DurableRunHandle]`
 - `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> DurableRunHandle`
 - `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str`
@@ -2049,6 +2053,225 @@ class RunStore
 - `def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]`
 - `async def changed(self, run_id: str, wait_seconds: float) -> None` — Wait until the run records something, or `wait_seconds` pass (other processes write without notifying).
 - `def close(self) -> None`
+
+## `rollout.environments`
+
+Environment backends: services that give runs computers.
+
+### `ImageStore`
+
+*class* · `src/rollout/environments/images.py`
+
+```python
+class ImageStore
+```
+
+Resolves image names (`alpine`, `alpine:3.24.2`) to verified, cached root filesystem tarballs.
+
+**Methods**
+
+- `def __init__(self, directory: Path) -> None`
+- `async def tarball(self, image: str) -> Path`
+
+### `NamespaceEnvironments`
+
+*class* · `src/rollout/environments/namespaces.py`
+
+```python
+class NamespaceEnvironments
+```
+
+Implements `EnvironmentService`.
+
+**Methods**
+
+- `def __init__(self, directory: Path, images: ImageStore | None = None) -> None`
+- `def root(self, environment_id: str) -> Path`
+- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
+- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None) -> ExecutionResult`
+- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
+- `async def get(self, environment_id: str, path: str) -> bytes`
+- `async def destroy(self, environment_id: str) -> None`
+
+## `rollout.coordination`
+
+Coordination between runs: participants, messages and a shared board.
+
+### `BoardTools`
+
+*class* · `src/rollout/coordination/tools.py`
+
+```python
+class BoardTools(_CoordinationTools)
+```
+
+A board of channels holding notes and tasks. Subscribers are told about new posts.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `specifications_` |  | `[ToolSpecification(name='post', description='Post a note or a task to a channel of the shared board. Subscribers of the channel are told. Tasks can be claimed by one session and resolved with a result.', input_schema=_object({'channel': {'type': 'string'}, 'title': {'type': 'string'}, 'body': {'type': 'string'}, 'kind': {'type': 'string', 'enum': ['note', 'task']}}, ['channel', 'title', 'body']), retry_class=RetryClass.SIDE_EFFECTING), ToolSpecification(name='read_board', description='Read recent posts, newest first. Filter by channel and status (open, claimed, done). Without a channel, also lists the channels.', input_schema=_object({'channel': {'type': 'string'}, 'status': {'type': 'string', 'enum': ['open', 'claimed', 'done']}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50}}, []), annotations=ToolAnnotations(read_only_hint=True), retry_class=RetryClass.PURE), ToolSpecification(name='claim_task', description='Claim an open task so no other session takes it. Fails if someone else claimed it first.', input_schema=_object({'post_id': {'type': 'integer'}}, ['post_id']), retry_class=RetryClass.SIDE_EFFECTING), ToolSpecification(name='resolve_task', description="Mark a task you claimed as done, with its result. The task's author is told.", input_schema=_object({'post_id': {'type': 'integer'}, 'result': {'type': 'string'}}, ['post_id', 'result']), retry_class=RetryClass.SIDE_EFFECTING), ToolSpecification(name='subscribe', description='Be told about new posts in a channel.', input_schema=_object({'channel': {'type': 'string'}}, ['channel']), retry_class=RetryClass.IDEMPOTENT), ToolSpecification(name='unsubscribe', description='Stop being told about new posts in a channel.', input_schema=_object({'channel': {'type': 'string'}}, ['channel']), retry_class=RetryClass.IDEMPOTENT)]` |  |
+
+### `CoordinationStore`
+
+*class* · `src/rollout/coordination/store.py`
+
+```python
+class CoordinationStore
+```
+
+**Methods**
+
+- `def __init__(self, path: Path) -> None`
+- `def recorded(self, effect_id: str, arguments_digest: str, perform: Callable[[sqlite3.Connection], ToolResult]) -> ToolResult` — Run a write once per effect: `perform` and the record of its result commit in one transaction.
+- `def read[T](self, query: Callable[[sqlite3.Connection], T]) -> T`
+- `def write[T](self, change: Callable[[sqlite3.Connection], T]) -> T` — A write outside any tool call (e.g. by an operator).
+- `def participant(self, name: str) -> Participant | None`
+- `def participants(self) -> list[Participant]`
+- `def posts(self, channel: str | None = None, status: str | None = None, limit: int = 20) -> list[Post]`
+- `def pending(self) -> list[Delivery]`
+- `def delivered(self, delivery_id: int) -> None`
+- `def on_outbox(self, listener: Callable[[], None]) -> None`
+- `def close(self) -> None`
+
+### `Deliver`
+
+*type alias* · `src/rollout/coordination/relay.py`
+
+```python
+type Deliver = Callable[[Delivery], Awaitable[None]]
+```
+
+### `Delivery`
+
+*class* · `src/rollout/coordination/store.py`
+
+```python
+class Delivery
+```
+
+A message waiting in the outbox.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `int` | required |  |
+| `key` | `str` | required |  |
+| `recipient` | `str` | required |  |
+| `sender` | `str` | required |  |
+| `text` | `str` | required |  |
+| `priority` | `str` | required |  |
+
+### `Identify`
+
+*type alias* · `src/rollout/coordination/tools.py`
+
+```python
+type Identify = Callable[[str], str | None]
+```
+
+The participant a call comes from, given its `effect_id`; None if the caller is not a participant.
+
+### `Participant`
+
+*class* · `src/rollout/coordination/store.py`
+
+```python
+class Participant
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `parent` | `str \| None` | required |  |
+| `purpose` | `str` | required |  |
+| `created_at` | `str` | required |  |
+
+### `Post`
+
+*class* · `src/rollout/coordination/store.py`
+
+```python
+class Post
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `int` | required |  |
+| `channel` | `str` | required |  |
+| `kind` | `str` | required |  |
+| `title` | `str` | required |  |
+| `body` | `str` | required |  |
+| `author` | `str` | required |  |
+| `status` | `str` | required |  |
+| `claimed_by` | `str \| None` | required |  |
+| `result` | `str \| None` | required |  |
+| `created_at` | `str` | required |  |
+
+### `post`
+
+*function* · `src/rollout/coordination/tools.py`
+
+```python
+def post(db: sqlite3.Connection, key: str, author: str, arguments: Mapping[str, JsonValue]) -> ToolResult
+```
+
+### `register`
+
+*function* · `src/rollout/coordination/tools.py`
+
+```python
+def register(db: sqlite3.Connection, name: str, parent: str | None, purpose: str) -> None
+```
+
+### `Relay`
+
+*class* · `src/rollout/coordination/relay.py`
+
+```python
+class Relay
+```
+
+**Methods**
+
+- `def __init__(self, store: CoordinationStore, deliver: Deliver, *, retry_seconds: float = 2.0) -> None`
+- `def start(self) -> None`
+- `async def stop(self) -> None`
+- `async def drain(self) -> None` — Deliver everything pending now.
+
+### `SessionTools`
+
+*class* · `src/rollout/coordination/tools.py`
+
+```python
+class SessionTools(_CoordinationTools)
+```
+
+`list_sessions`, `create_session`, `send_message`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `specifications_` |  | `[ToolSpecification(name='list_sessions', description='List every session: its name, who created it, what it is for, and whether it is working.', input_schema=_object({}, []), annotations=ToolAnnotations(read_only_hint=True), retry_class=RetryClass.PURE), ToolSpecification(name='create_session', description='Start a new session with its own environment. It receives `instructions` as its first message and knows you created it. Names are lowercase letters, digits and dashes.', input_schema=_object({'name': {'type': 'string'}, 'instructions': {'type': 'string'}}, ['name', 'instructions']), retry_class=RetryClass.SIDE_EFFECTING), ToolSpecification(name='send_message', description='Send a message to another session. Normal messages reach it at its next step; urgent ones interrupt what it is doing.', input_schema=_object({'to': {'type': 'string'}, 'text': {'type': 'string'}, 'urgent': {'type': 'boolean'}}, ['to', 'text']), retry_class=RetryClass.SIDE_EFFECTING)]` |  |
+
+**Methods**
+
+- `def __init__(self, store: CoordinationStore, identify: Identify, status: Status) -> None`
+
+### `Status`
+
+*type alias* · `src/rollout/coordination/tools.py`
+
+```python
+type Status = Callable[[str], str]
+```
+
+A participant's current state, e.g. `working`, `waiting` or `stopped`.
+
+### `subscribe`
+
+*function* · `src/rollout/coordination/tools.py`
+
+```python
+def subscribe(db: sqlite3.Connection, participant: str, channel: str) -> ToolResult
+```
 
 ## `rollout.adapters.responses`
 

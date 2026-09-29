@@ -147,6 +147,11 @@ class LocalRunner:
     def run(self, run_id: str) -> LocalRunHandle:
         return self._runs[run_id]
 
+    def conversation_of(self, run_id: str) -> ConversationKey | None:
+        """The conversation a run serves, if any."""
+        handle = self._runs.get(run_id)
+        return handle.conversation if handle is not None else None
+
     def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]:
         """The conversation's runs, oldest first."""
         conversation = self._conversations.get(f"{deployment}/{key}")

@@ -155,6 +155,14 @@ class DurableRunner:
             raise KeyError(run_id)
         return DurableRunHandle(self, run_id)
 
+    def conversation_of(self, run_id: str) -> ConversationKey | None:
+        """The conversation a run serves, if any."""
+        record = self.store.run(run_id)
+        if record is None or record.conversation is None:
+            return None
+        stored = self.store.conversation_key(record.conversation)
+        return ConversationKey.model_validate(stored) if isinstance(stored, dict) else None
+
     def conversation_runs(self, deployment: str, key: str) -> list[DurableRunHandle]:
         return [DurableRunHandle(self, run_id) for run_id in self.store.conversation_runs(f"{deployment}/{key}")]
 
