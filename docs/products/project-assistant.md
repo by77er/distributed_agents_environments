@@ -1,6 +1,6 @@
 # Project assistant
 
-Status: **In progress** (milestone P1) · See [ADR-0024](../decisions/0024-product-before-rl.md)
+Status: **Baseline recorded** (milestone P1) · See [ADR-0024](../decisions/0024-product-before-rl.md)
 
 A long-lived conversational agent about one code repository, built on the `rollout` core and served over HTTP. It
 answers questions grounded in the repository, remembers decisions across conversations, and follows up when asked.
@@ -40,7 +40,49 @@ curl -s localhost:8420/conversations/dev-1/transcript
 
 Source: `src/project_assistant/`.
 
+## Evaluations
+
+```bash
+uv run project-assistant evaluate --repeats 3        # all scenarios; results as JSON in .rollout/evaluations/
+uv run project-assistant evaluate --scenario "locate a function" --no-judge
+```
+
+Scenarios run against **tidepool**, an invented repository created fresh for each evaluation with a fixed git history,
+so every question has a known answer. Each scenario is a scripted user (possibly across several conversations) plus
+programmatic checks. A judge model grades replies for correctness, grounding and concision against key facts, with
+the whole repository and its history as ground truth. Cost and latency come from the runs' events.
+
+| Scenario | What it exercises |
+|---|---|
+| locate a function | search and read tools, citing files |
+| config value and its history | reading code together with `git_log` |
+| something that does not exist | saying "there is none" instead of inventing an API |
+| follow-up questions | context across turns of one conversation |
+| memory across conversations | `save_note` in one conversation, `search_notes` in another |
+| a follow-up fires | `schedule_follow_up` and a `WaitFor` timeout waking the assistant unprompted |
+| a high-priority message interrupts | a `HIGH`-priority message cancelling the reply in progress |
+
+**Baseline** (2026-09-28 · `gpt-6-astra`, reasoning effort `low`, Codex backend · 3 repeats, `LocalRunner`):
+
+| Scenario | Success | Correctness | Grounding | Concision | Seconds per turn | Model calls | Tokens in / out |
+|---|---|---|---|---|---|---|---|
+| locate a function | 3/3 | 5.0 | 5.0 | 5.0 | 14.0 | 3.0 | 2,472 / 256 |
+| config value and its history | 3/3 | 4.0 | 5.0 | 5.0 | 11.9 | 3.0 | 2,516 / 225 |
+| something that does not exist | 3/3 | 5.0 | 5.0 | 5.0 | 16.7 | 4.0 | 3,625 / 326 |
+| follow-up questions | 3/3 | 4.5 | 5.0 | 4.7 | 10.0 | 5.0 | 4,503 / 329 |
+| memory across conversations | 3/3 | 5.0 | 5.0 | 5.0 | 11.8 | 6.7 | 5,283 / 398 |
+| a follow-up fires | 3/3 | n/a | n/a | n/a | 7.8 | 5.0 | 3,970 / 159 |
+| a high-priority message interrupts | 3/3 | 5.0 | 5.0 | 5.0 | 5.1 | 3.7 | 2,930 / 117 |
+| **all** | **21/21** | **4.7** | **5.0** | **4.9** | **10.2** | **4.3** | **3,614 / 259** |
+
+Tokens are per scenario run. The suite is saturated: harder scenarios (larger repositories, longer conversations,
+ambiguous questions) are needed before it can tell two versions of the assistant apart.
+
+A first version of the judge saw only the key facts and marked correct extra details (line numbers, commit hashes)
+as unsupported; giving it the repository as ground truth fixed that.
+
 ## Next
 
-- The evaluation harness: scenarios, task-success checks, judged quality, cost and latency.
-- M2: the same product on the durable runner, and the durability-under-faults evaluation.
+- M2: the same product on the durable runner, and the durability-under-faults evaluation: processes killed at
+  random points, with no lost messages and no duplicated model calls or note writes.
+- Harder scenarios.

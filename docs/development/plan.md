@@ -34,8 +34,9 @@ third-party model validates the loop, conversations, tools and the durable runne
 A long-lived conversational agent about a local code repository, on a third-party model
 ([ADR-0024](../decisions/0024-product-before-rl.md)).
 
-Status: the adapter, the assistant (task, repository and notes tool sets, follow-ups) and the HTTP API are built
-([project assistant](../products/project-assistant.md)); the evaluation harness is next.
+Status: **done on the `LocalRunner`**: the adapter, the assistant, the HTTP API and the evaluation harness, with a
+baseline of 21/21 scenario runs passing ([project assistant](../products/project-assistant.md#evaluations)). A
+follow-up firing is verified in seconds; surviving a pause of days needs the durable runner and is verified in M2.
 
 **Scope**
 - The Responses API adapter on the local Codex login, with token refresh.
