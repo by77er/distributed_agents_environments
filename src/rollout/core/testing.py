@@ -72,7 +72,8 @@ def tool_call_reply(*calls: ToolCall, text: str = "") -> Message:
 def local_run(task: Task, replies: Iterable[ScriptedReply] = ()) -> tuple[LocalRunContext, ScriptedModelEndpoint]:
     """A local run context for `task` whose model slots all reply from one script."""
     endpoint = ScriptedModelEndpoint(replies)
-    return LocalRunContext(new_run_id(), task, dict.fromkeys(task.models, endpoint)), endpoint
+    run = LocalRunContext(new_run_id(), dict.fromkeys(task.models, endpoint), context_hints=task.context_hints)
+    return run, endpoint
 
 
 def events_of(run: LocalRunContext, event_type: RunEventType) -> list[RunEvent]:

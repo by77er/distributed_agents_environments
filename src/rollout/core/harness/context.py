@@ -9,8 +9,10 @@ from collections.abc import Awaitable, Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
+from pydantic import JsonValue
+
 from rollout.core.contracts import CapabilityContract, Message, ToolChoice, ToolSpecification, Usage
-from rollout.core.harness.conversations import ConversationKey, Envelope
+from rollout.core.harness.conversations import Address, ConversationKey, Envelope
 from rollout.core.harness.history import ContextHints, History
 from rollout.core.harness.observation import Observation, WaitFor
 
@@ -94,6 +96,10 @@ class RunContext(Protocol):
 
     def patched(self, change_id: str) -> bool:
         """`True` unless replaying history recorded before the change (see docs/core/harness/determinism.md)."""
+        ...
+
+    async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
+        """Durable output, such as a reply to a person; a connector or client delivers it."""
         ...
 
     # For the loop.

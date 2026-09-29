@@ -6,9 +6,9 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`History`](#history), [`HistoryShape`](#historyshape), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`rollout`](#rollout), [`RunContext`](#runcontext), [`Task`](#task), [`tool`](#tool), [`Turn`](#turn), [`WaitFor`](#waitfor)
+- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`Turn`](#turn), [`WaitFor`](#waitfor)
 - **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
-- **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`LocalRunContext`](#localruncontext), [`RewardAssignment`](#rewardassignment)
+- **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 
 ## `rollout.core.harness`
@@ -53,6 +53,16 @@ context (compaction, windows) or the way it acts (plan-then-act, self-critique).
 - `def select_context(self, history: History, hints: ContextHints) -> list[Message]` — What the model sees this turn. Default: the system prompt and the history shaped by the task's hints.
 - `async def act(self, run: RunContext, history: History, tools: list[ToolSpecification]) -> Message` — Produce one action. Default: one sample of the policy slot.
 
+### `agent_program`
+
+*function* · `src/rollout/core/harness/runner.py`
+
+```python
+def agent_program(task: type[Task], agent: type[Agent] = Agent, *, task_parameters: JsonValue = None, agent_configuration: JsonValue = None) -> ProgramReference
+```
+
+A reference to the task loop for `task` and `agent`.
+
 ### `AgentProgram`
 
 *class* · `src/rollout/core/harness/program.py`
@@ -66,6 +76,8 @@ The task loop: a task and an agent.
 **Methods**
 
 - `def __init__(self, task: Task, agent: Agent) -> None`
+- `def model_slots(self) -> Mapping[str, ModelSlot]`
+- `def context_hints(self) -> ContextHints`
 - `async def main(self, run: RunContext) -> None`
 
 ### `ContextHints`
@@ -133,6 +145,37 @@ Maps priorities to delivery modes. Default: LOW → QUEUE, NORMAL → STEER, HIG
 **Methods**
 
 - `def mode(self, priority: Priority, sender: str | None = None) -> DeliveryMode` — The delivery mode for a message, after capping the priority by sender.
+
+### `Deployment`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class Deployment(ContractModel)
+```
+
+A named, addressable agent: conversations addressed to it start runs of its specification.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | `{namespace}/{name}`, e.g. `acme/support-bot`. |
+| `specification` | `RunSpecification` | required |  |
+
+### `DirectModel`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class DirectModel(ContractModel)
+```
+
+A model served by a provider's API through a direct adapter; nothing is recorded.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `provider` | `str` | required | The key of an endpoint factory registered with the runner, e.g. `codex`. |
+| `model` | `str` | required |  |
+| `sampling` | `SamplingParameters` | `SamplingParameters()` |  |
 
 ### `Effects`
 
@@ -244,6 +287,16 @@ How much of the history the model should see.
 | `LATEST_OBSERVATION` | `'latest_observation'` | Only the latest observation: observations are complete states. |
 | `WINDOW` | `'window'` | The start observation and the most recent `window` turns. |
 
+### `instantiate`
+
+*function* · `src/rollout/core/harness/runner.py`
+
+```python
+def instantiate(reference: ProgramReference) -> Program
+```
+
+Create the program a reference names.
+
 ### `Interrupted`
 
 *class* · `src/rollout/core/harness/context.py`
@@ -283,6 +336,21 @@ A model slot as code sees it. Nothing here identifies the policy, weights or eng
 - `@property def capabilities(self) -> CapabilityContract`
 - `@property def usage(self) -> Usage | None` — Usage reported by the latest sample, if any: drives compaction decisions.
 - `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None) -> Message`
+
+### `ModelBinding`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class ModelBinding(ContractModel)
+```
+
+Exactly one of `direct` or `recorded`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `direct` | `DirectModel \| None` | `None` |  |
+| `recorded` | `RecordedModel \| None` | `None` |  |
 
 ### `ModelSlot`
 
@@ -351,7 +419,60 @@ What a run executes. `AgentProgram` is the task loop; plain durable workflows ar
 
 **Methods**
 
+- `def model_slots(self) -> Mapping[str, ModelSlot]` — The model slots the program samples; a runner binds an endpoint to each.
+- `def context_hints(self) -> ContextHints`
 - `async def main(self, run: RunContext) -> None`
+
+### `ProgramReference`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class ProgramReference(ContractModel)
+```
+
+What a run executes, by name, so a runner in another process can re-create it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `program` | `str` | required | `module:QualifiedName` of a `Program` class. |
+| `parameters` | `JsonValue` | `None` |  |
+| `code_reference` | `str \| None` | `None` | `{package}@{content_hash}`; pins durable runs to the code they started with. |
+
+### `RecordedModel`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class RecordedModel(ContractModel)
+```
+
+A channel served through the recorder (M1).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `channel` | `str` | required |  |
+| `sampling` | `SamplingParameters` | `SamplingParameters()` |  |
+
+### `register`
+
+*function* · `src/rollout/core/harness/runner.py`
+
+```python
+def register(cls: type) -> str
+```
+
+Make a class resolvable by name in this process, even if it cannot be imported (e.g. defined in a script).
+
+### `resolve`
+
+*function* · `src/rollout/core/harness/runner.py`
+
+```python
+def resolve(name: str) -> type
+```
+
+The class a `module:QualifiedName` names: registered in this process, or imported.
 
 ### `rollout`
 
@@ -362,6 +483,19 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None
 ```
 
 Run one episode of `task` with `agent`. Raises `InvalidObservation` or whatever a hook raised.
+
+### `RunBinding`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class RunBinding(ContractModel)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `models` | `Mapping[str, ModelBinding]` | required | Model slot → how it is served. |
+| `delivery` | `DeliveryPolicy` | `DeliveryPolicy()` |  |
 
 ### `RunContext`
 
@@ -388,10 +522,100 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `def exclude_from_training(self, reason: str) -> None` — Mark the run as unsuitable for training, e.g. after an infrastructure fault that is not the policy's.
 - `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]` — Await concurrently, in order. Equivalent to `asyncio.gather`.
 - `def patched(self, change_id: str) -> bool` — `True` unless replaying history recorded before the change (see docs/core/harness/determinism.md).
+- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Durable output, such as a reply to a person; a connector or client delivers it.
 - `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None` — Append a turn to the history. A `WaitFor` records only the reply it answers.
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None` — Suspend until a message of `wait.kind` arrives; `None` on timeout.
 - `def take_steering_messages(self) -> list[Envelope]` — Messages delivered with mode `STEER` since the last turn boundary.
 - `async def interruptible[T](self, reply: Awaitable[T]) -> T` — Await an agent's reply; raises `Interrupted` if a message with mode `INTERRUPT` arrives meanwhile.
+
+### `RunHandle`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class RunHandle(Protocol)
+```
+
+**Methods**
+
+- `@property def run_id(self) -> str`
+- `async def result(self) -> RunOutcome`
+- `def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]` — Every event from `from_seq`, then new ones as they are recorded, until the run ends.
+
+### `Runner`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class Runner(Protocol)
+```
+
+**Methods**
+
+- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> RunHandle`
+- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None) -> None` — Deliver a message; a message to a conversation starts its run when none is live.
+- `async def cancel(self, run_id: str, *, reason: str) -> None`
+
+### `RunOutcome`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class RunOutcome(ContractModel)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `status` | `RunStatus` | required |  |
+| `failure_class` | `RunFailureClass \| None` | `None` |  |
+| `detail` | `str \| None` | `None` |  |
+
+### `RunSpecification`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class RunSpecification(ContractModel)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `program` | `ProgramReference` | required |  |
+| `binding` | `RunBinding` | required |  |
+
+### `RunStatus`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class RunStatus(StrEnum)
+```
+
+| Member | Value | Description |
+|---|---|---|
+| `COMPLETED` | `'completed'` |  |
+| `FAILED` | `'failed'` |  |
+| `CANCELLED` | `'cancelled'` |  |
+
+### `SamplingParameters`
+
+*class* · `src/rollout/core/harness/runner.py`
+
+```python
+class SamplingParameters(ContractModel)
+```
+
+Configured on bindings, never by task or agent code.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `temperature` | `float` | `1.0` |  |
+| `top_p` | `float` | `1.0` |  |
+| `top_k` | `int \| None` | `None` |  |
+| `max_output_tokens` | `int \| None` | `None` |  |
+| `stop` | `FrozenSequence[str]` | `()` |  |
+| `seed` | `int \| None` | `None` |  |
+| `reasoning_effort` | `str \| None` | `None` | For providers with reasoning controls, e.g. `low`, `medium`, `high`. |
 
 ### `Task`
 
@@ -1377,6 +1601,16 @@ Context use after a sample.
 
 In-process implementations for the local profile.
 
+### `EndpointFactory`
+
+*type alias* · `src/rollout/core/local/runner.py`
+
+```python
+type EndpointFactory = Callable[[DirectModel], ModelEndpoint]
+```
+
+Creates the endpoint for a direct model binding; registered with the runner by provider name.
+
 ### `LocalRunContext`
 
 *class* · `src/rollout/core/local/context.py`
@@ -1389,7 +1623,7 @@ Implements `RunContext` and `Effects` in process.
 
 **Methods**
 
-- `def __init__(self, run_id: str, task: Task, endpoints: Mapping[str, ModelEndpoint], *, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
 - `@property def run_id(self) -> str`
 - `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int`
@@ -1403,13 +1637,62 @@ Implements `RunContext` and `Effects` in process.
 - `def exclude_from_training(self, reason: str) -> None`
 - `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]`
 - `def patched(self, change_id: str) -> bool`
+- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Durable output, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect.
 - `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None`
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
 - `def take_steering_messages(self) -> list[Envelope]`
 - `async def interruptible[T](self, reply: Awaitable[T]) -> T`
+- `def take_undelivered(self) -> list[Envelope]` — Messages the run never consumed; the runner hands them to the conversation's next run.
 - `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/core/harness/conversations.md#priority-and-delivery-mode).
 - `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue]) -> T`
 - `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent`
+
+### `LocalRunHandle`
+
+*class* · `src/rollout/core/local/runner.py`
+
+```python
+class LocalRunHandle
+```
+
+A run started by a `LocalRunner`. Its context is available for inspection in tests and tools.
+
+**Methods**
+
+- `def __init__(self, run_id: str, specification: RunSpecification, conversation: ConversationKey | None) -> None`
+- `@property def run_id(self) -> str`
+- `@property def done(self) -> bool`
+- `@property def outcome(self) -> RunOutcome | None`
+- `async def result(self) -> RunOutcome`
+- `async def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]`
+- `@property def task(self) -> asyncio.Task[None] | None`
+- `def attach(self, task: asyncio.Task[None]) -> None`
+- `def finish(self, outcome: RunOutcome) -> None`
+- `def notify(self, event: RunEvent | None = None) -> None` — Wake event streams: a new event was recorded, or the run ended.
+
+### `LocalRunner`
+
+*class* · `src/rollout/core/local/runner.py`
+
+```python
+class LocalRunner
+```
+
+Implements `Runner` in process.
+
+Direct model bindings are served by endpoint factories registered by provider name. Conversations addressed to a
+deployment start a run of its specification when none is live; one run consumes a conversation's messages at a
+time, and messages a run never consumed start the conversation's next run.
+
+**Methods**
+
+- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None) -> None`
+- `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
+- `def run(self, run_id: str) -> LocalRunHandle`
+- `def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]` — The conversation's runs, oldest first.
+- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None) -> LocalRunHandle`
+- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> None`
+- `async def cancel(self, run_id: str, *, reason: str) -> None`
 
 ### `RewardAssignment`
 
@@ -1424,6 +1707,16 @@ class RewardAssignment
 | `slot` | `str` | required |  |
 | `value` | `float` | required |  |
 | `key` | `str` | required |  |
+
+### `RunNotLive`
+
+*class* · `src/rollout/core/local/runner.py`
+
+```python
+class RunNotLive(Exception)
+```
+
+A message was addressed to a run that has ended.
 
 ## `rollout.core.testing`
 

@@ -7,14 +7,15 @@ today and how to read it.
 ## The local run context
 
 `LocalRunContext` implements the run context in process: it owns the history, assigns effect identities, emits
-events, and delivers messages. Nothing persists; a process crash loses the run.
+events, and delivers messages. Nothing persists; a process crash loses the run. The `LocalRunner` creates one per
+run; tests can create one directly with `local_run`.
 
 ```python fragment
 LocalRunContext(
     run_id: str,                                 # r_{ulid}; see rollout.core.contracts.new_run_id
-    task: Task,                                  # its declared model slots and context hints
-    endpoints: Mapping[str, ModelEndpoint],      # one endpoint per model slot the task declares
+    endpoints: Mapping[str, ModelEndpoint],      # one endpoint per model slot
     *,
+    context_hints: ContextHints | None = None,   # the task's hints, for the agent
     conversation: ConversationKey | None = None,
     generation: int = 0,
     on_event: Callable[[RunEvent], None] | None = None,   # called for each event as it is recorded
@@ -94,9 +95,47 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-> **Known gap:** the contract says `seq = 0` is `run.created`, and runs end with `run.completed`, `run.failed` or
-> `run.cancelled`. Those lifecycle events are the runner's job and arrive with the `LocalRunner` (M0 task 5). A bare
-> `LocalRunContext` starts with the first observation.
+A run started by a runner also has lifecycle events: `run.created` at `seq = 0`, and one terminal event. A bare
+`LocalRunContext`, as above, has none of them.
+
+## The local runner
+
+`LocalRunner` runs programs as asyncio tasks in the current process. A run is described by a `RunSpecification`: a
+program, named so that another process could re-create it, and a binding that says which endpoint serves each model
+slot. Direct model bindings name a provider, and the runner creates endpoints with the factory registered for it.
+
+```python
+from rollout.core.harness import DirectModel, ModelBinding, RunBinding, RunSpecification, RunStatus, agent_program
+from rollout.core.local import LocalRunner
+from rollout.core.testing import ScriptedModelEndpoint
+
+
+async def run_with_runner() -> None:
+    endpoint = ScriptedModelEndpoint(["4"])
+    runner = LocalRunner(providers={"scripted": lambda model: endpoint})
+    specification = RunSpecification(
+        program=agent_program(Addition),                  # the task loop for Addition with the default Agent
+        binding=RunBinding(models={"policy": ModelBinding(direct=DirectModel(provider="scripted", model="script"))}),
+    )
+    handle = await runner.start(specification, labels={"suite": "smoke"})
+
+    types = [event.type async for event in handle.events()]   # streams until the run ends
+    assert types[0] is RunEventType.RUN_CREATED and types[-1] is RunEventType.RUN_COMPLETED
+    assert (await handle.result()).status is RunStatus.COMPLETED
+
+
+asyncio.run(run_with_runner())
+```
+
+| Runner method | Does |
+|---|---|
+| `await start(specification, *, run_id=None, conversation=None, labels=None)` | starts a run; returns a handle |
+| `await send(to, envelope, *, priority=NORMAL, idempotency_key=None, sender=None)` | delivers a message ([conversations](conversations.md)) |
+| `await cancel(run_id, *, reason)` | cancels a run; `teardown` still runs |
+| `deploy(Deployment(name, specification))` | makes an agent addressable by conversation |
+
+A handle has `run_id`, `await result()` (a `RunOutcome`: `status`, `failure_class`, `detail`), `events(from_seq=0)`,
+which replays and then follows the run's events, and `context`, the run's `LocalRunContext`.
 
 ### Events emitted today
 
@@ -121,7 +160,7 @@ The full catalog, including the events that later layers emit, is in [run events
 
 `rollout()` raises when an episode cannot finish. `teardown` has run by then.
 
-| Raised | Cause | The runner (M0 task 5) records |
+| Raised | Cause | The runner records |
 |---|---|---|
 | `InvalidObservation` | a hook returned an observation that breaks the [validation rules](tasks.md#validation) | `run.failed` with class `INVALID_OBSERVATION` |
 | the hook's exception | a task hook raised | `run.failed` with class `TASK_ERROR` |

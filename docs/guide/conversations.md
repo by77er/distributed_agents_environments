@@ -4,9 +4,8 @@ Agents that talk with people or with other agents receive messages over time. A 
 `WaitFor`, and messages that arrive while the agent is busy are queued, merged into the next observation, or
 interrupt the reply in progress, depending on their priority.
 
-> **Today:** the `LocalRunner`, which routes a message to a conversation's run by its key and starts a run when
-> none is live, is M0 task 5. Until then, deliver messages to a run directly with
-> `LocalRunContext.deliver(envelope, mode)`, as the examples below do.
+The examples on this page deliver messages straight to a run context with `deliver(envelope, mode)`, to show
+the loop's behavior. Applications send through the runner instead: see [the last section](#sending-and-replying).
 
 ## Messages
 
@@ -150,6 +149,44 @@ asyncio.run(interrupted_episode())
 
 ## Sending and replying
 
-Designed, arriving with the `LocalRunner` (M0 task 5): `runner.send(address, envelope, priority=...)` from outside
-a run, `run.send(...)` between runs, and `run.emit("reply", content, to=run.conversation.origin)` for replies that
-connectors deliver to people. See the design in [conversations](../core/harness/conversations.md).
+An addressable agent is a **deployment**: a name and a run specification. A message sent to a conversation of the
+deployment (`{deployment}/{key}`) starts a run when none is live, and otherwise reaches the live run with the mode
+its priority maps to. Messages are deduplicated by `idempotency_key`. Messages a run never consumed start the
+conversation's next run. Replies leave a run with `run.emit`, which records an `output.emitted` event that clients
+and connectors read.
+
+```python
+from rollout.core.harness import Address, Deployment, DirectModel, ModelBinding, RunBinding, RunSpecification
+from rollout.core.harness import agent_program
+from rollout.core.local import LocalRunner
+from rollout.core.testing import ScriptedModelEndpoint
+
+
+class Replying(Support):
+    async def respond(self, run: RunContext, reply: Message) -> WaitFor:
+        await run.emit("reply", reply.text, to=run.conversation.origin if run.conversation else None)
+        return self.wait
+
+
+async def through_the_runner() -> None:
+    endpoint = ScriptedModelEndpoint(["Hello! What can I do for you?"])
+    runner = LocalRunner(providers={"scripted": lambda model: endpoint})
+    binding = RunBinding(models={"policy": ModelBinding(direct=DirectModel(provider="scripted", model="script"))})
+    runner.deploy(Deployment(name="acme/support", specification=RunSpecification(program=agent_program(Replying),
+                                                                                binding=binding)))
+
+    conversation = Address(kind="conversation", value="acme/support/user:42")
+    await runner.send(conversation, hello, idempotency_key="chat-event-1")
+    await runner.send(conversation, hello, idempotency_key="chat-event-1")   # a retry: deduplicated
+
+    (run,) = runner.conversation_runs("acme/support", "user:42")
+    await run.result()                                   # ends when no message arrives within 50 ms
+    replies = [event.payload for event in run.context.events if event.type is RunEventType.OUTPUT_EMITTED]
+    assert [reply["payload"] for reply in replies] == ["Hello! What can I do for you?"]
+
+
+asyncio.run(through_the_runner())
+```
+
+`run.send(...)` between runs and `run.spawn(...)` for child runs are designed but not built yet. See the design in
+[conversations](../core/harness/conversations.md).

@@ -8,15 +8,16 @@ Every Python example in this guide runs as part of the test suite (`tests/test_d
 
 ## What you can use today
 
-The project is in milestone M0 of the [development plan](../development/plan.md): the core loop, without a GPU.
+The project is in milestone M0 of the [development plan](../development/plan.md): the core loop, without a GPU. Next
+comes P1, a project assistant on a third-party model, then the durable runner (M2), then RL (M1).
 
 | Available now | Not yet |
 |---|---|
-| Tasks, agents, `@tool` methods, observations, rewards | `LocalRunner` (start, send, cancel, event streams), M0 task 5 |
-| Running an episode in process: `LocalRunContext` + `rollout()` | Model adapters for OpenAI-compatible servers and Anthropic, M0 task 6 |
-| Message delivery by mode: queue, steer, interrupt | Imported tools (`imports`, `ToolBinding`) |
-| Effect identities, argument digests, run events | The recorder, rollout jobs, samples, weight updates (M1) |
-| A scripted model endpoint for tests | The durable runner (M2) |
+| Tasks, agents, `@tool` methods, observations, rewards | The Responses API adapter on a Codex login (P1) |
+| `LocalRunner`: start, send, cancel, event streams, conversations | Imported tools (`imports`, `ToolBinding`) |
+| Message delivery by mode: queue, steer, interrupt | The durable runner (M2) |
+| Effect identities, argument digests, run events, `run.emit` | The recorder, rollout jobs, samples, weight updates (M1) |
+| A scripted model endpoint for tests | |
 
 Until a model adapter exists, the model is a `ScriptedModelEndpoint` from `rollout.core.testing`, or any object
 that implements the `ModelEndpoint` protocol.

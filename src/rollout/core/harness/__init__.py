@@ -15,6 +15,24 @@ from rollout.core.harness.loop import rollout
 from rollout.core.harness.model import Effects, EndpointModel
 from rollout.core.harness.observation import End, Ending, InvalidObservation, Observation, WaitFor
 from rollout.core.harness.program import AgentProgram, Program
+from rollout.core.harness.runner import (
+    Deployment,
+    DirectModel,
+    ModelBinding,
+    ProgramReference,
+    RecordedModel,
+    RunBinding,
+    RunHandle,
+    Runner,
+    RunOutcome,
+    RunSpecification,
+    RunStatus,
+    SamplingParameters,
+    agent_program,
+    instantiate,
+    register,
+    resolve,
+)
 from rollout.core.harness.task import ModelSlot, Task
 from rollout.core.harness.tools import tool
 
@@ -26,6 +44,8 @@ __all__ = [
     "ConversationKey",
     "DeliveryMode",
     "DeliveryPolicy",
+    "Deployment",
+    "DirectModel",
     "Effects",
     "End",
     "Ending",
@@ -36,14 +56,28 @@ __all__ = [
     "Interrupted",
     "InvalidObservation",
     "Model",
+    "ModelBinding",
     "ModelSlot",
     "Observation",
     "Priority",
     "Program",
+    "ProgramReference",
+    "RecordedModel",
+    "RunBinding",
     "RunContext",
+    "RunHandle",
+    "RunOutcome",
+    "RunSpecification",
+    "RunStatus",
+    "Runner",
+    "SamplingParameters",
     "Task",
     "Turn",
     "WaitFor",
+    "agent_program",
+    "instantiate",
+    "register",
+    "resolve",
     "rollout",
     "tool",
 ]

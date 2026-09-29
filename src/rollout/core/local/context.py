@@ -23,11 +23,10 @@ from rollout.core.contracts import (
     session_id,
 )
 from rollout.core.harness.context import Interrupted, Model
-from rollout.core.harness.conversations import ConversationKey, DeliveryMode, Envelope
+from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope
 from rollout.core.harness.history import ContextHints, History, Turn
 from rollout.core.harness.model import EFFECT_ID_META, EndpointModel
 from rollout.core.harness.observation import Observation, WaitFor
-from rollout.core.harness.task import Task
 
 
 @dataclass(frozen=True)
@@ -43,9 +42,9 @@ class LocalRunContext:
     def __init__(
         self,
         run_id: str,
-        task: Task,
         endpoints: Mapping[str, ModelEndpoint],
         *,
+        context_hints: ContextHints | None = None,
         conversation: ConversationKey | None = None,
         generation: int = 0,
         on_event: Callable[[RunEvent], None] | None = None,
@@ -53,7 +52,7 @@ class LocalRunContext:
         self._run_id = run_id
         self._conversation = conversation
         self._generation = generation
-        self._context_hints = task.context_hints
+        self._context_hints = context_hints or ContextHints()
         self._random = random.Random(run_id)
         self._history = History()
         self._turn = 0
@@ -63,11 +62,8 @@ class LocalRunContext:
         self.rewards: list[RewardAssignment] = []
         self.excluded_from_training: str | None = None
 
-        missing = set(task.models) - set(endpoints)
-        if missing:
-            raise ValueError(f"no endpoint bound for model slots {sorted(missing)}")
         self._models: dict[str, Model] = {
-            slot: EndpointModel(endpoints[slot], session_id(run_id, slot), self) for slot in task.models
+            slot: EndpointModel(endpoint, session_id(run_id, slot), self) for slot, endpoint in endpoints.items()
         }
 
         # Mailbox. `_held` keeps undelivered messages in arrival order with their delivery mode.
@@ -130,6 +126,17 @@ class LocalRunContext:
 
     def patched(self, change_id: str) -> bool:
         return True
+
+    async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
+        """Durable output, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect."""
+        arguments: dict[str, JsonValue] = {"kind": kind, "payload": payload}
+        if to is not None:
+            arguments["to"] = to.model_dump(mode="json")
+
+        async def execute(effect_id: str, arguments_digest: str) -> None:
+            self.record_event(RunEventType.OUTPUT_EMITTED, {**arguments, "effect_id": effect_id})
+
+        await self.perform(EffectKind.OUTPUT_EMIT, arguments, execute, completion=lambda _: None)
 
     # RunContext, for the loop
 
@@ -198,6 +205,12 @@ class LocalRunContext:
         return result
 
     # Delivery, for the runner
+
+    def take_undelivered(self) -> list[Envelope]:
+        """Messages the run never consumed; the runner hands them to the conversation's next run."""
+        undelivered = [envelope for envelope, _ in self._held]
+        self._held = []
+        return undelivered
 
     def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None:
         """Deliver a message to this run (docs/core/harness/conversations.md#priority-and-delivery-mode)."""
