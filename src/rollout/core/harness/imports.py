@@ -9,12 +9,16 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
-from rollout.core.contracts import ContractModel, EffectKind, ToolResult, ToolSpecification
+from rollout.core.contracts import ContractModel, EffectKind, RetryClass, ToolResult, ToolSpecification
 from rollout.core.harness.model import Effects
 
 
 class ToolSet(Protocol):
-    """A provider of tools: in process, or a client of an MCP server, an HTTP service or another agent."""
+    """A provider of tools: in process, or a client of an MCP server, an HTTP service or another agent.
+
+    A tool set that performs each `effect_id` at most once can say so with a `deduplicates = True` attribute; its
+    side-effecting tools are then re-executed after a crash rather than guarded (docs/contracts/effects.md).
+    """
 
     def specifications(self) -> Sequence[ToolSpecification]: ...
 
@@ -59,9 +63,12 @@ class Tools:
         async def execute(effect_id: str, arguments_digest: str) -> ToolResult:
             return await tool_set.call(name, arguments, effect_id=effect_id, arguments_digest=arguments_digest)
 
+        specification = next(s for s in tool_set.specifications() if s.name == name)
+        side_effecting = specification.retry_class in (RetryClass.SIDE_EFFECTING, RetryClass.UNKNOWN)
         return await self._effects.perform(
             EffectKind.TOOL_CALL,
             {"tool": name, "arguments": dict(arguments)},
             execute,
             completion=lambda result: result.model_dump(mode="json", exclude_none=True),
+            guard=side_effecting and not getattr(tool_set, "deduplicates", False),
         )

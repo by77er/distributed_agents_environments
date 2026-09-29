@@ -16,6 +16,7 @@ from rollout.core.contracts import (
     new_ulid,
 )
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope, Priority
+from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.program import Program
@@ -127,9 +128,11 @@ class LocalRunner:
         *,
         providers: Mapping[str, EndpointFactory] | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
+        environments: EnvironmentService | None = None,
     ) -> None:
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
+        self._environment_service = environments
         self._runs: dict[str, LocalRunHandle] = {}
         self._deployments: dict[str, Deployment] = {}
         self._conversations: dict[str, _Conversation] = {}
@@ -171,6 +174,7 @@ class LocalRunner:
             endpoints,
             context_hints=program.context_hints(),
             tool_sets=tool_sets,
+            environment_service=self._environment_service,
             conversation=conversation,
             on_event=handle.notify,
         )
@@ -270,6 +274,8 @@ class LocalRunner:
             detail = f"{type(error).__name__}: {error}"
             outcome = RunOutcome(status=RunStatus.FAILED, failure_class=RunFailureClass.TASK_ERROR, detail=detail)
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
+        if context.environments is not None:
+            await context.environments.release_all()  # environments the run still owns (P12)
         handle.finish(outcome)
         self._hand_over(handle)
 

@@ -60,3 +60,46 @@ def test_a_run_resumes_after_the_process_is_killed(tmp_path: Path) -> None:
     assert replies == [f"reply to turn {turn}" for turn in range(1, 6)]
     assert events[-1].type is RunEventType.RUN_COMPLETED
     store.close()
+
+
+GUARD_CHILD = Path(__file__).with_name("guard_child.py")
+
+
+def test_a_command_interrupted_by_a_crash_is_not_run_again(tmp_path: Path) -> None:
+    def start(mode: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            [sys.executable, str(GUARD_CHILD), mode, str(tmp_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    def entries() -> list[dict[str, str]]:
+        path = tmp_path / "ledger.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    first = start("start")
+    deadline = time.monotonic() + 60
+    while not any(entry["operation"] == "execute" for entry in entries()):  # the command is running
+        assert time.monotonic() < deadline and first.poll() is None, "the command never started"
+        time.sleep(0.1)
+    os.kill(first.pid, signal.SIGKILL)
+    first.wait()
+
+    second = start("resume")
+    output, _ = second.communicate(timeout=120)
+    assert second.returncode == 0, output
+    assert json.loads(output.split("OUTCOME ", 1)[1].splitlines()[0])["status"] == "completed"
+
+    operations = [entry["operation"] for entry in entries()]
+    assert operations.count("create") == 1  # the creation was recorded before the crash
+    assert operations.count("execute") == 1  # guarded: never started a second time
+    assert operations.count("destroy") == 1  # the run's environment is released when it ends
+
+    store = RunStore(tmp_path / "state" / "runs.sqlite")
+    events = store.events("r_guardtest")
+    completed = [e.payload for e in events if e.type is RunEventType.EFFECT_COMPLETED]
+    assert any(isinstance(p, dict) and p.get("status") == "outcome_unknown" for p in completed)
+    results = [e.payload["payload"] for e in events if e.type is RunEventType.OUTPUT_EMITTED]  # type: ignore[index, call-overload]
+    assert results == ["outcome unknown"]
+    store.close()

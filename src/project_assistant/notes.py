@@ -60,6 +60,9 @@ SPECIFICATIONS = [
 class NotesStore:
     """Implements `ToolSet`. One store per project; every conversation shares it."""
 
+    deduplicates = True
+    """Saves are performed at most once per effect_id, so they need no attempt marker."""
+
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()

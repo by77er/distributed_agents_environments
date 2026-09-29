@@ -20,9 +20,10 @@ from datetime import UTC, datetime, timedelta
 from dbos import DBOS
 from pydantic import JsonValue
 
-from rollout.core.contracts import EffectKind, ModelEndpoint, RunEvent, RunEventType
+from rollout.core.contracts import EffectKind, ModelEndpoint, OutcomeUnknown, RunEvent, RunEventType
 from rollout.core.harness.context import Interrupted
 from rollout.core.harness.conversations import ConversationKey, DeliveryMode, Envelope
+from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.history import ContextHints
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.observation import WaitFor
@@ -55,15 +56,19 @@ class DurableRunContext(LocalRunContext):
         started_at: datetime,
         context_hints: ContextHints | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
+        environment_service: EnvironmentService | None = None,
         conversation: ConversationKey | None = None,
         on_event: Callable[[RunEvent], None] | None = None,
+        mark_attempt: Callable[[str], bool] = lambda effect_id: True,
     ) -> None:
         self._clock = started_at
+        self._mark_attempt = mark_attempt
         super().__init__(
             run_id,
             endpoints,
             context_hints=context_hints,
             tool_sets=tool_sets,
+            environment_service=environment_service,
             conversation=conversation,
             on_event=on_event,
         )
@@ -80,11 +85,20 @@ class DurableRunContext(LocalRunContext):
     # Effects: each one is a DBOS step.
 
     async def _execute_effect[T](
-        self, kind: EffectKind, identifier: str, arguments_hash: str, execute: Callable[[str, str], Awaitable[T]]
+        self,
+        kind: EffectKind,
+        identifier: str,
+        arguments_hash: str,
+        execute: Callable[[str, str], Awaitable[T]],
+        guard: bool,
     ) -> T:
         self._check_cancelled()
 
         async def step() -> tuple[T, str]:
+            # The step body runs only if DBOS has no recorded result for it. For a guarded effect, a marker left by
+            # an earlier attempt means a crash interrupted it: it may have happened, so it must not run again.
+            if guard and not self._mark_attempt(identifier):
+                raise OutcomeUnknown(identifier)
             return await execute(identifier, arguments_hash), _utc_now()
 
         result, completed_at = await DBOS.run_step_async(None, step)

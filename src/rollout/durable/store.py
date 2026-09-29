@@ -47,6 +47,7 @@ class RunStore:
                 address TEXT NOT NULL, run_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (address, run_id));
             CREATE TABLE IF NOT EXISTS messages (
                 message_id TEXT PRIMARY KEY, address TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS attempts (effect_id TEXT PRIMARY KEY);
             """
         )
         self._signals: dict[str, asyncio.Event] = defaultdict(asyncio.Event)
@@ -123,6 +124,14 @@ class RunStore:
             cursor = self._database.execute(
                 "INSERT OR IGNORE INTO messages (message_id, address) VALUES (?, ?)", (message_id, address)
             )
+        return cursor.rowcount == 1
+
+    # Attempt markers
+
+    def mark_attempt(self, effect_id: str) -> bool:
+        """Record that a guarded effect is starting; False if an earlier attempt already started it."""
+        with self._lock:
+            cursor = self._database.execute("INSERT OR IGNORE INTO attempts (effect_id) VALUES (?)", (effect_id,))
         return cursor.rowcount == 1
 
     # Events

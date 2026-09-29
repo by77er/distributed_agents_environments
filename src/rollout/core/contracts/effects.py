@@ -33,6 +33,14 @@ class EffectStatus(StrEnum):
     """A possible duplicate of a side effect that could not be deduplicated; never silently retried."""
 
 
+class OutcomeUnknown(Exception):
+    """A guarded effect was interrupted by a crash in an earlier attempt: it may or may not have happened."""
+
+    def __init__(self, effect_id: str) -> None:
+        super().__init__(f"effect {effect_id} may or may not have happened: a crash interrupted it")
+        self.effect_id = effect_id
+
+
 class CallContext(ContractModel):
     """Assembled by the runner, never by task code."""
 

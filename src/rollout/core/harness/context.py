@@ -13,6 +13,7 @@ from pydantic import JsonValue
 
 from rollout.core.contracts import CapabilityContract, Message, ToolChoice, ToolSpecification, Usage
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope
+from rollout.core.harness.environments import Environments
 from rollout.core.harness.history import ContextHints, History
 from rollout.core.harness.imports import Tools
 from rollout.core.harness.observation import Observation, WaitFor
@@ -74,6 +75,11 @@ class RunContext(Protocol):
     @property
     def tools(self) -> Tools:
         """Imported tools; each call is a `tool.call` effect."""
+        ...
+
+    @property
+    def environments(self) -> Environments | None:
+        """Creates environments the run owns; None when the runner has no environment backend."""
         ...
 
     @property

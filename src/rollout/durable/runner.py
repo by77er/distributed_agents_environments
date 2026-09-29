@@ -31,6 +31,7 @@ from rollout.core.contracts import (
     new_ulid,
 )
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope, Priority
+from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.runner import Deployment, RunOutcome, RunSpecification, RunStatus, instantiate
@@ -110,8 +111,10 @@ class DurableRunner:
         *,
         providers: Mapping[str, EndpointFactory] | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
+        environments: EnvironmentService | None = None,
         application: str = "rollout",
     ) -> None:
+        self._environment_service = environments
         directory.mkdir(parents=True, exist_ok=True)
         self.store = RunStore(directory / "runs.sqlite")
         self._providers = dict(providers or {})
@@ -239,8 +242,10 @@ class DurableRunner:
             started_at=datetime.fromisoformat(started_at),
             context_hints=program.context_hints(),
             tool_sets=resolve_tool_sets(program, specification.binding, self._tool_sets),
+            environment_service=self._environment_service,
             conversation=conversation,
             on_event=self.store.append,
+            mark_attempt=self.store.mark_attempt,
         )
         context.record_event(
             RunEventType.RUN_CREATED,
@@ -266,6 +271,8 @@ class DurableRunner:
             detail = f"{type(error).__name__}: {error}"
             outcome = RunOutcome(status=RunStatus.FAILED, failure_class=RunFailureClass.TASK_ERROR, detail=detail)
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
+        if context.environments is not None:
+            await context.environments.release_all()  # environments the run still owns (P12)
         undelivered = await context.undelivered()
         self.store.finish_run(run_id, outcome.status.value, outcome.model_dump(mode="json", exclude_none=True))
         return {"undelivered": [envelope.model_dump(mode="json") for envelope in undelivered]}

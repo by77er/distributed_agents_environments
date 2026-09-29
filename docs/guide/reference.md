@@ -6,8 +6,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
-- **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
+- **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout.durable`](#rolloutdurable)** — The durability layer: runs that survive crashes and restarts, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
@@ -193,9 +193,10 @@ How a run performs effects. The runner decides what performing means: a direct c
 
 **Methods**
 
-- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue]) -> T` — Assign the next `effect_id`, digest `arguments`, and run `execute(effect_id, arguments_digest)`.
+- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue], guard: bool = False) -> T` — Assign the next `effect_id`, digest `arguments`, and run `execute(effect_id, arguments_digest)`.
   
-    `completion` renders the result for the run's events.
+    `completion` renders the result for the run's events. `guard` marks a side effect whose receiver cannot
+  deduplicate: a durable runner performs it at most once, raising `OutcomeUnknown` after a crash interrupted it.
 
 ### `End`
 
@@ -257,6 +258,88 @@ A message delivered to a run.
 | `reply_to` | `Address \| None` | `None` |  |
 | `message_id` | `str` | `''` | Set by the runner: the sender's `effect_id` or the caller's idempotency key. |
 | `sender` | `str \| None` | `None` | Set by the runner; never trusted from the payload. |
+
+### `Environment`
+
+*class* · `src/rollout/core/harness/environments.py`
+
+```python
+class Environment
+```
+
+A handle to one environment. Its methods are effects.
+
+**Methods**
+
+- `def __init__(self, environment_id: str, service: EnvironmentService, effects: Effects) -> None`
+- `async def execute(self, command: str, *, timeout_seconds: float = 120.0, cwd: str | None = None) -> ExecutionResult` — Run a shell command. Raises `OutcomeUnknown` if a crash interrupted an earlier attempt of this effect.
+- `async def put(self, path: str, data: bytes | str) -> None` — Write a file (relative paths are under the working directory).
+- `async def get(self, path: str) -> bytes`
+- `async def destroy(self) -> None`
+
+### `Environments`
+
+*class* · `src/rollout/core/harness/environments.py`
+
+```python
+class Environments
+```
+
+`run.environments`: creates environments the run owns.
+
+**Methods**
+
+- `def __init__(self, service: EnvironmentService, effects: Effects) -> None`
+- `async def create(self, specification: EnvironmentSpecification | None = None) -> Environment`
+- `def attach(self, environment_id: str) -> Environment` — A handle to an existing environment.
+- `async def release_all(self) -> None` — Destroy every environment the run created, directly (not as effects); for runners when a run ends.
+
+### `EnvironmentService`
+
+*class* · `src/rollout/core/harness/environments.py`
+
+```python
+class EnvironmentService(Protocol)
+```
+
+An environment backend. Every method must be safe to repeat with the same arguments, except `execute`.
+
+**Methods**
+
+- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None` — Create the environment, or do nothing if it already exists.
+- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None) -> ExecutionResult`
+- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
+- `async def get(self, environment_id: str, path: str) -> bytes`
+- `async def destroy(self, environment_id: str) -> None` — Destroy the environment, or do nothing if it is already gone.
+
+### `EnvironmentSpecification`
+
+*class* · `src/rollout/core/harness/environments.py`
+
+```python
+class EnvironmentSpecification(ContractModel)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `image` | `str` | `'alpine'` | A base image the backend knows, e.g. `alpine` (latest) or `alpine:3.24.2`. |
+| `setup` | `FrozenSequence[str]` | `()` | Shell commands run once at creation: a recipe for identical start states. |
+| `labels` | `Mapping[str, str]` | `Field(default_factory=dict[str, str])` |  |
+
+### `ExecutionResult`
+
+*class* · `src/rollout/core/harness/environments.py`
+
+```python
+class ExecutionResult(ContractModel)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `exit_code` | `int \| None` | required | None when the command timed out. |
+| `output` | `str` | required | Standard output and standard error, interleaved. |
+| `truncated` | `bool` | `False` |  |
+| `timed_out` | `bool` | `False` |  |
 
 ### `History`
 
@@ -523,6 +606,7 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `@property def models(self) -> Mapping[str, Model]`
 - `@property def model(self) -> Model` — `models["policy"]`.
 - `@property def tools(self) -> Tools` — Imported tools; each call is a `tool.call` effect.
+- `@property def environments(self) -> Environments | None` — Creates environments the run owns; None when the runner has no environment backend.
 - `@property def random(self) -> random.Random` — Seeded from `run_id`.
 - `@property def context_hints(self) -> ContextHints`
 - `def now(self) -> datetime` — The current time. Use it instead of the wall clock, which durable runs cannot replay.
@@ -708,6 +792,9 @@ class ToolSet(Protocol)
 ```
 
 A provider of tools: in process, or a client of an MCP server, an HTTP service or another agent.
+
+A tool set that performs each `effect_id` at most once can say so with a `deduplicates = True` attribute; its
+side-effecting tools are then re-executed after a crash rather than guarded (docs/contracts/effects.md).
 
 **Methods**
 
@@ -1220,6 +1307,20 @@ A ULID: 48 bits of Unix time in milliseconds, then 80 random bits, in Crockford 
 
 Minted by runners and services, never by task code (which has no ambient randomness under a durable runner).
 
+### `OutcomeUnknown`
+
+*class* · `src/rollout/core/contracts/effects.py`
+
+```python
+class OutcomeUnknown(Exception)
+```
+
+A guarded effect was interrupted by a crash in an earlier attempt: it may or may not have happened.
+
+**Methods**
+
+- `def __init__(self, effect_id: str) -> None`
+
 ### `Overloaded`
 
 *class* · `src/rollout/core/contracts/model_endpoint.py`
@@ -1677,7 +1778,7 @@ Implements `RunContext` and `Effects` in process.
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, conversation: ConversationKey | None = None, generation: int = 0, on_event: Callable[[RunEvent], None] | None = None) -> None`
 - `@property def run_id(self) -> str`
 - `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int`
@@ -1685,6 +1786,7 @@ Implements `RunContext` and `Effects` in process.
 - `@property def models(self) -> Mapping[str, Model]`
 - `@property def model(self) -> Model`
 - `@property def tools(self) -> Tools`
+- `@property def environments(self) -> Environments | None`
 - `@property def random(self) -> random.Random`
 - `@property def context_hints(self) -> ContextHints`
 - `def now(self) -> datetime`
@@ -1699,7 +1801,7 @@ Implements `RunContext` and `Effects` in process.
 - `async def interruptible[T](self, reply: Awaitable[T]) -> T`
 - `def take_undelivered(self) -> list[Envelope]` — Messages the run never consumed; the runner hands them to the conversation's next run.
 - `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/core/harness/conversations.md#priority-and-delivery-mode).
-- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue]) -> T`
+- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue], guard: bool = False) -> T`
 - `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent`
 
 ### `LocalRunHandle`
@@ -1742,7 +1844,7 @@ time, and messages a run never consumed start the conversation's next run.
 
 **Methods**
 
-- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None) -> None`
+- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None) -> None`
 - `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
 - `def run(self, run_id: str) -> LocalRunHandle`
 - `def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]` — The conversation's runs, oldest first.
@@ -1859,7 +1961,7 @@ class DurableRunContext(LocalRunContext)
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, started_at: datetime, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, started_at: datetime, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None, mark_attempt: Callable[[str], bool] = lambda effect_id: True) -> None`
 - `def now(self) -> datetime`
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
 - `async def take_steering_messages(self) -> list[Envelope]`
@@ -1898,7 +2000,7 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 
 **Methods**
 
-- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, application: str = 'rollout') -> None`
+- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, application: str = 'rollout') -> None`
 - `async def launch(self) -> None` — Start DBOS, which recovers the runs a crash left unfinished, and follow them.
 - `async def close(self) -> None`
 - `def deploy(self, deployment: Deployment) -> None`
@@ -1942,6 +2044,7 @@ class RunStore
 - `def conversation_key(self, address: str) -> JsonValue`
 - `def conversation_runs(self, address: str) -> list[str]`
 - `def claim_message(self, message_id: str, address: str) -> bool` — Record a message as delivered; False if it already was (a retry).
+- `def mark_attempt(self, effect_id: str) -> bool` — Record that a guarded effect is starting; False if an earlier attempt already started it.
 - `def append(self, event: RunEvent) -> None`
 - `def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]`
 - `async def changed(self, run_id: str, wait_seconds: float) -> None` — Wait until the run records something, or `wait_seconds` pass (other processes write without notifying).

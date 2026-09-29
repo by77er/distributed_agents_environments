@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from rollout.core.contracts import Message, Role, Text, ToolResult, ToolSpecification
+from rollout.core.contracts import Message, OutcomeUnknown, Role, Text, ToolResult, ToolSpecification
 from rollout.core.harness.context import RunContext
 from rollout.core.harness.conversations import Envelope
 from rollout.core.harness.history import ContextHints
@@ -102,6 +102,8 @@ class Task:
         if name in run.tools:
             try:
                 return await run.tools.call(name, arguments)
+            except OutcomeUnknown:
+                return error_result(f"{name} may or may not have taken effect: the system restarted during it")
             except Exception as error:  # a platform failure: recorded as a failed effect, shown to the model
                 return error_result(f"{name} is unavailable: {type(error).__name__}: {error}")
         return error_result(f"unknown tool {name!r}")

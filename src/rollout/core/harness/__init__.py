@@ -10,6 +10,13 @@ from rollout.core.harness.conversations import (
     Envelope,
     Priority,
 )
+from rollout.core.harness.environments import (
+    Environment,
+    Environments,
+    EnvironmentService,
+    EnvironmentSpecification,
+    ExecutionResult,
+)
 from rollout.core.harness.history import ContextHints, History, HistoryShape, Turn
 from rollout.core.harness.imports import ToolBinding, Tools, ToolSet
 from rollout.core.harness.loop import rollout
@@ -52,6 +59,11 @@ __all__ = [
     "Ending",
     "EndpointModel",
     "Envelope",
+    "Environment",
+    "EnvironmentService",
+    "EnvironmentSpecification",
+    "Environments",
+    "ExecutionResult",
     "History",
     "HistoryShape",
     "Interrupted",

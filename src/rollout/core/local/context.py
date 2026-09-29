@@ -15,6 +15,7 @@ from rollout.core.contracts import (
     EffectStatus,
     Message,
     ModelEndpoint,
+    OutcomeUnknown,
     RunEvent,
     RunEventType,
     arguments_digest,
@@ -24,6 +25,7 @@ from rollout.core.contracts import (
 )
 from rollout.core.harness.context import Interrupted, Model
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope
+from rollout.core.harness.environments import Environments, EnvironmentService
 from rollout.core.harness.history import ContextHints, History, Turn
 from rollout.core.harness.imports import Tools, ToolSet
 from rollout.core.harness.model import EFFECT_ID_META, EndpointModel
@@ -47,6 +49,7 @@ class LocalRunContext:
         *,
         context_hints: ContextHints | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
+        environment_service: EnvironmentService | None = None,
         conversation: ConversationKey | None = None,
         generation: int = 0,
         on_event: Callable[[RunEvent], None] | None = None,
@@ -69,6 +72,7 @@ class LocalRunContext:
         }
 
         self._tools = Tools(tool_sets or {}, self)
+        self._environments = Environments(environment_service, self) if environment_service is not None else None
 
         # Mailbox. `_held` keeps undelivered messages in arrival order with their delivery mode.
         self._held: list[tuple[Envelope, DeliveryMode]] = []
@@ -107,6 +111,10 @@ class LocalRunContext:
     @property
     def tools(self) -> Tools:
         return self._tools
+
+    @property
+    def environments(self) -> Environments | None:
+        return self._environments
 
     @property
     def random(self) -> random.Random:
@@ -245,6 +253,7 @@ class LocalRunContext:
         execute: Callable[[str, str], Awaitable[T]],
         *,
         completion: Callable[[T], JsonValue],
+        guard: bool = False,
     ) -> T:
         identifier = effect_id(self._run_id, self._generation, self._next_ordinal)
         self._next_ordinal += 1
@@ -256,7 +265,10 @@ class LocalRunContext:
         if kind is EffectKind.MODEL_SAMPLE:
             self._samples_in_flight.append(identifier)
         try:
-            result = await self._execute_effect(kind, identifier, arguments_hash, execute)
+            result = await self._execute_effect(kind, identifier, arguments_hash, execute, guard)
+        except OutcomeUnknown:
+            self._effect_completed(identifier, EffectStatus.OUTCOME_UNKNOWN, None, error_class="outcome_unknown")
+            raise
         except asyncio.CancelledError:
             self._effect_completed(identifier, EffectStatus.FAILED, None, error_class="cancelled")
             raise
@@ -270,9 +282,14 @@ class LocalRunContext:
         return result
 
     async def _execute_effect[T](
-        self, kind: EffectKind, identifier: str, arguments_hash: str, execute: Callable[[str, str], Awaitable[T]]
+        self,
+        kind: EffectKind,
+        identifier: str,
+        arguments_hash: str,
+        execute: Callable[[str, str], Awaitable[T]],
+        guard: bool,
     ) -> T:
-        """Perform the effect. The durable run context overrides this to make it a recorded step."""
+        """Perform the effect. The durable run context overrides this to make it a recorded, guarded step."""
         return await execute(identifier, arguments_hash)
 
     def _effect_completed(

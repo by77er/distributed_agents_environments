@@ -28,7 +28,14 @@ from rollout.core.contracts.digests import (
     message_digest,
     spec_hash,
 )
-from rollout.core.contracts.effects import CallContext, EffectCompletion, EffectKind, EffectRequest, EffectStatus
+from rollout.core.contracts.effects import (
+    CallContext,
+    EffectCompletion,
+    EffectKind,
+    EffectRequest,
+    EffectStatus,
+    OutcomeUnknown,
+)
 from rollout.core.contracts.events import (
     RUN_EVENT_SCHEMA_VERSION,
     TERMINAL_EVENT_TYPES,
@@ -95,6 +102,7 @@ __all__ = [
     "ModelEndpointError",
     "NamedToolChoice",
     "NeedFullContext",
+    "OutcomeUnknown",
     "Overloaded",
     "Provenance",
     "Reasoning",
