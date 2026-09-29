@@ -19,6 +19,7 @@ suite, and the API reference is generated from the source.
 - [Conversations](docs/guide/conversations.md): `WaitFor`, message kinds, priorities, queue / steer / interrupt
 - [Content](docs/guide/content.md): messages, blocks, tool results, immutability, digests
 - [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, failures
+- [Models](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
 - [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
 
 ## Reference

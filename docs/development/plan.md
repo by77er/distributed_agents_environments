@@ -104,6 +104,6 @@ The environment system; the platform layer (cells, trust tiers, Control API, con
    (`rollout.core.harness`, `rollout.core.local.LocalRunContext`, `rollout.core.testing`).
 4. `@tool` → `ToolSpecification` (pydantic JSON Schema), tool execution and `ToolResult` normalization. **Done**.
 5. `LocalRunner` with conversations and delivery modes. **Done** (`rollout.core.local.LocalRunner`).
-6. The Responses API adapter on the Codex login (P1 needs it first); the Anthropic adapter and `ContextDelta`
-   computation follow when a consumer needs them.
+6. The Responses API adapter on the Codex login (P1 needs it first). **Done** (`rollout.adapters.responses`). The
+   Anthropic adapter and `ContextDelta` computation follow when a consumer needs them.
 7. Examples.

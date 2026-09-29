@@ -13,14 +13,14 @@ comes P1, a project assistant on a third-party model, then the durable runner (M
 
 | Available now | Not yet |
 |---|---|
-| Tasks, agents, `@tool` methods, observations, rewards | The Responses API adapter on a Codex login (P1) |
-| `LocalRunner`: start, send, cancel, event streams, conversations | Imported tools (`imports`, `ToolBinding`) |
-| Message delivery by mode: queue, steer, interrupt | The durable runner (M2) |
-| Effect identities, argument digests, run events, `run.emit` | The recorder, rollout jobs, samples, weight updates (M1) |
-| A scripted model endpoint for tests | |
+| Tasks, agents, `@tool` methods, observations, rewards | Imported tools (`imports`, `ToolBinding`) |
+| `LocalRunner`: start, send, cancel, event streams, conversations | The durable runner (M2) |
+| Message delivery by mode: queue, steer, interrupt | The recorder, rollout jobs, samples, weight updates (M1) |
+| Effect identities, argument digests, run events, `run.emit` | |
+| Real models through the Responses API; a scripted endpoint for tests | |
 
-Until a model adapter exists, the model is a `ScriptedModelEndpoint` from `rollout.core.testing`, or any object
-that implements the `ModelEndpoint` protocol.
+Models are served by the Responses API adapter ([models](models.md)), a `ScriptedModelEndpoint` in tests, or any
+object that implements the `ModelEndpoint` protocol.
 
 ## Pages
 
@@ -33,6 +33,7 @@ that implements the `ModelEndpoint` protocol.
 | [Conversations](conversations.md) | wait for messages, and handle messages that arrive mid-turn |
 | [Content](content.md) | build and read messages, tool calls, tool results; digests |
 | [Runs and events](runs-and-events.md) | understand what a run records: effects, identifiers, events, failures |
+| [Models](models.md) | run against a real model through the Responses API |
 | [Testing](testing.md) | test tasks and agents with a scripted model |
 | [API reference](reference.md) | look up any public name |
 

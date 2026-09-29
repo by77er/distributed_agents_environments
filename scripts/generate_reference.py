@@ -24,6 +24,7 @@ PUBLIC_MODULES = [
     ("rollout.core.contracts", "Types that cross layers: canonical content, identifiers, digests, effects, events."),
     ("rollout.core.local", "In-process implementations for the local profile."),
     ("rollout.core.testing", "Test doubles: a scripted model endpoint and helpers."),
+    ("rollout.adapters.responses", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
 ]
 
 

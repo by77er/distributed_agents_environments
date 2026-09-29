@@ -13,8 +13,10 @@ from rollout.core.contracts import (
     ContextDelta,
     ContractViolation,
     EffectKind,
+    InternalError,
     Message,
     ModelEndpoint,
+    Overloaded,
     SampleRequest,
     SampleResult,
     ToolChoice,
@@ -49,7 +51,11 @@ class Effects(Protocol):
 class EndpointModel:
     """A model slot bound to an endpoint. Sends the full context; context deltas come with the direct adapters."""
 
-    def __init__(self, endpoint: ModelEndpoint, session_id: str, effects: Effects) -> None:
+    def __init__(
+        self, endpoint: ModelEndpoint, session_id: str, effects: Effects, *, retries: int = 3, backoff: float = 1.0
+    ) -> None:
+        self._retries = retries
+        self._backoff = backoff
         self._endpoint = endpoint
         self._session_id = session_id
         self._effects = effects
@@ -100,7 +106,7 @@ class EndpointModel:
                 tool_choice=tool_choice,
             )
             try:
-                return await self._endpoint.sample(request)
+                return await self._sample_with_retries(request)
             except asyncio.CancelledError:
                 with contextlib.suppress(Exception):
                     await self._endpoint.cancel(effect_id)
@@ -114,3 +120,17 @@ class EndpointModel:
         )
         self._usage = result.usage
         return result.message.model_copy(update={"meta": {**result.message.meta, EFFECT_ID_META: sampled_effect_id}})
+
+    async def _sample_with_retries(self, request: SampleRequest) -> SampleResult:
+        """Retry overloaded and failing endpoints with exponential backoff; other errors propagate."""
+        for attempt in range(self._retries + 1):
+            try:
+                return await self._endpoint.sample(request)
+            except (Overloaded, InternalError) as error:
+                if attempt == self._retries:
+                    raise
+                delay = self._backoff * 2**attempt
+                if isinstance(error, Overloaded) and error.retry_after is not None:
+                    delay = max(delay, error.retry_after)
+                await asyncio.sleep(delay)
+        raise AssertionError("unreachable")

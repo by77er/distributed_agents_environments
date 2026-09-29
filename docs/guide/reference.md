@@ -10,6 +10,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
+- **[`rollout.adapters.responses`](#rolloutadaptersresponses)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 
 ## `rollout.core.harness`
 
@@ -230,7 +231,7 @@ A model slot bound to an endpoint. Sends the full context; context deltas come w
 
 **Methods**
 
-- `def __init__(self, endpoint: ModelEndpoint, session_id: str, effects: Effects) -> None`
+- `def __init__(self, endpoint: ModelEndpoint, session_id: str, effects: Effects, *, retries: int = 3, backoff: float = 1.0) -> None`
 - `@property def capabilities(self) -> CapabilityContract`
 - `@property def usage(self) -> Usage | None`
 - `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None) -> Message`
@@ -1788,3 +1789,105 @@ def tool_call_reply(*calls: ToolCall, text: str = '') -> Message
 ```
 
 An assistant reply that makes tool calls.
+
+## `rollout.adapters.responses`
+
+A model endpoint for the OpenAI Responses API, on an API key or a Codex login.
+
+### `ApiKey`
+
+*class* · `src/rollout/adapters/responses.py`
+
+```python
+class ApiKey
+```
+
+An OpenAI API key against the public Responses API.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `key` | `str` | required |  |
+| `base_url` | `str` | `'https://api.openai.com/v1'` |  |
+
+**Methods**
+
+- `async def headers(self, client: httpx.AsyncClient, *, force_refresh: bool = False) -> dict[str, str]`
+- `@property def url(self) -> str`
+
+### `codex_provider`
+
+*function* · `src/rollout/adapters/responses.py`
+
+```python
+def codex_provider(contract: ResponsesContract | None = None) -> Callable[[DirectModel], ResponsesEndpoint]
+```
+
+An endpoint factory for `LocalRunner(providers={"codex": codex_provider()})`, using the local Codex login.
+
+### `CodexLogin`
+
+*class* · `src/rollout/adapters/responses.py`
+
+```python
+class CodexLogin
+```
+
+ChatGPT account tokens from a local Codex login.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `path` | `Path` | `Path.home() / '.codex' / 'auth.json'` |  |
+| `url` | `str` | `'https://chatgpt.com/backend-api/codex/responses'` |  |
+| `refresh_margin_seconds` | `int` | `300` |  |
+
+**Methods**
+
+- `async def headers(self, client: httpx.AsyncClient, *, force_refresh: bool = False) -> dict[str, str]`
+
+### `Credentials`
+
+*class* · `src/rollout/adapters/responses.py`
+
+```python
+class Credentials(Protocol)
+```
+
+Where requests go and how they authenticate.
+
+**Methods**
+
+- `async def headers(self, client: httpx.AsyncClient, *, force_refresh: bool = False) -> dict[str, str]`
+- `@property def url(self) -> str`
+
+### `ResponsesContract`
+
+*class* · `src/rollout/adapters/responses.py`
+
+```python
+class ResponsesContract
+```
+
+The capability contract the endpoint advertises; the provider does not report it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `context_limit` | `int` | `200000` |  |
+| `max_output_tokens` | `int` | `32000` |  |
+
+### `ResponsesEndpoint`
+
+*class* · `src/rollout/adapters/responses.py`
+
+```python
+class ResponsesEndpoint
+```
+
+Serves one model through the Responses API. Direct adapters do not deduplicate: a retried effect re-samples.
+
+**Methods**
+
+- `def __init__(self, credentials: Credentials, model: str, *, sampling: SamplingParameters | None = None, contract: ResponsesContract | None = None, client: httpx.AsyncClient | None = None, timeout: float = 600.0) -> None`
+- `def describe(self, session_id: str) -> CapabilityContract`
+- `async def cancel(self, effect_id: str) -> None` — Nothing to do: the request stops when the task awaiting `sample` is cancelled.
+- `async def sample(self, request: SampleRequest) -> SampleResult`
+- `def request_body(self, request: SampleRequest) -> dict[str, JsonValue]` — The Responses API request for a sample request (public for tests and debugging).
