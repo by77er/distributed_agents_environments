@@ -1,7 +1,5 @@
 """Assembles the project assistant: a runner, its tool sets and the deployment, plus conversation helpers."""
 
-import json
-import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,12 +11,8 @@ from project_assistant.assistant import ProjectAgent, ProjectAssistant
 from project_assistant.notes import NotesStore
 from project_assistant.repository import RepositoryTools
 from rollout.core.contracts import (
-    CapabilityContract,
-    ModelEndpoint,
     RunEvent,
     RunEventType,
-    SampleRequest,
-    SampleResult,
     Text,
 )
 from rollout.core.harness import (
@@ -37,6 +31,7 @@ from rollout.core.harness import (
     agent_program,
 )
 from rollout.core.local import EndpointFactory, LocalRunner
+from rollout.core.testing import LedgerEndpoint
 from rollout.durable import DurableRunner
 
 NAMESPACE = "assistant"
@@ -67,25 +62,6 @@ class ConversationRun(Protocol):
     def outcome(self) -> RunOutcome | None: ...
     def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]: ...
     def recorded_events(self) -> list[RunEvent]: ...
-
-
-class LedgerEndpoint:
-    """Appends each sample's effect_id to a file, then delegates."""
-
-    def __init__(self, inner: ModelEndpoint, ledger: Path) -> None:
-        self._inner = inner
-        self._ledger = ledger
-
-    def describe(self, session_id: str) -> CapabilityContract:
-        return self._inner.describe(session_id)
-
-    async def sample(self, request: SampleRequest) -> SampleResult:
-        with self._ledger.open("a") as file:
-            file.write(json.dumps({"effect_id": request.effect_id, "at": time.time()}) + "\n")
-        return await self._inner.sample(request)
-
-    async def cancel(self, effect_id: str) -> None:
-        await self._inner.cancel(effect_id)
 
 
 @dataclass(frozen=True)

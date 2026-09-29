@@ -91,6 +91,10 @@ class RunStore:
             ).fetchone()
         return RunRecord(*row) if row else None
 
+    def read_all_run_ids(self) -> list[str]:
+        with self._lock:
+            return [row[0] for row in self._database.execute("SELECT run_id FROM runs")]
+
     def unfinished_runs(self) -> list[str]:
         with self._lock:
             return [row[0] for row in self._database.execute("SELECT run_id FROM runs WHERE status = 'running'")]

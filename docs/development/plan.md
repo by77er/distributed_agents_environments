@@ -60,7 +60,8 @@ Independent agent sessions with isolated environments that create and message ea
 managed from a CLI ([ADR-0025](../decisions/0025-agent-sessions.md)).
 
 Status: **working**: environments, attempt markers, coordination tools and the product are built; a live fan-out
-over the board succeeded ([agent sessions](../products/agent-sessions.md)). Remaining: the fault evaluation.
+over the board succeeded, and the fault evaluation passes across 13 SIGKILLs
+([agent sessions](../products/agent-sessions.md#durability-under-faults)).
 
 **Scope**
 - The environment protocol in the core and `run.environments`; a namespace backend over an Alpine image.

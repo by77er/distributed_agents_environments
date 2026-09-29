@@ -30,6 +30,7 @@ from rollout.core.harness import (
     Deployment,
     DirectModel,
     Envelope,
+    EnvironmentService,
     ModelBinding,
     Priority,
     RunBinding,
@@ -40,6 +41,7 @@ from rollout.core.harness import (
     agent_program,
 )
 from rollout.core.local import EndpointFactory, LocalRunner
+from rollout.core.testing import LedgerEndpoint, LedgerEnvironments
 from rollout.durable import DurableRunner
 from rollout.environments import ImageStore, NamespaceEnvironments
 
@@ -54,6 +56,10 @@ class Settings:
     reasoning_effort: str | None = "low"
     durable: bool = True
     image_cache: Path = Path.home() / ".cache" / "rollout" / "images"
+    model_ledger: Path | None = None
+    """If set, every model call is appended here (for fault evaluations)."""
+    command_ledger: Path | None = None
+    """If set, every command started in an environment is appended here (for fault evaluations)."""
 
 
 @dataclass(frozen=True)
@@ -77,7 +83,17 @@ class SessionsService:
     def __init__(self, settings: Settings, providers: Mapping[str, EndpointFactory]) -> None:
         self.settings = settings
         settings.state.mkdir(parents=True, exist_ok=True)
-        self.environments = NamespaceEnvironments(settings.state / "environments", ImageStore(settings.image_cache))
+        self.environments: EnvironmentService = NamespaceEnvironments(
+            settings.state / "environments", ImageStore(settings.image_cache)
+        )
+        if settings.command_ledger is not None:
+            self.environments = LedgerEnvironments(self.environments, settings.command_ledger)
+        if settings.model_ledger is not None:
+            ledger = settings.model_ledger
+            providers = {
+                name: (lambda model, factory=factory: LedgerEndpoint(factory(model), ledger))
+                for name, factory in providers.items()
+            }
         self.coordination = CoordinationStore(settings.state / "coordination.sqlite")
         self.coordination.database.execute(
             "CREATE TABLE IF NOT EXISTS operator_inbox (key TEXT PRIMARY KEY, sender TEXT, text TEXT, at TEXT)"

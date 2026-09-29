@@ -36,6 +36,11 @@ def main() -> None:
     serve.add_argument("--model", default="gpt-6-astra")
     serve.add_argument("--reasoning-effort", default="low", choices=["low", "medium", "high"])
     serve.add_argument("--in-memory", action="store_true", help="use the LocalRunner: nothing survives a restart")
+    serve.add_argument("--model-ledger", type=Path, help=argparse.SUPPRESS)
+    serve.add_argument("--command-ledger", type=Path, help=argparse.SUPPRESS)
+    faults = commands.add_parser("faults", help="kill the server during a fan-out and check nothing was lost")
+    faults.add_argument("--kills", type=int, default=3)
+    faults.add_argument("--seed", type=int, default=1)
     commands.add_parser("list", help="sessions and their status")
     new = commands.add_parser("new", help="start a session")
     new.add_argument("name")
@@ -63,6 +68,14 @@ def main() -> None:
     if arguments.command == "serve":
         _serve(arguments)
         return
+    if arguments.command == "faults":
+        import asyncio
+
+        from agent_sessions.faults import run_faults
+
+        report = asyncio.run(run_faults(kills=arguments.kills, seed=arguments.seed))
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report["passed"] else 1)
     client = httpx.Client(base_url=os.environ.get("AGENTS_URL", DEFAULT_URL), timeout=60)
     try:
         _client_command(client, arguments)
@@ -82,6 +95,8 @@ def _serve(arguments: argparse.Namespace) -> None:
         model=arguments.model,
         reasoning_effort=arguments.reasoning_effort,
         durable=not arguments.in_memory,
+        model_ledger=arguments.model_ledger,
+        command_ledger=arguments.command_ledger,
     )
     service = SessionsService(settings, providers={"codex": codex_provider()})
     print(f"agent sessions: state in {settings.state}", file=sys.stderr)

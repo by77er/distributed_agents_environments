@@ -63,7 +63,7 @@ class NamespaceEnvironments:
             await asyncio.to_thread((home / "ready").write_text, specification.model_dump_json())
 
     async def execute(
-        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None
+        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
     ) -> ExecutionResult:
         root = self.root(environment_id)
         if not root.exists():

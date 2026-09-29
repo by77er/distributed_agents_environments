@@ -28,7 +28,7 @@ class MemoryEnvironments:
         self.files.setdefault(environment_id, {})
 
     async def execute(
-        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None
+        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
     ) -> ExecutionResult:
         return ExecutionResult(exit_code=0, output=f"ran: {command}\n")
 

@@ -9,7 +9,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
 - **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
-- **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
+- **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout.durable`](#rolloutdurable)** — The durability layer: runs that survive crashes and restarts, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout.environments`](#rolloutenvironments)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`NamespaceEnvironments`](#namespaceenvironments)
 - **[`rollout.coordination`](#rolloutcoordination)** — Coordination between runs: participants, messages and a shared board. [`BoardTools`](#boardtools), [`CoordinationStore`](#coordinationstore), [`Deliver`](#deliver), [`Delivery`](#delivery), [`Identify`](#identify), [`Participant`](#participant), [`Post`](#post), [`post`](#post), [`register`](#register), [`Relay`](#relay), [`SessionTools`](#sessiontools), [`Status`](#status), [`subscribe`](#subscribe)
@@ -309,7 +309,7 @@ An environment backend. Every method must be safe to repeat with the same argume
 **Methods**
 
 - `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None` — Create the environment, or do nothing if it already exists.
-- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None) -> ExecutionResult`
+- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult` — Run a command. `effect_id` identifies the attempt (it is the same on every re-execution).
 - `async def put(self, environment_id: str, path: str, data: bytes) -> None`
 - `async def get(self, environment_id: str, path: str) -> bytes`
 - `async def destroy(self, environment_id: str) -> None` — Destroy the environment, or do nothing if it is already gone.
@@ -1893,6 +1893,42 @@ def events_of(run: LocalRunContext, event_type: RunEventType) -> list[RunEvent]
 
 The run's events of one type, in order.
 
+### `LedgerEndpoint`
+
+*class* · `src/rollout/core/testing.py`
+
+```python
+class LedgerEndpoint
+```
+
+Wraps a model endpoint and appends every sample's `effect_id` to a file: to count calls across processes.
+
+**Methods**
+
+- `def __init__(self, inner: ModelEndpoint, ledger: Path) -> None`
+- `def describe(self, session_id: str) -> CapabilityContract`
+- `async def sample(self, request: SampleRequest) -> SampleResult`
+- `async def cancel(self, effect_id: str) -> None`
+
+### `LedgerEnvironments`
+
+*class* · `src/rollout/core/testing.py`
+
+```python
+class LedgerEnvironments
+```
+
+Wraps an environment service and appends every command it starts to a file, with its `effect_id`.
+
+**Methods**
+
+- `def __init__(self, inner: EnvironmentService, ledger: Path) -> None`
+- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
+- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult`
+- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
+- `async def get(self, environment_id: str, path: str) -> bytes`
+- `async def destroy(self, environment_id: str) -> None`
+
 ### `local_run`
 
 *function* · `src/rollout/core/testing.py`
@@ -1912,6 +1948,14 @@ def payload(event: RunEvent) -> dict[str, JsonValue]
 ```
 
 An event's payload as a JSON object.
+
+### `read_ledger`
+
+*function* · `src/rollout/core/testing.py`
+
+```python
+def read_ledger(ledger: Path) -> list[dict[str, str]]
+```
 
 ### `ScriptedModelEndpoint`
 
@@ -2043,6 +2087,7 @@ class RunStore
 - `def create_run(self, run_id: str, specification: JsonValue, conversation: str | None, conversation_key: JsonValue = None) -> None`
 - `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None`
 - `def run(self, run_id: str) -> RunRecord | None`
+- `def read_all_run_ids(self) -> list[str]`
 - `def unfinished_runs(self) -> list[str]`
 - `def live_run(self, address: str) -> str | None`
 - `def conversation_key(self, address: str) -> JsonValue`
@@ -2088,7 +2133,7 @@ Implements `EnvironmentService`.
 - `def __init__(self, directory: Path, images: ImageStore | None = None) -> None`
 - `def root(self, environment_id: str) -> Path`
 - `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
-- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None) -> ExecutionResult`
+- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult`
 - `async def put(self, environment_id: str, path: str, data: bytes) -> None`
 - `async def get(self, environment_id: str, path: str) -> bytes`
 - `async def destroy(self, environment_id: str) -> None`

@@ -1,7 +1,10 @@
 """Test doubles for code built on the core: a model endpoint that replies from a script."""
 
 import inspect
+import json
+import time
 from collections.abc import Awaitable, Callable, Iterable
+from pathlib import Path
 
 from pydantic import JsonValue
 
@@ -9,6 +12,7 @@ from rollout.core.contracts import (
     CapabilityContract,
     FinishReason,
     Message,
+    ModelEndpoint,
     Role,
     RunEvent,
     RunEventType,
@@ -19,10 +23,21 @@ from rollout.core.contracts import (
     Usage,
     new_run_id,
 )
+from rollout.core.harness.environments import EnvironmentService, EnvironmentSpecification, ExecutionResult
 from rollout.core.harness.task import Task
 from rollout.core.local.context import LocalRunContext
 
-__all__ = ["ScriptedModelEndpoint", "ScriptedReply", "events_of", "local_run", "payload", "tool_call_reply"]
+__all__ = [
+    "LedgerEndpoint",
+    "LedgerEnvironments",
+    "ScriptedModelEndpoint",
+    "ScriptedReply",
+    "events_of",
+    "local_run",
+    "payload",
+    "read_ledger",
+    "tool_call_reply",
+]
 
 type ScriptedReply = Message | str | Callable[[SampleRequest], Message | Awaitable[Message]]
 """A reply, its text, or a function of the request (which may await, e.g. to hold a sample open)."""
@@ -86,3 +101,58 @@ def payload(event: RunEvent) -> dict[str, JsonValue]:
     if not isinstance(event.payload, dict):
         raise TypeError(f"{event.type} payload is not an object")
     return event.payload
+
+
+class LedgerEndpoint:
+    """Wraps a model endpoint and appends every sample's `effect_id` to a file: to count calls across processes."""
+
+    def __init__(self, inner: ModelEndpoint, ledger: Path) -> None:
+        self._inner = inner
+        self._ledger = ledger
+
+    def describe(self, session_id: str) -> CapabilityContract:
+        return self._inner.describe(session_id)
+
+    async def sample(self, request: SampleRequest) -> SampleResult:
+        _append(self._ledger, {"effect_id": request.effect_id, "session_id": request.session_id})
+        return await self._inner.sample(request)
+
+    async def cancel(self, effect_id: str) -> None:
+        await self._inner.cancel(effect_id)
+
+
+class LedgerEnvironments:
+    """Wraps an environment service and appends every command it starts to a file, with its `effect_id`."""
+
+    def __init__(self, inner: EnvironmentService, ledger: Path) -> None:
+        self._inner = inner
+        self._ledger = ledger
+
+    async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None:
+        await self._inner.create(environment_id, specification)
+
+    async def execute(
+        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
+    ) -> ExecutionResult:
+        _append(self._ledger, {"effect_id": effect_id, "environment_id": environment_id, "command": command})
+        return await self._inner.execute(
+            environment_id, command, timeout_seconds=timeout_seconds, cwd=cwd, effect_id=effect_id
+        )
+
+    async def put(self, environment_id: str, path: str, data: bytes) -> None:
+        await self._inner.put(environment_id, path, data)
+
+    async def get(self, environment_id: str, path: str) -> bytes:
+        return await self._inner.get(environment_id, path)
+
+    async def destroy(self, environment_id: str) -> None:
+        await self._inner.destroy(environment_id)
+
+
+def read_ledger(ledger: Path) -> list[dict[str, str]]:
+    return [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.exists() else []
+
+
+def _append(ledger: Path, entry: dict[str, str]) -> None:
+    with ledger.open("a") as file:
+        file.write(json.dumps({**entry, "at": time.time()}) + "\n")

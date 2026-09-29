@@ -45,9 +45,28 @@ Source: `src/agent_sessions/` (the product), composed from `rollout.environments
 fetching a web page with `wget` after finding `curl` missing, hashing a string), and resolved them; `lead` sent the
 operator a correct summary.
 
+## Durability under faults
+
+```bash
+uv run agents faults --kills 3 --seed 1
+```
+
+The same fan-out, with the server killed by SIGKILL at seeded random moments and restarted. A model call in flight at
+a kill may be re-sampled and decide differently, so the checks are the system's guarantees, not the model's choices:
+every outbox message reaches its recipient exactly once, no command runs twice, model calls repeat at most once per
+session per kill, every task is resolved exactly once with no duplicate posts or sessions, event streams stay
+gapless, each session has one environment, and the operator gets a correct summary.
+
+| Run (2026-09-29) | Kills (seconds in) | Messages | Commands (outcome unknown) | Model calls (repeated) | Result |
+|---|---|---|---|---|---|
+| seed 1 | 3 (9.5, 35.3, 38.7) | 14, each once | 6 (1) | 57 (8) | passed in 71 s |
+| seed 2 | 5 (6.3 … 43.2) | 14, each once | 4 (0) | 46 (8) | passed in 61 s |
+| seed 3 | 5 (13.8 … 29.7) | 11, each once | 8 (2) | 54 (10) | passed in 67 s |
+
+A command in flight at a kill is reported to the session as "may or may not have run", and is never run again.
+
 ## Not yet
 
-- A fault evaluation for sessions (the server killed during a fan-out), as the project assistant has.
 - Isolation beyond namespaces (Firecracker microVMs), resource limits, and control over network access.
 - Unloading idle sessions from memory; context compaction for sessions that run for hours.
 - A web page on the same API.

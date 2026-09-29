@@ -33,7 +33,7 @@ class LedgerEnvironments:
         self._write({"operation": "create", "environment_id": environment_id})
 
     async def execute(
-        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None
+        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
     ) -> ExecutionResult:
         self._write({"operation": "execute", "command": command})
         await asyncio.sleep(3)

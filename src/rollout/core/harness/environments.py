@@ -42,8 +42,11 @@ class EnvironmentService(Protocol):
         ...
 
     async def execute(
-        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None
-    ) -> ExecutionResult: ...
+        self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
+    ) -> ExecutionResult:
+        """Run a command. `effect_id` identifies the attempt (it is the same on every re-execution)."""
+        ...
+
     async def put(self, environment_id: str, path: str, data: bytes) -> None: ...
     async def get(self, environment_id: str, path: str) -> bytes: ...
     async def destroy(self, environment_id: str) -> None:
@@ -70,7 +73,9 @@ class Environment:
         }
 
         async def execute(effect_id: str, arguments_digest: str) -> ExecutionResult:
-            return await self._service.execute(self.environment_id, command, timeout_seconds=timeout_seconds, cwd=cwd)
+            return await self._service.execute(
+                self.environment_id, command, timeout_seconds=timeout_seconds, cwd=cwd, effect_id=effect_id
+            )
 
         return await self._effects.perform(
             EffectKind.ENVIRONMENT_CALL,
