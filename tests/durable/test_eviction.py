@@ -50,13 +50,14 @@ type Setup = tuple[DurableRunner, ScriptedModelEndpoint]
 
 
 @pytest.fixture
-async def evicting(tmp_path: Path) -> AsyncIterator[Setup]:
+async def evicting(tmp_path: Path, database: str | None) -> AsyncIterator[Setup]:
     endpoint = ScriptedModelEndpoint(["first", "second", "third"])
     runner = DurableRunner(
         tmp_path / "state",
         providers={"scripted": lambda model: endpoint},
         evict_after=timedelta(seconds=0.3),
         eviction_interval=0.1,
+        database=database,
     )
     await runner.launch()
     binding = RunBinding(models={"policy": ModelBinding(direct=DirectModel(provider="scripted", model="s"))})

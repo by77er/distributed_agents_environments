@@ -16,7 +16,7 @@ not do yet:
 
 | Design element | Status |
 |---|---|
-| Runs as DBOS workflows (workflow id = `run_id`), SQLite system database | built |
+| Runs as DBOS workflows (workflow id = `run_id`), on SQLite (one runner) or Postgres (several) | built |
 | Effects as recorded steps with deterministic `effect_id`s; replay by re-execution | built: model samples, imported tool calls, outputs |
 | `run.now()` = time of the latest recorded input | built |
 | Durable `WaitFor` (a recorded receive with a durable timeout) | built |
@@ -27,10 +27,10 @@ not do yet:
 | The pump / sandboxed task host split over `HarnessHost` | **not yet**: the program runs inside the workflow, in the runner's process, so only T0 and T1 code may run durably |
 | Suspension without compute | built: runs idle past a threshold are evicted and woken by a message or their deadline ([evicting idle runs](eviction.md)); one activation per message with exported state is still to come |
 | Generations and state export | not yet |
-| Conversation activations on a partitioned queue | not yet: a conversation's run is one long workflow; sends are serialized per conversation in process |
-| Attempt markers for side effects without deduplication | not yet: a tool call in flight at a crash runs again, so such tools must deduplicate by `effect_id` (the project assistant's notes do) |
-| Recovery controller for other executors, reaper, poison-run quarantine | not yet: one executor per system database |
-| Postgres | not yet |
+| Conversation activations on a partitioned queue | not yet: a conversation's run is one long workflow; sends are serialized per conversation by a database lock, across runners |
+| Attempt markers for side effects without deduplication | built: a guarded effect in flight at a crash completes as `outcome_unknown` instead of running again (environment commands, tools without deduplication) |
+| Several runners on one database; recovery of a dead runner's runs | built: heartbeats and takeover through DBOS's queue ([several runners](runners.md)); a reaper and poison-run quarantine are not yet |
+| Postgres | built ([several runners](runners.md)) |
 
 A known window: a message sent to a conversation at the moment its run finishes can be left unconsumed. The
 activation queue closes it.

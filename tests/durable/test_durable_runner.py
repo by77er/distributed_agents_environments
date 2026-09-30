@@ -58,9 +58,9 @@ type Durable = tuple[DurableRunner, list[ScriptedModelEndpoint]]
 
 
 @pytest.fixture
-async def durable(tmp_path: Path) -> AsyncIterator[Durable]:
+async def durable(tmp_path: Path, database: str | None) -> AsyncIterator[Durable]:
     endpoints: list[ScriptedModelEndpoint] = []
-    runner = DurableRunner(tmp_path / "state", providers={"scripted": lambda model: endpoints[0]})
+    runner = DurableRunner(tmp_path / "state", providers={"scripted": lambda model: endpoints[0]}, database=database)
     await runner.launch()
     yield runner, endpoints
     await runner.close()

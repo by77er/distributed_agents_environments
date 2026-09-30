@@ -34,6 +34,17 @@ system-wide unless asked, but nothing enforces it.
 Sessions idle for 5 minutes (`--evict-after SECONDS`) are unloaded from memory and shown as sleeping; a message or a
 scheduled wake-up brings them back ([evicting idle runs](../durability/eviction.md)).
 
+### Several servers
+
+Servers can share a Postgres database, each with its own runner; any of them serves any request, and when one dies
+another takes over its sessions ([several runners](../durability/runners.md)). They must share `--state` too, since
+environments and blobs are files:
+
+```bash
+uv run agents serve --database postgresql://…/sessions --runner-id server-0 --state /shared/sessions --port 8421
+uv run agents serve --database postgresql://…/sessions --runner-id server-1 --state /shared/sessions --port 8422
+```
+
 ## What a session is
 
 | Piece | Built from |
@@ -92,6 +103,10 @@ evicted; checks run once the system is quiet (every session waiting or sleeping)
 The evaluation also runs on the local backend (`agents faults --environment local`): seed 21 passed in 123 s with
 5 kills, 5 evictions, 17 messages each delivered once, 10 commands (none with an unknown outcome) and 10 repeated
 model calls of 67.
+
+With three servers sharing a Postgres (`agents faults --servers 3`), kills hit random servers and the first killed
+server stays down until another takes its sessions over: seed 31 passed in 101 s with 6 kills, every session evicted
+and woken, 14 messages each delivered once and no command run twice ([several runners](../durability/runners.md)).
 
 One earlier run (seed 9) reported a message that never reached its recipient; the harness then stopped the server
 three seconds after the confirmation, which could leave a message in flight to a waking session. The harness now

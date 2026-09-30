@@ -149,8 +149,12 @@ def text(result: ToolResult) -> str:
     return "".join(part.text for part in result.content if isinstance(part, Text))
 
 
-@pytest.mark.parametrize("durable", [False, True], ids=["local", "durable"])
-async def test_an_agent_works_on_a_computer_with_the_tools(tmp_path: Path, durable: bool) -> None:
+@pytest.mark.parametrize("kind", ["local", "durable", "durable-postgres"])
+async def test_an_agent_works_on_a_computer_with_the_tools(
+    tmp_path: Path, kind: str, request: pytest.FixtureRequest
+) -> None:
+    durable = kind.startswith("durable")
+    database = request.getfixturevalue("postgres") if kind == "durable-postgres" else None
     endpoint = ScriptedModelEndpoint(SCRIPT)
     blobs = FileBlobStore(tmp_path / "blobs")
 
@@ -162,7 +166,7 @@ async def test_an_agent_works_on_a_computer_with_the_tools(tmp_path: Path, durab
         "environments": LocalEnvironments(tmp_path / "environments"),
         "blobs": blobs,
     }
-    runner = DurableRunner(tmp_path / "runs", **services) if durable else LocalRunner(**services)
+    runner = DurableRunner(tmp_path / "runs", database=database, **services) if durable else LocalRunner(**services)
     if isinstance(runner, DurableRunner):
         await runner.launch()
     try:

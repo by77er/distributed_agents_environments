@@ -1,4 +1,8 @@
-"""Fault evaluation for agent sessions: SIGKILL the server during a fan-out over the board, and check invariants.
+"""Fault evaluation for agent sessions: SIGKILL servers during a fan-out over the board, and check invariants.
+
+With `servers` > 1, several servers share a throwaway Postgres and one state directory; requests go to a random live
+server, kills hit a random server, and the first killed server stays down long enough for the others to take over
+its sessions.
 
 A lead session creates two workers and posts three tasks; the workers claim and do them on their own computers and
 the lead reports to the operator. Meanwhile the server is killed at seeded random moments and restarted. Model calls
@@ -14,6 +18,7 @@ the system's guarantees:
 """
 
 import asyncio
+import contextlib
 import os
 import random
 import signal
@@ -22,7 +27,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +36,7 @@ import httpx
 from rollout.coordination import CoordinationStore
 from rollout.core.contracts import RunEventType
 from rollout.core.testing import read_ledger
+from rollout.database import Database, create_database, fetch_all, temporary_postgres
 from rollout.durable import RunStore
 
 INSTRUCTIONS = (
@@ -48,21 +54,44 @@ FOLLOW_UP = (
 
 
 class Server:
-    def __init__(self, work: Path, environment: str) -> None:
+    def __init__(
+        self,
+        work: Path,
+        environment: str,
+        *,
+        database: str | None = None,
+        runner_id: str | None = None,
+        takeover_after: float = 15,
+        providers: str | None = None,
+        variables: Mapping[str, str] | None = None,
+    ) -> None:
         self.work = work
         self.environment = environment
+        self.database = database
+        self.runner_id = runner_id
+        self.takeover_after = takeover_after
+        self.providers = providers
+        self.variables = variables
         self.port = _free_port()
         self.url = f"http://127.0.0.1:{self.port}"
         self.process: asyncio.subprocess.Process | None = None
-        self.log = (work / "server.log").open("a")
+        self.log = (work / f"server{f'-{runner_id}' if runner_id else ''}.log").open("a")
+
+    @property
+    def alive(self) -> bool:
+        return self.process is not None and self.process.returncode is None
 
     async def start(self) -> None:
+        options = ["--database", self.database, "--runner-id", str(self.runner_id)] if self.database else []
+        options += ["--takeover-after", str(self.takeover_after)]
+        options += ["--providers", self.providers] if self.providers else []
         self.process = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "agent_sessions.cli", "serve", "--state", str(self.work / "state"),
             "--port", str(self.port), "--model-ledger", str(self.work / "models.jsonl"),
             "--command-ledger", str(self.work / "commands.jsonl"), "--evict-after", "5",
-            "--environment", self.environment,
+            "--environment", self.environment, *options,
             stdout=self.log, stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, **(self.variables or {})},
         )  # fmt: skip
         async with httpx.AsyncClient() as client:
             for _ in range(600):
@@ -88,61 +117,130 @@ class Server:
                 await self.process.wait()
 
 
+class Servers:
+    """One server, or several sharing a database; requests go to a random live one."""
+
+    def __init__(self, servers: list[Server], rng: random.Random) -> None:
+        self.servers = servers
+        self.rng = rng
+
+    def url(self) -> str:
+        live = [server for server in self.servers if server.alive]
+        return self.rng.choice(live).url
+
+    async def request(self, client: httpx.AsyncClient, method: str, path: str, **options: Any) -> httpx.Response:
+        """Retried on another live server if the chosen one fails (it may be being killed)."""
+        for _ in range(100):
+            try:
+                response = await client.request(method, f"{self.url()}{path}", **options)
+                response.raise_for_status()
+                return response
+            except (httpx.HTTPError, IndexError):
+                await asyncio.sleep(0.2)
+        raise RuntimeError(f"no server answered {method} {path}")
+
+
 async def run_faults(
-    *, kills: int = 3, seed: int = 1, environment: str = "namespaces", deadline_seconds: float = 420
+    *, kills: int = 3, seed: int = 1, environment: str = "namespaces", servers: int = 1, deadline_seconds: float = 420
 ) -> dict[str, Any]:
     rng = random.Random(seed)
     kill_times = sorted(rng.uniform(4, 45) for _ in range(kills))
-    report: dict[str, Any] = {"kills": 0, "kill_seconds": [round(t, 1) for t in kill_times], "problems": []}
-    with tempfile.TemporaryDirectory(prefix="session-faults-") as directory:
+    problems: list[str] = []
+    report: dict[str, Any] = {"servers": servers, "kills": 0, "kill_seconds": [round(t, 1) for t in kill_times]}
+    report["problems"] = problems
+    with tempfile.TemporaryDirectory(prefix="session-faults-") as directory, contextlib.ExitStack() as stack:
         work = Path(directory)
-        server = Server(work, environment)
-        await server.start()
+        database = None
+        if servers > 1:
+            server_url = stack.enter_context(temporary_postgres(work / "postgres"))
+            database = create_database(server_url, "sessions")
+        takeover_after = 6.0
+        group = Servers(
+            [
+                Server(work, environment, database=database, runner_id=f"server-{index}", takeover_after=takeover_after)
+                if database
+                else Server(work, environment)
+                for index in range(servers)
+            ],
+            rng,
+        )
+        await asyncio.gather(*(server.start() for server in group.servers))
         started = time.monotonic()
+        down_until: dict[int, float] = {}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                await _retry(
-                    lambda: client.post(f"{server.url}/sessions", json={"name": "lead", "instructions": INSTRUCTIONS})
-                )
+                await _create_lead(client, group)
                 while time.monotonic() - started < deadline_seconds:
-                    if kill_times and time.monotonic() - started >= kill_times[0]:
+                    now = time.monotonic() - started
+                    for index, until in list(down_until.items()):
+                        if now >= until:
+                            del down_until[index]
+                            await group.servers[index].start()
+                    if kill_times and now >= kill_times[0]:
                         kill_times.pop(0)
-                        await server.kill()
-                        report["kills"] += 1
-                        await server.start()
-                    if not kill_times and _summary(await _inbox(client, server)):
+                        await _kill_one(group, report, down_until, now, takeover_after)
+                    if not kill_times and not down_until and _summary(await _inbox(client, group)):
                         break
                     await asyncio.sleep(0.5)
-                # Phase 2: every session is evicted, the server dies while they sleep, and a message wakes them.
-                report["all_slept"] = await _until_all_sleeping(client, server, seconds=90)
+                # Phase 2: every session is evicted, servers die while they sleep, and a message wakes them.
+                report["all_slept"] = await _until_all_sleeping(client, group, seconds=90)
                 if not report["all_slept"]:
-                    report["problems"].append("the sessions were never all evicted")
-                await server.kill()
-                report["kills"] += 1
-                await server.start()
-                await _retry(lambda: client.post(f"{server.url}/sessions/lead/messages", json={"text": FOLLOW_UP}))
+                    problems.append("the sessions were never all evicted")
+                await _kill_one(group, report, None, 0, 0)
+                await group.request(client, "POST", "/sessions/lead/messages", json={"text": FOLLOW_UP})
                 await asyncio.sleep(rng.uniform(1, 4))  # kill again while they wake
-                await server.kill()
-                report["kills"] += 1
-                await server.start()
+                await _kill_one(group, report, None, 0, 0)
                 confirmed = time.monotonic() + 300
-                while time.monotonic() < confirmed and not _confirmation(await _inbox(client, server)):  # noqa: ASYNC110 - polling the server over HTTP
+                while time.monotonic() < confirmed and not _confirmation(await _inbox(client, group)):  # noqa: ASYNC110 - polling the servers over HTTP
                     await asyncio.sleep(1)
-                report["quiet"] = await _until_quiet(client, server, seconds=60)  # messages in flight land
+                report["quiet"] = await _until_quiet(client, group, seconds=60)  # messages in flight land
                 report["seconds"] = round(time.monotonic() - started, 1)
-                inbox = await _inbox(client, server)
+                inbox = await _inbox(client, group)
         finally:
-            await server.stop()
-        _check(report, work, inbox)
+            for server in group.servers:
+                await server.stop()
+        _check(report, work, inbox, database)
     report["passed"] = not report["problems"]
     return report
 
 
-def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> None:
+async def _create_lead(client: httpx.AsyncClient, group: Servers) -> None:
+    for _ in range(100):
+        try:
+            response = await client.post(f"{group.url()}/sessions", json={"name": "lead", "instructions": INSTRUCTIONS})
+            if response.status_code in (201, 400):  # 400: a retried request that had created it
+                return
+        except httpx.HTTPError:
+            pass
+        await asyncio.sleep(0.2)
+    raise RuntimeError("could not create the lead session")
+
+
+async def _kill_one(
+    group: Servers, report: dict[str, Any], down_until: dict[int, float] | None, now: float, takeover_after: float
+) -> None:
+    """Kill a random live server. The first kill with several servers keeps it down past the takeover time."""
+    live = [index for index, server in enumerate(group.servers) if server.alive]
+    if len(group.servers) > 1 and len(live) < 2:
+        return  # keep one server up
+    index = group.rng.choice(live)
+    await group.servers[index].kill()
+    report["kills"] += 1
+    killed: list[str] = report.setdefault("killed", [])
+    killed.append(group.servers[index].runner_id or "server")
+    if down_until is not None and len(group.servers) > 1 and "taken_over" not in report:
+        report["taken_over"] = group.servers[index].runner_id
+        down_until[index] = now + takeover_after + 6
+        return
+    await group.servers[index].start()
+
+
+def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]], database: str | None) -> None:
     problems: list[str] = report["problems"]
     state = work / "state"
-    coordination = CoordinationStore(state / "coordination.sqlite")
-    runs = RunStore(state / "runs" / "runs.sqlite")
+    shared = Database(database) if database else None
+    coordination = CoordinationStore(shared or state / "coordination.sqlite")
+    runs = RunStore(shared or state / "runs" / "runs.sqlite")
     try:
         summary = _summary(inbox)
         report["operator_messages"] = len(inbox)
@@ -186,9 +284,8 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
                 envelope = data.get("envelope")
                 if event.type is RunEventType.MESSAGE_RECEIVED and isinstance(envelope, dict):
                     received[str(envelope.get("message_id"))] += 1
-        outbox_keys = coordination.read(
-            lambda db: [row[0] for row in db.execute("SELECT key FROM outbox WHERE recipient != 'operator'")]
-        )
+        rows = coordination.read(lambda db: fetch_all(db, "SELECT key FROM outbox WHERE recipient != 'operator'"))
+        outbox_keys = [str(row[0]) for row in rows]
         duplicated = [key for key in outbox_keys if received[f"outbox:{key}"] > 1]
         missing = [key for key in outbox_keys if received[f"outbox:{key}"] == 0]
         report["messages_delivered"] = len(outbox_keys)
@@ -196,13 +293,15 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
             problems.append(f"{len(duplicated)} messages reached their recipient more than once")
         if missing:
             problems.append(f"{len(missing)} messages never reached their recipient")
-            details = coordination.read(
-                lambda db: db.execute(
-                    f"SELECT key, recipient, sender, substr(text, 1, 80), created_at, delivered_at FROM outbox "
-                    f"WHERE key IN ({','.join('?' * len(missing))})",
-                    missing,
-                ).fetchall()
-            )
+            details = [
+                row
+                for row in coordination.read(
+                    lambda db: fetch_all(
+                        db, "SELECT key, recipient, sender, substr(text, 1, 80), created_at, delivered_at FROM outbox"
+                    )
+                )
+                if row[0] in missing
+            ]
             report["missing_messages"] = [
                 {
                     "key": k,
@@ -250,6 +349,8 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]]) -> N
     finally:
         coordination.close()
         runs.close()
+        if shared is not None:
+            shared.close()
 
 
 def _confirmation(inbox: list[dict[str, str]]) -> str | None:
@@ -259,21 +360,21 @@ def _confirmation(inbox: list[dict[str, str]]) -> str | None:
     return None
 
 
-async def _until_all_sleeping(client: httpx.AsyncClient, server: Server, seconds: float) -> bool:
+async def _until_all_sleeping(client: httpx.AsyncClient, group: Servers, seconds: float) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        sessions = (await _retry(lambda: client.get(f"{server.url}/sessions"))).json()["sessions"]
+        sessions = (await group.request(client, "GET", "/sessions")).json()["sessions"]
         if sessions and all(session["status"] == "sleeping" for session in sessions):
             return True
         await asyncio.sleep(1)
     return False
 
 
-async def _until_quiet(client: httpx.AsyncClient, server: Server, seconds: float) -> bool:
+async def _until_quiet(client: httpx.AsyncClient, group: Servers, seconds: float) -> bool:
     """Until every session has been waiting or sleeping for a few seconds in a row."""
     deadline, calm = time.monotonic() + seconds, 0
     while time.monotonic() < deadline and calm < 3:
-        sessions = (await _retry(lambda: client.get(f"{server.url}/sessions"))).json()["sessions"]
+        sessions = (await group.request(client, "GET", "/sessions")).json()["sessions"]
         calm = calm + 1 if all(session["status"] in ("waiting", "sleeping") for session in sessions) else 0
         await asyncio.sleep(1.5)
     return calm >= 3
@@ -286,20 +387,9 @@ def _summary(inbox: list[dict[str, str]]) -> str | None:
     return None
 
 
-async def _inbox(client: httpx.AsyncClient, server: Server) -> list[dict[str, str]]:
-    response = await _retry(lambda: client.get(f"{server.url}/inbox"))
+async def _inbox(client: httpx.AsyncClient, group: Servers) -> list[dict[str, str]]:
+    response = await group.request(client, "GET", "/inbox")
     return response.json()["messages"]
-
-
-async def _retry(request: Callable[[], Awaitable[httpx.Response]]) -> httpx.Response:
-    for _ in range(100):
-        try:
-            response = await request()
-            response.raise_for_status()
-            return response
-        except httpx.HTTPError:
-            await asyncio.sleep(0.2)
-    raise RuntimeError("the server did not answer")
 
 
 def _free_port() -> int:

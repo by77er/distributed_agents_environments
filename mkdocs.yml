@@ -104,6 +104,7 @@ nav:
       - durability/README.md
       - "Task host": durability/task-host.md
       - "Evicting idle runs": durability/eviction.md
+      - "Several runners": durability/runners.md
   - Platform:
       - platform/README.md
       - "Cells": platform/cells.md

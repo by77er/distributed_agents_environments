@@ -2080,8 +2080,14 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 
 **Methods**
 
-- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
+- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0, database: str | Database | None = None, runner_id: str | None = None, heartbeat_interval: float = 2.0, takeover_after: timedelta = timedelta(seconds=15)) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
   `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
+  
+    `database`: a Postgres URL (or `Database`) shared with other runners; without it, state is SQLite in
+  `directory` and this runner is the only one. `runner_id` names this runner among them: a runner restarted
+  with its id puts its unfinished runs back on the queue at once, without waiting for a takeover.
+  `takeover_after`: how long a runner's heartbeat may stop before another runner recovers its runs.
+  `directory` holds local files either way.
 - `async def launch(self) -> None` — Start DBOS, which recovers the runs a crash left unfinished, and follow them.
 - `async def close(self) -> None`
 - `def deploy(self, deployment: Deployment) -> None`
@@ -2092,6 +2098,7 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 - `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str`
 - `async def cancel(self, run_id: str, *, reason: str) -> None` — Ask the run to stop at its next effect, wait or turn boundary; `teardown` runs.
 - `async def execute(self, run_id: str, specification_json: dict[str, Any], conversation_json: dict[str, Any] | None, labels: dict[str, str], started_at: str) -> dict[str, Any]`
+- `def after_run(self, run_id: str, result: dict[str, Any]) -> None` — Called by the workflow when a run ends, where it ran: start the follow-up outside the workflow.
 
 ### `RunCancelled`
 
@@ -2117,27 +2124,33 @@ class RunStore
 
 **Methods**
 
-- `def __init__(self, path: Path) -> None`
+- `def __init__(self, database: Database | Path) -> None` — A `Database`, or the path of a SQLite file.
 - `def create_run(self, run_id: str, specification: JsonValue, conversation: str | None, conversation_key: JsonValue = None) -> None`
 - `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None`
 - `def run(self, run_id: str) -> RunRecord | None`
 - `def read_all_run_ids(self) -> list[str]`
 - `def unfinished_runs(self) -> list[str]` — Running runs that are resident (not evicted).
 - `def evict(self, run_id: str, wake_at: str | None) -> None`
-- `def wake(self, run_id: str) -> None`
+- `def wake(self, run_id: str, at: str) -> None`
+- `def touch(self, run_id: str, at: str) -> None` — Record that the run was messaged: it must not be evicted until it suspends again.
+- `def last_activity(self, run_id: str) -> str | None` — When the run was last messaged or woken.
 - `def evictions(self) -> int` — How many times runs were evicted, in total.
 - `def is_evicted(self, run_id: str) -> bool`
 - `def due_for_waking(self, now: str) -> list[str]` — Evicted runs whose wait times out by `now`.
-- `def last_events(self) -> list[RunEvent]` — The latest event of every resident running run.
+- `def last_events(self, run_ids: list[str]) -> list[RunEvent]` — The latest event of each of these runs that is running and resident.
 - `def live_run(self, address: str) -> str | None`
 - `def conversation_key(self, address: str) -> JsonValue`
 - `def conversation_runs(self, address: str) -> list[str]`
+- `def is_claimed(self, message_id: str) -> bool`
 - `def claim_message(self, message_id: str, address: str) -> bool` — Record a message as delivered; False if it already was (a retry).
 - `def mark_attempt(self, effect_id: str) -> bool` — Record that a guarded effect is starting; False if an earlier attempt already started it.
+- `def heartbeat(self, runner_id: str, at: float) -> None`
+- `def stale_runners(self, before: float) -> list[str]` — Runners whose last heartbeat is older than `before`.
+- `def forget_runner(self, runner_id: str) -> None`
 - `def append(self, event: RunEvent) -> None`
 - `def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]`
 - `async def changed(self, run_id: str, wait_seconds: float) -> None` — Wait until the run records something, or `wait_seconds` pass (other processes write without notifying).
-- `def close(self) -> None`
+- `def close(self) -> None` — Close the database if this store opened it (a shared `Database` is closed by its owner).
 
 ## `rollout.environments`
 
@@ -2306,17 +2319,17 @@ class CoordinationStore
 
 **Methods**
 
-- `def __init__(self, path: Path) -> None`
-- `def recorded(self, effect_id: str, arguments_digest: str, perform: Callable[[sqlite3.Connection], ToolResult]) -> ToolResult` — Run a write once per effect: `perform` and the record of its result commit in one transaction.
-- `def read[T](self, query: Callable[[sqlite3.Connection], T]) -> T`
-- `def write[T](self, change: Callable[[sqlite3.Connection], T]) -> T` — A write outside any tool call (e.g. by an operator).
+- `def __init__(self, database: Database | Path) -> None` — A `Database` (shared with other processes, for Postgres), or the path of a SQLite file.
+- `def recorded(self, effect_id: str, arguments_digest: str, perform: Callable[[Connection], ToolResult]) -> ToolResult` — Run a write once per effect: `perform` and the record of its result commit in one transaction.
+- `def read[T](self, query: Callable[[Connection], T]) -> T`
+- `def write[T](self, change: Callable[[Connection], T]) -> T` — A write outside any tool call (e.g. by an operator).
 - `def participant(self, name: str) -> Participant | None`
 - `def participants(self) -> list[Participant]`
 - `def posts(self, channel: str | None = None, status: str | None = None, limit: int = 20) -> list[Post]`
 - `def pending(self) -> list[Delivery]`
 - `def delivered(self, delivery_id: int) -> None`
 - `def on_outbox(self, listener: Callable[[], None]) -> None`
-- `def close(self) -> None`
+- `def close(self) -> None` — Close the database if this store opened it (a shared `Database` is closed by its owner).
 
 ### `Deliver`
 
@@ -2396,7 +2409,7 @@ class Post
 *function* · `src/rollout/coordination/tools.py`
 
 ```python
-def post(db: sqlite3.Connection, key: str, author: str, arguments: Mapping[str, JsonValue]) -> ToolResult
+def post(db: Connection, key: str, author: str, arguments: Mapping[str, JsonValue]) -> ToolResult
 ```
 
 ### `register`
@@ -2404,7 +2417,7 @@ def post(db: sqlite3.Connection, key: str, author: str, arguments: Mapping[str, 
 *function* · `src/rollout/coordination/tools.py`
 
 ```python
-def register(db: sqlite3.Connection, name: str, parent: str | None, purpose: str) -> None
+def register(db: Connection, name: str, parent: str | None, purpose: str) -> None
 ```
 
 ### `Relay`
@@ -2455,7 +2468,7 @@ A participant's current state, e.g. `working`, `waiting` or `stopped`.
 *function* · `src/rollout/coordination/tools.py`
 
 ```python
-def subscribe(db: sqlite3.Connection, participant: str, channel: str) -> ToolResult
+def subscribe(db: Connection, participant: str, channel: str) -> ToolResult
 ```
 
 ## `rollout.adapters.responses`

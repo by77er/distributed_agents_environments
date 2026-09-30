@@ -2,7 +2,8 @@
 
 It runs outside any run, so it can start runs and send messages freely. Each delivery uses the outbox entry's key as
 its idempotency key, so a delivery repeated after a crash (sent, but not yet marked delivered) is deduplicated by the
-runner. On start it delivers whatever a crash left pending.
+runner. On start it delivers whatever a crash left pending. Several processes sharing a database may each run a relay:
+one delivers, and another takes over when it stops.
 """
 
 import asyncio
@@ -40,6 +41,12 @@ class Relay:
             self.store.delivered(delivery.id)
 
     async def _run(self) -> None:
+        # One relay delivers at a time, among every process sharing the store's database; the others wait to
+        # take over if it stops.
+        async with self.store.database.lock("coordination relay", poll_seconds=1.0):
+            await self._relay()
+
+    async def _relay(self) -> None:
         while True:
             self._wake.clear()
             try:

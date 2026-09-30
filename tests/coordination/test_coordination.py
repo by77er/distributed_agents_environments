@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -6,13 +7,15 @@ from pydantic import JsonValue
 
 from rollout.coordination import BoardTools, CoordinationStore, Delivery, Relay, SessionTools, register
 from rollout.core.contracts import Conflict, Text, ToolResult
+from rollout.database import Database
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> CoordinationStore:
-    store = CoordinationStore(tmp_path / "coordination.sqlite")
+def store(tmp_path: Path, database: str | None) -> Iterator[CoordinationStore]:
+    store = CoordinationStore(Database(database) if database else tmp_path / "coordination.sqlite")
     store.write(lambda db: register(db, "lead", None, "Coordinate the migration"))
-    return store
+    yield store
+    store.database.close()
 
 
 def caller_of(effect_id: str) -> str | None:
@@ -105,3 +108,42 @@ async def test_the_relay_delivers_the_outbox_once(store: CoordinationStore) -> N
     await relay.stop()
     assert [(d.recipient, d.text) for d in delivered] == [("worker-1", "Go.")]
     assert store.pending() == []
+
+
+async def test_one_relay_delivers_among_processes_sharing_a_database(postgres: str) -> None:
+    """Two stores on separate connections pools stand in for two processes: while one relay delivers, the other
+    waits, and takes over when the first stops. Every message is delivered once."""
+    stores = [CoordinationStore(Database(postgres)) for _ in range(2)]
+    stores[0].write(lambda db: register(db, "lead", None, "Coordinate"))
+    delivered: list[tuple[int, str]] = []
+
+    def deliverer(index: int):  # type: ignore[no-untyped-def]
+        async def deliver(delivery: Delivery) -> None:
+            delivered.append((index, delivery.key))
+
+        return deliver
+
+    relays = [Relay(store, deliverer(index), retry_seconds=0.05) for index, store in enumerate(stores)]
+    for relay in relays:
+        relay.start()
+        await asyncio.sleep(0.2)  # the first one leads
+    sessions = [SessionTools(store, caller_of, status=lambda name: "waiting") for store in stores]
+    for index in range(4):
+        await call(sessions[index % 2], "send_message", f"lead:0:{index}", to="lead", text=f"note {index}")
+    for _ in range(100):
+        if len(delivered) == 4:
+            break
+        await asyncio.sleep(0.05)
+    assert {relay for relay, _ in delivered} == {0}
+
+    await relays[0].stop()  # the leader stops; the other takes over
+    await call(sessions[0], "send_message", "lead:0:9", to="lead", text="after")
+    for _ in range(100):
+        if len(delivered) == 5:
+            break
+        await asyncio.sleep(0.05)
+    await relays[1].stop()
+    assert delivered[-1] == (1, "lead:0:9")
+    assert sorted(key for _, key in delivered) == sorted({key for _, key in delivered})  # each once
+    for store in stores:
+        store.database.close()

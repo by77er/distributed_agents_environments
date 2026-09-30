@@ -6,13 +6,13 @@ the same tools serve agent sessions, swarms or multi-agent RL tasks, whatever th
 """
 
 import re
-import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 
 from pydantic import JsonValue
 
 from rollout.coordination.store import CoordinationStore, enqueue, now
 from rollout.core.contracts import RetryClass, Text, ToolAnnotations, ToolResult, ToolSpecification
+from rollout.database import Connection, fetch_all, fetch_one, sql
 
 type Identify = Callable[[str], str | None]
 """The participant a call comes from, given its `effect_id`; None if the caller is not a participant."""
@@ -116,8 +116,8 @@ class SessionTools(_CoordinationTools):
         if not NAME.match(name):
             return _text(f"{name!r} is not a valid name: lowercase letters, digits and dashes", error=True)
 
-        def create(db: sqlite3.Connection) -> ToolResult:
-            if db.execute("SELECT 1 FROM participants WHERE name = ?", (name,)).fetchone():
+        def create(db: Connection) -> ToolResult:
+            if fetch_one(db, "SELECT 1 FROM participants WHERE name = :name", {"name": name}):
                 return _text(f"a session named {name!r} already exists", error=True)
             register(db, name, caller, instructions)
             enqueue(db, effect_id, name, caller, instructions)
@@ -129,8 +129,8 @@ class SessionTools(_CoordinationTools):
         recipient, text = str(arguments["to"]), str(arguments["text"])
         priority = "high" if arguments.get("urgent") else "normal"
 
-        def send(db: sqlite3.Connection) -> ToolResult:
-            if not db.execute("SELECT 1 FROM participants WHERE name = ?", (recipient,)).fetchone():
+        def send(db: Connection) -> ToolResult:
+            if not fetch_one(db, "SELECT 1 FROM participants WHERE name = :name", {"name": recipient}):
                 return _text(f"there is no session named {recipient!r}", error=True)
             enqueue(db, effect_id, recipient, caller, text, priority)
             return _text(f"Sent to {recipient}.")
@@ -213,9 +213,7 @@ class BoardTools(_CoordinationTools):
         ]
         if channel is None:
             channels = self.store.read(
-                lambda db: db.execute(
-                    "SELECT channel, COUNT(*) FROM posts GROUP BY channel ORDER BY channel"
-                ).fetchall()
+                lambda db: fetch_all(db, "SELECT channel, COUNT(*) FROM posts GROUP BY channel ORDER BY channel")
             )
             lines.insert(0, "Channels: " + (", ".join(f"{name} ({count})" for name, count in channels) or "(none)"))
         return _text("\n".join(lines) or "(no posts)")
@@ -223,15 +221,16 @@ class BoardTools(_CoordinationTools):
     def _claim_task(self, caller: str, arguments: Mapping[str, JsonValue], effect_id: str, digest: str) -> ToolResult:
         post_id = int(str(arguments["post_id"]))
 
-        def claim(db: sqlite3.Connection) -> ToolResult:
-            claimed = db.execute(
-                "UPDATE posts SET status = 'claimed', claimed_by = ? "
-                "WHERE id = ? AND kind = 'task' AND status = 'open'",
-                (caller, post_id),
+        def claim(db: Connection) -> ToolResult:
+            claimed = sql(
+                db,
+                "UPDATE posts SET status = 'claimed', claimed_by = :caller "
+                "WHERE id = :id AND kind = 'task' AND status = 'open'",
+                {"caller": caller, "id": post_id},
             ).rowcount
             if claimed:
                 return _text(f"You claimed task #{post_id}.")
-            row = db.execute("SELECT kind, status, claimed_by FROM posts WHERE id = ?", (post_id,)).fetchone()
+            row = fetch_one(db, "SELECT kind, status, claimed_by FROM posts WHERE id = :id", {"id": post_id})
             if row is None:
                 return _text(f"there is no post #{post_id}", error=True)
             return _text(f"#{post_id} is a {row[0]} that is {row[1]}{f' by {row[2]}' if row[2] else ''}", error=True)
@@ -241,11 +240,15 @@ class BoardTools(_CoordinationTools):
     def _resolve_task(self, caller: str, arguments: Mapping[str, JsonValue], effect_id: str, digest: str) -> ToolResult:
         post_id, result = int(str(arguments["post_id"])), str(arguments["result"])
 
-        def resolve(db: sqlite3.Connection) -> ToolResult:
-            row = db.execute("SELECT author, title, claimed_by, status FROM posts WHERE id = ?", (post_id,)).fetchone()
+        def resolve(db: Connection) -> ToolResult:
+            row = fetch_one(db, "SELECT author, title, claimed_by, status FROM posts WHERE id = :id", {"id": post_id})
             if row is None or row[2] != caller or row[3] != "claimed":
                 return _text(f"you have not claimed task #{post_id}", error=True)
-            db.execute("UPDATE posts SET status = 'done', result = ? WHERE id = ?", (result, post_id))
+            sql(
+                db,
+                "UPDATE posts SET status = 'done', result = :result WHERE id = :id",
+                {"result": result, "id": post_id},
+            )
             if row[0] != caller:
                 enqueue(
                     db,
@@ -265,8 +268,12 @@ class BoardTools(_CoordinationTools):
     def _unsubscribe(self, caller: str, arguments: Mapping[str, JsonValue], effect_id: str, digest: str) -> ToolResult:
         channel = str(arguments["channel"])
 
-        def unsubscribe(db: sqlite3.Connection) -> ToolResult:
-            db.execute("DELETE FROM subscriptions WHERE channel = ? AND participant = ?", (channel, caller))
+        def unsubscribe(db: Connection) -> ToolResult:
+            sql(
+                db,
+                "DELETE FROM subscriptions WHERE channel = :channel AND participant = :participant",
+                {"channel": channel, "participant": caller},
+            )
             return _text(f"Unsubscribed from {channel}.")
 
         return self.store.recorded(effect_id, digest, unsubscribe)
@@ -275,26 +282,35 @@ class BoardTools(_CoordinationTools):
 # Writes shared by tools and operators
 
 
-def register(db: sqlite3.Connection, name: str, parent: str | None, purpose: str) -> None:
-    db.execute(
-        "INSERT INTO participants (name, parent, purpose, created_at) VALUES (?, ?, ?, ?)",
-        (name, parent, purpose.strip().splitlines()[0][:200] if purpose.strip() else "", now()),
+def register(db: Connection, name: str, parent: str | None, purpose: str) -> None:
+    sql(
+        db,
+        "INSERT INTO participants (name, parent, purpose, created_at) VALUES (:name, :parent, :purpose, :at)",
+        {
+            "name": name,
+            "parent": parent,
+            "purpose": purpose.strip().splitlines()[0][:200] if purpose.strip() else "",
+            "at": now(),
+        },
     )
 
 
-def post(db: sqlite3.Connection, key: str, author: str, arguments: Mapping[str, JsonValue]) -> ToolResult:
+def post(db: Connection, key: str, author: str, arguments: Mapping[str, JsonValue]) -> ToolResult:
     channel, title, body = str(arguments["channel"]), str(arguments["title"]), str(arguments["body"])
     kind = str(arguments.get("kind") or "note")
     if kind not in ("note", "task"):
         return _text("kind must be note or task", error=True)
-    cursor = db.execute(
-        "INSERT INTO posts (channel, kind, title, body, author, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)",
-        (channel, kind, title, body, author, now()),
+    post_id = sql(
+        db,
+        "INSERT INTO posts (channel, kind, title, body, author, status, created_at) "
+        "VALUES (:channel, :kind, :title, :body, :author, 'open', :at) RETURNING id",
+        {"channel": channel, "kind": kind, "title": title, "body": body, "author": author, "at": now()},
+    ).scalar_one()
+    subscribers = fetch_all(
+        db,
+        "SELECT participant FROM subscriptions WHERE channel = :channel AND participant != :author",
+        {"channel": channel, "author": author},
     )
-    post_id = cursor.lastrowid
-    subscribers = db.execute(
-        "SELECT participant FROM subscriptions WHERE channel = ? AND participant != ?", (channel, author)
-    ).fetchall()
     for (subscriber,) in subscribers:
         claim = f" Claim it with claim_task({post_id})." if kind == "task" else ""
         text = f"[board #{channel}] New {kind} #{post_id} from {author}: {title}\n{body}{claim}"
@@ -302,6 +318,10 @@ def post(db: sqlite3.Connection, key: str, author: str, arguments: Mapping[str, 
     return _text(f"Posted #{post_id} to {channel}; {len(subscribers)} subscriber(s) told.")
 
 
-def subscribe(db: sqlite3.Connection, participant: str, channel: str) -> ToolResult:
-    db.execute("INSERT OR IGNORE INTO subscriptions (channel, participant) VALUES (?, ?)", (channel, participant))
+def subscribe(db: Connection, participant: str, channel: str) -> ToolResult:
+    sql(
+        db,
+        "INSERT INTO subscriptions (channel, participant) VALUES (:channel, :participant) ON CONFLICT DO NOTHING",
+        {"channel": channel, "participant": participant},
+    )
     return _text(f"Subscribed to {channel}.")

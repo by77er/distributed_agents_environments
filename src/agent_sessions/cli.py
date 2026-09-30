@@ -15,6 +15,7 @@ The client commands talk to the server at $AGENTS_URL (default http://127.0.0.1:
 """
 
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -48,12 +49,19 @@ def main() -> None:
     serve.add_argument(
         "--evict-after", type=float, default=300, help="seconds of waiting before a session is unloaded from memory"
     )
+    serve.add_argument(
+        "--database", help="a Postgres URL shared by several servers, which share --state too (default: SQLite)"
+    )
+    serve.add_argument("--runner-id", help="this server's name among those sharing --database; keep it across restarts")
+    serve.add_argument("--takeover-after", type=float, default=15, help=argparse.SUPPRESS)
+    serve.add_argument("--providers", help=argparse.SUPPRESS)  # module:attribute of model providers, for tests
     serve.add_argument("--model-ledger", type=Path, help=argparse.SUPPRESS)
     serve.add_argument("--command-ledger", type=Path, help=argparse.SUPPRESS)
     faults = commands.add_parser("faults", help="kill the server during a fan-out and check nothing was lost")
     faults.add_argument("--kills", type=int, default=3)
     faults.add_argument("--seed", type=int, default=1)
     faults.add_argument("--environment", choices=["namespaces", "local"], default="namespaces")
+    faults.add_argument("--servers", type=int, default=1, help="servers sharing a throwaway Postgres (needs pgembed)")
     commands.add_parser("list", help="sessions and their status")
     new = commands.add_parser("new", help="start a session")
     new.add_argument("name")
@@ -86,7 +94,11 @@ def main() -> None:
 
         from agent_sessions.faults import run_faults
 
-        report = asyncio.run(run_faults(kills=arguments.kills, seed=arguments.seed, environment=arguments.environment))
+        report = asyncio.run(
+            run_faults(
+                kills=arguments.kills, seed=arguments.seed, environment=arguments.environment, servers=arguments.servers
+            )
+        )
         print(json.dumps(report, indent=2))
         sys.exit(0 if report["passed"] else 1)
     client = httpx.Client(base_url=os.environ.get("AGENTS_URL", DEFAULT_URL), timeout=60)
@@ -112,8 +124,16 @@ def _serve(arguments: argparse.Namespace) -> None:
         command_ledger=arguments.command_ledger,
         evict_after=timedelta(seconds=arguments.evict_after) if arguments.evict_after > 0 else None,
         environment=arguments.environment,
+        database=arguments.database,
+        runner_id=arguments.runner_id,
+        takeover_after=timedelta(seconds=arguments.takeover_after),
     )
-    service = SessionsService(settings, providers={"codex": codex_provider(blobs=settings.blobs())})
+    if arguments.providers:
+        module, _, attribute = arguments.providers.partition(":")
+        providers = getattr(importlib.import_module(module), attribute)
+    else:
+        providers = {"codex": codex_provider(blobs=settings.blobs())}
+    service = SessionsService(settings, providers=providers)
     print(f"agent sessions: state in {settings.state}", file=sys.stderr)
     uvicorn.run(create_app(service), host=arguments.host, port=arguments.port, log_level="warning")
 

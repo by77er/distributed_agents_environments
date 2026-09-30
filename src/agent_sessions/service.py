@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 
+import sqlalchemy as sa
 from pydantic import JsonValue
 
 from agent_sessions.session import OPERATOR, AgentSession, SessionAgent
@@ -44,6 +45,7 @@ from rollout.core.harness import (
 )
 from rollout.core.local import EndpointFactory, LocalRunner
 from rollout.core.testing import LedgerEndpoint, LedgerEnvironments
+from rollout.database import Connection, Database, fetch_all, fetch_one, sql
 from rollout.durable import DurableRunner
 from rollout.environments import ImageStore, LocalEnvironments, NamespaceEnvironments
 from rollout.environments.local import HOST_IMAGE
@@ -64,15 +66,22 @@ class Settings:
     command_ledger: Path | None = None
     """If set, every command started in an environment is appended here (for fault evaluations)."""
     evict_after: timedelta | None = timedelta(minutes=5)
+    """Unload sessions that have waited this long for a message; they wake when messaged (durable runner only)."""
     environment: Literal["namespaces", "local"] = "namespaces"
     """Where sessions' commands run: a private Alpine computer in namespaces, or a workspace directory on the host
     itself, with no sandbox (for uses where convenience matters more than isolation)."""
+    database: str | None = None
+    """A Postgres URL shared by several servers (each with its own runner); without it, state is SQLite and there
+    is one server. Servers sharing a database must share `state` too (a shared disk), which holds environments and
+    blobs."""
+    runner_id: str | None = None
+    """This server's runner among those sharing the database; keep it across restarts."""
+    takeover_after: timedelta = timedelta(seconds=15)
+    """How long a server may stop heartbeating before another server recovers its sessions."""
 
     def blobs(self) -> FileBlobStore:
         """Where images the sessions look at are kept; model endpoints read them from here too."""
         return FileBlobStore(self.state / "blobs")
-
-    """Unload sessions that have waited this long for a message; they wake when messaged (durable runner only)."""
 
 
 @dataclass(frozen=True)
@@ -111,12 +120,12 @@ class SessionsService:
                 name: (lambda model, factory=factory: LedgerEndpoint(factory(model), ledger))
                 for name, factory in providers.items()
             }
-        self.coordination = CoordinationStore(settings.state / "coordination.sqlite")
-        self.coordination.database.execute(
-            "CREATE TABLE IF NOT EXISTS operator_inbox (key TEXT PRIMARY KEY, sender TEXT, text TEXT, at TEXT)"
-        )
-        if self.coordination.participant(OPERATOR) is None:
-            self.coordination.write(lambda db: register(db, OPERATOR, None, "The person managing all sessions"))
+        if settings.database is not None and not settings.durable:
+            raise ValueError("a shared database needs the durable runner")
+        self.database = Database(settings.database) if settings.database else None
+        self.coordination = CoordinationStore(self.database or settings.state / "coordination.sqlite")
+        self.coordination.database.create(OPERATOR_TABLES)
+        self.coordination.write(_register_operator)
         tool_sets: dict[str, ToolSet] = {
             "sessions": SessionTools(self.coordination, self._identify, self.status),
             "board": BoardTools(self.coordination, self._identify),
@@ -131,6 +140,9 @@ class SessionsService:
                 blobs=settings.blobs(),
                 evict_after=settings.evict_after,
                 eviction_interval=min(5.0, settings.evict_after.total_seconds() / 2) if settings.evict_after else 5.0,
+                database=self.database,
+                runner_id=settings.runner_id,
+                takeover_after=settings.takeover_after,
             )
         else:
             self.runner = LocalRunner(
@@ -169,6 +181,9 @@ class SessionsService:
         await self.relay.stop()
         if isinstance(self.runner, DurableRunner):
             await self.runner.close()
+        self.coordination.close()
+        if self.database is not None:
+            self.database.close()
 
     # Operator actions
 
@@ -233,7 +248,7 @@ class SessionsService:
 
     def inbox(self) -> list[dict[str, str]]:
         rows = self.coordination.read(
-            lambda db: db.execute("SELECT sender, text, at FROM operator_inbox ORDER BY at").fetchall()
+            lambda db: fetch_all(db, "SELECT sender, text, at FROM operator_inbox ORDER BY at, key")
         )
         return [{"from": sender, "text": text, "at": at} for sender, text, at in rows]
 
@@ -252,10 +267,12 @@ class SessionsService:
 
     async def _deliver(self, delivery: Delivery) -> None:
         if delivery.recipient == OPERATOR:
-            self.coordination.read(
-                lambda db: db.execute(
-                    "INSERT OR IGNORE INTO operator_inbox (key, sender, text, at) VALUES (?, ?, ?, ?)",
-                    (delivery.key, delivery.sender, delivery.text, now()),
+            self.coordination.database.write(
+                lambda db: sql(
+                    db,
+                    "INSERT INTO operator_inbox (key, sender, text, at) VALUES (:key, :sender, :text, :at) "
+                    "ON CONFLICT DO NOTHING",
+                    {"key": delivery.key, "sender": delivery.sender, "text": delivery.text, "at": now()},
                 )
             )
             return
@@ -296,6 +313,23 @@ def describe(event: RunEvent) -> dict[str, JsonValue] | None:
     if event.type in (RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED, RunEventType.RUN_COMPLETED):
         return {"at": at, "kind": "ended", "text": event.type.value}
     return None
+
+
+OPERATOR_TABLES = sa.MetaData()
+sa.Table(
+    "operator_inbox",
+    OPERATOR_TABLES,
+    sa.Column("key", sa.Text, primary_key=True),
+    sa.Column("sender", sa.Text),
+    sa.Column("text", sa.Text),
+    sa.Column("at", sa.Text),
+)
+
+
+def _register_operator(db: Connection) -> None:
+    """Register the operator once, whichever server starts first (writes to the store run one at a time)."""
+    if fetch_one(db, "SELECT 1 FROM participants WHERE name = :name", {"name": OPERATOR}) is None:
+        register(db, OPERATOR, None, "The person managing all sessions")
 
 
 def _keep_environment_backend(directory: Path, backend: str) -> None:
