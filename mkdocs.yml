@@ -61,6 +61,7 @@ nav:
       - "Project assistant": products/project-assistant.md
       - "Agent sessions": products/agent-sessions.md
   - Development plan: development/plan.md
+  - Local services: development/local-services.md
   - Architecture:
       - "Requirements": architecture/requirements.md
       - "Principles": architecture/principles.md

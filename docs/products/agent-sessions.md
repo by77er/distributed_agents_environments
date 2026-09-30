@@ -38,7 +38,7 @@ scheduled wake-up brings them back ([evicting idle runs](../durability/eviction.
 
 Servers can share a Postgres database, each with its own runner; any of them serves any request, and when one dies
 another takes over its sessions ([several runners](../durability/runners.md)). They must share `--state` too, since
-environments and blobs are files:
+environments are files; images can go to S3 with `--blobs s3://bucket/prefix` ([local services](../development/local-services.md)):
 
 ```bash
 uv run agents serve --database postgresql://…/sessions --runner-id server-0 --state /shared/sessions --port 8421

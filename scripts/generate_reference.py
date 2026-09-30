@@ -28,6 +28,7 @@ PUBLIC_MODULES = [
     ("rollout.environments", "Environment backends: services that give runs computers."),
     ("rollout.environments.tools", "Tools for agents that work on a computer: shell, files, edits and images."),
     ("rollout.coordination", "Coordination between runs: participants, messages and a shared board."),
+    ("rollout.adapters.s3", "Blobs in S3 or any S3-compatible object store."),
     ("rollout.adapters.responses", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
 ]
 

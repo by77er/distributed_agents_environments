@@ -14,6 +14,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.environments`](#rolloutenvironments)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
 - **[`rollout.environments.tools`](#rolloutenvironmentstools)** — Tools for agents that work on a computer: shell, files, edits and images. [`apply_edits`](#apply_edits), [`ComputerTools`](#computertools), [`page_text`](#page_text), [`prepare_image`](#prepare_image), [`Replacement`](#replacement)
 - **[`rollout.coordination`](#rolloutcoordination)** — Coordination between runs: participants, messages and a shared board. [`BoardTools`](#boardtools), [`CoordinationStore`](#coordinationstore), [`Deliver`](#deliver), [`Delivery`](#delivery), [`Identify`](#identify), [`Participant`](#participant), [`Post`](#post), [`post`](#post), [`register`](#register), [`Relay`](#relay), [`SessionTools`](#sessiontools), [`Status`](#status), [`subscribe`](#subscribe)
+- **[`rollout.adapters.s3`](#rolloutadapterss3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
 - **[`rollout.adapters.responses`](#rolloutadaptersresponses)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 
 ## `rollout.core.harness`
@@ -2470,6 +2471,27 @@ A participant's current state, e.g. `working`, `waiting` or `stopped`.
 ```python
 def subscribe(db: Connection, participant: str, channel: str) -> ToolResult
 ```
+
+## `rollout.adapters.s3`
+
+Blobs in S3 or any S3-compatible object store.
+
+### `S3BlobStore`
+
+*class* · `src/rollout/adapters/s3.py`
+
+```python
+class S3BlobStore
+```
+
+Implements `Blobs` in an S3 bucket.
+
+**Methods**
+
+- `def __init__(self, bucket: str, *, prefix: str = 'blobs/', endpoint_url: str | None = None, region: str | None = None, client: 'S3Client | None' = None) -> None` — `client` replaces the boto3 client this store would create (e.g. with custom credentials).
+- `@classmethod def from_url(cls, url: str, **options: Any) -> 'S3BlobStore'` — A store for `s3://bucket/prefix`.
+- `async def put(self, data: bytes, media_type: str) -> BlobReference`
+- `async def read(self, reference: BlobReference) -> bytes`
 
 ## `rollout.adapters.responses`
 

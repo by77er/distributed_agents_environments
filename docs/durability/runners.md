@@ -94,7 +94,8 @@ The tests start a throwaway Postgres with `pgembed` (a development dependency, n
 
 ## Not yet
 
-- Environments and blobs on shared storage or behind a network service, so servers can run on several machines.
+- Environments on shared storage or behind a network service, so servers can run on several machines. Blobs can
+  already live in object storage (`--blobs s3://…`; [local services](../development/local-services.md)).
 - Waking other runners through `NOTIFY` when a relay or follow-up has work (they poll every few seconds).
 - A follow-up lost if a runner dies between a run finishing and its unconsumed messages reaching the next run (as
   before; the activation queue will close it).

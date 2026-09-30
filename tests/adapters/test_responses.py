@@ -27,7 +27,7 @@ from rollout.core.contracts import (
     ToolSpecification,
     context_digests,
 )
-from rollout.core.harness import FileBlobStore, SamplingParameters
+from rollout.core.harness import Blobs, SamplingParameters
 
 
 def events(*items: dict[str, Any], status: str = "completed", usage: dict[str, int] | None = None) -> str:
@@ -38,7 +38,7 @@ def events(*items: dict[str, Any], status: str = "completed", usage: dict[str, i
 
 
 def endpoint(
-    handler: Callable[[httpx.Request], httpx.Response], credentials: Any = None, blobs: FileBlobStore | None = None
+    handler: Callable[[httpx.Request], httpx.Response], credentials: Any = None, blobs: Blobs | None = None
 ) -> ResponsesEndpoint:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return ResponsesEndpoint(
@@ -93,8 +93,8 @@ def test_canonical_messages_render_to_responses_items() -> None:
     assert body["store"] is False and body["stream"] is True
 
 
-async def test_images_are_sent_as_input_images_from_the_blob_store(tmp_path: Path) -> None:
-    blobs = FileBlobStore(tmp_path)
+async def test_images_are_sent_as_input_images_from_the_blob_store(blob_store: Blobs) -> None:
+    blobs = blob_store
     picture = Media(media_type="image/png", source=await blobs.put(b"png bytes", "image/png"))
     audio = Media(media_type="audio/wav", source=await blobs.put(b"wav bytes", "audio/wav"))
     messages = [

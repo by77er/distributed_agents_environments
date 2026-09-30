@@ -29,6 +29,7 @@ from rollout.coordination.store import now
 from rollout.core.contracts import EffectIdentity, RunEvent, RunEventType, Text
 from rollout.core.harness import (
     Address,
+    Blobs,
     Deployment,
     DirectModel,
     Envelope,
@@ -79,8 +80,16 @@ class Settings:
     takeover_after: timedelta = timedelta(seconds=15)
     """How long a server may stop heartbeating before another server recovers its sessions."""
 
-    def blobs(self) -> FileBlobStore:
+    blob_store: str | None = None
+    """Where images are kept: `s3://bucket/prefix` on S3 or an S3-compatible service (the `s3` extra; endpoint and
+    credentials from the usual AWS_* variables), or None for files in `state`."""
+
+    def blobs(self) -> Blobs:
         """Where images the sessions look at are kept; model endpoints read them from here too."""
+        if self.blob_store is not None:
+            from rollout.adapters.s3 import S3BlobStore
+
+            return S3BlobStore.from_url(self.blob_store)
         return FileBlobStore(self.state / "blobs")
 
 

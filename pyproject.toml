@@ -26,6 +26,9 @@ assistant = [
     "starlette>=0.48",
     "uvicorn>=0.37",
 ]
+s3 = [
+    "boto3>=1.40",
+]
 
 [dependency-groups]
 dev = [
@@ -34,6 +37,8 @@ dev = [
     "ruff>=0.14",
     "pyright>=1.1.407",
     "pgembed>=0.2",
+    "moto[server]>=5.1",
+    "boto3-stubs[s3]>=1.40",
 ]
 docs = [
     "mkdocs>=1.6,<2",

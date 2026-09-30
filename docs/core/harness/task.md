@@ -149,7 +149,8 @@ Bytes too large for events, such as images, go to `run.blobs`, a content-address
 media_type)` returns a `BlobReference` for a `Media` block. Storing is not an effect: the reference depends only on the
 bytes, so a replay gets the same one. Model adapters read the bytes back when they render the block (the Responses
 adapter sends images as `input_image`, in user messages and in tool results). `FileBlobStore(directory)` keeps one
-file per blob; runners take it as `blobs=`.
+file per blob, and `rollout.adapters.s3.S3BlobStore` one object per blob in S3 or an S3-compatible store (blobs are
+read by hash, so stores are interchangeable); runners take either as `blobs=`.
 
 ## RunContext
 

@@ -1,0 +1,51 @@
+# Local services for several runners: Postgres (DBOS and the stores) and S3-compatible object storage (blobs).
+#
+#   docker compose -f deploy/local/compose.yaml up -d
+#   set -a; . deploy/local/services.env; set +a
+#   uv run pytest                                  # the Postgres and S3 tests use these services
+#   uv run agents serve --database "$ROLLOUT_DATABASE" --blobs "$ROLLOUT_BLOBS" --runner-id server-0 ...
+#
+# See docs/development/local-services.md.
+name: rollout-local
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: rollout
+      POSTGRES_PASSWORD: rollout
+      POSTGRES_DB: rollout
+    command: ["postgres", "-c", "max_connections=400"]  # each runner holds a pool of connections
+    ports: ["5432:5432"]
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rollout"]
+      interval: 2s
+      retries: 30
+
+  s3:
+    image: versity/versitygw:v1.8.0  # an S3 gateway; buckets are directories under /data
+    environment:
+      ROOT_ACCESS_KEY_ID: rollout
+      ROOT_SECRET_ACCESS_KEY: rollout-secret
+    command: ["--port", ":7070", "posix", "/data"]
+    ports: ["7070:7070"]
+    volumes: ["s3:/data"]
+
+  buckets:  # creates the blob bucket once the gateway answers, then exits
+    image: amazon/aws-cli:2.27.0
+    depends_on: [s3]
+    environment:
+      AWS_ACCESS_KEY_ID: rollout
+      AWS_SECRET_ACCESS_KEY: rollout-secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until aws --endpoint-url http://s3:7070 s3api list-buckets >/dev/null 2>&1; do sleep 1; done;
+        aws --endpoint-url http://s3:7070 s3api head-bucket --bucket rollout-blobs 2>/dev/null
+        || aws --endpoint-url http://s3:7070 s3api create-bucket --bucket rollout-blobs
+
+volumes:
+  postgres:
+  s3:

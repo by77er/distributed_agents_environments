@@ -52,6 +52,9 @@ def main() -> None:
     serve.add_argument(
         "--database", help="a Postgres URL shared by several servers, which share --state too (default: SQLite)"
     )
+    serve.add_argument(
+        "--blobs", help="where images are kept: s3://bucket/prefix (endpoint, credentials: AWS_*); default: --state"
+    )
     serve.add_argument("--runner-id", help="this server's name among those sharing --database; keep it across restarts")
     serve.add_argument("--takeover-after", type=float, default=15, help=argparse.SUPPRESS)
     serve.add_argument("--providers", help=argparse.SUPPRESS)  # module:attribute of model providers, for tests
@@ -125,6 +128,7 @@ def _serve(arguments: argparse.Namespace) -> None:
         evict_after=timedelta(seconds=arguments.evict_after) if arguments.evict_after > 0 else None,
         environment=arguments.environment,
         database=arguments.database,
+        blob_store=arguments.blobs,
         runner_id=arguments.runner_id,
         takeover_after=timedelta(seconds=arguments.takeover_after),
     )
