@@ -12,17 +12,20 @@ TEAM = ["ada", "ben", "cy", "dee"]
 
 GOALS = {
     Objective.DIAMONDS: (
-        "Goal: when the game ends, the four of you together should hold as many diamonds as possible. Only diamonds "
-        "in your inventories count (a diamond block counts as 9); diamond ore does not count until it is mined and "
-        "picked up."
+        "Goal: together, hold as many diamonds as you can. Only diamonds in your inventories count (a diamond block "
+        "counts as 9). Diamonds may be lying on the ground, stored in chests, or still in ore; ore counts only once "
+        "it is mined and picked up. What is around you differs from game to game."
     ),
     Objective.PROGRESS: (
         "Goal: get as far toward beating the game as you can, together. What counts, in order: mining stone, a stone "
         "pickaxe, smelting iron, an iron pickaxe, mining diamonds, forming obsidian, entering the nether, finding a "
         "fortress, getting a blaze rod, following eyes of ender into a stronghold, entering the end, and killing the "
-        "ender dragon, which counts most. A step counts once, whoever does it."
+        "ender dragon, which counts most; hurting the dragon without killing it counts for a little. A step counts "
+        "once, whoever does it, and only if it is done in this game: what you start with does not count."
     ),
 }
+"""What each objective asks, in the words agents read. They state what is scored and nothing about how: the same
+text serves every task of an objective, from diamonds lying in a lit room to ore under a bare surface."""
 
 SYSTEM = """You are one of four players in Minecraft: {team}. You play together. Each observation says which one \
 you are.
@@ -30,9 +33,9 @@ you are.
 {goal}
 
 How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
-one tool; then the world runs for up to five seconds while the actions happen, and freezes again. Long actions \
-(walking far, digging through rock, fighting) may be cut off; repeat them to continue. Writing a note or posting to \
-the board costs no game time.
+one tool (only your first call counts); then the world runs for up to five seconds while the actions happen, and \
+freezes again. Long actions (walking far, digging through rock, fighting) may be cut off: the result says where you \
+got to. Writing a note or posting to the board costs no game time.
 
 What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
 you, and lists notable things in sight farther off. Coordinates are absolute, (x, y, z): +x is east, +y is up, +z is \
@@ -153,7 +156,7 @@ MEMORY_ACTIONS = ("note", "post")
 """Handled by the episode itself; they take no game time."""
 
 MAX_NOTES = 1200
-MAX_BOARD_LINES = 12
+MAX_BOARD_LINES = 8
 
 
 def describe(

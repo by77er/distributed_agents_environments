@@ -192,6 +192,13 @@ function drawRun() {
   if (state.follow) state.turn = Math.max(0, turns - 1);
   state.turn = Math.min(state.turn, Math.max(0, turns - 1));
   const scroll = main.scrollTop;
+  // What each agent sees opens scrolled to its end (the newest part of an observation); a redraw of the same turn
+  // keeps wherever the reader had scrolled to.
+  const showing = `${state.selected} ${state.turn} ${state.full}`;
+  const kept = showing === state.showing
+    ? new Map([...main.querySelectorAll(".slot")].map(card => [card.dataset.slot, card.querySelector(".sees pre")?.scrollTop]))
+    : new Map();
+  state.showing = showing;
 
   const top = $("div", { class: "top" }, $("h2", {}, run.labels.title || run.labels.task || short(run.run_id)));
   for (const [key, value] of Object.entries(run.labels)) if (key !== "title") top.append($("span", { class: "chip" }, `${key} `, $("b", {}, String(value))));
@@ -210,7 +217,7 @@ function drawRun() {
   const grid = $("div", { class: "slots" });
   for (const [slot, samples] of slots) {
     const sample = samples[state.turn];
-    const card = $("div", { class: "slot" }, $("header", {}, $("b", {}, slot),
+    const card = $("div", { class: "slot", "data-slot": slot }, $("header", {}, $("b", {}, slot),
       $("span", {}, sample ? `${sample.seconds} s · ${sample.finish_reason}` : "")));
     if (!sample) { card.append($("section", {}, $("span", { class: "none" }, "no turn yet"))); grid.append(card); continue; }
     card.append($("section", { class: "sees" }, $("h3", {}, "Sees"), seen(sample)));
@@ -249,6 +256,10 @@ function drawRun() {
   log.append(table);
   main.replaceChildren(top, bar, slots.size ? grid : $("p", { class: "empty" }, "This run has not sampled a model yet."), log);
   main.scrollTop = scroll;
+  for (const card of main.querySelectorAll(".slot")) {
+    const pre = card.querySelector(".sees pre");
+    if (pre) pre.scrollTop = kept.get(card.dataset.slot) ?? pre.scrollHeight;
+  }
 }
 
 async function pull() {

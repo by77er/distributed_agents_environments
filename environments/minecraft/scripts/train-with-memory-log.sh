@@ -3,7 +3,8 @@
 #
 #   train-with-memory-log.sh RUN_DIRECTORY [train options...]
 #
-# Writes RUN_DIRECTORY/train.log and RUN_DIRECTORY/memory.log (available system memory and GPU memory every 2 s), and
+# Writes RUN_DIRECTORY/train.log, memory.log (available system memory and GPU memory every 2 s) and, under WSL,
+# host-memory.log (Windows' free memory every 15 s), and
 # serves the monitor (each episode and each agent, live) on http://localhost:${MONITOR_PORT:-8765} while it runs.
 set -u
 run="$1"; shift
@@ -17,10 +18,24 @@ mkdir -p "$run/feed"
   done
 ) >> "$run/memory.log" &
 logger=$!
+# Windows' own view of memory (the host, not the WSL VM): the VM's file cache counts against the host.
+windows=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+if [ -x "$windows" ]; then
+  (
+    while true; do
+      line=$(timeout 20 "$windows" -NoProfile -Command "\$o = Get-CimInstance Win32_OperatingSystem; \$v = (Get-Process vmmemWSL -ErrorAction SilentlyContinue).WorkingSet64; Write-Output \"host free \$([math]::Round(\$o.FreePhysicalMemory/1MB,1)) GB of \$([math]::Round(\$o.TotalVisibleMemorySize/1MB,1)), WSL holds \$([math]::Round(\$v/1GB,1)) GB\"" 2>/dev/null | tr -d '\r')
+      echo "$(date +%T) $line"
+      sleep 15
+    done
+  ) >> "$run/host-memory.log" &
+  host=$!
+else
+  host=
+fi
 cd "$(dirname "$0")/../../.." || exit 1
 uv run rollout-monitor "$run/feed" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
-trap 'kill "$logger" "$monitor" 2>/dev/null' EXIT
+trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
 uv run minecraft-swarm train "$run" "$@" > "$run/train.log" 2>&1
 status=$?
 echo "exit $status" >> "$run/train.log"

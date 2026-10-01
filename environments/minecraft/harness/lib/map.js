@@ -4,7 +4,7 @@
 // Only what its own eyes saw is in it: `memory` holds the blocks its rays hit or passed through, `air` the empty cells
 // they passed through. A cell neither holds is unknown, whatever the client's world data says.
 
-const AIR = new Set(['air', 'cave_air', 'void_air'])
+const AIR = new Set(['air', 'cave_air', 'void_air', 'light']) // (`light` is the invisible block that lights staged rooms)
 const RADIUS = 6 // blocks each way: a 13 by 13 grid
 const HEIGHTS = [2, 1, 0, -1, -2] // relative to the feet: above the head, head, feet, floor, under the floor
 const MAX_AIR = 150000 // remembered empty cells per bot
