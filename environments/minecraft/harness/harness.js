@@ -5,6 +5,7 @@
 //   {"id": 2, "op": "observe", "bot": "ada"}         what ada sees, her messages, her last action's result
 //   {"id": 3, "op": "act", "bot": "ada", "action": {"name": "mine", "x": 1, "y": -58, "z": 4}}
 //   {"id": 4, "op": "busy"}                           which bots are still acting
+//   {"id": 4, "op": "status"}                         for diagnosis: each bot's connection, position and physics
 //   {"id": 5, "op": "freeze"}                         stop every action (results are kept) and pause physics
 //   {"id": 6, "op": "thaw"}                           resume physics, before actions start
 //   {"id": 7, "op": "quit"}
@@ -38,6 +39,10 @@ function join (host, port, name) {
     bots.set(name, state)
     bot.loadPlugin(pathfinder)
     bot.once('spawn', () => {
+      // The server makes a player's box from a 32-bit half width (0.30000001...), a little wider than mineflayer's
+      // 0.3: a bot resting against a wall would be inside it by the server's reckoning, and Paper refuses such
+      // moves ("clipped into block"), putting the bot back every tick.
+      bot.physics.playerHalfWidth = Math.fround(0.3)
       const movements = new Movements(bot)
       movements.canDig = true
       movements.allowParkour = false
@@ -54,6 +59,9 @@ function join (host, port, name) {
     bot.on('kicked', reason => { state.kicked = String(typeof reason === 'string' ? reason : JSON.stringify(reason)) })
     bot.on('error', error => { if (!bot.entity) reject(error) })
     bot.on('death', () => { state.died = true })
+    bot.on('physicsTick', () => { state.physicsTicks = (state.physicsTicks ?? 0) + 1 })
+    bot.on('forcedMove', () => { state.forcedMoves = (state.forcedMoves ?? 0) + 1 })
+    bot.on('respawn', () => state.memory.clear()) // another dimension (or a new life): what was seen is elsewhere
   })
 }
 
@@ -81,24 +89,27 @@ function act (name, action) {
   const { name: actionName, ...args } = action
   const context = { signal: controller.signal, memory: state.memory, team }
   state.result = null
-  state.action = {
-    controller,
-    done: (async () => {
-      try {
-        state.result = { action, ok: true, ...(await handler(state.bot, args, context)) }
-      } catch (error) {
-        if (error instanceof Interrupted || controller.signal.aborted) {
-          state.result = { action, ok: false, interrupted: true, note: 'time ran out before it finished; repeat it to continue' }
-        } else if (error instanceof ActionError) {
-          state.result = { action, ok: false, error: error.message }
-        } else {
-          state.result = { action, ok: false, error: `${actionName} failed: ${error.message}` }
-        }
-      } finally {
-        state.action = null
-      }
-    })()
+  const running = { controller, action, done: null }
+  const finish = result => { // an action abandoned at a freeze reports nothing when it finally ends
+    if (state.action !== running) return
+    state.result = result
+    state.action = null
   }
+  running.done = (async () => {
+    const started = Date.now()
+    try {
+      finish({ action, ok: true, ...(await handler(state.bot, args, context)), seconds: (Date.now() - started) / 1000 })
+    } catch (error) {
+      if (error instanceof Interrupted || controller.signal.aborted) {
+        finish(interrupted(action))
+      } else if (error instanceof ActionError) {
+        finish({ action, ok: false, error: error.message })
+      } else {
+        finish({ action, ok: false, error: `${actionName} failed: ${error.message}` })
+      }
+    }
+  })()
+  state.action = running
   return { started: true }
 }
 
@@ -112,6 +123,10 @@ async function freeze () {
   }
   await Promise.race([Promise.all(pending), new Promise(resolve => setTimeout(resolve, 3000))])
   for (const state of bots.values()) {
+    if (state.action) { // it did not stop (a path waiting to reach its next block, say): leave it behind
+      state.result = interrupted(state.action.action)
+      state.action = null
+    }
     state.bot.pathfinder.stop()
     state.bot.stopDigging?.()
     state.bot.clearControlStates()
@@ -120,9 +135,38 @@ async function freeze () {
   return { frozen: true }
 }
 
+function interrupted (action) {
+  return { action, ok: false, interrupted: true, note: 'time ran out before it finished; repeat it to continue' }
+}
+
 function thaw () {
   for (const state of bots.values()) state.bot.physicsEnabled = true
   return { thawed: true }
+}
+
+// For diagnosis: is each bot connected, where, and is its physics running?
+function status () {
+  const result = {}
+  for (const [name, state] of bots) {
+    const entity = state.bot.entity
+    result[name] = {
+      kicked: state.kicked,
+      acting: state.action !== null,
+      dimension: state.bot.game?.dimension ?? null,
+      position: entity ? { x: entity.position.x, y: entity.position.y, z: entity.position.z } : null,
+      on_ground: entity?.onGround ?? null,
+      chunk_loaded: entity ? state.bot.blockAt(entity.position) !== null : false,
+      physics_ticks: state.physicsTicks ?? 0,
+      forced_moves: state.forcedMoves ?? 0,
+      controls: ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'].filter(control => state.bot.getControlState(control)),
+      velocity: entity ? { x: entity.velocity.x, y: entity.velocity.y, z: entity.velocity.z } : null,
+      digging: state.bot.targetDigBlock ? state.bot.targetDigBlock.name : null,
+      pathing: { moving: state.bot.pathfinder.isMoving(), mining: state.bot.pathfinder.isMining(), building: state.bot.pathfinder.isBuilding() },
+      feet: entity ? state.bot.blockAt(entity.position)?.name : null,
+      below: entity ? state.bot.blockAt(entity.position.offset(0, -1, 0))?.name : null
+    }
+  }
+  return result
 }
 
 function busy () {
@@ -135,6 +179,7 @@ async function handle (request) {
     case 'observe': return observation(request.bot)
     case 'act': return act(request.bot, request.action)
     case 'busy': return busy()
+    case 'status': return status()
     case 'freeze': return freeze()
     case 'thaw': return thaw()
     case 'quit':

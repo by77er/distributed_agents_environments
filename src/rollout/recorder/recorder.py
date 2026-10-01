@@ -11,6 +11,7 @@ chat templates of reasoning models drop earlier turns' thinking: re-rendered con
 """
 
 import math
+from array import array
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -65,7 +66,8 @@ class Channel:
 class RecordedTurn:
     session_id: str
     effect_id: str
-    prompt: list[int]
+    prompt: Sequence[int]
+    """Kept as a packed array: a long episode records thousands of prompts of thousands of tokens each."""
     completion: list[int]
     loss_mask: list[bool]
     """True where the policy sampled the token; False where the recorder forced it."""
@@ -168,7 +170,7 @@ class RecordedEndpoint:
         turn = RecordedTurn(
             session_id=request.session_id,
             effect_id=request.effect_id,
-            prompt=list(prompt),
+            prompt=array("i", prompt),
             completion=completion,
             loss_mask=mask,
             logprobs=logprobs,

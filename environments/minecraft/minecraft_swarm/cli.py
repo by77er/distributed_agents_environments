@@ -22,11 +22,14 @@ def main() -> None:
     training.add_argument("directory", type=Path)
     training.add_argument("--iterations", type=int, default=100)
     training.add_argument("--group-size", type=int, default=4)
-    training.add_argument("--max-turns", type=int, default=16)
+    training.add_argument("--max-minutes", type=float, help="cap each task's budget of game time")
+    training.add_argument("--max-turns", type=int, help="cap each episode's turns (for smoke tests)")
+    training.add_argument("--update-turns", type=int, default=384, help="turns trained on per update (sampled)")
     training.add_argument("--thinking-budget", type=int, default=384)
     training.add_argument("--learning-rate", type=float, default=2e-5)
     training.add_argument("--seed", type=int, default=0)
     training.add_argument("--tasks", help="comma-separated task ids to train on (default: the whole curriculum)")
+    training.add_argument("--exercise-updates", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     if arguments.command == "train":
         from minecraft_swarm.train import TrainingSettings, train
@@ -35,11 +38,14 @@ def main() -> None:
             directory=arguments.directory,
             iterations=arguments.iterations,
             group_size=arguments.group_size,
+            max_minutes=arguments.max_minutes,
             max_turns=arguments.max_turns,
+            update_turns=arguments.update_turns,
             thinking_budget=arguments.thinking_budget,
             learning_rate=arguments.learning_rate,
             seed=arguments.seed,
             tasks=arguments.tasks.split(",") if arguments.tasks else None,
+            exercise_updates=arguments.exercise_updates,
         )
         asyncio.run(train(settings))
     if arguments.command == "server":

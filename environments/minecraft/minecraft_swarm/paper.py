@@ -7,7 +7,7 @@ Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may b
 - `bootstrap/`: one server started once, for the libraries and the patched jar every server shares;
 - `jdk/`: a JDK, only to compile the plugin (a Java runtime is enough to run Paper);
 - `plugin/`: the plugin jar, rebuilt when its sources change;
-- `templates/seed-N/`: a configured server whose world was generated from seed N;
+- `templates/seed-N-CONFIG/`: a configured server whose world was generated from seed N (with config/'s digest);
 - `servers/`: temporary servers, copies of a template, deleted when stopped.
 
 Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEULA) for a local, offline server.
@@ -19,6 +19,7 @@ import fcntl
 import hashlib
 import json
 import os
+import random
 import shutil
 import signal
 import socket
@@ -173,7 +174,7 @@ class Installation:
             return self._template(seed)
 
     def _template(self, seed: int) -> Path:
-        directory = self.root / "templates" / f"seed-{seed}"
+        directory = self.root / "templates" / f"seed-{seed}-{configuration_digest()}"
         if (directory / "ready").exists():
             return directory
         shutil.rmtree(directory, ignore_errors=True)
@@ -215,8 +216,9 @@ class PaperServer:
     seed: int
     heap: str = "1536M"
     name: str = field(default_factory=lambda: f"s-{uuid.uuid4().hex[:10]}")
-    port: int = field(default_factory=lambda: free_port())
-    control_port: int = field(default_factory=lambda: free_port())
+    port: int = 0
+    control_port: int = 0
+    """Chosen when the server starts (immediately before Java does)."""
     process: asyncio.subprocess.Process | None = None
 
     @property
@@ -227,13 +229,26 @@ class PaperServer:
     def control_url(self) -> str:
         return f"http://127.0.0.1:{self.control_port}"
 
-    async def start(self, *, seconds: float = 180) -> None:
+    async def start(self, *, seconds: float = 120, attempts: int = 2) -> None:
+        """Copy the template and start Java; a start that fails is tried again with other ports."""
         template = await asyncio.to_thread(self.installation.template, self.seed)
         plugin = await asyncio.to_thread(self.installation.plugin_jar)
         await asyncio.to_thread(_copy_template, template, self.directory)
-        _write_properties(self.directory, {"server-port": str(self.port)})
         (self.directory / "plugins").mkdir(exist_ok=True)
         shutil.copy2(plugin, self.directory / "plugins" / "rollout-ground-truth.jar")
+        for attempt in range(1, attempts + 1):
+            try:
+                await self._launch(seconds)
+                return
+            except (RuntimeError, TimeoutError):
+                await self._terminate()
+                if attempt == attempts:
+                    await asyncio.to_thread(shutil.rmtree, self.directory, True)
+                    raise
+
+    async def _launch(self, seconds: float) -> None:
+        self.port, self.control_port = free_port(), free_port()
+        _write_properties(self.directory, {"server-port": str(self.port)})
         log = (self.directory / "server.log").open("w")
         self.process = await asyncio.create_subprocess_exec(
             self.installation.java, f"-Xmx{self.heap}", f"-Drollout.control.port={self.control_port}",
@@ -244,13 +259,21 @@ class PaperServer:
         async with httpx.AsyncClient(timeout=2) as client:
             while time.monotonic() < deadline:
                 if self.process.returncode is not None:
-                    raise RuntimeError(f"the server exited while starting; see {self.directory / 'server.log'}")
+                    raise RuntimeError(f"the server exited while starting; its log ends:\n{self._log_tail()}")
                 with contextlib.suppress(httpx.HTTPError):
                     if (await client.get(f"{self.control_url}/health")).status_code == 200:
                         return
                 await asyncio.sleep(0.25)
-        await self.stop()
-        raise TimeoutError(f"the server did not start in {seconds} seconds")
+        raise TimeoutError(f"the server did not start in {seconds} seconds; its log ends:\n{self._log_tail()}")
+
+    def _log_tail(self) -> str:
+        return "\n".join((self.directory / "server.log").read_text(errors="replace").splitlines()[-15:])
+
+    async def _terminate(self) -> None:
+        process = self.process
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.wait()
 
     async def stop(self, *, keep: bool = False) -> None:
         """Stop the server and delete its directory (unless `keep`, e.g. to inspect a failure)."""
@@ -271,9 +294,23 @@ class PaperServer:
 
 
 def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+    """A free port to listen on, outside the range the system gives outgoing connections (a port from that range can
+    be taken by a client's connection between choosing it and listening on it)."""
+    for _ in range(200):
+        port = random.randint(20000, 29999)
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("no free port between 20000 and 29999")
+
+
+def configuration_digest() -> str:
+    """A digest of config/: templates made with other settings are not reused."""
+    files = sorted(path for path in CONFIG.rglob("*") if path.is_file())
+    return hashlib.sha256(b"".join(path.name.encode() + path.read_bytes() for path in files)).hexdigest()[:10]
 
 
 def server_properties() -> dict[str, str]:

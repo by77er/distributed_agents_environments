@@ -61,14 +61,21 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <ul>
  *   <li>GET /health: ready, and who is online.</li>
- *   <li>GET /state: every player's position, health, food, inventory and diamonds; the team's total diamonds.</li>
+ *   <li>GET /state: every player's position, health, food, inventory and diamonds; the team's total diamonds, the
+ *       advancements it earned since the baseline, and the most the dragon was hurt.</li>
  *   <li>GET /tick, POST /tick {"action": "freeze" | "unfreeze" | "step", "ticks": n}: a step runs n ticks of a
  *       frozen game and answers when they have run.</li>
- *   <li>POST /episode: set up the team (clear, kit, teleport, game mode) and the world (difficulty, time, rules).</li>
+ *   <li>POST /episode: set up the team (one scoreboard team without friendly fire; clear, kit with armor worn,
+ *       teleport to any dimension, respawn there, game mode) and the worlds (difficulty, time, rules).</li>
  *   <li>GET /ores?x&amp;y&amp;z&amp;radius&amp;exposed: diamond ores near a point, for choosing starts (never agents).</li>
- *   <li>GET /events?after=n: what happened (chat, ores mined, items picked up, deaths, joins).</li>
+ *   <li>GET /events?after=n: what happened (chat, ores mined, items picked up, deaths, joins, advancements, hits on
+ *       creatures, moves the server refused, the dragon's death).</li>
+ *   <li>POST /baseline: remember each team member's advancements now; /state then reports only newer ones (a kit can
+ *       itself grant advancements, which an episode should not be rewarded for).</li>
  *   <li>Setup, for building tasks: POST /setup/carve (a lit, empty box with a floor), /setup/items (dropped items),
- *       /setup/chest (a chest with contents), /setup/block (one block); GET /setup/stand (safe places to stand).</li>
+ *       /setup/chest (a chest with contents), /setup/block (one block), /setup/spawn (a creature), /setup/time;
+ *       GET /setup/stand (safe places to stand), /setup/surface (the ground's height), /setup/locate (the nearest
+ *       structure), /setup/blocks (blocks of one type near a point).</li>
  * </ul>
  *
  * Team members cannot run commands: every command they send is cancelled.
@@ -80,6 +87,11 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
     private final Gson gson = new GsonBuilder().disableHtmlEscaping().create();
     private final Set<String> team = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> lastKnownDiamonds = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> baselines = new ConcurrentHashMap<>();
+    private final Set<String> teamEarned = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> lastFailedMove = new ConcurrentHashMap<>();
+    private volatile boolean dragonKilled = false;
+    private volatile double dragonDamage = 0.0;
     private final ConcurrentLinkedDeque<JsonObject> events = new ConcurrentLinkedDeque<>();
     private final AtomicLong eventSequence = new AtomicLong();
     private HttpServer http;
@@ -108,12 +120,17 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         route("/episode", this::episode);
         route("/ores", this::ores);
         route("/events", this::events);
+        route("/baseline", this::baseline);
         route("/setup/carve", this::carve);
         route("/setup/items", this::dropItems);
         route("/setup/chest", this::chest);
         route("/setup/block", this::setBlock);
         route("/setup/stand", this::standingSpots);
         route("/setup/surface", this::surface);
+        route("/setup/locate", this::locate);
+        route("/setup/blocks", this::findBlocks);
+        route("/setup/spawn", this::spawnEntity);
+        route("/setup/time", this::setTime);
         getServer().getPluginManager().registerEvents(this, this);
         http.start();
         getLogger().info("control API on 127.0.0.1:" + port);
@@ -149,14 +166,21 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             JsonArray players = new JsonArray();
             int teamDiamonds = 0;
             Set<String> counted = new java.util.HashSet<>();
+            Set<String> teamAdvancements = new java.util.TreeSet<>(teamEarned);  // members who left keep theirs
             for (Player player : Bukkit.getOnlinePlayers()) {
                 int diamonds = diamonds(player);
                 String name = player.getName().toLowerCase(Locale.ROOT);
+                JsonObject described = describe(player, diamonds);
                 if (team.contains(name)) {
                     teamDiamonds += diamonds;
                     counted.add(name);
+                    Set<String> earned = newAdvancements(player);
+                    teamAdvancements.addAll(earned);
+                    JsonArray list = new JsonArray();
+                    earned.forEach(list::add);
+                    described.add("advancements", list);
                 }
-                players.add(describe(player, diamonds));
+                players.add(described);
             }
             for (String member : team) {  // members who left keep what they held when they left
                 if (!counted.contains(member)) {
@@ -165,6 +189,11 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             }
             result.add("players", players);
             result.addProperty("team_diamonds", teamDiamonds);
+            JsonArray advancements = new JsonArray();
+            teamAdvancements.forEach(advancements::add);
+            result.add("team_advancements", advancements);
+            result.addProperty("dragon_killed", dragonKilled);
+            result.addProperty("dragon_damage", dragonKilled ? 1.0 : dragonDamage);
             JsonArray members = new JsonArray();
             team.forEach(members::add);
             result.add("team", members);
@@ -227,16 +256,18 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             if (world == null) {
                 throw new IllegalArgumentException("no such world");
             }
-            if (body.has("difficulty")) {
-                world.setDifficulty(Difficulty.valueOf(body.get("difficulty").getAsString().toUpperCase(Locale.ROOT)));
+            for (World each : Bukkit.getWorlds()) {  // the nether and the end play by the same rules
+                if (body.has("difficulty")) {
+                    each.setDifficulty(Difficulty.valueOf(body.get("difficulty").getAsString().toUpperCase(Locale.ROOT)));
+                }
+                if (body.has("gamerules")) {
+                    for (Map.Entry<String, JsonElement> rule : body.getAsJsonObject("gamerules").entrySet()) {
+                        setGameRule(each, rule.getKey(), rule.getValue());
+                    }
+                }
             }
             if (body.has("time")) {
-                world.setTime(body.get("time").getAsLong());
-            }
-            if (body.has("gamerules")) {
-                for (Map.Entry<String, JsonElement> rule : body.getAsJsonObject("gamerules").entrySet()) {
-                    setGameRule(world, rule.getKey(), rule.getValue());
-                }
+                overworld().setTime(body.get("time").getAsLong());
             }
             GameMode gameMode = GameMode.valueOf(body.has("gamemode") ? body.get("gamemode").getAsString().toUpperCase(Locale.ROOT) : "SURVIVAL");
             double x = spawn.get("x").getAsDouble(), y = spawn.get("y").getAsDouble(), z = spawn.get("z").getAsDouble();
@@ -249,6 +280,14 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     placements.put(entry.get("name").getAsString().toLowerCase(Locale.ROOT), entry);
                 }
             }
+            // One scoreboard team: teammates cannot hurt each other (their arrows pass through) or push each other.
+            org.bukkit.scoreboard.Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+            org.bukkit.scoreboard.Team swarm = scoreboard.getTeam("swarm");
+            if (swarm == null) {
+                swarm = scoreboard.registerNewTeam("swarm");
+            }
+            swarm.setAllowFriendlyFire(false);
+            swarm.setOption(org.bukkit.scoreboard.Team.Option.COLLISION_RULE, org.bukkit.scoreboard.Team.OptionStatus.NEVER);
             int index = 0;
             for (JsonElement entry : body.getAsJsonArray("team")) {
                 Player player = Bukkit.getPlayerExact(entry.getAsString());
@@ -256,14 +295,18 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     missing.add(entry.getAsString());
                     continue;
                 }
+                swarm.addEntry(player.getName());
                 JsonObject placement = placements.get(entry.getAsString().toLowerCase(Locale.ROOT));
                 player.getInventory().clear();
                 player.setItemOnCursor(null);
                 JsonArray kit = placement != null && placement.has("kit") ? placement.getAsJsonArray("kit")
                         : body.has("kit") ? body.getAsJsonArray("kit") : new JsonArray();
                 for (ItemStack stack : stacks(kit)) {
-                    player.getInventory().addItem(stack);
+                    if (!wear(player, stack)) {
+                        player.getInventory().addItem(stack);
+                    }
                 }
+                player.updateInventory();  // the client sees the cleared and refilled slots
                 player.setGameMode(gameMode);
                 AttributeInstance maxHealth = player.getAttribute(Attribute.MAX_HEALTH);
                 player.setHealth(maxHealth != null ? maxHealth.getValue() : 20.0);
@@ -272,8 +315,14 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                 player.setFireTicks(0);
                 player.setFallDistance(0);
                 if (placement != null) {
-                    player.teleport(new Location(world, placement.get("x").getAsDouble(), placement.get("y").getAsDouble(),
-                            placement.get("z").getAsDouble(), (float) (index * 90), 0f));
+                    World target = placement.has("world") ? Bukkit.getWorld(placement.get("world").getAsString()) : world;
+                    if (target == null) {
+                        throw new IllegalArgumentException("no such world " + placement.get("world").getAsString());
+                    }
+                    Location start = new Location(target, placement.get("x").getAsDouble(), placement.get("y").getAsDouble(),
+                            placement.get("z").getAsDouble(), (float) (index * 90), 0f);
+                    player.teleport(start);
+                    player.setRespawnLocation(start, true);  // whoever dies starts again from here
                 } else {
                     double offset = index - 1.5;  // stand side by side, one block apart
                     player.teleport(new Location(world, x + offset, y, z, (float) (index * 90), 0f));
@@ -413,6 +462,29 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         });
     }
 
+    /** Spawn a creature (staged fights, and tests). */
+    private JsonElement spawnEntity(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            org.bukkit.entity.EntityType type = org.bukkit.entity.EntityType.valueOf(body.get("entity").getAsString().toUpperCase(Locale.ROOT));
+            Location location = new Location(world(body), body.get("x").getAsDouble() + 0.5, body.get("y").getAsDouble(),
+                    body.get("z").getAsDouble() + 0.5);
+            org.bukkit.entity.Entity entity = location.getWorld().spawnEntity(location, type);
+            if (entity instanceof org.bukkit.entity.LivingEntity living) {
+                living.setRemoveWhenFarAway(false);
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("id", entity.getEntityId());
+            return result;
+        });
+    }
+
+    private JsonElement setTime(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            overworld().setTime(body.get("time").getAsLong());
+            return new JsonObject();
+        });
+    }
+
     /** Places to stand near a point: air at the feet and head, a solid floor, and no lava within two blocks. */
     private JsonElement standingSpots(String method, Map<String, String> query, JsonObject body) throws Exception {
         int radius = Math.min(Integer.parseInt(query.getOrDefault("radius", "16")), MAX_ORE_RADIUS);
@@ -447,6 +519,72 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             }
             JsonObject result = new JsonObject();
             result.add("spots", spots);
+            return result;
+        });
+    }
+
+    /** The nearest structure (fortress, stronghold, end_city) to a point: where tasks of the late game start. */
+    private JsonElement locate(String method, Map<String, String> query, JsonObject body) throws Exception {
+        String worldName = query.getOrDefault("world", "world");
+        String name = query.get("structure").toUpperCase(Locale.ROOT);
+        int x = Integer.parseInt(query.getOrDefault("x", "0")), z = Integer.parseInt(query.getOrDefault("z", "0"));
+        int radius = Integer.parseInt(query.getOrDefault("radius", "100"));  // in chunks
+        return onMainThread(() -> {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                throw new IllegalArgumentException("no such world");
+            }
+            org.bukkit.generator.structure.Structure structure;
+            try {
+                structure = (org.bukkit.generator.structure.Structure)
+                        org.bukkit.generator.structure.Structure.class.getField(name).get(null);
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalArgumentException("unknown structure " + name);
+            }
+            org.bukkit.util.StructureSearchResult found =
+                    world.locateNearestStructure(new Location(world, x, 64, z), structure, radius, false);
+            JsonObject result = new JsonObject();
+            if (found != null) {
+                result.addProperty("x", found.getLocation().getBlockX());
+                result.addProperty("y", found.getLocation().getBlockY());
+                result.addProperty("z", found.getLocation().getBlockZ());
+            }
+            return result;
+        });
+    }
+
+    /** Blocks of one type near a point (e.g. end portal frames, to start beside the stronghold's portal). */
+    private JsonElement findBlocks(String method, Map<String, String> query, JsonObject body) throws Exception {
+        String worldName = query.getOrDefault("world", "world");
+        Material material = Material.matchMaterial(query.get("block"));
+        int radius = Math.min(Integer.parseInt(query.getOrDefault("radius", "32")), MAX_ORE_RADIUS);
+        int cx = Integer.parseInt(query.get("x")), cy = Integer.parseInt(query.get("y")), cz = Integer.parseInt(query.get("z"));
+        int limit = Integer.parseInt(query.getOrDefault("limit", "64"));
+        if (material == null) {
+            throw new IllegalArgumentException("unknown block " + query.get("block"));
+        }
+        return onMainThread(() -> {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                throw new IllegalArgumentException("no such world");
+            }
+            JsonArray found = new JsonArray();
+            int minY = Math.max(world.getMinHeight(), cy - radius), maxY = Math.min(world.getMaxHeight() - 1, cy + radius);
+            for (int x = cx - radius; x <= cx + radius && found.size() < limit; x++) {
+                for (int z = cz - radius; z <= cz + radius && found.size() < limit; z++) {
+                    for (int y = minY; y <= maxY && found.size() < limit; y++) {
+                        if (world.getBlockAt(x, y, z).getType() == material) {
+                            JsonObject block = new JsonObject();
+                            block.addProperty("x", x);
+                            block.addProperty("y", y);
+                            block.addProperty("z", z);
+                            found.add(block);
+                        }
+                    }
+                }
+            }
+            JsonObject result = new JsonObject();
+            result.add("blocks", found);
             return result;
         });
     }
@@ -497,6 +635,28 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         return world;
     }
 
+    /** Put a piece of armor on, if that slot is empty. */
+    private static boolean wear(Player player, ItemStack stack) {
+        String name = stack.getType().name();
+        org.bukkit.inventory.PlayerInventory inventory = player.getInventory();
+        if (name.endsWith("_HELMET") && empty(inventory.getHelmet())) {
+            inventory.setHelmet(stack);
+        } else if (name.endsWith("_CHESTPLATE") && empty(inventory.getChestplate())) {
+            inventory.setChestplate(stack);
+        } else if (name.endsWith("_LEGGINGS") && empty(inventory.getLeggings())) {
+            inventory.setLeggings(stack);
+        } else if (name.endsWith("_BOOTS") && empty(inventory.getBoots())) {
+            inventory.setBoots(stack);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean empty(ItemStack stack) {
+        return stack == null || stack.getType().isAir();
+    }
+
     private static java.util.List<ItemStack> stacks(JsonArray items) {
         java.util.List<ItemStack> result = new java.util.ArrayList<>();
         for (JsonElement item : items) {
@@ -515,7 +675,121 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         return result;
     }
 
+    private JsonElement baseline(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            baselines.clear();
+            teamEarned.clear();
+            dragonKilled = false;
+            dragonDamage = 0.0;
+            JsonObject result = new JsonObject();
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                String name = player.getName().toLowerCase(Locale.ROOT);
+                if (team.contains(name)) {
+                    Set<String> done = doneAdvancements(player);
+                    baselines.put(name, done);
+                    result.addProperty(player.getName(), done.size());
+                }
+            }
+            return result;
+        });
+    }
+
+    /** Advancements a player has completed (not the recipe unlocks Minecraft also tracks as advancements). */
+    private static Set<String> doneAdvancements(Player player) {
+        Set<String> done = new java.util.TreeSet<>();
+        java.util.Iterator<org.bukkit.advancement.Advancement> all = Bukkit.advancementIterator();
+        while (all.hasNext()) {
+            org.bukkit.advancement.Advancement advancement = all.next();
+            String key = advancement.getKey().getKey();
+            if (key.startsWith("recipes/")) {
+                continue;
+            }
+            if (player.getAdvancementProgress(advancement).isDone()) {
+                done.add(key);
+            }
+        }
+        return done;
+    }
+
+    private Set<String> newAdvancements(Player player) {
+        Set<String> done = doneAdvancements(player);
+        done.removeAll(baselines.getOrDefault(player.getName().toLowerCase(Locale.ROOT), Set.of()));
+        return done;
+    }
+
     // Listeners
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onAdvancement(org.bukkit.event.player.PlayerAdvancementDoneEvent event) {
+        String key = event.getAdvancement().getKey().getKey();
+        if (!key.startsWith("recipes/")) {
+            JsonObject data = new JsonObject();
+            data.addProperty("advancement", key);
+            record("advancement", event.getPlayer(), data);
+            String name = event.getPlayer().getName().toLowerCase(Locale.ROOT);
+            if (team.contains(name) && baselines.containsKey(name)) {
+                teamEarned.add(key);
+            }
+        }
+    }
+
+    /** The most the dragon has been hurt so far, as a share of its health (it heals at its crystals). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDragonDamage(org.bukkit.event.entity.EntityDamageEvent event) {
+        org.bukkit.entity.Entity hurt = event.getEntity();
+        if (hurt instanceof org.bukkit.entity.EnderDragonPart part) {
+            hurt = part.getParent();
+        }
+        if (hurt instanceof org.bukkit.entity.EnderDragon dragon) {
+            AttributeInstance maxHealth = dragon.getAttribute(Attribute.MAX_HEALTH);
+            double most = maxHealth != null ? maxHealth.getValue() : 200.0;
+            double left = Math.max(0.0, dragon.getHealth() - event.getFinalDamage());
+            dragonDamage = Math.max(dragonDamage, 1.0 - left / most);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onEntityDeath(org.bukkit.event.entity.EntityDeathEvent event) {
+        if (event.getEntityType() == org.bukkit.entity.EntityType.ENDER_DRAGON) {
+            dragonKilled = true;
+            record("dragon_killed", event.getEntity().getKiller(), new JsonObject());
+        }
+    }
+
+    /** A team member hurt a creature, by hand or with an arrow. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHurt(org.bukkit.event.entity.EntityDamageByEntityEvent event) {
+        org.bukkit.entity.Entity source = event.getDamager();
+        if (source instanceof org.bukkit.entity.Projectile projectile && projectile.getShooter() instanceof Player shooter) {
+            source = shooter;
+        }
+        if (!(source instanceof Player player) || !team.contains(player.getName().toLowerCase(Locale.ROOT))
+                || event.getEntity() instanceof Player) {
+            return;
+        }
+        JsonObject data = new JsonObject();
+        data.addProperty("entity", event.getEntityType().name().toLowerCase(Locale.ROOT));
+        data.addProperty("damage", Math.round(event.getFinalDamage() * 10) / 10.0);
+        data.addProperty("with", event.getDamager() instanceof org.bukkit.entity.Projectile ? "arrow" : "hand");
+        record("hurt", player, data);
+    }
+
+    /** A move the server refused (it puts the player back): recorded once a second per player, for diagnosis. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onFailedMove(io.papermc.paper.event.player.PlayerFailMoveEvent event) {
+        Player player = event.getPlayer();
+        long now = overworld().getFullTime();
+        Long last = lastFailedMove.get(player.getName());
+        if (last != null && now - last < 20) {
+            return;
+        }
+        lastFailedMove.put(player.getName(), now);
+        JsonObject data = new JsonObject();
+        data.addProperty("reason", event.getFailReason().name().toLowerCase(Locale.ROOT));
+        data.addProperty("from", event.getFrom().toVector().toString());
+        data.addProperty("to", event.getTo().toVector().toString());
+        record("move_refused", player, data);
+    }
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onCommand(PlayerCommandPreprocessEvent event) {

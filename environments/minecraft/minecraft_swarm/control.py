@@ -50,11 +50,21 @@ class Control:
     # Setup: building tasks from ground truth
 
     async def carve(
-        self, x: int, y: int, z: int, *, width: int, height: int, depth: int, light: bool = True, floor: str = "stone"
+        self,
+        x: int,
+        y: int,
+        z: int,
+        *,
+        width: int,
+        height: int,
+        depth: int,
+        light: bool = True,
+        floor: str = "stone",
+        world: str = "world",
     ) -> None:
         """Empty a box (its corner at x, y, z) and give it a floor; light it with invisible light blocks."""
         box = {"x": x, "y": y, "z": z, "width": width, "height": height, "depth": depth, "light": light, "floor": floor}
-        await self._request("POST", "/setup/carve", box)
+        await self._request("POST", "/setup/carve", {**box, "world": world})
 
     async def drop_items(self, x: int, y: int, z: int, items: list[dict[str, Any]]) -> int:
         return int((await self._request("POST", "/setup/items", {"x": x, "y": y, "z": z, "items": items}))["dropped"])
@@ -66,14 +76,41 @@ class Control:
         await self._request("POST", "/setup/block", {"x": x, "y": y, "z": z, "block": block})
 
     async def standing_spots(
-        self, x: int, y: int, z: int, *, radius: int = 16, limit: int = 64
+        self, x: int, y: int, z: int, *, radius: int = 16, limit: int = 64, world: str = "world"
     ) -> list[dict[str, int]]:
         """Places to stand near a point (air at the feet and head, a solid floor, no lava near), nearest first."""
-        query = {"x": x, "y": y, "z": z, "radius": radius, "limit": limit}
+        query = {"x": x, "y": y, "z": z, "radius": radius, "limit": limit, "world": world}
         return (await self._request("GET", "/setup/stand", params=query))["spots"]
 
-    async def surface(self, x: int, z: int) -> int:
-        return int((await self._request("GET", "/setup/surface", params={"x": x, "z": z}))["y"])
+    async def surface(self, x: int, z: int, world: str = "world") -> int:
+        return int((await self._request("GET", "/setup/surface", params={"x": x, "z": z, "world": world}))["y"])
+
+    async def locate(
+        self, structure: str, *, world: str, x: int = 0, z: int = 0, radius: int = 100
+    ) -> dict[str, int] | None:
+        """The nearest `fortress`, `stronghold` or `end_city`; None if there is none within `radius` chunks."""
+        query = {"structure": structure, "world": world, "x": x, "z": z, "radius": radius}
+        found = await self._request("GET", "/setup/locate", params=query)
+        return {"x": int(found["x"]), "y": int(found["y"]), "z": int(found["z"])} if "x" in found else None
+
+    async def find_blocks(
+        self, block: str, x: int, y: int, z: int, *, world: str = "world", radius: int = 32, limit: int = 64
+    ) -> list[dict[str, int]]:
+        query = {"block": block, "x": x, "y": y, "z": z, "world": world, "radius": radius, "limit": limit}
+        return (await self._request("GET", "/setup/blocks", params=query))["blocks"]
+
+    async def spawn(self, entity: str, x: int, y: int, z: int, *, world: str = "world") -> int:
+        """Spawn a creature; returns its entity id."""
+        body = {"entity": entity, "x": x, "y": y, "z": z, "world": world}
+        return int((await self._request("POST", "/setup/spawn", body))["id"])
+
+    async def set_time(self, time: int) -> None:
+        """The overworld's time of day in ticks (0 is sunrise, 13000 is night)."""
+        await self._request("POST", "/setup/time", {"time": time})
+
+    async def baseline(self) -> dict[str, Any]:
+        """Remember each team member's advancements now: `state` then reports only newer ones."""
+        return await self._request("POST", "/baseline", {})
 
     async def events(self, after: int = -1) -> list[dict[str, Any]]:
         return (await self._request("GET", "/events", params={"after": after}))["events"]

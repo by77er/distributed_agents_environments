@@ -23,7 +23,7 @@ from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
 from minecraft_swarm.paper import Installation, PaperServer
 from minecraft_swarm.prompts import TEAM
-from minecraft_swarm.tasks import Built, Task, build, catalog
+from minecraft_swarm.tasks import Built, Task, build, catalog, score, solved
 from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
 
 
@@ -65,6 +65,7 @@ class MinecraftWorlds:
             world = EpisodeWorld(episode, task, server, control, harness, built, list(team))
             self._episodes[episode] = world
             await self._run(world, ticks=20, settle=1.0)  # teleports and chunks reach the bots
+            await control.baseline()  # advancements the kit granted are not the episode's
         except BaseException:
             if harness is not None:
                 await harness.close()
@@ -93,14 +94,21 @@ class MinecraftWorlds:
         return {"ticks": ran}
 
     async def score(self, episode: str) -> dict[str, Any]:
-        """Ground truth: the team's diamonds now, each player's, and what happened."""
+        """Ground truth: the reward of the task's objective, the team's diamonds and advancements, and what
+        happened."""
         world = self._world(episode)
         state = await world.control.state()
         events = await world.control.events()
         kinds = Counter(str(event["kind"]) for event in events)
         mined = Counter(str(event["block"]) for event in events if event["kind"] == "mined")
         return {
+            "reward": score(world.task, state),
+            "solved": solved(world.task, state),
+            "objective": world.task.objective.value,
             "team_diamonds": int(state["team_diamonds"]),
+            "team_advancements": list(state.get("team_advancements", [])),
+            "dragon_killed": bool(state.get("dragon_killed", False)),
+            "dragon_damage": float(state.get("dragon_damage", 0.0)),
             "players": {p["name"]: p["diamonds"] for p in state["players"] if p["name"] in world.team},
             "available_diamonds": world.built.available_diamonds,
             "events": dict(kinds),

@@ -9,12 +9,19 @@
 const { Vec3 } = require('vec3')
 
 const RANGE = 24 // blocks
+const FAR_RANGE = 96 // large or glowing things in the open are seen from much farther
+const FAR = new Set(['ender_dragon', 'end_crystal', 'ghast'])
+const MAX_KINDS = 14 // kinds of notable blocks per observation
 const RAYS = 2400 // directions, spread evenly over the sphere
-const NOTABLE = /(_ore$|^ancient_debris$|^chest$|^trapped_chest$|^barrel$|^crafting_table$|^furnace$|^blast_furnace$|^lava$|^water$|^diamond_block$|^iron_block$|^spawner$|^torch$|^wall_torch$)/
+const NOTABLE = /(_ore$|^ancient_debris$|^chest$|^trapped_chest$|^barrel$|^crafting_table$|^furnace$|^blast_furnace$|^lava$|^water$|^diamond_block$|^iron_block$|^spawner$|^torch$|^wall_torch$|^obsidian$|^crying_obsidian$|^nether_portal$|^end_portal$|^end_portal_frame$|^nether_bricks$|^bed$|_bed$|^gravel$|^sand$|_log$|^bedrock$|^end_stone$)/
 const SEE_THROUGH = new Set(['air', 'cave_air', 'void_air', 'water', 'glass', 'glass_pane', 'torch', 'wall_torch',
   'light', 'short_grass', 'tall_grass', 'fern', 'vine', 'glow_lichen', 'cave_vines', 'cave_vines_plant', 'snow'])
+const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom', 'goat'])
 const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'cave_spider', 'enderman', 'witch', 'slime',
-  'drowned', 'husk', 'stray', 'silverfish', 'bogged', 'zombie_villager', 'phantom'])
+  'drowned', 'husk', 'stray', 'silverfish', 'bogged', 'zombie_villager', 'phantom', 'blaze', 'ghast',
+  'wither_skeleton', 'magma_cube', 'piglin_brute', 'hoglin', 'zoglin', 'endermite', 'shulker', 'ender_dragon',
+  'end_crystal', // not a creature, but a target: it heals the dragon and explodes when hit
+  'pillager', 'vindicator', 'evoker', 'ravager', 'guardian', 'elder_guardian', 'breeze'])
 const DIRECTIONS = {
   north: new Vec3(0, 0, -1), south: new Vec3(0, 0, 1), east: new Vec3(1, 0, 0), west: new Vec3(-1, 0, 0),
   up: new Vec3(0, 1, 0), down: new Vec3(0, -1, 0)
@@ -92,12 +99,19 @@ function observe (bot, team, memory) {
   const seen = look(bot, memory)
   const here = bot.entity.position.floored()
   const counts = {}
-  const notable = []
+  const kinds = new Map() // block name → the ones in sight, nearest first
   for (const block of seen.values()) {
     counts[block.name] = (counts[block.name] ?? 0) + 1
     if (NOTABLE.test(block.name)) {
-      notable.push({ block: block.name, ...relative(bot, block.position), distance: round(block.position.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)) })
+      if (!kinds.has(block.name)) kinds.set(block.name, [])
+      kinds.get(block.name).push({ ...relative(bot, block.position), distance: round(block.position.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)) })
     }
+  }
+  // One entry per kind: the nearest one, how many are in sight, and the next few (a forest is one line, not thirty).
+  const notable = []
+  for (const [name, found] of kinds) {
+    found.sort((a, b) => a.distance - b.distance)
+    notable.push({ block: name, count: found.length, ...found[0], also: found.slice(1, 4).map(({ x, y, z }) => ({ x, y, z })) })
   }
   notable.sort((a, b) => a.distance - b.distance)
 
@@ -108,9 +122,10 @@ function observe (bot, team, memory) {
     surroundings[name] = hit === null ? { open: `more than ${RANGE}` } : { open: round(hit.position.offset(0.5, 0.5, 0.5).distanceTo(origin) - 0.5), then: hit.name }
   }
 
-  const teammates = []; const items = []; const mobs = []
+  const teammates = []; const items = []; const mobs = []; const animals = []
   for (const entity of Object.values(bot.entities)) {
-    if (entity === bot.entity || entity.position.distanceTo(bot.entity.position) > RANGE) continue
+    const range = FAR.has(entity.name) ? FAR_RANGE : RANGE
+    if (entity === bot.entity || entity.position.distanceTo(bot.entity.position) > range) continue
     const center = entity.position.offset(0, (entity.height ?? 1) / 2, 0)
     if (entity.type === 'player') {
       if (!team.has(entity.username)) continue // only teammates exist, as far as agents know
@@ -120,29 +135,67 @@ function observe (bot, team, memory) {
       if (!lineOfSight(bot, origin, center)) continue
       const item = entity.getDroppedItem?.()
       if (item) items.push({ item: item.name, count: item.count, ...relative(bot, entity.position.floored()) })
-    } else if (HOSTILE.has(entity.name)) {
+    } else if (HOSTILE.has(entity.name) || ANIMALS.has(entity.name)) {
       if (!lineOfSight(bot, origin, center)) continue
-      mobs.push({ mob: entity.name, ...relative(bot, entity.position.floored()), distance: round(entity.position.distanceTo(bot.entity.position)) })
+      const seen = { id: entity.id, ...relative(bot, entity.position.floored()), distance: round(entity.position.distanceTo(bot.entity.position)) }
+      if (HOSTILE.has(entity.name)) mobs.push({ mob: entity.name, ...seen })
+      else animals.push({ animal: entity.name, ...seen })
     }
   }
 
+  const feet = bot.blockAt(here)
   return {
     self: {
       name: bot.username,
       position: { x: here.x, y: here.y, z: here.z },
+      dimension: String(bot.game?.dimension ?? 'overworld').replace('minecraft:', ''),
       health: round(bot.health ?? 0),
       food: bot.food ?? 0,
       holding: bot.heldItem ? bot.heldItem.name : null,
+      wearing: armor(bot),
       inventory: inventory(bot),
       near: nearbyStations(bot)
     },
+    world: {
+      time: timeOfDay(bot),
+      light: feet ? light(bot, feet) : null,
+      sky: feet ? feet.skyLight >= 15 : null,
+      biome: feet?.biome?.name ?? null
+    },
     surroundings,
     visible_blocks: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([block, count]) => ({ block, count })),
-    notable: notable.slice(0, 30),
+    notable: notable.slice(0, MAX_KINDS),
     teammates,
     items,
-    mobs
+    mobs: mobs.slice(0, 10),
+    animals: animals.slice(0, 10)
   }
+}
+
+// Worn armor, by slot (inventory slots 5 to 8 are head, torso, legs and feet).
+function armor (bot) {
+  const slots = { head: 5, torso: 6, legs: 7, feet: 8 }
+  const worn = {}
+  for (const [slot, index] of Object.entries(slots)) {
+    const item = bot.inventory.slots[index]
+    if (item) worn[slot] = item.name
+  }
+  const offHand = bot.inventory.slots[45]
+  if (offHand) worn['off-hand'] = offHand.name
+  return worn
+}
+
+// The light where the bot stands: from blocks, or from the sky (which gives little at night).
+function light (bot, feet) {
+  const ticks = bot.time?.timeOfDay ?? 0
+  const night = ticks >= 13000 && ticks < 23000
+  return Math.max(feet.light ?? 0, night ? Math.min(feet.skyLight ?? 0, 4) : (feet.skyLight ?? 0))
+}
+
+function timeOfDay (bot) {
+  const ticks = bot.time?.timeOfDay ?? 0
+  const phase = ticks < 12000 ? 'day' : ticks < 13800 ? 'dusk' : ticks < 22200 ? 'night' : 'dawn'
+  return { ticks, phase }
 }
 
 function inventory (bot) {

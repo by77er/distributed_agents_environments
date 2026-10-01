@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import torch
-from safetensors.torch import save_file  # pyright: ignore[reportUnknownVariableType]
+from safetensors.torch import load_file, save_file  # pyright: ignore[reportUnknownVariableType]
 from torch import nn
 
 
@@ -60,6 +60,21 @@ def lora_parameters(model: nn.Module) -> list[nn.Parameter]:
     return [parameter for name, parameter in model.named_parameters() if ".lora_A." in name or ".lora_B." in name]
 
 
+def load_adapter(model: nn.Module, directory: Path) -> int:
+    """Load an adapter saved by `save_adapter` into the model's LoRA layers; returns how many layers it filled."""
+    tensors = load_file(str(directory / "adapter_model.safetensors"))
+    filled = 0
+    for name, module in model.named_modules():
+        if isinstance(module, LoraLinear):
+            for part, layer in (("lora_A", module.lora_A), ("lora_B", module.lora_B)):
+                saved = tensors[f"base_model.model.{name}.{part}.weight"]
+                layer.weight.data.copy_(saved.to(layer.weight.device, layer.weight.dtype))
+            filled += 1
+    if filled == 0 or 2 * filled != len(tensors):
+        raise ValueError(f"the adapter in {directory} does not match the model's LoRA layers")
+    return filled
+
+
 def save_adapter(model: nn.Module, directory: Path, *, base_model: str, rank: int, alpha: float) -> Path:
     """Write the adapter in PEFT's layout: `adapter_config.json` and `adapter_model.safetensors`."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -67,12 +82,10 @@ def save_adapter(model: nn.Module, directory: Path, *, base_model: str, rank: in
     targets: set[str] = set()
     for name, module in model.named_modules():
         if isinstance(module, LoraLinear):
-            tensors[f"base_model.model.{name}.lora_A.weight"] = (
-                module.lora_A.weight.detach().to("cpu", torch.bfloat16).contiguous()
-            )
-            tensors[f"base_model.model.{name}.lora_B.weight"] = (
-                module.lora_B.weight.detach().to("cpu", torch.bfloat16).contiguous()
-            )
+            # Full precision: each training step resumes from this file, and updates are far smaller than
+            # bfloat16 resolves. Engines cast to their own dtype when they load it.
+            tensors[f"base_model.model.{name}.lora_A.weight"] = module.lora_A.weight.detach().cpu().contiguous()
+            tensors[f"base_model.model.{name}.lora_B.weight"] = module.lora_B.weight.detach().cpu().contiguous()
             targets.add(name.rsplit(".", 1)[-1])
     save_file(tensors, str(directory / "adapter_model.safetensors"))
     config = {

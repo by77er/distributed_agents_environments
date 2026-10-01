@@ -96,6 +96,8 @@ async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through:
     assert isinstance(result, dict)
     diamonds = result["team_diamonds"]
     assert isinstance(diamonds, int) and diamonds > 0 and rewards["ada"] == diamonds, result
+    assert result["objective"] == "diamonds" and result["solved"] is True and result["turns"] == 4
+    assert isinstance(result["game_minutes"], float) and 0 < result["game_minutes"] <= 3
     world_operations = [
         e for e in events if e.type is RunEventType.EFFECT_REQUESTED and payload(e).get("kind") == "tool.call"
     ]
