@@ -11,6 +11,7 @@ chat templates of reasoning models drop earlier turns' thinking: re-rendered con
 """
 
 import math
+import time
 from array import array
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -48,6 +49,74 @@ class Engine(Protocol):
         stop_token_ids: Sequence[int],
         adapter: str | None,
     ) -> Generation: ...
+
+
+@dataclass
+class MeteredEngine:
+    """An engine that counts what passes through it: tokens in and out, and for how long it was generating."""
+
+    engine: Engine
+    requests: int = 0
+    prompt_tokens: int = 0
+    generated_tokens: int = 0
+    request_seconds: float = 0.0
+    """Summed over requests (concurrent requests each count their own time)."""
+    busy_seconds: float = 0.0
+    """Wall-clock time with at least one request in flight."""
+    _in_flight: int = 0
+    _busy_since: float = 0.0
+
+    async def generate(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        adapter: str | None,
+    ) -> Generation:
+        started = time.monotonic()
+        if self._in_flight == 0:
+            self._busy_since = started
+        self._in_flight += 1
+        try:
+            generation = await self.engine.generate(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop_token_ids=stop_token_ids,
+                adapter=adapter,
+            )
+        finally:
+            finished = time.monotonic()
+            self._in_flight -= 1
+            self.request_seconds += finished - started
+            if self._in_flight == 0:
+                self.busy_seconds += finished - self._busy_since
+        self.requests += 1
+        self.prompt_tokens += len(prompt)
+        self.generated_tokens += len(generation.tokens)
+        return generation
+
+    def take(self) -> dict[str, float]:
+        """The counts since the last call, with throughput: `tokens_per_second` is everything the engine generated
+        over the time it was generating; `tokens_per_second_per_stream` is what one request saw."""
+        counts: dict[str, float] = {
+            "requests": self.requests,
+            "prompt_tokens": self.prompt_tokens,
+            "generated_tokens": self.generated_tokens,
+            "busy_seconds": round(self.busy_seconds, 1),
+            "tokens_per_second": round(self.generated_tokens / self.busy_seconds, 1) if self.busy_seconds else 0.0,
+            "tokens_per_second_per_stream": (
+                round(self.generated_tokens / self.request_seconds, 1) if self.request_seconds else 0.0
+            ),
+            "mean_concurrency": round(self.request_seconds / self.busy_seconds, 1) if self.busy_seconds else 0.0,
+        }
+        self.requests = self.prompt_tokens = self.generated_tokens = 0
+        self.request_seconds = self.busy_seconds = 0.0
+        return counts
 
 
 @dataclass

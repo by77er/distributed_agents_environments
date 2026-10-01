@@ -180,3 +180,30 @@ async def test_a_run_bound_to_a_recorded_channel_is_recorded(tokenizer: Tokenize
     await handle.result()
     (turn,) = recorder.sessions_of(handle.run_id)["policy"]
     assert tokenizer.decode(turn.completion).endswith("hi<|im_end|>")
+
+
+async def test_a_metered_engine_counts_tokens_and_throughput() -> None:
+    import asyncio
+
+    from rollout.recorder import MeteredEngine
+
+    class Slow:
+        async def generate(self, prompt: Sequence[int], **options: Any) -> Generation:
+            await asyncio.sleep(0.2)
+            return Generation(tokens=[1] * 50, logprobs=[0.0] * 50, finish_reason="stop")
+
+    metered = MeteredEngine(Slow())
+    options: dict[str, Any] = {
+        "max_tokens": 50,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "stop_token_ids": [],
+        "adapter": None,
+    }
+    await asyncio.gather(*(metered.generate([0] * 100, **options) for _ in range(4)))  # four at once
+    counts = metered.take()
+    assert counts["requests"] == 4 and counts["prompt_tokens"] == 400 and counts["generated_tokens"] == 200
+    assert 0.15 < counts["busy_seconds"] < 0.5  # the four overlapped: busy once, not four times
+    assert counts["tokens_per_second"] > 3 * counts["tokens_per_second_per_stream"]
+    assert 3.0 < counts["mean_concurrency"] <= 4.0
+    assert metered.take()["requests"] == 0  # taking resets

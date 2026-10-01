@@ -44,7 +44,7 @@ from rollout.core.harness import (
 )
 from rollout.core.local import LocalRunner
 from rollout.core.local.runner import LocalRunHandle
-from rollout.recorder import Channel, Recorder, renderer_for
+from rollout.recorder import Channel, MeteredEngine, Recorder, renderer_for
 from rollout.recorder.engines import VllmEngine
 from rollout.recorder.renderers import Tokenizer
 
@@ -103,7 +103,8 @@ async def train(settings: TrainingSettings) -> None:
         max_num_seqs=4 * settings.group_size,
         max_lora_rank=settings.lora_rank,
     )
-    channel = Channel(engine, renderer, thinking_budget=settings.thinking_budget, answer_tokens=settings.answer_tokens)
+    metered = MeteredEngine(engine)
+    channel = Channel(metered, renderer, thinking_budget=settings.thinking_budget, answer_tokens=settings.answer_tokens)
     recorder = Recorder({"policy": channel})
     worlds = MinecraftWorlds(window_ticks=settings.window_ticks, logs=directory / "logs")
     (directory / "logs").mkdir(exist_ok=True)
@@ -159,6 +160,7 @@ async def train(settings: TrainingSettings) -> None:
                 "failures": [handle.outcome.detail for handle in handles if handle not in completed and handle.outcome],
                 "adapter_step": learner.step,
                 "rollout_seconds": round(time.monotonic() - started, 1),
+                "inference": metered.take(),
                 "memory_available_gib": round(available_memory_gib(), 1),
             }
             if rewards:

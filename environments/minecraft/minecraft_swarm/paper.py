@@ -248,12 +248,15 @@ class PaperServer:
                     raise
 
     async def _launch(self, seconds: float) -> None:
+        # IPv4 only: Java otherwise listens on an IPv6 socket with a mapped address (::ffff:127.0.0.1), which WSL does
+        # not forward to Windows' localhost, so a client on the Windows side could not join to watch.
         self.port, self.control_port = free_port(), free_port()
         _write_properties(self.directory, {"server-port": str(self.port)})
         log = (self.directory / "server.log").open("w")
         self.process = await asyncio.create_subprocess_exec(
             self.installation.java, f"-Xmx{self.heap}", f"-Drollout.control.port={self.control_port}",
-            "-XX:+UseG1GC", "-jar", str(self.installation.paper_jar()), "--nogui",
+            "-XX:+UseG1GC", "-Djava.net.preferIPv4Stack=true",  # see below
+            "-jar", str(self.installation.paper_jar()), "--nogui",
             cwd=self.directory, stdin=asyncio.subprocess.PIPE, stdout=log, stderr=asyncio.subprocess.STDOUT,
         )  # fmt: skip
         deadline = time.monotonic() + seconds
