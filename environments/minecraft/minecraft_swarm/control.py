@@ -47,6 +47,34 @@ class Control:
         query = {"x": x, "y": y, "z": z, "radius": radius, "exposed": str(exposed).lower()}
         return (await self._request("GET", "/ores", params=query))["ores"]
 
+    # Setup: building tasks from ground truth
+
+    async def carve(
+        self, x: int, y: int, z: int, *, width: int, height: int, depth: int, light: bool = True, floor: str = "stone"
+    ) -> None:
+        """Empty a box (its corner at x, y, z) and give it a floor; light it with invisible light blocks."""
+        box = {"x": x, "y": y, "z": z, "width": width, "height": height, "depth": depth, "light": light, "floor": floor}
+        await self._request("POST", "/setup/carve", box)
+
+    async def drop_items(self, x: int, y: int, z: int, items: list[dict[str, Any]]) -> int:
+        return int((await self._request("POST", "/setup/items", {"x": x, "y": y, "z": z, "items": items}))["dropped"])
+
+    async def chest(self, x: int, y: int, z: int, items: list[dict[str, Any]]) -> None:
+        await self._request("POST", "/setup/chest", {"x": x, "y": y, "z": z, "items": items})
+
+    async def set_block(self, x: int, y: int, z: int, block: str) -> None:
+        await self._request("POST", "/setup/block", {"x": x, "y": y, "z": z, "block": block})
+
+    async def standing_spots(
+        self, x: int, y: int, z: int, *, radius: int = 16, limit: int = 64
+    ) -> list[dict[str, int]]:
+        """Places to stand near a point (air at the feet and head, a solid floor, no lava near), nearest first."""
+        query = {"x": x, "y": y, "z": z, "radius": radius, "limit": limit}
+        return (await self._request("GET", "/setup/stand", params=query))["spots"]
+
+    async def surface(self, x: int, z: int) -> int:
+        return int((await self._request("GET", "/setup/surface", params={"x": x, "z": z}))["y"])
+
     async def events(self, after: int = -1) -> list[dict[str, Any]]:
         return (await self._request("GET", "/events", params={"after": after}))["events"]
 

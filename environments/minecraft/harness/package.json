@@ -1,0 +1,15 @@
+{
+  "name": "rollout-minecraft-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Four mineflayer bots for one Paper server, with filtered observations and simplified actions, driven by JSON lines on stdin.",
+  "main": "harness.js",
+  "type": "commonjs",
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test" },
+  "dependencies": {
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "vec3": "0.1.10"
+  }
+}

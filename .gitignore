@@ -10,3 +10,6 @@ __pycache__/
 dist/
 .rollout/
 site/
+
+# node
+node_modules/

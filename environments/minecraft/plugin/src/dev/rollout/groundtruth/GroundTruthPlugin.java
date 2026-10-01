@@ -67,6 +67,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>POST /episode: set up the team (clear, kit, teleport, game mode) and the world (difficulty, time, rules).</li>
  *   <li>GET /ores?x&amp;y&amp;z&amp;radius&amp;exposed: diamond ores near a point, for choosing starts (never agents).</li>
  *   <li>GET /events?after=n: what happened (chat, ores mined, items picked up, deaths, joins).</li>
+ *   <li>Setup, for building tasks: POST /setup/carve (a lit, empty box with a floor), /setup/items (dropped items),
+ *       /setup/chest (a chest with contents), /setup/block (one block); GET /setup/stand (safe places to stand).</li>
  * </ul>
  *
  * Team members cannot run commands: every command they send is cancelled.
@@ -106,6 +108,12 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         route("/episode", this::episode);
         route("/ores", this::ores);
         route("/events", this::events);
+        route("/setup/carve", this::carve);
+        route("/setup/items", this::dropItems);
+        route("/setup/chest", this::chest);
+        route("/setup/block", this::setBlock);
+        route("/setup/stand", this::standingSpots);
+        route("/setup/surface", this::surface);
         getServer().getPluginManager().registerEvents(this, this);
         http.start();
         getLogger().info("control API on 127.0.0.1:" + port);
@@ -234,6 +242,13 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             double x = spawn.get("x").getAsDouble(), y = spawn.get("y").getAsDouble(), z = spawn.get("z").getAsDouble();
             JsonArray placed = new JsonArray();
             JsonArray missing = new JsonArray();
+            Map<String, JsonObject> placements = new HashMap<>();  // per player: x, y, z and a kit of their own
+            if (body.has("placements")) {
+                for (JsonElement placement : body.getAsJsonArray("placements")) {
+                    JsonObject entry = placement.getAsJsonObject();
+                    placements.put(entry.get("name").getAsString().toLowerCase(Locale.ROOT), entry);
+                }
+            }
             int index = 0;
             for (JsonElement entry : body.getAsJsonArray("team")) {
                 Player player = Bukkit.getPlayerExact(entry.getAsString());
@@ -241,17 +256,13 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     missing.add(entry.getAsString());
                     continue;
                 }
+                JsonObject placement = placements.get(entry.getAsString().toLowerCase(Locale.ROOT));
                 player.getInventory().clear();
                 player.setItemOnCursor(null);
-                if (body.has("kit")) {
-                    for (JsonElement item : body.getAsJsonArray("kit")) {
-                        JsonObject stack = item.getAsJsonObject();
-                        Material material = Material.matchMaterial(stack.get("item").getAsString());
-                        if (material == null) {
-                            throw new IllegalArgumentException("unknown item " + stack.get("item").getAsString());
-                        }
-                        player.getInventory().addItem(new ItemStack(material, stack.has("count") ? stack.get("count").getAsInt() : 1));
-                    }
+                JsonArray kit = placement != null && placement.has("kit") ? placement.getAsJsonArray("kit")
+                        : body.has("kit") ? body.getAsJsonArray("kit") : new JsonArray();
+                for (ItemStack stack : stacks(kit)) {
+                    player.getInventory().addItem(stack);
                 }
                 player.setGameMode(gameMode);
                 AttributeInstance maxHealth = player.getAttribute(Attribute.MAX_HEALTH);
@@ -260,8 +271,13 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                 player.setSaturation(5.0f);
                 player.setFireTicks(0);
                 player.setFallDistance(0);
-                double offset = index - 1.5;  // stand side by side, one block apart
-                player.teleport(new Location(world, x + offset, y, z, (float) (index * 90), 0f));
+                if (placement != null) {
+                    player.teleport(new Location(world, placement.get("x").getAsDouble(), placement.get("y").getAsDouble(),
+                            placement.get("z").getAsDouble(), (float) (index * 90), 0f));
+                } else {
+                    double offset = index - 1.5;  // stand side by side, one block apart
+                    player.teleport(new Location(world, x + offset, y, z, (float) (index * 90), 0f));
+                }
                 placed.add(player.getName());
                 index++;
             }
@@ -323,6 +339,179 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         }
         JsonObject result = new JsonObject();
         result.add("events", selected);
+        return result;
+    }
+
+    private JsonElement carve(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            World world = world(body);
+            int x0 = body.get("x").getAsInt(), y0 = body.get("y").getAsInt(), z0 = body.get("z").getAsInt();
+            int width = body.get("width").getAsInt(), height = body.get("height").getAsInt(), depth = body.get("depth").getAsInt();
+            if (width < 1 || height < 2 || depth < 1 || width * height * depth > 32 * 32 * 32) {
+                throw new IllegalArgumentException("a box is at least 1 x 2 x 1 and at most 32768 blocks");
+            }
+            boolean light = !body.has("light") || body.get("light").getAsBoolean();
+            Material floor = body.has("floor") ? Material.matchMaterial(body.get("floor").getAsString()) : Material.STONE;
+            for (int dx = 0; dx < width; dx++) {
+                for (int dz = 0; dz < depth; dz++) {
+                    Block below = world.getBlockAt(x0 + dx, y0 - 1, z0 + dz);
+                    if (!below.getType().isSolid() || below.getType() == Material.MAGMA_BLOCK) {
+                        below.setType(floor == null ? Material.STONE : floor, false);
+                    }
+                    for (int dy = 0; dy < height; dy++) {
+                        world.getBlockAt(x0 + dx, y0 + dy, z0 + dz).setType(Material.AIR, false);
+                    }
+                }
+            }
+            if (light) {  // invisible light blocks in the top corners
+                for (int[] corner : new int[][] {{0, 0}, {width - 1, 0}, {0, depth - 1}, {width - 1, depth - 1}}) {
+                    world.getBlockAt(x0 + corner[0], y0 + height - 1, z0 + corner[1]).setType(Material.LIGHT, false);
+                }
+            }
+            return new JsonObject();
+        });
+    }
+
+    private JsonElement dropItems(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            World world = world(body);
+            Location location = new Location(world, body.get("x").getAsDouble() + 0.5, body.get("y").getAsDouble() + 0.1,
+                    body.get("z").getAsDouble() + 0.5);
+            int dropped = 0;
+            for (ItemStack stack : stacks(body.getAsJsonArray("items"))) {
+                Item item = world.dropItem(location, stack);
+                item.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
+                item.setPickupDelay(0);
+                dropped += stack.getAmount();
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("dropped", dropped);
+            return result;
+        });
+    }
+
+    private JsonElement chest(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            Block block = world(body).getBlockAt(body.get("x").getAsInt(), body.get("y").getAsInt(), body.get("z").getAsInt());
+            block.setType(Material.CHEST, false);
+            org.bukkit.block.Chest chest = (org.bukkit.block.Chest) block.getState();
+            for (ItemStack stack : stacks(body.has("items") ? body.getAsJsonArray("items") : new JsonArray())) {
+                chest.getBlockInventory().addItem(stack);
+            }
+            return new JsonObject();
+        });
+    }
+
+    private JsonElement setBlock(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            Material material = Material.matchMaterial(body.get("block").getAsString());
+            if (material == null || !material.isBlock()) {
+                throw new IllegalArgumentException("unknown block " + body.get("block").getAsString());
+            }
+            world(body).getBlockAt(body.get("x").getAsInt(), body.get("y").getAsInt(), body.get("z").getAsInt()).setType(material, false);
+            return new JsonObject();
+        });
+    }
+
+    /** Places to stand near a point: air at the feet and head, a solid floor, and no lava within two blocks. */
+    private JsonElement standingSpots(String method, Map<String, String> query, JsonObject body) throws Exception {
+        int radius = Math.min(Integer.parseInt(query.getOrDefault("radius", "16")), MAX_ORE_RADIUS);
+        int limit = Integer.parseInt(query.getOrDefault("limit", "64"));
+        int cx = Integer.parseInt(query.get("x")), cy = Integer.parseInt(query.get("y")), cz = Integer.parseInt(query.get("z"));
+        String worldName = query.getOrDefault("world", "world");
+        return onMainThread(() -> {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                throw new IllegalArgumentException("no such world");
+            }
+            java.util.List<int[]> found = new java.util.ArrayList<>();
+            int minY = Math.max(world.getMinHeight() + 1, cy - radius), maxY = Math.min(world.getMaxHeight() - 2, cy + radius);
+            for (int x = cx - radius; x <= cx + radius; x++) {
+                for (int z = cz - radius; z <= cz + radius; z++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        if (safeToStand(world, x, y, z)) {
+                            found.add(new int[] {x, y, z});
+                        }
+                    }
+                }
+            }
+            found.sort(java.util.Comparator.comparingDouble(spot ->
+                    Math.pow(spot[0] - cx, 2) + Math.pow(spot[1] - cy, 2) + Math.pow(spot[2] - cz, 2)));
+            JsonArray spots = new JsonArray();
+            for (int[] spot : found.subList(0, Math.min(limit, found.size()))) {
+                JsonObject entry = new JsonObject();
+                entry.addProperty("x", spot[0]);
+                entry.addProperty("y", spot[1]);
+                entry.addProperty("z", spot[2]);
+                spots.add(entry);
+            }
+            JsonObject result = new JsonObject();
+            result.add("spots", spots);
+            return result;
+        });
+    }
+
+    /** The height of the highest solid block at a column, to start on the surface. */
+    private JsonElement surface(String method, Map<String, String> query, JsonObject body) throws Exception {
+        int x = Integer.parseInt(query.get("x")), z = Integer.parseInt(query.get("z"));
+        String worldName = query.getOrDefault("world", "world");
+        return onMainThread(() -> {
+            World world = Bukkit.getWorld(worldName);
+            if (world == null) {
+                throw new IllegalArgumentException("no such world");
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("y", world.getHighestBlockYAt(x, z, org.bukkit.HeightMap.MOTION_BLOCKING_NO_LEAVES));
+            return result;
+        });
+    }
+
+    private static boolean safeToStand(World world, int x, int y, int z) {
+        Material floor = world.getBlockAt(x, y - 1, z).getType();
+        if (!floor.isSolid() || floor == Material.MAGMA_BLOCK || floor == Material.POWDER_SNOW) {
+            return false;
+        }
+        if (!world.getBlockAt(x, y, z).isPassable() || !world.getBlockAt(x, y + 1, z).isPassable()) {
+            return false;
+        }
+        if (world.getBlockAt(x, y, z).isLiquid() || world.getBlockAt(x, y + 1, z).isLiquid()) {
+            return false;
+        }
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    if (world.getBlockAt(x + dx, y + dy, z + dz).getType() == Material.LAVA) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private static World world(JsonObject body) {
+        World world = Bukkit.getWorld(body.has("world") ? body.get("world").getAsString() : "world");
+        if (world == null) {
+            throw new IllegalArgumentException("no such world");
+        }
+        return world;
+    }
+
+    private static java.util.List<ItemStack> stacks(JsonArray items) {
+        java.util.List<ItemStack> result = new java.util.ArrayList<>();
+        for (JsonElement item : items) {
+            JsonObject stack = item.getAsJsonObject();
+            Material material = Material.matchMaterial(stack.get("item").getAsString());
+            if (material == null || !material.isItem()) {
+                throw new IllegalArgumentException("unknown item " + stack.get("item").getAsString());
+            }
+            int count = stack.has("count") ? stack.get("count").getAsInt() : 1;
+            while (count > 0) {  // stacks of at most the item's maximum size
+                int size = Math.min(count, material.getMaxStackSize());
+                result.add(new ItemStack(material, size));
+                count -= size;
+            }
+        }
         return result;
     }
 
@@ -474,8 +663,12 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void setGameRule(World world, String name, JsonElement value) {
         GameRule rule = GameRule.getByName(name);
-        if (rule == null) {
-            throw new IllegalArgumentException("unknown game rule " + name);
+        if (rule == null) {  // the API's constant names (DO_DAYLIGHT_CYCLE) outlive the game's renamed keys
+            try {
+                rule = (GameRule) GameRule.class.getField(name.toUpperCase(Locale.ROOT)).get(null);
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalArgumentException("unknown game rule " + name);
+            }
         }
         Object converted = rule.getType() == Boolean.class ? (Object) value.getAsBoolean() : (Object) value.getAsInt();
         world.setGameRule(rule, converted);
