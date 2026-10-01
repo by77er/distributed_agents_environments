@@ -23,7 +23,7 @@ from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
 from minecraft_swarm.paper import Installation, PaperServer
 from minecraft_swarm.prompts import TEAM
-from minecraft_swarm.tasks import Built, Task, build, catalog, score, solved
+from minecraft_swarm.tasks import Built, Start, Task, build, catalog, score, solved
 from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
 
 
@@ -87,11 +87,17 @@ class MinecraftWorlds:
         return await world.harness.act(agent, dict(action))
 
     async def window(self, episode: str) -> dict[str, Any]:
-        """Run game time until every action has finished or the window is over; then freeze."""
+        """Run game time until every action has finished or the window is over; then freeze. `done` says there is
+        nothing left to earn: every staged diamond is held, or the dragon is dead."""
         world = self._world(episode)
         ran = await self._run(world, ticks=self.window_ticks, settle=0.3)
         world.windows += 1
-        return {"ticks": ran}
+        state = await world.control.state()
+        staged = world.task.start in (Start.ITEMS, Start.CHESTS)  # the only starts whose diamonds are counted exactly
+        done = bool(state.get("dragon_killed")) or (
+            staged and int(state["team_diamonds"]) >= world.built.available_diamonds
+        )
+        return {"ticks": ran, "done": done}
 
     async def score(self, episode: str) -> dict[str, Any]:
         """Ground truth: the reward of the task's objective, the team's diamonds and advancements, and what

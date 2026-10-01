@@ -1,8 +1,9 @@
 """The swarm episode: four agents, one shared reward, the world frozen while they think.
 
 Each turn, every agent observes, thinks and calls one action tool, all at once while the world is frozen; then the
-world runs one window while the actions happen. The episode ends when its budget of game time is spent. Its reward,
-the task's objective scored from the plugin's ground truth, goes to every agent: the swarm is rewarded equally.
+world runs one window while the actions happen. The episode ends when its budget of game time is spent, or earlier
+when nothing is left to earn. Its reward, the task's objective scored from the plugin's ground truth, goes to every
+agent: the swarm is rewarded equally.
 
 Each agent is a model slot of its own (`ada`, `ben`, `cy`, `dee`): its own context and its own recorded session.
 Bound to the same recorded channel, they are one policy. An agent sees its system prompt and its last few turns;
@@ -79,6 +80,8 @@ class SwarmEpisode(Program):
                 )
                 window = await self._call(run, "window", {"episode": episode})
                 spent += float(cast(int, window["ticks"]))
+                if window.get("done"):
+                    break
             score = await self._call(run, "score", {"episode": episode})
         finally:
             await self._call(run, "end", {"episode": episode})
