@@ -9,6 +9,8 @@ from minecraft_swarm.paper import (
     Installation,
     PaperServer,
     merge_configuration,
+    offline_uuid,
+    operator_entries,
     server_properties,
 )
 
@@ -23,6 +25,14 @@ def test_configuration_overrides_merge_into_paper_defaults() -> None:
     }
     properties = server_properties()
     assert properties["online-mode"] == "false" and properties["server-ip"] == "127.0.0.1"
+
+
+def test_operators_are_listed_by_their_offline_ids() -> None:
+    # What an offline-mode server computes for the name (it logs "UUID of player By73 is ..." when they join).
+    assert str(offline_uuid("By73")) == "73bc9dd2-78aa-3946-ba5b-5b7c56e2b546"
+    assert operator_entries(["By73"]) == [
+        {"uuid": "73bc9dd2-78aa-3946-ba5b-5b7c56e2b546", "name": "By73", "level": 4, "bypassesPlayerLimit": True}
+    ]
 
 
 @pytest.fixture(scope="module")

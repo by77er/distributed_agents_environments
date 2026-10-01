@@ -236,6 +236,7 @@ class PaperServer:
         await asyncio.to_thread(_copy_template, template, self.directory)
         (self.directory / "plugins").mkdir(exist_ok=True)
         shutil.copy2(plugin, self.directory / "plugins" / "rollout-ground-truth.jar")
+        (self.directory / "ops.json").write_text(json.dumps(operator_entries(operators()), indent=1))
         for attempt in range(1, attempts + 1):
             try:
                 await self._launch(seconds)
@@ -307,9 +308,30 @@ def free_port() -> int:
     raise RuntimeError("no free port between 20000 and 29999")
 
 
+def operators() -> list[str]:
+    """config/operators.txt: the players made operators of every episode server."""
+    path = CONFIG / "operators.txt"
+    lines = path.read_text().splitlines() if path.exists() else []
+    return [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
+
+
+def offline_uuid(name: str) -> uuid.UUID:
+    """The id an offline-mode server gives a player: Java's name-based UUID of "OfflinePlayer:" and the name."""
+    digest = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode(), usedforsecurity=False).digest())
+    digest[6] = digest[6] & 0x0F | 0x30  # version 3
+    digest[8] = digest[8] & 0x3F | 0x80  # the RFC 4122 variant
+    return uuid.UUID(bytes=bytes(digest))
+
+
+def operator_entries(names: list[str]) -> list[dict[str, Any]]:
+    """The server's ops.json for these players."""
+    return [{"uuid": str(offline_uuid(name)), "name": name, "level": 4, "bypassesPlayerLimit": True} for name in names]
+
+
 def configuration_digest() -> str:
-    """A digest of config/: templates made with other settings are not reused."""
-    files = sorted(path for path in CONFIG.rglob("*") if path.is_file())
+    """A digest of config/: templates made with other settings are not reused. Operators are written when a server
+    starts, not into templates."""
+    files = sorted(path for path in CONFIG.rglob("*") if path.is_file() and path.name != "operators.txt")
     return hashlib.sha256(b"".join(path.name.encode() + path.read_bytes() for path in files)).hexdigest()[:10]
 
 

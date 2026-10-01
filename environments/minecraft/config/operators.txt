@@ -1,0 +1,3 @@
+# Players made operators of every episode server (one name per line). They are not on the team: agents never see
+# them or their chat, and the plugin cancels commands only for team members.
+By73
