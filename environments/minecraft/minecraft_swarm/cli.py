@@ -1,12 +1,15 @@
 """`minecraft-swarm`: run the Minecraft swarm environment.
 
 minecraft-swarm server [--seed N]     start a temporary server and keep it up (Ctrl-C stops and deletes it)
+minecraft-swarm train RUN             train the swarm on the curriculum
+minecraft-swarm report RUN [--watch]  chart a run's progress and summarise it; post both to a Discord webhook
 """
 
 import argparse
 import asyncio
 import contextlib
 import json
+import os
 from pathlib import Path
 
 from minecraft_swarm.paper import Installation, PaperServer
@@ -30,7 +33,16 @@ def main() -> None:
     training.add_argument("--seed", type=int, default=0)
     training.add_argument("--tasks", help="comma-separated task ids to train on (default: the whole curriculum)")
     training.add_argument("--exercise-updates", action="store_true", help=argparse.SUPPRESS)
+    reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
+    reporting.add_argument("directory", type=Path)
+    reporting.add_argument("--watch", action="store_true", help="report again after every iteration until the run ends")
+    reporting.add_argument("--webhook", help="a Discord webhook (default: the environment's DISCORD_WEBHOOK_URL)")
     arguments = parser.parse_args()
+    if arguments.command == "report":
+        from minecraft_swarm.report import report
+
+        webhook = arguments.webhook or os.environ.get("DISCORD_WEBHOOK_URL")
+        asyncio.run(report(arguments.directory, webhook, watch=arguments.watch))
     if arguments.command == "train":
         from minecraft_swarm.train import TrainingSettings, train
 

@@ -147,6 +147,7 @@ async def train(settings: TrainingSettings) -> None:
                 )
             line: dict[str, Any] = {
                 "iteration": iteration,
+                "time": round(time.time(), 1),
                 "task": task.id,
                 "title": task.title,
                 "difficulty": task.difficulty,

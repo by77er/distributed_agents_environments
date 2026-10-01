@@ -90,7 +90,8 @@ class GroupRelativeTrainer:
             batches[-1].append(sequence)
             counted += sum(sequence.loss_mask)
         self.policy.model.train()
-        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0}
+        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0, "kl": 0.0}
+        gradient_norms: list[float] = []
         for batch in batches:
             batch_tokens = sum(sum(sequence.loss_mask) for sequence in batch)
             if batch_tokens == 0:
@@ -111,8 +112,10 @@ class GroupRelativeTrainer:
                     totals["clipped"] += float((ratio != clipped).sum())
                     totals["ratio"] += float(ratio.sum())
                     totals["mismatch"] += float((logprobs - behavior).abs().sum())
+                    totals["kl"] += float((behavior - logprobs).sum())
                     totals["tokens"] += len(positions)
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_gradient_norm)
+            norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_gradient_norm)
+            gradient_norms.append(float(norm))
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
         tokens = max(totals["tokens"], 1.0)
@@ -121,6 +124,10 @@ class GroupRelativeTrainer:
             "clip_fraction": totals["clipped"] / tokens,
             "mean_ratio": totals["ratio"] / tokens,
             "mean_mismatch": totals["mismatch"] / tokens,
+            # KL(behavior || policy) estimated on the sampled tokens, as each minibatch saw the policy: the first
+            # minibatch measures only the engine's and the trainer's numerical difference, later ones the drift.
+            "approx_kl": totals["kl"] / tokens,
+            "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "tokens": totals["tokens"],
             "sequences": float(len(sequences)),
             "optimizer_steps": float(len(batches)),

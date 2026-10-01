@@ -157,6 +157,19 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
   reported as cut off.
 - **Friendly fire.** Teammates standing in the line of fire took the arrows until the team became a scoreboard team.
 
+## Reporting
+
+`minecraft-swarm report RUN` writes `progress.png` and `progress.md` into the run's directory: the climb through the
+curriculum (which task each group trained on, how far the catalog has unlocked, the share of each group that solved
+its task), every group's rewards, and the trainer's statistics per update. With `--watch` it does so after every
+iteration until the run ends; with a Discord webhook (`--webhook`, or `DISCORD_WEBHOOK_URL`) it posts both there.
+Needs the `report` extra (matplotlib).
+
+The trainer reports an approximate KL per update: the mean of the sampling policy's logprob minus the current
+policy's, over the sampled tokens, as each minibatch saw the policy. The first minibatch of an update therefore
+measures only the engine's and the trainer's numerical difference (about 0.01 to 0.02); later minibatches measure
+drift. The loss itself has no KL term.
+
 ## Results
 
 See the training runs below (updated as they complete).
