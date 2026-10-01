@@ -6,9 +6,11 @@ when nothing is left to earn. Its reward, the task's objective scored from the p
 agent: the swarm is rewarded equally.
 
 Each agent is a model slot of its own (`ada`, `ben`, `cy`, `dee`): its own context and its own recorded session.
-Bound to the same recorded channel, they are one policy. An agent sees its system prompt and its last few turns;
-what it wants to keep longer it writes in its notes (`note`) or on the team board (`post`), which every observation
-shows. Those two tools take no game time: an agent that only writes waits that turn.
+Bound to the same recorded channel, they are one policy. An agent sees its system prompt, its last few turns in brief
+(where it was, what it held, what it did and how that went) and the current observation in full, with the map; what
+it wants to keep longer it writes in its notes (`note`) or on the team board (`post`), which every observation
+shows. Those two tools take no game time: an agent that only writes stands idle that turn, without holding the
+world's window open.
 """
 
 from collections.abc import Mapping, Sequence
@@ -62,13 +64,12 @@ class SwarmEpisode(Program):
         try:
             while spent < budget and (self.max_turns is None or turn < self.max_turns):
                 turn += 1
-                left = (budget - spent) / TICKS_PER_MINUTE
                 observations = await run.gather(
                     *(self._call(run, "observe", {"episode": episode, "agent": name}) for name in TEAM)
                 )
                 actions = await run.gather(
                     *(
-                        self._think(run, name, left, observation, histories[name])
+                        self._think(run, name, observation, histories[name])
                         for name, observation in zip(TEAM, observations, strict=True)
                     )
                 )
@@ -93,12 +94,12 @@ class SwarmEpisode(Program):
         )
 
     async def _think(
-        self, run: RunContext, name: str, minutes_left: float, observation: Mapping[str, Any], history: list[Message]
+        self, run: RunContext, name: str, observation: Mapping[str, Any], history: list[Message]
     ) -> dict[str, JsonValue]:
-        """One agent's turn: its context, one sample, and the action it chose (`wait` if it chose none)."""
+        """One agent's turn: its context, one sample, and the action it chose (`idle` if it chose none)."""
         wrote = name in self._wrote
         self._wrote.discard(name)
-        if wrote:  # the world saw a wait; the agent is told its writing was saved
+        if wrote:  # the world saw nothing; the agent is told its writing was saved
             observation = {**observation, "last_action": None}
         if history and history[-1].role is Role.ASSISTANT:  # answer the previous call with how it went
             previous = history[-1].tool_calls
@@ -108,19 +109,22 @@ class SwarmEpisode(Program):
                 history.append(Message(role=Role.TOOL, content=[answered]))
             else:
                 history.append(Message.user(result))
-        text = describe(observation, minutes_left=minutes_left, notes=self.notes[name], board=self.board)
-        history.append(Message.user(text))
-        context = [Message.system(system_prompt(name, self.task)), *recent(history, HISTORY_TURNS)]
+        text = describe(observation, notes=self.notes[name], board=self.board)
+        earlier = recent([*history, Message.user(text)], HISTORY_TURNS)
+        context = [Message.system(system_prompt(self.task)), *earlier]
         reply = await run.models[name].sample(context, tools=ACTIONS)
+        # Later turns see this one in brief: a full observation, map and all, in every remembered turn would
+        # several times outweigh the current one.
+        history.append(Message.user(describe(observation, brief=True)))
         history.append(reply)
         calls = reply.tool_calls
         if not calls:
-            return {"name": "wait"}
+            return {"name": "idle"}
         call: ToolCall = calls[0]  # one action per turn
         if call.name in MEMORY_ACTIONS:
             self._remember(name, call)
             self._wrote.add(name)
-            return {"name": "wait"}
+            return {"name": "idle"}  # nothing in the world, and no game time spent on its account
         return {"name": call.name, **dict(call.arguments)}
 
     def _remember(self, name: str, call: ToolCall) -> None:
@@ -147,7 +151,8 @@ def describe_result(result: Any) -> str:
         details = {key: value for key, value in outcome.items() if key not in ("action", "ok")}
         return ", ".join(f"{key}: {item}" for key, item in details.items()) or "Done."
     if outcome.get("interrupted"):
-        return "Cut off when the world froze; repeat it to continue."
+        at = cast(dict[str, Any], outcome.get("now_at") or {})
+        return f"Cut off when the world froze; you got to ({at.get('x')}, {at.get('y')}, {at.get('z')})."
     return f"Failed: {outcome.get('error', 'unknown error')}"
 
 

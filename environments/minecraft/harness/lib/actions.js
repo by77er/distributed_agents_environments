@@ -1,5 +1,6 @@
 'use strict'
-// The actions agents choose from: a small vocabulary of skills over mineflayer.
+// The actions agents choose from: a small, general vocabulary over mineflayer. They are motor control (walking,
+// digging one block, aiming, moving items), not strategy: there is no "dig a staircase" or "collect everything".
 //
 // Every target must be one the agent could know: a block to mine must be the first thing a ray from the eyes hits,
 // within reach; a place to walk to must be near a block the bot has seen. Unfinished actions are stopped when the
@@ -7,10 +8,9 @@
 
 const { Vec3 } = require('vec3')
 const { goals } = require('mineflayer-pathfinder')
-const { look, lineOfSight, firstHit, eyes, key, DIRECTIONS } = require('./observe')
+const { lineOfSight, firstHit, eyes, DIRECTIONS } = require('./observe')
 
 const REACH = 4.5
-const MAX_TUNNEL = 16
 
 class ActionError extends Error {}
 
@@ -48,63 +48,6 @@ const ACTIONS = {
     return { mined: name, gained: gained(before, bot) }
   },
 
-  async tunnel (bot, { direction, length }, context) {
-    const vector = direction_(direction)
-    if (vector.y !== 0) throw new ActionError('tunnel goes north, south, east or west; use stairs to go up or down')
-    const count = Math.max(1, Math.min(int(length ?? 8, 'length'), MAX_TUNNEL))
-    const before = inventoryCounts(bot)
-    let dug = 0; const revealed = new Set()
-    for (let i = 0; i < count; i++) {
-      const feet = bot.entity.position.floored().plus(vector)
-      for (const position of [feet.offset(0, 1, 0), feet]) {
-        const block = bot.blockAt(position)
-        if (block && block.boundingBox === 'block') {
-          await equipBestTool(bot, block)
-          await dig(bot, block, context)
-          dug++
-        }
-      }
-      for (const name of hazardsInSight(bot, context)) revealed.add(name)
-      if (revealed.has('lava')) return { dug, stopped: 'lava came into sight', position: position(bot), gained: gained(before, bot) }
-      await travel(bot, new goals.GoalBlock(feet.x, feet.y, feet.z), context)
-    }
-    await collectNearby(bot, context, 3)
-    return { dug, position: position(bot), gained: gained(before, bot) }
-  },
-
-  async stairs (bot, { direction, steps, way }, context) {
-    // A staircase: each step goes one forward and one down (or up), never straight down.
-    const vector = direction_(direction)
-    if (vector.y !== 0) throw new ActionError('stairs need north, south, east or west')
-    const down = (way ?? 'down') === 'down'
-    const count = Math.max(1, Math.min(int(steps ?? 8, 'steps'), MAX_TUNNEL))
-    let taken = 0
-    for (let i = 0; i < count; i++) {
-      const here = bot.entity.position.floored()
-      const next = here.plus(vector).offset(0, down ? -1 : 1, 0)
-      const toClear = down ? [here.plus(vector).offset(0, 1, 0), here.plus(vector), next] : [here.offset(0, 2, 0), next.offset(0, 1, 0), next]
-      for (const position of toClear) {
-        const block = bot.blockAt(position)
-        if (block && block.boundingBox === 'block') {
-          await equipBestTool(bot, block)
-          await dig(bot, block, context)
-        }
-      }
-      if (hazardsInSight(bot, context).has('lava')) return { steps: taken, stopped: 'lava came into sight', position: position(bot) }
-      const floor = bot.blockAt(next.offset(0, -1, 0))
-      if (!floor || floor.boundingBox !== 'block') return { steps: taken, stopped: 'no floor to stand on', position: position(bot) }
-      await travel(bot, new goals.GoalBlock(next.x, next.y, next.z), context)
-      taken++
-    }
-    return { steps: taken, position: position(bot) }
-  },
-
-  async collect (bot, args, context) {
-    const before = inventoryCounts(bot)
-    await collectNearby(bot, context, 8)
-    return { gained: gained(before, bot) }
-  },
-
   async craft (bot, { item, count }, context) {
     const wanted = itemNamed(bot, item)
     const table = stationInReach(bot, 'crafting_table')
@@ -120,19 +63,6 @@ const ACTIONS = {
     const before = countOf(bot, wanted.name)
     await bot.craft(recipe, times, table ?? undefined)
     return { crafted: wanted.name, made: countOf(bot, wanted.name) - before }
-  },
-
-  async place (bot, { item, x, y, z }, context) {
-    const held = bot.inventory.items().find(stack => stack.name === item)
-    if (!held) throw new ActionError(`you have no ${item}`)
-    const target = x === undefined ? freeSpotNextTo(bot) : new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z'))
-    if (target === null) throw new ActionError('there is no free spot with a floor next to you')
-    if (target.offset(0.5, 0.5, 0.5).distanceTo(eyes(bot)) > REACH) throw new ActionError('that spot is out of reach')
-    const floor = bot.blockAt(target.offset(0, -1, 0))
-    if (!floor || floor.boundingBox !== 'block') throw new ActionError('there is nothing to place it on')
-    await bot.equip(held, 'hand')
-    await bot.placeBlock(floor, new Vec3(0, 1, 0))
-    return { placed: item, x: target.x, y: target.y, z: target.z }
   },
 
   async smelt (bot, { item, fuel, count }, context) {
@@ -162,15 +92,6 @@ const ACTIONS = {
     } finally { furnace.close() }
   },
 
-  async open_chest (bot, { x, y, z }, context) {
-    const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
-    if (!/chest|barrel/.test(block.name)) throw new ActionError(`${block.name} is not a container`)
-    const container = await bot.openContainer(block)
-    try {
-      return { contents: summarize(container.containerItems()) }
-    } finally { container.close() }
-  },
-
   async take (bot, { x, y, z, item, count }, context) {
     const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
     const container = await bot.openContainer(block)
@@ -196,17 +117,17 @@ const ACTIONS = {
     } finally { container.close() }
   },
 
-  async give (bot, { to, item, count }, context) {
-    if (!context.team.has(to) || to === bot.username) throw new ActionError(`${to} is not a teammate`)
-    const mate = bot.players[to]?.entity
-    if (!mate || !lineOfSight(bot, eyes(bot), mate.position.offset(0, 1, 0))) throw new ActionError(`you cannot see ${to}`)
+  async toss (bot, { item, count, x, y, z }, context) {
+    // Throw items: toward a position (a teammate standing there picks them up), or straight ahead.
     const wanted = itemNamed(bot, item)
     const amount = Math.min(countOf(bot, wanted.name), int(count ?? 1, 'count'))
     if (amount === 0) throw new ActionError(`you have no ${item}`)
-    await travel(bot, new goals.GoalNear(mate.position.x, mate.position.y, mate.position.z, 2), context)
-    await bot.lookAt(mate.position.offset(0, 1.2, 0), true)
+    if (x !== undefined) {
+      await bot.lookAt(new Vec3(int(x, 'x') + 0.5, int(y, 'y') + 1.2, int(z, 'z') + 0.5), true)
+      await sleep(150) // the server learns where the bot looks with its next movement packet
+    }
     await bot.toss(wanted.id, null, amount)
-    return { tossed: item, count: amount, to }
+    return { tossed: wanted.name, count: amount }
   },
 
   async equip (bot, { item, slot }, context) {
@@ -281,8 +202,9 @@ const ACTIONS = {
   },
 
   async use (bot, { item, x, y, z }, context) {
-    // Use the held item (or `item`) on a block you see within reach, or in the air: flint and steel on obsidian,
-    // a bucket on water or lava, an eye of ender in the air or on an end portal frame.
+    // Use the held item (or `item`) in the air, or on a block you see within reach: eat food, throw an eye of ender;
+    // flint and steel on obsidian, a bucket on water or lava, an eye of ender on a portal frame; and, with any item
+    // or none, look into a chest or sleep in a bed.
     if (item) {
       const stack = bot.inventory.items().find(entry => entry.name === item)
       if (!stack) throw new ActionError(`you have no ${item}`)
@@ -291,6 +213,10 @@ const ACTIONS = {
     const name = bot.heldItem?.name ?? 'your hand'
     if (x === undefined) {
       if (name === 'ender_eye') return throwEye(bot)
+      if (bot.registry.foodsByName?.[name]) { // eating takes as long as it takes
+        await bot.consume()
+        return { ate: name, food: bot.food }
+      }
       bot.activateItem()
       await sleep(300)
       bot.deactivateItem()
@@ -302,6 +228,16 @@ const ACTIONS = {
     if (position.offset(0.5, 0.5, 0.5).distanceTo(eyes(bot)) > REACH) throw new ActionError('that is out of reach')
     const blocking = whatHides(bot, block)
     if (blocking !== null) throw new ActionError(`you cannot see it from here: ${blocking} is in the way`)
+    if (/chest$|^barrel$/.test(block.name)) {
+      const container = await bot.openContainer(block)
+      try {
+        return { opened: block.name, contents: summarize(container.containerItems()) }
+      } finally { container.close() }
+    }
+    if (block.name.endsWith('_bed')) {
+      await bot.sleep(block)
+      return { sleeping: true, note: 'you wake when the night is over, if every player sleeps' }
+    }
     const before = inventoryCounts(bot)
     if (name.endsWith('bucket')) { // buckets are used on what the player looks at
       await bot.lookAt(position.offset(0.5, name === 'bucket' ? 0.5 : 1.0, 0.5), true)
@@ -337,29 +273,16 @@ const ACTIONS = {
     throw new ActionError('there is no block next to that position to place it against')
   },
 
-  async sleep (bot, { x, y, z }, context) {
-    const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')), true)
-    if (!block.name.endsWith('_bed')) throw new ActionError(`${block.name} is not a bed`)
-    if (block.position.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position) > 2) {
-      await travel(bot, new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1), context)
-    }
-    await bot.sleep(block)
-    return { sleeping: true, note: 'you wake when the night is over, if every player sleeps' }
-  },
-
-  async eat (bot, { item }, context) {
-    const food = bot.inventory.items().find(stack => stack.name === item)
-    if (!food) throw new ActionError(`you have no ${item}`)
-    await bot.equip(food, 'hand')
-    await bot.consume()
-    return { ate: item, food: bot.food }
-  },
-
   async chat (bot, { message }, context) {
     const text = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
     if (!text) throw new ActionError('say something')
     bot.chat(text)
     return { said: text }
+  },
+
+  // Nothing at all, at once: for a turn spent writing notes. It does not keep the world's window open.
+  async idle (bot, args, context) {
+    return {}
   },
 
   async wait (bot, args, context) {
@@ -557,29 +480,6 @@ function stationInReach (bot, name) {
   for (const position of bot.findBlocks({ matching: id, maxDistance: 5, count: 8 })) {
     const center = position.offset(0.5, 0.5, 0.5)
     if (center.distanceTo(origin) <= REACH && lineOfSight(bot, origin, center)) return bot.blockAt(position)
-  }
-  return null
-}
-
-function hazardsInSight (bot, context) {
-  const names = new Set()
-  for (const block of look(bot, context.memory).values()) {
-    if (block.name === 'lava' && block.position.distanceTo(bot.entity.position) < 4) names.add('lava')
-  }
-  return names
-}
-
-function freeSpotNextTo (bot) {
-  const here = bot.entity.position.floored()
-  const occupied = new Set() // blocks a player's body is in (feet and head)
-  for (const entity of Object.values(bot.entities)) {
-    if (entity.type !== 'player') continue
-    for (const dy of [0, 1, 1.8]) occupied.add(key(entity.position.offset(0, dy, 0).floored()))
-  }
-  for (const offset of [DIRECTIONS.north, DIRECTIONS.south, DIRECTIONS.east, DIRECTIONS.west]) {
-    const spot = here.plus(offset)
-    const block = bot.blockAt(spot); const floor = bot.blockAt(spot.offset(0, -1, 0))
-    if (block && block.boundingBox === 'empty' && floor && floor.boundingBox === 'block' && !occupied.has(key(spot))) return spot
   }
   return null
 }

@@ -73,7 +73,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>POST /baseline: remember each team member's advancements now; /state then reports only newer ones (a kit can
  *       itself grant advancements, which an episode should not be rewarded for).</li>
  *   <li>Setup, for building tasks: POST /setup/carve (a lit, empty box with a floor), /setup/items (dropped items),
- *       /setup/chest (a chest with contents), /setup/block (one block), /setup/spawn (a creature), /setup/time;
+ *       /setup/chest (a chest with contents), /setup/block (one block), /setup/spawn (a creature), /setup/time,
+ *       /setup/food (a player's hunger);
  *       GET /setup/stand (safe places to stand), /setup/surface (the ground's height), /setup/locate (the nearest
  *       structure), /setup/blocks (blocks of one type near a point).</li>
  * </ul>
@@ -131,6 +132,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         route("/setup/blocks", this::findBlocks);
         route("/setup/spawn", this::spawnEntity);
         route("/setup/time", this::setTime);
+        route("/setup/food", this::setFood);
         getServer().getPluginManager().registerEvents(this, this);
         http.start();
         getLogger().info("control API on 127.0.0.1:" + port);
@@ -215,7 +217,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                 if (count < 1 || count > 20 * 60 * 10) {
                     throw new IllegalArgumentException("ticks must be between 1 and 12000");
                 }
-                long before = onMainThread(() -> overworld().getFullTime());
+                long before = onMainThread(() -> overworld().getGameTime());
                 boolean started = onMainThread(() -> {
                     if (!ticks.isFrozen()) {
                         ticks.setFrozen(true);
@@ -233,7 +235,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     Thread.sleep(5);
                 }
                 JsonObject result = onMainThread(this::tickState);
-                result.addProperty("stepped", onMainThread(() -> overworld().getFullTime()) - before);
+                result.addProperty("stepped", onMainThread(() -> overworld().getGameTime()) - before);
                 return result;
             }
             default -> throw new IllegalArgumentException("action must be freeze, unfreeze or step");
@@ -471,10 +473,26 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             org.bukkit.entity.Entity entity = location.getWorld().spawnEntity(location, type);
             if (entity instanceof org.bukkit.entity.LivingEntity living) {
                 living.setRemoveWhenFarAway(false);
+                if (body.has("ai") && !body.get("ai").getAsBoolean()) {
+                    living.setAI(false);  // it stands where it is put
+                }
             }
             JsonObject result = new JsonObject();
             result.addProperty("id", entity.getEntityId());
             return result;
+        });
+    }
+
+    /** A player's hunger (20 is full), for staging and tests. */
+    private JsonElement setFood(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            Player player = Bukkit.getPlayerExact(body.get("name").getAsString());
+            if (player == null) {
+                throw new IllegalArgumentException("not online");
+            }
+            player.setFoodLevel(body.get("food").getAsInt());
+            player.setSaturation(0f);
+            return new JsonObject();
         });
     }
 
@@ -774,11 +792,21 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         record("hurt", player, data);
     }
 
+    /** Whoever threw an item cannot pick it back up for five seconds: tossed toward a teammate, it is the teammate's. */
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    public void onPickupOfOwnThrow(EntityPickupItemEvent event) {
+        Item item = event.getItem();
+        if (event.getEntity() instanceof Player player && player.getUniqueId().equals(item.getThrower())
+                && item.getTicksLived() < 100) {
+            event.setCancelled(true);
+        }
+    }
+
     /** A move the server refused (it puts the player back): recorded once a second per player, for diagnosis. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onFailedMove(io.papermc.paper.event.player.PlayerFailMoveEvent event) {
         Player player = event.getPlayer();
-        long now = overworld().getFullTime();
+        long now = overworld().getGameTime();
         Long last = lastFailedMove.get(player.getName());
         if (last != null && now - last < 20) {
             return;
@@ -926,7 +954,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         result.addProperty("frozen", ticks.isFrozen());
         result.addProperty("stepping", ticks.isStepping());
         result.addProperty("rate", ticks.getTickRate());
-        result.addProperty("game_time", overworld().getFullTime());
+        result.addProperty("game_time", overworld().getGameTime());
         return result;
     }
 
@@ -954,7 +982,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         if (player != null) {
             data.addProperty("player", player.getName());
         }
-        data.addProperty("game_time", overworld().getFullTime());
+        data.addProperty("game_time", overworld().getGameTime());
         events.addLast(data);
         while (events.size() > MAX_EVENTS) {
             events.pollFirst();

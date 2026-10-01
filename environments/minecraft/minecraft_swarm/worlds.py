@@ -97,7 +97,12 @@ class MinecraftWorlds:
         done = bool(state.get("dragon_killed")) or (
             staged and int(state["team_diamonds"]) >= world.built.available_diamonds
         )
-        return {"ticks": ran, "done": done}
+        return {
+            "ticks": ran,
+            "done": done,
+            "team_diamonds": int(state["team_diamonds"]),  # for whoever watches; the reward is scored at the end
+            "team_advancements": list(state.get("team_advancements", [])),
+        }
 
     async def score(self, episode: str) -> dict[str, Any]:
         """Ground truth: the reward of the task's objective, the team's diamonds and advancements, and what

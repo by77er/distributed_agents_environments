@@ -16,6 +16,7 @@ import pytest
 from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
 from minecraft_swarm.paper import Installation, PaperServer
+from minecraft_swarm.prompts import describe
 from minecraft_swarm.tasks import Coordination, Kit, Start, Task, build, catalog, score, solved
 
 TEAM = ["ada", "ben", "cy", "dee"]
@@ -131,7 +132,80 @@ async def test_an_agent_mines_ore_it_sees_and_the_team_holds_a_diamond(world: Wo
             break
     assert (await world.control.state())["team_diamonds"] >= 1
     result = (await world.harness.observe("ada"))["last_action"]
-    assert result["ok"] and result["mined"].endswith("diamond_ore") and result["gained"]["diamond"] >= 1, result
+    assert result["ok"] and result["mined"].endswith("diamond_ore"), result  # (a teammate may pick the drop up)
+
+
+def cell(local: dict[str, Any], dx: int, dy: int, dz: int) -> str | None:
+    """What the map holds at an offset from the agent (None: not seen)."""
+    layer = next(each for each in local["layers"] if each["dy"] == dy)
+    index = layer["cells"][(dz + local["radius"]) * (2 * local["radius"] + 1) + dx + local["radius"]]
+    return None if index < 0 else str(local["palette"][index]["name"])
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_map_shows_the_room_and_nothing_behind_its_walls(world: World) -> None:
+    _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=11)  # a 5 by 5 pocket; ore hidden nearby
+    local = observation["map"]
+    assert local["center"] == observation["self"]["position"]
+    assert cell(local, 0, 0, 0) == "air" and cell(local, 0, -1, 0) == "deepslate"  # where it stands, and the floor
+    known = [index for layer in local["layers"] for index in layer["cells"] if index >= 0]
+    unknown = [index for layer in local["layers"] for index in layer["cells"] if index < 0]
+    assert len(unknown) > len(known)  # most of the 13 by 13 by 5 around a small pocket is rock it cannot see into
+    assert not [entry for entry in local["palette"] if "diamond" in entry["name"]]  # the hidden ore stays hidden
+    text = describe(observation)
+    assert "Map of what you have seen within 6 blocks" in text and "(your feet):" in text
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_walking_digs_through_rock_and_items_are_tossed_eaten_and_found_in_chests(world: World) -> None:
+    _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=13)
+    here = observation["self"]["position"]
+    # The pocket's wall is two blocks away; the rest is rock. Each window digs a few blocks and is cut off, and says
+    # how far the agent got; the agent asks for what is left.
+    at: int = here["x"]
+    progress: list[int] = []
+    for _ in range(8):
+        left = at - (here["x"] - 8)
+        if left <= 0:
+            break
+        await world.harness.thaw()
+        await world.harness.act("ada", {"name": "move", "direction": "west", "blocks": left})
+        await run_window(world)
+        result = (await world.harness.observe("ada"))["last_action"]
+        at = int((result.get("now_at") or result.get("arrived_at"))["x"])
+        progress.append(at)
+    assert at == here["x"] - 8, progress
+    assert 1 < len(progress) <= 8, progress  # more than one window of digging
+    local = (await world.harness.observe("ada"))["map"]
+    assert all(cell(local, dx, dy, 0) == "air" for dx in range(1, 6) for dy in (0, 1))  # the tunnel behind it
+    assert cell(local, 0, 2, 0) is not None and cell(local, 0, 2, 0) != "air"  # two high, no more
+
+    ben = next(mate for mate in (await world.harness.observe("cy"))["teammates"] if mate["name"] == "ben")
+    tossed = await do(
+        world, {"name": "toss", "item": "torch", "count": 5, "x": ben["x"], "y": ben["y"], "z": ben["z"]}, "cy"
+    )
+    assert tossed["ok"] and tossed["count"] == 5, tossed
+    await do(world, {"name": "wait"}, "cy", windows=1)  # thrown items can be picked up after two seconds
+    held = {player["name"]: player["inventory"].get("torch", 0) for player in (await world.control.state())["players"]}
+    assert held["cy"] == 27 and held["ben"] == 37, held
+
+    await world.control.set_food("dee", 4)  # hungry (a peaceful world feeds players slowly by itself)
+    await settle(world)
+    assert (await world.harness.observe("dee"))["self"]["food"] < 20
+    eaten = await do(world, {"name": "use", "item": "bread"}, "dee")
+    assert eaten["ok"] and eaten["ate"] == "bread", eaten
+    bread = {player["name"]: player["inventory"].get("bread", 0) for player in (await world.control.state())["players"]}
+    assert bread["dee"] == 7 and bread["ada"] == 8, bread
+
+    spot = (await world.harness.observe("dee"))["self"]["position"]
+    await world.control.chest(spot["x"], spot["y"], spot["z"] + 1, [{"item": "diamond", "count": 3}])
+    await settle(world)
+    opened = await do(world, {"name": "use", "x": spot["x"], "y": spot["y"], "z": spot["z"] + 1}, "dee")
+    assert opened["ok"] and opened["contents"] == {"diamond": 3}, opened
+    took = await do(
+        world, {"name": "take", "x": spot["x"], "y": spot["y"], "z": spot["z"] + 1, "item": "diamond"}, "dee"
+    )
+    assert took["ok"] and (await world.control.state())["team_diamonds"] == 3, took
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -230,18 +304,19 @@ async def test_agents_fight_with_sword_and_bow_and_ground_truth_counts_the_hits(
     x, y, z = here["x"], here["y"], here["z"]
     await world.control.carve(x - 3, y, z - 3, width=22, height=5, depth=7, world="world_nether")  # a firing range
     await world.control.spawn("zombie", x + 3, y, z, world="world_nether")
-    await world.control.spawn("husk", x + 15, y, z + 1, world="world_nether")
+    await world.control.spawn("husk", x + 15, y, z + 1, world="world_nether", ai=False)  # a standing target
     await settle(world)
     mobs = sorted((await world.harness.observe("ada"))["mobs"], key=lambda mob: mob["distance"])
     assert [mob["mob"] for mob in mobs] == ["zombie", "husk"]
-    for _ in range(3):  # teammates stand in the line of fire: arrows pass through them
+    for _ in range(4):  # teammates stand in the line of fire: arrows pass through them
         shot = await do(world, {"name": "shoot", "target": mobs[1]["id"]}, windows=2)
         if not shot.get("target_still_there", True):
             break
     await do(world, {"name": "attack", "target": mobs[0]["id"]})
     assert (await world.harness.observe("ada"))["mobs"] == []
     hits = [event for event in await world.control.events() if event["kind"] == "hurt"]
-    assert {(hit["entity"], hit["with"]) for hit in hits} >= {("husk", "arrow"), ("zombie", "hand")}
+    assert ("husk", "arrow") in {(hit["entity"], hit["with"]) for hit in hits}
+    assert {hit["entity"] for hit in hits} == {"husk", "zombie"}  # (the zombie may walk into the arrows first)
     assert not [event for event in await world.control.events() if event["kind"] == "died"]
 
 

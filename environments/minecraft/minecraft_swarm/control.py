@@ -99,10 +99,14 @@ class Control:
         query = {"block": block, "x": x, "y": y, "z": z, "world": world, "radius": radius, "limit": limit}
         return (await self._request("GET", "/setup/blocks", params=query))["blocks"]
 
-    async def spawn(self, entity: str, x: int, y: int, z: int, *, world: str = "world") -> int:
-        """Spawn a creature; returns its entity id."""
-        body = {"entity": entity, "x": x, "y": y, "z": z, "world": world}
+    async def spawn(self, entity: str, x: int, y: int, z: int, *, world: str = "world", ai: bool = True) -> int:
+        """Spawn a creature; returns its entity id. Without `ai` it stands where it is put."""
+        body = {"entity": entity, "x": x, "y": y, "z": z, "world": world, "ai": ai}
         return int((await self._request("POST", "/setup/spawn", body))["id"])
+
+    async def set_food(self, name: str, food: int) -> None:
+        """A player's hunger (20 is full)."""
+        await self._request("POST", "/setup/food", {"name": name, "food": food})
 
     async def set_time(self, time: int) -> None:
         """The overworld's time of day in ticks (0 is sunrise, 13000 is night)."""

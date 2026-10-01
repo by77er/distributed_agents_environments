@@ -14,6 +14,7 @@ dependencies = [
 project-assistant = "project_assistant.__main__:main"
 agents = "agent_sessions.cli:main"
 minecraft-swarm = "minecraft_swarm.cli:main"
+rollout-monitor = "rollout.monitor.app:main"
 
 [project.optional-dependencies]
 vllm = ["vllm>=0.30; sys_platform == 'linux'", "transformers>=4.57"]
@@ -22,6 +23,7 @@ recorder = ["renderers>=0.1.11"]
 durable = ["dbos>=3.1"]
 mcp = ["mcp>=1.20"]
 report = ["matplotlib>=3.9"]
+monitor = ["starlette>=0.48", "uvicorn>=0.37"]
 anthropic = ["anthropic>=0.70"]
 openai = ["openai>=2.0"]
 assistant = [

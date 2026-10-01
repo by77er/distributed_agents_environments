@@ -10,8 +10,11 @@ four, and every agent is rewarded equally with the team's score.
 uv sync --all-extras
 uv run minecraft-swarm train ~/.cache/rollout/runs/first    # curriculum, groups of episodes, LoRA updates on one GPU
 uv run minecraft-swarm server --seed 12345                   # a temporary server to look at (join with any client)
-environments/minecraft/scripts/train-with-memory-log.sh RUN  # the same training, with a memory log on disk
+environments/minecraft/scripts/train-with-memory-log.sh RUN  # the same, with a memory log and the monitor
 ```
+
+While it trains, http://localhost:8765 shows every episode of every group and, for each agent, what it sees (the
+map included), what it thinks, what it does and what comes back (the [monitor](../core/monitor.md)).
 
 ## The pieces
 
@@ -26,6 +29,7 @@ environments/minecraft/scripts/train-with-memory-log.sh RUN  # the same training
 | World service | `minecraft_swarm/worlds.py`, `service.py` | Temporary worlds and ground-truth scores in process, or over HTTP for rollout workers elsewhere. |
 | Curriculum | `minecraft_swarm/curriculum.py` | Which task next: learning progress over the unlocked tasks. |
 | Training | `minecraft_swarm/train.py`, `rollout.training`, `rollout.recorder` | Groups of episodes, group-relative updates, adapters hot-loaded into vLLM. |
+| Watching | `rollout.monitor`, `minecraft_swarm/report.py` | The live monitor (through the runner's [hooks](../core/harness/hooks.md)), and a chart of progress that can be posted to Discord. |
 
 ## No cheating by construction
 
@@ -67,22 +71,44 @@ push each other.
 
 ## What agents see and do
 
-Each turn an agent reads: the game time left; its position, dimension, biome, time of day and light; health, food,
-inventory and worn armor; how its last action went; teammates' messages; open space in six directions; the commonest
-blocks in sight; notable blocks, one line per kind (the nearest, how many are in sight, and the next three); dropped
-items, teammates, hostile creatures and animals in sight (with ids to target); its notes and the team board.
+The harness gives agents raw material, not advice, and motor control, not strategy.
 
-| Actions | |
+**An observation** says which agent you are, where you are (absolute coordinates), your health, food, inventory and
+armor; how your last action went; what teammates said; then **a map**: the blocks you have seen within six blocks,
+one 13 by 13 grid per height (above the head, head, feet, floor, below), one character per block, north up, rows
+labelled with z. The map holds only what the agent's own rays have hit or passed through, remembered across turns;
+everything else is `?`. Teammates, creatures and dropped items in sight are drawn on it. After the map come notable
+blocks, items, teammates and creatures in sight, with coordinates (sight reaches 24 blocks); then the agent's notes
+and the team board.
+
+```
+y=64 (your feet):
+-2 ? ? # . . . . . B . # ? ?
+-1 ? ? # . . . . . . . # # ?
+0 ? ? # . . . @ . . . . . .
+1 ? ? # . . . . . . . # ? ?
+2 ? ? # * . . . . ~ . # ? ?
+On the map: * a dropped item; B ben; d deepslate_diamond_ore; ~ water.
+```
+
+Agents are **not told the clock**: an episode's length is a limit of training, not of the game, and a policy told the
+clock learns to play the clock. Doing more before the cut-off is rewarded all the same.
+
+| Actions (18) | |
 |---|---|
-| Moving | `move_to` a seen place, `move` in a direction, `tunnel`, `stairs` |
-| Blocks | `mine`, `place` beside you, `place_at` a free position in sight, `use` an item on a block (flint and steel, buckets, eyes of ender on a portal frame) |
-| Items | `collect`, `craft`, `smelt`, `take_smelted`, `open_chest`, `take`, `store`, `give`, `equip` (hand or armor slot), `eat` |
+| Moving | `move_to` a place seen, `move` in a direction; both dig through what is in the way and pick up what they pass over |
+| Blocks | `mine` one block, `place_at` a free position in sight, `use` an item on a block (flint and steel, buckets, an eye of ender on a portal frame; a chest shows its contents; a bed is slept in) |
+| Items | `use` an item in the air (eat, throw an eye of ender), `craft`, `smelt`, `take_smelted`, `take`, `store`, `toss` (toward a position; a teammate there picks it up), `equip` |
 | Creatures | `attack` (walks up and strikes until it is dead), `shoot` (bow; aims for the arrow's drop and the target's motion) |
-| Other | `use` an eye of ender in the air (reports which way it flew), `sleep`, `chat`, `wait` |
-| Memory | `note` (private notes, shown every turn), `post` (a line on the team board, shown to all four) |
+| Other | `chat`, `wait` |
+| Memory | `note` (private notes, shown every turn), `post` (a line on the team board, shown to all four); neither costs game time |
 
-An agent's context is its system prompt and its last four turns. Notes and the board are how it keeps anything
-longer: they take no game time (the agent waits that turn).
+There is no `tunnel`, `stairs`, `collect` or `give`: those were strategy, or walking plus something simpler. An action
+cut off by the freeze reports where the agent got to.
+
+An agent's context is the system prompt and tools (the same for all four agents, 2,100 tokens the engine caches as a
+shared prefix), its last four turns in brief (position, inventory, action, result), and the current observation in
+full: about 3,000 tokens at the first turn, of which the map is 750.
 
 ## Tasks and curriculum
 
@@ -119,9 +145,9 @@ catalog's order: the first three, and four past the hardest one solved at least 
 | Part | Choice | Measured on the RTX 5080 (16 GB) |
 |---|---|---|
 | Policy | `cyankiwi/Qwen3.5-9B-AWQ-4bit` (compressed-tensors, int4 in groups of 32), LoRA rank 32 on every attention, linear-attention and MLP projection | 8 GiB of weights in vLLM; four agents take a turn in about 6 s |
-| Engine | vLLM 0.30 in its own process; LoRA adapters registered by name; sleeps while the trainer runs | sleep 4–19 s, wake 1.5 s |
+| Engine | vLLM 0.30 in its own process; LoRA adapters registered by name; while the trainer runs it sleeps with its weights dropped, and reads them again on waking | sleep 0.2 s, wake 3 s; 3.3 GiB of system memory asleep (11.2 GiB when the weights were parked in memory instead); 88 tokens/s for one agent, 730 tokens/s for sixteen at once |
 | Recorder | Renders contexts to tokens and parses replies through a pluggable `Renderer` (Qwen3.5's XML tool calls and thinking); thinking has a budget, closed by forced (untrained) tokens | records prompt, sampled tokens, mask, behavior logprobs and adapter per turn |
-| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | a 4,096-token sequence peaks at 12.5 GiB, about 4 s; logprobs match vLLM's to a mean of 0.018, also with an adapter; an update of 24 turns takes 80–175 s, most of it loading |
+| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | peak 12.2 GiB at 3,000 tokens, 12.8 at 4,000, 13.4 at 5,000 (14.6 reserved), 3 to 5 s per sequence; longer sequences are left out of a step; logprobs match vLLM's to a mean of 0.018, also with an adapter |
 | Algorithm | Dr. GRPO advantages (reward minus group mean, every turn of an episode), DAPO's dynamic sampling, clip-higher (0.8–1.28) and token-level loss, PPO clipping against the behavior logprobs, no KL | |
 
 Bitsandbytes was the first plan for 4-bit weights, but vLLM 0.30 no longer supports it; a pre-quantized checkpoint
@@ -144,6 +170,11 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
   crash leaves evidence. In the check that ran two consecutive updates this way, available memory never fell below
   7.2 GiB.
 
+- **A sequence too long for the GPU thrashes instead of failing.** Under Windows, memory past the card's 16 GB spills
+  into system memory: a step of 96 turns ran for 13 minutes without finishing and took the host to 0.6 GB free. Turns
+  are now capped at 5,000 tokens for training, and prompts were shortened (earlier turns in brief, fewer tools).
+- **The engine drops its weights when it sleeps.** Parked in system memory they were 8 GiB that the host did not have.
+
 ## Lessons from the live world
 
 - **A bot's box must match the server's.** Mineflayer's player is 0.6 wide; the server's is built from a 32-bit 0.3,
@@ -156,6 +187,11 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
   path at once; the harness clears it before each path. An action that will not stop at a freeze is left behind and
   reported as cut off.
 - **Friendly fire.** Teammates standing in the line of fire took the arrows until the team became a scoreboard team.
+- **A throw needs a moment.** The server learns where a bot looks with its next movement packet: an item tossed at
+  once flew the old way. And whoever throws an item cannot pick it back up for five seconds, so that a toss toward
+  a teammate is the teammate's.
+- **Java on IPv4.** Java listened on an IPv6 socket with a mapped address, which WSL does not forward to Windows'
+  localhost; the servers now listen on plain 127.0.0.1, and a Windows client can join to watch.
 
 ## Reporting
 

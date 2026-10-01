@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs monitor</title>
+<style>
+  :root {
+    --ground: #f6f6f3; --panel: #ffffff; --line: #dedcd5; --ink: #1d1d1b; --quiet: #6d6b65; --faint: #a9a79f;
+    --accent: #0b6e69; --good: #2e7d32; --bad: #b3261e; --warm: #9a5b00; --code: #f1f0eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #171716; --panel: #20201e; --line: #34332f; --ink: #e8e6df; --quiet: #a09d94; --faint: #5f5d57;
+      --accent: #5cc8c1; --good: #7bc47f; --bad: #f28b82; --warm: #e0a94a; --code: #191918;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; display: flex; }
+  nav { width: 290px; flex: none; border-right: 1px solid var(--line); overflow-y: auto; background: var(--panel); }
+  nav h1 { font-size: 14px; margin: 0; padding: 14px 16px 10px; letter-spacing: .02em; }
+  nav h1 small { display: block; font-weight: 400; color: var(--quiet); font-size: 12px; margin-top: 2px; }
+  .group { border-top: 1px solid var(--line); padding: 10px 0 6px; }
+  .group > header { padding: 0 16px 4px; font-weight: 600; font-size: 13px; }
+  .group > header span { display: block; font-weight: 400; color: var(--quiet); font-size: 12px; }
+  .run { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 16px; border: 0; background: none;
+         color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .run:hover { background: var(--ground); }
+  .run[aria-current="true"] { background: var(--ground); box-shadow: inset 3px 0 0 var(--accent); }
+  .run .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run .score { font-variant-numeric: tabular-nums; color: var(--quiet); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .dot.running { background: var(--good); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.failed, .dot.cancelled { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
+  main { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 40px; }
+  .empty { color: var(--quiet); padding: 40px 0; }
+  .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 10px; }
+  .top h2 { font-size: 17px; margin: 0; }
+  .chip { font-size: 12px; color: var(--quiet); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .turns { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; position: sticky; top: -16px;
+           background: var(--ground); padding: 8px 0; z-index: 2; }
+  .turns input[type=range] { flex: 1; accent-color: var(--accent); }
+  .turns button { border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 6px;
+                  padding: 3px 10px; cursor: pointer; font: inherit; }
+  .turns output { font-variant-numeric: tabular-nums; min-width: 92px; }
+  .turns label { color: var(--quiet); font-size: 13px; display: flex; gap: 5px; align-items: center; }
+  .slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; align-items: start; }
+  .slot { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+  .slot > header { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 12px;
+                   border-bottom: 1px solid var(--line); }
+  .slot > header b { font-size: 15px; }
+  .slot > header span { color: var(--quiet); font-size: 12px; }
+  section { padding: 9px 12px 10px; border-bottom: 1px solid var(--line); }
+  section:last-child { border-bottom: 0; }
+  section h3 { margin: 0 0 5px; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+               color: var(--quiet); }
+  pre { margin: 0; font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap;
+        overflow-wrap: anywhere; }
+  .sees pre { background: var(--code); border-radius: 6px; padding: 8px 9px; max-height: 680px; overflow: auto; }
+  .thinks p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+  .does code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--accent);
+               overflow-wrap: anywhere; }
+  .result { color: var(--quiet); overflow-wrap: anywhere; white-space: pre-wrap; }
+  .result.error { color: var(--bad); }
+  .none { color: var(--faint); }
+  .row { white-space: pre; }
+  .c-solid { color: var(--quiet); } .c-air { color: var(--faint); } .c-unseen { color: var(--faint); opacity: .45; }
+  .c-self { color: var(--accent); font-weight: 700; } .c-mate { color: var(--warm); font-weight: 700; }
+  .c-thing { color: var(--ink); font-weight: 700; }
+  details { margin-top: 16px; }
+  details summary { cursor: pointer; color: var(--quiet); font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
+  td { border-top: 1px solid var(--line); padding: 4px 8px 4px 0; vertical-align: top; overflow-wrap: anywhere; }
+  td:first-child { white-space: nowrap; color: var(--accent); font-family: ui-monospace, monospace; }
+  @media (max-width: 760px) { body { flex-direction: column; } nav { width: auto; max-height: 34vh; border-right: 0;
+    border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<nav>
+  <h1>Runs monitor <small id="status">connecting…</small></h1>
+  <div id="groups"></div>
+</nav>
+<main id="main"><p class="empty">Choose a run on the left.</p></main>
+<script>
+"use strict";
+const state = { runs: [], selected: null, lines: [], turn: 0, follow: true, full: false };
+const $ = (tag, attributes = {}, ...children) => {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attributes)) {
+    if (key === "class") node.className = value; else if (key.startsWith("on")) node[key] = value; else node.setAttribute(key, value);
+  }
+  for (const child of children) node.append(child);
+  return node;
+};
+const short = id => id.length > 10 ? id.slice(-6) : id;
+const reward = run => { const values = Object.values(run.rewards); return values.length ? String(values[0]) : ""; };
+
+function groupTitle(labels, runs) {
+  const main = labels.title || labels.task || labels.group || "run";
+  const rest = Object.entries(labels).filter(([key]) => !["group", "episode", "title"].includes(key))
+    .map(([key, value]) => `${key} ${value}`).join(" · ");
+  return [main, rest, `${runs.length} run${runs.length === 1 ? "" : "s"}`];
+}
+
+function drawRuns() {
+  const groups = new Map();
+  for (const run of state.runs) {
+    const key = run.labels.group ?? run.run_id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(run);
+  }
+  const root = document.getElementById("groups");
+  root.replaceChildren();
+  for (const runs of groups.values()) {
+    runs.sort((a, b) => String(a.labels.episode ?? a.run_id).localeCompare(String(b.labels.episode ?? b.run_id), undefined, { numeric: true }));
+    const [title, rest, count] = groupTitle(runs[0].labels, runs);
+    const group = $("div", { class: "group" }, $("header", {}, title, $("span", {}, [rest, count].filter(Boolean).join(" · "))));
+    for (const run of runs) {
+      const name = run.labels.episode !== undefined ? `episode ${run.labels.episode}` : short(run.run_id);
+      group.append($("button", { class: "run", "aria-current": String(run.run_id === state.selected), onclick: () => select(run.run_id) },
+        $("span", { class: `dot ${run.state}`, title: run.state }), $("span", { class: "name" }, name),
+        $("span", { class: "score", title: "reward" }, reward(run))));
+    }
+    root.append(group);
+  }
+  document.getElementById("status").textContent = state.runs.length
+    ? `${state.runs.filter(run => run.state === "running").length} running · ${state.runs.length} in the feed` : "no runs yet";
+}
+
+async function select(runId) {
+  state.selected = runId; state.lines = []; state.turn = 0; state.follow = true;
+  drawRuns();
+  await pull();
+}
+
+// What the selected run has done, by slot: each sample, and the result its call got (found in that slot's next sample).
+function turnsBySlot() {
+  const slots = new Map();
+  for (const line of state.lines) {
+    if (line.kind !== "sample") continue;
+    if (!slots.has(line.slot)) slots.set(line.slot, []);
+    slots.get(line.slot).push(line);
+  }
+  return slots;
+}
+
+function resultOf(samples, index, callId) {
+  const next = samples[index + 1];
+  if (!next) return null;
+  for (const message of next.messages) for (const result of message.results) if (result.id === callId) return result;
+  const last = next.messages.filter(message => message.role === "user").at(-2);  // a reply without a call is answered in words
+  return last ? { text: last.text, error: false } : null;
+}
+
+function mapRow(text) {
+  const row = $("div", { class: "row" });
+  const [label, ...cells] = text.split(" ");
+  row.append(label.padStart(5) + " ");
+  for (const cell of cells) {
+    const kind = cell === "#" ? "solid" : cell === "." ? "air" : cell === "?" ? "unseen" : cell === "@" ? "self"
+      : /[A-Z]/.test(cell) ? "mate" : "thing";
+    row.append($("span", { class: `c-${kind}` }, cell + " "));
+  }
+  return row;
+}
+
+function seen(sample) {
+  const pre = $("pre");
+  const messages = state.full ? sample.messages : sample.messages.filter(message => message.role === "user").slice(-1);
+  for (const message of messages) {
+    if (state.full) pre.append($("div", { class: "none" }, `— ${message.role} —`));
+    for (const line of (message.text || "").split("\n")) {
+      pre.append(/^-?\d+( \S){6,}$/.test(line) ? mapRow(line) : $("div", {}, line || " "));
+    }
+    if (state.full) for (const call of message.calls) pre.append($("div", {}, `→ ${call.name}(${JSON.stringify(call.arguments)})`));
+    if (state.full) for (const result of message.results) pre.append($("div", {}, `← ${result.text}`));
+  }
+  return pre;
+}
+
+function drawRun() {
+  const main = document.getElementById("main");
+  const run = state.runs.find(each => each.run_id === state.selected);
+  if (!run) { main.replaceChildren($("p", { class: "empty" }, "Choose a run on the left.")); return; }
+  const slots = turnsBySlot();
+  const turns = Math.max(0, ...[...slots.values()].map(samples => samples.length));
+  if (state.follow) state.turn = Math.max(0, turns - 1);
+  state.turn = Math.min(state.turn, Math.max(0, turns - 1));
+  const scroll = main.scrollTop;
+
+  const top = $("div", { class: "top" }, $("h2", {}, run.labels.title || run.labels.task || short(run.run_id)));
+  for (const [key, value] of Object.entries(run.labels)) if (key !== "title") top.append($("span", { class: "chip" }, `${key} `, $("b", {}, String(value))));
+  top.append($("span", { class: "chip" }, "state ", $("b", {}, run.state)));
+  if (reward(run)) top.append($("span", { class: "chip" }, "reward ", $("b", {}, reward(run))));
+
+  const slider = $("input", { type: "range", min: 0, max: Math.max(0, turns - 1), value: state.turn, "aria-label": "turn",
+    oninput: event => { state.turn = Number(event.target.value); state.follow = false; drawRun(); } });
+  const step = delta => () => { state.turn = Math.max(0, Math.min(turns - 1, state.turn + delta)); state.follow = false; drawRun(); };
+  const bar = $("div", { class: "turns" },
+    $("button", { onclick: step(-1), "aria-label": "previous turn" }, "◀"), $("button", { onclick: step(1), "aria-label": "next turn" }, "▶"),
+    $("output", {}, turns ? `turn ${state.turn + 1} of ${turns}` : "no turns yet"), slider,
+    $("label", {}, $("input", Object.assign({ type: "checkbox", onchange: event => { state.follow = event.target.checked; drawRun(); } }, state.follow ? { checked: "" } : {})), "follow"),
+    $("label", {}, $("input", Object.assign({ type: "checkbox", onchange: event => { state.full = event.target.checked; drawRun(); } }, state.full ? { checked: "" } : {})), "whole context"));
+
+  const grid = $("div", { class: "slots" });
+  for (const [slot, samples] of slots) {
+    const sample = samples[state.turn];
+    const card = $("div", { class: "slot" }, $("header", {}, $("b", {}, slot),
+      $("span", {}, sample ? `${sample.seconds} s · ${sample.finish_reason}` : "")));
+    if (!sample) { card.append($("section", {}, $("span", { class: "none" }, "no turn yet"))); grid.append(card); continue; }
+    card.append($("section", { class: "sees" }, $("h3", {}, "Sees"), seen(sample)));
+    card.append($("section", { class: "thinks" }, $("h3", {}, "Thinks"),
+      sample.reply.reasoning ? $("p", {}, sample.reply.reasoning.trim()) : $("span", { class: "none" }, "nothing recorded")));
+    const does = $("section", { class: "does" }, $("h3", {}, "Does"));
+    if (sample.reply.text.trim()) does.append($("p", { style: "margin:0 0 4px" }, sample.reply.text.trim()));
+    for (const call of sample.reply.calls) {
+      const args = Object.entries(call.arguments).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ");
+      does.append($("div", {}, $("code", {}, `${call.name}(${args})`)));
+    }
+    if (!sample.reply.calls.length && !sample.reply.text.trim()) does.append($("span", { class: "none" }, "nothing"));
+    card.append(does);
+    const result = resultOf(samples, state.turn, sample.reply.calls[0]?.id);
+    card.append($("section", {}, $("h3", {}, "Result"), result
+      ? $("div", { class: `result${result.error ? " error" : ""}` }, result.text)
+      : $("span", { class: "none" }, run.state === "running" ? "pending" : "the run ended")));
+    grid.append(card);
+  }
+
+  const effects = [];
+  const requests = new Map();
+  for (const line of state.lines) {
+    if (line.kind !== "event") continue;
+    if (line.type === "effect.requested" && line.payload.kind !== "model.sample") requests.set(line.payload.effect_id, line.payload);
+    if (line.type === "effect.completed" && requests.has(line.payload.effect_id)) effects.push([requests.get(line.payload.effect_id), line.payload]);
+  }
+  const log = $("details", {}, $("summary", {}, `Other effects (${effects.length}; latest first)`));
+  const table = $("table");
+  for (const [request, completed] of effects.slice(-40).reverse()) {
+    const what = request.payload?.name ?? request.payload?.kind ?? request.kind;
+    const given = JSON.stringify(request.payload?.arguments ?? request.payload ?? {});
+    const structured = completed.payload?.structured ?? completed.payload;
+    table.append($("tr", {}, $("td", {}, String(what)), $("td", {}, given.slice(0, 160)), $("td", {}, JSON.stringify(structured ?? completed.status).slice(0, 260))));
+  }
+  log.append(table);
+  main.replaceChildren(top, bar, slots.size ? grid : $("p", { class: "empty" }, "This run has not sampled a model yet."), log);
+  main.scrollTop = scroll;
+}
+
+async function pull() {
+  try {
+    state.runs = await (await fetch("api/runs")).json();
+    drawRuns();
+    if (state.selected) {
+      const run = state.runs.find(each => each.run_id === state.selected);
+      if (run && run.lines > state.lines.length) {
+        const more = await (await fetch(`api/runs/${encodeURIComponent(state.selected)}?after=${state.lines.length}`)).json();
+        if (more.run_id === state.selected) state.lines.push(...more.lines);
+      }
+      const drawn = `${state.selected} ${state.lines.length} ${run?.state}`;  // redraw only when something changed
+      if (drawn !== state.drawn) { state.drawn = drawn; drawRun(); }
+    } else if (state.runs.length) {
+      await select((state.runs.find(run => run.state === "running") ?? state.runs[0]).run_id);
+    }
+  } catch (error) {
+    document.getElementById("status").textContent = "cannot reach the monitor";
+  }
+}
+pull();
+setInterval(pull, 2000);
+</script>
+</body>
+</html>

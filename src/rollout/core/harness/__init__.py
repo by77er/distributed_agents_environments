@@ -19,6 +19,7 @@ from rollout.core.harness.environments import (
     ExecutionResult,
 )
 from rollout.core.harness.history import ContextHints, History, HistoryShape, Turn
+from rollout.core.harness.hooks import ModelSample, RunHooks
 from rollout.core.harness.imports import ToolBinding, Tools, ToolSet
 from rollout.core.harness.loop import rollout
 from rollout.core.harness.model import Effects, EndpointModel
@@ -74,6 +75,7 @@ __all__ = [
     "InvalidObservation",
     "Model",
     "ModelBinding",
+    "ModelSample",
     "ModelSlot",
     "Observation",
     "Priority",
@@ -84,6 +86,7 @@ __all__ = [
     "RunBinding",
     "RunContext",
     "RunHandle",
+    "RunHooks",
     "RunOutcome",
     "RunSpecification",
     "RunStatus",

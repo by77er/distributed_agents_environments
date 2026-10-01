@@ -6,7 +6,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`Blobs`](#blobs), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
+- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`Blobs`](#blobs), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
 - **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
@@ -473,6 +473,24 @@ Exactly one of `direct` or `recorded`.
 | `direct` | `DirectModel \| None` | `None` |  |
 | `recorded` | `RecordedModel \| None` | `None` |  |
 
+### `ModelSample`
+
+*class* · `src/rollout/core/harness/hooks.py`
+
+```python
+class ModelSample
+```
+
+One model sample: what a slot's model was sent and what it replied.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `run_id` | `str` | required |  |
+| `slot` | `str` | required |  |
+| `request` | `SampleRequest` | required | `request.context.append` holds the messages sent; `request.tools` the tools offered. |
+| `result` | `SampleResult` | required |  |
+| `seconds` | `float` | required | How long the endpoint took. |
+
 ### `ModelSlot`
 
 *class* · `src/rollout/core/harness/task.py`
@@ -682,6 +700,21 @@ class RunHandle(Protocol)
 - `@property def run_id(self) -> str`
 - `async def result(self) -> RunOutcome`
 - `def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]` — Every event from `from_seq`, then new ones as they are recorded, until the run ends.
+
+### `RunHooks`
+
+*class* · `src/rollout/core/harness/hooks.py`
+
+```python
+class RunHooks
+```
+
+Subclass and override what you need; pass instances to a runner (`LocalRunner(hooks=[...])`).
+
+**Methods**
+
+- `def on_event(self, event: RunEvent) -> None` — A run event was recorded (of any run of the runner; `event.run_id` says which).
+- `def on_sample(self, sample: ModelSample) -> None` — A model replied.
 
 ### `Runner`
 
@@ -1894,7 +1927,8 @@ time, and messages a run never consumed start the conversation's next run.
 
 **Methods**
 
-- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None) -> None` — `recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`.
+- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = ()) -> None` — `recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `hooks`
+  watch every run: each event recorded and each model sample.
 - `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
 - `def run(self, run_id: str) -> LocalRunHandle`
 - `def conversation_of(self, run_id: str) -> ConversationKey | None` — The conversation a run serves, if any.
@@ -2095,7 +2129,7 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 
 **Methods**
 
-- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0, database: str | Database | None = None, runner_id: str | None = None, heartbeat_interval: float = 2.0, takeover_after: timedelta = timedelta(seconds=15)) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
+- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0, database: str | Database | None = None, runner_id: str | None = None, heartbeat_interval: float = 2.0, takeover_after: timedelta = timedelta(seconds=15)) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
   `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
   
     `database`: a Postgres URL (or `Database`) shared with other runners; without it, state is SQLite in

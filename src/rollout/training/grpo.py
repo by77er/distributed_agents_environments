@@ -60,6 +60,9 @@ class GroupRelativeTrainer:
     tokens_per_step: int = 16_384
     """Sampled tokens per optimizer step (gradients accumulate over sequences until then)."""
     max_gradient_norm: float = 1.0
+    max_sequence_tokens: int | None = None
+    """Longer sequences are left out of a step (and counted): memory grows with length, and one sequence too long
+    for the GPU would end the whole step."""
 
     def __post_init__(self) -> None:
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=0.0)
@@ -79,7 +82,12 @@ class GroupRelativeTrainer:
     def step(self, sequences: Sequence[TrainingSequence], *, seed: int = 0) -> dict[str, float]:
         """One pass over the sequences, in shuffled minibatches of about `tokens_per_step` sampled tokens."""
         started = time.monotonic()
-        order = list(sequences)
+        order = [
+            sequence
+            for sequence in sequences
+            if self.max_sequence_tokens is None or len(sequence.tokens) <= self.max_sequence_tokens
+        ]
+        too_long = len(sequences) - len(order)
         random.Random(seed).shuffle(order)
         batches: list[list[TrainingSequence]] = [[]]
         counted = 0
@@ -129,7 +137,9 @@ class GroupRelativeTrainer:
             "approx_kl": totals["kl"] / tokens,
             "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "tokens": totals["tokens"],
-            "sequences": float(len(sequences)),
+            "sequences": float(len(order)),
+            "sequences_too_long": float(too_long),
+            "longest_sequence_tokens": float(max((len(sequence.tokens) for sequence in order), default=0)),
             "optimizer_steps": float(len(batches)),
             "seconds": time.monotonic() - started,
         }

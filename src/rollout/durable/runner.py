@@ -24,7 +24,7 @@ import contextvars
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -43,6 +43,7 @@ from rollout.core.contracts import (
 from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope, Priority
 from rollout.core.harness.environments import EnvironmentService
+from rollout.core.harness.hooks import RunHooks, observed, publish
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.loop import UNLOAD
 from rollout.core.harness.observation import InvalidObservation
@@ -146,6 +147,7 @@ class DurableRunner:
         environments: EnvironmentService | None = None,
         blobs: Blobs | None = None,
         recorder: RecordedEndpoints | None = None,
+        hooks: Sequence[RunHooks] = (),
         application: str = "rollout",
         evict_after: timedelta | None = timedelta(minutes=5),
         eviction_interval: float = 5.0,
@@ -166,6 +168,7 @@ class DurableRunner:
         self._environment_service = environments
         self._blobs = blobs
         self._recorder = recorder
+        self._hooks = list(hooks)
         self._evict_after = evict_after
         self._eviction_interval = eviction_interval
         self._heartbeat_interval = heartbeat_interval
@@ -336,14 +339,18 @@ class DurableRunner:
         program = instantiate(specification.program)
         context = DurableRunContext(
             run_id,
-            resolve_endpoints(program, specification.binding, self._providers, self._recorder),
+            observed(
+                resolve_endpoints(program, specification.binding, self._providers, self._recorder),
+                self._hooks,
+                run_id,
+            ),
             started_at=datetime.fromisoformat(started_at),
             context_hints=program.context_hints(),
             tool_sets=resolve_tool_sets(program, specification.binding, self._tool_sets),
             environment_service=self._environment_service,
             blobs=self._blobs,
             conversation=conversation,
-            on_event=self.store.append,
+            on_event=self._recorded,
             mark_attempt=self.store.mark_attempt,
         )
         context.record_event(
@@ -377,6 +384,10 @@ class DurableRunner:
         return {"undelivered": [envelope.model_dump(mode="json") for envelope in undelivered]}
 
     # Internals
+
+    def _recorded(self, event: RunEvent) -> None:
+        self.store.append(event)
+        publish(self._hooks, event)
 
     def _live_run(self, address: str) -> str | None:
         run_id = self.store.live_run(address)

@@ -1,7 +1,7 @@
 """What agents read and call: the system prompt, observations as text, and the actions as tools."""
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from pydantic import JsonValue
 
@@ -24,24 +24,31 @@ GOALS = {
     ),
 }
 
-SYSTEM = """You are {name}, one of four players in Minecraft: {team}. You play together.
+SYSTEM = """You are one of four players in Minecraft: {team}. You play together. Each observation says which one \
+you are.
 
 {goal}
 
 How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
 one tool; then the world runs for up to five seconds while the actions happen, and freezes again. Long actions \
-(walking far, tunnelling, fighting) may be cut off; repeat them to continue. You have about {minutes:g} minutes of \
-game time; time passes only while actions happen.
+(walking far, digging through rock, fighting) may be cut off; repeat them to continue. Writing a note or posting to \
+the board costs no game time.
 
-What you know: you see only what is in your line of sight. Coordinates are (x, y, z): +x is east, +y is up, +z is \
-south. If you die you start again where the game began. You see only your last few turns, so keep what matters in \
-your notes (the note tool): they are shown to you every turn. The team board (the post tool) is shown to all four \
-of you every turn; chat reaches teammates at their next turn. Use them to split up the work and to share what you \
-find. Think briefly, then act."""
+What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
+you, and lists notable things in sight farther off. Coordinates are absolute, (x, y, z): +x is east, +y is up, +z is \
+south. Walking digs through what is in the way and picks up items it passes over. If you die you start again where \
+the game began. You see your earlier turns only in brief, so keep what matters in your notes (the note tool): they \
+are shown to you every turn. The team board (the post tool) is shown to all four of you every turn; chat reaches \
+teammates at their next turn. Use them to split up the work and to share what you find. Think briefly, then act."""
 
 
-def system_prompt(name: str, task: Task) -> str:
-    return SYSTEM.format(name=name, team=", ".join(TEAM), goal=GOALS[task.objective], minutes=task.minutes)
+def system_prompt(task: Task) -> str:
+    """The same for all four agents, so that their prompts share it (and the tools) as a prefix the engine caches.
+
+    It says nothing of how long the game lasts, and neither do observations: an episode's length is a limit of
+    training, not of the game, and a policy told the clock learns to play the clock. Doing more before the episode is
+    cut off is rewarded all the same."""
+    return SYSTEM.format(team=", ".join(TEAM), goal=GOALS[task.objective])
 
 
 def _integer(description: str) -> dict[str, JsonValue]:
@@ -61,37 +68,20 @@ def _action(
 STRING: dict[str, JsonValue] = {"type": "string"}
 COUNT = _integer("how many")
 DIRECTION: dict[str, JsonValue] = {"type": "string", "enum": ["north", "south", "east", "west", "up", "down"]}
-WAY: dict[str, JsonValue] = {"type": "string", "enum": ["down", "up"]}
 SLOT: dict[str, JsonValue] = {"type": "string", "enum": ["hand", "off-hand", "head", "torso", "legs", "feet"]}
-XYZ: dict[str, JsonValue] = {"x": _integer("x"), "y": _integer("y"), "z": _integer("z")}
+INTEGER: dict[str, JsonValue] = {"type": "integer"}
+XYZ: dict[str, JsonValue] = {"x": INTEGER, "y": INTEGER, "z": INTEGER}
 AT = ["x", "y", "z"]
 
 ACTIONS = [
-    _action("move_to", "Walk to a place near something you have seen (digging through if needed).", XYZ, AT),
-    _action("move", "Walk up to 32 blocks in a direction.", {"direction": DIRECTION, "blocks": COUNT}, ["direction"]),
+    _action("move_to", "Walk to a place you have seen, digging through what is in the way.", XYZ, AT),
+    _action(
+        "move",
+        "Walk up to 32 blocks in a direction, digging through what is in the way.",
+        {"direction": DIRECTION, "blocks": COUNT},
+        ["direction"],
+    ),
     _action("mine", "Mine a block you can see within reach (4.5 blocks) and pick up what drops.", XYZ, AT),
-    _action(
-        "tunnel",
-        "Dig a 1x2 tunnel north, south, east or west, up to 16 blocks; stops if lava comes into sight.",
-        {"direction": DIRECTION, "length": _integer("blocks")},
-        ["direction"],
-    ),
-    _action(
-        "stairs",
-        "Dig a staircase down (or up) in a direction (north, south, east or west), one block forward per step.",
-        {"direction": DIRECTION, "steps": _integer("steps"), "way": WAY},
-        ["direction"],
-    ),
-    _action("collect", "Pick up dropped items you can see nearby.", {}, []),
-    _action(
-        "craft",
-        "Craft an item from your inventory (3x3 recipes need a crafting table within reach).",
-        {"item": STRING, "count": COUNT},
-        ["item"],
-    ),
-    _action(
-        "place", "Place a block from your inventory next to you (e.g. a crafting table).", {"item": STRING}, ["item"]
-    ),
     _action(
         "place_at",
         "Place a block from your inventory at a free position you see within reach; it needs a block next to it.",
@@ -100,10 +90,39 @@ ACTIONS = [
     ),
     _action(
         "use",
-        "Use an item: on a block you see within reach (flint and steel on obsidian, a bucket on water or lava, an eye "
-        "of ender on a portal frame), or, without a position, in the air (an eye of ender flies toward a stronghold).",
+        "Use an item (the one you hold, or `item`). Without a position: eat food, or throw an eye of ender. On a block "
+        "you see within reach: flint and steel on obsidian, a bucket on water or lava, an eye of ender on a portal "
+        "frame; on a chest it shows what is inside; on a bed you sleep.",
         {"item": STRING, **XYZ},
         [],
+    ),
+    _action(
+        "craft",
+        "Craft an item from your inventory (3x3 recipes need a crafting table within reach).",
+        {"item": STRING, "count": COUNT},
+        ["item"],
+    ),
+    _action(
+        "smelt",
+        "Put items and fuel into a furnace within reach; each item takes 10 seconds.",
+        {"item": STRING, "fuel": STRING, "count": COUNT},
+        ["item"],
+    ),
+    _action("take_smelted", "Take what a furnace within reach has finished.", {}, []),
+    _action("take", "Take items from a chest within reach.", {**XYZ, "item": STRING, "count": COUNT}, [*AT, "item"]),
+    _action("store", "Put items into a chest within reach.", {**XYZ, "item": STRING, "count": COUNT}, [*AT, "item"]),
+    _action(
+        "toss",
+        "Throw items from your inventory, toward a position if given: a teammate standing there picks them up (you "
+        "cannot pick them back up for five seconds).",
+        {"item": STRING, "count": COUNT, **XYZ},
+        ["item"],
+    ),
+    _action(
+        "equip",
+        "Hold an item, or wear armor (slot: head, torso, legs, feet).",
+        {"item": STRING, "slot": SLOT},
+        ["item"],
     ),
     _action(
         "attack",
@@ -117,30 +136,6 @@ ACTIONS = [
         {"target": _integer("the creature's id")},
         ["target"],
     ),
-    _action(
-        "smelt",
-        "Put items and fuel into a furnace within reach; each item takes 10 seconds.",
-        {"item": STRING, "fuel": STRING, "count": COUNT},
-        ["item"],
-    ),
-    _action("take_smelted", "Take what a furnace within reach has finished.", {}, []),
-    _action("open_chest", "Look into a chest you can see within reach.", XYZ, AT),
-    _action("take", "Take items from a chest within reach.", {**XYZ, "item": STRING, "count": COUNT}, [*AT, "item"]),
-    _action("store", "Put items into a chest within reach.", {**XYZ, "item": STRING, "count": COUNT}, [*AT, "item"]),
-    _action(
-        "give",
-        "Walk to a teammate you can see and toss them items.",
-        {"to": STRING, "item": STRING, "count": COUNT},
-        ["to", "item"],
-    ),
-    _action(
-        "equip",
-        "Hold an item, or wear armor (slot: head, torso, legs, feet).",
-        {"item": STRING, "slot": SLOT},
-        ["item"],
-    ),
-    _action("eat", "Eat food from your inventory.", {"item": STRING}, ["item"]),
-    _action("sleep", "Sleep in a bed you can see within reach (at night).", XYZ, AT),
     _action("chat", "Say something to your teammates.", {"message": STRING}, ["message"]),
     _action(
         "note",
@@ -149,10 +144,10 @@ ACTIONS = [
         ["text"],
     ),
     _action("post", "Add a line to the team board (shown to all four of you every turn).", {"text": STRING}, ["text"]),
-    _action("wait", "Do nothing this turn.", {}, []),
+    _action("wait", "Do nothing while the world runs (up to five seconds of game time pass).", {}, []),
 ]
-"""The actions, as tools the model calls (one per turn). `note` and `post` are the agents' memory; the rest act in
-the world."""
+"""The actions, as tools the model calls (one per turn): motor control, not strategy. `note` and `post` are the
+agents' memory; the rest act in the world."""
 
 MEMORY_ACTIONS = ("note", "post")
 """Handled by the episode itself; they take no game time."""
@@ -161,8 +156,15 @@ MAX_NOTES = 1200
 MAX_BOARD_LINES = 12
 
 
-def describe(observation: Mapping[str, Any], *, minutes_left: float, notes: str = "", board: Sequence[str] = ()) -> str:
-    """An observation as text: who and where you are, what you see, what happened, what you heard and remember."""
+def describe(
+    observation: Mapping[str, Any],
+    *,
+    notes: str = "",
+    board: Sequence[str] = (),
+    brief: bool = False,
+) -> str:
+    """An observation as text: who and where you are, the map of what you have seen, what is in sight, what happened,
+    what you heard and remember. `brief` keeps only where you were and what you held (how earlier turns are kept)."""
     me = observation["self"]
     position = me["position"]
     world: Mapping[str, Any] = observation.get("world") or {}
@@ -179,10 +181,13 @@ def describe(observation: Mapping[str, Any], *, minutes_left: float, notes: str 
     holding = f" Holding {me['holding']}." if me.get("holding") else ""
     wearing = f" Wearing {', '.join(me['wearing'].values())}." if me.get("wearing") else ""
     lines = [
-        f"{minutes_left:.1f} minutes left. You are at {where} ({', '.join(place)}); health {me['health']}/20, "
+        f"You are {me['name']}, at {where} ({', '.join(place)}); "
+        f"health {me['health']}/20, "
         f"food {me['food']}/20, light {world.get('light', '?')}.",
         f"Inventory: {_items(me['inventory'])}.{holding}{wearing}",
     ]
+    if brief:
+        return "\n".join(lines)
     if observation.get("died"):
         lines.append("You died since your last turn and respawned.")
     result = observation.get("last_action")
@@ -190,16 +195,10 @@ def describe(observation: Mapping[str, Any], *, minutes_left: float, notes: str 
         lines.append(f"Your last action: {_result(result)}")
     if observation.get("messages"):
         lines.append("Teammates said: " + " | ".join(f"{m['from']}: {m['message']}" for m in observation["messages"]))
-    surroundings = observation["surroundings"]
-    openings = ", ".join(
-        f"{direction} {value['open']}" + (f" then {value['then']}" if "then" in value else "")
-        for direction, value in surroundings.items()
-    )
-    lines.append(f"Open space: {openings}.")
-    seen = ", ".join(f"{b['block']} ({b['count']})" for b in observation["visible_blocks"][:6])
-    lines.append(f"You see mostly: {seen}.")
+    if observation.get("map"):
+        lines.append(render_map(observation))
     if observation["notable"]:
-        lines.append("Notable: " + "; ".join(_notable(kind) for kind in observation["notable"]) + ".")
+        lines.append("Notable in sight: " + "; ".join(_notable(kind) for kind in observation["notable"]) + ".")
     if observation["items"]:
         dropped = "; ".join(
             f"{i['count']} {i['item']} at ({i['x']}, {i['y']}, {i['z']})" for i in observation["items"][:8]
@@ -214,11 +213,136 @@ def describe(observation: Mapping[str, Any], *, minutes_left: float, notes: str 
     if observation.get("animals"):
         animals = "; ".join(f"{a['animal']} (id {a['id']}) {a['distance']} away" for a in observation["animals"][:6])
         lines.append(f"Animals: {animals}.")
-    if me.get("near"):
-        lines.append("Within reach: " + ", ".join(s["station"] for s in me["near"]) + ".")
     lines.append(f"Your notes: {notes or '(empty)'}")
     lines.append("Team board: " + (" | ".join(board) if board else "(empty)"))
     return "\n".join(lines)
+
+
+# The map
+
+UNSEEN, EMPTY, SOLID, PASSABLE, SELF = "?", ".", "#", ",", "@"
+SYMBOLS = {
+    "water": "~",
+    "lava": "%",
+    "fire": "^",
+    "chest": "h",
+    "trapped_chest": "h",
+    "barrel": "h",
+    "crafting_table": "t",
+    "furnace": "f",
+    "blast_furnace": "f",
+    "obsidian": "o",
+    "crying_obsidian": "o",
+    "nether_portal": "p",
+    "end_portal": "p",
+    "end_portal_frame": "m",
+    "spawner": "s",
+    "bedrock": "k",
+    "torch": "j",
+    "wall_torch": "j",
+    "gravel": "z",
+    "sand": "z",
+    "ancient_debris": "a",
+}
+"""Blocks with a symbol of their own on the map. Everything else is `#` if solid and `,` if it can be walked through."""
+ORES = {
+    "diamond": "d",
+    "iron": "i",
+    "coal": "c",
+    "gold": "g",
+    "redstone": "r",
+    "lapis": "l",
+    "emerald": "e",
+    "copper": "u",
+    "quartz": "q",
+}
+SUFFIXES = {"_log": "w", "_leaves": "v", "_bed": "b"}
+ITEM, HOSTILE, ANIMAL = "*", "!", "&"
+HEIGHTS = {2: "above your head", 1: "your head", 0: "your feet", -1: "the floor under you", -2: "below the floor"}
+
+
+def symbol(name: str, solid: bool) -> str:
+    """The map's character for a block."""
+    if name == "air":
+        return EMPTY
+    if name in SYMBOLS:
+        return SYMBOLS[name]
+    if name.endswith("_ore"):
+        ore = name.removesuffix("_ore").removeprefix("deepslate_").removeprefix("nether_")
+        return ORES.get(ore, SOLID)
+    for suffix, character in SUFFIXES.items():
+        if name.endswith(suffix):
+            return character
+    return SOLID if solid else PASSABLE
+
+
+def render_map(observation: Mapping[str, Any]) -> str:
+    """The map as text: one grid per height, highest first; one character per block, north up and east right. Only
+    what the agent has seen is on it. Teammates, creatures and dropped items in sight are drawn where they stand."""
+    local: Mapping[str, Any] = observation["map"]
+    center, radius = local["center"], int(local["radius"])
+    side = 2 * radius + 1
+    palette = [(str(entry["name"]), bool(entry["solid"])) for entry in local["palette"]]
+    characters = [symbol(name, solid) for name, solid in palette]
+    legend: dict[str, set[str]] = {}
+    for (name, _), character in zip(palette, characters, strict=True):
+        if character not in (EMPTY, SOLID):
+            legend.setdefault(character, set()).add(name)
+
+    marks: dict[tuple[int, int, int], str] = {(int(center["x"]), int(center["y"]), int(center["z"])): SELF}
+    for mate in observation.get("teammates", []):
+        marks[(mate["x"], mate["y"], mate["z"])] = str(mate["name"])[:1].upper()
+        legend.setdefault(str(mate["name"])[:1].upper(), set()).add(str(mate["name"]))
+    for kind, character, meaning in (
+        ("items", ITEM, "a dropped item"),
+        ("mobs", HOSTILE, "a hostile creature"),
+        ("animals", ANIMAL, "an animal"),
+    ):
+        for entity in observation.get(kind, []):
+            marks.setdefault((entity["x"], entity["y"], entity["z"]), character)
+            legend.setdefault(character, set()).add(meaning)
+
+    west, north = int(center["x"]) - radius, int(center["z"]) - radius
+    lines = [
+        f"Map of what you have seen within {radius} blocks, one grid per height, highest first. North is up, east is "
+        f"right: columns are x={west} to x={west + side - 1}, and each row starts with its z. "
+        f"{UNSEEN} not seen, {EMPTY} empty, {SOLID} solid, {PASSABLE} something you can walk through, {SELF} you."
+    ]
+    shown: set[str] = set()
+    for layer in local["layers"]:
+        y, title = int(layer["y"]), HEIGHTS.get(int(layer["dy"]), "")
+        rows: list[list[str]] = []
+        for row in range(side):
+            indices = [int(index) for index in layer["cells"][row * side : (row + 1) * side]]
+            cells: list[str] = [UNSEEN if index < 0 else characters[index] for index in indices]
+            for column in range(side):
+                mark = marks.get((west + column, y, north + row))
+                if mark is not None:
+                    cells[column] = mark
+            rows.append(cells)
+        kinds = {cell for cells in rows for cell in cells}
+        shown |= kinds
+        heading = f"y={y} ({title})" if title else f"y={y}"
+        if kinds == {UNSEEN}:
+            lines.append(f"{heading}: not seen")
+        elif len(kinds - {UNSEEN}) == 1:  # one kind of thing wherever it was seen: a line says as much as a grid
+            lines.append(f"{heading}: all {next(iter(kinds - {UNSEEN}))} where seen")
+        else:
+            lines.append(f"{heading}:")
+            lines.extend(f"{north + row} {' '.join(cells)}" for row, cells in enumerate(rows))
+    meanings = [
+        f"{character} {'/'.join(sorted(names))}" for character, names in sorted(legend.items()) if character in shown
+    ]
+    if meanings:
+        lines.append("On the map: " + "; ".join(meanings) + ".")
+    return "\n".join(lines)
+
+
+def _position(position: Any) -> str:
+    if not isinstance(position, Mapping):
+        return "where you are now"
+    place = cast(Mapping[str, Any], position)
+    return f"({place.get('x')}, {place.get('y')}, {place.get('z')})"
 
 
 def _notable(kind: Mapping[str, Any]) -> str:
@@ -242,5 +366,5 @@ def _result(result: Mapping[str, Any]) -> str:
         details = {key: value for key, value in result.items() if key not in ("action", "ok")}
         return f"{name} succeeded: {details}" if details else f"{name} succeeded."
     if result.get("interrupted"):
-        return f"{name} was cut off when the world froze; repeat it to continue."
+        return f"{name} was cut off when the world froze; you got to {_position(result.get('now_at'))}."
     return f"{name} failed: {result.get('error', 'unknown error')}"

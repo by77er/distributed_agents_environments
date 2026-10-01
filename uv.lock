@@ -4401,6 +4401,10 @@ durable = [
 mcp = [
     { name = "mcp" },
 ]
+monitor = [
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
 openai = [
     { name = "openai" },
 ]
@@ -4455,11 +4459,13 @@ requires-dist = [
     { name = "renderers", marker = "extra == 'recorder'", specifier = ">=0.1.11" },
     { name = "rfc8785", specifier = ">=0.1.4" },
     { name = "starlette", marker = "extra == 'assistant'", specifier = ">=0.48" },
+    { name = "starlette", marker = "extra == 'monitor'", specifier = ">=0.48" },
     { name = "transformers", marker = "extra == 'vllm'", specifier = ">=4.57" },
     { name = "uvicorn", marker = "extra == 'assistant'", specifier = ">=0.37" },
+    { name = "uvicorn", marker = "extra == 'monitor'", specifier = ">=0.37" },
     { name = "vllm", marker = "sys_platform == 'linux' and extra == 'vllm'", specifier = ">=0.30" },
 ]
-provides-extras = ["vllm", "training", "recorder", "durable", "mcp", "report", "anthropic", "openai", "assistant", "s3"]
+provides-extras = ["vllm", "training", "recorder", "durable", "mcp", "report", "monitor", "anthropic", "openai", "assistant", "s3"]
 
 [package.metadata.requires-dev]
 dev = [

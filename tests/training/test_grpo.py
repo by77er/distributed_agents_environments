@@ -58,3 +58,14 @@ def test_forced_tokens_are_never_trained_on() -> None:
     metrics = trainer.step([forced])
     assert metrics["tokens"] == 0
     assert all(torch.equal(a, b) for a, b in zip(weights, policy.parameters(), strict=True))
+
+
+def test_sequences_too_long_for_the_gpu_are_left_out_and_counted() -> None:
+    policy = ToyPolicy()
+    trainer = GroupRelativeTrainer(policy, learning_rate=0.05, max_sequence_tokens=4)  # type: ignore[arg-type]
+    short = sequence(policy, [1, 2, 3], 1.0)
+    long = sequence(policy, [1, 2, 3, 4, 5], -1.0)
+    metrics = trainer.step([short, long])
+    assert metrics["sequences"] == 1 and metrics["sequences_too_long"] == 1
+    assert metrics["longest_sequence_tokens"] == 3
+    assert "approx_kl" in metrics and metrics["gradient_norm"] >= 0

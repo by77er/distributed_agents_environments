@@ -88,11 +88,13 @@ nav:
           - "Agent": core/harness/agent.md
           - "Conversations and messages": core/harness/conversations.md
           - "Determinism rules for durable code": core/harness/determinism.md
+          - "Hooks": core/harness/hooks.md
       - Recorder:
           - core/recorder/README.md
           - "Recorder session API": core/recorder/session-api.md
           - "Session trees": core/recorder/session-tree.md
           - "Engine adapter": core/recorder/engine-adapter.md
+      - "Monitor": core/monitor.md
       - "Rollouts": core/rollouts/README.md
       - "Trajectories": core/trajectories/README.md
   - Inference: inference/README.md

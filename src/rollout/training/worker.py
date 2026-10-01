@@ -27,6 +27,8 @@ class TrainerSettings:
     rank: int = 32
     alpha: float = 64.0
     learning_rate: float = 2e-5
+    max_sequence_tokens: int | None = None
+    """Sequences longer than this are left out of a step (see `GroupRelativeTrainer`)."""
 
 
 class TrainerProcess:
@@ -80,7 +82,9 @@ def _step(
         policy = Policy.load(settings.checkpoint, rank=settings.rank, alpha=settings.alpha)
         if previous is not None:
             load_adapter(policy.model, previous)
-        trainer = GroupRelativeTrainer(policy, learning_rate=settings.learning_rate)
+        trainer = GroupRelativeTrainer(
+            policy, learning_rate=settings.learning_rate, max_sequence_tokens=settings.max_sequence_tokens
+        )
         optimizer_state = settings.state / "optimizer.pt"
         if previous is not None and optimizer_state.exists():
             trainer.optimizer.load_state_dict(torch.load(optimizer_state, map_location="cuda"))

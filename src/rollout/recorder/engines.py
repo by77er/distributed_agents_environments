@@ -1,9 +1,11 @@
 """Engines for the recorder: tokens in; tokens, behavior logprobs and a finish reason out.
 
 `VllmEngine` drives vLLM's async engine, whose engine core runs in its own process: when it sleeps, its GPU memory
-is free for a trainer in this process. LoRA adapters are registered by name (`load_adapter`); a recorder channel
-names the adapter each sample uses. Entry points that start one must guard `if __name__ == "__main__":` (vLLM
-starts its process with `spawn`).
+is free for a trainer. Sleeping drops the weights (they are read again from the checkpoint on waking, about 3 s from
+the file cache) rather than parking them in system memory, where 8 GiB of them sat next to the trainer.
+
+LoRA adapters are registered by name (`load_adapter`); a recorder channel names the adapter each sample uses. Entry
+points that start an engine must guard `if __name__ == "__main__":` (vLLM starts its process with `spawn`).
 """
 
 import itertools
@@ -104,13 +106,21 @@ class VllmEngine:
         if request is not None:
             await self._engine.remove_lora(request.lora_int_id)
 
-    async def sleep(self) -> None:
-        """Free the GPU: weights to CPU memory, cache discarded."""
+    async def sleep(self, *, keep_weights: bool = False) -> None:
+        """Free the GPU: the cache is discarded, and the weights dropped (or, with `keep_weights`, moved to system
+        memory: waking is then a second faster and costs the weights' size in memory meanwhile)."""
         await self._engine.reset_prefix_cache()
-        await self._engine.sleep(level=1)
+        self._dropped = not keep_weights
+        await self._engine.sleep(level=1 if keep_weights else 2)
 
     async def wake(self) -> None:
-        await self._engine.wake_up()
+        if getattr(self, "_dropped", False):
+            await self._engine.wake_up(tags=["weights"])
+            await self._engine.collective_rpc("reload_weights")
+            await self._engine.wake_up(tags=["kv_cache"])
+            self._dropped = False
+        else:
+            await self._engine.wake_up()
 
     def close(self) -> None:
         self._engine.shutdown()

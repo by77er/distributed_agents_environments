@@ -23,7 +23,7 @@ const { ACTIONS, ActionError, Interrupted } = require('./lib/actions')
 const VERSION = '1.21.11'
 const MAX_MESSAGES = 20
 
-const bots = new Map() // name → { bot, memory, inbox, action, result }
+const bots = new Map() // name → { bot, memory, air, inbox, action, result }
 let team = new Set()
 
 async function connect ({ host, port, team: names }) {
@@ -35,7 +35,7 @@ async function connect ({ host, port, team: names }) {
 function join (host, port, name) {
   return new Promise((resolve, reject) => {
     const bot = mineflayer.createBot({ host, port, username: name, version: VERSION, auth: 'offline', hideErrors: true })
-    const state = { bot, memory: new Map(), inbox: [], action: null, result: null, kicked: null }
+    const state = { bot, memory: new Map(), air: new Set(), inbox: [], action: null, result: null, kicked: null }
     bots.set(name, state)
     bot.loadPlugin(pathfinder)
     bot.once('spawn', () => {
@@ -61,14 +61,14 @@ function join (host, port, name) {
     bot.on('death', () => { state.died = true })
     bot.on('physicsTick', () => { state.physicsTicks = (state.physicsTicks ?? 0) + 1 })
     bot.on('forcedMove', () => { state.forcedMoves = (state.forcedMoves ?? 0) + 1 })
-    bot.on('respawn', () => state.memory.clear()) // another dimension (or a new life): what was seen is elsewhere
+    bot.on('respawn', () => { state.memory.clear(); state.air.clear() }) // another dimension (or a new life): what was seen is elsewhere
   })
 }
 
 function observation (name) {
   const state = bots.get(name)
   if (!state) throw new Error(`no bot ${name}`)
-  const result = observe(state.bot, team, state.memory)
+  const result = observe(state.bot, team, state.memory, state.air)
   result.messages = state.inbox.splice(0)
   result.last_action = state.result
   result.died = Boolean(state.died)
@@ -101,7 +101,7 @@ function act (name, action) {
       finish({ action, ok: true, ...(await handler(state.bot, args, context)), seconds: (Date.now() - started) / 1000 })
     } catch (error) {
       if (error instanceof Interrupted || controller.signal.aborted) {
-        finish(interrupted(action))
+        finish(interrupted(action, state.bot))
       } else if (error instanceof ActionError) {
         finish({ action, ok: false, error: error.message })
       } else {
@@ -124,7 +124,7 @@ async function freeze () {
   await Promise.race([Promise.all(pending), new Promise(resolve => setTimeout(resolve, 3000))])
   for (const state of bots.values()) {
     if (state.action) { // it did not stop (a path waiting to reach its next block, say): leave it behind
-      state.result = interrupted(state.action.action)
+      state.result = interrupted(state.action.action, state.bot)
       state.action = null
     }
     state.bot.pathfinder.stop()
@@ -135,8 +135,11 @@ async function freeze () {
   return { frozen: true }
 }
 
-function interrupted (action) {
-  return { action, ok: false, interrupted: true, note: 'time ran out before it finished; repeat it to continue' }
+// How an action cut off by the freeze is reported: where the bot got to, so that the agent can decide how to go on
+// (a relative move repeated as it was would go the whole distance again).
+function interrupted (action, bot) {
+  const here = bot.entity?.position.floored()
+  return { action, ok: false, interrupted: true, now_at: here ? { x: here.x, y: here.y, z: here.z } : null }
 }
 
 function thaw () {

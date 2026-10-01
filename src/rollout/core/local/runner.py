@@ -1,7 +1,7 @@
 """`LocalRunner`: runs programs on the current asyncio loop. Nothing persists; a process crash loses in-flight runs."""
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from pydantic import JsonValue
@@ -18,6 +18,7 @@ from rollout.core.contracts import (
 from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope, Priority
 from rollout.core.harness.environments import EnvironmentService
+from rollout.core.harness.hooks import RunHooks, observed, publish
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.program import Program
@@ -133,8 +134,11 @@ class LocalRunner:
         environments: EnvironmentService | None = None,
         blobs: Blobs | None = None,
         recorder: RecordedEndpoints | None = None,
+        hooks: Sequence[RunHooks] = (),
     ) -> None:
-        """`recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`."""
+        """`recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `hooks`
+        watch every run: each event recorded and each model sample."""
+        self._hooks = list(hooks)
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
         self._environment_service = environments
@@ -144,6 +148,10 @@ class LocalRunner:
         self._deployments: dict[str, Deployment] = {}
         self._conversations: dict[str, _Conversation] = {}
         self._background: set[asyncio.Task[None]] = set()
+
+    def _recorded(self, handle: LocalRunHandle, event: RunEvent) -> None:
+        handle.notify(event)
+        publish(self._hooks, event)
 
     # Deployments and inspection
 
@@ -179,6 +187,7 @@ class LocalRunner:
             raise ValueError(f"run {run_id} already exists")
         program = instantiate(specification.program)
         endpoints = resolve_endpoints(program, specification.binding, self._providers, self._recorder)
+        endpoints = observed(endpoints, self._hooks, run_id)
         tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
         handle = LocalRunHandle(run_id, specification, conversation)
         handle.context = LocalRunContext(
@@ -189,7 +198,7 @@ class LocalRunner:
             environment_service=self._environment_service,
             blobs=self._blobs,
             conversation=conversation,
-            on_event=handle.notify,
+            on_event=lambda event: self._recorded(handle, event),
         )
         handle.context.record_event(
             RunEventType.RUN_CREATED,

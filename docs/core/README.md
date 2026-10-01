@@ -13,6 +13,8 @@ other implementations of the same protocols.
 | [harness/agent.md](harness/agent.md) | `Agent`: context selection and acting |
 | [harness/conversations.md](harness/conversations.md) | Conversations, messages, priorities and delivery modes |
 | [harness/determinism.md](harness/determinism.md) | The rules code must follow to run under a durable runner |
+| [harness/hooks.md](harness/hooks.md) | `RunHooks`: watch every run event and model sample as it happens |
+| [monitor.md](monitor.md) | A live web page over runs: each model's context, reasoning, actions and results |
 | [recorder/](recorder/README.md) | Token-exact recording for training: renderers, session trees, engine adapter |
 | [rollouts/](rollouts/README.md) | The rollout API: rows in, samples out, weights published |
 | [trajectories/](trajectories/README.md) | `Sample` and its assembly |

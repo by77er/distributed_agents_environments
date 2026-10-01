@@ -1,5 +1,6 @@
 'use strict'
-// What a bot may perceive: only what it could see with its own eyes.
+// What a bot may perceive: only what it could see with its own eyes. An observation is raw material, not advice:
+// the bot's own state, a map of the blocks it has seen around it, and what is in sight with coordinates.
 //
 // The client's world data already lacks hidden ores (Paper's anti-xray sends ores no air touches as stone), but it
 // still holds caves, chests and ores behind walls. Observations therefore come from rays cast from the bot's eyes in
@@ -7,6 +8,7 @@
 // it. Players outside the team are never reported.
 
 const { Vec3 } = require('vec3')
+const { localMap, remember, trim } = require('./map')
 
 const RANGE = 24 // blocks
 const FAR_RANGE = 96 // large or glowing things in the open are seen from much farther
@@ -48,8 +50,9 @@ function opaque (block) {
   return block !== null && !SEE_THROUGH.has(block.name)
 }
 
-// The first opaque block along a ray, stepping through the voxel grid (Amanatides & Woo).
-function firstHit (bot, origin, direction, range) {
+// The first opaque block along a ray, stepping through the voxel grid (Amanatides & Woo). `visit`, if given, is called
+// with every cell the ray passes through before that.
+function firstHit (bot, origin, direction, range, visit) {
   let x = Math.floor(origin.x); let y = Math.floor(origin.y); let z = Math.floor(origin.z)
   const step = [Math.sign(direction.x), Math.sign(direction.y), Math.sign(direction.z)]
   const delta = [Math.abs(1 / direction.x), Math.abs(1 / direction.y), Math.abs(1 / direction.z)]
@@ -63,6 +66,7 @@ function firstHit (bot, origin, direction, range) {
     const block = bot.blockAt(new Vec3(x, y, z), false)
     if (block === null) return null // an unloaded chunk: nothing seen
     if (opaque(block)) return block
+    if (visit) visit(x, y, z, block)
   }
   return null
 }
@@ -78,15 +82,26 @@ function lineOfSight (bot, from, to) {
 function key (position) { return `${position.x},${position.y},${position.z}` }
 
 // Everything a bot can see now. `memory` (a Map of positions it has seen) is updated, so actions can check that
-// their targets were seen.
-function look (bot, memory) {
+// their targets were seen; `air`, if given, collects the empty cells its rays passed through (for the map).
+function look (bot, memory, air) {
   const origin = eyes(bot)
   const seen = new Map()
+  const visit = air ? (x, y, z, block) => remember(memory, air, x, y, z, block.name) : undefined
   for (const direction of SPHERE) {
-    const block = firstHit(bot, origin, direction, RANGE)
+    const block = firstHit(bot, origin, direction, RANGE, visit)
     if (block !== null) seen.set(key(block.position), block)
   }
-  for (const [position, block] of seen) memory.set(position, block.name)
+  for (const [position, block] of seen) {
+    memory.set(position, block.name)
+    if (air) air.delete(position)
+  }
+  if (air) {
+    for (const dy of [0, 1]) { // where the bot itself stands
+      const own = bot.blockAt(bot.entity.position.offset(0, dy, 0), false)
+      if (own && !opaque(own)) remember(memory, air, own.position.x, own.position.y, own.position.z, own.name)
+    }
+    trim(bot, air)
+  }
   return seen
 }
 
@@ -95,13 +110,11 @@ function relative (bot, position) {
   return { x: position.x, y: position.y, z: position.z, dx: position.x - here.x, dy: position.y - here.y, dz: position.z - here.z }
 }
 
-function observe (bot, team, memory) {
-  const seen = look(bot, memory)
+function observe (bot, team, memory, air = new Set()) {
+  const seen = look(bot, memory, air)
   const here = bot.entity.position.floored()
-  const counts = {}
   const kinds = new Map() // block name → the ones in sight, nearest first
   for (const block of seen.values()) {
-    counts[block.name] = (counts[block.name] ?? 0) + 1
     if (NOTABLE.test(block.name)) {
       if (!kinds.has(block.name)) kinds.set(block.name, [])
       kinds.get(block.name).push({ ...relative(bot, block.position), distance: round(block.position.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)) })
@@ -116,11 +129,6 @@ function observe (bot, team, memory) {
   notable.sort((a, b) => a.distance - b.distance)
 
   const origin = eyes(bot)
-  const surroundings = {}
-  for (const [name, direction] of Object.entries(DIRECTIONS)) {
-    const hit = firstHit(bot, origin, direction, RANGE)
-    surroundings[name] = hit === null ? { open: `more than ${RANGE}` } : { open: round(hit.position.offset(0.5, 0.5, 0.5).distanceTo(origin) - 0.5), then: hit.name }
-  }
 
   const teammates = []; const items = []; const mobs = []; const animals = []
   for (const entity of Object.values(bot.entities)) {
@@ -153,8 +161,7 @@ function observe (bot, team, memory) {
       food: bot.food ?? 0,
       holding: bot.heldItem ? bot.heldItem.name : null,
       wearing: armor(bot),
-      inventory: inventory(bot),
-      near: nearbyStations(bot)
+      inventory: inventory(bot)
     },
     world: {
       time: timeOfDay(bot),
@@ -162,8 +169,7 @@ function observe (bot, team, memory) {
       sky: feet ? feet.skyLight >= 15 : null,
       biome: feet?.biome?.name ?? null
     },
-    surroundings,
-    visible_blocks: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([block, count]) => ({ block, count })),
+    map: localMap(bot, memory, air),
     notable: notable.slice(0, MAX_KINDS),
     teammates,
     items,
@@ -202,22 +208,6 @@ function inventory (bot) {
   const totals = {}
   for (const item of bot.inventory.items()) totals[item.name] = (totals[item.name] ?? 0) + item.count
   return totals
-}
-
-// Crafting tables, furnaces and chests within reach (4.5 blocks) and in sight: what crafting and smelting can use.
-function nearbyStations (bot) {
-  const result = []
-  const origin = eyes(bot)
-  for (const name of ['crafting_table', 'furnace', 'chest']) {
-    const id = bot.registry.blocksByName[name]?.id
-    if (id === undefined) continue
-    for (const position of bot.findBlocks({ matching: id, maxDistance: 5, count: 4 })) {
-      if (position.offset(0.5, 0.5, 0.5).distanceTo(origin) <= 4.5 && lineOfSight(bot, origin, position.offset(0.5, 0.5, 0.5))) {
-        result.push({ station: name, x: position.x, y: position.y, z: position.z })
-      }
-    }
-  }
-  return result
 }
 
 function round (value) { return Math.round(value * 10) / 10 }

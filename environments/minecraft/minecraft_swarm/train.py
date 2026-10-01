@@ -11,7 +11,8 @@ machine.
 
 Outputs (in `directory`): `metrics.jsonl` (one line per iteration), `episodes.jsonl` (each episode's ground truth),
 `transcripts/` (one agent's turns per iteration), `adapters/step-N/` (PEFT adapters), `trainer/` (the optimizer's
-state), `curriculum.json`.
+state), `curriculum.json`, and `feed/` (every episode as it happens: what each agent saw, thought and did; watch it
+with `rollout-monitor DIRECTORY/feed`).
 """
 
 import asyncio
@@ -44,6 +45,7 @@ from rollout.core.harness import (
 )
 from rollout.core.local import LocalRunner
 from rollout.core.local.runner import LocalRunHandle
+from rollout.monitor import RunFeed
 from rollout.recorder import Channel, MeteredEngine, Recorder, renderer_for
 from rollout.recorder.engines import VllmEngine
 from rollout.recorder.renderers import Tokenizer
@@ -62,6 +64,10 @@ class TrainingSettings:
     """Caps each task's budget of game time (None: the task's own)."""
     max_turns: int | None = None
     """Caps each episode's turns (for smoke tests)."""
+    max_sequence_tokens: int = 5000
+    """Turns longer than this are left out of an update. The trainer's peak on the GPU grows with length (12.8 GiB at
+    4,000 tokens, 13.4 at 5,000, with 14.6 reserved); past the card's memory, Windows spills into system memory and
+    the step slows to a crawl."""
     update_turns: int = 384
     """At most this many agent turns per update, sampled evenly from the group's (long episodes have thousands)."""
     thinking_budget: int = 384
@@ -78,6 +84,8 @@ class TrainingSettings:
     """System memory that must be available to start a group of episodes (each runs a Paper server)."""
     update_memory_gib: float = 4.0
     """System memory that must be available to train, once the engine has gone to sleep."""
+    feed_runs: int = 80
+    """Episodes kept in `feed/` for the monitor (the oldest are deleted)."""
     exercise_updates: bool = False
     """For smoke tests: update with small synthetic advantages when a group carries no signal."""
 
@@ -108,7 +116,8 @@ async def train(settings: TrainingSettings) -> None:
     recorder = Recorder({"policy": channel})
     worlds = MinecraftWorlds(window_ticks=settings.window_ticks, logs=directory / "logs")
     (directory / "logs").mkdir(exist_ok=True)
-    runner = LocalRunner(recorder=recorder, tool_sets={"minecraft": MinecraftTools(worlds)})
+    feed = RunFeed(directory / "feed", keep=settings.feed_runs)
+    runner = LocalRunner(recorder=recorder, tool_sets={"minecraft": MinecraftTools(worlds)}, hooks=[feed])
     tasks = [task for task in catalog() if settings.tasks is None or task.id in settings.tasks]
     curriculum = Curriculum(tasks, rng, start=len(tasks) if settings.tasks else 3)
     if (directory / "curriculum.json").exists():
@@ -133,7 +142,8 @@ async def train(settings: TrainingSettings) -> None:
                 "minutes": minutes,
                 "turns": settings.max_turns,
             }
-            handles = await _run_group(runner, binding, parameters, settings.group_size)
+            labels = {"group": f"{iteration:04d}", "iteration": str(iteration), "task": task.id, "title": task.title}
+            handles = await _run_group(runner, binding, parameters, settings.group_size, labels)
             completed = [
                 handle for handle in handles if handle.outcome and handle.outcome.status is RunStatus.COMPLETED
             ]
@@ -202,6 +212,7 @@ async def train(settings: TrainingSettings) -> None:
     finally:
         await worlds.close()
         engine.close()
+        feed.close()
 
 
 class Learner:
@@ -222,6 +233,7 @@ class Learner:
                 rank=settings.lora_rank,
                 alpha=2.0 * settings.lora_rank,
                 learning_rate=settings.learning_rate,
+                max_sequence_tokens=settings.max_sequence_tokens,
             )
         )
 
@@ -266,13 +278,16 @@ def require_memory(gib: float, purpose: str) -> None:
 
 
 async def _run_group(
-    runner: LocalRunner, binding: RunBinding, parameters: dict[str, JsonValue], size: int
+    runner: LocalRunner, binding: RunBinding, parameters: dict[str, JsonValue], size: int, labels: dict[str, str]
 ) -> list[LocalRunHandle]:
-    """Episodes of one task from identical starts (the same world and layout), run at once."""
+    """Episodes of one task from identical starts (the same world and layout), run at once. `labels` mark the runs
+    as one group (for the monitor); each gets its number as `episode`."""
     specification = RunSpecification(
         program=ProgramReference(program=register(SwarmEpisode), parameters=parameters), binding=binding
     )
-    handles = [await runner.start(specification) for _ in range(size)]
+    handles = [
+        await runner.start(specification, labels={**labels, "episode": str(index)}) for index in range(1, size + 1)
+    ]
     await asyncio.gather(*(handle.result() for handle in handles))
     return handles
 
