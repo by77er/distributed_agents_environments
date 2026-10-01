@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+from pathlib import Path
 
 from minecraft_swarm.paper import Installation, PaperServer
 
@@ -17,7 +18,28 @@ def main() -> None:
     server = commands.add_parser("server", help="start a temporary server and keep it up")
     server.add_argument("--seed", type=int, default=12345)
     server.add_argument("--keep", action="store_true", help="keep the server's directory when it stops")
+    training = commands.add_parser("train", help="train the swarm")
+    training.add_argument("directory", type=Path)
+    training.add_argument("--iterations", type=int, default=100)
+    training.add_argument("--group-size", type=int, default=4)
+    training.add_argument("--max-turns", type=int, default=16)
+    training.add_argument("--thinking-budget", type=int, default=384)
+    training.add_argument("--learning-rate", type=float, default=2e-5)
+    training.add_argument("--seed", type=int, default=0)
     arguments = parser.parse_args()
+    if arguments.command == "train":
+        from minecraft_swarm.train import TrainingSettings, train
+
+        settings = TrainingSettings(
+            directory=arguments.directory,
+            iterations=arguments.iterations,
+            group_size=arguments.group_size,
+            max_turns=arguments.max_turns,
+            thinking_budget=arguments.thinking_budget,
+            learning_rate=arguments.learning_rate,
+            seed=arguments.seed,
+        )
+        asyncio.run(train(settings))
     if arguments.command == "server":
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(_server(arguments.seed, keep=arguments.keep))
