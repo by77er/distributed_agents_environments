@@ -70,6 +70,7 @@ ignore = ["RUF012"]
 
 [tool.pyright]
 include = ["src", "tests", "scripts", "environments"]
+extraPaths = ["src", "environments/minecraft"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 

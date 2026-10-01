@@ -265,11 +265,11 @@ def _configure(bootstrap: Path, directory: Path) -> None:
     for relative in ("config/paper-world-defaults.yml", "bukkit.yml"):
         defaults: dict[str, Any] = yaml.safe_load((bootstrap / relative).read_text())
         overrides: dict[str, Any] = yaml.safe_load((CONFIG / Path(relative).name).read_text())
-        (directory / relative).write_text(yaml.safe_dump(_merge(defaults, overrides), sort_keys=False))
+        (directory / relative).write_text(yaml.safe_dump(merge_configuration(defaults, overrides), sort_keys=False))
     shutil.copy2(bootstrap / "config" / "paper-global.yml", directory / "config" / "paper-global.yml")
 
 
-def _merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+def merge_configuration(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     """Overrides win; a key ending in `-also` appends its list to the list without the suffix."""
     merged = dict(defaults)
     for key, value in overrides.items():
@@ -277,7 +277,7 @@ def _merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any
             base = key.removesuffix("-also")
             merged[base] = [*merged.get(base, []), *(item for item in value if item not in merged.get(base, []))]
         elif isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _merge(merged[key], value)  # pyright: ignore[reportUnknownArgumentType]
+            merged[key] = merge_configuration(merged[key], value)  # pyright: ignore[reportUnknownArgumentType]
         else:
             merged[key] = value
     return merged

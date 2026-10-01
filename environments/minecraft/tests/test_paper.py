@@ -5,10 +5,10 @@ import shutil
 
 import pytest
 from minecraft_swarm.control import Control
-from minecraft_swarm.paper import (  # pyright: ignore[reportPrivateUsage]
+from minecraft_swarm.paper import (
     Installation,
     PaperServer,
-    _merge,
+    merge_configuration,
     server_properties,
 )
 
@@ -18,7 +18,7 @@ SEED = 12345
 def test_configuration_overrides_merge_into_paper_defaults() -> None:
     defaults = {"anticheat": {"anti-xray": {"enabled": False, "engine-mode": 2, "hidden-blocks": ["gold_ore"]}}}
     overrides = {"anticheat": {"anti-xray": {"enabled": True, "hidden-blocks-also": ["diamond_ore", "gold_ore"]}}}
-    assert _merge(defaults, overrides) == {
+    assert merge_configuration(defaults, overrides) == {
         "anticheat": {"anti-xray": {"enabled": True, "engine-mode": 2, "hidden-blocks": ["gold_ore", "diamond_ore"]}}
     }
     properties = server_properties()
