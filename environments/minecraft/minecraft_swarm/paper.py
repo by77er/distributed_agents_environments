@@ -15,6 +15,7 @@ Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEU
 
 import asyncio
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ import time
 import urllib.request
 import uuid
 import zipfile
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,8 +69,24 @@ class Installation:
         _write_atomically(jar, data)
         return jar
 
+    @contextlib.contextmanager
+    def _lock(self, name: str) -> Generator[None]:
+        """Exclusive across threads and processes (a lock file under `root`)."""
+        path = self.root / "locks" / f"{name}.lock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
     def bootstrap(self) -> Path:
         """A server started once, so the shared libraries and patched jar exist."""
+        with self._lock("bootstrap"):
+            return self._bootstrap()
+
+    def _bootstrap(self) -> Path:
         directory = self.root / "bootstrap"
         if all((directory / name).is_dir() for name in SHARED) and any((directory / "versions").rglob("*.jar")):
             return directory
@@ -112,6 +130,10 @@ class Installation:
 
     def plugin_jar(self) -> Path:
         """The ground-truth plugin, compiled against this Paper's API; rebuilt when its sources change."""
+        with self._lock("plugin"):
+            return self._plugin_jar()
+
+    def _plugin_jar(self) -> Path:
         sources = sorted((PLUGIN_SOURCES / "src").rglob("*.java")) + sorted((PLUGIN_SOURCES / "resources").rglob("*"))
         digest = hashlib.sha256(
             b"".join(path.read_bytes() for path in sources if path.is_file()) + self.version.encode()
@@ -145,7 +167,12 @@ class Installation:
     # Templates
 
     def template(self, seed: int) -> Path:
-        """A configured server whose world was generated from `seed`; generated once, then copied for each server."""
+        """A configured server whose world was generated from `seed`; generated once, then copied for each server.
+        Safe to call from several threads or processes at once: one generates, the others wait."""
+        with self._lock(f"template-{seed}"):
+            return self._template(seed)
+
+    def _template(self, seed: int) -> Path:
         directory = self.root / "templates" / f"seed-{seed}"
         if (directory / "ready").exists():
             return directory

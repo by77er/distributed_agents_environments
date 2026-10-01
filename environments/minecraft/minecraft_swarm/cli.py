@@ -26,6 +26,7 @@ def main() -> None:
     training.add_argument("--thinking-budget", type=int, default=384)
     training.add_argument("--learning-rate", type=float, default=2e-5)
     training.add_argument("--seed", type=int, default=0)
+    training.add_argument("--tasks", help="comma-separated task ids to train on (default: the whole curriculum)")
     arguments = parser.parse_args()
     if arguments.command == "train":
         from minecraft_swarm.train import TrainingSettings, train
@@ -38,6 +39,7 @@ def main() -> None:
             thinking_budget=arguments.thinking_budget,
             learning_rate=arguments.learning_rate,
             seed=arguments.seed,
+            tasks=arguments.tasks.split(",") if arguments.tasks else None,
         )
         asyncio.run(train(settings))
     if arguments.command == "server":

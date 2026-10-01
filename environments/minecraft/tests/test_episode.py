@@ -5,9 +5,11 @@ import re
 import shutil
 from collections.abc import Mapping
 
+import httpx
 import pytest
 from minecraft_swarm.episode import SwarmEpisode
 from minecraft_swarm.prompts import TEAM
+from minecraft_swarm.service import RemoteMinecraftTools, create_app
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
 
 from rollout.core.contracts import (
@@ -27,6 +29,7 @@ from rollout.core.harness import (
     RunSpecification,
     RunStatus,
     ToolBinding,
+    ToolSet,
     register,
 )
 from rollout.core.local import LocalRunner
@@ -67,11 +70,14 @@ def binding() -> RunBinding:
 
 
 @pytest.mark.skipif(shutil.which("java") is None or shutil.which("node") is None, reason="Java and Node are needed")
-async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward() -> None:
+@pytest.mark.parametrize("through", ["in-process", "service"])
+async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through: str) -> None:
     worlds = MinecraftWorlds()
-    runner = LocalRunner(
-        providers={"scripted": lambda model: WalkToDiamonds()}, tool_sets={"minecraft": MinecraftTools(worlds)}
-    )
+    tools: ToolSet = MinecraftTools(worlds)
+    if through == "service":  # the world service over HTTP, served in process
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(worlds)), timeout=300)
+        tools = RemoteMinecraftTools("http://worlds", client=client)
+    runner = LocalRunner(providers={"scripted": lambda model: WalkToDiamonds()}, tool_sets={"minecraft": tools})
     parameters: Mapping[str, object] = {"task": "t001", "world_seed": 12345, "layout_seed": 3, "turns": 4}
     specification = RunSpecification(
         program=ProgramReference(program=register(SwarmEpisode), parameters=dict(parameters)),  # type: ignore[arg-type]

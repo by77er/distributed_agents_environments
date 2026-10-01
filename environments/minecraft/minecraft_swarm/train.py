@@ -62,6 +62,8 @@ class TrainingSettings:
     window_ticks: int = 100
     gpu_memory_utilization: float = 0.72
     seed: int = 0
+    tasks: list[str] | None = None
+    """Restrict the curriculum to these task ids (all tasks when None)."""
 
 
 async def train(settings: TrainingSettings) -> None:
@@ -88,7 +90,8 @@ async def train(settings: TrainingSettings) -> None:
     worlds = MinecraftWorlds(window_ticks=settings.window_ticks, logs=directory / "logs")
     (directory / "logs").mkdir(exist_ok=True)
     runner = LocalRunner(recorder=recorder, tool_sets={"minecraft": MinecraftTools(worlds)})
-    curriculum = Curriculum(catalog(), rng)
+    tasks = [task for task in catalog() if settings.tasks is None or task.id in settings.tasks]
+    curriculum = Curriculum(tasks, rng, start=max(task.difficulty for task in tasks) if settings.tasks else 1.0)
     if (directory / "curriculum.json").exists():
         curriculum.load(directory / "curriculum.json")
     sampling = SamplingParameters(temperature=settings.temperature)
@@ -126,6 +129,7 @@ async def train(settings: TrainingSettings) -> None:
                 "turns": turns,
                 "rewards": rewards,
                 "failed": len(handles) - len(completed),
+                "failures": [handle.outcome.detail for handle in handles if handle not in completed and handle.outcome],
                 "adapter_step": step,
                 "rollout_seconds": round(time.monotonic() - started, 1),
             }
