@@ -146,7 +146,7 @@ function turnsBySlot() {
     if (!slots.has(line.slot)) slots.set(line.slot, []);
     slots.get(line.slot).push(line);
   }
-  return slots;
+  return new Map([...slots].sort(([a], [b]) => a.localeCompare(b)));  // columns keep their places
 }
 
 function resultOf(samples, index, callId) {
