@@ -1,0 +1,5 @@
+name: RolloutGroundTruth
+version: 0.1.0
+main: dev.rollout.groundtruth.GroundTruthPlugin
+api-version: '1.21'
+description: Server-side ground truth and tick control for RL episodes; a control API on 127.0.0.1 only.

@@ -1,0 +1,14 @@
+# Merged into Paper's config/paper-world-defaults.yml.
+# Anti-xray (engine mode 1) sends every ore that no air touches as plain stone or deepslate, so no client, and no
+# bot, can see ores through stone, whatever the harness does with what it receives.
+anticheat:
+  anti-xray:
+    enabled: true
+    engine-mode: 1
+    max-block-height: 64
+    update-radius: 2
+    hidden-blocks-also:  # added to Paper's default list
+      - diamond_ore
+      - deepslate_diamond_ore
+      - iron_ore
+      - deepslate_iron_ore
