@@ -17,6 +17,7 @@ minecraft-swarm = "minecraft_swarm.cli:main"
 
 [project.optional-dependencies]
 vllm = ["vllm>=0.30; sys_platform == 'linux'", "transformers>=4.57"]
+training = ["peft>=0.21", "bitsandbytes>=0.50; sys_platform == 'linux'", "flash-linear-attention>=0.5"]
 recorder = ["renderers>=0.1.11"]
 durable = ["dbos>=3.1"]
 mcp = ["mcp>=1.20"]

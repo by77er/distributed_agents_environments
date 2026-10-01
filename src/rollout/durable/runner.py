@@ -46,7 +46,14 @@ from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.loop import UNLOAD
 from rollout.core.harness.observation import InvalidObservation
-from rollout.core.harness.runner import Deployment, RunOutcome, RunSpecification, RunStatus, instantiate
+from rollout.core.harness.runner import (
+    Deployment,
+    RecordedEndpoints,
+    RunOutcome,
+    RunSpecification,
+    RunStatus,
+    instantiate,
+)
 from rollout.core.local.runner import EndpointFactory, RunNotLive, resolve_endpoints, resolve_tool_sets
 from rollout.database import Database
 from rollout.durable.context import INBOX, INTERRUPT, DurableRunContext, RunCancelled
@@ -138,6 +145,7 @@ class DurableRunner:
         tool_sets: Mapping[str, ToolSet] | None = None,
         environments: EnvironmentService | None = None,
         blobs: Blobs | None = None,
+        recorder: RecordedEndpoints | None = None,
         application: str = "rollout",
         evict_after: timedelta | None = timedelta(minutes=5),
         eviction_interval: float = 5.0,
@@ -157,6 +165,7 @@ class DurableRunner:
         """
         self._environment_service = environments
         self._blobs = blobs
+        self._recorder = recorder
         self._evict_after = evict_after
         self._eviction_interval = eviction_interval
         self._heartbeat_interval = heartbeat_interval
@@ -327,7 +336,7 @@ class DurableRunner:
         program = instantiate(specification.program)
         context = DurableRunContext(
             run_id,
-            resolve_endpoints(program, specification.binding, self._providers),
+            resolve_endpoints(program, specification.binding, self._providers, self._recorder),
             started_at=datetime.fromisoformat(started_at),
             context_hints=program.context_hints(),
             tool_sets=resolve_tool_sets(program, specification.binding, self._tool_sets),

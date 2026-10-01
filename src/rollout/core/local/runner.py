@@ -24,6 +24,7 @@ from rollout.core.harness.program import Program
 from rollout.core.harness.runner import (
     Deployment,
     DirectModel,
+    RecordedEndpoints,
     RunBinding,
     RunOutcome,
     RunSpecification,
@@ -131,11 +132,14 @@ class LocalRunner:
         tool_sets: Mapping[str, ToolSet] | None = None,
         environments: EnvironmentService | None = None,
         blobs: Blobs | None = None,
+        recorder: RecordedEndpoints | None = None,
     ) -> None:
+        """`recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`."""
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
         self._environment_service = environments
         self._blobs = blobs
+        self._recorder = recorder
         self._runs: dict[str, LocalRunHandle] = {}
         self._deployments: dict[str, Deployment] = {}
         self._conversations: dict[str, _Conversation] = {}
@@ -174,7 +178,7 @@ class LocalRunner:
         if run_id in self._runs:
             raise ValueError(f"run {run_id} already exists")
         program = instantiate(specification.program)
-        endpoints = resolve_endpoints(program, specification.binding, self._providers)
+        endpoints = resolve_endpoints(program, specification.binding, self._providers, self._recorder)
         tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
         handle = LocalRunHandle(run_id, specification, conversation)
         handle.context = LocalRunContext(
@@ -312,16 +316,25 @@ class LocalRunner:
 
 
 def resolve_endpoints(
-    program: Program, binding: RunBinding, providers: Mapping[str, EndpointFactory]
+    program: Program,
+    binding: RunBinding,
+    providers: Mapping[str, EndpointFactory],
+    recorder: RecordedEndpoints | None = None,
 ) -> dict[str, ModelEndpoint]:
-    """An endpoint for each model slot of the program, from the binding and the registered providers."""
+    """An endpoint for each model slot of the program, from the binding: the recorder serves recorded models, the
+    registered providers direct ones."""
     endpoints: dict[str, ModelEndpoint] = {}
     for slot in program.model_slots():
         model = binding.models.get(slot)
         if model is None:
             raise ValueError(f"the binding has no model for slot {slot!r}")
+        if model.recorded is not None:
+            if recorder is None:
+                raise ValueError(f"slot {slot!r} is bound to a recorded channel, but the runner has no recorder")
+            endpoints[slot] = recorder.endpoint(model.recorded)
+            continue
         if model.direct is None:
-            raise NotImplementedError("recorded model bindings need the recorder (milestone M1)")
+            raise ValueError(f"the binding for slot {slot!r} names no model")
         factory = providers.get(model.direct.provider)
         if factory is None:
             raise ValueError(f"no endpoint factory registered for provider {model.direct.provider!r}")

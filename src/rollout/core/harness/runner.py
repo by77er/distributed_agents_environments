@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from pydantic import Field, JsonValue
 
-from rollout.core.contracts import ContractModel, FrozenSequence, RunEvent, RunFailureClass
+from rollout.core.contracts import ContractModel, FrozenSequence, ModelEndpoint, RunEvent, RunFailureClass
 from rollout.core.harness.agent import Agent
 from rollout.core.harness.conversations import Address, ConversationKey, DeliveryPolicy, Envelope, Priority
 from rollout.core.harness.imports import ToolBinding
@@ -42,6 +42,12 @@ class RecordedModel(ContractModel):
 
     channel: str
     sampling: SamplingParameters = SamplingParameters()
+
+
+class RecordedEndpoints(Protocol):
+    """Serves recorded bindings: the recorder (`rollout.recorder.Recorder`), as runners see it."""
+
+    def endpoint(self, binding: RecordedModel) -> ModelEndpoint: ...
 
 
 class ModelBinding(ContractModel):
