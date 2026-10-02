@@ -672,7 +672,7 @@ Serves recorded bindings: the recorder (`rollout.recorder.Recorder`), as runners
 class RecordedModel(ContractModel)
 ```
 
-A channel served through the recorder (M1).
+A channel served through the recorder.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

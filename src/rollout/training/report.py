@@ -44,9 +44,9 @@ def summary(name: str, lines: Sequence[Mapping[str, Any]], curriculum: Curriculu
     last = lines[-1]
     titles = {row.key: row.title for row in curriculum.rows}
     updates = [update for line in lines if (update := update_of(line)) is not None]
-    serving = next((str(line["adapter"]) for line in reversed(lines) if line.get("adapter")), "the base model")
+    serving = next((f" (serving {line['adapter']})" for line in reversed(lines) if line.get("adapter")), "")
     took = f"{hours(lines)[-1]:.1f} h in, {len(updates)} updates"
-    text = [f"**{name}** — group {last['iteration']}, {took} (serving {serving})"]
+    text = [f"**{name}** — group {last['iteration']}, {took}{serving}"]
     rewards = [float(reward) for reward in last.get("rewards", [])]
     solved = [bool(value) for value in last.get("solved", [])]
     text.append(

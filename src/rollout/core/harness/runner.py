@@ -38,7 +38,7 @@ class DirectModel(ContractModel):
 
 
 class RecordedModel(ContractModel):
-    """A channel served through the recorder (M1)."""
+    """A channel served through the recorder."""
 
     channel: str
     sampling: SamplingParameters = SamplingParameters()
