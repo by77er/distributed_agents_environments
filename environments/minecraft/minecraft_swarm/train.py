@@ -64,13 +64,16 @@ class TrainingSettings:
     """Caps each task's budget of game time (None: the task's own)."""
     max_turns: int | None = None
     """Caps each episode's turns (for smoke tests)."""
-    max_sequence_tokens: int = 5000
-    """Turns longer than this are left out of an update. The trainer's peak on the GPU grows with length (12.8 GiB at
-    4,000 tokens, 13.4 at 5,000, with 14.6 reserved); past the card's memory, Windows spills into system memory and
-    the step slows to a crawl."""
+    max_sequence_tokens: int = 5400
+    """No turn is longer (prompt and completion): the recorder gives a long prompt less room to think, so that the
+    trainer can train on every turn. The trainer's peak on the GPU grows with length (13.4 GiB at 5,000 tokens, 13.7
+    at 5,500, 14.3 reserved); past the card's memory, Windows spills into system memory and the step crawls."""
     update_turns: int = 384
     """At most this many agent turns per update, sampled evenly from the group's (long episodes have thousands)."""
-    thinking_budget: int = 384
+    thinking_budget: int = 1024
+    """Tokens of thinking per turn before it is closed by force. Wide on purpose: on this environment's
+    observations the model's thoughts run to a median of 530 tokens and a 95th percentile of 820, and a thought cut
+    off in the middle decides nothing."""
     answer_tokens: int = 256
     temperature: float = 1.0
     learning_rate: float = 2e-5
@@ -112,7 +115,13 @@ async def train(settings: TrainingSettings) -> None:
         max_lora_rank=settings.lora_rank,
     )
     metered = MeteredEngine(engine)
-    channel = Channel(metered, renderer, thinking_budget=settings.thinking_budget, answer_tokens=settings.answer_tokens)
+    channel = Channel(
+        metered,
+        renderer,
+        thinking_budget=settings.thinking_budget,
+        answer_tokens=settings.answer_tokens,
+        max_sequence_tokens=settings.max_sequence_tokens,
+    )
     recorder = Recorder({"policy": channel})
     worlds = MinecraftWorlds(window_ticks=settings.window_ticks, logs=directory / "logs")
     (directory / "logs").mkdir(exist_ok=True)

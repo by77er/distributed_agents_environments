@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from rollout.training.lora import add_lora, lora_parameters, save_adapter
 from rollout.training.quantized import replace_compressed_linears
@@ -22,6 +23,10 @@ TARGETS = (
     "in_proj_qkv", "in_proj_z", "out_proj",
 )  # fmt: skip
 """Every attention, linear-attention and MLP projection of Qwen3.5 except the tiny gate projections."""
+
+
+LOGIT_ROWS = 128
+"""Positions sent through the output layer at a time (each row of logits is a vocabulary wide)."""
 
 
 @dataclass
@@ -73,9 +78,25 @@ class Policy:
         ids = torch.tensor([list(tokens)], device=device)
         hidden = model.model.language_model(input_ids=ids).last_hidden_state[0]
         index = torch.tensor([position - 1 for position in positions], device=device)
-        logits = model.lm_head(hidden.index_select(0, index)).float()
+        rows = hidden.index_select(0, index)
         targets = ids[0].index_select(0, torch.tensor(list(positions), device=device))
-        return torch.log_softmax(logits, dim=-1).gather(-1, targets.unsqueeze(-1)).squeeze(-1)
+
+        def chunk(rows: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+            logits = model.lm_head(rows).float()
+            return -torch.nn.functional.cross_entropy(logits, targets, reduction="none")
+
+        # The output layer is a vocabulary wide: a long thought's logits would be gigabytes if kept for the backward
+        # pass. Each chunk's are recomputed there instead (checkpointing), so the peak is one chunk's.
+        parts = [
+            cast(
+                torch.Tensor,
+                checkpoint(
+                    chunk, rows[start : start + LOGIT_ROWS], targets[start : start + LOGIT_ROWS], use_reentrant=False
+                ),
+            )
+            for start in range(0, len(positions), LOGIT_ROWS)
+        ]
+        return torch.cat(parts)
 
     def save(self, directory: Path) -> Path:
         return save_adapter(self.model, directory, base_model=self.checkpoint, rank=self.rank, alpha=self.alpha)

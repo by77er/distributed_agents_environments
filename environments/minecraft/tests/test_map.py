@@ -52,13 +52,18 @@ def test_the_map_is_drawn_one_grid_per_height_with_absolute_coordinates() -> Non
 
 def test_an_observation_carries_the_map_and_exact_coordinates_and_earlier_turns_are_brief() -> None:
     seen = observation()
-    text = describe(seen, notes="chest room south?", board=["ben: I go east"])
+    chat = [(3, "ben", "I go east"), (0, "ada", "ore in the west wall")]
+    text = describe(seen, chat=chat)
     assert text.startswith("You are ada, at (0, 64, 0) (overworld, plains, day, no sky above); health 20/20")
     assert "minute" not in text  # agents are not told the clock
     assert "Map of what you have seen within 6 blocks" in text
     assert "Notable in sight: deepslate_diamond_ore at (-4, 65, 0), 4.3 away." in text
     assert "Dropped items: 3 diamond at (-3, 64, 2)." in text
-    assert "Your notes: chest room south?" in text and "Team board: ben: I go east" in text
+    assert "notes" not in text  # agents keep no notes: what they remember is what their context holds
+    assert text.endswith(
+        "Team chat, oldest first:\n- ben, 3 turns ago: I go east\n- you, this turn: ore in the west wall"
+    )
+    assert describe(seen).endswith("Team chat: (nothing yet)")
     assert "Open space" not in text and "You see mostly" not in text  # the map shows it
     brief = describe(seen, brief=True)
     assert brief.splitlines() == [text.splitlines()[0], "Inventory: empty."]

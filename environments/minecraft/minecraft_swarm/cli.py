@@ -28,7 +28,7 @@ def main() -> None:
     training.add_argument("--max-minutes", type=float, help="cap each task's budget of game time")
     training.add_argument("--max-turns", type=int, help="cap each episode's turns (for smoke tests)")
     training.add_argument("--update-turns", type=int, default=384, help="turns trained on per update (sampled)")
-    training.add_argument("--thinking-budget", type=int, default=384)
+    training.add_argument("--thinking-budget", type=int, default=1024, help="tokens of thinking per turn")
     training.add_argument("--learning-rate", type=float, default=2e-5)
     training.add_argument("--seed", type=int, default=0)
     training.add_argument("--tasks", help="comma-separated task ids to train on (default: the whole curriculum)")

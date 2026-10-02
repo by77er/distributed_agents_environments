@@ -129,6 +129,9 @@ class Channel:
     thinking_budget: int = 512
     answer_tokens: int = 384
     context_limit: int = 32_768
+    max_sequence_tokens: int | None = None
+    """If set, no recorded turn (prompt and completion) is longer: a long prompt leaves less room for thinking. A
+    trainer with limited memory can then train on every turn, instead of leaving the long ones out."""
 
 
 @dataclass(frozen=True)
@@ -205,9 +208,12 @@ class RecordedEndpoint:
         logprobs: list[float] = []
         adapter, version = channel.adapter, channel.adapter_version
         thinking = renderer.thinking
-        if thinking is not None and thinking.prompt_opens and channel.thinking_budget > 0:
+        budget = channel.thinking_budget
+        if channel.max_sequence_tokens is not None:  # what the prompt leaves, after room for the answer
+            budget = max(0, min(budget, channel.max_sequence_tokens - len(prompt) - channel.answer_tokens))
+        if thinking is not None and thinking.prompt_opens and budget > 0:
             first = await channel.engine.generate(
-                prompt, max_tokens=channel.thinking_budget, temperature=temperature, top_p=top_p,
+                prompt, max_tokens=budget, temperature=temperature, top_p=top_p,
                 stop_token_ids=[*renderer.thinking_end_token_ids(), *stops], adapter=adapter,
             )  # fmt: skip
             completion += first.tokens
@@ -229,7 +235,7 @@ class RecordedEndpoint:
                 logprobs += second.logprobs
         else:
             only = await channel.engine.generate(
-                prompt, max_tokens=channel.thinking_budget + channel.answer_tokens, temperature=temperature,
+                prompt, max_tokens=budget + channel.answer_tokens, temperature=temperature,
                 top_p=top_p, stop_token_ids=stops, adapter=adapter,
             )  # fmt: skip
             completion, mask, logprobs = list(only.tokens), [True] * len(only.tokens), list(only.logprobs)

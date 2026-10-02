@@ -71,15 +71,15 @@ push each other.
 
 ## What agents see and do
 
-The harness gives agents raw material, not advice, and motor control, not strategy.
+The harness gives agents raw material and motor control. Strategy is theirs.
 
 **An observation** says which agent you are, where you are (absolute coordinates), your health, food, inventory and
-armor; how your last action went; what teammates said; then **a map**: the blocks you have seen within six blocks,
-one 13 by 13 grid per height (above the head, head, feet, floor, below), one character per block, north up, rows
-labelled with z. The map holds only what the agent's own rays have hit or passed through, remembered across turns;
-everything else is `?`. Teammates, creatures and dropped items in sight are drawn on it. After the map come notable
-blocks, items, teammates and creatures in sight, with coordinates (sight reaches 24 blocks); then the agent's notes
-and the team board.
+armor; how your last action went; then **a map**: the blocks you have seen within six blocks, one 13 by 13 grid per
+height (above the head, head, feet, floor, below), one character per block, north up, rows labelled with z. The map
+holds only what the agent's own rays have hit or passed through, remembered across turns; everything else is `?`.
+Teammates, creatures and dropped items in sight are drawn on it. After the map come notable blocks, items, teammates
+and creatures in sight, with coordinates (sight reaches 24 blocks), and the team's last six chat messages, each with
+its age in turns.
 
 ```
 y=64 (your feet):
@@ -91,24 +91,24 @@ y=64 (your feet):
 On the map: * a dropped item; B ben; d deepslate_diamond_ore; ~ water.
 ```
 
-Agents are **not told the clock**: an episode's length is a limit of training, not of the game, and a policy told the
-clock learns to play the clock. Doing more before the cut-off is rewarded all the same.
-
-| Actions (18) | |
+| Actions (16) | |
 |---|---|
 | Moving | `move_to` a place seen, `move` in a direction; both dig through what is in the way and pick up what they pass over |
 | Blocks | `mine` one block, `place_at` a free position in sight, `use` an item on a block (flint and steel, buckets, an eye of ender on a portal frame; a chest shows its contents; a bed is slept in) |
 | Items | `use` an item in the air (eat, throw an eye of ender), `craft`, `smelt`, `take_smelted`, `take`, `store`, `toss` (toward a position; a teammate there picks it up), `equip` |
 | Creatures | `attack` (walks up and strikes until it is dead), `shoot` (bow; aims for the arrow's drop and the target's motion) |
 | Other | `chat`, `wait` |
-| Memory | `note` (private notes, shown every turn), `post` (a line on the team board, shown to all four); neither costs game time |
 
-There is no `tunnel`, `stairs`, `collect` or `give`: those were strategy, or walking plus something simpler. An action
-cut off by the freeze reports where the agent got to.
+An action cut off by the freeze reports where the agent got to.
 
-An agent's context is the system prompt and tools (the same for all four agents, 2,100 tokens the engine caches as a
-shared prefix), its last four turns in brief (position, inventory, action, result), and the current observation in
-full: about 3,000 tokens at the first turn, of which the map is 750.
+**What an agent's context holds** is all it remembers: the system prompt and tools (the same for all four agents,
+about 2,000 tokens the engine caches as a shared prefix), its last four turns in brief (position, inventory, action,
+result), and the current observation in full: about 3,000 tokens at the first turn, of which the map is 750.
+
+Two limits of training are kept out of what agents read. They see no clock: an episode's length is a limit of
+training, and a policy shown the clock learns to play it; doing more before the cut-off is rewarded all the same.
+And the limit on thinking (1,024 tokens) is wide enough to be met rarely: on this environment's observations the
+model's thoughts run to a median of 530 tokens and a 95th percentile of 820.
 
 ## Tasks and curriculum
 
@@ -147,7 +147,7 @@ catalog's order: the first three, and four past the hardest one solved at least 
 | Policy | `cyankiwi/Qwen3.5-9B-AWQ-4bit` (compressed-tensors, int4 in groups of 32), LoRA rank 32 on every attention, linear-attention and MLP projection | 8 GiB of weights in vLLM; four agents take a turn in about 6 s |
 | Engine | vLLM 0.30 in its own process; LoRA adapters registered by name; while the trainer runs it sleeps with its weights dropped, and reads them again on waking | sleep 0.2 s, wake 3 s; 3.3 GiB of system memory asleep (11.2 GiB when the weights were parked in memory instead); 88 tokens/s for one agent, 730 tokens/s for sixteen at once |
 | Recorder | Renders contexts to tokens and parses replies through a pluggable `Renderer` (Qwen3.5's XML tool calls and thinking); thinking has a budget, closed by forced (untrained) tokens | records prompt, sampled tokens, mask, behavior logprobs and adapter per turn |
-| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | peak 12.2 GiB at 3,000 tokens, 12.8 at 4,000, 13.4 at 5,000 (14.6 reserved), 3 to 5 s per sequence; longer sequences are left out of a step; logprobs match vLLM's to a mean of 0.018, also with an adapter |
+| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | peak 12.8 GiB at 4,000 tokens, 13.4 at 5,000, 13.7 at 5,500 (14.3 reserved), whatever the share of sampled tokens: the output layer is run in checkpointed chunks; 3 to 5 s per turn; logprobs match vLLM's to a mean of 0.018, also with an adapter |
 | Algorithm | Dr. GRPO advantages (reward minus group mean, every turn of an episode), DAPO's dynamic sampling, clip-higher (0.8–1.28) and token-level loss, PPO clipping against the behavior logprobs, no KL | |
 
 Bitsandbytes was the first plan for 4-bit weights, but vLLM 0.30 no longer supports it; a pre-quantized checkpoint
@@ -171,8 +171,9 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
   7.2 GiB.
 
 - **A sequence too long for the GPU thrashes instead of failing.** Under Windows, memory past the card's 16 GB spills
-  into system memory: a step of 96 turns ran for 13 minutes without finishing and took the host to 0.6 GB free. Turns
-  are now capped at 5,000 tokens for training, and prompts were shortened (earlier turns in brief, fewer tools).
+  into system memory: a step of 96 turns ran for 13 minutes without finishing and took the host to 0.6 GB free. No
+  turn may now be longer than 5,400 tokens, and that is settled when the turn is sampled (a long prompt leaves less
+  room to think) so that every turn can be trained on; prompts were shortened to make the limit a rare one.
 - **The engine drops its weights when it sleeps.** Parked in system memory they were 8 GiB that the host did not have.
 
 ## Lessons from the live world

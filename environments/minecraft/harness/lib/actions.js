@@ -1,6 +1,6 @@
 'use strict'
 // The actions agents choose from: a small, general vocabulary over mineflayer. They are motor control (walking,
-// digging one block, aiming, moving items), not strategy: there is no "dig a staircase" or "collect everything".
+// digging one block, aiming, moving items); strategy is the agents'.
 //
 // Every target must be one the agent could know: a block to mine must be the first thing a ray from the eyes hits,
 // within reach; a place to walk to must be near a block the bot has seen. Unfinished actions are stopped when the

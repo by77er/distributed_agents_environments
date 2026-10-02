@@ -96,6 +96,7 @@ class ScriptedEngine:
         self.tokenizer = tokenizer
         self.script = list(script)
         self.prompts: list[list[int]] = []
+        self.budgets: list[int] = []
 
     async def generate(
         self,
@@ -108,6 +109,7 @@ class ScriptedEngine:
         adapter: str | None,
     ) -> Generation:
         self.prompts.append(list(prompt))
+        self.budgets.append(max_tokens)
         text, finish = self.script.pop(0)
         tokens = self.tokenizer.encode(text, add_special_tokens=False)[:max_tokens]
         return Generation(tokens=tokens, logprobs=[-0.5] * len(tokens), finish_reason=finish)
@@ -207,3 +209,18 @@ async def test_a_metered_engine_counts_tokens_and_throughput() -> None:
     assert counts["tokens_per_second"] > 3 * counts["tokens_per_second_per_stream"]
     assert 3.0 < counts["mean_concurrency"] <= 4.0
     assert metered.take()["requests"] == 0  # taking resets
+
+
+async def test_a_long_prompt_leaves_less_room_to_think_so_that_no_turn_is_too_long(tokenizer: Tokenizer) -> None:
+    renderer = renderer_for("qwen3.5", tokenizer)
+    messages = [Message.user("Say hi.")]
+    engine = ScriptedEngine(tokenizer, [("thinking " * 30, "length"), ("\n\nhi<|im_end|>", "stop")])
+    limit = len(renderer.render(messages, [MINE])) + 40  # (the request offers that tool)
+    channel = Channel(engine, renderer, thinking_budget=64, answer_tokens=16, max_sequence_tokens=limit)
+    recorder = Recorder({"policy": channel})
+    await recorder.endpoint(RecordedModel(channel="policy")).sample(request(messages))
+    prompt = engine.prompts[0]
+    room = limit - len(prompt) - 16  # what the prompt leaves, after room for the answer
+    assert 0 < room < 64 and engine.budgets[0] == room  # not the channel's 64
+    (turn,) = recorder.turns["r_1/ada"]
+    assert len(turn.prompt) + sum(turn.loss_mask) <= limit

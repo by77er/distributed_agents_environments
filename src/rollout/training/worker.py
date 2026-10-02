@@ -73,6 +73,10 @@ def _step(
     previous: Path | None,
 ) -> None:
     try:
+        import os
+
+        # Reserve close to what is used: fragmentation would otherwise cost about 0.7 GiB at the peak.
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         import torch
 
         from rollout.training.grpo import GroupRelativeTrainer

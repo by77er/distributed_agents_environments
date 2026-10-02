@@ -7,10 +7,9 @@ agent: the swarm is rewarded equally.
 
 Each agent is a model slot of its own (`ada`, `ben`, `cy`, `dee`): its own context and its own recorded session.
 Bound to the same recorded channel, they are one policy. An agent sees its system prompt, its last few turns in brief
-(where it was, what it held, what it did and how that went) and the current observation in full, with the map; what
-it wants to keep longer it writes in its notes (`note`) or on the team board (`post`), which every observation
-shows. Those two tools take no game time: an agent that only writes stands idle that turn, without holding the
-world's window open.
+(where it was, what it held, what it did and how that went) and the current observation in full, with the map.
+What an agent remembers is what that context holds. The team talks through the game's chat: an observation shows
+the last few messages an agent has heard or said, each with its age in turns.
 """
 
 from collections.abc import Mapping, Sequence
@@ -18,7 +17,7 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
-from minecraft_swarm.prompts import ACTIONS, MAX_BOARD_LINES, MAX_NOTES, MEMORY_ACTIONS, TEAM, describe, system_prompt
+from minecraft_swarm.prompts import ACTIONS, CHAT_LINES, TEAM, describe, system_prompt
 from minecraft_swarm.tasks import Task, catalog
 from rollout.core.contracts import Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
 from rollout.core.harness import ModelSlot, Program, RunContext
@@ -41,10 +40,8 @@ class SwarmEpisode(Program):
         self.minutes = min(self.task.minutes, float(cast(float, parameters.get("minutes", self.task.minutes))))
         turns = parameters.get("turns")
         self.max_turns = int(cast(int, turns)) if turns is not None else None
-        self.notes: dict[str, str] = {name: "" for name in TEAM}
-        self.board: list[str] = []
-        self._wrote: set[str] = set()
-        """Agents whose last turn was a memory tool (they waited in the world)."""
+        self.chat: dict[str, list[tuple[int, str, str]]] = {name: [] for name in TEAM}
+        """What each agent has heard and said lately: (turn, speaker, message), oldest first."""
 
     def model_slots(self) -> Mapping[str, ModelSlot]:
         return {name: ModelSlot() for name in TEAM}
@@ -69,7 +66,7 @@ class SwarmEpisode(Program):
                 )
                 actions = await run.gather(
                     *(
-                        self._think(run, name, observation, histories[name])
+                        self._think(run, name, turn, observation, histories[name])
                         for name, observation in zip(TEAM, observations, strict=True)
                     )
                 )
@@ -94,22 +91,22 @@ class SwarmEpisode(Program):
         )
 
     async def _think(
-        self, run: RunContext, name: str, observation: Mapping[str, Any], history: list[Message]
+        self, run: RunContext, name: str, turn: int, observation: Mapping[str, Any], history: list[Message]
     ) -> dict[str, JsonValue]:
         """One agent's turn: its context, one sample, and the action it chose (`idle` if it chose none)."""
-        wrote = name in self._wrote
-        self._wrote.discard(name)
-        if wrote:  # the world saw nothing; the agent is told its writing was saved
-            observation = {**observation, "last_action": None}
         if history and history[-1].role is Role.ASSISTANT:  # answer the previous call with how it went
             previous = history[-1].tool_calls
-            result = "Saved." if wrote else describe_result(observation.get("last_action"))
+            result = describe_result(observation.get("last_action"))
             if previous:
                 answered = ToolResultBlock(call_id=previous[0].call_id, result=ToolResult(content=[Text(text=result)]))
                 history.append(Message(role=Role.TOOL, content=[answered]))
             else:
                 history.append(Message.user(result))
-        text = describe(observation, notes=self.notes[name], board=self.board)
+        heard = self.chat[name]
+        heard.extend((turn, str(said["from"]), str(said["message"])) for said in observation.get("messages", []))
+        del heard[:-CHAT_LINES]
+        chat = [(turn - at, who, message) for at, who, message in heard]
+        text = describe(observation, chat=chat)
         earlier = recent([*history, Message.user(text)], HISTORY_TURNS)
         context = [Message.system(system_prompt(self.task)), *earlier]
         reply = await run.models[name].sample(context, tools=ACTIONS)
@@ -121,19 +118,9 @@ class SwarmEpisode(Program):
         if not calls:
             return {"name": "idle"}
         call: ToolCall = calls[0]  # one action per turn
-        if call.name in MEMORY_ACTIONS:
-            self._remember(name, call)
-            self._wrote.add(name)
-            return {"name": "idle"}  # nothing in the world, and no game time spent on its account
+        if call.name == "chat":  # an agent sees what it said among what it heard
+            heard.append((turn, name, " ".join(str(call.arguments.get("message", "")).split())[:240]))
         return {"name": call.name, **dict(call.arguments)}
-
-    def _remember(self, name: str, call: ToolCall) -> None:
-        text = str(call.arguments.get("text", "")).strip()
-        if call.name == "note":
-            self.notes[name] = text[:MAX_NOTES]
-        elif text:
-            self.board.append(f"{name}: {text[:200]}")
-            del self.board[:-MAX_BOARD_LINES]
 
     async def _call(self, run: RunContext, operation: str, arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         result = await run.tools.call(operation, arguments)

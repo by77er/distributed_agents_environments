@@ -35,14 +35,14 @@ you are.
 How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
 one tool (only your first call counts); then the world runs for up to five seconds while the actions happen, and \
 freezes again. Long actions (walking far, digging through rock, fighting) may be cut off: the result says where you \
-got to. Writing a note or posting to the board costs no game time.
+got to.
 
 What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
 you, and lists notable things in sight farther off. Coordinates are absolute, (x, y, z): +x is east, +y is up, +z is \
 south. Walking digs through what is in the way and picks up items it passes over. If you die you start again where \
-the game began. You see your earlier turns only in brief, so keep what matters in your notes (the note tool): they \
-are shown to you every turn. The team board (the post tool) is shown to all four of you every turn; chat reaches \
-teammates at their next turn. Use them to split up the work and to share what you find. Think briefly, then act."""
+the game began. You see your last few turns only in brief: where you were, what you did and how it went. Chat \
+reaches teammates at their next turn; every observation shows the team's last {chat_lines} messages and how old each \
+is. Use chat to split up the work and to share what you find. Think briefly, then act."""
 
 
 def system_prompt(task: Task) -> str:
@@ -50,8 +50,9 @@ def system_prompt(task: Task) -> str:
 
     It says nothing of how long the game lasts, and neither do observations: an episode's length is a limit of
     training, not of the game, and a policy told the clock learns to play the clock. Doing more before the episode is
-    cut off is rewarded all the same."""
-    return SYSTEM.format(team=", ".join(TEAM), goal=GOALS[task.objective])
+    cut off is rewarded all the same. The same goes for the limit on thinking: it is set wide enough to be met
+    rarely, and agents are not told of it."""
+    return SYSTEM.format(team=", ".join(TEAM), goal=GOALS[task.objective], chat_lines=CHAT_LINES)
 
 
 def _integer(description: str) -> dict[str, JsonValue]:
@@ -139,35 +140,30 @@ ACTIONS = [
         {"target": _integer("the creature's id")},
         ["target"],
     ),
-    _action("chat", "Say something to your teammates.", {"message": STRING}, ["message"]),
     _action(
-        "note",
-        "Replace your private notes (shown to you every turn): where things are, your plan, what is done.",
-        {"text": STRING},
-        ["text"],
+        "chat",
+        "Say something to your teammates: they see it from their next turn, while it is among the last few messages.",
+        {"message": STRING},
+        ["message"],
     ),
-    _action("post", "Add a line to the team board (shown to all four of you every turn).", {"text": STRING}, ["text"]),
     _action("wait", "Do nothing while the world runs (up to five seconds of game time pass).", {}, []),
 ]
-"""The actions, as tools the model calls (one per turn): motor control, not strategy. `note` and `post` are the
-agents' memory; the rest act in the world."""
+"""The actions, as tools the model calls (one per turn): motor control; strategy is the agents'. What an agent
+remembers is what its context holds: its last turns, the map and the team's chat."""
 
-MEMORY_ACTIONS = ("note", "post")
-"""Handled by the episode itself; they take no game time."""
-
-MAX_NOTES = 1200
-MAX_BOARD_LINES = 8
+CHAT_LINES = 6
+"""Messages of the team's chat an observation shows: the newest, each with its age in turns."""
 
 
 def describe(
     observation: Mapping[str, Any],
     *,
-    notes: str = "",
-    board: Sequence[str] = (),
+    chat: Sequence[tuple[int, str, str]] = (),
     brief: bool = False,
 ) -> str:
     """An observation as text: who and where you are, the map of what you have seen, what is in sight, what happened,
-    what you heard and remember. `brief` keeps only where you were and what you held (how earlier turns are kept)."""
+    and what the team has said lately. `chat` holds (age in turns, speaker, message), oldest first.
+    `brief` keeps only where you were and what you held (how earlier turns are kept)."""
     me = observation["self"]
     position = me["position"]
     world: Mapping[str, Any] = observation.get("world") or {}
@@ -196,8 +192,6 @@ def describe(
     result = observation.get("last_action")
     if result:
         lines.append(f"Your last action: {_result(result)}")
-    if observation.get("messages"):
-        lines.append("Teammates said: " + " | ".join(f"{m['from']}: {m['message']}" for m in observation["messages"]))
     if observation.get("map"):
         lines.append(render_map(observation))
     if observation["notable"]:
@@ -216,8 +210,11 @@ def describe(
     if observation.get("animals"):
         animals = "; ".join(f"{a['animal']} (id {a['id']}) {a['distance']} away" for a in observation["animals"][:6])
         lines.append(f"Animals: {animals}.")
-    lines.append(f"Your notes: {notes or '(empty)'}")
-    lines.append("Team board: " + (" | ".join(board) if board else "(empty)"))
+    if chat:
+        lines.append("Team chat, oldest first:")
+        lines.extend(f"- {'you' if who == me['name'] else who}, {_age(age)}: {message}" for age, who, message in chat)
+    else:
+        lines.append("Team chat: (nothing yet)")
     return "\n".join(lines)
 
 
@@ -339,6 +336,10 @@ def render_map(observation: Mapping[str, Any]) -> str:
     if meanings:
         lines.append("On the map: " + "; ".join(meanings) + ".")
     return "\n".join(lines)
+
+
+def _age(turns: int) -> str:
+    return "this turn" if turns <= 0 else "1 turn ago" if turns == 1 else f"{turns} turns ago"
 
 
 def _position(position: Any) -> str:

@@ -61,8 +61,9 @@ class GroupRelativeTrainer:
     """Sampled tokens per optimizer step (gradients accumulate over sequences until then)."""
     max_gradient_norm: float = 1.0
     max_sequence_tokens: int | None = None
-    """Longer sequences are left out of a step (and counted): memory grows with length, and one sequence too long
-    for the GPU would end the whole step."""
+    """A guard: longer sequences are left out of a step and counted (`sequences_too_long`), since one too long for
+    the GPU would end or stall the whole step. Leaving turns out biases training, so the sampling side should make
+    it never happen (`rollout.recorder.Channel.max_sequence_tokens`); the count says whether it did."""
 
     def __post_init__(self) -> None:
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=0.0)
