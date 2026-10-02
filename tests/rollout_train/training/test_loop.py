@@ -84,29 +84,31 @@ async def test_the_loop_trains_groups_as_they_finish_and_goes_on_where_it_stoppe
     store, trainer = Directory(tmp_path / "run"), Counting()
     await train(jobs, Words(), trainer, store, channel="policy", groups=3, seed=1)
 
-    lines = iterations(store)
-    assert [line.iteration for line in lines] == [1, 2, 3]
+    lines = iterations(store)  # in the order the groups ended, which is not always the order they were started in
+    assert sorted(line.iteration for line in lines) == [1, 2, 3]
     assert all(len(line.rewards) == 4 and line.failed == 0 for line in lines)
-    # Half of each group said the word (the policy says yes and no in turn): rewards differ, so every group trains.
-    assert all(sorted(line.rewards) == [0.0, 0.0, 1.0, 1.0] for line in lines if line.task != "say-maybe")
-    assert all(line.skipped == "every episode scored the same" for line in lines if line.task == "say-maybe")
+    # The policy says yes and no in turn, so in most groups some episodes said the word and some did not: those
+    # groups train, and the others are skipped for having nothing to compare.
     trained = [line for line in lines if line.update is not None]
-    assert len(trained) == len(trainer.batches) >= 2
+    assert all(len(set(line.rewards)) == 1 and line.skipped for line in lines if line.update is None)
+    assert len(trained) == len(trainer.batches) >= 1
     assert [line.version for line in trained] == list(range(1, len(trained) + 1))
     assert recorder.channels["policy"].version == len(trained)
     for line, batch in zip(trained, trainer.batches, strict=True):
         assert line.sequences_recorded == 4 and line.sequences_trained == len(batch) == 3  # the trainer's budget
-        assert line.notes["speed_bonus"] == [1.0 if reward else 0.0 for reward in line.rewards]  # both were as fast
-        said = {"".join(chr(t) for t in w.epoch.tokens[w.epoch.spans[0].start :]).strip(): w.advantage for w in batch}
+        if sum(line.rewards) >= 2:  # those that said it were as fast as each other
+            assert line.notes["speed_bonus"] == [1.0 if reward else 0.0 for reward in line.rewards]
         word = line.task.removeprefix("say-")
-        assert said[word] == 1.0 and all(value == -1.0 for other, value in said.items() if other != word)
+        for weighted in batch:  # whoever said the word is above the group's mean, and the others below it
+            said = "".join(chr(token) for token in weighted.epoch.tokens[weighted.epoch.spans[0].start :]).strip()
+            assert (weighted.advantage > 0) == (said == word)
     saved = json.loads(store.read("curriculum.json") or "{}")
     assert {entry["title"] for entry in saved.values()} <= {"say yes", "say no", "say maybe"}
     assert notes.kinds.count("iteration") == 3 and notes.kinds.count("published") == len(trained)
     assert notes.kinds.count("episode") == 12
 
     await train(jobs, Words(), trainer, store, channel="policy", groups=2, seed=1)  # started again: it goes on
-    assert [line.iteration for line in iterations(store)] == [1, 2, 3, 4, 5]
+    assert sorted(line.iteration for line in iterations(store)) == [1, 2, 3, 4, 5]
 
 
 async def test_a_trainer_that_shares_the_engines_gpu_puts_them_to_sleep_around_each_step(tmp_path: Path) -> None:
