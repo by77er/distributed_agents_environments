@@ -11,11 +11,12 @@ shows the last few messages an agent has heard or said, each with its age in tur
 
 What an agent remembers is what its context holds (`Memory`): the current observation in full, with the map; its
 recent turns without their maps (what was in sight, what it did, how that went); and, of everything older, a summary
-it wrote itself. When the recent turns reach `COMPACT_AT`, the agent is shown the oldest of them once more, with its
-earlier summary, and asked what to remember (`prompts.COMPACT`); its answer replaces them. That is a sample like any
-other, on the agent's own slot: it costs no game time, it is recorded, and it is trained with the episode's
-advantage, since what an agent chooses to remember is part of how it plays. An episode of any length thus keeps a
-context of bounded size.
+it wrote itself. When the context is nearly full (by the tokens its last prompt actually took, which the model
+endpoint reports), the agent is shown its oldest turns once more, with its earlier summary, and asked what to
+remember (`prompts.COMPACT`); its answer replaces them. That is a sample like any other, on the agent's own slot:
+it costs no game time, it is recorded, and it is trained with the episode's advantage, since what an agent chooses
+to remember is part of how it plays. An episode of any length thus keeps a context that fits; should a prompt
+overflow all the same, the agent compacts and tries again.
 """
 
 from collections.abc import Mapping
@@ -26,15 +27,15 @@ from pydantic import JsonValue
 
 from minecraft_swarm.prompts import ACTIONS, CHAT_LINES, COMPACT, REMEMBERED, TEAM, describe, system_prompt
 from minecraft_swarm.tasks import Task, catalog
-from rollout.core.contracts import Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
-from rollout.core.harness import ModelSlot, Program, RunContext
+from rollout.core.contracts import ContextOverflow, Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
+from rollout.core.harness import Model, ModelSlot, Program, RunContext
 
-COMPACT_AT = 14
-"""Recent turns an agent's memory holds before the oldest are compacted into its summary. A remembered turn is about
-220 tokens (what was in sight, the action, its result); with the system prompt and tools (2,000), a summary (400),
-the current observation (900 to 1,250) and room to think and answer (1,400), thirteen fit a turn of 8,000 tokens."""
-KEEP_TURNS = 7
-"""Recent turns left as they are by a compaction: a compaction every seven turns."""
+TURN_GROWTH = 700
+"""Tokens one more turn may add to a context (a reply, its result, a larger observation): memory is compacted when
+the last prompt, grown by this, would leave less than the room the model may use to think and answer."""
+KEEP_CHARACTERS = 3500
+"""Recent turns a compaction leaves as they are: the newest that fit this many characters (about 1,000 tokens, four
+or five turns), and never more than half of them."""
 MAX_SUMMARY = 2400
 """Characters of summary kept (the engine's limit on an answer is the tighter one)."""
 TICKS_PER_MINUTE = 1200
@@ -132,15 +133,23 @@ class SwarmEpisode(Program):
                 last.append(Message(role=Role.TOOL, content=[answered]))
             else:
                 last.append(Message.user(result))
-        if len(memory.turns) >= COMPACT_AT:
+        model = run.models[name]
+        if crowded(model):
             await self._compact(run, name, memory)
         heard = self.chat[name]
         heard.extend((turn, str(said["from"]), str(said["message"])) for said in observation.get("messages", []))
         del heard[:-CHAT_LINES]
         chat = [(turn - at, who, message) for at, who, message in heard]
         seen = Message.user(describe(observation, chat=chat))
-        context = [Message.system(system_prompt(self.task)), *memory.messages(), seen]
-        reply = await run.models[name].sample(context, tools=ACTIONS)
+        while True:
+            context = [Message.system(system_prompt(self.task)), *memory.messages(), seen]
+            try:
+                reply = await model.sample(context, tools=ACTIONS)
+                break
+            except ContextOverflow:  # the estimate was short: make room and ask again
+                if not memory.turns:
+                    raise
+                await self._compact(run, name, memory, keep=0 if len(memory.turns) == 1 else None)
         memory.turns.append([Message.user(describe(observation, recalled=True)), reply])
         calls = reply.tool_calls
         if not calls:
@@ -150,19 +159,34 @@ class SwarmEpisode(Program):
             heard.append((turn, name, " ".join(str(call.arguments.get("message", "")).split())[:240]))
         return {"name": call.name, **dict(call.arguments)}
 
-    async def _compact(self, run: RunContext, name: str, memory: Memory) -> None:
-        """Replace the agent's oldest turns with what it says it needs to remember of them."""
-        old = memory.turns[:-KEEP_TURNS]
+    async def _compact(self, run: RunContext, name: str, memory: Memory, keep: int | None = None) -> None:
+        """Replace the agent's oldest turns with what it says it needs to remember of them. `keep` turns stay as they
+        are (by default the newest that fit `KEEP_CHARACTERS`, and at most half)."""
+        if keep is None:
+            keep, size = 0, 0
+            for turn in reversed(memory.turns[len(memory.turns) - len(memory.turns) // 2 :]):
+                size += sum(
+                    len(message.text) + sum(len(str(call.arguments)) for call in message.tool_calls) for message in turn
+                )
+                if size > KEEP_CHARACTERS:
+                    break
+                keep += 1
+        old = memory.turns[: len(memory.turns) - keep]
+        if not old:
+            return
         context = [
             Message.system(system_prompt(self.task)),
             *Memory(memory.summary, old).messages(),
             Message.user(COMPACT),
         ]
-        reply = await run.models[name].sample(context)
-        summary = reply.text.strip()
+        try:
+            reply = await run.models[name].sample(context)
+            summary = reply.text.strip()
+        except ContextOverflow:  # too much even to reread: it is forgotten unsummarized
+            summary = ""
         if summary:  # (a reply with no text keeps the earlier summary; the old turns go either way)
             memory.summary = summary[:MAX_SUMMARY]
-        memory.turns = memory.turns[-KEEP_TURNS:]
+        memory.turns = memory.turns[len(memory.turns) - keep :]
         memory.compactions += 1
 
     async def _call(self, run: RunContext, operation: str, arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
@@ -171,6 +195,14 @@ class SwarmEpisode(Program):
             detail = "".join(part.text for part in result.content if isinstance(part, Text))
             raise RuntimeError(f"minecraft.{operation} failed: {detail}")
         return result.structured
+
+
+def crowded(model: Model) -> bool:
+    """Whether one more turn would leave the model less than its full room to think and answer."""
+    usage = model.usage
+    if usage is None or usage.input_tokens is None:
+        return False
+    return usage.input_tokens + TURN_GROWTH > usage.context_limit - model.capabilities.max_output_tokens
 
 
 def describe_result(result: Any) -> str:

@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from minecraft_swarm.episode import COMPACT_AT, KEEP_TURNS, SwarmEpisode
+from minecraft_swarm.episode import TURN_GROWTH, SwarmEpisode
 from minecraft_swarm.prompts import COMPACT, TEAM
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
 from pydantic import JsonValue
 
 from rollout.core.contracts import (
     CapabilityContract,
+    ContextOverflow,
     FinishReason,
     Message,
     RunEventType,
@@ -39,10 +40,10 @@ from rollout.core.harness import (
 from rollout.core.local import LocalRunner
 from rollout.core.testing import payload, tool_call_reply
 
-DROPPED = COMPACT_AT - KEEP_TURNS
-"""Turns a compaction replaces with the summary."""
-TURNS = COMPACT_AT + DROPPED + 2
-"""Long enough for two compactions: before turn `COMPACT_AT + 1`, and `DROPPED` turns later."""
+LIMIT, OUTPUT = 5_050, 1_400
+"""The scripted model's context limit and the room it may use to answer. It counts 100 tokens a message, so with
+`TURN_GROWTH` a context is crowded from 30 messages on: after turn 11, and again after turn 17."""
+TURNS = 19
 
 
 class MadeUpWorld:
@@ -108,22 +109,31 @@ def observation(agent: str, turn: int) -> dict[str, JsonValue]:
 
 
 class Remembering:
-    """Waits every turn; asked what to remember, answers with a numbered summary. Keeps every request it gets."""
+    """Waits every turn; asked what to remember, answers with a numbered summary. Keeps every request it gets.
 
-    def __init__(self) -> None:
+    It reports 100 tokens of input per message, as an endpoint reports the tokens a prompt took; or, with `overflow`,
+    reports nothing and refuses any acting context of more than that many messages."""
+
+    def __init__(self, overflow: int | None = None) -> None:
         self.requests: list[SampleRequest] = []
         self.summaries: dict[str, int] = {}
+        self.overflow = overflow
 
     def describe(self, session_id: str) -> CapabilityContract:
-        return CapabilityContract(context_limit=100_000, max_output_tokens=1_000)
+        return CapabilityContract(context_limit=LIMIT, max_output_tokens=OUTPUT)
 
     async def cancel(self, effect_id: str) -> None:
         pass
 
     async def sample(self, request: SampleRequest) -> SampleResult:
+        messages = len(request.context.append)
+        compacting = request.context.append[-1].text == COMPACT
+        if self.overflow is not None and not compacting and messages > self.overflow:
+            raise ContextOverflow(LIMIT)
         self.requests.append(request)
-        usage = Usage(context_used=1, context_limit=100_000)
-        if request.context.append[-1].text == COMPACT:
+        tokens = None if self.overflow is not None else 100 * messages
+        usage = Usage(context_used=tokens or 1, context_limit=LIMIT, input_tokens=tokens)
+        if compacting:
             agent = request.session_id.rsplit("/", 1)[-1]
             self.summaries[agent] = self.summaries.get(agent, 0) + 1
             summary = Message.assistant(f"SUMMARY {self.summaries[agent]} for {agent}")
@@ -132,12 +142,12 @@ class Remembering:
         return SampleResult(message=tool_call_reply(call), finish_reason=FinishReason.TOOL_USE, usage=usage)
 
 
-def specification() -> RunSpecification:
+def specification(turns: int = TURNS) -> RunSpecification:
     binding = RunBinding(
         models={name: ModelBinding(direct=DirectModel(provider="scripted", model="m")) for name in TEAM},
         imports={"minecraft": ToolBinding(local="minecraft")},
     )
-    parameters: dict[str, JsonValue] = {"task": "t001", "turns": TURNS}
+    parameters: dict[str, JsonValue] = {"task": "t001", "turns": turns}
     return RunSpecification(
         program=ProgramReference(program=register(SwarmEpisode), parameters=parameters), binding=binding
     )
@@ -147,8 +157,15 @@ def texts(request: SampleRequest) -> list[str]:
     return [message.text for message in request.context.append]
 
 
+def of(model: Remembering, agent: str) -> tuple[list[SampleRequest], list[SampleRequest]]:
+    """An agent's acting requests and its compaction requests, in order."""
+    mine = [request for request in model.requests if request.session_id.endswith(f"/{agent}")]
+    compactions = [request for request in mine if texts(request)[-1] == COMPACT]
+    return [request for request in mine if texts(request)[-1] != COMPACT], compactions
+
+
 @pytest.mark.parametrize("runner_kind", ["local", "durable"])
-async def test_old_turns_are_compacted_into_a_summary_and_the_context_stays_bounded(
+async def test_a_crowded_context_is_compacted_into_a_summary_and_stays_bounded(
     runner_kind: str, tmp_path: Path
 ) -> None:
     model = Remembering()
@@ -175,37 +192,46 @@ async def test_old_turns_are_compacted_into_a_summary_and_the_context_stays_boun
     (result,) = [payload(event)["payload"] for event in events if event.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict) and result["turns"] == TURNS and result["compactions"] == 2
 
-    ada = [request for request in model.requests if request.session_id.endswith("/ada")]
-    compactions = [request for request in ada if texts(request)[-1] == COMPACT]
-    acting = [request for request in ada if texts(request)[-1] != COMPACT]
+    acting, compactions = of(model, "ada")
     assert len(acting) == TURNS and len(compactions) == 2
 
-    # However long the episode, a context holds at most the system prompt, a summary, the recent turns (what was
-    # seen, the reply, how it went) and the current observation.
-    assert max(len(request.context.append) for request in acting) == 1 + 1 + 3 * (COMPACT_AT - 1) + 1
+    # A context grows by a turn (what was seen, the reply, how it went) until it is crowded; it never passes that.
     assert [len(request.context.append) for request in acting[:3]] == [2, 5, 8]
+    assert max(len(request.context.append) for request in acting) == 32
+    crowded = acting[10]  # turn 11: 32 messages, 3,200 tokens: one more turn would cut into the room to answer
+    assert 100 * len(crowded.context.append) + TURN_GROWTH > LIMIT - OUTPUT
 
     # Only the current observation carries a map; remembered turns keep what was in sight.
-    before = texts(acting[COMPACT_AT - 1])  # the last turn before the first compaction
+    before = texts(crowded)
     assert sum("Map of what you have seen" in text for text in before) == 1
-    assert "Map of what you have seen" in before[-1] and f"You are ada, at ({COMPACT_AT}, 64, 0)" in before[-1]
+    assert "Map of what you have seen" in before[-1] and "You are ada, at (11, 64, 0)" in before[-1]
     assert "You are ada, at (1, 64, 0)" in before[1] and "Notable in sight: chest at (3, 64, 0)" in before[1]
 
-    # The first compaction: the oldest turns are shown once more, and no tools are offered.
+    # The compaction: the older half of the turns is shown once more, and no tools are offered.
     first = compactions[0]
-    assert not first.tools and len(first.context.append) == 1 + 3 * DROPPED + 1
-    assert "You are ada, at (1, 64, 0)" in texts(first)[1]
-    assert f"You are ada, at ({DROPPED}, 64, 0)" in texts(first)[-4]
-    assert not any(f"You are ada, at ({DROPPED + 1}, 64, 0)" in text for text in texts(first))
+    assert not first.tools and len(first.context.append) == 1 + 3 * 6 + 1
+    assert "You are ada, at (1, 64, 0)" in texts(first)[1] and "You are ada, at (6, 64, 0)" in texts(first)[-4]
+    assert not any("You are ada, at (7, 64, 0)" in text for text in texts(first))
 
     # From then on the summary stands for them.
-    after = texts(acting[COMPACT_AT])
+    after = texts(acting[11])
     assert after[1].endswith("SUMMARY 1 for ada") and "your own summary" in after[1]
-    assert f"You are ada, at ({DROPPED + 1}, 64, 0)" in after[2]
+    assert "You are ada, at (7, 64, 0)" in after[2] and len(after) == 1 + 1 + 3 * 5 + 1
     assert not any("You are ada, at (1, 64, 0)" in text for text in after)
-    assert len(after) == 1 + 1 + 3 * KEEP_TURNS + 1
 
     # The second compaction builds on the first summary, and replaces it.
     second = texts(compactions[1])
-    assert second[1].endswith("SUMMARY 1 for ada") and f"You are ada, at ({DROPPED + 1}, 64, 0)" in second[2]
+    assert second[1].endswith("SUMMARY 1 for ada") and "You are ada, at (7, 64, 0)" in second[2]
     assert texts(acting[-1])[1].endswith("SUMMARY 2 for ada")
+
+
+async def test_a_context_that_overflows_is_compacted_and_tried_again() -> None:
+    model = Remembering(overflow=20)  # says nothing of its tokens, and refuses contexts of more than 20 messages
+    runner = LocalRunner(providers={"scripted": lambda _: model}, tool_sets={"minecraft": MadeUpWorld()})
+    handle = await runner.start(specification(turns=12))
+    outcome = await handle.result()
+    assert outcome.status is RunStatus.COMPLETED, outcome  # an overflow does not end the episode
+    acting, compactions = of(model, "ada")
+    assert len(acting) == 12 and compactions
+    assert max(len(request.context.append) for request in acting) <= 20
+    assert texts(acting[-1])[1].startswith("What you remember from earlier in this game")

@@ -227,7 +227,7 @@ async def test_a_long_prompt_leaves_less_room_to_think_so_that_no_turn_is_too_lo
 
 
 async def test_a_channel_tells_programs_the_engines_own_limit_and_refuses_what_is_over_it(tokenizer: Tokenizer) -> None:
-    from rollout.core.contracts import ContractViolation
+    from rollout.core.contracts import ContextOverflow
 
     renderer = renderer_for("qwen3.5", tokenizer)
     engine = ScriptedEngine(tokenizer, [("ok</think>", "stop"), ("\n\nhi<|im_end|>", "stop")])
@@ -239,5 +239,5 @@ async def test_a_channel_tells_programs_the_engines_own_limit_and_refuses_what_i
 
     messages = [Message.user("Say hi.")]
     tight = Channel(engine, renderer, answer_tokens=16, context_limit=len(renderer.render(messages, [MINE])) + 15)
-    with pytest.raises(ContractViolation, match="over the channel's limit"):
+    with pytest.raises(ContextOverflow):  # what tells a program to compact and try again
         await Recorder({"policy": tight}).endpoint(RecordedModel(channel="policy")).sample(request(messages))

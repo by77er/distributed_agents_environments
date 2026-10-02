@@ -107,14 +107,18 @@ An action cut off by the freeze reports where the agent got to.
 |---|---|---|
 | System prompt and tools | 2,000 | The same for all four agents: the engine caches it as a shared prefix |
 | Summary | up to 400 | Of everything older than the recent turns, in the agent's own words |
-| Recent turns | 220 each, 7 to 13 of them | What was in sight (without the map), the action, how it went |
+| Recent turns | 200 to 350 each | What was in sight (without the map), the reply, how it went |
 | Current observation | 900 to 1,250 | In full, with the map (750) and the team's chat |
 
-When an agent holds 14 recent turns, the oldest 7 are **compacted**: it is shown them once more, with its earlier
-summary, and asked what it needs to remember; its answer replaces them. This is a model call like any other, on
-the agent's own slot, made while the world is frozen: it costs no game time, it is recorded, and it is trained with
-the episode's advantage, since what an agent chooses to remember is part of how it plays. An episode of any length
-keeps a context of bounded size.
+When a context is nearly full, the agent's older turns are **compacted**: it is shown them once more, with its
+earlier summary, and asked what it needs to remember; its answer replaces them, and the newest four or five turns
+stay as they are. "Nearly full" is measured, not estimated: the model endpoint reports the tokens each prompt took,
+and memory is compacted when one more turn would leave less than the full room to think and answer. A prompt that
+overflows all the same is compacted and tried again; it does not end the episode.
+
+Compaction is a model call like any other, on the agent's own slot, made while the world is frozen: it costs no game
+time, it is recorded, and it is trained with the episode's advantage, since what an agent chooses to remember is
+part of how it plays. An episode of any length keeps a context that fits.
 
 Two limits of training are kept out of what agents read. They see no clock: an episode's length is a limit of
 training, and a policy shown the clock learns to play it; doing more before the cut-off is rewarded all the same.
@@ -200,6 +204,9 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
 - **A stopped path must be cleared.** Stopping the pathfinder while no path is active leaves a flag that ends the next
   path at once; the harness clears it before each path. An action that will not stop at a freeze is left behind and
   reported as cut off.
+- **Count tokens, not turns.** Compaction every so many turns assumed a turn's size; agents that wrote long replies
+  outgrew the budget, and a 7,669-token prompt ended an episode. Losing episodes that way removes exactly the
+  talkative ones from the group's baseline. Memory is now compacted by the tokens a prompt actually took.
 - **Friendly fire.** Teammates standing in the line of fire took the arrows until the team became a scoreboard team.
 - **A throw needs a moment.** The server learns where a bot looks with its next movement packet: an item tossed at
   once flew the old way. And whoever throws an item cannot pick it back up for five seconds, so that a toss toward

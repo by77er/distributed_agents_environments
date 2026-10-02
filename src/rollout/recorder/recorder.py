@@ -20,7 +20,7 @@ from typing import Protocol
 
 from rollout.core.contracts import (
     CapabilityContract,
-    ContractViolation,
+    ContextOverflow,
     FinishReason,
     SampleRequest,
     SampleResult,
@@ -225,11 +225,8 @@ class RecordedEndpoint:
             return recorded[1]
         channel, renderer = self._channel, self._channel.renderer
         prompt = renderer.render(request.context.append, request.tools)
-        if len(prompt) + channel.answer_tokens > channel.limit:
-            raise ContractViolation(
-                f"the prompt is {len(prompt)} tokens; with {channel.answer_tokens} for the answer it is over the "
-                f"channel's limit of {channel.limit}"
-            )
+        if len(prompt) + channel.answer_tokens > channel.limit:  # no room left to answer: the program must compact
+            raise ContextOverflow(channel.limit)
         temperature, top_p = self._sampling.temperature, self._sampling.top_p
         stops = renderer.stop_token_ids()
         completion: list[int] = []
