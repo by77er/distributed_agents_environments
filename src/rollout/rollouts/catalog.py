@@ -13,7 +13,8 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
-from rollout.core.harness.runner import ProgramReference
+from rollout.core.harness.imports import ToolBinding
+from rollout.core.harness.runner import ProgramReference, RunBinding, bind, with_row
 
 
 @dataclass(frozen=True)
@@ -36,3 +37,11 @@ class Catalog(Protocol):
     def start(self, row: Row, rng: random.Random) -> JsonValue:
         """The parameters of one start of `row` (a seed drawn with `rng`, say): what every run of a group is given."""
         ...
+
+
+def binding_for(catalog: Catalog, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding:
+    """How a catalog's runs are served: every model slot of its program from `channel`, and each of its imports
+    from the tool set of its own name, or where `tools` says. (A program says which slots and imports it has once
+    it is given a row: the catalog's first.)"""
+    first = with_row(catalog.program, catalog.start(catalog.rows()[0], random.Random(0)))
+    return bind(first, channel, tools=tools)

@@ -3,6 +3,7 @@ game goes on, when the team compacts, how an episode ends and what it reports. U
 durable one."""
 
 import json
+import math
 import random
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -10,9 +11,10 @@ from typing import Any
 
 import pytest
 from minecraft_swarm.catalog import Swarm
-from minecraft_swarm.episode import NO_CALL, ONE_CALL, SwarmEpisode, action, answer
-from minecraft_swarm.prompts import COMPACT, TEAM
-from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
+from minecraft_swarm.episode import TICKS_PER_MINUTE, SwarmEpisode, action, answer
+from minecraft_swarm.prompts import COMPACT, NO_CALL, ONE_CALL
+from minecraft_swarm.tasks import TEAM, catalog
+from minecraft_swarm.worlds import DROP_TICKS, OPERATIONS, WINDOW_TICKS, MinecraftTools, MinecraftWorlds
 from pydantic import JsonValue
 
 from rollout.core.contracts import (
@@ -46,12 +48,18 @@ from rollout.core.testing import payload, tool_call_reply
 LIMIT, OUTPUT = 5_000, 1_400
 """The scripted model's context limit and the room it may use to answer. It counts 100 tokens a message."""
 TURNS = 19
+SHORT_WINDOW = 110
+"""Game ticks of a made-up window, unless a test says otherwise: `TURNS` of them fit in the first task's game time."""
+FULL_WINDOW = WINDOW_TICKS + DROP_TICKS
+"""Game ticks of a window that no action ends early."""
 
 
 class MadeUpWorld:
     """The `minecraft` tool set without a server: each agent stands one block further east every turn."""
 
-    def __init__(self, ticks: int = 110) -> None:
+    deduplicates = False
+
+    def __init__(self, ticks: int = SHORT_WINDOW) -> None:
         self.observed: dict[str, int] = dict.fromkeys(TEAM, 0)
         self.ticks = ticks
         """Game time each window takes."""
@@ -62,6 +70,7 @@ class MadeUpWorld:
     async def call(
         self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
     ) -> ToolResult:
+        assert name in OPERATIONS, name  # an episode asks only for what the tool set offers
         value: JsonValue
         match name:
             case "begin":
@@ -94,7 +103,7 @@ def observation(agent: str, turn: int) -> dict[str, JsonValue]:
             "wearing": {},
             "inventory": {},
         },
-        "world": {"time": {"ticks": 1000, "phase": "day"}, "light": 15, "sky": True, "biome": "plains"},
+        "world": {"time": {"phase": "day"}, "sky": True, "biome": "plains"},
         "map": {
             "center": {"x": turn, "y": 64, "z": 0},
             "radius": 1,
@@ -191,7 +200,7 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
     assert isinstance(result, dict) and result["turns"] == TURNS and result["compactions"] != 0
     # How it went, in the game's terms: nothing here ended the game early, and its time is game minutes.
     assert result["solved"] is True and result["saturated"] is False and result["ended"] == "turns"
-    assert result["duration"] == pytest.approx(TURNS * 110 / 1200)
+    assert result["duration"] == pytest.approx(TURNS * SHORT_WINDOW / TICKS_PER_MINUTE)
 
     acting, compactions = of(model, "ada")
     assert len(acting) == TURNS and len(compactions) == result["compactions"]
@@ -237,11 +246,13 @@ async def test_an_episode_ends_when_its_turns_are_spent_however_little_game_time
         assert isinstance(result, dict)
         return result
 
-    # t001 has three minutes of game time, and so 36 turns.
+    first = catalog()[0]  # t001: three minutes of game time, and so 36 turns
+    game_ticks = first.minutes * TICKS_PER_MINUTE
     quick = await play(ticks=20)  # actions that end at once: a second of game time a turn
-    assert quick["turns"] == 36 and quick["ended"] == "turns" and quick["duration"] == 0.6
-    slow = await play(ticks=110)  # full windows: the game time runs out first
-    assert slow["turns"] == 33 and slow["ended"] == "game time"
+    assert quick["turns"] == first.turns == 36 and quick["ended"] == "turns"
+    assert quick["duration"] == pytest.approx(first.turns * 20 / TICKS_PER_MINUTE)
+    slow = await play(ticks=FULL_WINDOW)  # full windows: the game time runs out first
+    assert slow["turns"] == math.ceil(game_ticks / FULL_WINDOW) < first.turns and slow["ended"] == "game time"
 
 
 def test_every_reply_is_answered_whatever_it_called() -> None:

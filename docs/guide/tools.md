@@ -51,8 +51,8 @@ assert specification.input_schema == {
 - Parameters can use any type pydantic can validate, including pydantic models. Arguments are validated before the
   body runs; unknown arguments are rejected.
 - `*args` and `**kwargs` are not allowed: every argument must appear in the schema.
-- A parameter named `run` receives the run context (for `run.now()`, `run.emit`, other model slots). It is not
-  part of the schema, so the model never sees it.
+- A parameter named `run` receives the [run context](tasks.md#the-run-context) (for `run.now()`, `run.emit`,
+  other model slots). It is not part of the schema, so the model never sees it.
 - Methods may be `async` or plain functions.
 - `@tool` methods are collected when the class is defined (`Task.declared_tools`); subclasses inherit them.
   Two tools with the same name in one class hierarchy are an error.
@@ -67,8 +67,8 @@ async def search(self, query: str) -> list[str]: ...
 | Option | Effect |
 |---|---|
 | `name` | The name the model sees (default: the method name). Must match `^[a-zA-Z0-9_-]{1,64}$`. |
-| `retry_class` | What a durable runner may do after a crash: `PURE` (default), `IDEMPOTENT`, `SIDE_EFFECTING`, `UNKNOWN`. |
-| `timeout` | A time limit for the body. Exceeding it returns an error result to the model. |
+| `retry_class` | The specification's `retry_class`: `PURE` (default), `IDEMPOTENT`, `SIDE_EFFECTING` or `UNKNOWN`. Runners act on it for [imported tools](#imported-tools). |
+| `timeout` | A time limit for the body, also written to the specification as `timeout_ms`. Exceeding it returns an error result to the model. |
 
 ## What a tool returns
 
@@ -145,8 +145,8 @@ async def respond(self, run: RunContext, reply: Message) -> Observation:
 
 ## Offering a subset per turn
 
-`tools_for_turn(run)` returns the specifications offered on each turn; the default offers every declared tool.
-Override it to change the action space as the episode progresses:
+`tools_for_turn(run)` returns the specifications offered on each turn; the default offers every `@tool` method,
+then every imported tool. Override it to change the action space as the episode progresses:
 
 ```python fragment
 def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]:
@@ -162,8 +162,15 @@ in a `@tool` body. Each call to an imported tool is a `tool.call` effect: the to
 `effect_id` and arguments digest, and can use them to perform each call at most once.
 
 A tool set implements `ToolSet`: `specifications()` and `call(name, arguments, *, effect_id, arguments_digest)`.
-The `LocalRunner` serves imports with in-process tool sets registered by name; MCP, HTTP and agent bindings come
-later.
+The binding's `ToolBinding` says where it is served:
+
+| `ToolBinding` | The tool set is |
+|---|---|
+| `ToolBinding(local="name")` | in the runner's process, registered as `tool_sets={"name": tool_set}` |
+| `ToolBinding(url="http://host:8700")` | served over HTTP, wherever its own infrastructure runs ([below](#serving-a-tool-set-over-http)) |
+
+Tool names are unique within a run: an imported tool that shares a name with another import or with a `@tool`
+method raises `ValueError`.
 
 ```python
 from collections.abc import Mapping, Sequence
@@ -221,8 +228,33 @@ asyncio.run(imported())
 If a tool set raises, the effect is recorded as failed and the model receives an error result, so every tool call
 still gets an answer.
 
+### After a crash
+
+Under the durable runner, a call that a crash interrupted is handled by the tool's `retry_class`
+(`ToolSpecification` defaults to `UNKNOWN`):
+
+| Tool | The interrupted call |
+|---|---|
+| `PURE` or `IDEMPOTENT` | is made again, with the same `effect_id` |
+| `SIDE_EFFECTING` or `UNKNOWN`, in a tool set with the attribute `deduplicates = True` | is made again: the tool set performs each `effect_id` at most once |
+| `SIDE_EFFECTING` or `UNKNOWN` otherwise | is not made again: the effect completes as `outcome_unknown`, and the model receives an error result saying the call may or may not have taken effect |
+
+### Serving a tool set over HTTP
+
+`rollout.core.harness.remote.serve(tool_set)` returns a Starlette application with two routes:
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /specifications` | | the tool specifications |
+| `POST /call` | `name`, `arguments`, `effect_id`, `arguments_digest` | the `ToolResult`; status 500 with `error` when the tool set raised |
+
+`rollout tools FACTORY [--directory DIRECTORY] [--host 127.0.0.1] [--port 8700]` serves the tool set that
+`FACTORY` (`module:function`, called with the directory) returns. A run reaches it with `ToolBinding(url=...)`;
+task code calls `run.tools` the same way in both cases. A deployment profile names each tool set once
+([deploying](deploying.md)).
+
 ## What tools are not
 
-- **Tool bodies are task code, not effects.** Under the durable runner (M2), a tool body may run again during
-  replay. Work that must happen exactly once belongs in effects: model samples, environment operations, imported
-  tools.
+- **Tool bodies are task code, not effects.** The durable runner resumes a run by running its code again, so a
+  tool body may run more than once. Work that must happen once belongs in effects: model samples, environment
+  operations, imported tools.

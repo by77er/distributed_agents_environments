@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 import subprocess
 from pathlib import Path
@@ -72,6 +73,22 @@ async def test_commands_time_out_and_report_failures(environments: NamespaceEnvi
     assert slow.timed_out and slow.exit_code is None
     failing = await environments.execute("e_slow", "echo oops >&2; exit 3", timeout_seconds=30, cwd=None)
     assert (failing.exit_code, failing.output) == (3, "oops\n")
+
+
+async def test_a_cancelled_command_is_killed(environments: NamespaceEnvironments) -> None:
+    await environments.create("e_cancelled", EnvironmentSpecification())
+    workspace = environments.root("e_cancelled") / "workspace"
+    command = "touch started; sleep 1; touch survived"
+    running = asyncio.create_task(environments.execute("e_cancelled", command, timeout_seconds=30, cwd=None))
+    for _ in range(1000):  # until the command is running
+        if (workspace / "started").exists():
+            break
+        await asyncio.sleep(0.01)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    await asyncio.sleep(1.5)
+    assert not (workspace / "survived").exists()
 
 
 async def test_long_output_is_saved_inside_the_environment(environments: NamespaceEnvironments) -> None:

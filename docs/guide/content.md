@@ -2,7 +2,8 @@
 
 Everything a model reads or writes is **canonical content**: model-agnostic messages made of typed blocks. Task
 and agent code use only this form; rendering to a model's tokens happens in the recorder or inside a provider.
-The types live in `rollout.core.contracts` and are defined once, in [canonical content](../contracts/canonical-content.md).
+The types live in `rollout.core.contracts` and are specified in
+[canonical content](../contracts/canonical-content.md).
 
 ## Messages and blocks
 
@@ -51,18 +52,55 @@ it.
 ## Tool specifications and results
 
 `ToolSpecification` is what the model sees about a tool (`name`, `description`, `input_schema`, `output_schema`)
-plus fields it never sees (`annotations`, `retry_class`, `timeout_ms`, `max_result_bytes`). `@tool` builds these
-for you ([tools](tools.md)).
+plus fields it never sees (`annotations`, `retry_class`, `timeout_ms`, `max_result_bytes`). `@tool` builds one from
+a method ([tools](tools.md)).
 
 `ToolResult` is what a tool produces:
 
 | Field | Meaning |
 |---|---|
 | `content` | text and media blocks shown to the model |
-| `structured` | an optional JSON value (validated against `output_schema` when there is one) |
+| `structured` | an optional JSON value |
 | `is_error` | a tool-level error the model should see and reason about |
-| `truncated`, `overflow` | output cut to `max_result_bytes`, with the full output in blob storage |
-| `provenance` | whether the result came from untrusted input, and from what kind of binding |
+| `truncated`, `overflow` | set by a tool that cut its output: a flag, and a `BlobReference` to the full output |
+| `provenance` | `untrusted`: whether the result came from untrusted input; `binding_kind`: what kind of binding produced it |
+
+## Media and blobs
+
+A `Media` block holds a media type and a `BlobReference` (`uri`, `sha256`, `size`, `media_type`), never the bytes.
+Task code stores bytes with `run.blobs.put(data, media_type)` and puts the reference it gets in a `Media` block;
+model adapters read the bytes back when they render the block ([models](models.md)). Storing is not an effect: in
+one store the reference depends only on the bytes, so storing them again returns the same reference.
+
+```python
+import asyncio
+import tempfile
+from pathlib import Path
+
+from rollout.core.contracts import Media
+from rollout.core.harness import FileBlobStore
+
+
+async def store_an_image() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        blobs = FileBlobStore(Path(directory))               # what a task reaches as run.blobs
+        reference = await blobs.put(b"not really a PNG", "image/png")
+        assert reference == await blobs.put(b"not really a PNG", "image/png")
+        picture = Message(role=Role.USER, content=[Text(text="What is this?"),
+                                                   Media(media_type="image/png", source=reference)])
+        assert await blobs.read(picture.content[1].source) == b"not really a PNG"
+
+
+asyncio.run(store_an_image())
+```
+
+| Store | Keeps |
+|---|---|
+| `FileBlobStore(directory)` | one file per blob, named by its SHA-256 |
+| `rollout.adapters.s3.S3BlobStore` | one object per blob, in S3 or an S3-compatible store |
+
+Both implement `Blobs` (`put`, `read`). A runner takes one as `blobs=`. Blobs are read by hash, so stores are
+interchangeable.
 
 ## Immutability and JSON
 
@@ -94,6 +132,5 @@ chain = context_digests([question, call, answer])   # d0 … d3
 assert context_digests([question, call])[-1] == chain[2]   # a prefix is recognizable by its own digest
 ```
 
-The context digest chain lets an endpoint recognize that a new request extends a previous one, so only the new
-messages need to be sent. Requests carry the chain's last value today; sending only the new messages arrives with
-the model adapters (M0 task 6).
+Every sample request carries the whole context in `request.context.append`, and the chain's last value in
+`request.context.digest`. A run's events name a sample's context by that digest.

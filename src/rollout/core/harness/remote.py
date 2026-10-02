@@ -4,7 +4,7 @@ Whoever builds an environment decides where its worlds live: in the process that
 their own. `serve(tool_set)` is the second, and a binding's `ToolBinding(url=...)` is all a run needs to reach it;
 the program calls `run.tools` the same way either way.
 
-    GET  /specifications      the tools
+    GET  /specifications      {"specifications", "deduplicates"}: the tools, and whether the tool set deduplicates
     POST /call                {"name", "arguments", "effect_id", "arguments_digest"} → a `ToolResult`
 
 A call that raises is a platform failure, as in process: the service answers 500 with the error, and the client
@@ -19,7 +19,7 @@ import httpx
 from pydantic import JsonValue
 
 from rollout.core.contracts import ToolResult, ToolSpecification
-from rollout.core.harness.imports import ToolSet
+from rollout.core.harness.imports import ToolSet, deduplicates
 
 
 def serve(tool_set: ToolSet) -> Any:
@@ -30,7 +30,8 @@ def serve(tool_set: ToolSet) -> Any:
     from starlette.routing import Route
 
     async def specifications(request: Request) -> Response:
-        return JSONResponse([s.model_dump(mode="json", exclude_none=True) for s in tool_set.specifications()])
+        tools = [s.model_dump(mode="json", exclude_none=True) for s in tool_set.specifications()]
+        return JSONResponse({"specifications": tools, "deduplicates": deduplicates(tool_set)})
 
     async def call(request: Request) -> Response:
         body = await request.json()
@@ -49,8 +50,8 @@ def serve(tool_set: ToolSet) -> Any:
 
 
 class RemoteToolSet:
-    """A `ToolSet` served at `url`. It deduplicates if the tool set behind it does: the effect's id goes with every
-    call."""
+    """A `DeduplicatingToolSet` served at `url`. It deduplicates if the tool set behind it does: the effect's id goes
+    with every call."""
 
     def __init__(
         self,
@@ -58,19 +59,30 @@ class RemoteToolSet:
         *,
         client: httpx.AsyncClient | None = None,
         specifications: Sequence[ToolSpecification] | None = None,
+        deduplicating: bool = False,
         timeout: float = 600.0,
     ) -> None:
-        """`specifications`: the tools, if the caller already has them (they are asked for otherwise)."""
+        """`specifications` and `deduplicating`: the tools and whether the tool set deduplicates, if the caller
+        already knows (the tool set is asked otherwise)."""
         self._url = url
         self._http = client or httpx.AsyncClient(base_url=url, timeout=timeout)
-        self._specifications = list(specifications) if specifications is not None else None
+        self._described = (list(specifications), deduplicating) if specifications is not None else None
+
+    @property
+    def deduplicates(self) -> bool:
+        return self._describe()[1]
 
     def specifications(self) -> Sequence[ToolSpecification]:
-        if self._specifications is None:  # (asked once, before any call: a plain request, as runs are being set up)
+        return self._describe()[0]
+
+    def _describe(self) -> tuple[list[ToolSpecification], bool]:
+        if self._described is None:  # (asked once, before any call: a plain request, as runs are being set up)
             response = httpx.get(f"{self._url}/specifications", timeout=30)
             response.raise_for_status()
-            self._specifications = [ToolSpecification.model_validate(entry) for entry in response.json()]
-        return self._specifications
+            described = response.json()
+            tools = [ToolSpecification.model_validate(entry) for entry in described["specifications"]]
+            self._described = (tools, bool(described["deduplicates"]))
+        return self._described
 
     async def call(
         self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str

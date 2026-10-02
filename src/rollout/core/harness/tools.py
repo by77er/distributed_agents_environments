@@ -118,7 +118,6 @@ def _declare(attribute: str, function: Callable[..., Any], options: ToolOptions)
         description=inspect.getdoc(function) or "",
         input_schema=schema,
         retry_class=options.retry_class,
-        timeout_ms=int(options.timeout.total_seconds() * 1000) if options.timeout else None,
     )
     return DeclaredTool(attribute, specification, arguments_model, options.timeout, wants_run)
 

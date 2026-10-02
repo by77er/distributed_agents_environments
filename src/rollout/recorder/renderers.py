@@ -2,16 +2,15 @@
 
 A `Renderer` turns canonical messages and tool specifications into prompt tokens, says how thinking is delimited,
 and parses sampled tokens back into a canonical message (reasoning, text, tool calls). The recorder and trainers
-depend only on this protocol; a model family is supported by registering a renderer, usually a
-`ChatTemplateRenderer` (the tokenizer's chat template) with that family's `ToolCallFormat` and `ThinkingFormat`.
-
-    renderer = renderer_for("qwen3.5", tokenizer)
+depend only on this protocol; a model family is supported by a function that makes its renderer from a checkpoint's
+name (`qwen35`, `qwen3`), usually a `ChatTemplateRenderer` (the tokenizer's chat template) with that family's
+`ToolCallFormat` and `ThinkingFormat`. A deployment's profile names the function.
 """
 
 import json
 import re
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -166,8 +165,10 @@ class ChatTemplateRenderer:
         text = text.split(self._end)[0]
         blocks: list[Reasoning | Text | ToolCall] = []
         if self.thinking is not None and self.thinking.close in text:
-            reasoning, text = text.split(self.thinking.close, 1)
-            reasoning = reasoning.replace(self.thinking.open, "").strip()
+            # The last close ends the thinking: a model whose thinking was closed for it may go on thinking, and
+            # close it again itself.
+            reasoning, text = text.rsplit(self.thinking.close, 1)
+            reasoning = reasoning.replace(self.thinking.open, "").replace(self.thinking.close, "").strip()
             if reasoning:
                 blocks.append(Reasoning(scope=ReasoningScope.PORTABLE, text=reasoning))
         elif self.thinking is not None and self.thinking.prompt_opens:  # thinking never closed: all of it is thought
@@ -183,32 +184,36 @@ class ChatTemplateRenderer:
         return Message(role=Role.ASSISTANT, content=blocks)
 
 
-# Registry
+# Model families
 
-RENDERERS: dict[str, Callable[[Tokenizer], Renderer]] = {
-    "qwen3.5": lambda tokenizer: ChatTemplateRenderer(
+
+def tokenizer_of(model: str) -> Tokenizer:
+    """The tokenizer of a checkpoint, by its name or path."""
+    from transformers import AutoTokenizer
+
+    return cast(Tokenizer, AutoTokenizer.from_pretrained(model))  # pyright: ignore[reportUnknownMemberType]
+
+
+def qwen35(model: str | Tokenizer) -> Renderer:
+    """Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer."""
+    return ChatTemplateRenderer(
         "qwen3.5",
-        tokenizer,
+        tokenizer_of(model) if isinstance(model, str) else model,
         XmlFunctionCalls(),
         ThinkingFormat(open="<think>", close="</think>", prompt_opens=True, forced_close="\n</think>\n\n"),
         end="<|im_end|>",
-    ),
-    "qwen3": lambda tokenizer: ChatTemplateRenderer(
+    )
+
+
+def qwen3(model: str | Tokenizer) -> Renderer:
+    """Qwen3: JSON tool calls, and thinking the model opens. `model` is a checkpoint's name, or its tokenizer."""
+    return ChatTemplateRenderer(
         "qwen3",
-        tokenizer,
+        tokenizer_of(model) if isinstance(model, str) else model,
         JsonToolCalls(),
         ThinkingFormat(open="<think>", close="</think>", prompt_opens=False, forced_close="\n</think>\n\n"),
         end="<|im_end|>",
-    ),
-}
-"""Renderers by family. Register another with `RENDERERS[name] = factory`."""
-
-
-def renderer_for(name: str, tokenizer: Tokenizer) -> Renderer:
-    factory = RENDERERS.get(name)
-    if factory is None:
-        raise KeyError(f"no renderer {name!r}; known: {sorted(RENDERERS)}")
-    return factory(tokenizer)
+    )
 
 
 # Canonical content → chat template dictionaries

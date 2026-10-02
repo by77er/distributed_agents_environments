@@ -52,11 +52,16 @@ class Status:
     """The cursor the caller has consumed through."""
 
 
+class Refused(Exception):
+    """A job would not run a ticket: its guard refused (a machine out of memory, say), or the job was closed."""
+
+
 class Ticket(Protocol):
     id: str
 
     async def episodes(self) -> list[Episode]:
-        """The ticket's episodes, once every one of its runs has ended (in the order they ended)."""
+        """The ticket's episodes, once every one of its runs has ended (in the order they ended). Raises `Refused`
+        if the job would not run it."""
         ...
 
 
@@ -96,22 +101,31 @@ class Job(Protocol):
 
 
 @dataclass
-class _Ticket:
+class RolloutTicket:
+    """A ticket of a `RolloutJob`. The job keeps it until its episodes are acknowledged."""
+
     id: str
     parameters: JsonValue
     labels: Mapping[str, str]
     count: int
     ended: list[Episode] = field(default_factory=list[Episode])
-    done: asyncio.Event = field(default_factory=asyncio.Event)
-    failure: BaseException | None = None
-    collected: Callable[[], None] = lambda: None
+    refused: str | None = None
+    """Why the job would not run it, if it would not."""
+    _done: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def episodes(self) -> list[Episode]:
-        await self.done.wait()
-        self.collected()
-        if self.failure is not None:
-            raise self.failure
+        await self._done.wait()
+        if self.refused is not None:
+            raise Refused(self.refused)
         return list(self.ended)
+
+    async def ready(self, seconds: float) -> bool:
+        """Whether the ticket is over (its runs have all ended, or it was refused), waiting up to `seconds`."""
+        try:
+            await asyncio.wait_for(self._done.wait(), seconds)
+        except TimeoutError:
+            return False
+        return True
 
 
 class RolloutJob:
@@ -137,9 +151,8 @@ class RolloutJob:
         self._log = log
         self._hooks = hooks
         self._guard = guard
-        self._queue: list[_Ticket] = []
-        self.tickets: dict[str, _Ticket] = {}
-        """Tickets by id, until their episodes have been collected (`collect`)."""
+        self._queue: list[RolloutTicket] = []
+        self._tickets: dict[str, RolloutTicket] = {}
         self._running = 0
         self._episodes: list[Episode] = []
         self._first = 1  # the cursor of `_episodes[0]`
@@ -157,13 +170,14 @@ class RolloutJob:
 
     # For the caller
 
-    async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> _Ticket:
+    async def run(
+        self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1
+    ) -> RolloutTicket:
         if self._closed:
             raise RuntimeError(f"job {self.id} is closed")
-        ticket = _Ticket(f"t_{uuid.uuid4().hex[:10]}", parameters, dict(labels or {}), count)
-        ticket.collected = lambda: self.collect(ticket.id)
+        ticket = RolloutTicket(f"t_{uuid.uuid4().hex[:10]}", parameters, dict(labels or {}), count)
         self._queue.append(ticket)
-        self.tickets[ticket.id] = ticket
+        self._tickets[ticket.id] = ticket
         self._tell("ticket", ticket=ticket.id, labels=dict(ticket.labels), count=count)
         self._spawn(self._admit())
         return ticket
@@ -179,9 +193,9 @@ class RolloutJob:
                 cursor = episode.cursor
                 yield episode
 
-    def collect(self, ticket: str) -> None:
-        """A ticket's episodes have been read: it need not be kept."""
-        self.tickets.pop(ticket, None)
+    def ticket(self, ticket: str) -> RolloutTicket:
+        """A ticket by its id (for a caller that holds only the id), until its episodes are acknowledged."""
+        return self._tickets[ticket]
 
     def after(self, cursor: int) -> list[Episode]:
         """The episodes after `cursor` that are in the log now."""
@@ -194,6 +208,9 @@ class RolloutJob:
             self._first = done.cursor + 1
             if self._log is not None:
                 (self._log / f"{done.cursor:09d}.json").unlink(missing_ok=True)
+        for ticket in [t for t in self._tickets.values() if t._done.is_set()]:  # pyright: ignore[reportPrivateUsage]
+            if all(episode.cursor <= cursor for episode in ticket.ended):
+                del self._tickets[ticket.id]
 
     async def publish(self, channel: str, adapter: str, path: str) -> int:
         version = await self._recorder.publish(channel, adapter, path)
@@ -211,8 +228,8 @@ class RolloutJob:
         """Stop admitting, cancel what is running, and end every `episodes` stream."""
         self._closed = True
         for ticket in self._queue:
-            ticket.failure = RuntimeError(f"job {self.id} was closed before the ticket was admitted")
-            ticket.done.set()
+            ticket.refused = f"job {self.id} was closed before the ticket was admitted"
+            ticket._done.set()  # pyright: ignore[reportPrivateUsage]
         self._queue.clear()
         for task in list(self._tasks):
             task.cancel()
@@ -242,8 +259,8 @@ class RolloutJob:
                 try:
                     self._guard()
                 except Exception as error:  # refused (no memory, say): the ticket's caller is told
-                    ticket.failure = error
-                    ticket.done.set()
+                    ticket.refused = f"{type(error).__name__}: {error}"
+                    ticket._done.set()  # pyright: ignore[reportPrivateUsage]
                     continue
             self._running += ticket.count
             labels = {**ticket.labels, "job": self.id, "ticket": ticket.id}
@@ -260,11 +277,11 @@ class RolloutJob:
                 self._spawn(self._watch(ticket, handle.run_id, handle.events()))
             self._tell("admitted", ticket=ticket.id, runs=list(started))
 
-    def _specification_for(self, ticket: _Ticket) -> RunSpecification:
+    def _specification_for(self, ticket: RolloutTicket) -> RunSpecification:
         program = with_row(self._specification.program, ticket.parameters)
         return self._specification.model_copy(update={"program": program})
 
-    async def _watch(self, ticket: _Ticket, run_id: str, stream: AsyncIterator[RunEvent]) -> None:
+    async def _watch(self, ticket: RolloutTicket, run_id: str, stream: AsyncIterator[RunEvent]) -> None:
         events: list[RunEvent] = []
         try:
             async for event in stream:
@@ -276,7 +293,7 @@ class RolloutJob:
 
     async def _ended(
         self,
-        ticket: _Ticket,
+        ticket: RolloutTicket,
         run_id: str,
         events: Sequence[RunEvent],
         epochs: Mapping[str, list[Epoch]],
@@ -297,7 +314,7 @@ class RolloutJob:
             (self._log / f"{episode.cursor:09d}.json").write_text(json.dumps(episode.to_json()))
         ticket.ended.append(episode)
         if len(ticket.ended) == ticket.count:
-            ticket.done.set()
+            ticket._done.set()  # pyright: ignore[reportPrivateUsage]
         self._tell(
             "episode",
             cursor=episode.cursor,
@@ -340,14 +357,17 @@ class RolloutJobs:
         self._log = log
         self._hooks = list(hooks)
         self._guard = guard
-        self.jobs: dict[str, RolloutJob] = {}
+        self._jobs: dict[str, RolloutJob] = {}
 
     async def start(
         self, *, program: ProgramReference, binding: RunBinding, in_flight: int, name: str = ""
     ) -> RolloutJob:
         """A job that runs `program` (with each ticket's row as its parameters) under `binding`, at most `in_flight`
-        runs at a time. A `name` makes the job's log one a later process finds again."""
+        runs at a time. A `name` makes the job's log one a later caller finds again: a job of that name that is
+        still open is closed first (its runs are cancelled), and the new one goes on over its log."""
         job_id = name or f"j_{uuid.uuid4().hex[:10]}"
+        if job_id in self._jobs:
+            await self._jobs[job_id].close()
         job = RolloutJob(
             job_id,
             RunSpecification(program=program, binding=binding),
@@ -358,8 +378,12 @@ class RolloutJobs:
             hooks=self._hooks,
             guard=self._guard,
         )
-        self.jobs[job_id] = job
+        self._jobs[job_id] = job
         return job
 
+    def job(self, job: str) -> RolloutJob:
+        """A job by its id (for a caller that holds only the id)."""
+        return self._jobs[job]
+
     async def close(self) -> None:
-        await asyncio.gather(*(job.close() for job in self.jobs.values()))
+        await asyncio.gather(*(job.close() for job in self._jobs.values()))

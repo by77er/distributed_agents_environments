@@ -4,7 +4,6 @@ from rollout.core.contracts import (
     EMPTY_DIGEST,
     Message,
     RetryClass,
-    ToolAnnotations,
     ToolSpecification,
     arguments_digest,
     canonical_json,
@@ -26,13 +25,7 @@ def test_arguments_digest_ignores_key_order_but_not_nulls() -> None:
 
 def test_spec_hash_covers_only_model_visible_fields() -> None:
     plain = ToolSpecification(name="search", description="Search the web.")
-    extended = ToolSpecification(
-        name="search",
-        description="Search the web.",
-        annotations=ToolAnnotations(read_only_hint=True),
-        retry_class=RetryClass.IDEMPOTENT,
-        timeout_ms=1000,
-    )
+    extended = ToolSpecification(name="search", description="Search the web.", retry_class=RetryClass.IDEMPOTENT)
     assert spec_hash(plain) == spec_hash(extended)
     assert spec_hash(plain) != spec_hash(ToolSpecification(name="search", description="Search."))
 

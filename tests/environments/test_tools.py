@@ -16,6 +16,7 @@ from rollout.core.harness import (
     Observation,
     RunBinding,
     RunContext,
+    Runner,
     RunSpecification,
     RunStatus,
     Task,
@@ -166,16 +167,15 @@ async def test_an_agent_works_on_a_computer_with_the_tools(
         "environments": LocalEnvironments(tmp_path / "environments"),
         "blobs": blobs,
     }
+    runner: Runner
     runner = DurableRunner(tmp_path / "runs", database=database, **services) if durable else LocalRunner(**services)
-    if isinstance(runner, DurableRunner):
-        await runner.launch()
+    await runner.launch()
     try:
         binding = RunBinding(models={"policy": ModelBinding(direct=DirectModel(provider="scripted", model="s"))})
         handle = await runner.start(RunSpecification(program=agent_program(Workbench), binding=binding))
         assert (await handle.result()).status is RunStatus.COMPLETED
     finally:
-        if isinstance(runner, DurableRunner):
-            await runner.close()
+        await runner.close()
 
     found = results(endpoint)
     assert text(found["e1"]) == text(found["e2"]) == "Edited notes.txt: 1 replacement."

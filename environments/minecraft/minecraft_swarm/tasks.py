@@ -6,8 +6,8 @@ reward. Three tiers:
 - **Skills** (staged or safe): the plugin builds the situation from ground truth: diamonds lying in a lit room, chests
   around corners, natural ore exposed in a pocket's wall or hidden nearby. Kits remove steps of the tech tree.
   Objective: the diamonds the team holds at the end. Also here, the **crafting** tasks: among trees on a peaceful
-  surface with nothing at all, make an item whose recipe is several steps deep, gathering every material (a crafting
-  table; a stone pickaxe; a furnace; torches; an iron pickaxe). Objective: the steps of the chain the team got done.
+  surface with nothing at all, make an item whose recipe is several steps deep, gathering every material (from a
+  crafting table to a diamond pickaxe: `CHAINS`). Objective: the steps of the chain the team got done.
 - **Survival** (natural): a natural world, a real day and night, mobs and no kept inventory. Nothing is staged; only
   the start (a cave, the surface, the nether, beside a fortress or a stronghold, the end) and the kit decide where
   along the game the task begins. Objectives: diamonds held, or progress toward the dragon.
@@ -30,11 +30,14 @@ from pydantic import BaseModel, ConfigDict
 
 from minecraft_swarm.control import Control
 
+TEAM = ["ada", "ben", "cy", "dee"]
+"""The agents of an episode, by the names they play under."""
+
 DIAMOND_DEPTH = -58
 TURNS_PER_MINUTE = 12
-"""A task's budget of turns for each minute of its budget of game time: what the minute would take if every turn ran
-its full five seconds. Turns are what cost real time (each is a round of thinking), and a turn whose actions end
-quickly spends little game time: without this, four minutes of game time ran to over a hundred turns."""
+"""A task's budget of turns for each minute of its budget of game time, however long a window runs. Turns are what
+cost real time (each is a round of thinking), and a turn whose actions end at once spends under a second of game
+time: with a budget of game time alone, four minutes of it can run to over a hundred turns."""
 
 MILESTONES: dict[str, float] = {
     "story/mine_stone": 1,
@@ -79,7 +82,7 @@ class Start(StrEnum):
     ORE_IN_SIGHT = "ore_in_sight"
     """Staged: a pocket at diamond depth whose wall exposes natural diamond ore."""
     ORE_NEARBY = "ore_nearby"
-    """Staged: a pocket 4 to 8 blocks from hidden ore."""
+    """Staged: a pocket 5 to 8 blocks from hidden ore."""
     ORE_FAR = "ore_far"
     """Staged: a pocket 8 to 24 blocks from the nearest ore."""
     CAVE = "cave"
@@ -166,6 +169,28 @@ class Task(BaseModel):
     def turns(self) -> int:
         """Budget of turns."""
         return round(self.minutes * TURNS_PER_MINUTE)
+
+    @property
+    def keeps_inventory(self) -> bool:
+        """Whether whoever dies keeps what they carried: only where nothing is out to hurt the team."""
+        return self.hazards is Hazards.SAFE
+
+    @property
+    def lit(self) -> bool:
+        """Whether what is built for the task is lit, so that nothing spawns in it."""
+        return self.hazards is Hazards.SAFE
+
+    @property
+    def laid_out(self) -> bool:
+        """Whether the task's diamonds are laid out, on the floor or in chests: the only starts whose diamonds are
+        counted exactly (`Built.available_diamonds`)."""
+        return self.start in (Start.ITEMS, Start.CHESTS)
+
+    @property
+    def counts_early_steps(self) -> bool:
+        """Whether the steps before the first advancement (`EARLY`) count toward progress: for a team that starts
+        with nothing."""
+        return self.objective is Objective.PROGRESS and self.kit is Kit.NOTHING
 
     goal: str | None = None
     """What counts as solving the task: for a progress task the milestone it is about, for a crafting task the item
@@ -455,7 +480,7 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
     if state.get("dragon_killed"):  # (the advancement goes to a player; the dragon may die with no one credited)
         earned.add("end/kill_dragon")
     reward = float(sum(weight for key, weight in MILESTONES.items() if key in earned))
-    if task.kit is Kit.NOTHING:  # from nothing, the steps before the first advancement count too
+    if task.counts_early_steps:
         made = set(done(EARLY, state.get("team_obtained", {})))
         reward += sum(weight for name, _, weight in EARLY if name in made)
     if "end/kill_dragon" not in earned:  # hurting the dragon counts for something
@@ -463,7 +488,7 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
     return reward
 
 
-SOLVED_DIAMONDS = 4
+SOLVED_DIAMONDS = len(TEAM)
 """Diamonds the team must hold for a task with natural ore to count as solved: one each."""
 
 
@@ -472,7 +497,7 @@ def solved(task: Task, state: Mapping[str, Any], available: int | None = None) -
     the staged starts that count them) or one each from ore, made the task's item, or earned its milestone."""
     if task.objective is Objective.DIAMONDS:
         held = int(state["team_diamonds"])
-        if task.start in (Start.ITEMS, Start.CHESTS) and available:
+        if task.laid_out and available:
             return 2 * held > available
         return held >= SOLVED_DIAMONDS
     if task.objective is Objective.CRAFT:
@@ -480,6 +505,16 @@ def solved(task: Task, state: Mapping[str, Any], available: int | None = None) -
     if task.goal == "end/kill_dragon" and state.get("dragon_killed"):
         return True
     return task.goal in set(state.get("team_advancements", []))
+
+
+def saturated(task: Task, state: Mapping[str, Any], available: int) -> bool:
+    """Whether nothing is left to earn, so that the episode may end: every diamond laid out (`available`) is held, the
+    task's item is made, or the dragon is dead."""
+    return (
+        bool(state.get("dragon_killed"))
+        or (task.laid_out and int(state["team_diamonds"]) >= available)
+        or (task.objective is Objective.CRAFT and solved(task, state))
+    )
 
 
 # Building a task in a live world
@@ -561,7 +596,7 @@ async def build(task: Task, control: Control, team: list[str], rng: random.Rando
         "gamerules": {
             "do_daylight_cycle": natural,
             "do_weather_cycle": natural,
-            "keep_inventory": task.hazards is Hazards.SAFE,
+            "keep_inventory": task.keeps_inventory,
         },
     }
     result = await control.episode(setup)
@@ -579,8 +614,8 @@ async def _spots(control: Control, point: Point, radius: int, world: str = "worl
     return [(spot["x"], spot["y"], spot["z"]) for spot in spots]
 
 
-def _spread(spots: Sequence[Point], count: int = 4) -> list[Point]:
-    """Distinct spots a little apart (two agents cannot stand in one block)."""
+def _spread(spots: Sequence[Point], count: int = len(TEAM)) -> list[Point]:
+    """Distinct spots a little apart (two agents cannot stand in one block): one for each of the team."""
     chosen: list[Point] = []
     for spot in spots:
         if all(math.dist(spot, other) >= 1.0 for other in chosen):
@@ -603,12 +638,11 @@ async def _ore_count(control: Control, point: Point) -> int:
 
 async def _items(task: Task, control: Control, rng: random.Random) -> Site:
     x, y, z = _anchor(rng, y=-30)
-    light = task.hazards is Hazards.SAFE
     if task.apart:  # diamonds in the middle room; each agent starts in its own side room, around a corner
-        rooms = await _room_with_side_rooms(control, (x, y, z), light)
+        rooms = await _room_with_side_rooms(control, (x, y, z), task.lit)
         total = await _drop_piles(control, (x, y, z), rng, spread=2)
         return Site([(rx + 1, y, rz + 1) for rx, rz in rooms], total, (x, y, z))
-    await control.carve(x - 4, y, z - 4, width=9, height=3, depth=9, light=light)
+    await control.carve(x - 4, y, z - 4, width=9, height=3, depth=9, light=task.lit)
     starts = _spread(await _spots(control, (x - 3, y, z - 3), 2))  # in a corner of the room, away from the piles
     total = await _drop_piles(control, (x, y, z), rng, spread=3, clear_of=starts)
     return Site(starts, total, (x, y, z))
@@ -616,7 +650,7 @@ async def _items(task: Task, control: Control, rng: random.Random) -> Site:
 
 async def _chests(task: Task, control: Control, rng: random.Random) -> Site:
     x, y, z = _anchor(rng, y=-30)
-    rooms = await _room_with_side_rooms(control, (x, y, z), task.hazards is Hazards.SAFE)
+    rooms = await _room_with_side_rooms(control, (x, y, z), task.lit)
     total = 0
     for rx, rz in rooms:
         count = rng.randint(2, 6)
@@ -687,8 +721,7 @@ async def _iron_in_wall(control: Control, task: Task, corner: Point) -> None:
 
 async def _pocket(control: Control, center: Point, task: Task) -> list[Point]:
     x, y, z = center
-    light = task.hazards is Hazards.SAFE
-    await control.carve(x - 2, y, z - 2, width=5, height=3, depth=5, light=light, floor="deepslate")
+    await control.carve(x - 2, y, z - 2, width=5, height=3, depth=5, light=task.lit, floor="deepslate")
     await _iron_in_wall(control, task, (x - 2, y, z - 2))
     return _spread(await _spots(control, center, 2))
 
@@ -699,8 +732,7 @@ async def _ore_in_sight(task: Task, control: Control, rng: random.Random) -> Sit
         raise BuildError("no diamond ore here")
     ox, oy, oz = rng.choice(ores)
     # A pocket whose west wall holds the ore at eye level: the ore is exposed and in sight from inside.
-    light = task.hazards is Hazards.SAFE
-    await control.carve(ox + 1, oy - 1, oz - 2, width=5, height=3, depth=5, light=light, floor="deepslate")
+    await control.carve(ox + 1, oy - 1, oz - 2, width=5, height=3, depth=5, light=task.lit, floor="deepslate")
     await _iron_in_wall(control, task, (ox + 1, oy - 1, oz - 2))
     starts = _spread(await _spots(control, (ox + 3, oy - 1, oz), 2))
     return Site(starts, await _ore_count(control, (ox, oy, oz)), (ox, oy, oz))
@@ -735,7 +767,7 @@ async def _cave(task: Task, control: Control, rng: random.Random) -> Site:
     x, _, z = _anchor(rng)
     y = rng.randint(-50, -10)
     caves = [spot for spot in await _spots(control, (x, y, z), 12, limit=64) if abs(spot[1] - y) <= 12]
-    if len(caves) < 4:
+    if len(caves) < len(TEAM):
         raise BuildError("no natural cave here")
     first = caves[0]
     if await control.find_blocks("sculk_shrieker", *first, radius=24, limit=1):
@@ -763,7 +795,7 @@ async def _woodland(task: Task, control: Control, rng: random.Random) -> Site:
         foot[column] = min(foot.get(column, log["y"]), log["y"])
     for (x, z), y in sorted(foot.items(), key=lambda trunk: math.hypot(trunk[0][0] - ax, trunk[0][1] - az)):
         starts = _spread([spot for spot in await _spots(control, (x, y, z), 4) if abs(spot[1] - y) <= 1])
-        if len(starts) >= 4:
+        if len(starts) >= len(TEAM):
             return Site(starts, site.available_diamonds, (x, y, z))
     raise BuildError("no trees here")
 
@@ -771,7 +803,7 @@ async def _woodland(task: Task, control: Control, rng: random.Random) -> Site:
 async def _nether(task: Task, control: Control, rng: random.Random) -> Site:
     x, z = rng.randint(-100, 100), rng.randint(-100, 100)
     spots = await _spots(control, (x, 64, z), 24, world="world_nether", limit=64)
-    if len(spots) < 4:
+    if len(spots) < len(TEAM):
         raise BuildError("no ground here in the nether")
     return Site(_spread(spots), 0, spots[0], world="world_nether")
 
@@ -781,7 +813,7 @@ async def _fortress(task: Task, control: Control, rng: random.Random) -> Site:
     if found is None:
         raise BuildError("no fortress near")
     spots = await _spots(control, (found["x"], 64, found["z"]), 32, world="world_nether", limit=64)
-    if len(spots) < 4:
+    if len(spots) < len(TEAM):
         raise BuildError("no ground beside the fortress")
     return Site(_spread(spots), 0, spots[0], world="world_nether")
 
@@ -815,6 +847,6 @@ async def _portal_room(task: Task, control: Control, rng: random.Random) -> Site
 
 async def _end(task: Task, control: Control, rng: random.Random) -> Site:
     spots = await _spots(control, (100, 49, 0), 8, world="world_the_end", limit=64)
-    if len(spots) < 4:
+    if len(spots) < len(TEAM):
         raise BuildError("no platform in the end")
     return Site(_spread(spots), 0, spots[0], world="world_the_end")

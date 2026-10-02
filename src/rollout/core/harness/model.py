@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Protocol, cast
+from typing import Protocol
 
 from pydantic import JsonValue
 from pydantic_core import to_jsonable_python
@@ -23,6 +23,7 @@ from rollout.core.contracts import (
     ToolChoice,
     ToolSpecification,
     Usage,
+    address_of,
     context_digests,
     spec_hash,
 )
@@ -52,7 +53,7 @@ class Effects(Protocol):
 
 
 class EndpointModel:
-    """A model slot bound to an endpoint. Sends the full context; context deltas come with the direct adapters."""
+    """A model slot bound to an endpoint. Every sample sends the full context."""
 
     def __init__(
         self, endpoint: ModelEndpoint, session_id: str, effects: Effects, *, retries: int = 3, backoff: float = 1.0
@@ -74,10 +75,7 @@ class EndpointModel:
         return self._usage
 
     def address(self) -> ModelAddress:
-        serve = getattr(self._endpoint, "address", None)
-        if serve is None:
-            raise RuntimeError("this model slot is not served over HTTP: a harness cannot be given an address")
-        return cast(ModelAddress, serve(self._session_id))
+        return address_of(self._endpoint, self._session_id)
 
     async def sample(
         self,

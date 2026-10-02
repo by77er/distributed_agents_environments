@@ -62,7 +62,6 @@ def test_specifications_come_from_signatures_and_docstrings() -> None:
         "additionalProperties": False,
     }
     assert specifications["divide"].retry_class is RetryClass.IDEMPOTENT
-    assert specifications["slow"].timeout_ms == 10
 
 
 async def test_calls_run_concurrently_and_results_are_normalized() -> None:

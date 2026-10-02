@@ -16,7 +16,7 @@ from rollout.core.harness import (
     agent_program,
 )
 from rollout.core.local import LocalRunner
-from rollout.recorder import Recorder, Span, renderer_for
+from rollout.recorder import Recorder, Span, qwen3, qwen35
 from rollout.recorder.renderers import Tokenizer
 from tests.support import ScriptedEngine, channel, plain_channel, qwen_tokenizer, sample_request
 
@@ -37,7 +37,7 @@ def tokenizer() -> Tokenizer:
 
 
 def test_qwen35_renders_an_open_thinking_block_and_tools(tokenizer: Tokenizer) -> None:
-    renderer = renderer_for("qwen3.5", tokenizer)
+    renderer = qwen35(tokenizer)
     tokens = renderer.render([Message.system("You mine."), Message.user("Go.")], [MINE])
     text = tokenizer.decode(tokens)
     assert text.endswith("<|im_start|>assistant\n<think>\n")
@@ -46,7 +46,7 @@ def test_qwen35_renders_an_open_thinking_block_and_tools(tokenizer: Tokenizer) -
 
 
 def test_qwen35_parses_reasoning_and_typed_xml_tool_calls(tokenizer: Tokenizer) -> None:
-    renderer = renderer_for("qwen3.5", tokenizer)
+    renderer = qwen35(tokenizer)
     sampled = (
         "The ore is two blocks east.\n</think>\n\nMining it now.\n\n<tool_call>\n<function=mine>\n"
         "<parameter=x>\n3\n</parameter>\n<parameter=y>\n-58\n</parameter>\n<parameter=z>\n7\n</parameter>\n"
@@ -60,17 +60,20 @@ def test_qwen35_parses_reasoning_and_typed_xml_tool_calls(tokenizer: Tokenizer) 
     assert (call.name, dict(call.arguments)) == ("mine", {"x": 3, "y": -58, "z": 7})
 
 
+def test_thinking_that_goes_on_after_it_was_closed_is_still_thinking(tokenizer: Tokenizer) -> None:
+    renderer = qwen35(tokenizer)
+    sampled = "\n</think>\n\nI should note the ore.\n</think>\n\nOre at (1, 2, 3).<|im_end|>"  # closed by force first
+    message = renderer.parse(renderer.encode(sampled), [])
+    (thought,) = [block.text for block in message.content if isinstance(block, Reasoning)]
+    assert message.text == "Ore at (1, 2, 3)." and thought == "I should note the ore."
+
+
 def test_qwen3_parses_json_tool_calls(tokenizer: Tokenizer) -> None:
-    renderer = renderer_for("qwen3", tokenizer)
+    renderer = qwen3(tokenizer)
     call_json = '{"name": "mine", "arguments": {"x": 1, "y": 2, "z": 3}}'
     sampled = f"<think>\nok\n</think>\n\n<tool_call>\n{call_json}\n</tool_call><|im_end|>"
     (call,) = renderer.parse(renderer.encode(sampled), [MINE]).tool_calls
     assert dict(call.arguments) == {"x": 1, "y": 2, "z": 3}
-
-
-def test_unknown_renderers_are_named(tokenizer: Tokenizer) -> None:
-    with pytest.raises(KeyError, match=r"qwen3\.5"):
-        renderer_for("llama9", tokenizer)
 
 
 CALL = (
@@ -170,7 +173,7 @@ async def test_a_conversation_that_only_grows_is_one_sequence_and_an_edited_one_
 async def test_a_long_prompt_leaves_less_room_to_think_so_that_no_turn_is_too_long(tokenizer: Tokenizer) -> None:
     messages = [Message.user("Say hi.")]
     engine = ScriptedEngine(tokenizer, [("thinking " * 30, "length"), ("\n\nhi<|im_end|>", "stop")])
-    renderer = renderer_for("qwen3.5", tokenizer)
+    renderer = qwen35(tokenizer)
     limit = len(renderer.render(messages, [MINE])) + 40
     recorder = Recorder({"policy": channel(engine, thinking=64, answer=16, sequence=limit)})
     await recorder.endpoint(POLICY).sample(sample_request(messages, tools=[MINE]))
@@ -188,7 +191,7 @@ async def test_a_request_can_cap_its_output_down_to_no_thinking_at_all(tokenizer
     result = await recorder.endpoint(POLICY).sample(capped)
     assert result.message.text == "A summary." and engine.budgets == [16]  # one generation: the answer
     (epoch,) = recorder.export("r_1/ada")
-    forced = len(renderer_for("qwen3.5", tokenizer).encode("\n</think>\n\n"))
+    forced = len(qwen35(tokenizer).encode("\n</think>\n\n"))
     assert epoch.spans == [Span(len(engine.prompts[0]), len(epoch.tokens), 0)]  # after the close, which is unsampled
     assert len(engine.prompts[0]) == len(epoch.tokens) - epoch.sampled  # (the engine was shown the close)
     assert forced > 0
@@ -207,6 +210,6 @@ async def test_a_channel_tells_programs_its_limit_and_refuses_what_is_over_it(to
     assert channel(engine, sequence=5400).context_limit == 5400  # or the trainer's, if that is less
 
     messages = [Message.user("Say hi.")]
-    tight = channel(engine, answer=16, sequence=len(renderer_for("qwen3.5", tokenizer).render(messages, [MINE])) + 15)
+    tight = channel(engine, answer=16, sequence=len(qwen35(tokenizer).render(messages, [MINE])) + 15)
     with pytest.raises(ContextOverflow):  # what tells a program to compact and try again
         await Recorder({"policy": tight}).endpoint(POLICY).sample(sample_request(messages, tools=[MINE]))

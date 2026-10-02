@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal
 
 import sqlalchemy as sa
 from pydantic import JsonValue
@@ -26,10 +26,11 @@ from rollout.coordination import (
     register,
 )
 from rollout.coordination.store import now
-from rollout.core.contracts import EffectIdentity, RunEvent, RunEventType, Text
+from rollout.core.contracts import EffectIdentity, RunEvent, RunEventType, Text, new_ulid
 from rollout.core.harness import (
     Address,
     Blobs,
+    ConversationKey,
     Deployment,
     DirectModel,
     Envelope,
@@ -38,6 +39,8 @@ from rollout.core.harness import (
     ModelBinding,
     Priority,
     RunBinding,
+    RunHandle,
+    Runner,
     RunSpecification,
     SamplingParameters,
     ToolBinding,
@@ -47,7 +50,7 @@ from rollout.core.harness import (
 from rollout.core.local import EndpointFactory, LocalRunner
 from rollout.core.testing import LedgerEndpoint, LedgerEnvironments
 from rollout.database import Connection, Database, fetch_all, fetch_one, sql
-from rollout.durable import DurableRunner
+from rollout.durable import DurableRunner, RunStore
 from rollout.environments import ImageStore, LocalEnvironments, NamespaceEnvironments
 from rollout.environments.local import HOST_IMAGE
 
@@ -102,14 +105,6 @@ class SessionInfo:
     created_at: str
 
 
-class SessionRun(Protocol):
-    @property
-    def run_id(self) -> str: ...
-    @property
-    def done(self) -> bool: ...
-    def recorded_events(self) -> list[RunEvent]: ...
-
-
 class SessionsService:
     def __init__(self, settings: Settings, providers: Mapping[str, EndpointFactory]) -> None:
         self.settings = settings
@@ -139,9 +134,11 @@ class SessionsService:
             "sessions": SessionTools(self.coordination, self._identify, self.status),
             "board": BoardTools(self.coordination, self._identify),
         }
-        self.runner: LocalRunner | DurableRunner
+        self.runner: Runner
+        self._run_store: RunStore | None = None
+        """Says which sessions a durable runner has evicted."""
         if settings.durable:
-            self.runner = DurableRunner(
+            self.runner = durable = DurableRunner(
                 settings.state / "runs",
                 providers=providers,
                 tool_sets=tool_sets,
@@ -153,6 +150,7 @@ class SessionsService:
                 runner_id=settings.runner_id,
                 takeover_after=settings.takeover_after,
             )
+            self._run_store = durable.store
         else:
             self.runner = LocalRunner(
                 providers=providers, tool_sets=tool_sets, environments=self.environments, blobs=settings.blobs()
@@ -182,14 +180,12 @@ class SessionsService:
         self.relay = Relay(self.coordination, self._deliver)
 
     async def start(self) -> None:
-        if isinstance(self.runner, DurableRunner):
-            await self.runner.launch()
+        await self.runner.launch()
         self.relay.start()
 
     async def close(self) -> None:
         await self.relay.stop()
-        if isinstance(self.runner, DurableRunner):
-            await self.runner.close()
+        await self.runner.close()
         self.coordination.close()
         if self.database is not None:
             self.database.close()
@@ -222,7 +218,7 @@ class SessionsService:
         return True
 
     def post(self, channel: str, title: str, body: str, kind: str = "note") -> str:
-        key = f"operator:{now()}:{title}"
+        key = f"operator:{new_ulid()}"
         arguments: dict[str, JsonValue] = {"channel": channel, "title": title, "body": body, "kind": kind}
         result = self.coordination.write(lambda db: post(db, key, OPERATOR, arguments))
         return "".join(block.text for block in result.content if isinstance(block, Text))
@@ -244,12 +240,12 @@ class SessionsService:
             return "starting"
         if runs[-1].done:
             return "stopped"
-        if isinstance(self.runner, DurableRunner) and self.runner.store.is_evicted(runs[-1].run_id):
+        if self._run_store is not None and self._run_store.is_evicted(runs[-1].run_id):
             return "sleeping"  # evicted from memory; wakes when messaged
         events = runs[-1].recorded_events()
         return "waiting" if events and events[-1].type is RunEventType.RUN_SUSPENDED else "working"
 
-    def runs(self, name: str) -> list[SessionRun]:
+    def runs(self, name: str) -> list[RunHandle]:
         return list(self.runner.conversation_runs(DEPLOYMENT, name))
 
     def board(self, channel: str | None = None, status: str | None = None, limit: int = 30) -> list[Post]:
@@ -268,7 +264,7 @@ class SessionsService:
     # Internals
 
     def _address(self, name: str) -> Address:
-        return Address(kind="conversation", value=f"{DEPLOYMENT}/{name}")
+        return Address(kind="conversation", value=ConversationKey(deployment=DEPLOYMENT, key=name).address)
 
     def _identify(self, effect_id: str) -> str | None:
         conversation = self.runner.conversation_of(EffectIdentity.parse(effect_id).run_id)

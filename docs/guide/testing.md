@@ -28,10 +28,24 @@ loudly. Pass `contract=CapabilityContract(...)` to test behavior near limits.
 
 | Helper | Does |
 |---|---|
-| `local_run(task, replies)` | a `LocalRunContext` with one scripted endpoint bound to every declared slot; returns `(run, endpoint)` |
+| `local_run(task, replies=())` | a `LocalRunContext` with one scripted endpoint bound to every declared slot; returns `(run, endpoint)` |
 | `tool_call_reply(*calls, text="")` | an assistant message that makes tool calls |
 | `events_of(run, RunEventType.X)` | the run's events of one type |
 | `payload(event)` | an event's payload as a JSON object |
+
+`local_run` gives the run no imported tools, environments or blob store. A task that uses them is tested through a
+`LocalRunner` built with `tool_sets=`, `environments=` or `blobs=` and a scripted endpoint as its provider, as in
+[tools](tools.md#imported-tools).
+
+### Counting calls across processes
+
+Tests that kill and restart a durable runner count what ran in a file that outlives the process:
+
+| Helper | Does |
+|---|---|
+| `LedgerEndpoint(inner, ledger)` | wraps a model endpoint; appends the `effect_id` and `session_id` of every sample to the file `ledger` |
+| `LedgerEnvironments(inner, ledger)` | wraps an environment service; appends the `effect_id`, `environment_id` and `command` of every command it starts |
+| `read_ledger(ledger)` | the entries, oldest first, each with its time `at`; an empty list when the file does not exist |
 
 ## A test
 
@@ -81,7 +95,7 @@ async def test_the_agent_is_rewarded_for_reaching_the_target() -> None:
     assert [payload(event)["status"] for event in completed] == ["ok", "ok"]
 
 
-asyncio.run(test_the_agent_is_rewarded_for_reaching_the_target())  # pytest runs it for you; this makes the page runnable
+asyncio.run(test_the_agent_is_rewarded_for_reaching_the_target())  # pytest runs it for you; this runs the page
 ```
 
 ## Replies that depend on the request

@@ -5,7 +5,7 @@ trainer elsewhere holds. Nothing in a training loop written against `Jobs` says 
 
     POST /jobs                                   start a job                    → {"job": id}
     POST /jobs/{job}/runs                        queue runs of a row            → {"ticket": id}
-    GET  /jobs/{job}/tickets/{ticket}?wait=S     its episodes, once all ended   → {"done", "episodes", "failure"}
+    GET  /jobs/{job}/tickets/{ticket}?wait=S     its episodes, once all ended   → {"done", "episodes", "refused"}
     GET  /jobs/{job}/episodes?cursor=N&wait=S    episodes after a cursor        → {"episodes", "closed"}
     POST /jobs/{job}/acknowledge | publish | notes
     GET  /jobs/{job}/status
@@ -27,14 +27,14 @@ from starlette.routing import Route
 
 from rollout.core.harness.runner import ProgramReference, RunBinding
 from rollout.rollouts.episodes import Episode
-from rollout.rollouts.jobs import RolloutJob, RolloutJobs, Status
+from rollout.rollouts.jobs import Refused, RolloutJob, RolloutJobs, Status
 
 WAIT_SECONDS = 20.0
 
 
 def create_app(jobs: RolloutJobs) -> Starlette:
     def job_of(request: Request) -> RolloutJob:
-        return jobs.jobs[request.path_params["job"]]
+        return jobs.job(request.path_params["job"])
 
     async def start(request: Request) -> Response:
         body = await request.json()
@@ -52,15 +52,10 @@ def create_app(jobs: RolloutJobs) -> Starlette:
         return JSONResponse({"ticket": ticket.id})
 
     async def ticket(request: Request) -> Response:
-        job = job_of(request)
-        held = job.tickets[request.path_params["ticket"]]
-        try:
-            await asyncio.wait_for(held.done.wait(), float(request.query_params.get("wait", WAIT_SECONDS)))
-        except TimeoutError:
-            return JSONResponse({"done": False, "episodes": [], "failure": None})
-        job.collect(held.id)
-        failure = f"{type(held.failure).__name__}: {held.failure}" if held.failure else None
-        return JSONResponse({"done": True, "episodes": [e.to_json() for e in held.ended], "failure": failure})
+        held = job_of(request).ticket(request.path_params["ticket"])
+        if not await held.ready(float(request.query_params.get("wait", WAIT_SECONDS))):
+            return JSONResponse({"done": False, "episodes": [], "refused": None})
+        return JSONResponse({"done": True, "episodes": [e.to_json() for e in held.ended], "refused": held.refused})
 
     async def episodes(request: Request) -> Response:
         cursor = int(request.query_params.get("cursor", "0"))
@@ -173,8 +168,8 @@ class RemoteTicket:
         while True:
             answer = await _get(self._http, f"/jobs/{self._job}/tickets/{self.id}")
             if answer["done"]:
-                if answer["failure"]:
-                    raise RuntimeError(answer["failure"])
+                if answer["refused"] is not None:
+                    raise Refused(answer["refused"])
                 return [Episode.from_json(data) for data in answer["episodes"]]
 
 

@@ -8,7 +8,7 @@ from collections.abc import Mapping
 import httpx
 import pytest
 from minecraft_swarm.episode import SwarmEpisode
-from minecraft_swarm.prompts import TEAM
+from minecraft_swarm.tasks import TEAM
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
 
 from rollout.core.contracts import (

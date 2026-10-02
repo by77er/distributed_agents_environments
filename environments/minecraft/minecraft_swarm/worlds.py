@@ -1,8 +1,8 @@
 """Temporary worlds for episodes, and the tool set episodes reach them through.
 
 `MinecraftWorlds` starts a Paper server from a template, connects the team's bots, builds a task, runs windows of game
-time while actions happen, and reports the score from the plugin's ground truth. Every episode of a GRPO group gets
-its own server from the same world seed and layout seed, so they start identically.
+time while actions happen, and reports the score from the plugin's ground truth. Every episode gets a server of its
+own, and episodes given the same world seed and layout seed start identically.
 
 `MinecraftTools` exposes it to programs as the imported tool set `minecraft`: every operation is a recorded effect.
 It is served in the process that runs the episodes (`tools`), or from a machine of its own
@@ -15,7 +15,7 @@ import random
 import time
 import uuid
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,10 +24,13 @@ from pydantic import JsonValue
 
 from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
+from minecraft_swarm.limits import LIMITS, TICKS_PER_SECOND
 from minecraft_swarm.paper import Installation, PaperServer, sweep
-from minecraft_swarm.prompts import TEAM
-from minecraft_swarm.tasks import Built, Objective, Start, Task, build, catalog, score, solved
+from minecraft_swarm.tasks import TEAM, Built, Task, build, catalog, saturated, score, solved
 from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
+
+WINDOW_TICKS = LIMITS.window_seconds * TICKS_PER_SECOND
+"""The most game ticks a window runs: it is over sooner when every action has finished."""
 
 
 @dataclass
@@ -39,14 +42,12 @@ class EpisodeWorld:
     harness: Harness
     built: Built
     team: list[str]
-    windows: int = 0
 
 
 @dataclass
 class MinecraftWorlds:
     installation: Installation = field(default_factory=Installation)
-    window_ticks: int = 400
-    """The most game ticks a window runs (400 = twenty seconds): it is over sooner when every action has finished."""
+    window_ticks: int = WINDOW_TICKS
     logs: Path | None = None
     tasks: dict[str, Task] = field(default_factory=lambda: {task.id: task for task in catalog()})
     _episodes: dict[str, EpisodeWorld] = field(default_factory=dict[str, EpisodeWorld])
@@ -62,7 +63,7 @@ class MinecraftWorlds:
         harness: Harness | None = None
         try:
             harness = await Harness.start(log=self.logs / f"{episode}.harness.log" if self.logs else None)
-            await harness.connect("127.0.0.1", server.port, list(team))
+            await harness.connect("127.0.0.1", server.port, list(team), version=self.installation.version)
             await control.freeze()
             built = await build(task, control, list(team), random.Random(layout_seed))
             world = EpisodeWorld(episode, task, server, control, harness, built, list(team))
@@ -76,11 +77,7 @@ class MinecraftWorlds:
             await control.close()
             await server.stop()
             raise
-        return {
-            "episode": episode,
-            "task": task.model_dump(mode="json"),
-            "available_diamonds": built.available_diamonds,
-        }
+        return {"episode": episode}
 
     async def observe(self, episode: str, agent: str) -> dict[str, Any]:
         return await self._world(episode).harness.observe(agent)
@@ -92,20 +89,13 @@ class MinecraftWorlds:
 
     async def window(self, episode: str) -> dict[str, Any]:
         """Run game time until every action has finished or the window is over; then freeze. `done` says there is
-        nothing left to earn: every staged diamond is held, or the dragon is dead."""
+        nothing left to earn (`tasks.saturated`)."""
         world = self._world(episode)
         ran = await self._run(world, ticks=self.window_ticks, settle=0.3)
-        world.windows += 1
         state = await world.control.state()
-        staged = world.task.start in (Start.ITEMS, Start.CHESTS)  # the only starts whose diamonds are counted exactly
-        done = (
-            bool(state.get("dragon_killed"))
-            or (staged and int(state["team_diamonds"]) >= world.built.available_diamonds)
-            or (world.task.objective is Objective.CRAFT and solved(world.task, state))  # the item is made
-        )
         return {
             "ticks": ran,
-            "done": done,
+            "done": saturated(world.task, state, world.built.available_diamonds),
             "team_diamonds": int(state["team_diamonds"]),  # for whoever watches; the reward is scored at the end
             "team_advancements": list(state.get("team_advancements", [])),
         }
@@ -161,7 +151,7 @@ class MinecraftWorlds:
         return world
 
 
-TICK_SECONDS = 0.05
+TICK_SECONDS = 1 / TICKS_PER_SECOND
 POLL_SECONDS = 0.1
 DROP_TICKS = 10
 
@@ -198,10 +188,6 @@ async def loaded(control: Control, harness: Harness, *, seconds: float = 30.0) -
         await asyncio.sleep(0.25)
 
 
-def _object(properties: dict[str, JsonValue], required: list[str]) -> dict[str, JsonValue]:
-    return {"type": "object", "properties": properties, "required": list[JsonValue](required)}
-
-
 def tools(directory: Path) -> "MinecraftTools":
     """The `minecraft` tool set for a deployment whose state is under `directory` (a profile's `[tools]` names this
     function): worlds on this machine, their logs kept there. Servers a stopped process left behind are removed."""
@@ -211,8 +197,79 @@ def tools(directory: Path) -> "MinecraftTools":
     return MinecraftTools(worlds)
 
 
+Arguments = Mapping[str, JsonValue]
+STRING: JsonValue = {"type": "string"}
+INTEGER: JsonValue = {"type": "integer"}
+
+
+@dataclass(frozen=True)
+class Operation:
+    """An operation of the tool set: what it takes, what may be done with it after a crash, and what performs it."""
+
+    description: str
+    takes: Mapping[str, JsonValue]
+    """Its arguments, each with its schema; every one is required."""
+    retry_class: RetryClass
+    perform: Callable[[MinecraftWorlds, Arguments], Awaitable[JsonValue]]
+
+
+async def _begin(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
+    return await worlds.begin(str(arguments["task"]), _int(arguments["world_seed"]), _int(arguments["layout_seed"]))
+
+
+async def _observe(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
+    return await worlds.observe(str(arguments["episode"]), str(arguments["agent"]))
+
+
+async def _act(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
+    action = arguments["action"]
+    started = await worlds.act(
+        str(arguments["episode"]), str(arguments["agent"]), action if isinstance(action, dict) else {}
+    )
+    return {"started": started}
+
+
+async def _window(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
+    return await worlds.window(str(arguments["episode"]))
+
+
+async def _score(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
+    return await worlds.score(str(arguments["episode"]))
+
+
+async def _end(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
+    await worlds.end(str(arguments["episode"]))
+    return {"ended": True}
+
+
+EPISODE: Mapping[str, JsonValue] = {"episode": STRING}
+OPERATIONS: dict[str, Operation] = {
+    "begin": Operation(
+        "Start a world for an episode.",
+        {"task": STRING, "world_seed": INTEGER, "layout_seed": INTEGER},
+        RetryClass.SIDE_EFFECTING,
+        _begin,
+    ),
+    # (Asked again before the game next runs, the harness answers the same: an observation uses nothing up.)
+    "observe": Operation("What an agent perceives.", {**EPISODE, "agent": STRING}, RetryClass.PURE, _observe),
+    "act": Operation(
+        "Start an agent's action.",
+        {**EPISODE, "agent": STRING, "action": {"type": "object"}},
+        RetryClass.SIDE_EFFECTING,
+        _act,
+    ),
+    "window": Operation("Run game time while actions happen.", EPISODE, RetryClass.SIDE_EFFECTING, _window),
+    "score": Operation("The task's reward, and the ground truth it is scored from.", EPISODE, RetryClass.PURE, _score),
+    "end": Operation("Stop the episode's world.", EPISODE, RetryClass.IDEMPOTENT, _end),
+}
+"""The operations of the tool set `minecraft`, by name: its specifications and what a call does both come from here."""
+
+
 class MinecraftTools:
     """The `minecraft` tool set: the world operations an episode program performs, each a recorded effect."""
+
+    deduplicates = False
+    """An operation asked for twice is performed twice: nothing here remembers an effect's id."""
 
     def __init__(self, worlds: MinecraftWorlds) -> None:
         self.worlds = worlds
@@ -221,78 +278,27 @@ class MinecraftTools:
         await self.worlds.close()
 
     def specifications(self) -> Sequence[ToolSpecification]:
-        string: JsonValue = {"type": "string"}
-        integer: JsonValue = {"type": "integer"}
         return [
             ToolSpecification(
-                name="begin",
-                description="Start a world for an episode.",
-                input_schema=_object(
-                    {"task": string, "world_seed": integer, "layout_seed": integer},
-                    ["task", "world_seed", "layout_seed"],
-                ),
-                retry_class=RetryClass.SIDE_EFFECTING,
-            ),
-            ToolSpecification(
-                name="observe",
-                description="What an agent perceives.",
-                input_schema=_object({"episode": string, "agent": string}, ["episode", "agent"]),
-                retry_class=RetryClass.PURE,
-            ),
-            ToolSpecification(
-                name="act",
-                description="Start an agent's action.",
-                input_schema=_object(
-                    {"episode": string, "agent": string, "action": {"type": "object"}}, ["episode", "agent", "action"]
-                ),
-                retry_class=RetryClass.SIDE_EFFECTING,
-            ),
-            ToolSpecification(
-                name="window",
-                description="Run game time while actions happen.",
-                input_schema=_object({"episode": string}, ["episode"]),
-                retry_class=RetryClass.SIDE_EFFECTING,
-            ),
-            ToolSpecification(
-                name="score",
-                description="The team's diamonds (ground truth).",
-                input_schema=_object({"episode": string}, ["episode"]),
-                retry_class=RetryClass.PURE,
-            ),
-            ToolSpecification(
-                name="end",
-                description="Stop the episode's world.",
-                input_schema=_object({"episode": string}, ["episode"]),
-                retry_class=RetryClass.IDEMPOTENT,
-            ),
+                name=name,
+                description=operation.description,
+                input_schema={
+                    "type": "object",
+                    "properties": dict(operation.takes),
+                    "required": list[JsonValue](operation.takes),
+                },
+                retry_class=operation.retry_class,
+            )
+            for name, operation in OPERATIONS.items()
         ]
 
     async def call(
         self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
     ) -> ToolResult:
-        value: JsonValue
-        match name:
-            case "begin":
-                value = await self.worlds.begin(
-                    str(arguments["task"]), _int(arguments["world_seed"]), _int(arguments["layout_seed"])
-                )
-            case "observe":
-                value = await self.worlds.observe(str(arguments["episode"]), str(arguments["agent"]))
-            case "act":
-                action = arguments["action"]
-                started = await self.worlds.act(
-                    str(arguments["episode"]), str(arguments["agent"]), action if isinstance(action, dict) else {}
-                )
-                value = {"started": started}
-            case "window":
-                value = await self.worlds.window(str(arguments["episode"]))
-            case "score":
-                value = await self.worlds.score(str(arguments["episode"]))
-            case "end":
-                await self.worlds.end(str(arguments["episode"]))
-                value = {"ended": True}
-            case _:
-                return ToolResult(content=[Text(text=f"unknown operation {name}")], is_error=True)
+        operation = OPERATIONS.get(name)
+        if operation is None:
+            return ToolResult(content=[Text(text=f"unknown operation {name}")], is_error=True)
+        value = await operation.perform(self.worlds, arguments)
         return ToolResult(content=[Text(text=json.dumps(value))], structured=value)
 
 

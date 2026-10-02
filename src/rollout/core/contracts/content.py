@@ -50,55 +50,29 @@ class ReasoningScope(StrEnum):
 
     PORTABLE = "portable"
     """Plain text that any renderer may render or drop."""
-    POLICY = "policy"
-    """Opaque, valid only for its producer (e.g. encrypted provider reasoning)."""
 
 
 class Reasoning(ContractModel):
-    """The model's reasoning. `POLICY`-scoped reasoning is handled by the recorder; code never needs to."""
+    """The model's reasoning."""
 
     type: Literal["reasoning"] = "reasoning"
     scope: ReasoningScope
-    text: str | None = None
-    """`PORTABLE` only."""
-    producer: str | None = None
-    """`POLICY` only: the renderer or provider that can consume `opaque`."""
-    opaque: BlobReference | None = None
-    """`POLICY` only."""
-
-    @model_validator(mode="after")
-    def _fields_match_scope(self) -> Self:
-        if self.scope is ReasoningScope.PORTABLE and (self.text is None or self.producer or self.opaque):
-            raise ValueError("portable reasoning has text only")
-        if self.scope is ReasoningScope.POLICY and (self.producer is None or self.opaque is None or self.text):
-            raise ValueError("policy-scoped reasoning has a producer and opaque content only")
-        return self
-
-
-class Provenance(ContractModel):
-    """Where a tool result came from."""
-
-    untrusted: bool = False
-    """True for anything originating in a guest or a third-party server."""
-    binding_kind: str | None = None
-    """`task`, `environment`, `mcp`, `http`, `agent` or `human`."""
+    text: str
 
 
 type ResultBlock = Annotated[Text | Media, Field(discriminator="type")]
 
 
 class ToolResult(ContractModel):
-    """What a tool produces. Platform failures are `tool.failed` events, not results."""
+    """What a tool produces. Platform failures are exceptions, not results."""
 
     content: FrozenSequence[ResultBlock] = ()
     structured: JsonValue = None
-    """Optional; must validate against the tool's `output_schema` when it has one."""
+    """Optional: the result as JSON, for code that reads it."""
     is_error: bool = False
     """A tool-level error the model should see and reason about (non-zero exit, file not found)."""
     truncated: bool = False
-    """Content was cut to `max_result_bytes`; the full output is in `overflow`."""
-    overflow: BlobReference | None = None
-    provenance: Provenance = Provenance()
+    """`content` is only part of what the tool produced."""
 
 
 class ToolResultBlock(ContractModel):
@@ -129,8 +103,6 @@ class Message(ContractModel):
 
     role: Role
     content: FrozenSequence[Block] = ()
-    name: str | None = None
-    """Optional speaker name (multi-agent)."""
     meta: Mapping[str, str] = Field(default_factory=dict[str, str])
     """Not model-visible; never rendered and not covered by the context digest."""
 
@@ -172,7 +144,7 @@ class Message(ContractModel):
 
 
 class RetryClass(StrEnum):
-    """What a durable runner may do with a tool call after a crash (docs/architecture/delivery-semantics.md)."""
+    """What a durable runner may do with a tool call after a crash (docs/architecture/overview.md)."""
 
     PURE = "pure"
     IDEMPOTENT = "idempotent"
@@ -180,36 +152,20 @@ class RetryClass(StrEnum):
     UNKNOWN = "unknown"
 
 
-class ToolAnnotations(ContractModel):
-    """MCP-compatible hints; not model-visible, and ignored from untrusted servers."""
-
-    title: str | None = None
-    read_only_hint: bool | None = None
-    destructive_hint: bool | None = None
-    idempotent_hint: bool | None = None
-    open_world_hint: bool | None = None
-
-
 _TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 class ToolSpecification(ContractModel):
-    """What the model sees about a tool, plus extensions that are never model-visible."""
+    """What the model sees about a tool, plus an extension that is never model-visible."""
 
     # Model-visible: covered by the spec hash.
     name: str
     description: str = ""
     input_schema: Mapping[str, JsonValue] = Field(default_factory=lambda: {"type": "object", "properties": {}})
     """JSON Schema 2020-12 with `type: object`."""
-    output_schema: Mapping[str, JsonValue] | None = None
 
-    # Advisory, not model-visible.
-    annotations: ToolAnnotations | None = None
-
-    # Platform extensions, not model-visible.
+    # A platform extension, not model-visible.
     retry_class: RetryClass = RetryClass.UNKNOWN
-    timeout_ms: int | None = None
-    max_result_bytes: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -226,7 +182,5 @@ class ToolSpecification(ContractModel):
         return schema
 
     def model_visible(self) -> dict[str, JsonValue]:
-        """The fields a model sees and the spec hash covers; absent fields are omitted."""
-        return self.model_dump(
-            mode="json", exclude_none=True, include={"name", "description", "input_schema", "output_schema"}
-        )
+        """The fields a model sees and the spec hash covers."""
+        return self.model_dump(mode="json", exclude_none=True, include={"name", "description", "input_schema"})

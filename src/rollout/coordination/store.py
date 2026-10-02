@@ -13,8 +13,8 @@ from pathlib import Path
 
 import sqlalchemy as sa
 
-from rollout.core.contracts import Conflict, ToolResult
-from rollout.database import Connection, Database, fetch_all, fetch_one, sql
+from rollout.core.contracts import ToolResult
+from rollout.database import Connection, Database, effects_table, fetch_all, fetch_one, recorded, sql
 
 METADATA = sa.MetaData()
 sa.Table(
@@ -57,13 +57,7 @@ sa.Table(
     sa.Column("channel", sa.Text, primary_key=True),
     sa.Column("participant", sa.Text, primary_key=True),
 )
-sa.Table(
-    "effects",
-    METADATA,
-    sa.Column("effect_id", sa.Text, primary_key=True),
-    sa.Column("arguments_digest", sa.Text, nullable=False),
-    sa.Column("result", sa.Text, nullable=False),
-)
+effects_table(METADATA)
 WRITES = "coordination writes"
 
 
@@ -117,23 +111,7 @@ class CoordinationStore:
         self, effect_id: str, arguments_digest: str, perform: Callable[[Connection], ToolResult]
     ) -> ToolResult:
         """Run a write once per effect: `perform` and the record of its result commit in one transaction."""
-
-        def once(db: Connection) -> ToolResult:
-            row = fetch_one(db, "SELECT arguments_digest, result FROM effects WHERE effect_id = :id", {"id": effect_id})
-            if row is not None:
-                recorded_digest, recorded_result = row
-                if recorded_digest != arguments_digest:
-                    raise Conflict(f"effect {effect_id} was recorded with different arguments")
-                return ToolResult.model_validate_json(recorded_result)
-            result = perform(db)
-            sql(
-                db,
-                "INSERT INTO effects (effect_id, arguments_digest, result) VALUES (:id, :digest, :result)",
-                {"id": effect_id, "digest": arguments_digest, "result": result.model_dump_json()},
-            )
-            return result
-
-        result = self.database.write(once, exclusive=WRITES)
+        result = self.database.write(lambda db: recorded(db, effect_id, arguments_digest, perform), exclusive=WRITES)
         self._wake_relay()
         return result
 

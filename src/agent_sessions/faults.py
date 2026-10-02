@@ -33,8 +33,10 @@ from typing import Any
 
 import httpx
 
+from agent_sessions.service import DEPLOYMENT
 from rollout.coordination import CoordinationStore
 from rollout.core.contracts import RunEventType
+from rollout.core.harness import ConversationKey
 from rollout.core.testing import read_ledger
 from rollout.database import Database, create_database, fetch_all, temporary_postgres
 from rollout.durable import RunStore
@@ -311,7 +313,8 @@ def _check(report: dict[str, Any], work: Path, inbox: list[dict[str, str]], data
                     "created": created,
                     "delivered": delivered,
                     "recipient_evicted": any(
-                        runs.is_evicted(r) for r in runs.conversation_runs(f"agents/session/{to}")
+                        runs.is_evicted(r)
+                        for r in runs.conversation_runs(ConversationKey(deployment=DEPLOYMENT, key=str(to)).address)
                     ),
                 }
                 for k, to, sender, text, created, delivered in details

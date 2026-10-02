@@ -34,10 +34,14 @@ from rollout.core.contracts import (
     ModelEndpoint,
     SampleRequest,
     SampleResult,
+    SessionIdentity,
     Usage,
 )
 from rollout.core.harness.runner import RecordedModel, SamplingParameters
 from rollout.inference import Channel
+
+SERVED_UNDER = "/v1"
+"""The path `rollout.recorder.compat` serves a recorder under: a recorder's `base_url` ends with it."""
 
 
 @dataclass(frozen=True)
@@ -121,14 +125,17 @@ class Recorder:
 
     def sessions(self, run_id: str) -> dict[str, list[Epoch]]:
         """What each model slot of a run exports, by slot."""
-        prefix = f"{run_id}/"
-        return {session[len(prefix) :]: self.export(session) for session in self._turns if session.startswith(prefix)}
+        of_run = [identity for identity in map(SessionIdentity.parse, self._turns) if identity.owner == run_id]
+        return {identity.model_slot: self.export(str(identity)) for identity in of_run}
 
     def forget(self, run_id: str) -> None:
-        for session in [session for session in self._turns if session.startswith(f"{run_id}/")]:
+        def of_run(session: str) -> bool:
+            return SessionIdentity.parse(session).owner == run_id
+
+        for session in [session for session in self._turns if of_run(session)]:
             for turn in self._turns.pop(session):
                 self._by_effect.pop(turn.effect_id, None)
-        for key in [key for key, (session, _) in self._keys.items() if session.startswith(f"{run_id}/")]:
+        for key in [key for key, (session, _) in self._keys.items() if of_run(session)]:
             del self._keys[key]
 
     async def publish(self, channel: str, adapter: str, path: str) -> int:

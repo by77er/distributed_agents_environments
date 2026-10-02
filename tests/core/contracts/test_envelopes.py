@@ -7,8 +7,6 @@ from rollout.core.contracts import (
     CapabilityContract,
     ContextDelta,
     EffectCompletion,
-    EffectKind,
-    EffectRequest,
     EffectStatus,
     FinishReason,
     Message,
@@ -20,24 +18,14 @@ from rollout.core.contracts import (
     ToolChoiceMode,
     ToolSpecification,
     Usage,
-    arguments_digest,
     context_digests,
 )
 
 NOW = datetime(2026, 9, 28, tzinfo=UTC)
 
 
-def test_effect_envelopes_round_trip() -> None:
-    request = EffectRequest(
-        effect_id="r_x:0:3",
-        arguments_digest=arguments_digest({"q": 1}),
-        kind=EffectKind.TOOL_CALL,
-        run_id="r_x",
-        deadline=NOW,
-        payload={"q": 1},
-    )
+def test_effect_completions_round_trip() -> None:
     completion = EffectCompletion(effect_id="r_x:0:3", status=EffectStatus.OUTCOME_UNKNOWN)
-    assert EffectRequest.model_validate_json(request.model_dump_json()) == request
     assert EffectCompletion.model_validate_json(completion.model_dump_json()) == completion
 
 

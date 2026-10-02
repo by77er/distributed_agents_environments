@@ -3,7 +3,6 @@
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
 from pydantic import JsonValue
 
@@ -17,13 +16,15 @@ from rollout.core.contracts import (
 )
 from rollout.core.harness import (
     Address,
+    ConversationKey,
     Deployment,
     DirectModel,
     Envelope,
     ModelBinding,
     Priority,
     RunBinding,
-    RunOutcome,
+    RunHandle,
+    Runner,
     RunSpecification,
     SamplingParameters,
     ToolBinding,
@@ -51,19 +52,6 @@ class Settings:
     """If set, every model call is appended to this file (for the durability evaluation)."""
 
 
-class ConversationRun(Protocol):
-    """What the service needs from a run handle; both runners' handles provide it."""
-
-    @property
-    def run_id(self) -> str: ...
-    @property
-    def done(self) -> bool: ...
-    @property
-    def outcome(self) -> RunOutcome | None: ...
-    def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]: ...
-    def recorded_events(self) -> list[RunEvent]: ...
-
-
 @dataclass(frozen=True)
 class TranscriptEntry:
     role: str  # "user" | "assistant"
@@ -86,7 +74,7 @@ class AssistantService:
                 for name, factory in providers.items()
             }
         tool_sets: dict[str, ToolSet] = {"repository": self.repository_tools, "notes": self.notes}
-        self.runner: LocalRunner | DurableRunner
+        self.runner: Runner
         if settings.state is not None:
             self.runner = DurableRunner(settings.state, providers=providers, tool_sets=tool_sets)
         else:
@@ -114,22 +102,22 @@ class AssistantService:
 
     async def start(self) -> None:
         """Launch the runner; a durable runner recovers the conversations a crash interrupted."""
-        if isinstance(self.runner, DurableRunner):
-            await self.runner.launch()
+        await self.runner.launch()
 
     async def close(self) -> None:
-        if isinstance(self.runner, DurableRunner):
-            await self.runner.close()
+        await self.runner.close()
+        self.notes.close()
 
     def address(self, conversation: str) -> Address:
-        return Address(kind="conversation", value=f"{self.deployment_name}/{conversation}")
+        key = ConversationKey(deployment=self.deployment_name, key=conversation)
+        return Address(kind="conversation", value=key.address)
 
-    def runs(self, conversation: str) -> Sequence[ConversationRun]:
+    def runs(self, conversation: str) -> Sequence[RunHandle]:
         return self.runner.conversation_runs(self.deployment_name, conversation)
 
     async def send(
         self, conversation: str, text: str, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None
-    ) -> tuple[str, ConversationRun]:
+    ) -> tuple[str, RunHandle]:
         """Deliver a message; returns its message_id and the run that received it."""
         envelope = Envelope(content=[Text(text=text)], reply_to=Address(kind="external", value="http"))
         message_id = await self.runner.send(
@@ -137,7 +125,7 @@ class AssistantService:
         )
         return message_id, self.runs(conversation)[-1]
 
-    async def reply_to(self, run: ConversationRun, message_id: str) -> str | None:
+    async def reply_to(self, run: RunHandle, message_id: str) -> str | None:
         """The first reply the run emits after it received `message_id`, or None if the run ends first."""
         received = False
         async for event in run.events():

@@ -27,6 +27,20 @@ class ConversationKey(ContractModel):
     origin: Address | None = None
     """Where replies go by default (e.g. a connector target)."""
 
+    @property
+    def address(self) -> str:
+        """`{deployment}/{key}`: the value of the conversation's `Address`."""
+        return f"{self.deployment}/{self.key}"
+
+    @classmethod
+    def parse(cls, address: str, *, origin: Address | None = None) -> "ConversationKey":
+        """The conversation an address value names. A deployment is `{namespace}/{name}`; the rest is the key, which
+        may itself contain `/`."""
+        namespace, name, key = [*address.split("/", 2), "", ""][:3]
+        if not namespace or not name or not key:
+            raise ValueError(f"{address!r} does not name a conversation")
+        return cls(deployment=f"{namespace}/{name}", key=key, origin=origin)
+
 
 class Envelope(ContractModel):
     """A message delivered to a run."""
@@ -38,7 +52,7 @@ class Envelope(ContractModel):
     """A structured payload."""
     reply_to: Address | None = None
     message_id: str = ""
-    """Set by the runner: the sender's `effect_id` or the caller's idempotency key."""
+    """Set by the runner: the caller's idempotency key (a sending run's `effect_id`, say), or a new `m_{ulid}`."""
     sender: str | None = None
     """Set by the runner; never trusted from the payload."""
 

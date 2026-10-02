@@ -11,7 +11,7 @@ from pydantic import JsonValue
 from rollout.core.harness import ModelBinding, RecordedModel, RunBinding, agent_program
 from rollout.core.local import LocalRunner
 from rollout.recorder import Recorder
-from rollout.rollouts import Episode, JobHooks, Outcome, RolloutJob, RolloutJobs
+from rollout.rollouts import Episode, JobHooks, Outcome, Refused, RolloutJob, RolloutJobs
 from tests.rollouts.games import GATES, Gated, Guess
 from tests.support import plain_channel
 
@@ -119,7 +119,7 @@ async def test_a_run_that_fails_is_an_episode_too_and_a_refused_ticket_tells_its
 
     guarded, _, _ = jobs("yes", guard=full)
     refused = await (await start(guarded)).run({"word": "yes"})
-    with pytest.raises(MemoryError):
+    with pytest.raises(Refused, match="MemoryError: the machine has no memory left"):
         await refused.episodes()
     await guarded.close()
 
@@ -153,3 +153,29 @@ async def test_a_named_job_keeps_what_was_not_acknowledged_for_the_next_process(
     kept = [episode async for episode in _until_closed(resumed, again)]
     assert [episode.cursor for episode in kept] == [2, 3] and kept[0] == episodes[1]  # tokens, spans and all
     assert json.loads((tmp_path / "main" / "000000002.json").read_text())["labels"]["group"] == "g"
+
+
+async def test_a_job_started_again_under_its_name_takes_the_place_of_the_one_before(tmp_path: Path) -> None:
+    rollouts, _, _ = jobs("yes", log=tmp_path)
+    first = await start(rollouts, task=Gated, name="main")
+    waiting = await first.run({"word": "yes", "gate": "never"})
+    await asyncio.sleep(0.05)
+    second = await start(rollouts, name="main")  # the first is closed: its run is cancelled, and is an episode
+    (cancelled,) = await waiting.episodes()
+    assert cancelled.outcome is Outcome.CANCELLED and rollouts.job("main") is second
+    assert (await second.status()).finished == 1  # the log is one log: the new job goes on after it
+    (episode,) = await (await second.run({"word": "yes"})).episodes()
+    assert episode.cursor == 2
+    await rollouts.close()
+
+
+async def test_a_ticket_can_be_read_again_until_its_episodes_are_acknowledged() -> None:
+    rollouts, _, _ = jobs("yes")
+    job = await start(rollouts)
+    ticket = await job.run({"word": "yes"}, count=2)
+    assert await ticket.ready(5.0) and len(await ticket.episodes()) == 2
+    assert [e.cursor for e in await job.ticket(ticket.id).episodes()] == [1, 2]  # by its id, as a service finds it
+    await job.acknowledge(2)
+    with pytest.raises(KeyError):
+        job.ticket(ticket.id)
+    await rollouts.close()

@@ -18,13 +18,11 @@ class RunEventType(StrEnum):
 
     # Lifecycle
     RUN_CREATED = "run.created"
-    GENERATION_STARTED = "generation.started"
     RUN_SUSPENDED = "run.suspended"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
     RUN_CANCEL_REQUESTED = "run.cancel_requested"
     RUN_CANCELLED = "run.cancelled"
-    PATCH_MARKED = "patch.marked"
     # Episode
     OBSERVATION_RECORDED = "observation.recorded"
     REWARD_ASSIGNED = "reward.assigned"
@@ -38,7 +36,6 @@ class RunEventType(StrEnum):
     TURN_INTERRUPTED = "turn.interrupted"
     # Tools
     TOOLS_RESOLVED = "tools.resolved"
-    TOOLS_CHANGED = "tools.changed"
 
 
 TERMINAL_EVENT_TYPES = frozenset({RunEventType.RUN_COMPLETED, RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED})
@@ -49,9 +46,6 @@ class RunFailureClass(StrEnum):
 
     TASK_ERROR = "task_error"
     INVALID_OBSERVATION = "invalid_observation"
-    NON_DETERMINISM = "non_determinism"
-    POISONED = "poisoned"
-    INFRASTRUCTURE = "infrastructure"
 
 
 class RunEvent(ContractModel):

@@ -13,8 +13,8 @@ its age in turns.
 What an agent remembers is a `rollout.core.harness.Memory`: the current observation in full, with the map; its recent
 turns as `describe(recalled=True)` gives them (what was in sight, what it did, how that went, without the map); and,
 of everything older, a summary it wrote itself when its memory was full. The team compacts in the same turn: a turn
-takes as long as its slowest agent, so four agents compacting together cost what one does, and in four different
-turns four times that.
+waits for its slowest agent, so agents that write their summaries together hold the team up once, and agents that
+write them in different turns once each.
 
 The episode's result says how it went, in the game's terms: `solved`, `saturated` (nothing was left to earn),
 `duration` (game minutes), `turns`, and the ground truth the reward was scored from.
@@ -25,14 +25,23 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
-from minecraft_swarm.prompts import ACTIONS, CHAT_LINES, COMPACT, REMEMBERED, TEAM, describe, system_prompt
-from minecraft_swarm.tasks import TURNS_PER_MINUTE, Task, catalog
+from minecraft_swarm.limits import LIMITS, TICKS_PER_SECOND
+from minecraft_swarm.prompts import (
+    ACTIONS,
+    CHAT_LINES,
+    COMPACT,
+    NO_CALL,
+    ONE_CALL,
+    REMEMBERED,
+    describe,
+    describe_result,
+    system_prompt,
+)
+from minecraft_swarm.tasks import TEAM, TURNS_PER_MINUTE, Task, catalog
 from rollout.core.contracts import Message, Text, ToolCall
 from rollout.core.harness import Memory, ModelSlot, Program, RunContext
 
-TICKS_PER_MINUTE = 1200
-NO_CALL = "You called no tool, so you did nothing that turn."
-ONE_CALL = "Not done: only your first call of a turn counts."
+TICKS_PER_MINUTE = 60 * TICKS_PER_SECOND
 SPARE_TURNS = 4
 """An agent compacts along with a teammate whose memory is full if it remembers at least this many turns."""
 
@@ -133,8 +142,8 @@ class SwarmEpisode(Program):
         if not calls:
             return {"name": "idle"}
         call: ToolCall = calls[0]  # one action per turn
-        said = " ".join(str(call.arguments.get("message", "")).split())[:240]
-        if call.name == "chat" and said:  # an agent sees what it said among what it heard
+        said = " ".join(str(call.arguments.get("message", "")).split())[: LIMITS.chat_characters]
+        if call.name == "chat" and said:  # an agent sees what it said among what it heard, as the harness says it
             heard.append((turn, name, said))
         return action(call)
 
@@ -156,16 +165,3 @@ def answer(memory: Memory, observation: Mapping[str, Any]) -> None:
     if memory.turns:
         called = memory.turns[-1][-1].tool_calls
         memory.answer(describe_result(observation.get("last_action")) if called else NO_CALL, others=ONE_CALL)
-
-
-def describe_result(result: Any) -> str:
-    if not isinstance(result, dict):
-        return "No result."
-    outcome = cast(dict[str, Any], result)
-    if outcome.get("ok"):
-        details = {key: value for key, value in outcome.items() if key not in ("action", "ok")}
-        return ", ".join(f"{key}: {item}" for key, item in details.items()) or "Done."
-    if outcome.get("interrupted"):
-        at = cast(dict[str, Any], outcome.get("now_at") or {})
-        return f"Cut off when the world froze; you got to ({at.get('x')}, {at.get('y')}, {at.get('z')})."
-    return f"Failed: {outcome.get('error', 'unknown error')}"

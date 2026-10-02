@@ -1,7 +1,9 @@
 # Models
 
 A run's model slots are served by **model endpoints**. Which endpoint serves a slot is decided by the run's binding,
-never by task or agent code. This page covers the one real-model adapter so far, for the OpenAI Responses API.
+never by task or agent code. A `ModelBinding` is either `direct` (a provider's API, on this page) or `recorded` (a
+trainable channel served through the [recorder](../core/recorder/README.md)). This page covers the adapter for the
+OpenAI Responses API.
 
 ## Binding a slot to a provider
 
@@ -18,7 +20,7 @@ binding = RunBinding(models={
     "policy": ModelBinding(direct=DirectModel(
         provider="codex",
         model="gpt-6-astra",
-        sampling=SamplingParameters(reasoning_effort="low"),   # low | medium | high
+        sampling=SamplingParameters(reasoning_effort="low"),   # low | medium | high: what the adapter sends
     )),
 })
 ```
@@ -50,16 +52,20 @@ runner = LocalRunner(providers={
 
 - **Rendering.** SYSTEM messages become the request's `instructions`; USER and ASSISTANT text becomes message items;
   tool calls and tool results become `function_call` and `function_call_output` items; tool specifications become
-  function tools. Media blocks are not sent yet.
+  function tools.
+- **Images.** A `Media` block with an `image/*` type is sent as `input_image`, in user messages and in tool results.
+  The endpoint reads the bytes from the blob store it was given (`ResponsesEndpoint(..., blobs=...)`,
+  `codex_provider(blobs=...)`; see [content](content.md#media-and-blobs)); a context with media and no blob store
+  raises `ValueError`. Media of other types is replaced by a line of text saying it was omitted.
 - **Stateless requests.** Every request carries the whole context (`store: false`). The model's reasoning is not
   carried from one turn to the next.
 - **Results.** Text and tool calls come back as canonical blocks. The finish reason is `TOOL_USE` when the reply
   makes tool calls and `LENGTH` when the response was cut off. Usage reports the provider's token counts.
-- **Errors.** HTTP 429 raises `Overloaded`, a context that is too long raises `ContextOverflow`, and other failures
-  raise `InternalError`. `Model.sample` retries `Overloaded` and `InternalError` with exponential backoff (three
-  retries by default) before giving up.
-- **Limits.** The provider does not report a context limit, so the endpoint advertises one from
-  `ResponsesContract` (200,000 tokens by default).
+- **Errors.** HTTP 429 raises `Overloaded`, a context that is too long raises `ContextOverflow`, rejected
+  credentials raise `PermissionError` (after one refresh and retry on a 401), and other failures raise
+  `InternalError`. `Model.sample` [retries](agents.md#the-model-interface) `Overloaded` and `InternalError`.
+- **Limits.** The provider does not report its limits, so the endpoint advertises them from `ResponsesContract`
+  (a context of 200,000 tokens and 32,000 output tokens by default).
 - **No recording.** Direct adapters are for models you do not train: nothing about tokens or logprobs is kept, and a
   retried effect samples again.
 

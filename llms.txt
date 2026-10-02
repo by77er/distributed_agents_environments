@@ -40,7 +40,6 @@ suite, and the API reference is generated from the source.
 
 - [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
 
-## Design
+## Everything else
 
-- [Design docs](docs/README.md): requirements, principles, layers, contracts, decisions (normative)
-- [Development plan](docs/development/plan.md): milestones and what is done
+- [Documentation index](docs/README.md): architecture overview, contracts, durability, environments, products

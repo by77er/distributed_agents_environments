@@ -1,7 +1,7 @@
 # Developer guide
 
-How to build with `rollout`: write tasks, tools and agents, run episodes, and test them. This guide describes the
-code as it exists; the [design docs](../README.md) describe the whole system, including parts not built yet.
+How to build with `rollout`: write tasks, tools and agents, run episodes, test them, and train on them. The
+[documentation index](../README.md) lists everything else.
 
 Every Python example in this guide runs as part of the test suite (`tests/test_docs.py`), and the
 [API reference](reference.md) is generated from the source, so both match the code.

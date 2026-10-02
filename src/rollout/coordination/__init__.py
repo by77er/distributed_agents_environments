@@ -1,4 +1,5 @@
-"""Coordination between runs: a directory of participants, messages, and a shared board (docs/decisions/0025).
+"""Coordination between runs: a directory of participants, messages, and a shared board
+(docs/products/agent-sessions.md).
 
 Tool calls write to a `CoordinationStore`; a `Relay` delivers its outbox through a runner. Identity, status and
 delivery are injected, so the same pieces serve agent sessions, swarms and multi-agent RL tasks.
@@ -6,7 +7,7 @@ delivery are injected, so the same pieces serve agent sessions, swarms and multi
 
 from rollout.coordination.relay import Deliver, Relay
 from rollout.coordination.store import CoordinationStore, Delivery, Participant, Post
-from rollout.coordination.tools import BoardTools, Identify, SessionTools, Status, post, register, subscribe
+from rollout.coordination.tools import BoardTools, Identify, SessionTools, Status, post, register
 
 __all__ = [
     "BoardTools",
@@ -21,5 +22,4 @@ __all__ = [
     "Status",
     "post",
     "register",
-    "subscribe",
 ]

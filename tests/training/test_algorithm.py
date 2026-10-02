@@ -32,17 +32,27 @@ def test_the_fastest_of_the_episodes_that_saturated_the_task_scores_a_point_more
     # One episode alone at the top already scores more than the rest; and an unfinished game is not a fast one.
     assert fastest_of_the_saturated([full(0.2), episode(1.0, duration=3.0)]) == [0.0, 0.0]
     assert fastest_of_the_saturated([]) == []
+    # An episode that does not say how long it took is not compared (it is not the fastest for saying nothing).
+    assert fastest_of_the_saturated([full(0.2), episode(5.0, saturated=True), full(0.3)]) == [1.0, 0.0, 0.0]
     group = [full(0.4), full(0.1), full(0.3)]
-    assert Grpo().scores(group) == [5.0, 6.0, 5.0] and Grpo(tie_break=False).scores(group) == [5.0, 5.0, 5.0]
-    assert Grpo(tie_break=False).batch(group, Budget(), random.Random(0)) is None  # nothing to compare them by
+    tied = Grpo().batch(group, Budget(), random.Random(0))
+    assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.sequences) == 12
+    assert sorted({round(weighted.advantage, 3) for weighted in tied.sequences}) == [-0.333, 0.667]
+    untied = Grpo(tie_break=False).batch(group, Budget(), random.Random(0))  # nothing to compare them by
+    assert not untied.sequences and untied.skipped == "every episode scored the same"
 
 
 def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from_the_mean() -> None:
     group = [episode(0.0), episode(0.0), episode(3.0), episode(1.0)]  # advantages -1, -1, 2, 0
     batch = Grpo().batch(group, Budget(), random.Random(0))
-    assert batch is not None and [weighted.advantage for weighted in batch] == [-1.0] * 8 + [2.0] * 4
+    assert batch.skipped is None and [weighted.advantage for weighted in batch.sequences] == [-1.0] * 8 + [2.0] * 4
     limited = Grpo().batch(group, Budget(sequences=6), random.Random(0))
-    assert limited is not None and [w.advantage for w in limited] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
+    assert [w.advantage for w in limited.sequences] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
+    failed = Episode(9, "j", "t", "r9", {}, None, Outcome.FAILED, detail="it raised")
+    assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).sequences] == [
+        weighted.advantage for weighted in batch.sequences
+    ]  # an episode that did not complete is no part of the comparison
+    assert Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped == "1 of 2 episodes completed"
 
 
 def test_an_update_takes_an_even_share_of_every_episodes_sequences() -> None:

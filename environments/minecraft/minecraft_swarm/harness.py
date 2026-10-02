@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any, Self
 
+from minecraft_swarm.paper import PAPER_VERSION
+
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
 
 
@@ -46,10 +48,13 @@ class Harness:
                     raise HarnessError("the harness exited while starting")
         return cls(process, log)
 
-    async def connect(self, host: str, port: int, team: list[str]) -> None:
-        await self.request("connect", host=host, port=port, team=team, wait_seconds=90)
+    async def connect(self, host: str, port: int, team: list[str], *, version: str = PAPER_VERSION) -> None:
+        """Join the server at `host` and `port`, which runs Minecraft `version`, with one bot for each of `team`."""
+        await self.request("connect", host=host, port=port, team=team, version=version, wait_seconds=90)
 
     async def observe(self, bot: str) -> dict[str, Any]:
+        """What a bot sees, what it has heard, whether it died, and how its last action went. Asked again before
+        the next `thaw`, it answers the same."""
         return await self.request("observe", bot=bot)
 
     async def act(self, bot: str, action: dict[str, Any]) -> bool:
@@ -69,6 +74,8 @@ class Harness:
         await self.request("freeze")
 
     async def thaw(self) -> None:
+        """Resume the bots' physics, before actions start. What observations have told of messages and deaths is
+        dropped."""
         await self.request("thaw")
 
     async def close(self) -> None:

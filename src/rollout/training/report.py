@@ -9,7 +9,7 @@ import asyncio
 import io
 import json
 import statistics
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -17,48 +17,39 @@ import httpx
 
 from rollout.rollouts import Row
 from rollout.training.curriculum import Curriculum
-from rollout.training.loop import Directory, iterations
+from rollout.training.record import Directory, Iteration, iterations
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
 
 
-def hours(lines: Sequence[Mapping[str, Any]]) -> list[float]:
+def hours(lines: Sequence[Iteration]) -> list[float]:
     """When each group ended, in hours since the run began (groups overlap, so their durations do not add up)."""
     if not lines:
         return []
-    began = float(lines[0]["time"]) - float(lines[0].get("seconds", 0.0))
-    return [(float(line["time"]) - began) / 3600 for line in lines]
+    began = lines[0].time - lines[0].seconds
+    return [(line.time - began) / 3600 for line in lines]
 
 
-def update_of(line: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """The trainer's statistics, if this group was trained on (a skipped or failed update is a sentence)."""
-    update = line.get("update")
-    return update if isinstance(update, Mapping) else None  # pyright: ignore[reportUnknownVariableType]
-
-
-def summary(name: str, lines: Sequence[Mapping[str, Any]], curriculum: Curriculum) -> str:
+def summary(name: str, lines: Sequence[Iteration], curriculum: Curriculum) -> str:
     """The run in words: the latest group, what the update did, and each unlocked row's record."""
     if not lines:
         return f"**{name}** — no group has finished yet."
     last = lines[-1]
     titles = {row.key: row.title for row in curriculum.rows}
-    updates = [update for line in lines if (update := update_of(line)) is not None]
-    serving = next((f" (serving {line['adapter']})" for line in reversed(lines) if line.get("adapter")), "")
-    took = f"{hours(lines)[-1]:.1f} h in, {len(updates)} updates"
-    text = [f"**{name}** — group {last['iteration']}, {took}{serving}"]
-    rewards = [float(reward) for reward in last.get("rewards", [])]
-    solved = [bool(value) for value in last.get("solved", [])]
+    updates = sum(1 for line in lines if line.update is not None)
+    serving = next((f" (serving {line.adapter})" for line in reversed(lines) if line.adapter), "")
+    text = [f"**{name}** — group {last.iteration}, {hours(lines)[-1]:.1f} h in, {updates} updates{serving}"]
     text.append(
-        f"**Latest group:** {last['task']} ({titles.get(str(last['task']), '?')}) — rewards "
-        f"{' / '.join(f'{reward:g}' for reward in sorted(rewards)) or 'none'}"
-        f" ({_statistics(rewards)}); solved {sum(solved)}/{len(solved)}"
-        + (f"; {last['failed']} episodes failed" if last.get("failed") else "")
+        f"**Latest group:** {last.task} ({titles.get(last.task, '?')}) — rewards "
+        f"{' / '.join(f'{reward:g}' for reward in sorted(last.rewards)) or 'none'}"
+        f" ({_statistics(last.rewards)}); solved {sum(last.solved)}/{len(last.solved)}"
+        + (f"; {last.failed} episodes failed" if last.failed else "")
     )
-    update = update_of(last)
-    text.append(
-        f"**Update:** {last.get('update', 'none')}" if update is None else "**Update:** " + _update(last, update)
-    )
+    if last.update is not None:
+        text.append("**Update:** " + _update(last))
+    else:
+        text.append(f"**Update:** {'failed: ' + last.error if last.error else 'skipped: ' + (last.skipped or '')}")
     unlocked = curriculum.unlocked()
     text.append(f"**Rows:** {len(unlocked)} of {len(curriculum.rows)} unlocked")
     for row in unlocked:
@@ -81,22 +72,22 @@ def _statistics(rewards: Sequence[float]) -> str:
     return f"mean {statistics.fmean(rewards):.2f}, sd {spread:.2f}"
 
 
-def _update(line: Mapping[str, Any], update: Mapping[str, Any]) -> str:
-    trained, recorded = line.get("sequences_trained", update.get("sequences", 0)), line.get("sequences_recorded")
-    of = f" of {recorded:g}" if recorded else ""
-    parts = [f"{trained:g}{of} sequences, {update.get('tokens', 0):g} sampled tokens"]
+def _update(line: Iteration) -> str:
+    update = line.update or {}
+    of = f" of {line.sequences_recorded}" if line.sequences_recorded else ""
+    parts = [f"{line.sequences_trained}{of} sequences, {update.get('tokens', 0):g} sampled tokens"]
     if "kl_moved" in update:
         parts.append(f"moved the policy by KL ≈ {update['kl_moved']:.4f} (floor {update.get('kl_floor', 0.0):.4f})")
         parts.append(f"{update.get('optimizer_steps', 0):g} steps")
-    parts.append(f"clipped {float(update.get('clip_fraction', 0.0)):.1%}")
-    parts.append(f"mean ratio {float(update.get('mean_ratio', 1.0)):.4f}")
+    parts.append(f"clipped {update.get('clip_fraction', 0.0):.1%}")
+    parts.append(f"mean ratio {update.get('mean_ratio', 1.0):.4f}")
     if "gradient_norm" in update:
         parts.append(f"gradient norm {update['gradient_norm']:.2f}")
-    parts.append(f"loss {float(update.get('loss', 0.0)):.4f}")
+    parts.append(f"loss {update.get('loss', 0.0):.4f}")
     return ", ".join(parts)
 
 
-def chart(lines: Sequence[Mapping[str, Any]], rows: Sequence[Row], *, title: str = "") -> bytes:
+def chart(lines: Sequence[Iteration], rows: Sequence[Row], *, title: str = "") -> bytes:
     """The climb as a PNG: which row each group trained on and how far the curriculum has unlocked; each group's
     rewards; and the trainer's statistics per update."""
     import matplotlib
@@ -113,9 +104,9 @@ def chart(lines: Sequence[Mapping[str, Any]], rows: Sequence[Row], *, title: str
     reward: Any = panels[1]
     training: Any = panels[2]
 
-    trained = [numbers.get(str(line["task"]), 0) for line in lines]
-    share = [sum(line.get("solved") or [0]) / max(len(line.get("solved") or [0]), 1) for line in lines]
-    climb.step(when, [line.get("unlocked", 0) for line in lines], where="post", color="#888888", label="unlocked")
+    trained = [numbers.get(line.task, 0) for line in lines]
+    share = [sum(line.solved) / max(len(line.solved), 1) for line in lines]
+    climb.step(when, [line.unlocked for line in lines], where="post", color="#888888", label="unlocked")
     points = climb.scatter(
         when, trained, c=share, cmap="viridis", vmin=0, vmax=1, s=46, zorder=3, edgecolors="#222222", linewidths=0.5
     )
@@ -123,23 +114,23 @@ def chart(lines: Sequence[Mapping[str, Any]], rows: Sequence[Row], *, title: str
         points, ax=list(panels), label="share of the group that solved it", pad=0.01, shrink=0.4, anchor=(0.0, 1.0)
     )
     climb.set_ylabel(f"row (1 to {len(rows)}, harder upward)")
-    climb.set_ylim(0, max([*trained, *[line.get("unlocked", 0) for line in lines], 5]) + 1)
+    climb.set_ylim(0, max([*trained, *[line.unlocked for line in lines], 5]) + 1)
     climb.legend(loc="upper left", frameon=False)
     climb.set_title(title or "Climb through the curriculum")
 
     for at, line in zip(when, lines, strict=True):
-        rewards = [float(value) for value in line.get("rewards", [])]
+        rewards = line.rewards
         if not rewards:
             continue
         reward.vlines(at, min(rewards), max(rewards), color="#9aa5b1", linewidth=2)
         reward.scatter([at] * len(rewards), rewards, color="#9aa5b1", s=10, zorder=2)
         reward.scatter([at], [statistics.fmean(rewards)], color="#d1495b", s=30, zorder=3)
         reward.annotate(
-            str(line["task"]), (at, max(rewards)), textcoords="offset points", xytext=(0, 4), ha="center", fontsize=7
+            line.task, (at, max(rewards)), textcoords="offset points", xytext=(0, 4), ha="center", fontsize=7
         )
     reward.set_ylabel("reward per episode\n(mean in red; rows differ)")
 
-    trainings = [(at, update) for at, line in zip(when, lines, strict=True) if (update := update_of(line))]
+    trainings = [(at, line.update) for at, line in zip(when, lines, strict=True) if line.update is not None]
     if trainings:
         times = [at for at, _ in trainings]
         if any("kl_moved" in update for _, update in trainings):

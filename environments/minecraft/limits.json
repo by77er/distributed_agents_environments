@@ -1,0 +1,11 @@
+{
+  "reach_blocks": 4.5,
+  "move_blocks": 32,
+  "walk_dig_seconds": 5,
+  "scaffolding": ["dirt", "cobblestone", "cobbled_deepslate", "netherrack"],
+  "wait_seconds": 5,
+  "smelt_seconds": 10,
+  "fuels": ["coal", "charcoal", "planks", "logs", "sticks"],
+  "window_seconds": 20,
+  "chat_characters": 240
+}

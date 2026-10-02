@@ -14,7 +14,6 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
 
 from rollout.core.contracts import (
     CapabilityContract,
@@ -23,6 +22,7 @@ from rollout.core.contracts import (
     RunEvent,
     SampleRequest,
     SampleResult,
+    address_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ def observed(
 
 
 class _ObservedEndpoint:
-    """Implements `ModelEndpoint` over another, telling hooks of each reply."""
+    """Implements `AddressableEndpoint` over another endpoint, telling hooks of each reply."""
 
     def __init__(self, endpoint: ModelEndpoint, hooks: Sequence[RunHooks], run_id: str, slot: str) -> None:
         self._endpoint = endpoint
@@ -81,11 +81,8 @@ class _ObservedEndpoint:
     def describe(self, session_id: str) -> CapabilityContract:
         return self._endpoint.describe(session_id)
 
-    def address(self, session_id: str) -> ModelAddress:
-        serve = getattr(self._endpoint, "address", None)
-        if serve is None:
-            raise RuntimeError("this model slot is not served over HTTP: a harness cannot be given an address")
-        return cast(ModelAddress, serve(session_id, through=self))  # (what a harness samples reaches the hooks too)
+    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+        return address_of(self._endpoint, session_id, through=through or self)  # (its samples reach the hooks too)
 
     async def cancel(self, effect_id: str) -> None:
         await self._endpoint.cancel(effect_id)

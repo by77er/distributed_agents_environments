@@ -17,6 +17,7 @@ from rollout.core.harness import (
     Priority,
     RunBinding,
     RunContext,
+    RunNotLive,
     RunSpecification,
     RunStatus,
     Task,
@@ -107,6 +108,31 @@ async def test_a_conversation_waits_durably_and_answers_each_message(durable: Du
     assert Chat.teardowns == teardowns + 1
     types = [event.type for event in handle.recorded_events()]
     assert types[-2:] == [RunEventType.RUN_CANCEL_REQUESTED, RunEventType.RUN_CANCELLED]
+
+
+async def test_a_failed_send_can_be_retried_and_messages_to_a_run_are_deduplicated(durable: Durable) -> None:
+    runner, endpoints = durable
+    script(endpoints, ["hi!", "fine, thanks"])
+    conversation = Address(kind="conversation", value="acme/chat/user:9")
+    hello = Envelope(content=[Text(text="hello")])
+    with pytest.raises(ValueError, match="does not name a conversation of a deployed agent"):
+        await runner.send(conversation, hello, idempotency_key="k1")  # nothing is deployed yet
+    runner.deploy(
+        Deployment(name="acme/chat", specification=RunSpecification(program=agent_program(Chat), binding=binding()))
+    )
+    await runner.send(conversation, hello, idempotency_key="k1")  # the failed send claimed nothing
+    (handle,) = runner.conversation_runs("acme/chat", "user:9")
+    run = Address(kind="run", value=handle.run_id)
+    assert await runner.send(run, hello, idempotency_key="k2") == "k2"
+    assert await runner.send(run, hello, idempotency_key="k2") == "k2"  # a retry
+    async for _ in handle.events():
+        if len(outputs(handle.recorded_events())) == 2:
+            break
+    await runner.cancel(handle.run_id, reason="done")
+    received = [event for event in handle.recorded_events() if event.type is RunEventType.MESSAGE_RECEIVED]
+    assert [payload(event)["envelope"]["message_id"] for event in received] == ["k1", "k2"]  # type: ignore[index, call-overload]
+    with pytest.raises(RunNotLive):
+        await runner.send(run, hello)
 
 
 async def test_a_high_priority_message_interrupts_the_reply(durable: Durable) -> None:

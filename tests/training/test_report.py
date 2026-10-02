@@ -26,7 +26,7 @@ def groups() -> list[dict[str, Any]]:
     }
     return [
         {"iteration": 1, "time": 1800.0, "task": "r1", "rewards": [9.0, 9.0], "solved": [True, True], "failed": 0,
-         "seconds": 1800, "unlocked": 3, "update": "skipped: every episode scored the same"},
+         "seconds": 1800, "unlocked": 3, "skipped": "every episode scored the same"},
         {"iteration": 2, "time": 3600.0, "task": "r3", "rewards": [0.0, 2.0, 10.0, 11.0],
          "solved": [False, True, True, True], "failed": 0, "seconds": 1800, "unlocked": 7, "adapter": "step-1",
          "version": 1, "sequences_recorded": 680, "sequences_trained": 384,

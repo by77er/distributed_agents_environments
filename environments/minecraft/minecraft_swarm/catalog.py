@@ -1,7 +1,7 @@
 """The catalog of the Minecraft swarm: what there is to train on, as rows (`rollout.rollouts.Catalog`).
 
-A row is a task; a start of it is a world and a layout drawn at random, which every episode of a group is given, so
-that the four episodes begin identically.
+A row is a task; a start of it is a world and a layout drawn at random: episodes given the same start begin
+identically.
 """
 
 import random

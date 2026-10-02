@@ -15,7 +15,14 @@ const FAR_RANGE = 96 // large or glowing things in the open are seen from much f
 const FAR = new Set(['ender_dragon', 'end_crystal', 'ghast'])
 const MAX_KINDS = 14 // kinds of notable blocks per observation
 const RAYS = 2400 // directions, spread evenly over the sphere
-const NOTABLE = /(_ore$|^ancient_debris$|^chest$|^trapped_chest$|^barrel$|^crafting_table$|^furnace$|^blast_furnace$|^lava$|^water$|^diamond_block$|^iron_block$|^spawner$|^torch$|^wall_torch$|^obsidian$|^crying_obsidian$|^nether_portal$|^end_portal$|^end_portal_frame$|^nether_bricks$|^bed$|_bed$|^gravel$|^sand$|_log$|^bedrock$|^end_stone$)/
+const LISTED = { items: 8, mobs: 6, animals: 6 } // of each kind of thing in sight, how many an observation lists
+const DRAWN = 10 // of each kind of creature in sight, how many the map shows where they stand (those listed among them)
+const CONTAINERS = new Set(['chest', 'trapped_chest', 'barrel']) // what `use` looks into, and `take` and `store` reach into
+const FURNACES = new Set(['furnace']) // what `smelt` and `take_smelted` work at
+const NOTABLE = new Set([...CONTAINERS, ...FURNACES, 'blast_furnace', 'crafting_table', 'ancient_debris', 'lava', 'water',
+  'diamond_block', 'iron_block', 'spawner', 'torch', 'wall_torch', 'obsidian', 'crying_obsidian', 'nether_portal',
+  'end_portal', 'end_portal_frame', 'nether_bricks', 'bed', 'gravel', 'sand', 'bedrock', 'end_stone'])
+const NOTABLE_KINDS = /(_ore|_bed|_log)$/
 const SEE_THROUGH = new Set(['air', 'cave_air', 'void_air', 'water', 'glass', 'glass_pane', 'torch', 'wall_torch',
   'light', 'short_grass', 'tall_grass', 'fern', 'vine', 'glow_lichen', 'cave_vines', 'cave_vines_plant', 'snow'])
 const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom', 'goat'])
@@ -106,26 +113,23 @@ function look (bot, memory, air) {
   return seen
 }
 
-function relative (bot, position) {
-  const here = bot.entity.position.floored()
-  return { x: position.x, y: position.y, z: position.z, dx: position.x - here.x, dy: position.y - here.y, dz: position.z - here.z }
-}
+function at ({ x, y, z }) { return { x, y, z } }
 
 function observe (bot, team, memory, air = new Set()) {
   const seen = look(bot, memory, air)
   const here = bot.entity.position.floored()
   const kinds = new Map() // block name → the ones in sight, nearest first
   for (const block of seen.values()) {
-    if (NOTABLE.test(block.name)) {
+    if (NOTABLE.has(block.name) || NOTABLE_KINDS.test(block.name)) {
       if (!kinds.has(block.name)) kinds.set(block.name, [])
-      kinds.get(block.name).push({ ...relative(bot, block.position), distance: round(block.position.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)) })
+      kinds.get(block.name).push({ ...at(block.position), distance: round(block.position.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)) })
     }
   }
   // One entry per kind: the nearest one, how many are in sight, and the next few (a forest is one line, not thirty).
   const notable = []
   for (const [name, found] of kinds) {
     found.sort((a, b) => a.distance - b.distance)
-    notable.push({ block: name, count: found.length, ...found[0], also: found.slice(1, 4).map(({ x, y, z }) => ({ x, y, z })) })
+    notable.push({ block: name, count: found.length, ...found[0], also: found.slice(1, 4).map(at) })
   }
   notable.sort((a, b) => a.distance - b.distance)
 
@@ -139,19 +143,21 @@ function observe (bot, team, memory, air = new Set()) {
     if (entity.type === 'player') {
       if (!team.has(entity.username)) continue // only teammates exist, as far as agents know
       if (!lineOfSight(bot, origin, center)) continue
-      teammates.push({ name: entity.username, ...relative(bot, entity.position.floored()) })
+      teammates.push({ name: entity.username, ...at(entity.position.floored()) })
     } else if (entity.name === 'item') {
       if (!lineOfSight(bot, origin, center)) continue
       const item = entity.getDroppedItem?.()
-      if (item) items.push({ item: item.name, count: item.count, ...relative(bot, entity.position.floored()) })
+      if (item) items.push({ item: item.name, count: item.count, ...at(entity.position.floored()) })
     } else if (HOSTILE.has(entity.name) || ANIMALS.has(entity.name)) {
       if (!lineOfSight(bot, origin, center)) continue
-      const seen = { id: entity.id, ...relative(bot, entity.position.floored()), distance: round(entity.position.distanceTo(bot.entity.position)) }
+      const seen = { id: entity.id, ...at(entity.position.floored()), distance: round(entity.position.distanceTo(bot.entity.position)) }
       if (HOSTILE.has(entity.name)) mobs.push({ mob: entity.name, ...seen })
       else animals.push({ animal: entity.name, ...seen })
     }
   }
 
+  const hostile = nearestFirst(mobs).slice(0, DRAWN)
+  const tame = nearestFirst(animals).slice(0, DRAWN)
   const feet = bot.blockAt(here)
   return {
     self: {
@@ -166,16 +172,21 @@ function observe (bot, team, memory, air = new Set()) {
     },
     world: {
       time: timeOfDay(bot),
-      light: feet ? light(bot, feet) : null,
       sky: feet ? feet.skyLight >= 15 : null,
       biome: feet?.biome?.name ?? null
     },
     map: localMap(bot, memory, air),
     notable: notable.slice(0, MAX_KINDS),
     teammates,
-    items,
-    mobs: nearestFirst(mobs).slice(0, 10),
-    animals: nearestFirst(animals).slice(0, 10)
+    items: items.slice(0, LISTED.items),
+    mobs: hostile.slice(0, LISTED.mobs),
+    animals: tame.slice(0, LISTED.animals),
+    // In sight, but past the end of the lists: the map shows where they are all the same.
+    unlisted: {
+      items: items.slice(LISTED.items).map(at),
+      mobs: hostile.slice(LISTED.mobs).map(at),
+      animals: tame.slice(LISTED.animals).map(at)
+    }
   }
 }
 
@@ -198,17 +209,9 @@ function armor (bot) {
   return worn
 }
 
-// The light where the bot stands: from blocks, or from the sky (which gives little at night).
-function light (bot, feet) {
-  const ticks = bot.time?.timeOfDay ?? 0
-  const night = ticks >= 13000 && ticks < 23000
-  return Math.max(feet.light ?? 0, night ? Math.min(feet.skyLight ?? 0, 4) : (feet.skyLight ?? 0))
-}
-
 function timeOfDay (bot) {
   const ticks = bot.time?.timeOfDay ?? 0
-  const phase = ticks < 12000 ? 'day' : ticks < 13800 ? 'dusk' : ticks < 22200 ? 'night' : 'dawn'
-  return { ticks, phase }
+  return { phase: ticks < 12000 ? 'day' : ticks < 13800 ? 'dusk' : ticks < 22200 ? 'night' : 'dawn' }
 }
 
 function inventory (bot) {
@@ -219,4 +222,4 @@ function inventory (bot) {
 
 function round (value) { return Math.round(value * 10) / 10 }
 
-module.exports = { observe, lineOfSight, firstHit, eyes, DIRECTIONS }
+module.exports = { observe, lineOfSight, firstHit, eyes, DIRECTIONS, CONTAINERS, FURNACES, FAR_RANGE }

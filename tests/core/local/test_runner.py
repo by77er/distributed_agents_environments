@@ -2,10 +2,13 @@ import asyncio
 from datetime import timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from rollout.core.contracts import Message, RunEventType, RunFailureClass, Text
 from rollout.core.harness import (
     Address,
+    DeliveryMode,
+    DeliveryPolicy,
     Deployment,
     DirectModel,
     End,
@@ -13,15 +16,17 @@ from rollout.core.harness import (
     ModelBinding,
     Observation,
     Priority,
+    RecordedModel,
     RunBinding,
     RunContext,
+    RunNotLive,
     RunSpecification,
     RunStatus,
     Task,
     WaitFor,
     agent_program,
 )
-from rollout.core.local import LocalRunner, RunNotLive
+from rollout.core.local import LocalRunner
 from rollout.core.testing import ScriptedModelEndpoint, ScriptedReply, payload
 
 
@@ -148,6 +153,30 @@ async def test_messages_are_deduplicated_by_idempotency_key() -> None:
     assert len(endpoint.requests) == 1
 
 
+async def test_a_send_that_fails_can_be_retried_with_its_idempotency_key() -> None:
+    runner, endpoint = runner_with(["once"])
+    with pytest.raises(ValueError, match="does not name a conversation of a deployed agent"):
+        await runner.send(CONVERSATION, text("hello"), idempotency_key="event-1")  # nothing is deployed yet
+    runner.deploy(
+        Deployment(name="acme/chat", specification=RunSpecification(program=agent_program(Chat), binding=binding()))
+    )
+    await runner.send(CONVERSATION, text("hello"), idempotency_key="event-1")
+    (handle,) = runner.conversation_runs("acme/chat", "user:42")
+    await handle.result()
+    assert len(endpoint.requests) == 1
+
+
+async def test_messages_to_a_run_are_deduplicated_by_idempotency_key() -> None:
+    runner, endpoint = runner_with(["once"])
+    handle = await runner.start(RunSpecification(program=agent_program(Chat), binding=binding()))
+    address = Address(kind="run", value=handle.run_id)
+    assert await runner.send(address, text("hello"), idempotency_key="event-1") == "event-1"
+    assert await runner.send(address, text("hello"), idempotency_key="event-1") == "event-1"
+    await handle.result()
+    assert len(endpoint.requests) == 1
+    assert len([event for event in handle.recorded_events() if event.type is RunEventType.MESSAGE_RECEIVED]) == 1
+
+
 async def test_unconsumed_messages_start_the_next_run() -> None:
     class OneShot(Task):
         async def start(self, run: RunContext) -> WaitFor:
@@ -157,7 +186,9 @@ async def test_unconsumed_messages_start_the_next_run() -> None:
             return End()  # ends after one message, leaving any others unconsumed
 
     runner, _ = runner_with(["first answer", "second answer"])
-    spec = RunSpecification(program=agent_program(OneShot), binding=binding())
+    # Whatever the policy maps priorities to, a message handed over is queued for the next run.
+    delivery = DeliveryPolicy(modes=dict.fromkeys(Priority, DeliveryMode.STEER))
+    spec = RunSpecification(program=agent_program(OneShot), binding=binding().model_copy(update={"delivery": delivery}))
     runner.deploy(Deployment(name="acme/oneshot", specification=spec))
     address = Address(kind="conversation", value="acme/oneshot/k")
     await runner.send(address, text("first"), priority=Priority.LOW)
@@ -168,6 +199,8 @@ async def test_unconsumed_messages_start_the_next_run() -> None:
     for handle in runs:
         await handle.result()
     assert [len(handle.context.history.turns) for handle in runs] == [2, 2]
+    received = [event for event in runs[1].recorded_events() if event.type is RunEventType.MESSAGE_RECEIVED]
+    assert [payload(event)["mode"] for event in received] == ["queue"]
 
 
 async def test_sending_to_an_ended_run_fails() -> None:
@@ -176,6 +209,15 @@ async def test_sending_to_an_ended_run_fails() -> None:
     await handle.result()
     with pytest.raises(RunNotLive):
         await runner.send(Address(kind="run", value=handle.run_id), text("late"))
+
+
+def test_a_model_binding_is_exactly_one_kind() -> None:
+    direct, recorded = DirectModel(provider="scripted", model="script"), RecordedModel(channel="policy")
+    with pytest.raises(ValidationError, match="exactly one"):
+        ModelBinding()
+    with pytest.raises(ValidationError, match="exactly one"):
+        ModelBinding(direct=direct, recorded=recorded)
+    assert ModelBinding(recorded=recorded).direct is None
 
 
 async def test_unknown_providers_and_conversations_are_rejected() -> None:

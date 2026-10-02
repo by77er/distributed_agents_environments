@@ -1,9 +1,13 @@
 import asyncio
 from datetime import timedelta
 
+import pytest
+
 from rollout.core.contracts import Message, Role, RunEventType, SampleRequest, Text, ToolCall
 from rollout.core.harness import (
+    Address,
     Agent,
+    ConversationKey,
     DeliveryMode,
     DeliveryPolicy,
     Ending,
@@ -167,6 +171,17 @@ async def test_interrupt_during_tools_lets_them_finish_and_merges_like_steer() -
     tool_observation = run.history.turns[1].observation
     assert [message.role for message in tool_observation.messages] == [Role.TOOL, Role.USER]  # pyright: ignore[reportOptionalMemberAccess]
     assert tool_observation.messages[1].text == "hurry up"  # pyright: ignore[reportOptionalMemberAccess]
+
+
+def test_a_conversation_address_names_its_deployment_and_key() -> None:
+    key = ConversationKey(deployment="acme/support-bot", key="slack:T1/C2/171.2")
+    assert key.address == "acme/support-bot/slack:T1/C2/171.2"
+    assert ConversationKey.parse(key.address) == key
+    origin = Address(kind="external", value="http")
+    assert ConversationKey.parse("acme/chat/user:42", origin=origin).origin == origin
+    for address in ("acme/chat", "acme/chat/", "acme"):
+        with pytest.raises(ValueError, match="does not name a conversation"):
+            ConversationKey.parse(address)
 
 
 def test_delivery_policy_maps_priorities_and_caps_senders() -> None:

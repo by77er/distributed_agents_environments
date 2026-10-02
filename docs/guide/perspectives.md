@@ -73,27 +73,12 @@ The same code holds `RolloutJobs` (runs in this process) or `RolloutClient(url)`
 
 ## Deploying
 
-```toml
-directory = "~/.cache/rollout/runs/first"
-runner = "local"                                 # or "durable"
-
-[channels.policy]
-model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
-renderer = "qwen3.5"
-engines = [{ gpu_share = 0.78 }]                 # one entry per replica
-
-[trainer]
-sequence_tokens = 8000
-sequences_per_step = 384
-colocated = true                                 # it shares the engines' GPU: they sleep while it steps
-
-[tools]
-minecraft = "minecraft_swarm.worlds:tools"       # or "http://worlds:8700"
-```
+A profile is a TOML file that names each of these: the channels (a model, its token format, what serves it, one
+entry per replica), the trainer and the channel it trains, the runner, and where each tool set lives.
 
 ```bash
 rollout train profile.toml minecraft_swarm.catalog:catalog
 ```
 
-The trainer's limits become the channels' limits; the channels' limits reach environments as "your memory is full".
+The trainer's limits become its channel's limits; the channel's limits reach environments as "your memory is full".
 Scaling is a change to this file ([deploying](deploying.md)).

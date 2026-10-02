@@ -12,6 +12,7 @@ from rollout.core.contracts import (
     CapabilityContract,
     FinishReason,
     Message,
+    ModelAddress,
     ModelEndpoint,
     Role,
     RunEvent,
@@ -21,6 +22,7 @@ from rollout.core.contracts import (
     Text,
     ToolCall,
     Usage,
+    address_of,
     new_run_id,
 )
 from rollout.core.harness.environments import EnvironmentService, EnvironmentSpecification, ExecutionResult
@@ -112,6 +114,9 @@ class LedgerEndpoint:
 
     def describe(self, session_id: str) -> CapabilityContract:
         return self._inner.describe(session_id)
+
+    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+        return address_of(self._inner, session_id, through=through or self)
 
     async def sample(self, request: SampleRequest) -> SampleResult:
         _append(self._ledger, {"effect_id": request.effect_id, "session_id": request.session_id})

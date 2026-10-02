@@ -8,14 +8,16 @@
 
 const { Vec3 } = require('vec3')
 const { goals } = require('mineflayer-pathfinder')
-const { lineOfSight, firstHit, eyes, DIRECTIONS } = require('./observe')
+const { lineOfSight, firstHit, eyes, DIRECTIONS, CONTAINERS, FURNACES } = require('./observe')
+const { LIMITS, TICKS_PER_SECOND, spelled, listed } = require('./limits')
 
-const REACH = 4.5
-const MAX_DIG_SECONDS = 15 // a block must break well within a window of game time (twenty seconds)
-const WAIT_TICKS = 100
-const SMELT_TICKS = 200 // to smelt one item
+const REACH = LIMITS.reach_blocks
+const MAX_DIG_SECONDS = 15 // a block must break well within a window of game time (`window_seconds`)
+const WAIT_TICKS = LIMITS.wait_seconds * TICKS_PER_SECOND
+const SMELT_TICKS = LIMITS.smelt_seconds * TICKS_PER_SECOND // to smelt one item
 const BURN_TICKS = { coal: 1600, charcoal: 1600, coal_block: 16000, blaze_rod: 2400, lava_bucket: 20000, stick: 100, dried_kelp_block: 4000 }
 const WORN = { head: /_helmet$|^carved_pumpkin$|_skull$|_head$/, torso: /_chestplate$|^elytra$/, legs: /_leggings$/, feet: /_boots$/ }
+const SLOTS = ['hand', 'off-hand', ...Object.keys(WORN)] // where `equip` puts an item
 
 class ActionError extends Error {}
 
@@ -32,7 +34,7 @@ const ACTIONS = {
 
   async move (bot, { direction, blocks }, context) {
     const vector = direction_(direction)
-    const count = Math.max(1, Math.min(int(blocks ?? 8, 'blocks'), 32))
+    const count = Math.max(1, Math.min(int(blocks ?? 8, 'blocks'), LIMITS.move_blocks))
     const start = bot.entity.position.floored()
     const target = start.plus(vector.scaled(count))
     const goal = vector.y === 0 ? new goals.GoalXZ(target.x, target.z) : new goals.GoalY(target.y)
@@ -44,7 +46,7 @@ const ACTIONS = {
       const { steps, obstacle } = straight(bot, start, vector, count)
       if (steps === 0) {
         throw new ActionError(obstacle
-          ? `you cannot go ${direction} from here: ${obstacle} is in the way, and your tools do not break it within five seconds`
+          ? `you cannot go ${direction} from here: ${obstacle} is in the way, and your tools do not break it within ${spelled(LIMITS.walk_dig_seconds)} seconds`
           : `you cannot go ${direction} from here: there is no ground to walk on`)
       }
       const end = start.plus(vector.scaled(steps))
@@ -81,7 +83,7 @@ const ACTIONS = {
 
   async craft (bot, { item, count }, context) {
     const wanted = itemNamed(bot, item)
-    const table = stationInReach(bot, 'crafting_table')
+    const table = stationInReach(bot, ['crafting_table'])
     const recipes = bot.recipesFor(wanted.id, null, 1, table)
     if (recipes.length === 0) {
       const every = bot.recipesAll(wanted.id, null, true)
@@ -103,12 +105,12 @@ const ACTIONS = {
   },
 
   async smelt (bot, { item, fuel, count }, context) {
-    const block = stationInReach(bot, 'furnace')
+    const block = stationInReach(bot, FURNACES)
     if (block === null) throw new ActionError('there is no furnace within reach; craft and place one')
     const input = itemNamed(bot, item)
     const burn = fuel == null ? bestFuel(bot) : itemNamed(bot, fuel)
     if (burn !== null && burnTicks(burn.name) === 0) {
-      throw new ActionError(`${burn.name} does not burn; coal, charcoal, planks, logs and sticks do`)
+      throw new ActionError(`${burn.name} does not burn; ${listed(LIMITS.fuels, 'and')} do`)
     }
     const furnace = await opened(bot.openFurnace(block), 'furnace')
     try {
@@ -120,7 +122,7 @@ const ACTIONS = {
       if (have === 0 && !inside) throw new ActionError(`you have no ${input.name}`)
       const amount = Math.max(0, Math.min(int(count ?? 1, 'count'), have))
       if (amount > 0) await furnace.putInput(input.id, null, amount)
-      // Fuel for everything now in the furnace: an item takes 200 ticks, and what is in the fuel slot counts.
+      // Fuel for everything now in the furnace: an item takes `SMELT_TICKS`, and what is in the fuel slot counts.
       const waiting = (inside?.count ?? 0) + amount
       const stoked = furnace.fuelItem()
       const lit = stoked ? stoked.count * burnTicks(stoked.name) : 0
@@ -131,19 +133,19 @@ const ACTIONS = {
       }
       const fuelled = furnace.fuelItem()
       if (!fuelled && !(furnace.fuel > 0)) {
-        return { smelting: null, in_furnace: { [input.name]: waiting }, note: `it has no fuel: smelt again with fuel (coal, charcoal, planks, logs or sticks) in your inventory` }
+        return { smelting: null, in_furnace: { [input.name]: waiting }, note: `it has no fuel: smelt again with fuel (${listed(LIMITS.fuels, 'or')}) in your inventory` }
       }
       return {
         smelting: input.name,
         count: waiting,
         fuel: fuelled ? { [fuelled.name]: fuelled.count } : 'burning',
-        note: 'each item takes 10 seconds; come back and use take_smelted'
+        note: `each item takes ${LIMITS.smelt_seconds} seconds; come back and use take_smelted`
       }
     } finally { furnace.close() }
   },
 
   async take_smelted (bot, args, context) {
-    const block = stationInReach(bot, 'furnace')
+    const block = stationInReach(bot, FURNACES)
     if (block === null) throw new ActionError('there is no furnace within reach')
     const furnace = await opened(bot.openFurnace(block), 'furnace')
     try {
@@ -197,9 +199,7 @@ const ACTIONS = {
     if (!held) throw new ActionError(`you have no ${item}`)
     const worn = Object.keys(WORN).find(place => WORN[place].test(item)) ?? null
     const destination = slot ?? worn ?? 'hand'
-    if (!['hand', 'off-hand', ...Object.keys(WORN)].includes(destination)) {
-      throw new ActionError('slot must be hand, off-hand, head, torso, legs or feet')
-    }
+    if (!SLOTS.includes(destination)) throw new ActionError(`slot must be ${listed(SLOTS, 'or')}`)
     if (destination in WORN && destination !== worn) throw new ActionError(`${item} cannot be worn on the ${destination}`)
     await bot.equip(held, destination)
     return { equipped: item, slot: destination }
@@ -293,7 +293,7 @@ const ACTIONS = {
     if (position.offset(0.5, 0.5, 0.5).distanceTo(eyes(bot)) > REACH) throw new ActionError('that is out of reach')
     const blocking = whatHides(bot, block)
     if (blocking !== null) throw new ActionError(`you cannot see it from here: ${blocking} is in the way`)
-    if (/chest$|^barrel$/.test(block.name)) {
+    if (CONTAINERS.has(block.name)) {
       const container = await opened(bot.openContainer(block), block.name)
       try {
         return { opened: block.name, contents: summarize(container.containerItems()) }
@@ -340,18 +340,19 @@ const ACTIONS = {
   },
 
   async chat (bot, { message }, context) {
-    const text = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
+    const text = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, LIMITS.chat_characters)
     if (!text) throw new ActionError('say something')
     bot.chat(text)
     return { said: text }
   },
 
-  // Nothing at all, at once: for a turn spent writing notes. It does not keep the world's window open.
+  // Nothing at all, at once: what an agent that called no tool does that turn. It does not keep the world's window
+  // open.
   async idle (bot, args, context) {
     return {}
   },
 
-  // Five seconds of game time, counted by the world's age (the server reports it once a second), so that a window
+  // `wait_seconds` of game time, counted by the world's age (the server reports it once a second), so that a window
   // other players' actions keep open does not make a wait any longer.
   async wait (bot, args, context) {
     const until = bot.time.age + WAIT_TICKS
@@ -583,10 +584,11 @@ function standsIn (bot, position) {
   return false
 }
 
-function stationInReach (bot, name) {
-  const id = bot.registry.blocksByName[name]?.id
+// A block of one of the kinds in `names` that the bot sees within reach, or null.
+function stationInReach (bot, names) {
+  const ids = [...names].map(name => bot.registry.blocksByName[name]?.id).filter(id => id !== undefined)
   const origin = eyes(bot)
-  for (const position of bot.findBlocks({ matching: id, maxDistance: 5, count: 8 })) {
+  for (const position of bot.findBlocks({ matching: ids, maxDistance: 5, count: 8 })) {
     const center = position.offset(0.5, 0.5, 0.5)
     if (center.distanceTo(origin) <= REACH && lineOfSight(bot, origin, center)) return bot.blockAt(position)
   }
@@ -608,7 +610,7 @@ function straight (bot, start, vector, count) {
 }
 
 function container_ (block) {
-  if (!/chest$|^barrel$|shulker_box$/.test(block.name)) {
+  if (!CONTAINERS.has(block.name)) {
     throw new ActionError(`(${block.position.x}, ${block.position.y}, ${block.position.z}) is ${block.name}, not a chest`)
   }
   return block
@@ -697,4 +699,4 @@ function sleep (ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
 
 class Interrupted extends Error {}
 
-module.exports = { ACTIONS, ActionError, Interrupted, burnTicks, opened, straight, WORN }
+module.exports = { ACTIONS, ActionError, Interrupted, burnTicks, opened, straight, WORN, SLOTS }

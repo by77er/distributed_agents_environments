@@ -41,7 +41,7 @@ from rollout.core.contracts import (
     arguments_digest,
     context_digests,
 )
-from rollout.recorder.recorder import Recorder
+from rollout.recorder.recorder import SERVED_UNDER, Recorder
 
 FINISH = {FinishReason.TOOL_USE: "tool_calls", FinishReason.LENGTH: "length"}
 
@@ -88,7 +88,12 @@ def create_app(recorder: Recorder) -> Starlette:
             return StreamingResponse(events(reply), media_type="text/event-stream")
         return JSONResponse(reply)
 
-    return Starlette(routes=[Route("/v1/models", models), Route("/v1/chat/completions", chat, methods=["POST"])])
+    return Starlette(
+        routes=[
+            Route(f"{SERVED_UNDER}/models", models),
+            Route(f"{SERVED_UNDER}/chat/completions", chat, methods=["POST"]),
+        ]
+    )
 
 
 def canonical(entry: dict[str, Any]) -> Message:

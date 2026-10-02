@@ -3,9 +3,8 @@
 Implemented by the recorder and by direct adapters; code cannot tell which serves a model slot.
 """
 
-from datetime import datetime
 from enum import StrEnum
-from typing import Protocol, Self
+from typing import Protocol, Self, runtime_checkable
 
 from pydantic import model_validator
 
@@ -36,43 +35,23 @@ class FinishReason(StrEnum):
     STOP = "stop"
     LENGTH = "length"
     TOOL_USE = "tool_use"
-    CONTENT_FILTER = "content_filter"
-
-
-class ReasoningSupport(StrEnum):
-    """Which kinds of reasoning blocks a model slot produces."""
-
-    NONE = "none"
-    PORTABLE = "portable"
-    POLICY_SCOPED = "policy_scoped"
 
 
 class CapabilityContract(ContractModel):
     """What a model slot guarantees. It must not weaken during a run."""
 
-    contract_version: str = "1"
     context_limit: int
     """Minimum guaranteed."""
     max_output_tokens: int
-    modalities_in: frozenset[str] = frozenset({"text"})
-    tool_calling: bool = True
-    parallel_tool_calls: bool = True
-    reasoning: ReasoningSupport = ReasoningSupport.NONE
-    accepts_context_delta: bool = False
 
 
 class ContextDelta(ContractModel):
-    """The context of a request as an edit of the previous request's context in the same slot.
+    """The context of a request: its messages, and the digest that names them."""
 
-    Digests are values of the chain computed by `rollout.core.contracts.digests.context_digests`.
-    """
-
-    parent_digest: str | None = None
-    """Digest of the previous request's context; `None` means `append` is the full context."""
-    keep_prefix: int = 0
-    """Number of parent items retained (the parent's length for a pure append)."""
     append: FrozenSequence[Message] = ()
+    """The whole context, in order."""
     digest: str
+    """The last value of the chain `rollout.core.contracts.digests.context_digests` computes over `append`."""
 
 
 class SampleRequest(ContractModel):
@@ -88,7 +67,6 @@ class SampleRequest(ContractModel):
     max_output_tokens: int | None = None
     """Must not exceed the contract's `max_output_tokens`."""
     tool_choice: ToolChoice | None = None
-    deadline: datetime | None = None
 
     @model_validator(mode="after")
     def _unique_tool_names(self) -> Self:
@@ -135,7 +113,7 @@ class ModelAddress(ContractModel):
 
 class ModelEndpoint(Protocol):
     """Serves model slots: implemented by the recorder and by direct adapters. An endpoint that can also be reached
-    over HTTP has `address(session_id) -> ModelAddress`."""
+    over HTTP is an `AddressableEndpoint`."""
 
     def describe(self, session_id: str) -> CapabilityContract:
         """The capability contract of the session's model slot."""
@@ -150,6 +128,23 @@ class ModelEndpoint(Protocol):
         ...
 
 
+@runtime_checkable
+class AddressableEndpoint(ModelEndpoint, Protocol):
+    """A model endpoint that also serves its slots over HTTP, to a harness that brings its own loop."""
+
+    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+        """Where such a harness reaches the session's slot. What it samples there goes `through` an endpoint
+        wrapping this one, if one is given (a runner's, which reports samples to its hooks)."""
+        ...
+
+
+def address_of(endpoint: ModelEndpoint, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+    """`AddressableEndpoint.address` of an endpoint; raises if the endpoint has no address."""
+    if not isinstance(endpoint, AddressableEndpoint):
+        raise RuntimeError("this model slot is not served over HTTP: a harness cannot be given an address")
+    return endpoint.address(session_id, through=through)
+
+
 class ModelEndpointError(Exception):
     """Errors an endpoint raises; see the table in the contract for how the core handles each."""
 
@@ -162,10 +157,6 @@ class Overloaded(ModelEndpointError):
         self.retry_after = retry_after
 
 
-class NeedFullContext(ModelEndpointError):
-    """The delta's parent is unknown to the endpoint; the core resends the full context."""
-
-
 class ContextOverflow(ModelEndpointError):
     """The context exceeds the contract's limit; agents compact and retry."""
 
@@ -176,14 +167,6 @@ class ContextOverflow(ModelEndpointError):
 
 class ContractViolation(ModelEndpointError):
     """The request exceeds the capability contract."""
-
-
-class Conflict(ModelEndpointError):
-    """A known `effect_id` arrived with a different arguments digest."""
-
-
-class DeadlineExceeded(ModelEndpointError):
-    """The request's deadline passed."""
 
 
 class InternalError(ModelEndpointError):

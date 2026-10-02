@@ -46,8 +46,7 @@ Two hooks are enough:
 ## Run one episode
 
 `rollout()` runs the loop: `start`, then the agent acts, then `respond`, until an observation ends the episode.
-It needs a run context. `local_run` builds one whose model replies from a script, which is how you run tasks until
-the model adapters arrive.
+It needs a run context. `local_run` builds one whose model replies from a script, so the episode needs no model.
 
 ```python
 async def main() -> None:
@@ -85,3 +84,4 @@ Along the way the run emitted events you can inspect: see [runs and events](runs
 - Multi-step environments, more reward types and other endings: [tasks](tasks.md).
 - Letting the model call functions: [tools](tools.md).
 - Changing what the model sees: [agents](agents.md).
+- Running against a real model: [models](models.md).

@@ -20,7 +20,7 @@ from rollout.core.harness.environments import (
 )
 from rollout.core.harness.history import ContextHints, History, HistoryShape, Turn
 from rollout.core.harness.hooks import ModelSample, RunHooks
-from rollout.core.harness.imports import ToolBinding, Tools, ToolSet
+from rollout.core.harness.imports import DeduplicatingToolSet, ToolBinding, Tools, ToolSet
 from rollout.core.harness.loop import rollout
 from rollout.core.harness.memory import CompactingAgent, Memory
 from rollout.core.harness.model import Effects, EndpointModel
@@ -29,6 +29,7 @@ from rollout.core.harness.program import AgentProgram, Program
 from rollout.core.harness.runner import (
     Deployment,
     DirectModel,
+    MessageRouter,
     ModelBinding,
     ProgramReference,
     RecordedEndpoints,
@@ -36,6 +37,7 @@ from rollout.core.harness.runner import (
     RunBinding,
     RunHandle,
     Runner,
+    RunNotLive,
     RunOutcome,
     RunSpecification,
     RunStatus,
@@ -58,6 +60,7 @@ __all__ = [
     "CompactingAgent",
     "ContextHints",
     "ConversationKey",
+    "DeduplicatingToolSet",
     "DeliveryMode",
     "DeliveryPolicy",
     "Deployment",
@@ -78,6 +81,7 @@ __all__ = [
     "Interrupted",
     "InvalidObservation",
     "Memory",
+    "MessageRouter",
     "Model",
     "ModelBinding",
     "ModelSample",
@@ -92,6 +96,7 @@ __all__ = [
     "RunContext",
     "RunHandle",
     "RunHooks",
+    "RunNotLive",
     "RunOutcome",
     "RunSpecification",
     "RunStatus",

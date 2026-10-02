@@ -126,7 +126,7 @@ async def test_a_tool_set_served_over_http_is_imported_by_its_address() -> None:
     assert result.structured == {"rolled": 4} and dice.effects == ["r_1:0:0"]  # the effect's id goes with the call
     with pytest.raises(RuntimeError, match="ValueError: a die has sides"):  # a failure there is a failure here
         await remote.call("roll", {"sides": 0}, effect_id="r_1:0:1", arguments_digest="d")
-    assert (await client.get("/specifications")).json()[0]["name"] == "roll"
+    assert (await client.get("/specifications")).json()["specifications"][0]["name"] == "roll"
 
     # A binding names it by address; the program calls `run.tools` as it would a tool set in its own process.
     binding = bind(ProgramReference(program=register(Roller)), "policy", tools={"dice": ToolBinding(url="http://dice")})

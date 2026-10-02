@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from rollout.core.contracts import RetryClass, Text, ToolAnnotations, ToolResult, ToolSpecification
+from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
 
 MAX_RESULT_CHARACTERS = 20_000
 MAX_FILE_BYTES = 1_000_000
@@ -28,8 +28,6 @@ def _schema(properties: dict[str, JsonValue], required: list[str]) -> dict[str, 
     }
 
 
-READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True)
-
 SPECIFICATIONS = [
     ToolSpecification(
         name="list_files",
@@ -38,7 +36,6 @@ SPECIFICATIONS = [
         input_schema=_schema(
             {"glob": {"type": "string", "description": "A glob relative to the repository root."}}, []
         ),
-        annotations=READ_ONLY,
         retry_class=RetryClass.IDEMPOTENT,
     ),
     ToolSpecification(
@@ -52,7 +49,6 @@ SPECIFICATIONS = [
             },
             ["pattern"],
         ),
-        annotations=READ_ONLY,
         retry_class=RetryClass.IDEMPOTENT,
     ),
     ToolSpecification(
@@ -66,7 +62,6 @@ SPECIFICATIONS = [
             },
             ["path"],
         ),
-        annotations=READ_ONLY,
         retry_class=RetryClass.IDEMPOTENT,
     ),
     ToolSpecification(
@@ -76,7 +71,6 @@ SPECIFICATIONS = [
         input_schema=_schema(
             {"path": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, []
         ),
-        annotations=READ_ONLY,
         retry_class=RetryClass.IDEMPOTENT,
     ),
 ]

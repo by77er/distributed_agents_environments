@@ -7,6 +7,9 @@ it need:
 - `write(..., exclusive=name)`: writes with the same name run one at a time (SQLite serializes every write anyway);
 - `lock(name)`: mutual exclusion across every process using the database, for work that spans several writes and
   other calls (a Postgres advisory lock, released if the holder's connection drops).
+
+A store whose tools write deduplicates them by `effect_id` with `effects_table` and `recorded`
+(docs/contracts/effects.md).
 """
 
 import asyncio
@@ -20,7 +23,19 @@ import sqlalchemy as sa
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, CursorResult
 
-__all__ = ["Connection", "Database", "create_database", "fetch_all", "fetch_one", "sql", "temporary_postgres"]
+from rollout.core.contracts import Conflict, ToolResult
+
+__all__ = [
+    "Connection",
+    "Database",
+    "create_database",
+    "effects_table",
+    "fetch_all",
+    "fetch_one",
+    "recorded",
+    "sql",
+    "temporary_postgres",
+]
 
 
 def sql(connection: Connection, statement: str, parameters: Mapping[str, Any] | None = None) -> CursorResult[Any]:
@@ -41,6 +56,39 @@ def fetch_one(
     """The first row a query returns, as a tuple, or None."""
     row = sql(connection, statement, parameters).first()
     return tuple(row) if row is not None else None
+
+
+def effects_table(metadata: sa.MetaData) -> sa.Table:
+    """Declare the table `recorded` keeps in a store's database: the result of each effect the store performed."""
+    return sa.Table(
+        "effects",
+        metadata,
+        sa.Column("effect_id", sa.Text, primary_key=True),
+        sa.Column("arguments_digest", sa.Text, nullable=False),
+        sa.Column("result", sa.Text, nullable=False),
+    )
+
+
+def recorded(
+    connection: Connection, effect_id: str, arguments_digest: str, perform: Callable[[Connection], ToolResult]
+) -> ToolResult:
+    """Run a tool's write once per effect, inside the caller's transaction: `perform` and the record of its result
+    commit together. A repeated effect returns the recorded result; a known `effect_id` with a different arguments
+    digest raises `Conflict`. The caller's writes must run one at a time (`Database.write` on SQLite, or
+    `exclusive=` on Postgres)."""
+    row = fetch_one(connection, "SELECT arguments_digest, result FROM effects WHERE effect_id = :id", {"id": effect_id})
+    if row is not None:
+        recorded_digest, recorded_result = row
+        if recorded_digest != arguments_digest:
+            raise Conflict(f"effect {effect_id} was recorded with different arguments")
+        return ToolResult.model_validate_json(recorded_result)
+    result = perform(connection)
+    sql(
+        connection,
+        "INSERT INTO effects (effect_id, arguments_digest, result) VALUES (:id, :digest, :result)",
+        {"id": effect_id, "digest": arguments_digest, "result": result.model_dump_json()},
+    )
+    return result
 
 
 class Database:

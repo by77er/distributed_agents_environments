@@ -13,6 +13,7 @@ class Slow:
     """An engine that takes a moment, and keeps what it was asked and told."""
 
     max_model_len = 8192
+    processes: Sequence[int] = ()
 
     def __init__(self, seconds: float = 0.1, tokens: int = 1) -> None:
         self.seconds, self.tokens = seconds, tokens
@@ -53,6 +54,10 @@ async def test_a_channel_counts_tokens_and_throughput() -> None:
     assert counts["tokens_per_second"] > 3 * counts["tokens_per_second_per_stream"]
     assert 3.0 < counts["mean_concurrency"] <= 4.0
     assert served.take()["requests"] == 0  # taking resets
+    running = asyncio.create_task(served.generate([0] * 100, **OPTIONS))
+    await asyncio.sleep(0.1)
+    assert served.take()["busy_seconds"] >= 0.1  # a channel that never falls idle is busy all the same
+    await running
 
 
 async def test_a_paused_channel_finishes_what_is_in_flight_and_holds_the_rest_back() -> None:

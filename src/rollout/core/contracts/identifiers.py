@@ -25,9 +25,9 @@ def new_run_id() -> str:
     return f"r_{new_ulid()}"
 
 
-def new_job_id() -> str:
-    """`j_{ulid}`."""
-    return f"j_{new_ulid()}"
+def new_message_id() -> str:
+    """`m_{ulid}`: the id of a message sent without an idempotency key."""
+    return f"m_{new_ulid()}"
 
 
 @dataclass(frozen=True)

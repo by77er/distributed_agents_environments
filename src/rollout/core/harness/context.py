@@ -118,10 +118,6 @@ class RunContext(Protocol):
         """Await concurrently, in order. Equivalent to `asyncio.gather`."""
         ...
 
-    def patched(self, change_id: str) -> bool:
-        """`True` unless replaying history recorded before the change (see docs/core/harness/determinism.md)."""
-        ...
-
     async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
         """Durable output, such as a reply to a person; a connector or client delivers it."""
         ...

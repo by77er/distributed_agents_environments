@@ -4,9 +4,11 @@ import asyncio
 import threading
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 
-from rollout.database import Connection, Database, fetch_one, sql
+from rollout.core.contracts import Conflict, Text, ToolResult
+from rollout.database import Connection, Database, effects_table, fetch_one, recorded, sql
 
 COUNTER = sa.MetaData()
 sa.Table("counter", COUNTER, sa.Column("name", sa.Text, primary_key=True), sa.Column("value", sa.Integer))
@@ -40,6 +42,31 @@ def test_exclusive_writes_never_interleave(tmp_path: Path, database: str | None)
         thread.join()
     assert databases[1].read(lambda db: sql(db, "SELECT value FROM counter").scalar_one()) == 100
     for each in databases:
+        each.close()
+
+
+def test_a_recorded_write_happens_once_per_effect(tmp_path: Path, database: str | None) -> None:
+    first, second = open_twice(tmp_path, database)
+    tables = sa.MetaData()
+    sa.Table("counter", tables, sa.Column("name", sa.Text, primary_key=True), sa.Column("value", sa.Integer))
+    effects_table(tables)
+    first.create(tables)
+    first.write(lambda db: sql(db, "INSERT INTO counter (name, value) VALUES ('n', 0)"))
+
+    def increment(db: Connection) -> ToolResult:
+        value = sql(db, "UPDATE counter SET value = value + 1 WHERE name = 'n' RETURNING value").scalar_one()
+        return ToolResult(content=[Text(text=str(value))])
+
+    def perform(store: Database, effect_id: str, digest: str) -> ToolResult:
+        return store.write(lambda db: recorded(db, effect_id, digest, increment), exclusive="counter")
+
+    once = perform(first, "r:0:1", "digest-a")
+    assert perform(second, "r:0:1", "digest-a") == once  # the recorded result: nothing is performed again
+    assert perform(second, "r:0:2", "digest-a") != once
+    with pytest.raises(Conflict):
+        perform(first, "r:0:1", "digest-b")
+    assert first.read(lambda db: sql(db, "SELECT value FROM counter").scalar_one()) == 2
+    for each in (first, second):
         each.close()
 
 

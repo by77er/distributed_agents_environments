@@ -1,8 +1,6 @@
 """`DurableRunner`: runs survive crashes and restarts (docs/durability/README.md).
 
-Each run is a DBOS workflow whose id is the `run_id`. This first version runs the program inside the workflow, in the
-runner's process ("trusted mode": platform and in-house code, trust tiers T0 and T1). The sandboxed task host that
-speaks `HarnessHost` comes next; task and agent code will not change.
+Each run is a DBOS workflow whose id is the `run_id`. The program runs inside the workflow, in the runner's process.
 
 State lives in one directory (SQLite, for one runner), or in a Postgres database that several runners share
 (`database=`; docs/durability/runners.md):
@@ -25,6 +23,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -38,10 +37,9 @@ from rollout.core.contracts import (
     RunEventType,
     RunFailureClass,
     new_run_id,
-    new_ulid,
 )
 from rollout.core.harness.blobs import Blobs
-from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, Envelope, Priority
+from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, DeliveryPolicy, Envelope
 from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.hooks import RunHooks, observed, publish
 from rollout.core.harness.imports import ToolSet
@@ -49,15 +47,16 @@ from rollout.core.harness.loop import UNLOAD
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.runner import (
     Deployment,
+    MessageRouter,
     RecordedEndpoints,
     RunOutcome,
     RunSpecification,
     RunStatus,
     instantiate,
 )
-from rollout.core.local.runner import EndpointFactory, RunNotLive, resolve_endpoints, resolve_tool_sets
+from rollout.core.local.runner import EndpointFactory, resolve_endpoints, resolve_tool_sets
 from rollout.database import Database
-from rollout.durable.context import INBOX, INTERRUPT, DurableRunContext, RunCancelled
+from rollout.durable.context import INBOX, INTERRUPT, DurableRunContext, RunCancelled, utc_now
 from rollout.durable.store import RunStore
 
 logger = logging.getLogger(__name__)
@@ -135,7 +134,7 @@ class DurableRunHandle:
         return self._runner.store.events(self._run_id)
 
 
-class DurableRunner:
+class DurableRunner(MessageRouter):
     """Implements `Runner` on DBOS. Call `await launch()` before use and `await close()` after."""
 
     def __init__(
@@ -218,7 +217,7 @@ class DurableRunner:
         finishing = [
             task
             for run_id, task in self.workflow_tasks.items()
-            if (record := self.store.run(run_id)) is not None and record.status != "running"
+            if (record := self.store.run(run_id)) is not None and not record.running
         ]
         if finishing:
             await asyncio.wait(finishing, timeout=10)
@@ -254,7 +253,8 @@ class DurableRunner:
         return ConversationKey.model_validate(stored) if isinstance(stored, dict) else None
 
     def conversation_runs(self, deployment: str, key: str) -> list[DurableRunHandle]:
-        return [DurableRunHandle(self, run_id) for run_id in self.store.conversation_runs(f"{deployment}/{key}")]
+        address = ConversationKey(deployment=deployment, key=key).address
+        return [DurableRunHandle(self, run_id) for run_id in self.store.conversation_runs(address)]
 
     # Runner
 
@@ -269,55 +269,20 @@ class DurableRunner:
         run_id = run_id or new_run_id()
         specification_json = specification.model_dump(mode="json", exclude_none=True)
         conversation_json = conversation.model_dump(mode="json", exclude_none=True) if conversation else None
-        address = f"{conversation.deployment}/{conversation.key}" if conversation else None
+        address = conversation.address if conversation else None
         self.store.create_run(run_id, specification_json, address, conversation_json)
         with SetWorkflowID(run_id):
             await DBOS.start_workflow_async(
-                run_workflow, run_id, specification_json, conversation_json, dict(labels or {}), _now()
+                run_workflow, run_id, specification_json, conversation_json, dict(labels or {}), utc_now()
             )
         return DurableRunHandle(self, run_id)
-
-    async def send(
-        self,
-        to: Address,
-        envelope: Envelope,
-        *,
-        priority: Priority = Priority.NORMAL,
-        idempotency_key: str | None = None,
-        sender: str | None = None,
-    ) -> str:
-        message_id = idempotency_key or f"m_{new_ulid()}"
-        envelope = envelope.model_copy(update={"message_id": message_id, "sender": sender})
-        if to.kind == "run":
-            record = self.store.run(to.value)
-            if record is None or record.status != "running":
-                raise RunNotLive(to.value)
-            mode = RunSpecification.model_validate_json(record.specification).binding.delivery.mode(priority, sender)
-            await self._deliver(to.value, envelope, mode)
-            return message_id
-        if to.kind != "conversation":
-            raise ValueError(f"the durable runner cannot deliver to {to.kind} addresses")
-        async with self.database.lock(f"conversation:{to.value}"):
-            if self.store.is_claimed(message_id):
-                return message_id  # a retry of a message already delivered
-            run_id = self._live_run(to.value)
-            if run_id is None:
-                run_id = (await self._start_conversation_run(to.value, envelope.reply_to)).run_id
-            record = self.store.run(run_id)
-            assert record is not None
-            mode = RunSpecification.model_validate_json(record.specification).binding.delivery.mode(priority, sender)
-            await self._deliver(run_id, envelope, mode)
-            # Claimed only once delivered: a crash in between makes the retry deliver again (deduplicated by DBOS
-            # while the same run is live) rather than never.
-            self.store.claim_message(message_id, to.value)
-        return message_id
 
     async def cancel(self, run_id: str, *, reason: str) -> None:
         """Ask the run to stop at its next effect, wait or turn boundary; `teardown` runs."""
         record = self.store.run(run_id)
-        if record is None or record.status != "running":
+        if record is None or not record.running:
             return
-        item = {"type": "cancel", "reason": reason, "sent_at": _now()}
+        item = {"type": "cancel", "reason": reason, "sent_at": utc_now()}
         async with self.database.lock(f"run:{run_id}"):
             await DBOS.send_async(run_id, item, INBOX, idempotency_key=f"cancel:{run_id}")
             await DBOS.send_async(run_id, {"cancel": True}, INTERRUPT, idempotency_key=f"cancel-signal:{run_id}")
@@ -394,31 +359,53 @@ class DurableRunner:
         if run_id is None:
             return None
         record = self.store.run(run_id)
-        return run_id if record is not None and record.status == "running" else None
+        return run_id if record is not None and record.running else None
 
-    async def _start_conversation_run(self, address: str, reply_to: Address | None) -> DurableRunHandle:
+    # The transport of `MessageRouter`
+
+    def _exclusive(self, to: Address) -> AbstractAsyncContextManager[None]:
+        return self.database.lock(f"send:{to.kind}:{to.value}")
+
+    def _is_claimed(self, message_id: str) -> bool:
+        return self.store.is_claimed(message_id)
+
+    def _claim(self, message_id: str, to: Address) -> None:
+        self.store.claim_message(message_id, to.value)
+
+    async def _conversation_run(self, address: str, reply_to: Address | None) -> str:
+        run_id = self._live_run(address)
+        if run_id is not None:
+            return run_id
         stored = self.store.conversation_key(address)
         if isinstance(stored, dict):
             conversation = ConversationKey.model_validate(stored)
         else:
-            namespace, name, key = [*address.split("/", 2), "", ""][:3]
-            if not key:
-                raise ValueError(f"{address!r} does not name a conversation")
-            conversation = ConversationKey(deployment=f"{namespace}/{name}", key=key, origin=reply_to)
+            conversation = ConversationKey.parse(address, origin=reply_to)
         deployment = self._deployments.get(conversation.deployment)
         if deployment is None:
             raise ValueError(f"{address!r} does not name a conversation of a deployed agent")
-        return await self.start(deployment.specification, conversation=conversation)
+        return (await self.start(deployment.specification, conversation=conversation)).run_id
+
+    def _delivery_policy(self, run_id: str) -> DeliveryPolicy | None:
+        record = self.store.run(run_id)
+        if record is None or not record.running:
+            return None
+        return RunSpecification.model_validate_json(record.specification).binding.delivery
 
     async def _deliver(self, run_id: str, envelope: Envelope, mode: DeliveryMode) -> None:
-        item = {"type": "message", "envelope": envelope.model_dump(mode="json"), "mode": mode.value, "sent_at": _now()}
+        item = {
+            "type": "message",
+            "envelope": envelope.model_dump(mode="json"),
+            "mode": mode.value,
+            "sent_at": utc_now(),
+        }
         async with self.database.lock(f"run:{run_id}"):
             await DBOS.send_async(run_id, item, INBOX, idempotency_key=f"{run_id}:{envelope.message_id}")
             if mode is DeliveryMode.INTERRUPT:
                 signal = {"message_id": envelope.message_id}
                 key = f"{run_id}:{envelope.message_id}:signal"
                 await DBOS.send_async(run_id, signal, INTERRUPT, idempotency_key=key)
-            self.store.touch(run_id, _now())
+            self.store.touch(run_id, utc_now())
             await self._wake_if_evicted(run_id)
 
     # Eviction (docs/durability/eviction.md)
@@ -427,7 +414,7 @@ class DurableRunner:
         """Resume an evicted run; its replay returns recorded steps and then takes the new message. Hold its lock."""
         if not self.store.is_evicted(run_id):
             return
-        self.store.wake(run_id, _now())  # until it suspends again, it must not be re-evicted
+        self.store.wake(run_id, utc_now())  # until it suspends again, it must not be re-evicted
         await DBOS.resume_workflow_async(run_id)  # queued: whichever runner dequeues it executes it
 
     async def _evict_idle_runs(self) -> None:
@@ -460,14 +447,8 @@ class DurableRunner:
         """When a conversation's run ends, messages it never consumed start the conversation's next run."""
         undelivered = [Envelope.model_validate(item) for item in result.get("undelivered", [])]
         record = self.store.run(run_id)
-        if not undelivered or record is None or record.conversation is None:
-            return
-        async with self.database.lock(f"conversation:{record.conversation}"):
-            successor = self._live_run(record.conversation)
-            if successor is None:
-                successor = (await self._start_conversation_run(record.conversation, None)).run_id
-            for envelope in undelivered:
-                await self._deliver(successor, envelope, DeliveryMode.QUEUE)
+        if record is not None and record.conversation is not None:
+            await self._hand_over(record.conversation, undelivered)
 
     # Runners sharing a database
 
@@ -495,10 +476,6 @@ class DurableRunner:
         task: asyncio.Task[None] = asyncio.get_running_loop().create_task(work, name=name, context=context)
         self._background.add(task)
         task.add_done_callback(self._background.discard)
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _timestamp(moment: datetime) -> str:

@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass, field
 
 from pydantic import JsonValue
@@ -13,10 +14,9 @@ from rollout.core.contracts import (
     RunEventType,
     RunFailureClass,
     new_run_id,
-    new_ulid,
 )
 from rollout.core.harness.blobs import Blobs
-from rollout.core.harness.conversations import Address, ConversationKey, Envelope, Priority
+from rollout.core.harness.conversations import Address, ConversationKey, DeliveryMode, DeliveryPolicy, Envelope
 from rollout.core.harness.environments import EnvironmentService
 from rollout.core.harness.hooks import RunHooks, observed, publish
 from rollout.core.harness.imports import ToolSet
@@ -26,6 +26,7 @@ from rollout.core.harness.remote import remote_tool_set
 from rollout.core.harness.runner import (
     Deployment,
     DirectModel,
+    MessageRouter,
     RecordedEndpoints,
     RunBinding,
     RunOutcome,
@@ -37,10 +38,6 @@ from rollout.core.local.context import LocalRunContext
 
 type EndpointFactory = Callable[[DirectModel], ModelEndpoint]
 """Creates the endpoint for a direct model binding; registered with the runner by provider name."""
-
-
-class RunNotLive(Exception):
-    """A message was addressed to a run that has ended."""
 
 
 class LocalRunHandle:
@@ -116,10 +113,9 @@ class _Conversation:
     key: ConversationKey
     live: LocalRunHandle | None = None
     runs: list[str] = field(default_factory=list[str])
-    seen: set[str] = field(default_factory=set[str])
 
 
-class LocalRunner:
+class LocalRunner(MessageRouter):
     """Implements `Runner` in process.
 
     Direct model bindings are served by endpoint factories registered by provider name. Conversations addressed to a
@@ -148,11 +144,18 @@ class LocalRunner:
         self._runs: dict[str, LocalRunHandle] = {}
         self._deployments: dict[str, Deployment] = {}
         self._conversations: dict[str, _Conversation] = {}
+        self._claimed: set[str] = set()
         self._background: set[asyncio.Task[None]] = set()
 
     def _recorded(self, handle: LocalRunHandle, event: RunEvent) -> None:
         handle.notify(event)
         publish(self._hooks, event)
+
+    async def launch(self) -> None:
+        """Nothing to start: runs execute on the caller's event loop."""
+
+    async def close(self) -> None:
+        """Nothing to release: nothing outlives the process."""
 
     # Deployments and inspection
 
@@ -170,7 +173,7 @@ class LocalRunner:
 
     def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]:
         """The conversation's runs, oldest first."""
-        conversation = self._conversations.get(f"{deployment}/{key}")
+        conversation = self._conversations.get(ConversationKey(deployment=deployment, key=key).address)
         return [self._runs[run_id] for run_id in conversation.runs] if conversation else []
 
     # Runner
@@ -219,35 +222,6 @@ class LocalRunner:
         handle.attach(asyncio.create_task(self._execute(handle, program), name=f"run {run_id}"))
         return handle
 
-    async def send(
-        self,
-        to: Address,
-        envelope: Envelope,
-        *,
-        priority: Priority = Priority.NORMAL,
-        idempotency_key: str | None = None,
-        sender: str | None = None,
-    ) -> str:
-        message_id = idempotency_key or f"m_{new_ulid()}"
-        envelope = envelope.model_copy(update={"message_id": message_id, "sender": sender})
-        if to.kind == "run":
-            handle = self._runs.get(to.value)
-            if handle is None or handle.done:
-                raise RunNotLive(to.value)
-            handle.context.deliver(envelope, handle.specification.binding.delivery.mode(priority, sender))
-            return message_id
-        if to.kind != "conversation":
-            raise ValueError(f"the local runner cannot deliver to {to.kind} addresses")
-        conversation = self._conversation(to.value, envelope.reply_to)
-        if message_id in conversation.seen:
-            return message_id  # deduplicated by message_id
-        conversation.seen.add(message_id)
-        handle = conversation.live
-        if handle is None or handle.done:
-            handle = await self._start_conversation_run(conversation)
-        handle.context.deliver(envelope, handle.specification.binding.delivery.mode(priority, sender))
-        return message_id
-
     async def cancel(self, run_id: str, *, reason: str) -> None:
         handle = self._runs[run_id]
         task = handle.task
@@ -257,26 +231,39 @@ class LocalRunner:
         task.cancel()
         await asyncio.wait([task])
 
+    # The transport of `MessageRouter`. Runs share one event loop and delivering never suspends, so nothing needs
+    # holding while a message is delivered.
+
+    def _exclusive(self, to: Address) -> AbstractAsyncContextManager[None]:
+        return nullcontext()
+
+    def _is_claimed(self, message_id: str) -> bool:
+        return message_id in self._claimed
+
+    def _claim(self, message_id: str, to: Address) -> None:
+        self._claimed.add(message_id)
+
+    async def _conversation_run(self, address: str, reply_to: Address | None) -> str:
+        conversation = self._conversations.get(address)
+        if conversation is None:
+            key = ConversationKey.parse(address, origin=reply_to)
+            if key.deployment not in self._deployments:
+                raise ValueError(f"{address!r} does not name a conversation of a deployed agent")
+            conversation = self._conversations[address] = _Conversation(key)
+        if conversation.live is None or conversation.live.done:
+            deployment = self._deployments[conversation.key.deployment]
+            conversation.live = await self.start(deployment.specification, conversation=conversation.key)
+            conversation.runs.append(conversation.live.run_id)
+        return conversation.live.run_id
+
+    def _delivery_policy(self, run_id: str) -> DeliveryPolicy | None:
+        handle = self._runs.get(run_id)
+        return handle.specification.binding.delivery if handle is not None and not handle.done else None
+
+    async def _deliver(self, run_id: str, envelope: Envelope, mode: DeliveryMode) -> None:
+        self._runs[run_id].context.deliver(envelope, mode)
+
     # Internals
-
-    def _conversation(self, address: str, reply_to: Address | None) -> _Conversation:
-        existing = self._conversations.get(address)
-        if existing is not None:
-            return existing
-        namespace, name, key = [*address.split("/", 2), "", ""][:3]
-        deployment = f"{namespace}/{name}"
-        if not key or deployment not in self._deployments:
-            raise ValueError(f"{address!r} does not name a conversation of a deployed agent")
-        conversation = _Conversation(ConversationKey(deployment=deployment, key=key, origin=reply_to))
-        self._conversations[address] = conversation
-        return conversation
-
-    async def _start_conversation_run(self, conversation: _Conversation) -> LocalRunHandle:
-        deployment = self._deployments[conversation.key.deployment]
-        handle = await self.start(deployment.specification, conversation=conversation.key)
-        conversation.live = handle
-        conversation.runs.append(handle.run_id)
-        return handle
 
     async def _execute(self, handle: LocalRunHandle, program: Program) -> None:
         context = handle.context
@@ -300,29 +287,22 @@ class LocalRunner:
         if context.environments is not None:
             await context.environments.release_all()  # environments the run still owns (P12)
         handle.finish(outcome)
-        self._hand_over(handle)
+        self._leave_conversation(handle)
 
-    def _hand_over(self, handle: LocalRunHandle) -> None:
+    def _leave_conversation(self, handle: LocalRunHandle) -> None:
         """Messages the finished run never consumed start the conversation's next run."""
         if handle.conversation is None:
             return
-        address = f"{handle.conversation.deployment}/{handle.conversation.key}"
+        address = handle.conversation.address
         conversation = self._conversations.get(address)
         if conversation is None or conversation.live is not handle:
             return
         conversation.live = None
         undelivered = handle.context.take_undelivered()
-        if not undelivered:
-            return
-
-        async def continue_conversation() -> None:
-            successor = await self._start_conversation_run(conversation)
-            for envelope in undelivered:
-                successor.context.deliver(envelope, successor.specification.binding.delivery.mode(Priority.LOW))
-
-        task = asyncio.create_task(continue_conversation())
-        self._background.add(task)
-        task.add_done_callback(self._background.discard)
+        if undelivered:
+            task = asyncio.create_task(self._hand_over(address, undelivered))
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
 
 
 def resolve_endpoints(
@@ -343,8 +323,7 @@ def resolve_endpoints(
                 raise ValueError(f"slot {slot!r} is bound to a recorded channel, but the runner has no recorder")
             endpoints[slot] = recorder.endpoint(model.recorded)
             continue
-        if model.direct is None:
-            raise ValueError(f"the binding for slot {slot!r} names no model")
+        assert model.direct is not None  # a binding is one or the other
         factory = providers.get(model.direct.provider)
         if factory is None:
             raise ValueError(f"no endpoint factory registered for provider {model.direct.provider!r}")

@@ -32,6 +32,9 @@ from rollout.core.harness.imports import Tools, ToolSet
 from rollout.core.harness.model import EFFECT_ID_META, EndpointModel
 from rollout.core.harness.observation import Observation, WaitFor
 
+GENERATION = 0
+"""The generation in every `effect_id` (`{run_id}:{generation}:{ordinal}`): a run has one."""
+
 
 @dataclass(frozen=True)
 class RewardAssignment:
@@ -53,13 +56,11 @@ class LocalRunContext:
         environment_service: EnvironmentService | None = None,
         blobs: Blobs | None = None,
         conversation: ConversationKey | None = None,
-        generation: int = 0,
         on_event: Callable[[RunEvent], None] | None = None,
         retain_events: bool = True,
     ) -> None:
         self._run_id = run_id
         self._conversation = conversation
-        self._generation = generation
         self._context_hints = context_hints or ContextHints()
         self._random = random.Random(run_id)
         self._history = History()
@@ -150,9 +151,6 @@ class LocalRunContext:
 
     async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]:
         return list(await asyncio.gather(*awaitables))
-
-    def patched(self, change_id: str) -> bool:
-        return True
 
     async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
         """Durable output, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect."""
@@ -266,7 +264,7 @@ class LocalRunContext:
         completion: Callable[[T], JsonValue],
         guard: bool = False,
     ) -> T:
-        identifier = effect_id(self._run_id, self._generation, self._next_ordinal)
+        identifier = effect_id(self._run_id, GENERATION, self._next_ordinal)
         self._next_ordinal += 1
         arguments_hash = arguments_digest(arguments)
         self.record_event(

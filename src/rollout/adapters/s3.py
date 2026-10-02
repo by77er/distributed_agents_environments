@@ -12,12 +12,12 @@ S3-compatible service accepts.
 """
 
 import asyncio
-import hashlib
 import os
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from rollout.core.contracts import BlobReference
+from rollout.core.harness.blobs import blob_digest, verified
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
@@ -51,16 +51,13 @@ class S3BlobStore:
         return cls(parsed.netloc, prefix=parsed.path.lstrip("/"), **options)
 
     async def put(self, data: bytes, media_type: str) -> BlobReference:
-        digest = hashlib.sha256(data).hexdigest()
+        digest = blob_digest(data)
         key = self._key(digest)
         await asyncio.to_thread(self._put_once, key, data, media_type, digest)
         return BlobReference(uri=f"s3://{self.bucket}/{key}", sha256=digest, size=len(data), media_type=media_type)
 
     async def read(self, reference: BlobReference) -> bytes:
-        data = await asyncio.to_thread(self._get, self._key(reference.sha256))
-        if hashlib.sha256(data).hexdigest() != reference.sha256:
-            raise ValueError(f"blob {reference.sha256} is corrupt")
-        return data
+        return verified(await asyncio.to_thread(self._get, self._key(reference.sha256)), reference)
 
     def _key(self, digest: str) -> str:
         return f"{self.prefix}{digest[:2]}/{digest}"

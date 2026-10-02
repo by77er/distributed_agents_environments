@@ -1,0 +1,119 @@
+"""What is written in two places says the same in both: the actions and their limits (the prompts, and the Node
+harness that performs them), the control API (the Python client, and the Java plugin that serves it), the tool set's
+operations, the game's version, and how far off large things are seen (the harness, and the server's configuration).
+
+No server is started: the files are read, and Node prints what the harness takes (a script that connects to nothing).
+"""
+
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+from minecraft_swarm import control
+from minecraft_swarm.limits import LIMITS
+from minecraft_swarm.paper import CONFIG, PAPER_VERSION, PLUGIN_SOURCES, server_properties
+from minecraft_swarm.prompts import ACTIONS, DIRECTION, SLOT, SYMBOLS, symbol, system_prompt
+from minecraft_swarm.tasks import catalog
+from minecraft_swarm.worlds import OPERATIONS, MinecraftTools, MinecraftWorlds
+
+from rollout.core.contracts import RetryClass
+
+HARNESS = Path(__file__).resolve().parents[1] / "harness"
+CHUNK = 16
+
+needs_node = pytest.mark.skipif(
+    shutil.which("node") is None or not (HARNESS / "node_modules").exists(), reason="Node and the harness's packages"
+)
+
+
+def vocabulary() -> dict[str, Any]:
+    """What the harness takes and keeps, as it says itself."""
+    ran = subprocess.run(["node", "test/vocabulary.js"], cwd=HARNESS, capture_output=True, text=True, check=True)
+    return json.loads(ran.stdout)
+
+
+@needs_node
+def test_the_prompts_offer_the_actions_the_harness_handles_with_its_slots_and_directions() -> None:
+    harness = vocabulary()
+    offered = [tool.name for tool in ACTIONS]
+    # The harness also handles `idle`, which no agent is offered: it is what calling no tool comes to.
+    assert set(harness["actions"]) == {*offered, "idle"} and len(offered) == len(set(offered)) == 16
+    assert harness["slots"] == SLOT["enum"]
+    assert harness["directions"] == DIRECTION["enum"]
+    assert harness["limits"] == LIMITS.model_dump(mode="json")
+
+
+@needs_node
+def test_the_map_draws_as_chests_and_furnaces_what_the_harness_opens_as_such() -> None:
+    harness = vocabulary()
+    assert {name for name, character in SYMBOLS.items() if character == symbol("chest", True)} == set(
+        harness["containers"]
+    )
+    assert {name for name, character in SYMBOLS.items() if character == symbol("furnace", True)} == set(
+        harness["furnaces"]
+    )
+
+
+def test_the_prompts_state_the_limits_in_these_words() -> None:
+    described = {tool.name: tool.description for tool in ACTIONS}
+    assert (LIMITS.reach_blocks, LIMITS.move_blocks, LIMITS.walk_dig_seconds) == (4.5, 32, 5)
+    assert described["mine"] == "Mine a block you can see within reach (4.5 blocks) and pick up what drops."
+    assert described["move"].startswith(
+        "Walk up to 32 blocks in a direction. Walking digs through what is in the way if your tools break it within "
+        "five seconds a block, and bridges or pillars with dirt, cobblestone, cobbled_deepslate or netherrack you carry"
+    )
+    assert described["move_to"].endswith(described["move"].removeprefix("Walk up to 32 blocks in a direction. "))
+    assert (LIMITS.wait_seconds, LIMITS.smelt_seconds, LIMITS.window_seconds) == (5, 10, 20)
+    assert described["wait"] == "Do nothing for five seconds."
+    assert described["smelt"].endswith(
+        "unless you name one: coal, charcoal, planks, logs, sticks); each item takes 10 seconds."
+    )
+    system = system_prompt(catalog()[0])
+    assert system.startswith("You are one of four players in Minecraft: ada, ben, cy, dee. You play together.")
+    assert "then the world runs until all four actions have finished, and freezes again." in system
+    assert "An action that takes more than twenty seconds (a long walk" in system
+
+
+def test_the_client_asks_only_for_what_the_plugin_serves_and_for_all_of_it() -> None:
+    plugin = (PLUGIN_SOURCES / "src/dev/rollout/groundtruth/GroundTruthPlugin.java").read_text()
+    served = re.findall(r'^\s*route\("([^"]+)"', plugin, flags=re.MULTILINE)
+    client = Path(control.__file__).read_text()
+    asked = re.findall(r'self\._request\(\s*"(?:GET|POST)",\s*"([^"]+)"', client)
+    assert len(asked) == client.count("self._request(")  # every request names its path where it is made
+    assert len(served) == len(set(served)) and set(asked) == set(served)
+
+
+def test_the_tool_set_specifies_the_operations_it_performs() -> None:
+    specifications = MinecraftTools(MinecraftWorlds()).specifications()
+    assert [specification.name for specification in specifications] == list(OPERATIONS)
+    for specification in specifications:
+        takes = OPERATIONS[specification.name].takes
+        assert specification.input_schema == {"type": "object", "properties": dict(takes), "required": list(takes)}
+        assert specification.retry_class is OPERATIONS[specification.name].retry_class
+    # An observation uses nothing up (harness/lib/news.js), so it may be asked for again; an action may not.
+    assert OPERATIONS["observe"].retry_class is RetryClass.PURE
+    assert OPERATIONS["act"].retry_class is OPERATIONS["window"].retry_class is RetryClass.SIDE_EFFECTING
+
+
+async def test_an_operation_the_tool_set_does_not_have_is_an_error() -> None:
+    result = await MinecraftTools(MinecraftWorlds()).call("teleport", {}, effect_id="e", arguments_digest="d")
+    assert result.is_error
+
+
+def test_the_plugin_is_built_for_the_version_the_servers_run() -> None:
+    plugin: dict[str, Any] = yaml.safe_load((PLUGIN_SOURCES / "resources" / "plugin.yml").read_text())
+    assert PAPER_VERSION.startswith(str(plugin["api-version"]))
+
+
+@needs_node
+def test_large_things_are_tracked_and_sent_as_far_off_as_the_harness_shows_them() -> None:
+    far = vocabulary()["far_range"]  # the dragon, end crystals and ghasts
+    spigot: dict[str, Any] = yaml.safe_load((CONFIG / "spigot.yml").read_text())
+    assert spigot["world-settings"]["default"]["entity-tracking-range"]["other"] == far
+    properties = server_properties()
+    assert int(properties["view-distance"]) * CHUNK >= far and int(properties["simulation-distance"]) * CHUNK >= far

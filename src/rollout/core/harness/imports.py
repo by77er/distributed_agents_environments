@@ -5,20 +5,16 @@ set that deduplicates performs each call at most once, however often a durable r
 """
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol
+from typing import Protocol, Self, runtime_checkable
 
-from pydantic import JsonValue
+from pydantic import JsonValue, model_validator
 
 from rollout.core.contracts import ContractModel, EffectKind, RetryClass, ToolResult, ToolSpecification
 from rollout.core.harness.model import Effects
 
 
 class ToolSet(Protocol):
-    """A provider of tools: in process, or a client of an MCP server, an HTTP service or another agent.
-
-    A tool set that performs each `effect_id` at most once can say so with a `deduplicates = True` attribute; its
-    side-effecting tools are then re-executed after a crash rather than guarded (docs/contracts/effects.md).
-    """
+    """A provider of tools: in process, or a client of an MCP server, an HTTP service or another agent."""
 
     def specifications(self) -> Sequence[ToolSpecification]: ...
 
@@ -29,6 +25,21 @@ class ToolSet(Protocol):
         ...
 
 
+@runtime_checkable
+class DeduplicatingToolSet(ToolSet, Protocol):
+    """A tool set that says whether it performs each `effect_id` at most once (a `deduplicates = True` attribute, on
+    a class). The side-effecting tools of one that does are re-executed after a crash rather than guarded
+    (docs/contracts/effects.md)."""
+
+    @property
+    def deduplicates(self) -> bool: ...
+
+
+def deduplicates(tool_set: ToolSet) -> bool:
+    """Whether a tool set performs each `effect_id` at most once: what it says, or False if it does not say."""
+    return isinstance(tool_set, DeduplicatingToolSet) and tool_set.deduplicates
+
+
 class ToolBinding(ContractModel):
     """How an import is served. Exactly one kind is set."""
 
@@ -37,6 +48,12 @@ class ToolBinding(ContractModel):
     url: str | None = None
     """A tool set served over HTTP (`rollout.core.harness.remote`): an environment's own infrastructure, wherever it
     runs."""
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.local is None) == (self.url is None):
+            raise ValueError("a tool binding is exactly one of `local` or `url`")
+        return self
 
 
 class Tools:
@@ -73,5 +90,5 @@ class Tools:
             {"tool": name, "arguments": dict(arguments)},
             execute,
             completion=lambda result: result.model_dump(mode="json", exclude_none=True),
-            guard=side_effecting and not getattr(tool_set, "deduplicates", False),
+            guard=side_effecting and not deduplicates(tool_set),
         )

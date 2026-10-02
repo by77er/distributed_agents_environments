@@ -1,159 +1,198 @@
 # Harness
 
-Status: **Proposed** · Layer: core · See [ADR-0012](../../decisions/0012-task-agent-loop.md), [ADR-0006](../../decisions/0006-harness-unaware-of-policy.md), [ADR-0019](../../decisions/0019-conversations-and-priority-delivery.md)
+Status: **Working** (2026-10-02) · Code: `rollout.core.harness`
 
-## Purpose
+The harness is the framework-owned rollout loop and the interfaces around it. The loop drives a **task** (the
+environment the agent acts in) with an **agent** (the policy side). A **runner** executes runs of it.
 
-The harness is the **framework-owned rollout loop**. It drives a **Task** — the environment the agent acts in, in
-the reinforcement-learning sense: tools, lifecycle, responses to each model turn, scoring — with an **Agent** — the
-policy side: what the model sees and how it acts. Task and agent code are ordinary `async` Python.
+Writing tasks, tools, agents and conversations is covered by the [developer guide](../../guide/README.md). This page
+is the reference for the rest: the loop itself, programs, run specifications and runners.
 
-A **`Runner`** executes runs. The core ships `LocalRunner` (in-process, no persistence). The
-[durability layer](../../durability/README.md) provides `DurableRunner`, which executes the same code so that it
-survives crashes.
-
-| Document | Defines |
+| Page | Covers |
 |---|---|
-| this document | the loop, `Program`, `RunSpecification`, deployments, `Runner` |
-| [task.md](task.md) | `Task`, `Observation`, `WaitFor`, tools, `RunContext` |
-| [agent.md](agent.md) | `Agent` |
-| [conversations.md](conversations.md) | conversations, messages, priorities, delivery modes |
-| [determinism.md](determinism.md) | rules for code that runs under a durable runner |
+| [guide: tasks](../../guide/tasks.md) | `Task`, `Observation`, `End`, `WaitFor`, rewards, `RunContext` |
+| [guide: tools](../../guide/tools.md) | `@tool` methods, imported tools, `ToolSet` |
+| [guide: agents](../../guide/agents.md) | `Agent`, `History`, `ContextHints`, `Model` |
+| [guide: conversations](../../guide/conversations.md) | `Envelope`, `Address`, priorities, delivery modes |
+| [guide: runs and events](../../guide/runs-and-events.md) | effects, identifiers, run events |
+| [hooks.md](hooks.md) | `RunHooks`: watching every event and model sample of a runner |
+| [memory.md](memory.md) | `Memory` and `CompactingAgent`: a context that fits any model |
+| [determinism.md](determinism.md) | rules for code that runs under the durable runner |
 
-There is exactly **one** interaction pattern. Tool-driven tasks, environment-driven (multi-step) tasks, single-turn
-tasks and conversations differ only in how `Task.start`, `Task.respond` and `Task.resume` answer.
+## The loop
 
-## The loop (normative)
+`rollout(task, agent, run)` runs one episode. This is `rollout.core.harness.loop`, without its validation calls:
 
 ```python
 async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
+    unloading = False
     try:
         await task.setup(run)
         observation = await task.start(run)
         run.record(observation)
         while True:
             if isinstance(observation, WaitFor):
-                envelope = await run.wait_for_message(observation)            # suspends; see conversations.md
-                observation = (await task.resume(run, envelope)) if envelope else observation.on_timeout
+                envelope = await run.wait_for_message(observation)
+                observation = observation.on_timeout if envelope is None else await task.resume(run, envelope)
                 run.record(observation)
                 continue
             if observation.end is not None:
                 break
             if task.max_turns is not None and run.turn >= task.max_turns:
-                run.record(End(truncated=True))
+                observation = End(truncated=True)
+                run.record(observation)
                 break
             try:
                 reply = await run.interruptible(agent.act(run, run.history, task.tools_for_turn(run)))
-            except Interrupted as interruption:                                    # a message with mode INTERRUPT
+            except Interrupted as interruption:
                 observation = await task.resume(run, interruption.envelope)
                 run.record(observation)
                 continue
-            observation = await task.respond(run, reply)                           # validated; see task.md
+            observation = await task.respond(run, reply)
             if isinstance(observation, Observation) and observation.end is None:
-                if steering := await run.take_steering_messages():
+                steering = await run.take_steering_messages()
+                if steering:
                     observation = await task.steer(run, steering, observation)
-            run.record(observation, reply=reply)                                   # observation.reward binds to reply
+            run.record(observation, reply=reply)
         episode_reward = await task.score(run)
         if episode_reward is not None:
             run.reward(episode_reward)
+    except asyncio.CancelledError as cancelled:
+        unloading = cancelled.args == ("rollout: unload",)
+        raise
     finally:
-        await task.teardown(run)
+        if not unloading:
+            await task.teardown(run)
 ```
 
-- `setup` runs first; `teardown` runs whenever `setup` began (success, failure, cancellation). A durable runner that
-  unloads an idle run from memory cancels it with the message `rollout: unload`; that is not an ending, so `teardown`
-  does not run ([evicting idle runs](../../durability/eviction.md)).
-- Every observation a hook returns is validated ([task](task.md#observation-ending-waitfor)) before it is
-  recorded. `run.record` appends a turn to the history and emits `observation.recorded`.
-- `score` runs only when the loop ends with an `Ending`; after a hook raised it does not run and the run fails
-  with `TASK_ERROR`.
-- A `WaitFor` suspends the run until a message of the requested kind arrives or the timeout passes
-  ([conversations](conversations.md)). Under a durable runner, a suspended run holds no compute.
-- Messages delivered with mode `STEER` are merged into the next non-terminal observation by `Task.steer` (default:
-  appended as USER content). Mode `INTERRUPT` while the agent is acting cancels `agent.act`, including any model
-  sample in flight (`run.interruptible` raises `Interrupted`), and the loop calls `Task.resume` with the message;
-  agents need no handling of their own; during tool execution the tools finish and the message is merged like
-  `STEER`. Messages delivered with mode `QUEUE` wait for the next `WaitFor`.
-- A task with no tools and one turn (`start` → one reply → `respond` returns `End`) is a complete task. No
-  environment is involved unless the task creates one.
+- Every observation that `start`, `respond`, `resume` and `steer` return is checked against the
+  [validation rules](../../guide/tasks.md#validation) before it is recorded. A violation raises `InvalidObservation`.
+- `run.record` appends a turn to the history and records an `observation.recorded` event. A `WaitFor` records only
+  the reply it answers. `run.turn` counts recorded replies.
+- `agent.act` must return an ASSISTANT message; anything else raises `TypeError`.
+- `score` runs only when the loop ends with an observation whose `end` is set. After an exception it does not run.
+- `teardown` runs on every path, including failure and cancellation. The one exception is a cancellation with the
+  message `rollout: unload`, which the durable runner uses to take a waiting run out of memory without ending it
+  ([evicting idle runs](../../durability/eviction.md)).
+- `record`, `wait_for_message`, `take_steering_messages` and `interruptible` are the members of `RunContext` that
+  only the loop uses.
 
 ## Program
 
-The loop is one `Program`. Plain durable workflows are others.
+A run executes a `Program`. The loop is one program, `AgentProgram`; any other subclass implements `main` itself.
 
-```python
-class Program:
-    async def main(self, run: RunContext) -> None: ...
+| `Program` method | Default | `AgentProgram(task, agent)` |
+|---|---|---|
+| `model_slots()` | `{"policy": ModelSlot()}` | the task's `models` |
+| `context_hints()` | `ContextHints()` | the task's `context_hints` |
+| `imports()` | `[]` | the task's `imports` |
+| `tool_specifications()` | `[]` | the specifications of the task's `@tool` methods |
+| `await main(run)` | raises `NotImplementedError` | `await rollout(task, agent, run)` |
 
-class AgentProgram(Program):                        # the loop above
-    def __init__(self, task: Task, agent: Agent): ...
-    async def main(self, run: RunContext) -> None:
-        await rollout(self.task, self.agent, run)
-```
+A run names its program with a `ProgramReference`, so that a runner in any process can create it:
 
-A `Program` that hosts a third-party agent framework (e.g. an OpenAI Agents SDK agent whose model calls go through
-`run.model`) is how foreign loops run on the platform; see [research: interoperability](../../research/interfaces-agent-frameworks.md#8-interoperability-adapters).
+| Field | Type | Meaning |
+|---|---|---|
+| `program` | `str` | `module:QualifiedName` of a `Program` class |
+| `parameters` | JSON | passed to the program's constructor; for `AgentProgram`: `task`, `agent`, `task_parameters`, `agent_configuration` |
+| `code_reference` | `str \| None` | `{package}@{content_hash}`, carried with the specification |
 
-## RunSpecification and deployments
+| Function | Does |
+|---|---|
+| `agent_program(task, agent=Agent, *, task_parameters=None, agent_configuration=None)` | a reference to the loop for a task class and an agent class; registers both classes |
+| `register(cls)` | makes a class resolvable by name in this process even if it cannot be imported (defined in a script, say); returns the name |
+| `resolve(name)` | the class a name refers to: registered, or imported |
+| `instantiate(reference)` | creates the program; a task or agent is constructed with its parameters, or with no arguments when they are `None` |
+| `with_row(reference, row)` | the same program for another row of parameters (for the loop: the task's parameters) |
+| `bind(reference, channel, *, tools=None)` | a `RunBinding` that serves every model slot from one recorded channel, and each import from the tool set registered under the import's name, or as `tools` says |
 
-```python
-@dataclass(frozen=True)
-class RunSpecification:
-    program: ProgramReference            # {code_reference, class_name, parameters} — e.g. AgentProgram(task, agent)
-    binding: RunBinding
+## Run specifications
 
-@dataclass(frozen=True)
-class RunBinding:
-    models: Mapping[str, ModelBinding]             # model slot → recorded channel or direct provider
-    imports: Mapping[str, ToolBinding] = field(default_factory=dict)   # import name → external tool binding
-    environments: EnvironmentBinding | None = None # opaque to the core; interpreted by the environment layer
-    delivery: DeliveryPolicy = DeliveryPolicy()    # priority → delivery mode (conversations.md)
+| Type | Field | Type | Meaning |
+|---|---|---|---|
+| `RunSpecification` | `program` | `ProgramReference` | what to run |
+| | `binding` | `RunBinding` | how its slots and imports are served |
+| `RunBinding` | `models` | `Mapping[str, ModelBinding]` | model slot → how it is served |
+| | `imports` | `Mapping[str, ToolBinding]` | import name → how the tool set is served; default `{}` |
+| | `delivery` | `DeliveryPolicy` | priority → delivery mode ([conversations](../../guide/conversations.md#priority-and-delivery-mode)) |
+| `ModelBinding` | `direct` | `DirectModel \| None` | a provider's API: `provider` (the key of an endpoint factory registered with the runner), `model`, `sampling` |
+| | `recorded` | `RecordedModel \| None` | a channel served through the [recorder](../recorder/README.md): `channel`, `sampling` |
+| `ToolBinding` | `local` | `str \| None` | the name of a tool set registered with the runner, in its process |
+| | `url` | `str \| None` | a tool set served over HTTP ([tools](../../guide/tools.md#serving-a-tool-set-over-http)) |
+| `Deployment` | `name` | `str` | `{namespace}/{name}`, e.g. `acme/support-bot` |
+| | `specification` | `RunSpecification` | what a conversation addressed to the deployment runs |
 
-@dataclass(frozen=True)
-class ModelBinding:
-    recorded: RecordedModel | None = None          # {channel, sampling: SamplingParameters} → recorder
-    direct: DirectModel | None = None              # {provider, model, sampling}           → direct adapter
-
-@dataclass(frozen=True)
-class Deployment:                                   # a named, addressable agent
-    name: str                                       # e.g. "acme/support-bot"
-    specification: RunSpecification                # program + default binding
-```
-
-`code_reference` is `{package}@{content_hash}`. A run is pinned to the code references it started with; a
-conversation's next run after a `WaitFor` timeout or `End(continue_as=…)` takes the deployment's current version.
+A `ModelBinding` sets one of `direct` and `recorded`; a `ToolBinding` sets one of `local` and `url`.
+`SamplingParameters` has `temperature` (1.0), `top_p` (1.0), `top_k`, `max_output_tokens`, `stop`, `seed` and
+`reasoning_effort`. It belongs to bindings; task and agent code cannot set it.
 
 ## Runner
 
 ```python
 class Runner(Protocol):
-    async def start(self, specification: RunSpecification, *, run_id: str | None = None,
-                    conversation: ConversationKey | None = None, labels: Mapping[str, str] = {}) -> RunHandle: ...
-    async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL,
-                   idempotency_key: str | None = None) -> None: ...       # starts the conversation's run if none is live
+    async def start(
+        self,
+        specification: RunSpecification,
+        *,
+        run_id: str | None = None,
+        conversation: ConversationKey | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> RunHandle: ...
+
+    async def send(
+        self,
+        to: Address,
+        envelope: Envelope,
+        *,
+        priority: Priority = Priority.NORMAL,
+        idempotency_key: str | None = None,
+    ) -> str: ...            # the message_id; a message to a conversation starts its run when none is live
+
     async def cancel(self, run_id: str, *, reason: str) -> None: ...
 
+
 class RunHandle(Protocol):
-    run_id: str
+    @property
+    def run_id(self) -> str: ...
     async def result(self) -> RunOutcome: ...
-    def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]: ...
+    def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]: ...   # from from_seq, until the run ends
 ```
 
-| Implementation | Layer | Behaviour |
+`RunOutcome` has `status` (`RunStatus.COMPLETED`, `FAILED` or `CANCELLED`), `failure_class` and `detail`.
+
+| Runner | Code | Behaviour |
 |---|---|---|
-| `LocalRunner` | core | Runs the program on the current asyncio loop. Nothing persists; a process crash loses in-flight runs. Waits are in memory. |
-| `DurableRunner` | [durability](../../durability/README.md) | Runs the program in a sandboxed task host driven by a DBOS workflow; effects are durable steps; runs resume after crashes; suspended runs hold no compute. |
+| `LocalRunner(...)` | `rollout.core.local` | Runs each program as a task on the current asyncio loop. Nothing persists: a process crash loses its runs. |
+| `DurableRunner(directory, ...)` | `rollout.durable` | Runs each program inside a DBOS workflow in the runner's process. Effects are recorded steps, so a run resumes after a crash ([durability](../../durability/README.md)). Needs `await launch()` before use and `await close()` after. |
 
-## Failure modes
+Both take `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
+bindings, by name), `environments` (an `EnvironmentService`), `blobs`, `recorder` (serves recorded bindings) and
+`hooks`. Beyond the protocol, both have:
 
-| Failure | Result |
+| Member | Does |
 |---|---|
-| Unhandled exception in a task hook | `run.failed{TASK_ERROR}` (after `teardown`) |
-| Exception inside a `@tool` body | returned to the model as a `tool_result` with `is_error = true` |
-| Invalid observation (roles, missing tool results) | `run.failed{INVALID_OBSERVATION}` |
-| Process crash | `LocalRunner`: runs are lost. `DurableRunner`: runs resume ([durability](../../durability/README.md)) |
+| `send(..., sender=None)` | names the sender, which `DeliveryPolicy.max_priority_by_sender` caps |
+| `deploy(deployment)` | registers or replaces a deployment; a conversation's next run uses the current one |
+| `run(run_id)` | the run's handle |
+| `conversation_of(run_id)` | the `ConversationKey` the run serves, or `None` |
+| `conversation_runs(deployment, key)` | the handles of a conversation's runs, oldest first |
 
-## Open questions
+Their handles add `done`, `outcome` (the `RunOutcome`, or `None` while the run is live) and `recorded_events()`.
+A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
 
-- Branching partway through an episode (tree search, Monte Carlo value estimates) is not supported
-  ([ADR-0014](../../decisions/0014-no-forks-template-recipes.md)); add it only when an algorithm needs it.
+`cancel` records `run.cancel_requested`, lets `teardown` run, and returns once the run has ended. The `LocalRunner`
+cancels the run's task at once; the `DurableRunner` stops the run at its next effect, wait or turn boundary. When a
+run ends, its runner destroys the environments the run still owns.
+
+## Failures
+
+| What happens | Result |
+|---|---|
+| A hook returns an observation that breaks the validation rules | `run.failed` with class `invalid_observation`; `RunOutcome.failure_class` is `RunFailureClass.INVALID_OBSERVATION` |
+| Any other exception leaves the program: a hook raised (`setup` included), the agent returned a message that is not from the assistant, an endpoint error went unhandled | `run.failed` with class `task_error` and detail `ExceptionType: message`; `RunFailureClass.TASK_ERROR` |
+| A `@tool` body raises or times out, its arguments do not validate, or the model calls a tool that does not exist | no failure: the model receives an error result ([tools](../../guide/tools.md#errors-are-observations)) |
+| An imported tool set raises | no failure: the effect completes as `failed` and the model receives an error result |
+| A binding leaves a model slot or an import unserved | `LocalRunner.start` raises `ValueError` |
+| The process crashes | `LocalRunner`: its runs are lost. `DurableRunner`: its runs resume by [replay](determinism.md) |
+
+`teardown` has run by the time a run fails or is cancelled.

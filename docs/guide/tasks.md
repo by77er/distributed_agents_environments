@@ -10,10 +10,11 @@ keep episode state on `self`.
 class MyTask(Task):
     # Declarations: class attributes
     models = {"policy": ModelSlot()}      # model slots; the agent acts through "policy"
+    imports = ["notes"]                    # imported tool sets, bound per run (tools.md)
     max_turns = 10                         # truncate after this many replies (None: no limit)
     context_hints = ContextHints()         # advice to the agent about how much history to show
 
-    def __init__(self, parameters): ...    # once per run, with the row's parameters
+    def __init__(self, parameters=None): ...   # once per run, with the row's parameters
 
     async def setup(self, run): ...        # optional: acquire resources
     async def start(self, run): ...        # required: first Observation, or WaitFor a message
@@ -22,6 +23,9 @@ class MyTask(Task):
     async def steer(self, run, envelopes, observation): ...  # merge mid-turn messages (conversations.md)
     async def score(self, run): ...        # optional: episode-level reward
     async def teardown(self, run): ...     # optional: always runs once setup began
+
+    def tools_for_turn(self, run): ...     # the tools offered this turn (tools.md)
+    async def run_tools(self, run, reply): ...   # execute the reply's tool calls (tools.md)
 ```
 
 | Hook | Called | Returns | Default |
@@ -35,8 +39,9 @@ class MyTask(Task):
 | `teardown` | always, if `setup` began | nothing | does nothing |
 
 The loop, in order: `setup`, `start`, then repeatedly the agent acts and `respond` answers, until an observation
-has `end` set. Then `score`, then `teardown`. If a hook raises, `rollout()` re-raises after `teardown`, and `score`
-does not run.
+has `end` set or `max_turns` replies were made. Then `score`, then `teardown`. If a hook raises, `rollout()`
+re-raises after `teardown`, and `score` does not run. The loop itself is in
+[harness](../core/harness/README.md#the-loop).
 
 ## Observations
 
@@ -70,8 +75,8 @@ assert End(truncated=True).end is Ending.TRUNCATED
 
 ### Validation
 
-Every observation a hook returns is checked. A violation raises `InvalidObservation` (a runner reports it as
-`INVALID_OBSERVATION`):
+Every observation a hook returns is checked before it is recorded. A violation raises `InvalidObservation`, and a
+runner fails the run with class `invalid_observation`:
 
 1. Observations contain only USER and TOOL messages. The system prompt belongs to the agent, and assistant turns
    belong to the model.
@@ -182,10 +187,40 @@ asyncio.run(support_episode())
 
 `local_run` binds every slot to one scripted endpoint, so the script interleaves both slots' replies in call order.
 
+## The run context
+
+Every hook receives the run context as `run`. It is everything task and agent code can reach.
+
+| Member | Meaning |
+|---|---|
+| `run_id` | the run's identifier, `r_{ulid}` |
+| `conversation` | the `ConversationKey` when the run serves a conversation, otherwise `None` ([conversations](conversations.md)) |
+| `turn` | the number of replies recorded so far |
+| `history` | the episode, read-only: `turns`, and `messages(hints)` ([agents](agents.md#what-the-model-sees)) |
+| `models`, `model` | the declared model slots by name; `model` is `models["policy"]` ([agents](agents.md#the-model-interface)) |
+| `tools` | the imported tools: `specifications()`, `await call(name, arguments)`, `name in run.tools` ([tools](tools.md#imported-tools)) |
+| `environments` | creates computers the run owns; `None` when the runner has no environment backend ([environments](../environments/README.md)) |
+| `blobs` | stores bytes for `Media` blocks; `None` when the runner has no blob store ([content](content.md#media-and-blobs)) |
+| `context_hints` | the task's `context_hints`, for the agent |
+| `now()` | the current time, as a `datetime` |
+| `random` | a `random.Random` seeded from `run_id` |
+| `reward(value, *, slot="policy", key="default")` | assigns a reward ([rewards](#rewards)); an unknown slot raises `ValueError` |
+| `exclude_from_training(reason)` | marks the run as unsuitable for training ([rewards](#rewards)) |
+| `await emit(kind, payload, *, to=None)` | durable output, such as a reply to a person ([conversations](conversations.md#sending-and-replying)) |
+| `await gather(*awaitables)` | awaits concurrently and returns the results in order, as `asyncio.gather` does |
+| `patched(change_id)` | returns `True` |
+
+## Environments
+
+A task whose agent needs a computer creates one in `setup` with `await run.environments.create(specification)` and
+keeps the handle on `self`. Every operation on the handle is an effect. The runner destroys any environment the run
+still owns when the run ends. Handles, backends and the ready-made `ComputerTools` are described in
+[environments](../environments/README.md).
+
 ## State and determinism
 
 - Keep episode state on `self`. `__init__` receives the row's parameters once per run.
-- Use `run.now()` and `run.random` rather than `time.time()` or the `random` module. Today they are ordinary; under
-  the durable runner (M2) they are recorded so a run can be replayed after a crash. The full rules are in
+- Use `run.now()` and `run.random` rather than `time.time()` or the `random` module. The durable runner resumes a
+  run by running its code again, and these give the same values each time. The rules are in
   [determinism](../core/harness/determinism.md).
-- `teardown` must be idempotent: it runs on every path once `setup` began, including failures.
+- `teardown` must be idempotent: it runs on every path once `setup` began, including failures and cancellation.

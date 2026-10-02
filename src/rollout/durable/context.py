@@ -44,8 +44,13 @@ class RunCancelled(Exception):
         self.reason = reason
 
 
-def _utc_now() -> str:
+def utc_now() -> str:
+    """The wall clock, as the runner stamps messages and the context records it."""
     return datetime.now(UTC).isoformat()
+
+
+CLOCK_STEP = "_utc_now"
+"""The name a clock reading is recorded under in a run's journal; a replay checks it against the journal."""
 
 
 class DurableRunContext(LocalRunContext):
@@ -84,7 +89,7 @@ class DurableRunContext(LocalRunContext):
         return self._clock
 
     async def _record_clock(self) -> None:
-        self._clock = datetime.fromisoformat(await DBOS.run_step_async(None, _utc_now))
+        self._clock = datetime.fromisoformat(await DBOS.run_step_async({"name": CLOCK_STEP}, utc_now))
 
     # Effects: each one is a DBOS step.
 
@@ -103,7 +108,7 @@ class DurableRunContext(LocalRunContext):
             # an earlier attempt means a crash interrupted it: it may have happened, so it must not run again.
             if guard and not self._mark_attempt(identifier):
                 raise OutcomeUnknown(identifier)
-            return await execute(identifier, arguments_hash), _utc_now()
+            return await execute(identifier, arguments_hash), utc_now()
 
         result, completed_at = await DBOS.run_step_async(None, step)
         self._clock = datetime.fromisoformat(completed_at)

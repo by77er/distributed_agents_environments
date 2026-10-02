@@ -1,20 +1,25 @@
-# One machine with one 16 GB GPU: a single engine, and a trainer that shares its card (the engine sleeps while it
-# steps). `rollout train environments/minecraft/profiles/one-gpu.toml minecraft_swarm.catalog:catalog`
+# One machine with one 16 GB GPU: a single vLLM engine, and a LoRA trainer that shares its card (the engine sleeps
+# while it steps). `rollout train environments/minecraft/profiles/one-gpu.toml minecraft_swarm.catalog:catalog`
 directory = "~/.cache/rollout/runs/swarm"
+feed_runs = 80
 
 [channels.policy]
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
-renderer = "qwen3.5"
+renderer = "rollout.recorder.renderers:qwen35"
+engine = "rollout.inference.vllm:VllmEngine"
 thinking_tokens = 1024           # thoughts here run to a median of 530 tokens and a 95th percentile of 820
 answer_tokens = 400              # a tool call takes about 40; a summary of old turns up to this
-engines = [{ gpu_share = 0.78, max_model_len = 8192, concurrency = 20 }]   # at 0.85 the card was full
+# At 0.85 of the card it was full. Twenty requests at once: four episodes of four agents, and one episode more.
+engines = [{ gpu_memory_utilization = 0.78, max_model_len = 8192, max_num_seqs = 20, max_lora_rank = 32 }]
 
 [trainer]
+kind = "rollout.lora:LoraTrainer"
+channel = "policy"
+colocated = true
 rank = 32
 learning_rate = 5e-5
 sequence_tokens = 8000           # peak 12.4 GiB at 8,000 tokens; past the card's memory a step crawls
 sequences_per_step = 384         # 4 to 8 s each: about half an hour a step
-colocated = true
 
 [tools]
 minecraft = "minecraft_swarm.worlds:tools"

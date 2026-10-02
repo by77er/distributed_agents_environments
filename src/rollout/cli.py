@@ -1,17 +1,16 @@
 """`rollout`: train on a catalog under a deployment profile, and watch.
 
-rollout train PROFILE CATALOG [--groups N] [--directory RUN]
-                                              the training loop: PROFILE is a TOML file (`rollout.profile`), CATALOG
-                                              names an environment's catalog as `module:object`
-rollout report RUN CATALOG [--watch]          chart a run's progress and summarise it; post both to a Discord webhook
-rollout monitor FEED [--port 8765]            the web page over a run's feed (RUN/feed)
-rollout tools FACTORY [--port 8700]           serve an environment's tool set over HTTP: FACTORY is `module:function`,
-                                              called with --directory
+rollout train PROFILE CATALOG    the training loop: PROFILE is a TOML file (`rollout.profile`), CATALOG names an
+                                 environment's catalog as `module:name`
+rollout report RUN CATALOG       chart a run's progress and summarise it; post both to a Discord webhook
+rollout monitor FEED             the web page over a run's feed (RUN/feed)
+rollout tools FACTORY            serve an environment's tool set over HTTP: FACTORY is `module:name`
+
+`rollout COMMAND --help` lists each command's options.
 """
 
 import argparse
 import asyncio
-import importlib
 import os
 import signal
 import sys
@@ -19,11 +18,7 @@ from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 
-
-def named(reference: str) -> Any:
-    """What `module:name` names."""
-    module, _, name = reference.partition(":")
-    return getattr(importlib.import_module(module), name)
+from rollout.names import named
 
 
 async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
@@ -51,9 +46,20 @@ async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
 
 async def _train(profile: Path, directory: Path | None, catalog: str, groups: int, seed: int) -> None:
     from rollout.profile import Profile
+    from rollout.rollouts import binding_for
+    from rollout.training import train
 
-    async with Profile.load(profile, directory=directory).open() as platform:
-        await platform.train(named(catalog), groups=groups, seed=seed)
+    described = Profile.load(profile, directory=directory)
+    if described.trainer is None:
+        raise SystemExit(f"{profile} describes no trainer")
+    channel, rows = described.trainer.channel, named(catalog)
+    async with described.open() as platform:
+        assert platform.trainer is not None
+        binding = binding_for(rows, channel, platform.tool_bindings)
+        await train(
+            platform.jobs, rows, platform.trainer, platform.store, channel=channel, groups=groups, seed=seed,
+            binding=binding,
+        )  # fmt: skip
 
 
 def main() -> None:

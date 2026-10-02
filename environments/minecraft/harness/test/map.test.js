@@ -55,3 +55,27 @@ test('the map remembers what was seen, and follows changes it sees', () => {
   assert.strictEqual(cell(map, 0, 0, 4), 'air')
   assert.strictEqual(cell(map, 0, 0, 6), 'chest')
 })
+
+test('an observation lists the nearest few of each kind in sight, and says where the rest are', () => {
+  const bot = botIn(scene(), new Vec3(0.5, 64, 0.5))
+  const row = (index, z) => new Vec3((index % 6) - 2.5, 64, z + 0.5) // six to a row across the room
+  for (let index = 0; index < 12; index++) {
+    bot.entities[index + 1] = { id: index + 1, name: 'zombie', position: row(index, index < 6 ? -2 : -3), height: 1.9 }
+    bot.entities[index + 21] = { id: index + 21, name: 'cow', position: row(index, index < 6 ? 1 : 3), height: 1.4 }
+  }
+  for (let index = 0; index < 10; index++) {
+    const item = { name: 'diamond', count: index + 1 }
+    bot.entities[index + 41] = { id: index + 41, name: 'item', position: row(index, index < 6 ? -1 : 2), height: 0.25, getDroppedItem: () => item }
+  }
+  const seen = observe(bot, new Set(['ada']), new Map(), new Set())
+  assert.deepStrictEqual([seen.mobs.length, seen.animals.length, seen.items.length], [6, 6, 8])
+  assert.deepStrictEqual(Object.keys(seen.mobs[0]), ['mob', 'id', 'x', 'y', 'z', 'distance'])
+  // The map shows ten creatures of a kind and every item: those past the end of a list come as places only.
+  assert.deepStrictEqual([seen.unlisted.mobs.length, seen.unlisted.animals.length, seen.unlisted.items.length], [4, 4, 2])
+  assert.deepStrictEqual(seen.unlisted.items, [{ x: -1, y: 64, z: 2 }, { x: 0, y: 64, z: 2 }])
+  const away = place => Math.hypot(place.x, place.z) // from the bot, which stands in the cell at the origin
+  for (const kind of ['mobs', 'animals']) { // the nearest are the ones listed
+    assert.ok(Math.max(...seen[kind].map(away)) <= Math.min(...seen.unlisted[kind].map(away)), kind)
+  }
+  assert.deepStrictEqual(seen.world, { time: { phase: 'day' }, sky: false, biome: 'plains' })
+})

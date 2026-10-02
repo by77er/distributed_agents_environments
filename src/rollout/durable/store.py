@@ -14,12 +14,16 @@ from pathlib import Path
 
 import sqlalchemy as sa
 from pydantic import JsonValue
+from sqlalchemy.schema import CreateColumn
 
 from rollout.core.contracts import RunEvent
 from rollout.database import Connection, Database, sql
 
+RUNNING = "running"
+"""The status of a run that has not ended; an ended run's status is its outcome's (`RunStatus`)."""
+
 METADATA = sa.MetaData()
-sa.Table(
+RUNS = sa.Table(
     "runs",
     METADATA,
     sa.Column("run_id", sa.Text, primary_key=True),
@@ -67,14 +71,6 @@ sa.Table(
     sa.Column("heartbeat_at", sa.Float(asdecimal=False), nullable=False),
 )
 
-# Columns added after the first release, for SQLite stores created before them.
-_ADDED_COLUMNS = {
-    "evicted": "INTEGER NOT NULL DEFAULT 0",
-    "wake_at": "TEXT",
-    "evictions": "INTEGER NOT NULL DEFAULT 0",
-    "last_activity": "TEXT",
-}
-
 
 @dataclass(frozen=True)
 class RunRecord:
@@ -85,6 +81,10 @@ class RunRecord:
     status: str
     outcome: str | None
 
+    @property
+    def running(self) -> bool:
+        return self.status == RUNNING
+
 
 class RunStore:
     def __init__(self, database: Database | Path) -> None:
@@ -92,13 +92,13 @@ class RunStore:
         self._owns_database = isinstance(database, Path)
         self.database = Database.sqlite(database) if isinstance(database, Path) else database
         self.database.create(METADATA)
-        if not self.database.shared:
-            columns = {column["name"] for column in sa.inspect(self.database.engine).get_columns("runs")}
-            for name, declaration in _ADDED_COLUMNS.items():
-                if name not in columns:
-                    self.database.write(
-                        lambda db, n=name, d=declaration: sql(db, f"ALTER TABLE runs ADD COLUMN {n} {d}")
-                    )
+        if not self.database.shared:  # a SQLite store created before `runs` had all its columns gains the others
+            engine = self.database.engine
+            existing = {column["name"] for column in sa.inspect(engine).get_columns(RUNS.name)}
+            for column in RUNS.columns:
+                if column.name not in existing:
+                    definition = str(CreateColumn(column).compile(dialect=engine.dialect))
+                    self.database.write(lambda db, d=definition: sql(db, f"ALTER TABLE {RUNS.name} ADD COLUMN {d}"))
         self._signals: dict[str, asyncio.Event] = defaultdict(asyncio.Event)
 
     # Runs
@@ -110,8 +110,13 @@ class RunStore:
             sql(
                 db,
                 "INSERT INTO runs (run_id, specification, conversation, status) "
-                "VALUES (:run_id, :specification, :conversation, 'running') ON CONFLICT DO NOTHING",
-                {"run_id": run_id, "specification": json.dumps(specification), "conversation": conversation},
+                "VALUES (:run_id, :specification, :conversation, :status) ON CONFLICT DO NOTHING",
+                {
+                    "run_id": run_id,
+                    "specification": json.dumps(specification),
+                    "conversation": conversation,
+                    "status": RUNNING,
+                },
             )
             if conversation is None:
                 return
@@ -157,12 +162,6 @@ class RunStore:
 
     def read_all_run_ids(self) -> list[str]:
         return self.database.read(lambda db: list(sql(db, "SELECT run_id FROM runs").scalars()))
-
-    def unfinished_runs(self) -> list[str]:
-        """Running runs that are resident (not evicted)."""
-        return self.database.read(
-            lambda db: list(sql(db, "SELECT run_id FROM runs WHERE status = 'running' AND evicted = 0").scalars())
-        )
 
     # Eviction
 
@@ -214,9 +213,9 @@ class RunStore:
             lambda db: list(
                 sql(
                     db,
-                    "SELECT run_id FROM runs WHERE status = 'running' AND evicted = 1 AND wake_at IS NOT NULL "
+                    "SELECT run_id FROM runs WHERE status = :running AND evicted = 1 AND wake_at IS NOT NULL "
                     "AND wake_at <= :now",
-                    {"now": now},
+                    {"running": RUNNING, "now": now},
                 ).scalars()
             )
         )
@@ -229,10 +228,10 @@ class RunStore:
             lambda db: db.execute(
                 sa.text(
                     "SELECT e.event FROM events e JOIN runs r ON r.run_id = e.run_id "
-                    "WHERE r.status = 'running' AND r.evicted = 0 AND r.run_id IN :run_ids "
+                    "WHERE r.status = :running AND r.evicted = 0 AND r.run_id IN :run_ids "
                     "AND e.seq = (SELECT MAX(seq) FROM events WHERE run_id = e.run_id)"
                 ).bindparams(sa.bindparam("run_ids", expanding=True)),
-                {"run_ids": run_ids},
+                {"running": RUNNING, "run_ids": run_ids},
             ).scalars()
         )
         return [RunEvent.model_validate_json(row) for row in rows]

@@ -1,11 +1,16 @@
 """Two small tasks for the tests of everything above a run: a guessing game on the task loop, and a gate that holds
-a run open until the test lets it through."""
+a run open until the test lets it through; and a catalog of the guessing game."""
 
 import asyncio
+import random
+from collections.abc import Sequence
 from typing import Any
 
+from pydantic import JsonValue
+
 from rollout.core.contracts import Message
-from rollout.core.harness import End, Observation, RunContext, Task
+from rollout.core.harness import End, Observation, ProgramReference, RunContext, Task, agent_program
+from rollout.rollouts import Row
 
 GATES: dict[str, asyncio.Event] = {}
 """By name: a `Gated` run waits for its gate to be set."""
@@ -45,3 +50,18 @@ class Gated(Guess):
     async def start(self, run: RunContext) -> Observation:
         await GATES.setdefault(str(self.parameters["gate"]), asyncio.Event()).wait()
         return await super().start(run)
+
+
+class Words:
+    """A catalog of the guessing game: three rows, each a word to say."""
+
+    program: ProgramReference = agent_program(Guess)
+
+    def rows(self) -> Sequence[Row]:
+        return [Row(f"say-{word}", f"say {word}", {"word": word}) for word in ("yes", "no", "maybe")]
+
+    def start(self, row: Row, rng: random.Random) -> JsonValue:
+        return {**row.parameters, "seed": rng.randrange(1000)}
+
+
+words = Words()

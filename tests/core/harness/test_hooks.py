@@ -1,9 +1,14 @@
 """Hooks: a runner tells them of every event it records and every sample its models make, with the content."""
 
+from pathlib import Path
+
 from rollout.core.contracts import (
+    AddressableEndpoint,
     CapabilityContract,
     FinishReason,
     Message,
+    ModelAddress,
+    ModelEndpoint,
     RunEvent,
     RunEventType,
     SampleRequest,
@@ -27,7 +32,7 @@ from rollout.core.harness import (
     register,
 )
 from rollout.core.local import LocalRunner
-from rollout.core.testing import tool_call_reply
+from rollout.core.testing import LedgerEndpoint, tool_call_reply
 
 MINE = ToolSpecification(
     name="mine", description="Mine.", input_schema={"type": "object", "properties": {"x": {"type": "integer"}}}
@@ -101,6 +106,44 @@ async def test_hooks_see_every_event_and_every_sample_with_its_content() -> None
     assert [tool.name for tool in sample.request.tools] == ["mine"]
     assert sample.result.message.tool_calls[0].arguments == {"x": 3}
     assert sample.seconds >= 0
+
+
+class ServedMiner(Miner):
+    """A `Miner` that is also reached over HTTP; remembers what each address was to be sampled through."""
+
+    def __init__(self) -> None:
+        self.through: list[ModelEndpoint | None] = []
+
+    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+        self.through.append(through)
+        return ModelAddress(base_url="http://models", api_key=session_id, model="miner")
+
+
+class Addressed(Program):
+    def model_slots(self) -> dict[str, ModelSlot]:
+        return {"ada": ModelSlot()}
+
+    async def main(self, run: RunContext) -> None:
+        await run.emit("address", run.models["ada"].address().api_key)
+
+
+async def test_a_harness_is_given_an_address_whose_samples_reach_the_hooks(tmp_path: Path) -> None:
+    served = ServedMiner()
+    binding = RunBinding(models={"ada": ModelBinding(direct=DirectModel(provider="scripted", model="miner"))})
+    addressed = RunSpecification(program=ProgramReference(program=register(Addressed)), binding=binding)
+    ledger = LedgerEndpoint(served, tmp_path / "ledger.jsonl")
+    for endpoint, hooks in ((served, []), (served, [Watching()]), (ledger, [Watching()])):
+        handle = await LocalRunner(providers={"scripted": lambda model, e=endpoint: e}, hooks=hooks).start(addressed)
+        assert (await handle.result()).status is RunStatus.COMPLETED
+    alone, observed, through_ledger = served.through
+    assert alone is None
+    assert observed is not None and observed is not served  # the runner's endpoint, which tells the hooks
+    assert through_ledger is not None and through_ledger not in (served, ledger, observed)
+
+    unserved = await LocalRunner(providers={"scripted": lambda model: Miner()}, hooks=[Watching()]).start(addressed)
+    outcome = await unserved.result()
+    assert outcome.status is RunStatus.FAILED and "not served over HTTP" in str(outcome.detail)
+    assert isinstance(served, AddressableEndpoint) and not isinstance(Miner(), AddressableEndpoint)
 
 
 async def test_a_runner_without_hooks_is_unchanged() -> None:

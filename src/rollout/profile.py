@@ -4,80 +4,57 @@ Whoever deploys writes this down once (a TOML file, or the dataclasses below) an
 `jobs` and a `trainer` and never learns what stands behind them. Scaling is a change here: more engines behind a
 channel, a durable runner instead of an in-process one, a tool set at a URL instead of in this process.
 
-```toml
-directory = "~/.cache/rollout/runs/first"     # the run's state: adapters, the job's log, metrics, the monitor's feed
-runner = "local"                              # or "durable": runs survive this process
-serve = "127.0.0.1:8900"                      # optional: rollout jobs and the model endpoint for harnesses, over HTTP
-
-[channels.policy]
-model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
-renderer = "qwen3.5"
-thinking_tokens = 1024
-answer_tokens = 400
-engines = [{ gpu_share = 0.78 }]              # one entry per replica
-
-[trainer]
-rank = 32
-learning_rate = 5e-5
-sequence_tokens = 8000                        # the longest turn it can train on: the channels take it as their limit
-sequences_per_step = 384
-colocated = true                              # it shares the engines' GPU: they sleep while it steps
-
-[tools]
-minecraft = "minecraft_swarm.worlds:tools"    # made in this process by `tools(directory)`; or "http://worlds:8700"
-
-[memory]
-runs_gib = 6                                  # must be available to admit runs
-training_gib = 4                              # and to start a step
-```
+Engines, renderers, the trainer and tool sets are named as `module:name`, and what the profile says of each is
+passed to it: this module knows no engine and no trainer. docs/guide/deploying.md describes the file.
 """
 
 import asyncio
 import contextlib
-import importlib
 import math
-import random
 import tomllib
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from rollout.core.harness.imports import ToolBinding, ToolSet
-from rollout.core.harness.runner import Runner, bind, with_row
+from rollout.core.harness.runner import Runner
 from rollout.inference import Channel, Engine, Limits
+from rollout.names import named
+from rollout.processes import end_orphans, note_processes
 from rollout.recorder import Recorder
-from rollout.rollouts import Catalog, RolloutJobs
-from rollout.training import Budget, Colocated, Directory, Grpo, LoraTrainer, Trainer, train
+from rollout.recorder.recorder import SERVED_UNDER
+from rollout.rollouts import RolloutJobs
+from rollout.training import Colocated, Directory, Trainer
 
-__all__ = ["ChannelSpec", "EngineSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
-
-
-@dataclass(frozen=True)
-class EngineSpec:
-    gpu_share: float = 0.78
-    """Of its GPU's memory, while awake. The weights take what they take; the rest is its cache."""
-    max_model_len: int = 8192
-    concurrency: int = 32
-    """Requests it works on at once."""
+__all__ = ["ChannelSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
 
 
 @dataclass(frozen=True)
 class ChannelSpec:
     model: str
+    """The checkpoint every engine of the channel serves."""
     renderer: str
-    thinking_tokens: int = 1024
-    answer_tokens: int = 400
-    engines: tuple[EngineSpec, ...] = (EngineSpec(),)
+    """`module:name` of the model family's renderer, called with `model`."""
+    engine: str
+    """`module:name` of what makes an engine, called with `model` and one entry of `engines`."""
+    engines: tuple[Mapping[str, Any], ...] = ({},)
+    """One entry per replica: what that engine is told (its share of a GPU, which device, where it listens)."""
+    thinking_tokens: int | None = None
+    """Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own."""
+    answer_tokens: int | None = None
 
 
 @dataclass(frozen=True)
 class TrainerSpec:
-    rank: int = 32
-    learning_rate: float = 5e-5
-    sequence_tokens: int = 8000
-    sequences_per_step: int = 384
-    colocated: bool = True
+    kind: str
+    """`module:name` of what makes the trainer, called with the channel's model, the run's directory and
+    `settings`."""
+    channel: str
+    """The channel whose policy it trains."""
+    colocated: bool = False
+    """Whether it shares the channels' accelerator: their engines then sleep while it steps."""
+    settings: Mapping[str, Any] = field(default_factory=dict[str, Any])
 
 
 class NotEnoughMemory(Exception):
@@ -103,163 +80,162 @@ def require_memory(gib: float, purpose: str) -> None:
 @dataclass(frozen=True)
 class Profile:
     directory: Path
+    """The run's state: adapters, the job's log, metrics, the monitor's feed."""
     channels: Mapping[str, ChannelSpec]
-    trainer: TrainerSpec = TrainerSpec()
+    trainer: TrainerSpec | None = None
     runner: str = "local"
+    """`local` runs episodes in this process; `durable` records them so that they survive it."""
     serve: str | None = None
+    """`host:port` to serve the rollout jobs and the model endpoint for harnesses on."""
+    address: str | None = None
+    """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
+    """Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`."""
     runs_gib: float = 0.0
+    """System memory that must be available to admit runs."""
     training_gib: float = 0.0
-    feed_runs: int = 80
-    """Episodes kept in the monitor's feed (the oldest are deleted)."""
+    """And to start a step of a colocated trainer."""
+    feed_runs: int | None = None
+    """Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are
+    deleted)."""
 
     @classmethod
     def load(cls, path: Path, *, directory: Path | None = None) -> "Profile":
-        """The profile a TOML file describes; `directory` replaces the file's (one profile, many runs)."""
+        """The profile a TOML file describes; `directory` replaces the file's (one profile, many runs). A key the
+        file has and a profile does not is an error: a misspelt guard would otherwise be no guard."""
         described = tomllib.loads(path.read_text())
-        channels = {
-            name: ChannelSpec(
-                **{key: value for key, value in channel.items() if key != "engines"},
-                engines=tuple(EngineSpec(**engine) for engine in channel.get("engines", [{}])),
-            )
-            for name, channel in described.get("channels", {}).items()
-        }
-        memory = described.get("memory", {})
+        channels: dict[str, ChannelSpec] = {}
+        for name, channel in _table(described, "channels").items():
+            known = ("model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens")
+            given = _only(dict(channel), f"channels.{name}", *known)
+            engines = tuple(given.pop("engines", [{}]))
+            channels[name] = ChannelSpec(**given, engines=engines)
+        trainer = _table(described, "trainer")
+        memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
+        top = _only(described, "the profile", "directory", "runner", "serve", "address", "tools", "feed_runs")
+        top["directory"] = directory or Path(top["directory"]).expanduser()
         return cls(
-            directory=directory or Path(described["directory"]).expanduser(),
+            **top,
+            **memory,
             channels=channels,
-            trainer=TrainerSpec(**described.get("trainer", {})),
-            runner=described.get("runner", "local"),
-            serve=described.get("serve"),
-            tools=described.get("tools", {}),
-            runs_gib=float(memory.get("runs_gib", 0.0)),
-            training_gib=float(memory.get("training_gib", 0.0)),
+            trainer=TrainerSpec(
+                kind=trainer.pop("kind"),
+                channel=trainer.pop("channel"),
+                colocated=trainer.pop("colocated", False),
+                settings=trainer,
+            )
+            if trainer
+            else None,
         )
 
     @contextlib.asynccontextmanager
     async def open(self) -> AsyncGenerator["Platform"]:
-        """Start what the profile describes, and stop it on the way out."""
-        platform = await Platform.start(self)
-        try:
-            yield platform
-        finally:
-            await platform.close()
+        """Start what the profile describes, and stop it on the way out (also if starting fails half way)."""
+        async with contextlib.AsyncExitStack() as stack:
+            yield await Platform.start(self, stack)
+
+
+def _table(described: dict[str, Any], name: str) -> dict[str, Any]:
+    return dict(described.pop(name, {}))
+
+
+def _only(table: dict[str, Any], where: str, *known: str) -> dict[str, Any]:
+    if unknown := sorted(set(table) - set(known)):
+        raise ValueError(f"{where} has no {', '.join(unknown)} (it has {', '.join(known)})")
+    return table
 
 
 class Platform:
-    """An open profile: `jobs` to run episodes with, a `trainer` to step, and `train` for the loop over both."""
+    """An open profile: `jobs` to run episodes with, a `trainer` to step, and a `store` for the run's state."""
 
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
         self.store = Directory(profile.directory)
+        self.channels: dict[str, Channel] = {}
         self.recorder: Recorder
         self.jobs: RolloutJobs
-        self.trainer: Trainer
+        self.trainer: Trainer | None = None
         self.tool_bindings: dict[str, ToolBinding] = {}
-        self._closing: list[Any] = []
-        self._tasks: list[asyncio.Task[None]] = []
+        """Where a run finds each tool set the profile names (for a run's binding)."""
 
     @classmethod
-    async def start(cls, profile: Profile) -> "Platform":
-        from transformers import AutoTokenizer
-
-        from rollout.inference.vllm import VllmEngine, end_orphaned_engines, note_engines
+    async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> "Platform":
+        """Start everything, registering with `stack` how each thing is stopped (the engines last)."""
         from rollout.monitor import RunFeed
-        from rollout.recorder import renderer_for
-        from rollout.recorder.renderers import Tokenizer
 
         self = cls(profile)
         directory = profile.directory
         directory.mkdir(parents=True, exist_ok=True)
-        end_orphaned_engines(directory / "engine.json")  # one a killed process left behind holds the GPU
-        learner = LoraTrainer(
-            next(iter(profile.channels.values())).model,
-            directory,
-            rank=profile.trainer.rank,
-            learning_rate=profile.trainer.learning_rate,
-            budget=Budget(profile.trainer.sequence_tokens, profile.trainer.sequences_per_step),
-        )
-        channels: dict[str, Channel] = {}
+        record = directory / "engine.json"
+        end_orphans(record)  # an engine a killed process left behind holds its accelerator
+        described = profile.trainer
+        learner: Trainer | None = None
+        if described is not None:
+            learner = named(described.kind)(profile.channels[described.channel].model, directory, **described.settings)
+        started: list[Engine] = []
         for name, spec in profile.channels.items():
-            tokenizer = cast(Tokenizer, AutoTokenizer.from_pretrained(spec.model))  # pyright: ignore[reportUnknownMemberType]
-            engines: list[Engine] = [
-                VllmEngine(
-                    spec.model,
-                    gpu_memory_utilization=engine.gpu_share,
-                    max_model_len=engine.max_model_len,
-                    max_num_seqs=engine.concurrency,
-                    max_lora_rank=profile.trainer.rank,
-                )
-                for engine in spec.engines
-            ]
-            limits = Limits(spec.thinking_tokens, spec.answer_tokens, profile.trainer.sequence_tokens)
-            channels[name] = Channel(name, engines, renderer_for(spec.renderer, tokenizer), limits)
-            self._closing.append(channels[name])
-            if learner.latest is not None:  # a run that is started again serves its newest weights
-                await channels[name].publish(*learner.latest)
-        note_engines(directory / "engine.json")
-        self.recorder = Recorder(channels, base_url=f"http://{profile.serve}/v1" if profile.serve else None)
-        feed = RunFeed(directory / "feed", keep=profile.feed_runs)
-        self._closing.append(feed)
+            engines: list[Engine] = []
+            for options in spec.engines:
+                engine: Engine = named(spec.engine)(spec.model, **options)
+                stack.callback(engine.close)
+                engines.append(engine)
+                started.append(engine)
+                note_processes(record, [pid for each in started for pid in each.processes])
+            trained = learner if described is not None and described.channel == name else None
+            limits = {"thinking": spec.thinking_tokens, "answer": spec.answer_tokens}
+            self.channels[name] = Channel(
+                name,
+                engines,
+                named(spec.renderer)(spec.model),
+                Limits(
+                    **{key: value for key, value in limits.items() if value is not None},
+                    sequence=trained.budget.sequence_tokens if trained is not None else None,
+                ),
+            )
+            if trained is not None and trained.latest is not None:
+                await self.channels[name].publish(*trained.latest)  # a run started again serves its newest weights
+        address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
+        self.recorder = Recorder(self.channels, base_url=f"{address}{SERVED_UNDER}" if address else None)
+        feed = RunFeed(directory / "feed", **({"keep": profile.feed_runs} if profile.feed_runs else {}))
+        stack.callback(feed.close)
         tool_sets: dict[str, ToolSet] = {}
         for name, where in profile.tools.items():
             if where.startswith(("http://", "https://")):
                 self.tool_bindings[name] = ToolBinding(url=where)
                 continue
-            module, _, factory = where.partition(":")
-            tool_sets[name] = getattr(importlib.import_module(module), factory)(directory)
+            tool_sets[name] = named(where)(directory)
             self.tool_bindings[name] = ToolBinding(local=name)
-            self._closing.append(tool_sets[name])
+            stack.push_async_callback(_closed, tool_sets[name])
         runner: Runner
         if profile.runner == "durable":
             from rollout.durable import DurableRunner
 
-            durable = DurableRunner(directory / "runs", recorder=self.recorder, tool_sets=tool_sets, hooks=[feed])
-            await durable.launch()
-            self._closing.append(durable)
-            runner = cast(Runner, durable)
-        else:
+            runner = DurableRunner(directory / "runs", recorder=self.recorder, tool_sets=tool_sets, hooks=[feed])
+        elif profile.runner == "local":
             from rollout.core.local import LocalRunner
 
-            runner = cast(Runner, LocalRunner(recorder=self.recorder, tool_sets=tool_sets, hooks=[feed]))
-        guard = (lambda: require_memory(profile.runs_gib, "to run more episodes")) if profile.runs_gib else None
+            runner = LocalRunner(recorder=self.recorder, tool_sets=tool_sets, hooks=[feed])
+        else:
+            raise ValueError(f"runner is {profile.runner!r}: it is local or durable")
+        await runner.launch()
+        stack.push_async_callback(runner.close)
+        guard = _needs(profile.runs_gib, "to run more episodes")
         self.jobs = RolloutJobs(runner, self.recorder, log=directory / "jobs", hooks=[feed], guard=guard)
-        self._closing.append(self.jobs)
+        stack.push_async_callback(self.jobs.close)
         self.trainer = learner
-        if profile.trainer.colocated:
-            ready = (lambda: require_memory(profile.training_gib, "to train")) if profile.training_gib else None
-            self.trainer = Colocated(learner, list(channels.values()), guard=ready)
-        self._tasks.append(asyncio.create_task(self._measure(feed, channels)))
+        if learner is not None and described is not None and described.colocated:
+            ready = _needs(profile.training_gib, "to train")
+            self.trainer = Colocated(learner, list(self.channels.values()), guard=ready)
+        _background(stack, self._measure(feed))
         if profile.serve:
-            self._tasks.append(asyncio.create_task(self._serve(profile.serve)))
+            _background(stack, self._serve(profile.serve))
         return self
 
-    async def train(self, catalog: Catalog, *, groups: int = 100, algorithm: Grpo | None = None, seed: int = 0) -> None:
-        """The training loop over this platform, on the first channel."""
-        channel = next(iter(self.profile.channels))
-        first = with_row(catalog.program, catalog.start(catalog.rows()[0], random.Random(0)))
-        binding = bind(first, channel, tools=self.tool_bindings)
-        await train(
-            self.jobs, catalog, self.trainer, self.store, channel=channel, algorithm=algorithm or Grpo(),
-            groups=groups, seed=seed, binding=binding,
-        )  # fmt: skip
-
-    async def close(self) -> None:
-        for task in self._tasks:
-            task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
-        for thing in reversed(self._closing):  # the jobs first, the engines last
-            close = getattr(thing, "close", None)
-            closed = close() if close is not None else None
-            if asyncio.iscoroutine(closed):
-                with contextlib.suppress(Exception):
-                    await closed
-
-    async def _measure(self, feed: Any, channels: Mapping[str, Channel], every: float = 60.0) -> None:
+    async def _measure(self, feed: Any, every: float = 60.0) -> None:
         """Tell whoever watches how the engines are doing, once a minute."""
         while True:
             await asyncio.sleep(every)
-            for name, channel in channels.items():
+            for name, channel in self.channels.items():
                 counts = channel.take()
                 if counts["requests"]:
                     feed.on_job({"kind": "inference", "channel": name, "version": channel.version, **counts})
@@ -275,3 +251,25 @@ class Platform:
         host, _, port = address.rpartition(":")
         app = Starlette(routes=[*harness_endpoint(self.recorder).routes, *rollout_service(self.jobs).routes])
         await uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning")).serve()
+
+
+def _needs(gib: float, purpose: str) -> Callable[[], None] | None:
+    return (lambda: require_memory(gib, purpose)) if gib else None
+
+
+async def _closed(thing: Any) -> None:
+    """Close something whose `close` may be a coroutine or not."""
+    closing = thing.close()
+    if asyncio.iscoroutine(closing):
+        await closing
+
+
+def _background(stack: contextlib.AsyncExitStack, work: Coroutine[Any, Any, None]) -> None:
+    """Run `work` until the stack is closed."""
+    task = asyncio.ensure_future(work)
+
+    async def stop() -> None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    stack.push_async_callback(stop)

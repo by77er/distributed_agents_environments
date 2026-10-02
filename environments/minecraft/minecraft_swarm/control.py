@@ -1,5 +1,6 @@
 """A client for the ground-truth plugin's control API (environments/minecraft/plugin): ticks, episodes and ground
-truth. Only the environment service and the episode program use it; agents never see it."""
+truth. The worlds use it (`minecraft_swarm.worlds`, to build tasks, run game time and score) and so do the servers
+(`minecraft_swarm.paper`, to start and to generate templates); agents never see it."""
 
 from typing import Any
 
@@ -19,7 +20,9 @@ class Control:
         return await self._request("GET", "/health")
 
     async def state(self) -> dict[str, Any]:
-        """Every player's position, health, food, inventory and diamonds, and `team_diamonds`: the reward."""
+        """Ground truth, which tasks are scored from: every player's position, health, food, inventory and diamonds;
+        the team's diamonds, the advancements it earned and what it got hold of since the baseline; and whether the
+        dragon is dead and how much it was hurt."""
         return await self._request("GET", "/state")
 
     async def freeze(self) -> dict[str, Any]:
@@ -41,7 +44,8 @@ class Control:
         return await self._request("GET", "/tick")
 
     async def episode(self, setup: dict[str, Any]) -> dict[str, Any]:
-        """Set up the team and the world: `team`, `spawn`, `kit`, `gamemode`, `difficulty`, `time`, `gamerules`."""
+        """Set up the team and the world: `team`, `spawn`, `placements` (where each agent stands, and its kit),
+        `gamemode`, `difficulty`, `time`, `gamerules`."""
         return await self._request("POST", "/episode", setup)
 
     async def ores(self, x: int, y: int, z: int, *, radius: int = 32, exposed: bool = False) -> list[dict[str, Any]]:
@@ -110,6 +114,11 @@ class Control:
         """A player's hunger (20 is full)."""
         await self._request("POST", "/setup/food", {"name": name, "food": food})
 
+    async def generate(self, radius: int, *, seconds: float = 900) -> None:
+        """Generate the overworld's chunks within `radius` chunks of the origin and save them (for a server
+        template); this takes minutes, so the request waits up to `seconds`."""
+        await self._request("POST", "/setup/generate", {"radius": radius}, seconds=seconds)
+
     async def baseline(self) -> dict[str, Any]:
         """Remember each team member's advancements now: `state` then reports only newer ones."""
         return await self._request("POST", "/baseline", {})
@@ -121,9 +130,17 @@ class Control:
         await self._client.aclose()
 
     async def _request(
-        self, method: str, path: str, body: dict[str, Any] | None = None, *, params: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        params: dict[str, Any] | None = None,
+        seconds: float | None = None,
     ) -> dict[str, Any]:
-        response = await self._client.request(method, f"{self.url}{path}", json=body, params=params)
+        """One request to the plugin; `seconds` is how long to wait for the answer (the client's own limit if None)."""
+        timeout = httpx.USE_CLIENT_DEFAULT if seconds is None else seconds
+        response = await self._client.request(method, f"{self.url}{path}", json=body, params=params, timeout=timeout)
         payload: dict[str, Any] = response.json()
         if response.status_code != 200:
             raise ControlError(f"{method} {path}: {payload.get('error', response.text)}")

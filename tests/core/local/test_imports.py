@@ -1,7 +1,8 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
+import httpx
 import pytest
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 
 from rollout.core.contracts import (
     EffectKind,
@@ -25,6 +26,8 @@ from rollout.core.harness import (
     agent_program,
     tool,
 )
+from rollout.core.harness.imports import deduplicates
+from rollout.core.harness.remote import RemoteToolSet, serve
 from rollout.core.local import LocalRunner
 from rollout.core.testing import ScriptedModelEndpoint, ScriptedReply, payload, tool_call_reply
 
@@ -103,6 +106,38 @@ async def test_a_failing_tool_set_answers_with_an_error_and_a_failed_effect() ->
     assert tool_turn is not None
     (block,) = tool_turn.messages[0].content
     assert isinstance(block, ToolResultBlock) and block.result.is_error
+
+
+def test_a_tool_binding_is_exactly_one_kind() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        ToolBinding()
+    with pytest.raises(ValidationError, match="exactly one"):
+        ToolBinding(local="counter-service", url="http://counter")
+
+
+def answering(described: JsonValue) -> Callable[..., httpx.Response]:
+    """What `httpx.get` is replaced with: answers any request with `described`."""
+
+    def get(url: str, **options: object) -> httpx.Response:
+        return httpx.Response(200, json=described, request=httpx.Request("GET", url))
+
+    return get
+
+
+async def test_a_remote_tool_set_deduplicates_if_the_one_it_serves_does(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Deduplicating(Counter):
+        deduplicates = True
+
+    for served, says in ((Counter(), False), (Deduplicating(), True)):  # one that does not say does not
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=serve(served)), base_url="http://c") as client:
+            described = (await client.get("/specifications")).json()
+        assert described["deduplicates"] is says
+        assert [entry["name"] for entry in described["specifications"]] == ["increment"]
+        monkeypatch.setattr(httpx, "get", answering(described))  # the client asks with a plain request
+        remote = RemoteToolSet("http://counter")
+        assert deduplicates(remote) is says
+        assert remote.specifications() == list(served.specifications())
+    assert deduplicates(RemoteToolSet("http://counter", specifications=[], deduplicating=True))
 
 
 async def test_an_unbound_import_is_rejected() -> None:

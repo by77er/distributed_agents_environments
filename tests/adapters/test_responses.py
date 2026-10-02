@@ -93,6 +93,22 @@ def test_canonical_messages_render_to_responses_items() -> None:
     assert body["store"] is False and body["stream"] is True
 
 
+def test_sampling_parameters_are_sent_where_the_backend_accepts_them(tmp_path: Path) -> None:
+    capped = request(CONVERSATION[:2], max_output_tokens=256)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+    plain = ResponsesEndpoint(ApiKey("test-key"), "gpt-test", client=client)
+    assert plain.request_body(capped)["max_output_tokens"] == 256
+    assert {"max_output_tokens", "temperature", "top_p", "reasoning"}.isdisjoint(
+        plain.request_body(request(CONVERSATION))
+    )
+    tuned = ResponsesEndpoint(
+        ApiKey("test-key"), "gpt-test", sampling=SamplingParameters(temperature=0.2, top_p=0.9), client=client
+    )
+    assert (tuned.request_body(capped)["temperature"], tuned.request_body(capped)["top_p"]) == (0.2, 0.9)
+    codex = ResponsesEndpoint(CodexLogin(path=tmp_path / "auth.json"), "gpt-test", client=client)
+    assert "max_output_tokens" not in codex.request_body(capped)  # the Codex backend rejects the parameter
+
+
 async def test_images_are_sent_as_input_images_from_the_blob_store(blob_store: Blobs) -> None:
     blobs = blob_store
     picture = Media(media_type="image/png", source=await blobs.put(b"png bytes", "image/png"))

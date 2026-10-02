@@ -12,6 +12,9 @@ shaped by the task's context hints, and offers the tools the task exposes that t
 class Agent:
     system_prompt: str | None = None
 
+    def __init__(self, configuration: Any = None) -> None:
+        self.configuration = configuration
+
     def select_context(self, history: History, hints: ContextHints) -> list[Message]:
         system = [Message.system(self.system_prompt)] if self.system_prompt else []
         return system + history.messages(hints)
@@ -21,7 +24,9 @@ class Agent:
 ```
 
 Override `select_context` to change what the model sees, `act` to change how a reply is produced, or set
-`system_prompt`.
+`system_prompt`. A runner creates the agent from its class and an optional configuration
+(`agent_program(MyTask, MyAgent, agent_configuration=...)`), again each time the durable runner resumes the run, so
+`__init__` must be deterministic.
 
 ## What the model sees
 
@@ -74,9 +79,9 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-A context that is not an extension of the previous turn's (a window moving, a summary replacing old turns) is
-fine. The core computes each request's context digest chain; with a recorder (M1) such a context starts a new
-segment for training and loses prefix-cache reuse.
+`select_context` returns the complete message list for the turn, and every sample sends it whole. A context that
+is not an extension of the previous turn's (a window moving, a summary replacing old turns) needs no special
+handling. For episodes that outgrow the model's context, [memory](../core/harness/memory.md) keeps one that fits.
 
 ## How the agent acts
 
@@ -113,10 +118,12 @@ separate model slot that the task declares.
 |---|---|
 | `await sample(messages, *, tools=(), max_output_tokens=None, tool_choice=None)` | one assistant `Message` |
 | `capabilities` | the slot's `CapabilityContract`: context limit, maximum output tokens, tool calling, modalities |
-| `usage` | the latest sample's `Usage` (`context_used`, `context_limit`), for compaction decisions |
+| `usage` | the latest sample's `Usage` (`context_used`, `context_limit`), or `None` before the first; for compaction decisions |
+| `address()` | a `ModelAddress` (`base_url`, `api_key`, `model`) at which a harness that brings its own loop reaches this slot's model; raises `RuntimeError` when the endpoint is not served over HTTP |
 
-`sample` raises `ContractViolation` when `max_output_tokens` exceeds the contract. Errors the endpoint reports
-propagate unchanged; `ContextOverflow` means the context does not fit, and an agent can compact and retry.
+`sample` raises `ContractViolation` when `max_output_tokens` exceeds the contract. It retries an endpoint that
+reports `Overloaded` or `InternalError` three times, with exponential backoff. Other errors propagate unchanged;
+`ContextOverflow` means the context does not fit, and an agent can compact and retry.
 
 Each reply carries the `effect_id` of the sample that produced it in `reply.meta["effect_id"]`. `meta` is never
 shown to the model.

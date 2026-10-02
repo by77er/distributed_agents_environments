@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pydantic import JsonValue
 
 from rollout.coordination.store import CoordinationStore, enqueue, now
-from rollout.core.contracts import RetryClass, Text, ToolAnnotations, ToolResult, ToolSpecification
+from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
 from rollout.database import Connection, fetch_all, fetch_one, sql
 
 type Identify = Callable[[str], str | None]
@@ -74,7 +74,6 @@ class SessionTools(_CoordinationTools):
             name="list_sessions",
             description="List every session: its name, who created it, what it is for, and whether it is working.",
             input_schema=_object({}, []),
-            annotations=ToolAnnotations(read_only_hint=True),
             retry_class=RetryClass.PURE,
         ),
         ToolSpecification(
@@ -169,7 +168,6 @@ class BoardTools(_CoordinationTools):
                 },
                 [],
             ),
-            annotations=ToolAnnotations(read_only_hint=True),
             retry_class=RetryClass.PURE,
         ),
         ToolSpecification(

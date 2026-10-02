@@ -21,7 +21,14 @@ approval = Envelope(kind="approval", data={"approved": True, "by": "reviewer-7"}
 assert hello.kind == "message"
 ```
 
-The runner sets `message_id` (for deduplication) and `sender`; a message's payload never sets them.
+| `Envelope` field | Meaning |
+|---|---|
+| `kind` | `"message"` (default), or an application-defined kind that `WaitFor` can select |
+| `content` | canonical content blocks ([content](content.md)) |
+| `data` | a structured JSON payload |
+| `reply_to` | an `Address` for replies; the first message of a conversation makes it the conversation's `origin` |
+| `message_id` | set by the runner: the caller's `idempotency_key`, or a new `m_{ulid}` |
+| `sender` | set by the runner from the `sender` argument of its `send`; never taken from the payload |
 
 ## Waiting for a message
 
@@ -70,15 +77,15 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-A `WaitFor("approval")` takes only messages of kind `approval`; messages of other kinds stay held until a matching
-wait.
+A `WaitFor("approval")` takes only messages of kind `approval`. Messages of other kinds stay held, as they do
+while the run is busy.
 
 ## Priority and delivery mode
 
-A sender gives a message a `Priority`. The run's `DeliveryPolicy` maps it to a `DeliveryMode`, which decides what
-happens when the run is busy:
+A sender gives a message a `Priority`. The run's `DeliveryPolicy` (`RunBinding.delivery`) maps it to a
+`DeliveryMode`, which decides what happens when the run is busy:
 
-| Mode (default priority) | Run is waiting | Run is sampling a reply | Run is executing tools |
+| Mode (default priority) | Run is waiting for this kind | Run is sampling a reply | Run is executing tools |
 |---|---|---|---|
 | `QUEUE` (`LOW`) | resumes it | held until the run next waits | held |
 | `STEER` (`NORMAL`) | resumes it | merged into the observation after this turn by `Task.steer` | merged after the tools finish |
@@ -92,6 +99,9 @@ assert policy.mode(Priority.HIGH) is DeliveryMode.INTERRUPT
 assert policy.mode(Priority.HIGH, sender="webhook") is DeliveryMode.QUEUE  # capped: an integration cannot interrupt
 ```
 
+`DeliveryPolicy.modes` maps each priority to a mode (the defaults are in the table above), and
+`max_priority_by_sender` caps the priority of a named sender.
+
 ## Steering
 
 Messages delivered with mode `STEER` during a turn are passed to `Task.steer(run, envelopes, observation)` after
@@ -100,9 +110,10 @@ arrive as the episode ends are not merged into the final observation.
 
 ## Interrupting
 
-A message delivered with mode `INTERRUPT` while the agent is acting cancels the reply in progress. The model
-endpoint receives a best-effort `cancel(effect_id)`, the run records a `turn.interrupted` event, the partial reply
-never enters the history, and the loop calls `Task.resume` with the message.
+A message delivered with mode `INTERRUPT` while the agent is acting cancels the reply in progress, however many
+samples the agent makes per reply. The model endpoint receives a best-effort `cancel(effect_id)`, the run records a
+`turn.interrupted` event, the partial reply never enters the history, and the loop calls `Task.resume` with the
+message.
 
 ```python
 from rollout.core.contracts import RunEventType, SampleRequest
@@ -149,11 +160,25 @@ asyncio.run(interrupted_episode())
 
 ## Sending and replying
 
-An addressable agent is a **deployment**: a name and a run specification. A message sent to a conversation of the
-deployment (`{deployment}/{key}`) starts a run when none is live, and otherwise reaches the live run with the mode
-its priority maps to. Messages are deduplicated by `idempotency_key`. Messages a run never consumed start the
-conversation's next run. Replies leave a run with `run.emit`, which records an `output.emitted` event that clients
-and connectors read.
+An addressable agent is a **deployment**: a name (`{namespace}/{name}`) and a run specification. A conversation
+is a deployment and a caller-chosen key, and at most one run serves it at a time.
+
+| Type | Fields |
+|---|---|
+| `Address` | `kind`: `"conversation"`, `"run"` or `"external"`; `value`: `{deployment}/{key}`, a `run_id`, or a target outside the system |
+| `ConversationKey` | `deployment`, e.g. `acme/support`; `key`, e.g. `user:42`; `origin`: the `Address` replies go to by default |
+
+`await runner.send(to, envelope, *, priority=Priority.NORMAL, idempotency_key=None, sender=None)` delivers a
+message and returns its `message_id`:
+
+- To a `conversation` address, it starts a run of the deployment's current specification when none is live, and
+  otherwise reaches the live run with the mode its priority maps to. A repeated `idempotency_key` is delivered once.
+- To a `run` address, it reaches that run, or raises `RunNotLive` when the run has ended.
+- Messages a run never consumed start the conversation's next run, where they are queued.
+- `runner.cancel(run_id, reason=...)` stops a run; it is not a message.
+
+Replies leave a run with `run.emit(kind, payload, to=...)`. It is an `output.emit` effect and records an
+`output.emitted` event, which clients read from the run's event stream.
 
 ```python
 from rollout.core.harness import Address, Deployment, DirectModel, ModelBinding, RunBinding, RunSpecification
@@ -188,5 +213,5 @@ async def through_the_runner() -> None:
 asyncio.run(through_the_runner())
 ```
 
-`run.send(...)` between runs and `run.spawn(...)` for child runs are designed but not built yet. See the design in
-[conversations](../core/harness/conversations.md).
+Under the durable runner a wait survives restarts, and a run that has waited long is unloaded from memory until its
+next message or its timeout: see [evicting idle runs](../durability/eviction.md).

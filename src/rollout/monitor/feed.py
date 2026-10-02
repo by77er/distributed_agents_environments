@@ -17,6 +17,8 @@ from pydantic import JsonValue
 from rollout.core.contracts import Message, Reasoning, RunEvent, RunEventType, Text, ToolCall, ToolResultBlock
 from rollout.core.harness.hooks import ModelSample, RunHooks
 from rollout.rollouts import JobHooks
+from rollout.rollouts.episodes import DEFAULT
+from rollout.rollouts.episodes import rewards as assigned
 
 ENDED = (RunEventType.RUN_COMPLETED, RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED)
 
@@ -190,7 +192,7 @@ class FeedReader:
 def summary(run_id: str, lines: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     labels: dict[str, Any] = {}
     state, started, updated = "running", 0.0, 0.0
-    rewards: dict[str, float] = {}
+    events: list[tuple[str, Mapping[str, Any]]] = []
     slots: list[str] = []
     samples = 0
     for line in lines:
@@ -201,17 +203,16 @@ def summary(run_id: str, lines: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 slots.append(line["slot"])
             continue
         payload: Any = line.get("payload") or {}
+        events.append((str(line["type"]), payload))
         match line["type"]:
-            case "run.created":
+            case RunEventType.RUN_CREATED:
                 labels = dict(payload.get("labels") or {})
                 started = float(line["at"])
-            case "reward.assigned":
-                rewards[str(payload.get("slot"))] = float(payload.get("value", 0.0))
-            case "run.completed":
+            case RunEventType.RUN_COMPLETED:
                 state = "completed"
-            case "run.failed":
+            case RunEventType.RUN_FAILED:
                 state = "failed"
-            case "run.cancelled":
+            case RunEventType.RUN_CANCELLED:
                 state = "cancelled"
             case _:
                 pass
@@ -221,7 +222,7 @@ def summary(run_id: str, lines: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "state": state,
         "started": started,
         "updated": updated,
-        "rewards": rewards,
+        "rewards": {slot: by_key.get(DEFAULT, 0.0) for slot, by_key in assigned(events).items()},
         "slots": slots,
         "samples": samples,
         "lines": len(lines),

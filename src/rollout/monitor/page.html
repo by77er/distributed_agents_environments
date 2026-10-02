@@ -155,10 +155,12 @@ function drawJob() {
   for (const line of of("iteration").slice(-6).reverse()) {
     const update = line.update;
     const rewards = (line.rewards ?? []).map(value => Number(value).toFixed(Number.isInteger(value) ? 0 : 1)).join(" ");
-    const what = typeof update === "string"
-      ? $("span", { class: update.startsWith("failed") ? "bad" : "still" }, update)
-      : $("span", { class: "moved" }, `trained ${line.sequences_trained} of ${line.sequences_recorded}, ` +
-          `${update.optimizer_steps ?? "?"} steps, moved ${Number(update.kl_moved ?? 0).toFixed(4)}`);
+    const what = update
+      ? $("span", { class: "moved" }, `trained ${line.sequences_trained} of ${line.sequences_recorded}, ` +
+          `${update.optimizer_steps ?? "?"} steps, moved ${Number(update.kl_moved ?? 0).toFixed(4)}`)
+      : line.error
+        ? $("span", { class: "bad" }, `failed: ${line.error}`)
+        : $("span", { class: "still" }, `skipped: ${line.skipped ?? ""}`);
     root.append($("div", { class: "line" }, $("b", {}, `#${line.iteration} ${line.task}`), ` ${rewards || "no episode"}`,
       line.failed ? ` (${line.failed} failed)` : "", " · ", what));
   }

@@ -1,6 +1,7 @@
 """Idle runs are evicted from memory and woken by a message, by their deadline, or to be cancelled."""
 
 import asyncio
+import sqlite3
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
@@ -24,7 +25,7 @@ from rollout.core.harness import (
     agent_program,
 )
 from rollout.core.testing import ScriptedModelEndpoint, payload
-from rollout.durable import DurableRunner
+from rollout.durable import DurableRunner, RunStore
 
 
 class Chat(Task):
@@ -120,3 +121,22 @@ async def test_cancelling_an_evicted_run_still_tears_it_down(evicting: Setup) ->
     await asyncio.wait_for(runner.cancel(handle.run_id, reason="done"), 15)
     assert (await handle.result()).status is RunStatus.CANCELLED
     assert Chat.teardowns == teardowns + 1
+
+
+def test_a_store_created_without_the_eviction_columns_gains_them(tmp_path: Path) -> None:
+    path = tmp_path / "runs.sqlite"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE runs (run_id TEXT PRIMARY KEY, specification TEXT NOT NULL, conversation TEXT, "
+            "status TEXT NOT NULL, outcome TEXT)"
+        )
+        connection.execute("INSERT INTO runs VALUES ('r_old', '{}', NULL, 'running', NULL)")
+    connection.close()
+    store = RunStore(path)
+    record = store.run("r_old")
+    assert record is not None and record.running and not store.is_evicted("r_old")
+    store.evict("r_old", None)
+    assert store.is_evicted("r_old") and store.evictions() == 1
+    store.wake("r_old", "2026-10-02T00:00:00+00:00")
+    assert store.last_activity("r_old") == "2026-10-02T00:00:00+00:00"
+    store.close()

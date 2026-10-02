@@ -5,15 +5,20 @@ model slot, the token sequences the policy saw and continued, with the logprobs 
 about the run is needed to compute a loss, and nothing here says where the run executed.
 """
 
-from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
 
 from rollout.core.contracts import RunEvent, RunEventType
-from rollout.recorder import Epoch, Span
+from rollout.recorder import Epoch
+
+POLICY = "policy"
+"""The model slot an observation's reward belongs to: the one an agent acts through."""
+DEFAULT = "default"
+"""The key of a reward assigned without one."""
 
 
 class Outcome(StrEnum):
@@ -33,7 +38,7 @@ class Trace:
 
     @property
     def reward(self) -> float:
-        return self.rewards.get("default", 0.0)
+        return self.rewards.get(DEFAULT, 0.0)
 
 
 @dataclass(frozen=True)
@@ -49,8 +54,8 @@ class Episode:
     outcome: Outcome
     detail: str | None = None
     info: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """What the program reported as its result (`run.emit("result", {...})`). By convention `solved` and `saturated`
-    (nothing was left to earn) are booleans and `duration` is a number in the task's own units."""
+    """What the program reported as its result (`run.emit("result", {...})`). `solved`, `saturated` and `duration`
+    read the three entries training knows about."""
     excluded: str | None = None
     """Why the program asked for the run to be left out of training, if it did."""
     traces: Mapping[str, Trace] = field(default_factory=dict[str, Trace])
@@ -64,31 +69,48 @@ class Episode:
     def trainable(self) -> bool:
         return self.outcome is Outcome.COMPLETED and self.excluded is None
 
+    @property
+    def solved(self) -> bool:
+        """Whether the program said its task was solved (`info["solved"]`)."""
+        return self.info.get("solved") is True
+
+    @property
+    def saturated(self) -> bool:
+        """Whether the program said nothing was left to earn (`info["saturated"]`)."""
+        return self.info.get("saturated") is True
+
+    @property
+    def duration(self) -> float | None:
+        """How long the program said it took, in the task's own units (`info["duration"]`), if it said."""
+        took = self.info.get("duration")
+        return float(took) if isinstance(took, int | float) and not isinstance(took, bool) else None
+
     def to_json(self) -> dict[str, Any]:
-        return asdict(self)
+        return _EPISODE.dump_python(self, mode="json")
 
     @classmethod
     def from_json(cls, data: Mapping[str, Any]) -> "Episode":
-        traces = {
-            str(slot): Trace(
-                [Epoch(e["tokens"], [Span(**span) for span in e["spans"]], e["logprobs"]) for e in trace["epochs"]],
-                trace["rewards"],
-            )
-            for slot, trace in data["traces"].items()
-        }
-        return cls(
-            cursor=data["cursor"],
-            job=data["job"],
-            ticket=data["ticket"],
-            run_id=data["run_id"],
-            labels=data["labels"],
-            parameters=data["parameters"],
-            outcome=Outcome(data["outcome"]),
-            detail=data["detail"],
-            info=data["info"],
-            excluded=data["excluded"],
-            traces=traces,
-        )
+        return _EPISODE.validate_python(data)
+
+
+_EPISODE = TypeAdapter(Episode)
+
+
+def rewards(events: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, dict[str, float]]:
+    """The rewards a run's events assign, by model slot and key: each event as its type and payload. A reward on an
+    observation belongs to the slot the agent acts through."""
+    total: dict[str, dict[str, float]] = {}
+
+    def add(slot: str, key: str, value: float) -> None:
+        of_slot = total.setdefault(slot, {})
+        of_slot[key] = of_slot.get(key, 0.0) + value
+
+    for kind, payload in events:
+        if kind == RunEventType.REWARD_ASSIGNED:
+            add(str(payload["slot"]), str(payload.get("key", DEFAULT)), float(payload["value"]))
+        elif kind == RunEventType.OBSERVATION_RECORDED and payload.get("reward") is not None:
+            add(POLICY, DEFAULT, float(payload["reward"]))
+    return total
 
 
 def assemble(
@@ -103,24 +125,16 @@ def assemble(
     """An episode from a run's events (its labels, rewards, result and ending) and what the recorder kept of each
     of its model slots."""
     labels: Mapping[str, str] = {}
-    rewards: dict[str, dict[str, float]] = {slot: {} for slot in epochs}
     info: Mapping[str, JsonValue] = {}
     excluded: str | None = None
     outcome, detail = Outcome.CANCELLED, None
-
-    def add(slot: str, key: str, value: float) -> None:
-        of_slot = rewards.setdefault(slot, {})
-        of_slot[key] = of_slot.get(key, 0.0) + value
-
-    for event in events:
-        payload: Any = event.payload if isinstance(event.payload, dict) else {}
-        match event.type:
+    payloads: list[tuple[str, Mapping[str, Any]]] = [
+        (event.type, event.payload if isinstance(event.payload, dict) else {}) for event in events
+    ]
+    for kind, payload in payloads:
+        match kind:
             case RunEventType.RUN_CREATED:
                 labels = dict(payload.get("labels") or {})
-            case RunEventType.REWARD_ASSIGNED:
-                add(str(payload["slot"]), str(payload.get("key", "default")), float(payload["value"]))
-            case RunEventType.OBSERVATION_RECORDED if payload.get("reward") is not None:
-                add("policy", "default", float(payload["reward"]))
             case RunEventType.OUTPUT_EMITTED if payload.get("kind") == "result":
                 info = dict(payload.get("payload") or {})
             case RunEventType.TRAINING_EXCLUDED:
@@ -131,6 +145,7 @@ def assemble(
                 outcome, detail = Outcome.FAILED, str(payload.get("detail"))
             case _:
                 pass
-    traces = {slot: Trace(epochs.get(slot, []), rewards[slot]) for slot in rewards}
+    assigned = rewards(payloads)
+    traces = {slot: Trace(epochs.get(slot, []), assigned.get(slot, {})) for slot in dict.fromkeys([*epochs, *assigned])}
     run_id = events[0].run_id if events else ""
     return Episode(cursor, job, ticket, run_id, labels, parameters, outcome, detail, info, excluded, traces)

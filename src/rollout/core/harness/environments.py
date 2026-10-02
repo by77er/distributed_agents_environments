@@ -8,10 +8,9 @@ again.
 """
 
 import hashlib
-from collections.abc import Mapping
 from typing import Protocol
 
-from pydantic import Field, JsonValue
+from pydantic import JsonValue
 
 from rollout.core.contracts import ContractModel, EffectKind, FrozenSequence
 from rollout.core.harness.model import Effects
@@ -22,7 +21,6 @@ class EnvironmentSpecification(ContractModel):
     """A base image the backend knows, e.g. `alpine` (latest) or `alpine:3.24.2`."""
     setup: FrozenSequence[str] = ()
     """Shell commands run once at creation: a recipe for identical start states."""
-    labels: Mapping[str, str] = Field(default_factory=dict[str, str])
 
 
 class ExecutionResult(ContractModel):

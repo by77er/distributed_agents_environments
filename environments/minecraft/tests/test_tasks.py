@@ -10,6 +10,7 @@ from minecraft_swarm.tasks import (
     CHAINS,
     KITS,
     MILESTONES,
+    TEAM,
     Coordination,
     Hazards,
     Kit,
@@ -20,11 +21,10 @@ from minecraft_swarm.tasks import (
     catalog,
     done,
     kits,
+    saturated,
     score,
     solved,
 )
-
-TEAM = ["ada", "ben", "cy", "dee"]
 
 
 def find(start: Start, kit: Kit, coordination: Coordination = Coordination.KITTED, tier: Tier | None = None) -> Task:
@@ -77,6 +77,19 @@ def test_a_diamond_task_is_solved_by_most_of_what_was_laid_out_or_by_one_diamond
     staged, ore = find(Start.CHESTS, Kit.NONE), find(Start.ORE_IN_SIGHT, Kit.IRON)
     assert not solved(staged, {"team_diamonds": 6}, available=12) and solved(staged, {"team_diamonds": 7}, available=12)
     assert not solved(ore, {"team_diamonds": 3}, available=274) and solved(ore, {"team_diamonds": 4}, available=274)
+
+
+def test_an_episode_may_end_when_nothing_is_left_to_earn() -> None:
+    staged, ore = find(Start.CHESTS, Kit.NONE), find(Start.ORE_IN_SIGHT, Kit.IRON)
+    assert staged.laid_out and not ore.laid_out
+    assert not saturated(staged, {"team_diamonds": 11}, 12) and saturated(staged, {"team_diamonds": 12}, 12)
+    assert not saturated(ore, {"team_diamonds": 300}, 274)  # ore is counted only near the start: there is more
+    furnace = next(t for t in catalog() if t.goal == "furnace")
+    assert not saturated(furnace, {"team_diamonds": 0, "team_obtained": {"cobblestone": 8}}, 0)
+    assert saturated(furnace, {"team_diamonds": 0, "team_obtained": {"furnace": 1}}, 0)
+    dragon = find(Start.END, Kit.END_READY)
+    assert not saturated(dragon, {"team_diamonds": 0, "dragon_damage": 0.9}, 0)
+    assert saturated(dragon, {"team_diamonds": 0, "dragon_killed": True}, 0)
 
 
 def test_progress_tasks_reward_milestones_once_and_are_solved_by_their_own() -> None:
@@ -240,7 +253,7 @@ async def test_no_one_starts_within_reach_of_the_diamonds_on_the_floor() -> None
     for seed in range(40):
         control = Site()
         site = await _items(task, control, random.Random(seed))  # type: ignore[arg-type]
-        assert len(site.starts) == 4 and len(set(site.starts)) == 4 and 3 <= len(control.piles) <= 5
+        assert len(site.starts) == len(set(site.starts)) == len(TEAM) and 3 <= len(control.piles) <= 5
         for px, _, pz in control.piles:
             assert all(max(abs(px - sx), abs(pz - sz)) > 2 for sx, _, sz in site.starts), (seed, site.starts)
         (x, _, z, width, _, depth) = control.carved[0]
@@ -270,4 +283,6 @@ async def test_a_woodland_start_is_at_the_foot_of_the_nearest_tree_or_nowhere() 
     control.trees = ((500, 500), (40, -30))
     site = await _woodland(task, control, random.Random(3))  # type: ignore[arg-type]
     assert site.anchor == (40, 71, -30)  # the nearer trunk's lowest log
-    assert len(site.starts) == 4 and all(abs(x - 40) <= 4 and abs(z + 30) <= 4 and y == 71 for x, y, z in site.starts)
+    assert len(site.starts) == len(TEAM) and all(
+        abs(x - 40) <= 4 and abs(z + 30) <= 4 and y == 71 for x, y, z in site.starts
+    )

@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_the_harness_builds_the_map_from_line_of_sight_only_and_times_digs_as_the_game_does() -> None:
     ran = subprocess.run(
-        ["node", "--test", "test/map.test.js", "test/data.test.js", "test/actions.test.js"],
+        ["node", "--test", "test/map.test.js", "test/data.test.js", "test/actions.test.js", "test/news.test.js"],
         cwd=HARNESS,
         capture_output=True,
         text=True,
@@ -80,6 +80,18 @@ def test_an_observation_carries_the_map_and_exact_coordinates_and_earlier_turns_
     assert "Map of what you have seen" not in recalled and "Team chat" not in recalled and "Next to" not in recalled
     assert "Notable in sight: deepslate_diamond_ore at (-4, 65, 0), 4.3 away." in recalled
     assert "Dropped items: 3 diamond at (-3, 64, 2)." in recalled
+
+
+def test_the_map_marks_what_is_in_sight_past_the_end_of_the_lists() -> None:
+    seen = observation()
+    seen["mobs"] = [{"mob": "zombie", "id": 7, "x": 1, "y": 64, "z": 1, "distance": 1.4}]
+    seen["unlisted"] = {"mobs": [{"x": 3, "y": 64, "z": 3}], "items": [{"x": -1, "y": 64, "z": -3}], "animals": []}
+    text = describe(seen)
+    lines = text.splitlines()
+    grid = lines[lines.index("y=64 (your feet):") + 1 :][:13]
+    assert grid[7] == "1 ? ? # . . . . ! . . # ? ?" and grid[9] == "3 ? ? # . . . . . . ! # ? ?"  # both zombies
+    assert grid[3] == "-3 ? ? # . . * . . . . # ? ?"
+    assert "Hostile: zombie (id 7) 1.4 away." in text  # one is listed: the harness says how long a list is
 
 
 def test_blocks_have_their_own_symbols_or_fall_back_to_solid_and_passable() -> None:

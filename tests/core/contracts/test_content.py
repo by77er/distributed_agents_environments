@@ -8,6 +8,7 @@ from rollout.core.contracts import (
     Message,
     Reasoning,
     ReasoningScope,
+    RetryClass,
     Role,
     Text,
     ToolCall,
@@ -31,7 +32,7 @@ def test_messages_round_trip_through_json() -> None:
             ],
         ),
         Message(role=Role.TOOL, content=[ToolResultBlock(call_id="c1", result=ToolResult(content=[Text(text="5")]))]),
-        Message(role=Role.USER, content=[Media(media_type="image/png", source=BLOB)], name="alice", meta={"k": "v"}),
+        Message(role=Role.USER, content=[Media(media_type="image/png", source=BLOB)], meta={"k": "v"}),
     ]
     for message in messages:
         assert Message.model_validate_json(message.model_dump_json()) == message
@@ -80,20 +81,12 @@ def test_text_and_tool_calls_accessors() -> None:
     assert message.tool_calls == [call]
 
 
-def test_reasoning_fields_match_scope() -> None:
-    Reasoning(scope=ReasoningScope.POLICY, producer="qwen3@1", opaque=BLOB)
-    with pytest.raises(ValidationError):
-        Reasoning(scope=ReasoningScope.PORTABLE)
-    with pytest.raises(ValidationError):
-        Reasoning(scope=ReasoningScope.POLICY, text="visible")
-
-
 def test_tool_specification_validation() -> None:
     with pytest.raises(ValidationError):
         ToolSpecification(name="has space")
     with pytest.raises(ValidationError):
         ToolSpecification(name="t", input_schema={"type": "string"})
-    specification = ToolSpecification(name="t", description="d", timeout_ms=5)
+    specification = ToolSpecification(name="t", description="d", retry_class=RetryClass.PURE)
     assert specification.model_visible() == {
         "name": "t",
         "description": "d",

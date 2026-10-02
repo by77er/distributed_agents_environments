@@ -1,17 +1,79 @@
-"""What environment backends share: shaping a command's output into a result, and removing directories."""
+"""What environment backends share: creating an environment once, running a command and shaping its output into a
+result, and writing and removing files."""
 
+import asyncio
+import contextlib
 import hashlib
 import os
 import shutil
+import signal
 import stat
+import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
-from rollout.core.harness.environments import ExecutionResult
+from rollout.core.harness.environments import EnvironmentSpecification, ExecutionResult
 
 MAX_OUTPUT_LINES = 2000
 MAX_OUTPUT_BYTES = 50 * 1024
+
+IN_DIRECTORY = 'cd "$1" || exit 125; eval "$2"'
+"""A shell script that runs the command `$2` in the directory `$1`, or exits with 125 if it cannot enter it."""
+
+
+async def create_once(
+    home: Path,
+    specification: EnvironmentSpecification,
+    prepare: Callable[[], Awaitable[None]],
+    execute: Callable[[str], Awaitable[ExecutionResult]],
+) -> None:
+    """Create the environment kept in `home`, unless it is ready: `prepare` its files, run the specification's setup
+    commands with `execute`, and mark it ready. The caller holds the environment's creation lock."""
+    if (home / "ready").exists():
+        return  # already created: creation is idempotent
+    await prepare()
+    for command in specification.setup:
+        result = await execute(command)
+        if result.exit_code != 0:
+            raise RuntimeError(f"setup command failed ({result.exit_code}): {command}\n{result.output[-2000:]}")
+    await asyncio.to_thread((home / "ready").write_text, specification.model_dump_json())
+
+
+async def run_command(
+    arguments: Sequence[str],
+    *,
+    timeout_seconds: float,
+    save: Callable[[bytes], str],
+    cwd: Path | None = None,
+    variables: Mapping[str, str] | None = None,
+) -> ExecutionResult:
+    """Run a program in its own process group and return its result (`save` as in `execution_result`). The group is
+    killed when the program ends, when it times out and when the caller is cancelled: nothing it started keeps
+    running, whichever way the command ends."""
+    with tempfile.TemporaryFile() as output:  # a file, not a pipe: background processes cannot hold it open
+        process = await asyncio.create_subprocess_exec(
+            *arguments,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=output,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=cwd,
+            env=variables,
+            start_new_session=True,
+        )
+        timed_out = False
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                await process.wait()
+        except TimeoutError:
+            timed_out = True
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            await process.wait()
+        output.seek(0)
+        data = await asyncio.to_thread(output.read)
+    return execution_result(None if timed_out else process.returncode, data, timed_out=timed_out, save=save)
 
 
 def execution_result(
@@ -55,6 +117,16 @@ def _tail(output: bytes) -> bytes:
 
 def _decode(output: bytes) -> str:
     return output.decode("utf-8", errors="replace")
+
+
+async def write_file(target: Path, data: bytes) -> None:
+    """Write a file, creating the directories above it."""
+
+    def write() -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    await asyncio.to_thread(write)
 
 
 def remove_tree(path: Path) -> None:

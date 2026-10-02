@@ -38,7 +38,7 @@ function botIn (blocks, position) {
     blockAt (point) {
       const cell = point.floored()
       const name = blocks.name(cell.x, cell.y, cell.z)
-      return { name, position: cell, boundingBox: SOLID.has(name) ? 'block' : 'empty', light: 0, skyLight: 0, biome: { name: 'plains' } }
+      return { name, position: cell, boundingBox: SOLID.has(name) ? 'block' : 'empty', skyLight: 0, biome: { name: 'plains' } }
     }
   }
 }

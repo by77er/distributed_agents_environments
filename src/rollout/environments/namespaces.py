@@ -1,4 +1,4 @@
-"""An environment backend on unprivileged Linux namespaces (docs/decisions/0025-agent-sessions.md).
+"""An environment backend on unprivileged Linux namespaces (docs/environments/README.md).
 
 Each environment is a directory holding its own copy of a base image's root filesystem. A command runs in new user,
 mount and PID namespaces, chrooted into that root filesystem, as root inside (mapped to the host user outside):
@@ -12,24 +12,29 @@ directories, so they survive restarts of the runner.
 """
 
 import asyncio
-import os
-import signal
 import subprocess
 from pathlib import Path
 
 from rollout.core.harness.environments import EnvironmentSpecification, ExecutionResult
 from rollout.environments.images import ImageStore
-from rollout.environments.processes import execution_result, output_name, remove_tree
+from rollout.environments.processes import (
+    IN_DIRECTORY,
+    create_once,
+    output_name,
+    remove_tree,
+    run_command,
+    write_file,
+)
 
 # Runs inside the new namespaces, before entering the environment: mounts, then chroot with a clean environment.
-ENTER = r"""
+ENTER = rf"""
 root="$1"; cwd="$2"; command="$3"
 mount --rbind /dev "$root/dev" 2>/dev/null
 mount -t proc proc "$root/proc"
 mount -t tmpfs tmpfs "$root/tmp"
 exec chroot "$root" /usr/bin/env -i HOME=/root TERM=dumb LANG=C.UTF-8 \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    /bin/sh -c 'cd "$1" || exit 125; eval "$2"' sh "$cwd" "$command"
+    /bin/sh -c '{IN_DIRECTORY}' sh "$cwd" "$command"
 """
 
 
@@ -45,18 +50,19 @@ class NamespaceEnvironments:
         return self.directory / environment_id / "rootfs"
 
     async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None:
-        lock = self._creating.setdefault(environment_id, asyncio.Lock())
-        async with lock:
-            home = self.directory / environment_id
-            if (home / "ready").exists():
-                return  # already created: creation is idempotent
+        home = self.directory / environment_id
+
+        async def prepare() -> None:
             tarball = await self.images.tarball(specification.image)
             await asyncio.to_thread(_unpack, tarball, home)
-            for command in specification.setup:
-                result = await self.execute(environment_id, command, timeout_seconds=600, cwd=None)
-                if result.exit_code != 0:
-                    raise RuntimeError(f"setup command failed ({result.exit_code}): {command}\n{result.output[-2000:]}")
-            await asyncio.to_thread((home / "ready").write_text, specification.model_dump_json())
+
+        async with self._creating.setdefault(environment_id, asyncio.Lock()):
+            await create_once(
+                home,
+                specification,
+                prepare,
+                lambda command: self.execute(environment_id, command, timeout_seconds=600, cwd=None),
+            )
 
     async def execute(
         self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
@@ -64,22 +70,6 @@ class NamespaceEnvironments:
         root = self.root(environment_id)
         if not root.exists():
             raise FileNotFoundError(f"environment {environment_id} does not exist")
-        process = await asyncio.create_subprocess_exec(
-            "unshare", "--user", "--map-root-user", "--mount", "--pid", "--fork", "--kill-child",
-            "sh", "-c", ENTER, "enter", str(root), cwd or "/workspace", command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-        )  # fmt: skip
-        try:
-            async with asyncio.timeout(timeout_seconds):
-                output, _ = await process.communicate()
-        except TimeoutError:
-            os.killpg(process.pid, signal.SIGKILL)
-            output, _ = await process.communicate()
-            exit_code, timed_out = None, True
-        else:
-            exit_code, timed_out = process.returncode, False
 
         def save(full: bytes) -> str:
             inside = f"/var/tmp/{output_name(effect_id)}"
@@ -88,16 +78,15 @@ class NamespaceEnvironments:
             target.write_bytes(full)
             return inside
 
-        return execution_result(exit_code, output, timed_out=timed_out, save=save)
+        return await run_command(
+            ["unshare", "--user", "--map-root-user", "--mount", "--pid", "--fork", "--kill-child",
+             "sh", "-c", ENTER, "enter", str(root), cwd or "/workspace", command],
+            timeout_seconds=timeout_seconds,
+            save=save,
+        )  # fmt: skip
 
     async def put(self, environment_id: str, path: str, data: bytes) -> None:
-        target = self._inside(environment_id, path)
-
-        def write() -> None:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-
-        await asyncio.to_thread(write)
+        await write_file(self._inside(environment_id, path), data)
 
     async def get(self, environment_id: str, path: str) -> bytes:
         return await asyncio.to_thread(self._inside(environment_id, path).read_bytes)

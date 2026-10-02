@@ -5,8 +5,7 @@ that runs on one machine (one GPU is enough); durability, fleet-scale execution 
 
 - Three ways in (building an environment, designing training, deploying): [docs/guide/perspectives.md](docs/guide/perspectives.md)
 - Developer guide: [docs/guide/README.md](docs/guide/README.md) (API reference: [docs/guide/reference.md](docs/guide/reference.md))
-- Design: [docs/README.md](docs/README.md)
-- Development plan: [docs/development/plan.md](docs/development/plan.md)
+- All documentation: [docs/README.md](docs/README.md)
 
 ## Development
 

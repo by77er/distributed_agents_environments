@@ -1,13 +1,16 @@
 'use strict'
 // The harness for one Paper server: one bot per agent, driven by JSON lines on stdin, answered on stdout.
 //
-//   {"id": 1, "op": "connect", "host": "127.0.0.1", "port": 25565, "team": ["ada", "ben", "cy", "dee"]}
-//   {"id": 2, "op": "observe", "bot": "ada"}         what ada sees, her messages, her last action's result
+//   {"id": 1, "op": "connect", "host": "127.0.0.1", "port": 25565, "team": ["ada", "ben", "cy", "dee"],
+//    "version": "1.21.11"}                           the game version the server runs
+//   {"id": 2, "op": "observe", "bot": "ada"}         what ada sees, her messages, her last action's result; asked
+//                                                     again before the next thaw, it answers the same
 //   {"id": 3, "op": "act", "bot": "ada", "action": {"name": "mine", "x": 1, "y": -58, "z": 4}}
 //   {"id": 4, "op": "busy"}                           which bots are still acting, and which were hurt since the thaw
 //   {"id": 4, "op": "unloaded"}                       which bots do not yet hold the chunks around them
 //   {"id": 5, "op": "freeze"}                         stop every action (results are kept) and pause physics
-//   {"id": 6, "op": "thaw"}                           resume physics, before actions start
+//   {"id": 6, "op": "thaw"}                           resume physics, before actions start; the messages and deaths
+//                                                     that observations have told are dropped
 //   {"id": 7, "op": "quit"}
 //
 // Messages reach an agent only from its teammates: system messages (someone joining, deaths, server notices) and
@@ -21,26 +24,27 @@ const { pathfinder, Movements } = require('mineflayer-pathfinder')
 const { observe } = require('./lib/observe')
 const { ACTIONS, ActionError, Interrupted } = require('./lib/actions')
 const { fixMaterials } = require('./lib/data')
+const { LIMITS } = require('./lib/limits')
+const { News } = require('./lib/news')
 
-const VERSION = '1.21.11'
 const MAX_MESSAGES = 20
-const SCAFFOLDING = ['dirt', 'cobblestone', 'cobbled_deepslate', 'netherrack']
-const MAX_WALK_DIG_MS = 5000
+const MAX_WALK_DIG_MS = LIMITS.walk_dig_seconds * 1000
 const RESTFUL = new Set(['wait', 'idle', 'chat'])
 
-const bots = new Map() // name → { bot, memory, air, inbox, action, result }
+const bots = new Map() // name → { bot, memory, air, news, action, result }
 let team = new Set()
 
-async function connect ({ host, port, team: names }) {
+async function connect ({ host, port, team: names, version }) {
+  if (!version) throw new Error('connect needs the game version the server runs')
   team = new Set(names)
-  await Promise.all(names.map(name => join(host, port, name)))
+  await Promise.all(names.map(name => join(host, port, name, version)))
   return { connected: names }
 }
 
-function join (host, port, name) {
+function join (host, port, name, version) {
   return new Promise((resolve, reject) => {
-    const bot = mineflayer.createBot({ host, port, username: name, version: VERSION, auth: 'offline', hideErrors: true })
-    const state = { bot, memory: new Map(), air: new Set(), inbox: [], action: null, result: null, kicked: null, health: null, hurt: false }
+    const bot = mineflayer.createBot({ host, port, username: name, version, auth: 'offline', hideErrors: true })
+    const state = { bot, memory: new Map(), air: new Set(), news: new News(MAX_MESSAGES), action: null, result: null, kicked: null, health: null, hurt: false }
     bots.set(name, state)
     bot.loadPlugin(pathfinder)
     bot.once('spawn', () => {
@@ -54,7 +58,7 @@ function join (host, port, name) {
       movements.allowParkour = false
       movements.allowSprinting = true
       // What walking may put under the bot or ahead of it when there is no other way (the `move` tools say so).
-      movements.scafoldingBlocks = SCAFFOLDING.map(item => bot.registry.itemsByName[item]?.id).filter(id => id !== undefined)
+      movements.scafoldingBlocks = LIMITS.scaffolding.map(item => bot.registry.itemsByName[item]?.id).filter(id => id !== undefined)
       // Walking digs only what `mine` would: not what takes the bot's tools too long (stone by hand is 7.5 seconds a
       // block), and not what would drop nothing (ore under too weak a pickaxe is destroyed).
       const slow = new Map() // block type → whether walking may not dig it, with the tools held now
@@ -72,13 +76,12 @@ function join (host, port, name) {
     })
     bot.on('chat', (username, message) => {
       if (username === name || !team.has(username)) return // teammates only
-      state.inbox.push({ from: username, message })
-      if (state.inbox.length > MAX_MESSAGES) state.inbox.shift()
+      state.news.hear(username, message)
     })
     bot.on('kicked', reason => { state.kicked = String(typeof reason === 'string' ? reason : JSON.stringify(reason)) })
     bot.on('end', reason => { state.ended = String(reason ?? 'the connection closed') })
     bot.on('error', error => { if (!bot.entity) reject(error) })
-    bot.on('death', () => { state.died = true })
+    bot.on('death', () => { state.news.died = true })
     bot.on('health', () => { // (also fires when only food changes)
       if (state.health !== null && bot.health < state.health) state.hurt = true
       state.health = bot.health
@@ -98,10 +101,10 @@ function observation (name) {
   if (!state) throw new Error(`no bot ${name}`)
   connected(name, state)
   const result = observe(state.bot, team, state.memory, state.air)
-  result.messages = state.inbox.splice(0)
+  const { messages, died } = state.news.tell()
+  result.messages = messages
   result.last_action = state.result
-  result.died = Boolean(state.died)
-  state.died = false
+  result.died = died
   return result
 }
 
@@ -177,6 +180,7 @@ function thaw () {
   for (const state of bots.values()) {
     state.bot.physicsEnabled = true
     state.hurt = false
+    state.news.forget()
   }
   return { thawed: true }
 }

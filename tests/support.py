@@ -19,7 +19,7 @@ from rollout.core.contracts import (
     context_digests,
 )
 from rollout.inference import Channel, Generation, Limits
-from rollout.recorder import Renderer, renderer_for
+from rollout.recorder import Renderer, qwen3, qwen35
 from rollout.recorder.renderers import Tokenizer
 
 MODEL = "Qwen/Qwen3.5-9B"
@@ -40,6 +40,7 @@ class ScriptedEngine:
     spent; logprobs are -0.5 per token. Keeps what it was asked and told."""
 
     max_model_len = 32_768
+    processes: Sequence[int] = ()
 
     def __init__(
         self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = ()
@@ -147,7 +148,8 @@ def plain_channel(script: Sequence[tuple[str, str]] = (), *, name: str = "policy
 
 
 def channel(engine: ScriptedEngine, *, renderer: str = "qwen3.5", name: str = "policy", **limits: Any) -> Channel:
-    return Channel(name, [engine], renderer_for(renderer, engine.tokenizer), Limits(**limits))
+    family = {"qwen3.5": qwen35, "qwen3": qwen3}[renderer]
+    return Channel(name, [engine], family(engine.tokenizer), Limits(**limits))
 
 
 def sample_request(
@@ -164,3 +166,23 @@ def sample_request(
         context=ContextDelta(append=messages, digest=context_digests(messages)[-1]),
         tools=tools,
     )
+
+
+# What a profile names (`tests.support:scripted_engine`, ...): an engine and a renderer that need no GPU.
+
+STARTED: list[ScriptedEngine] = []
+"""Every engine `scripted_engine` has made, for a test to look at."""
+
+
+def scripted_engine(model: str, **options: Any) -> ScriptedEngine:
+    """An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start."""
+    if options.get("fails"):
+        raise RuntimeError("no such device")
+    engine = ScriptedEngine(cast(Tokenizer, Characters()), always=[("yes\n", "stop"), ("no\n", "stop")])
+    engine.told.append(f"started {model} {sorted(options.items())}")
+    STARTED.append(engine)
+    return engine
+
+
+def plain_renderer(model: str) -> Renderer:
+    return cast(Renderer, PlainRenderer())

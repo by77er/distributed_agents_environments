@@ -53,6 +53,11 @@ class Engine(Protocol):
 
     async def wake(self) -> None: ...
 
+    @property
+    def processes(self) -> Sequence[int]:
+        """The processes it started on this machine, for whoever must end them if this process is killed."""
+        ...
+
     def close(self) -> None: ...
 
 
@@ -172,6 +177,10 @@ class Channel:
     def take(self) -> dict[str, float]:
         """What passed through since the last call: requests, tokens in and out, and throughput.
         `tokens_per_second` is everything generated over the time the channel was generating."""
+        if self._in_flight:  # a stretch still going counts up to now
+            now = time.monotonic()
+            self._counts["busy_s"] += now - self._busy_since
+            self._busy_since = now
         counts, busy, each = self._counts, self._counts["busy_s"], self._counts["request_s"]
         taken = {
             "requests": counts["requests"],

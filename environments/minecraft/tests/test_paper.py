@@ -6,6 +6,7 @@ import shutil
 import pytest
 from minecraft_swarm.control import Control
 from minecraft_swarm.paper import (
+    PAPER_VERSION,
     Installation,
     PaperServer,
     merge_configuration,
@@ -47,7 +48,7 @@ async def test_a_server_freezes_steps_and_reports_ground_truth(installation: Ins
     await server.start()
     control = Control(server.control_url)
     try:
-        assert (await control.health())["version"] == "1.21.11"
+        assert (await control.health())["version"] == PAPER_VERSION
         frozen = await control.freeze()
         await asyncio.sleep(0.5)
         assert (await control.ticks())["game_time"] == frozen["game_time"]  # nothing ticks while frozen

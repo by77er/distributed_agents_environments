@@ -41,9 +41,11 @@ from typing import Any
 import httpx
 import yaml
 
+from minecraft_swarm.control import Control, ControlError
 from rollout.processes import end_with_parent
 
 PAPER_VERSION = "1.21.11"
+"""The Minecraft version the servers run; the harness's bots are told it when they connect."""
 PAPER_BUILD = 132
 CACHE = Path.home() / ".cache" / "rollout" / "minecraft"
 ENVIRONMENT = Path(__file__).resolve().parents[1]
@@ -208,10 +210,7 @@ class Installation:
         )
         try:
             _wait_for_line(directory / "generate.log", "Done (", process, seconds=600)
-            generated = httpx.post(
-                f"http://127.0.0.1:{control}/setup/generate", json={"radius": GENERATED_CHUNKS}, timeout=900
-            )
-            generated.raise_for_status()
+            asyncio.run(_generate(f"http://127.0.0.1:{control}"))  # (a template is made in a thread of its own)
         finally:
             _stop_process(process)
             release_port(control)
@@ -289,15 +288,15 @@ class PaperServer:
         )  # fmt: skip
         deadline = time.monotonic() + seconds
         async with httpx.AsyncClient(timeout=2) as client:
+            control = Control(self.control_url, client=client)
             while time.monotonic() < deadline:
                 if self.process.returncode is not None:
                     raise RuntimeError(f"the server exited while starting; its log ends:\n{self._log_tail()}")
-                with contextlib.suppress(httpx.HTTPError, ValueError):
-                    health = await client.get(f"{self.control_url}/health")
-                    if health.status_code == 200:
-                        if health.json().get("server") != self.name:  # another server answers on this port
-                            raise RuntimeError(f"port {self.control_port} belongs to another server")
-                        return
+                with contextlib.suppress(httpx.HTTPError, ValueError, ControlError):  # not up yet
+                    health = await control.health()
+                    if health.get("server") != self.name:  # another server answers on this port
+                        raise RuntimeError(f"port {self.control_port} belongs to another server")
+                    return
                 await asyncio.sleep(0.25)
         raise TimeoutError(f"the server did not start in {seconds} seconds; its log ends:\n{self._log_tail()}")
 
@@ -423,8 +422,18 @@ def server_properties() -> dict[str, str]:
     return values
 
 
+async def _generate(control_url: str) -> None:
+    """Have the server whose control API is at `control_url` generate the area a template holds."""
+    control = Control(control_url)
+    try:
+        await control.generate(GENERATED_CHUNKS)
+    finally:
+        await control.close()
+
+
 def _configure(bootstrap: Path, directory: Path) -> None:
-    """Paper's own configuration with config/'s overrides merged in (anti-xray, no end dimension)."""
+    """Paper's own configuration with config/'s overrides merged in (anti-xray, the end allowed, and how far off
+    entities are tracked)."""
     (directory / "config").mkdir(exist_ok=True)
     for relative in ("config/paper-world-defaults.yml", "bukkit.yml", "spigot.yml"):
         defaults: dict[str, Any] = yaml.safe_load((bootstrap / relative).read_text())

@@ -59,22 +59,9 @@ nav:
       - "Testing": guide/testing.md
       - "Deploying": guide/deploying.md
       - "API reference": guide/reference.md
-  - Products:
-      - "Project assistant": products/project-assistant.md
-      - "Agent sessions": products/agent-sessions.md
-      - "Minecraft swarm": products/minecraft-swarm.md
-  - Development plan: development/plan.md
-  - Local services: development/local-services.md
   - Architecture:
-      - "Requirements": architecture/requirements.md
-      - "Principles": architecture/principles.md
-      - "Layers and deployment profiles": architecture/layers-and-profiles.md
-      - "Architecture overview": architecture/overview.md
-      - "Lifecycle of a turn": architecture/turn-lifecycle.md
-      - "Delivery semantics": architecture/delivery-semantics.md
-      - "Trust boundaries": architecture/trust-boundaries.md
+      - "Overview": architecture/overview.md
       - "Glossary": architecture/glossary.md
-      - "Open questions": architecture/open-questions.md
   - Contracts:
       - contracts/README.md
       - "Identifiers": contracts/identifiers.md
@@ -83,12 +70,8 @@ nav:
       - "Effects": contracts/effects.md
       - "Model endpoint contract": contracts/model-endpoint.md
   - Core:
-      - core/README.md
       - Harness:
           - core/harness/README.md
-          - "Task": core/harness/task.md
-          - "Agent": core/harness/agent.md
-          - "Conversations and messages": core/harness/conversations.md
           - "Determinism rules for durable code": core/harness/determinism.md
           - "Hooks": core/harness/hooks.md
           - "Memory": core/harness/memory.md
@@ -97,61 +80,18 @@ nav:
           - "The recorder over HTTP": core/recorder/session-api.md
           - "Epochs": core/recorder/session-tree.md
           - "Engines": core/recorder/engine-adapter.md
-      - "Monitor": core/monitor.md
       - "Rollouts": core/rollouts/README.md
       - "Episodes": core/trajectories/README.md
       - "Training": core/training.md
+      - "Monitor": core/monitor.md
   - Inference: inference/README.md
-  - Environments:
-      - environments/README.md
-      - "Environment API (envd)": environments/env-api.md
-      - "Driver SPI": environments/driver.md
-      - "SecurityProfile": environments/security-profile.md
-      - "Placement, pools, and the envlet": environments/placement.md
   - Durability:
       - durability/README.md
-      - "Task host": durability/task-host.md
       - "Evicting idle runs": durability/eviction.md
       - "Several runners": durability/runners.md
-  - Platform:
-      - platform/README.md
-      - "Cells": platform/cells.md
-      - "Trust tiers": platform/trust-tiers.md
-      - "Control API": platform/control-api/README.md
-      - "Tool Router": platform/tool-router/README.md
-  - Decisions:
-      - decisions/README.md
-      - "0001 — Cells are the unit of scale and failure": decisions/0001-cells.md
-      - "0002 — Postgres per cell for the run store": decisions/0002-postgres-run-store.md
-      - "0003 — The run log is the outbox; eager dispatch": decisions/0003-log-is-the-outbox.md
-      - "0004 — Harness is a pure step function hosted by a durable actor runtime": decisions/0004-durable-actor-runtime.md
-      - "0005 — Agent = model + tools; tools are spec + binding; MCP is one binding": decisions/0005-tools-are-spec-plus-binding.md
-      - "0006 — The harness is unaware of the model and policy changes": decisions/0006-harness-unaware-of-policy.md
-      - "0007 — An active recorder owns tokenization and records sessions": decisions/0007-active-recorder.md
-      - "0008 — Policy may change mid-rollout; split generations by abort-and-resubmit": decisions/0008-mid-rollout-policy-change.md
-      - "0009 — Reuse stale KV across weight updates; correct with importance sampling": decisions/0009-stale-kv-importance-sampling.md
-      - "0010 — microVMs via a node daemon (envlet) forked from E2B's orchestrator": decisions/0010-envlet-fork-e2b.md
-      - "0011 — Go for control and environment planes, Python for recorder and RL plane": decisions/0011-stack.md
-      - "0012 — Tasks, agents, and one framework-owned loop": decisions/0012-task-agent-loop.md
-      - "0013 — Durability of task and agent code by deterministic replay": decisions/0013-replay-durability.md
-      - "0014 — No forks: setup cost is paid by content-addressed template builds": decisions/0014-no-forks-template-recipes.md
-      - "0015 — Rollout interface: rows in, samples out, weights published": decisions/0015-rollout-interface.md
-      - "0016 — A core library with optional layers, and deployment profiles": decisions/0016-layers-and-profiles.md
-      - "0017 — DBOS as the durable execution substrate, in pump mode": decisions/0017-dbos-substrate.md
-      - "0018 — Effects are at-least-once; receivers deduplicate with argument digests": decisions/0018-effects-at-least-once.md
-      - "0019 — Conversations as keyed runs, with priority-based delivery": decisions/0019-conversations-and-priority-delivery.md
-      - "0020 — A deterministic asyncio event loop in the task host": decisions/0020-deterministic-event-loop.md
-      - "0021 — Isolate task code by trust tier, in one execution architecture": decisions/0021-trust-tiers.md
-      - "0022 — RL interface extensions": decisions/0022-rl-interface-extensions.md
-      - "0023 — Development baseline": decisions/0023-development-baseline.md
-      - "0024 — Validate with a product before RL": decisions/0024-product-before-rl.md
-      - "0025 — Agent sessions, and the pieces they are built from": decisions/0025-agent-sessions.md
-  - Research:
-      - "Research": research/README.md
-      - "Synthesis: substrate, interfaces, and how the system operates": research/synthesis.md
-      - "Our interface vs agent frameworks and durable-agent frameworks": research/interfaces-agent-frameworks.md
-      - "Our interface vs RL environment specifications and RL frameworks": research/interfaces-rl-environments.md
-      - "Substrate: our own runtime vs other contenders": research/substrate-custom-and-others.md
-      - "DBOS as the durable execution substrate": research/substrate-dbos.md
-      - "Restate as the durable execution substrate": research/substrate-restate.md
-      - "Temporal as the durable execution substrate": research/substrate-temporal.md
+  - Environments: environments/README.md
+  - Products:
+      - "Project assistant": products/project-assistant.md
+      - "Agent sessions": products/agent-sessions.md
+      - "Minecraft swarm": products/minecraft-swarm.md
+  - Local services: development/local-services.md

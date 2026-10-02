@@ -1,50 +1,60 @@
 # Project assistant
 
-Status: **Baseline recorded** (milestone P1) · See [ADR-0024](../decisions/0024-product-before-rl.md)
+Status: **Working** (2026-10-02) · Code: `src/project_assistant`
 
-A long-lived conversational agent about one code repository, built on the `rollout` core and served over HTTP. It
-answers questions grounded in the repository, remembers decisions across conversations, and follows up when asked.
-It exists to exercise the system end to end on a third-party model before RL work resumes.
+A long-lived conversational agent about one code repository, served over HTTP. It answers questions grounded in the
+repository, remembers decisions across conversations, and follows up when asked.
 
 ## Running it
 
 ```bash
-uv sync --extra assistant
+uv sync --extra assistant --extra durable
 uv run project-assistant serve --repository /path/to/repo      # http://127.0.0.1:8420, on the local Codex login
 
 curl -s localhost:8420/conversations/dev-1/messages -d '{"text": "Where is billing implemented?"}'
 curl -s localhost:8420/conversations/dev-1/transcript
 ```
 
+| `serve` option | Default | Meaning |
+|---|---|---|
+| `--repository PATH` | the current directory | the repository the assistant answers about |
+| `--model`, `--reasoning-effort` | `gpt-6-astra`, `low` | the model; effort is `low`, `medium` or `high` |
+| `--host`, `--port` | `127.0.0.1`, `8420` | where the server listens |
+| `--state DIR` | none | run on the `DurableRunner` with its state here, so conversations survive restarts ([durability](../durability/README.md)); without it they live in memory, on the `LocalRunner` |
+| `--notes PATH` | `.rollout/notes.sqlite` in the repository | the notes database |
+| `--ledger PATH` | none | append every model call to this file |
+
 | Endpoint | Does |
 |---|---|
-| `POST /conversations/{key}/messages` | `{text, priority?, idempotency_key?, wait? = true, timeout_seconds? = 300}`. With `wait`, returns the reply to this message; otherwise 202 |
+| `POST /conversations/{key}/messages` | `{text, priority?, idempotency_key?, wait? = true, timeout_seconds? = 300}`. With `wait`, returns the reply to this message, or 504 when none came in time; without, returns 202 |
 | `GET /conversations/{key}/transcript` | user messages and assistant replies, in order |
 | `GET /conversations/{key}/events?from_seq=0` | the live run's events as server-sent events |
 | `POST /conversations/{key}/cancel` | cancels the conversation's live run |
 | `GET /health` | liveness and the deployment name |
 
-`priority` is `low`, `normal` or `high`: queue for the next wait, steer the current turn, or interrupt it.
+`priority` is `low`, `normal` (the default) or `high`: queue for the next wait, steer the current turn, or interrupt
+it ([conversations](../guide/conversations.md)).
 
 ## How it maps onto the library
 
 | Piece | Built from |
 |---|---|
-| The conversation | one run of the deployment `assistant/{repository}`, keyed by the conversation key; it waits for messages with `WaitFor` and never ends on its own |
-| Answers | `ProjectAgent` samples the `policy` slot with a system prompt naming the repository and the time; replies leave the run with `run.emit("reply", …)` |
-| Repository tools | `RepositoryTools`, an **imported** tool set: `list_files`, `search`, `read_file`, `git_log`, confined to the repository. Imported rather than `@tool` so that a durable run replays recorded results |
-| Notes | `NotesStore`, an imported tool set in SQLite (`.rollout/notes.sqlite`): `save_note`, `search_notes`, `list_notes`. Shared by every conversation; saves deduplicate by `effect_id` |
-| Follow-ups | the `schedule_follow_up` `@tool` records a due time with `run.now()`; the task's `WaitFor` times out at the next one and wakes the assistant with a follow-up observation |
-| Model | `gpt-6-astra` through the Responses API adapter on the local Codex login, reasoning effort `low` by default |
-| Runner | `LocalRunner` by default; `DurableRunner` with `--state`, with unchanged task code |
+| The conversation | one run of the deployment `assistant/{repository name}`, keyed by the conversation key. It waits for messages with `WaitFor` and never ends on its own |
+| Answers | `ProjectAgent` samples the `policy` slot with a system prompt naming the repository and the time. Replies leave the run with `run.emit("reply", …)` |
+| Repository tools | `RepositoryTools`, an imported tool set: `list_files`, `search`, `read_file`, `git_log`, confined to the repository. As effects, their results are recorded, so a durable run replays them |
+| Notes | `NotesStore`, an imported tool set in SQLite: `save_note`, `search_notes`, `list_notes`. Every conversation shares it; saves deduplicate by `effect_id` |
+| Follow-ups | the `schedule_follow_up` `@tool` records a due time from `run.now()`. The task's `WaitFor` times out at the next one and wakes the assistant with a follow-up observation |
+| Model | the Responses API adapter on the local Codex login |
 
-Source: `src/project_assistant/`.
+On the `DurableRunner`, a conversation idle for 5 minutes is unloaded from memory and woken by its next message or
+follow-up ([evicting idle runs](../durability/eviction.md)).
 
 ## Evaluations
 
 ```bash
 uv run project-assistant evaluate --repeats 3        # all scenarios; results as JSON in .rollout/evaluations/
 uv run project-assistant evaluate --scenario "locate a function" --no-judge
+uv run project-assistant evaluate --durable          # on the DurableRunner, one scenario at a time
 ```
 
 Scenarios run against **tidepool**, an invented repository created fresh for each evaluation with a fixed git history,
@@ -62,7 +72,7 @@ the whole repository and its history as ground truth. Cost and latency come from
 | a follow-up fires | `schedule_follow_up` and a `WaitFor` timeout waking the assistant unprompted |
 | a high-priority message interrupts | a `HIGH`-priority message cancelling the reply in progress |
 
-**Baseline** (2026-09-28 · `gpt-6-astra`, reasoning effort `low`, Codex backend · 3 repeats, `LocalRunner`):
+Results with `gpt-6-astra`, reasoning effort `low`, 3 repeats, on the `LocalRunner`:
 
 | Scenario | Success | Correctness | Grounding | Concision | Seconds per turn | Model calls | Tokens in / out |
 |---|---|---|---|---|---|---|---|
@@ -75,19 +85,10 @@ the whole repository and its history as ground truth. Cost and latency come from
 | a high-priority message interrupts | 3/3 | 5.0 | 5.0 | 5.0 | 5.1 | 3.7 | 2,930 / 117 |
 | **all** | **21/21** | **4.7** | **5.0** | **4.9** | **10.2** | **4.3** | **3,614 / 259** |
 
-Tokens are per scenario run. The suite is saturated: harder scenarios (larger repositories, longer conversations,
-ambiguous questions) are needed before it can tell two versions of the assistant apart.
+Tokens are per scenario run. The suite is saturated: it cannot tell two versions of the assistant apart. On the
+`DurableRunner` (one repeat) all 7 scenarios passed, at 10.7 seconds and 4.1 model calls per turn.
 
-A first version of the judge saw only the key facts and marked correct extra details (line numbers, commit hashes)
-as unsupported; giving it the repository as ground truth fixed that.
-
-### On the durable runner
-
-`uv run project-assistant serve --state DIR` runs conversations on the `DurableRunner`, so they survive restarts.
-`uv run project-assistant evaluate --durable` runs the scenario suite on it: 7/7 passed (2026-09-28, one repeat), with
-cost and latency close to the `LocalRunner` baseline (10.7 seconds and 4.1 model calls per turn).
-
-### Durability under faults
+## Durability under faults
 
 ```bash
 uv run project-assistant faults --kills 3 --seed 1
@@ -99,15 +100,9 @@ restarts it, and resends the message with the same idempotency key. It passes wh
 note is duplicated, no model call repeats except the one in flight at each kill, and the last reply recalls both
 facts.
 
-| Run (2026-09-28) | Kills | Lost messages | Duplicate replies | Duplicate notes | Repeated model calls | Recalls both | Seconds from restart to reply |
+| Run | Kills | Lost messages | Duplicate replies | Duplicate notes | Repeated model calls | Recalls both | Seconds from restart to reply |
 |---|---|---|---|---|---|---|---|
 | seed 1 | 3 | 0 | 0 | 0 | 3 (one per kill) | yes | 12.1, 10.1, 9.9 |
 | seed 2 | 5 | 0 | 0 | 0 | 5 (one per kill) | yes | 11.2, 14.4, 15.5, 10.4, 13.0 |
 
 The seconds after a restart include starting the server, DBOS recovery, and finishing the interrupted reply.
-
-## Next
-
-- The sandboxed task host behind `HarnessHost`, so untrusted code can run durably.
-- Suspending idle conversations without holding them in memory.
-- Harder scenarios.

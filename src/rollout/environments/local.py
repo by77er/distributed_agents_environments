@@ -14,15 +14,19 @@ directories, so they survive restarts of the runner.
 """
 
 import asyncio
-import contextlib
 import os
-import signal
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
 from rollout.core.harness.environments import EnvironmentSpecification, ExecutionResult
-from rollout.environments.processes import execution_result, output_name, remove_tree
+from rollout.environments.processes import (
+    IN_DIRECTORY,
+    create_once,
+    output_name,
+    remove_tree,
+    run_command,
+    write_file,
+)
 
 HOST_IMAGE = "host"
 
@@ -42,18 +46,19 @@ class LocalEnvironments:
     async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None:
         if specification.image != HOST_IMAGE:
             raise ValueError(f"the local backend only provides the image {HOST_IMAGE!r}, not {specification.image!r}")
-        lock = self._creating.setdefault(environment_id, asyncio.Lock())
-        async with lock:
-            home = self.directory / environment_id
-            if (home / "ready").exists():
-                return  # already created: creation is idempotent
+        home = self.directory / environment_id
+
+        async def prepare() -> None:
             await asyncio.to_thread(remove_tree, home)  # a creation interrupted earlier starts again from nothing
             await asyncio.to_thread(self.workspace(environment_id).mkdir, parents=True)
-            for command in specification.setup:
-                result = await self.execute(environment_id, command, timeout_seconds=600, cwd=None)
-                if result.exit_code != 0:
-                    raise RuntimeError(f"setup command failed ({result.exit_code}): {command}\n{result.output[-2000:]}")
-            await asyncio.to_thread((home / "ready").write_text, specification.model_dump_json())
+
+        async with self._creating.setdefault(environment_id, asyncio.Lock()):
+            await create_once(
+                home,
+                specification,
+                prepare,
+                lambda command: self.execute(environment_id, command, timeout_seconds=600, cwd=None),
+            )
 
     async def execute(
         self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = ""
@@ -61,27 +66,6 @@ class LocalEnvironments:
         workspace = self.workspace(environment_id)
         if not workspace.exists():
             raise FileNotFoundError(f"environment {environment_id} does not exist")
-        with tempfile.TemporaryFile() as output:  # a file, not a pipe: background processes cannot hold it open
-            process = await asyncio.create_subprocess_exec(
-                "/bin/sh", "-c", 'cd "$1" || exit 125; eval "$2"', "sh", str(workspace / (cwd or ".")), command,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=output,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=workspace,
-                env={**self.variables, "WORKSPACE": str(workspace)},
-                start_new_session=True,
-            )  # fmt: skip
-            timed_out = False
-            try:
-                async with asyncio.timeout(timeout_seconds):
-                    await process.wait()
-            except TimeoutError:
-                timed_out = True
-            finally:
-                _kill_group(process.pid)  # what the command left running in the background ends with it
-                await process.wait()
-            output.seek(0)
-            data = await asyncio.to_thread(output.read)
 
         def save(full: bytes) -> str:
             target = self.directory / environment_id / "outputs" / output_name(effect_id)
@@ -89,17 +73,16 @@ class LocalEnvironments:
             target.write_bytes(full)
             return str(target)
 
-        exit_code = None if timed_out else process.returncode
-        return execution_result(exit_code, data, timed_out=timed_out, save=save)
+        return await run_command(
+            ["/bin/sh", "-c", IN_DIRECTORY, "sh", str(workspace / (cwd or ".")), command],
+            timeout_seconds=timeout_seconds,
+            save=save,
+            cwd=workspace,
+            variables={**self.variables, "WORKSPACE": str(workspace)},
+        )
 
     async def put(self, environment_id: str, path: str, data: bytes) -> None:
-        target = self._resolve(environment_id, path)
-
-        def write() -> None:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-
-        await asyncio.to_thread(write)
+        await write_file(self._resolve(environment_id, path), data)
 
     async def get(self, environment_id: str, path: str) -> bytes:
         return await asyncio.to_thread(self._resolve(environment_id, path).read_bytes)
@@ -112,8 +95,3 @@ class LocalEnvironments:
         if not workspace.exists():
             raise FileNotFoundError(f"environment {environment_id} does not exist")
         return workspace / os.path.expanduser(path)  # an absolute path replaces the workspace
-
-
-def _kill_group(process_group: int) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(process_group, signal.SIGKILL)

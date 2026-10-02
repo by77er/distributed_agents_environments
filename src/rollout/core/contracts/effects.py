@@ -1,13 +1,10 @@
 """Effects: operations that reach outside task, agent or program code (docs/contracts/effects.md)."""
 
-from collections.abc import Mapping
-from datetime import datetime
 from enum import StrEnum
 
-from pydantic import Field, JsonValue
+from pydantic import JsonValue
 
 from rollout.core.contracts.base import ContractModel
-from rollout.core.contracts.content import RetryClass
 
 
 class EffectKind(StrEnum):
@@ -17,10 +14,6 @@ class EffectKind(StrEnum):
     TOOL_CALL = "tool.call"
     ENVIRONMENT_CALL = "environment.call"
     ENVIRONMENT_LIFECYCLE = "environment.lifecycle"
-    MESSAGE_SEND = "message.send"
-    MESSAGE_WAIT = "message.wait"
-    RUN_SPAWN = "run.spawn"
-    TIMER_SLEEP = "timer.sleep"
     OUTPUT_EMIT = "output.emit"
 
 
@@ -41,28 +34,8 @@ class OutcomeUnknown(Exception):
         self.effect_id = effect_id
 
 
-class CallContext(ContractModel):
-    """Assembled by the runner, never by task code."""
-
-    labels: Mapping[str, str] = Field(default_factory=dict[str, str])
-    tenant: str | None = None
-
-
-class EffectRequest(ContractModel):
-    """What an executor receives. Transport is per implementation; these fields are mandatory everywhere."""
-
-    effect_id: str
-    """`{run_id}:{generation}:{ordinal}`; identical on every attempt."""
-    arguments_digest: str
-    kind: EffectKind
-    run_id: str
-    attempt: int = 1
-    """1-based; informational."""
-    deadline: datetime
-    """Absolute."""
-    payload: JsonValue
-    retry_class: RetryClass = RetryClass.UNKNOWN
-    context: CallContext = CallContext()
+class Conflict(Exception):
+    """A receiver that deduplicates by `effect_id` was sent a known `effect_id` with a different arguments digest."""
 
 
 class EffectCompletion(ContractModel):

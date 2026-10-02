@@ -1,4 +1,4 @@
-"""A `ModelEndpoint` for the OpenAI Responses API (docs/decisions/0024-product-before-rl.md).
+"""A `ModelEndpoint` for the OpenAI Responses API (docs/guide/models.md).
 
 Two ways to authenticate:
 
@@ -9,6 +9,11 @@ Two ways to authenticate:
 
 Requests are stateless (`store: false`): the whole context is sent every time, and reasoning is not carried between
 turns.
+
+Of a binding's sampling parameters, `reasoning_effort` is sent when set, and `temperature` and `top_p` only when they
+differ from the API's own default (1.0): reasoning models reject the two parameters whatever their value. A
+request's `max_output_tokens` is sent where the backend accepts it: the public API does, and counts reasoning tokens
+against it; the Codex backend rejects the parameter.
 """
 
 import base64
@@ -56,6 +61,10 @@ class Credentials(Protocol):
     async def headers(self, client: httpx.AsyncClient, *, force_refresh: bool = False) -> dict[str, str]: ...
     @property
     def url(self) -> str: ...
+    @property
+    def accepts_max_output_tokens(self) -> bool:
+        """Whether the backend accepts `max_output_tokens`."""
+        ...
 
 
 @dataclass
@@ -64,6 +73,7 @@ class ApiKey:
 
     key: str
     base_url: str = "https://api.openai.com/v1"
+    accepts_max_output_tokens: bool = True
 
     async def headers(self, client: httpx.AsyncClient, *, force_refresh: bool = False) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.key}"}
@@ -85,6 +95,7 @@ class CodexLogin:
     path: Path = Path.home() / ".codex" / "auth.json"
     url: str = "https://chatgpt.com/backend-api/codex/responses"
     refresh_margin_seconds: int = 300
+    accepts_max_output_tokens: bool = False
 
     async def headers(self, client: httpx.AsyncClient, *, force_refresh: bool = False) -> dict[str, str]:
         auth = json.loads(self.path.read_text())
@@ -196,6 +207,12 @@ class ResponsesEndpoint:
             body["tools"] = [_tool(specification) for specification in request.tools]
         if request.tool_choice is not None:
             body["tool_choice"] = _tool_choice(request.tool_choice)
+        if request.max_output_tokens is not None and self._credentials.accepts_max_output_tokens:
+            body["max_output_tokens"] = request.max_output_tokens
+        if self._sampling.temperature != 1.0:
+            body["temperature"] = self._sampling.temperature
+        if self._sampling.top_p != 1.0:
+            body["top_p"] = self._sampling.top_p
         if self._sampling.reasoning_effort is not None:
             body["reasoning"] = {"effort": self._sampling.reasoning_effort}
         return body

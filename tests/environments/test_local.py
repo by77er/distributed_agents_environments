@@ -53,6 +53,22 @@ async def test_nothing_keeps_running_after_a_command(environments: LocalEnvironm
     assert not marker.exists()  # it was killed with the command
 
 
+async def test_a_cancelled_command_is_killed(environments: LocalEnvironments, tmp_path: Path) -> None:
+    await environments.create("e_cancelled", HOST)
+    started, survived = tmp_path / "started", tmp_path / "survived"
+    command = f"touch {started}; sleep 1; touch {survived}"
+    running = asyncio.create_task(environments.execute("e_cancelled", command, timeout_seconds=30, cwd=None))
+    for _ in range(1000):  # until the command is running
+        if started.exists():
+            break
+        await asyncio.sleep(0.01)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    await asyncio.sleep(1.5)
+    assert not survived.exists()
+
+
 async def test_commands_time_out_and_report_failures(environments: LocalEnvironments) -> None:
     await environments.create("e_slow", HOST)
     started = time.monotonic()
