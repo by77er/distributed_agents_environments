@@ -4,7 +4,7 @@
 #   train-with-memory-log.sh RUN_DIRECTORY [train options...]
 #
 # Writes RUN_DIRECTORY/train.log, memory.log (available system memory and GPU memory every 2 s) and, under WSL,
-# host-memory.log (Windows' free memory every 15 s), and
+# host-memory.log (every 15 s: Windows' free memory, and GPU memory spilled into system memory, which should be 0), and
 # serves the monitor (each episode and each agent, live) on http://localhost:${MONITOR_PORT:-8765} while it runs.
 set -u
 run="$1"; shift
@@ -23,7 +23,7 @@ windows=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
 if [ -x "$windows" ]; then
   (
     while true; do
-      line=$(timeout 20 "$windows" -NoProfile -Command "\$o = Get-CimInstance Win32_OperatingSystem; \$v = (Get-Process vmmemWSL -ErrorAction SilentlyContinue).WorkingSet64; Write-Output \"host free \$([math]::Round(\$o.FreePhysicalMemory/1MB,1)) GB of \$([math]::Round(\$o.TotalVisibleMemorySize/1MB,1)), WSL holds \$([math]::Round(\$v/1GB,1)) GB\"" 2>/dev/null | tr -d '\r')
+      line=$(timeout 20 "$windows" -NoProfile -Command "\$o = Get-CimInstance Win32_OperatingSystem; \$v = (Get-Process vmmemWSL -ErrorAction SilentlyContinue).WorkingSet64; \$s = ((Get-Counter '\\GPU Adapter Memory(*)\\Shared Usage' -ErrorAction SilentlyContinue).CounterSamples | Measure-Object CookedValue -Sum).Sum; Write-Output \"host free \$([math]::Round(\$o.FreePhysicalMemory/1MB,1)) GB of \$([math]::Round(\$o.TotalVisibleMemorySize/1MB,1)), WSL holds \$([math]::Round(\$v/1GB,1)) GB, GPU spilled \$([math]::Round(\$s/1GB,1)) GB\"" 2>/dev/null | tr -d '\r')
       echo "$(date +%T) $line"
       sleep 15
     done

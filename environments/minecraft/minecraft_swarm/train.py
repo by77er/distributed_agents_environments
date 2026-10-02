@@ -81,10 +81,11 @@ class TrainingSettings:
     learning_rate: float = 2e-5
     lora_rank: int = 32
     window_ticks: int = 100
-    gpu_memory_utilization: float = 0.85
+    gpu_memory_utilization: float = 0.78
     """The engine's share of the GPU while it is awake (the trainer runs only while it sleeps, its memory freed).
-    What the weights leave is the engine's cache: at 0.72 it held 63,000 tokens, less than sixteen agents' contexts,
-    and requests queued for it."""
+    What the weights leave is the engine's cache: at 0.72 it held 63,000 tokens, less than sixteen agents' contexts.
+    The engine takes about 0.8 GiB more than its share, and the desktop up to 1.7 GiB: at 0.85 the card was full,
+    memory spilled into the system's, and a turn went from 10 s to minutes."""
     seed: int = 0
     tasks: list[str] | None = None
     """Restrict the curriculum to these task ids (all tasks when None)."""
