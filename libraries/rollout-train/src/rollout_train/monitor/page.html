@@ -81,6 +81,62 @@
   table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12px; }
   td { border-top: 1px solid var(--line); padding: 4px 8px 4px 0; vertical-align: top; overflow-wrap: anywhere; }
   td:first-child { white-space: nowrap; color: var(--accent); font-family: ui-monospace, monospace; }
+  .view { font-weight: 600; border-top: 1px solid var(--line); padding-block: 9px; }
+  .system { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 14px;
+            align-items: start; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0;
+           padding: 11px 14px 13px; }
+  .panel.wide { grid-column: 1 / -1; }
+  .panel h3 { margin: 0 0 9px; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+              color: var(--quiet); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; }
+  .panel h3 span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .panel p { margin: 0 0 8px; overflow-wrap: anywhere; }
+  .panel .quiet, .legend { color: var(--quiet); font-size: 12px; }
+  .open { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 7px; }
+  .open:first-of-type { border-top: 0; padding-top: 0; }
+  .open > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+  .open > header b { font-size: 15px; } .open > header .when { margin-left: auto; color: var(--quiet); font-size: 12px; }
+  .track { display: flex; flex-wrap: wrap; gap: 4px 0; list-style: none; margin: 0; padding: 0; font-size: 12px;
+           color: var(--faint); }
+  .track li { display: flex; align-items: center; gap: 6px; }
+  .track li + li::before { content: ""; width: 16px; height: 1px; background: var(--line); margin: 0 4px; }
+  .track li i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; }
+  .track li.done { color: var(--quiet); } .track li.done i { background: var(--quiet); border-color: var(--quiet); }
+  .track li.now { color: var(--ink); font-weight: 600; } .track li.now i { border-color: var(--accent); }
+  .track li.now.active i { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .track li.now.active i { animation: none; } }
+  .pips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pip { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--ground);
+         color: inherit; font: inherit; font-size: 12px; border-radius: 999px; padding: 2px 10px 2px 8px;
+         font-variant-numeric: tabular-nums; }
+  button.pip { cursor: pointer; } button.pip:hover { border-color: var(--accent); }
+  .pip b { font-weight: 600; }
+  .figures { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
+  .figures div { color: var(--quiet); font-size: 12px; }
+  .figures b { display: block; color: var(--ink); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;
+               line-height: 1.2; }
+  .scroll { overflow-x: auto; }
+  table.rows { margin-top: 0; }
+  table.rows td { padding-right: 14px; overflow-wrap: break-word; }
+  table.rows th { text-align: left; font-size: 11px; font-weight: 600; color: var(--quiet); padding: 0 14px 4px 0;
+                  white-space: nowrap; }
+  table.rows td:first-child { color: var(--ink); font-family: inherit; font-weight: 600; }
+  table.rows .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.rows .moved { color: var(--good); } table.rows .still { color: var(--quiet); } table.rows .bad { color: var(--bad); }
+  .meter { margin-bottom: 9px; } .meter div:first-child { display: flex; justify-content: space-between; gap: 10px;
+           font-size: 12px; color: var(--quiet); margin-bottom: 3px; } .meter b { color: var(--ink); font-weight: 600; }
+  .bar { height: 7px; background: var(--code); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .bar.warm i { background: var(--warm); } .bar.bad i { background: var(--bad); }
+  svg { display: block; max-width: 100%; } svg text { font: 10px system-ui, sans-serif; fill: var(--quiet); }
+  .s-line { stroke: var(--line); stroke-width: 1; } .s-accent { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+  .s-warm { stroke: var(--warm); stroke-width: 1.5; fill: none; } .s-ink { stroke: var(--ink); stroke-width: 1.5; }
+  .f-accent { fill: var(--accent); } .f-good { fill: var(--good); } .f-quiet { fill: var(--faint); } .f-bad { fill: var(--bad); }
+  .f-none { fill: transparent; } .f-hollow { fill: var(--panel); stroke: var(--faint); stroke-width: 1; }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 10px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; vertical-align: baseline; }
+  .legend i.square { border-radius: 1px; } .legend i.hollow { border: 1px solid var(--faint); }
+  .legend i.rule { height: 2px; border-radius: 0; vertical-align: middle; background: var(--ink); }
   @media (max-width: 760px) { body { flex-direction: column; } nav { width: auto; max-height: 34vh; border-right: 0;
     border-bottom: 1px solid var(--line); } }
 </style>
@@ -88,18 +144,25 @@
 <body>
 <nav>
   <h1>Runs monitor <small id="status">connecting…</small></h1>
+  <button class="run view" id="system" aria-current="true">System</button>
   <div id="job"></div>
   <div id="groups"></div>
 </nav>
-<main id="main"><p class="empty">Choose a run on the left.</p></main>
+<main id="main"><p class="empty">Reading the run…</p></main>
 <script>
 "use strict";
-const state = { runs: [], job: [], selected: null, lines: [], turn: 0, follow: true, full: false };
+const state = { view: "system", system: null, runs: [], job: [], selected: null, lines: [], turn: 0, follow: true, full: false };
 const $ = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attributes)) {
     if (key === "class") node.className = value; else if (key.startsWith("on")) node[key] = value; else node.setAttribute(key, value);
   }
+  for (const child of children) node.append(child);
+  return node;
+};
+const svg = (tag, attributes = {}, ...children) => {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
   for (const child of children) node.append(child);
   return node;
 };
@@ -116,7 +179,7 @@ function groupTitle(labels, runs) {
 function drawRuns() {
   const groups = new Map();
   for (const run of state.runs) {
-    const key = run.labels.group ?? run.run_id;
+    const key = run.labels.ticket ?? run.labels.group ?? run.run_id;  // (a group asked for again is a group of its own)
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(run);
   }
@@ -167,10 +230,21 @@ function drawJob() {
 }
 
 async function select(runId) {
-  state.selected = runId; state.lines = []; state.turn = 0; state.follow = true;
+  state.view = "run"; state.selected = runId; state.lines = []; state.turn = 0; state.follow = true; state.drawn = null;
+  history.replaceState(null, "", `#${runId}`);
+  document.getElementById("system").setAttribute("aria-current", "false");
   drawRuns();
   await pull();
 }
+
+async function showSystem() {
+  state.view = "system"; state.selected = null; state.shown = null;
+  history.replaceState(null, "", "#system");
+  document.getElementById("system").setAttribute("aria-current", "true");
+  drawRuns();
+  await pull();
+}
+document.getElementById("system").onclick = showSystem;
 
 // What the selected run has done, by slot: each sample, and the result its call got (found in that slot's next sample).
 function turnsBySlot() {
@@ -296,13 +370,230 @@ function drawRun() {
   }
 }
 
+// The system view: where the run stands, from its ledger, its jobs' logs and its feed.
+const span = seconds => seconds == null ? "" : seconds < 90 ? `${Math.round(seconds)} s`
+  : seconds < 5400 ? `${Math.round(seconds / 60)} min` : `${(seconds / 3600).toFixed(1)} h`;
+const clock = at => at ? new Date(at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+const bytes = count => count >= 2 ** 30 ? `${(count / 2 ** 30).toFixed(1)} GiB` : count >= 2 ** 20 ? `${Math.round(count / 2 ** 20)} MiB`
+  : `${Math.round(count / 1024)} KiB`;
+const figure = value => value == null ? "" : Number.isInteger(value) ? String(value) : Number(value).toFixed(1);
+const versionOf = name => name ? `@${name.split("@").at(-1)}` : "the base";
+const panel = (title, note, ...children) => $("div", { class: "panel" }, $("h3", {}, title, $("span", {}, note ?? "")), ...children);
+const rows = (heads, lines) => {
+  const table = $("table", { class: "rows", style: `min-width:${heads.length * 5.5}em` }, $("tr", {}, ...heads.map(([name, kind]) => $("th", kind ? { class: kind } : {}, name))));
+  for (const line of lines) table.append($("tr", {}, ...line.map((cell, index) => {
+    const kind = [heads[index][1], cell?.kind].filter(Boolean).join(" ");
+    return $("td", kind ? { class: kind } : {}, cell?.text ?? cell ?? "");
+  })));
+  return $("div", { class: "scroll" }, table);
+};
+const meter = (name, used, total, says) => {
+  const share = total ? used / total : 0;
+  return $("div", { class: "meter" }, $("div", {}, $("span", {}, name), $("b", {}, says)),
+    $("div", { class: `bar${share > 0.93 ? " bad" : share > 0.85 ? " warm" : ""}` }, $("i", { style: `width:${(100 * share).toFixed(1)}%` })));
+};
+
+// A line over time, from zero to the largest value, with its newest point marked.
+function spark(values, kind = "s-accent", width = 300, height = 40) {
+  const drawing = svg("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img" });
+  const top = Math.max(...values, 1e-9), step = (width - 6) / Math.max(1, values.length - 1);
+  const point = (value, index) => [3 + index * step, height - 3 - (value / top) * (height - 8)];
+  drawing.append(svg("line", { x1: 0, x2: width, y1: height - 2.5, y2: height - 2.5, class: "s-line" }));
+  if (values.length > 1) drawing.append(svg("polyline", { class: kind, points: values.map((value, index) => point(value, index).join(",")).join(" ") }));
+  if (values.length) { const [x, y] = point(values.at(-1), values.length - 1); drawing.append(svg("circle", { cx: x, cy: y, r: 2.5, class: kind.replace("s-", "f-") })); }
+  return drawing;
+}
+
+const STAGES = { decided: [1, "to be asked for"], waiting: [2, "queued"], playing: [2, ""], ended: [3, "awaiting its step"], stepping: [3, ""], made: [5, "writing its outcome"] };
+
+function openGroup(group, now) {
+  const [at, waits] = STAGES[group.stage];
+  const says = group.stage === "playing" ? `playing, ${group.ended} of ${group.count} ended`
+    : group.stage === "stepping" ? `stepping to ${versionOf(group.step.makes)}` : waits;
+  const stops = ["decided", "asked for", "played", "stepped", "version made", "outcome written"];
+  const track = $("ol", { class: "track" });
+  stops.forEach((name, index) => track.append($("li", { class: index < at ? "done" : index === at ? `now${["playing", "stepping"].includes(group.stage) ? " active" : ""}` : "" },
+    $("i"), index === at ? says : name)));
+  const root = $("div", { class: "open" }, $("header", {}, $("b", {}, `#${group.number}`), $("span", {}, `${group.task} · ${group.title ?? ""}`),
+    $("span", { class: "when" }, group.decided ? `decided ${clock(group.decided)} · ${span(now - group.decided)} ago` : "")), track);
+  if (group.episodes.length) {
+    const pips = $("div", { class: "pips" });
+    for (const episode of group.episodes) {
+      const ended = episode.outcome !== undefined;
+      const says = episode.interrupted ? "interrupted" : ended && episode.outcome !== "completed" ? episode.outcome
+        : ended ? $("b", {}, figure(episode.reward)) : `${episode.samples} turns`;
+      const content = [$("span", { class: `dot ${episode.interrupted ? "" : episode.state}` }), `episode ${episode.episode ?? "?"} · `, says];
+      pips.append(episode.in_feed
+        ? $("button", { class: "pip", title: episode.detail ?? "open its transcript", onclick: () => select(episode.run_id) }, ...content)
+        : $("span", { class: "pip", title: episode.detail ?? "" }, ...content));
+    }
+    root.append(pips);
+  }
+  if (group.step) root.append($("div", { class: "quiet" }, `step from ${group.step.parent ?? "the base model"}`,
+    group.step.sequences ? ` on ${group.step.sequences} sequences` : "", group.step.decided ? `, decided ${span(now - group.step.decided)} ago` : ""));
+  return root;
+}
+
+const outcomeOf = line => line.update
+  ? { kind: "moved", text: `trained ${line.sequences_trained} of ${line.sequences_recorded}, ${line.update.optimizer_steps ?? "?"} steps, moved ${Number(line.update.kl_moved ?? 0).toFixed(4)}` }
+  : line.error ? { kind: "bad", text: `step failed: ${line.error}` }
+  : { kind: line.failed && !line.rewards.length ? "bad" : "still", text: `skipped: ${line.skipped ?? ""}` };
+
+// Every group the run is done with: its episodes' rewards (a dot each, the group's mean as a rule) and, under the
+// axis, what was done with it.
+function groupsChart(iterations, width) {
+  const left = 30, top = 8, plot = 100, band = top + plot + 9, height = band + 26;
+  const count = Math.max(iterations.length, 12), column = (width - left - 6) / count;
+  const most = Math.max(1, ...iterations.flatMap(line => line.rewards));
+  const power = 10 ** Math.floor(Math.log10(most)), ceiling = Math.ceil(most / power) * power;
+  const y = value => top + plot - (value / ceiling) * plot;
+  const drawing = svg("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img", "aria-label": "rewards by group" });
+  for (const value of [0, ceiling / 2, ceiling]) {
+    drawing.append(svg("line", { x1: left, x2: width, y1: y(value), y2: y(value), class: "s-line" }));
+    drawing.append(svg("text", { x: left - 6, y: y(value) + 3, "text-anchor": "end" }, figure(value)));
+  }
+  const every = Math.max(1, Math.ceil(36 / column)), mark = Math.max(3, Math.min(8, column - 2));
+  iterations.forEach((line, index) => {
+    const x = left + (index + 0.5) * column;
+    const spread = Math.min(3.2, column / 6);
+    line.rewards.forEach((value, place) => drawing.append(svg("circle", { cx: x + (place - (line.rewards.length - 1) / 2) * spread, cy: y(value),
+      r: Math.min(3, Math.max(1.5, column / 5)), class: line.solved[place] ? "f-good" : "f-quiet", "fill-opacity": 0.85 })));
+    if (line.rewards.length) {
+      const mean = line.rewards.reduce((sum, value) => sum + value, 0) / line.rewards.length;
+      drawing.append(svg("line", { x1: x - column * 0.34, x2: x + column * 0.34, y1: y(mean), y2: y(mean), class: "s-ink" }));
+    }
+    const did = line.update ? "f-accent" : line.error || (line.failed && !line.rewards.length) ? "f-bad" : "f-hollow";
+    drawing.append(svg("rect", { x: x - mark / 2, y: band, width: mark, height: mark, rx: 1, class: did }));
+    if (line.iteration % every === 0) drawing.append(svg("text", { x, y: band + 21, "text-anchor": "middle" }, String(line.iteration)));
+    drawing.append(svg("rect", { x: x - column / 2, y: top, width: column, height: height - top, class: "f-none" },
+      svg("title", {}, `#${line.iteration} ${line.task} ${line.title}\n${line.rewards.map(figure).join(" ") || "no episode"}${line.failed ? ` (${line.failed} failed)` : ""}\n${outcomeOf(line).text}${line.adapter ? ` → ${line.adapter}` : ""}`)));
+  });
+  return drawing;
+}
+
+function tasks(iterations) {
+  const byTask = new Map();
+  for (const line of iterations) {
+    if (!byTask.has(line.task)) byTask.set(line.task, { title: line.title, groups: 0, trained: 0 });
+    const task = byTask.get(line.task);
+    task.groups += 1; task.trained += line.update ? 1 : 0; task.last = line;
+  }
+  return [...byTask].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function drawSystem() {
+  const main = document.getElementById("main");
+  const system = state.system;
+  if (!system) { main.replaceChildren($("p", { class: "empty" }, "This monitor has no system to show.")); return; }
+  const scroll = main.scrollTop, now = system.at, width = Math.max(280, main.clientWidth - 70);
+  const chip = (name, value) => $("span", { class: "chip" }, `${name} `, $("b", {}, String(value)));
+  const top = $("div", { class: "top" }, $("h2", {}, system.name));
+  if (system.processes) top.append($("span", { class: "chip" }, $("span", { class: `dot ${system.processes.alive ? "running" : "failed"}`, style: "display:inline-block;margin-right:6px" }),
+    system.processes.alive ? "its process is running" : "its process is not running"));
+  if (system.written) top.append(chip("last wrote", `${span(Math.max(0, now - system.written))} ago`));
+  for (const channel of system.channels) if (channel.adapter) top.append(chip(`${channel.channel} serves`, channel.adapter));
+  const grid = $("div", { class: "system" });
+
+  for (const run of system.runs) {
+    const last = run.iterations.at(-1);
+    const flight = panel(`Run ${run.run} · in flight`, `fence ${run.fence ?? "none"} · ${run.decided} groups decided, ${run.iterations.length} done with`);
+    flight.classList.add("wide");
+    if (!run.open.length) flight.append($("p", { class: "quiet" }, "No group is in flight."));
+    for (const group of run.open) flight.append(openGroup(group, now));
+    grid.append(flight);
+
+    const trained = run.iterations.filter(line => line.update).length;
+    const done = panel(`Run ${run.run} · groups`, `${trained} trained on, ${run.iterations.length - trained} not${last ? ` · ${last.unlocked} rows unlocked` : ""}`);
+    done.classList.add("wide");
+    if (run.iterations.length) {
+      done.append(groupsChart(run.iterations, width), $("div", { class: "legend" },
+        $("span", {}, $("i", { style: "background:var(--good)" }), "episode, solved"), $("span", {}, $("i", { style: "background:var(--faint)" }), "episode, not solved"),
+        $("span", {}, $("i", { class: "rule" }), "the group's mean"), $("span", {}, $("i", { class: "square", style: "background:var(--accent)" }), "trained on"),
+        $("span", {}, $("i", { class: "square hollow" }), "skipped"), $("span", {}, $("i", { class: "square", style: "background:var(--bad)" }), "no episode, or the step failed"),
+        $("span", {}, "Rewards are each task's own: compare a task with itself.")));
+      done.append(rows([["group"], ["task"], ["rewards"], ["what was done"], ["made"], ["took", "n"]], run.iterations.slice(-8).reverse().map(line => [
+        `#${line.iteration}`, `${line.task} · ${line.title}`, `${line.rewards.map(figure).join(" ") || "no episode"}${line.failed ? ` (${line.failed} failed)` : ""}`,
+        outcomeOf(line), line.adapter ? versionOf(line.adapter) : "", span(line.seconds)])));
+      const failures = [...new Set(run.iterations.slice(-8).flatMap(line => line.failures.map(failure => `#${line.iteration}: ${failure}`)))];
+      if (failures.length) done.append($("details", {}, $("summary", {}, `Why episodes failed (${failures.length})`), ...failures.map(failure => $("p", { class: "quiet" }, failure))));
+    } else done.append($("p", { class: "quiet" }, "No group is done with yet."));
+    grid.append(done);
+  }
+
+  for (const policy of system.policies) {
+    const versions = policy.versions;
+    const box = panel(`Policy ${policy.policy}`, `fence ${policy.fence ?? "none"} · ${versions.length} versions`);
+    const moved = versions.map(version => version.metrics.kl_moved ?? 0);
+    box.append($("div", { class: "figures" }, $("div", {}, $("b", {}, versionOf(policy.head)), "head"),
+      $("div", {}, $("b", {}, bytes(versions.reduce((sum, version) => sum + version.weights.bytes + (version.state?.bytes ?? 0), 0))), "of weights and trainer state"),
+      $("div", {}, spark(moved, "s-accent", 150, 34), "how far each step moved it (KL)")));
+    box.append(rows([["version"], ["from"], ["made"], ["sequences", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["files", "n"]],
+      versions.slice(-8).reverse().map(version => [versionOf(version.name), versionOf(version.parent), clock(version.made),
+        figure(version.metrics.sequences), figure(version.metrics.optimizer_steps), version.metrics.kl_moved?.toFixed(4), version.metrics.loss?.toFixed(3),
+        span(version.metrics.seconds), bytes(version.weights.bytes + (version.state?.bytes ?? 0))])));
+    grid.append(box);
+  }
+
+  for (const channel of system.channels) {
+    const latest = channel.throughput.at(-1);
+    const box = panel(`Channel ${channel.channel}`, channel.adapter ? `serving ${channel.adapter} since ${clock(channel.published)}` : "serving the base model");
+    if (latest) box.append($("div", { class: "figures" }, $("div", {}, $("b", {}, figure(latest.tokens_per_second)), "tokens a second"),
+      $("div", {}, $("b", {}, figure(latest.mean_concurrency)), "requests at once"), $("div", {}, $("b", {}, figure(latest.tokens_per_second_per_stream)), "tokens a second each")),
+      spark(channel.throughput.map(each => each.tokens_per_second), "s-accent", Math.min(width, 420), 46),
+      $("div", { class: "quiet" }, `Tokens a second over the engines' last ${channel.throughput.length} busy minutes.`));
+    else box.append($("p", { class: "quiet" }, "No request has been measured yet."));
+    grid.append(box);
+  }
+
+  for (const run of system.runs) {
+    const played = tasks(run.iterations);
+    if (!played.length) continue;
+    grid.append(panel(`Run ${run.run} · tasks played`, `${played.length} of the catalog's rows`, rows(
+      [["task"], ["groups", "n"], ["trained on", "n"], ["last rewards"], ["solved", "n"]],
+      played.map(([key, task]) => [{ text: $("span", { title: task.title }, key) }, String(task.groups), String(task.trained),
+        task.last.rewards.map(figure).join(" ") || "no episode", `${task.last.solved.filter(Boolean).length} of ${task.last.rewards.length}`]))));
+  }
+
+  for (const job of system.jobs) {
+    const outcomes = Object.entries(job.outcomes).map(([outcome, count]) => `${count} ${outcome}`).join(", ");
+    grid.append(panel(`Job ${job.job}`, `${job.tickets} tickets`, $("div", { class: "figures" },
+      $("div", {}, $("b", {}, String(job.episodes)), "episodes in its log"), $("div", {}, $("b", {}, `${job.acknowledged} of ${job.last}`), "acknowledged by its caller"),
+      $("div", {}, $("b", {}, job.sampled >= 1e6 ? `${(job.sampled / 1e6).toFixed(1)} M` : `${Math.round(job.sampled / 1e3)} k`), "tokens sampled")),
+      $("p", { class: "quiet" }, outcomes || "No episode has ended.")));
+  }
+
+  const machine = system.machine.now, history = system.machine.history;
+  const box = panel("Machine", "where this monitor runs");
+  if (machine.memory.total) box.append(meter("memory in use", machine.memory.total - machine.memory.available, machine.memory.total,
+    `${bytes(machine.memory.available)} available of ${bytes(machine.memory.total)}`));
+  for (const each of machine.accelerators) box.append(meter(each.name, each.used, each.total, `${bytes(each.used)} of ${bytes(each.total)} · ${Math.round(100 * each.busy)}% busy`));
+  if (machine.disk) box.append(meter("disk in use", machine.disk.total - machine.disk.free, machine.disk.total, `${bytes(machine.disk.free)} free`));
+  if (history.length > 1 && machine.memory.total) box.append(spark(history.map(each => each.memory.available ?? 0), "s-warm", Math.min(width, 420), 40),
+    $("div", { class: "quiet" }, `Memory available over the last ${span(machine.at - history[0].at)}.`));
+  if (system.processes) box.append($("p", { class: "quiet", style: "margin-top:8px" }, `Process ${system.processes.owner}${system.processes.alive ? "" : " (gone)"}`,
+    ...system.processes.started.map(each => `, ${each.name} ${each.pid}${each.alive ? "" : " (gone)"}`)));
+  grid.append(box);
+
+  grid.append(panel("Ledger", `${bytes(system.kept.versions)} of versions and ${bytes(system.kept.episodes)} of episodes kept`,
+    rows([["scope"], ["fence", "n"]], Object.entries(system.ledger.fences)),
+    $("div", { style: "height:10px" }), rows([["table"], ["records", "n"]], Object.entries(system.ledger.tables))));
+
+  main.replaceChildren(top, grid);
+  main.scrollTop = scroll;
+}
+
 async function pull() {
   try {
     state.runs = await (await fetch("api/runs")).json();
     drawRuns();
     const job = await (await fetch(`api/job?after=${state.job.length}`)).json();
     if (job.lines.length) { state.job.push(...job.lines); drawJob(); }
-    if (state.selected) {
+    if (state.view === "system") {
+      const answered = await fetch("api/system");
+      state.system = answered.ok ? await answered.json() : null;
+      const shown = JSON.stringify(state.system);
+      if (shown !== state.shown) { state.shown = shown; drawSystem(); }
+    } else if (state.selected) {
       const run = state.runs.find(each => each.run_id === state.selected);
       if (run && run.lines > state.lines.length) {
         const more = await (await fetch(`api/runs/${encodeURIComponent(state.selected)}?after=${state.lines.length}`)).json();
@@ -310,15 +601,15 @@ async function pull() {
       }
       const drawn = `${state.selected} ${state.lines.length} ${run?.state}`;  // redraw only when something changed
       if (drawn !== state.drawn) { state.drawn = drawn; drawRun(); }
-    } else if (state.runs.length) {
-      await select((state.runs.find(run => run.state === "running") ?? state.runs[0]).run_id);
     }
   } catch (error) {
     document.getElementById("status").textContent = "cannot reach the monitor";
   }
 }
-pull();
+if (location.hash.length > 1 && location.hash !== "#system") select(decodeURIComponent(location.hash.slice(1)));
+else pull();
 setInterval(pull, 2000);
+addEventListener("resize", () => { if (state.view === "system") drawSystem(); });
 </script>
 </body>
 </html>

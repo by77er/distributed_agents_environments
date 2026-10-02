@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from rollout_train.ledger import Ledger
+from rollout_train.ledger import Ledger, between
 
 
 @dataclass
@@ -66,12 +66,23 @@ class Iteration:
         return cls(**{key: value for key, value in data.items() if key in known})
 
 
+def scope(run: str) -> str:
+    """The scope whose fence a run's loop holds."""
+    return _RUNS + run
+
+
 def table(run: str, name: str) -> str:
     """A run's table in the ledger."""
-    return f"runs/{run}/{name}"
+    return f"{scope(run)}/{name}"
 
 
 GROUPS, STEPS, ITERATIONS = "groups", "steps", "iterations"
+_RUNS = "runs/"
+
+
+async def runs_in(ledger: Ledger) -> list[str]:
+    """The runs a ledger has groups of, by name."""
+    return [run for each in await ledger.tables() if (run := between(each, _RUNS, f"/{GROUPS}"))]
 
 
 async def iterations(ledger: Ledger, run: str = "train") -> list[Iteration]:

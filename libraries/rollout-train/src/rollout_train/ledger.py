@@ -51,6 +51,21 @@ class Ledger(Protocol):
         """A table's records by key, in the order they were appended."""
         ...
 
+    async def tables(self) -> list[str]:
+        """The tables that have records, by name."""
+        ...
+
+    async def fences(self) -> dict[str, int]:
+        """The newest fence of every scope that has been taken."""
+        ...
+
+
+def between(table: str, before: str, after: str) -> str | None:
+    """What a table's name has between `before` and `after`, if it begins and ends so: which run's or which
+    policy's table it is, among those of many."""
+    middle = table[len(before) : len(table) - len(after)]
+    return middle if middle and table == before + middle + after else None
+
 
 class FileLedger:
     """A `Ledger` in a directory: a table is `<table>.jsonl`, one `{"key", "fence", "record"}` per line. Processes
@@ -81,6 +96,17 @@ class FileLedger:
     async def read(self, table: str) -> dict[str, JsonValue]:
         with self._locked():
             return self._read(table)
+
+    async def tables(self) -> list[str]:
+        with self._locked():
+            return sorted(str(path.relative_to(self.directory))[: -len(".jsonl")] for path in self._files())
+
+    async def fences(self) -> dict[str, int]:
+        with self._locked():
+            return self._fences()
+
+    def _files(self) -> list[Path]:
+        return list(self.directory.rglob("*.jsonl"))
 
     def _read(self, table: str) -> dict[str, JsonValue]:
         path = self._path(table)
@@ -113,7 +139,5 @@ class FileLedger:
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-LEDGER = "ledger"
-"""Where a run keeps its ledger, under its directory, unless its deployment says otherwise."""
 FENCES = "fences.json"
 """In a `FileLedger`'s directory: the newest fence of every scope."""

@@ -11,6 +11,7 @@ passed to it: this module knows no engine and no trainer. docs/guide/deploying.m
 import asyncio
 import contextlib
 import math
+import time
 import tomllib
 from collections.abc import AsyncGenerator, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
@@ -24,7 +25,7 @@ from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Colocated, FileLedger, Ledger, Policies, Trainer
 from rollout_train.inference import Channel, Engine, Limits
-from rollout_train.ledger import LEDGER
+from rollout_train.layout import BLOBS, FEED, JOBS, LEDGER, PROCESSES
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.rollouts import RolloutJobs
@@ -188,7 +189,7 @@ class Platform:
         self = cls(profile)
         directory = profile.directory
         directory.mkdir(parents=True, exist_ok=True)
-        record = directory / "engine.json"
+        record = directory / PROCESSES
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
         learner: Trainer | None = None
@@ -216,7 +217,7 @@ class Platform:
             )
         address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
         self.recorder = Recorder(self.channels, base_url=f"{address}{SERVED_UNDER}" if address else None)
-        feed = RunFeed(directory / "feed", **({"keep": profile.feed_runs} if profile.feed_runs else {}))
+        feed = RunFeed(directory / FEED, **({"keep": profile.feed_runs} if profile.feed_runs else {}))
         stack.callback(feed.close)
         tool_sets: dict[str, ToolSet] = {}
         for name, where in profile.tools.items():
@@ -227,7 +228,7 @@ class Platform:
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
         store = dict(profile.blobs)
-        self.blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(directory / "blobs")
+        self.blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(directory / BLOBS)
         self.policies = Policies(self.ledger, self.blobs)
         runner: Runner
         if profile.runner == "durable":
@@ -246,7 +247,7 @@ class Platform:
         stack.push_async_callback(runner.close)
         guard = _needs(profile.runs_gib, "to run more episodes")
         self.jobs = RolloutJobs(
-            runner, self.recorder, log=directory / "jobs", blobs=self.blobs, hooks=[feed], guard=guard
+            runner, self.recorder, log=directory / JOBS, blobs=self.blobs, hooks=[feed], guard=guard
         )
         stack.push_async_callback(self.jobs.close)
         self.trainer = learner
@@ -265,7 +266,8 @@ class Platform:
             for name, channel in self.channels.items():
                 counts = channel.take()
                 if counts["requests"]:
-                    feed.on_job({"kind": "inference", "channel": name, "version": channel.version, **counts})
+                    at = round(time.time(), 3)
+                    feed.on_job({"kind": "inference", "at": at, "channel": name, "version": channel.version, **counts})
 
     async def _serve(self, address: str) -> None:
         """Rollout jobs and the harness endpoint, over HTTP."""

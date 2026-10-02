@@ -45,7 +45,7 @@ the test suite and a block tagged `python fragment` does not. The API reference 
   trainer protocol
 - [Recorder](docs/libraries/rollout-train/recorder.md) and [channels](docs/libraries/rollout-train/channels.md):
   token recording, engines, limits, the OpenAI-compatible endpoint for harnesses
-- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a job and its runs
+- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a run's directory: where the system stands, and every run's turns
 
 ## Implementations
 

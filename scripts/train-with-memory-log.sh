@@ -5,7 +5,7 @@
 #
 # Writes RUN_DIRECTORY/train.log, memory.log (available system memory and GPU memory every 2 s) and, under WSL,
 # host-memory.log (every 15 s: Windows' free memory, and GPU memory spilled into system memory, which should be 0), and
-# serves the monitor (each episode and each agent, live) on http://localhost:${MONITOR_PORT:-8765} while it runs.
+# serves the monitor (where the run stands, and each episode and agent, live) on http://localhost:${MONITOR_PORT:-8765} while it runs.
 set -u
 run="$1"; profile="$2"; catalog="$3"; shift 3
 mkdir -p "$run/feed"
@@ -33,7 +33,7 @@ else
   host=
 fi
 cd "$(dirname "$0")/.." || exit 1
-uv run rollout monitor "$run/feed" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
+uv run rollout monitor "$run" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
 trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
 uv run rollout train "$profile" "$catalog" --directory "$run" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)

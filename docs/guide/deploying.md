@@ -39,7 +39,7 @@ training_gib = 4                              # and to start a step
 
 ```bash
 uv run rollout train profile.toml minecraft_swarm.catalog:catalog --groups 100 --directory RUN
-uv run rollout monitor RUN/feed                # the web page over the run: http://localhost:8765
+uv run rollout monitor RUN                     # the web page over the run: http://localhost:8765
 uv run rollout report RUN minecraft_swarm.catalog:catalog --watch
 uv run rollout tools minecraft_swarm.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 ```
@@ -100,7 +100,7 @@ feed in `directory/feed`; the tool sets; the runner; the rollout jobs. A colocat
 [`Colocated`](reference.md#colocated). With `serve`, the rollout service and the endpoint for harnesses listen there.
 Leaving the block stops all of it in reverse, also when starting fails half way.
 
-`rollout train` writes the feed; `rollout monitor RUN/feed` is a separate process that serves the page over it.
+`rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it.
 
 ## Stopping
 

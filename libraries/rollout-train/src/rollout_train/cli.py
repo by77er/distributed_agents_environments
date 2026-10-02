@@ -3,7 +3,7 @@
 rollout train PROFILE CATALOG    the training loop: PROFILE is a TOML file (`rollout_train.profile`), CATALOG names an
                                  environment's catalog as `module:name`
 rollout report RUN CATALOG       chart a run's progress and summarise it; post both to a Discord webhook
-rollout monitor FEED             the web page over a run's feed (RUN/feed)
+rollout monitor RUN              the web page over a run's directory: where it stands, and every episode
 rollout tools FACTORY            serve an environment's tool set over HTTP: FACTORY is `module:name`
 
 `rollout COMMAND --help` lists each command's options.
@@ -76,7 +76,7 @@ def main() -> None:
     reporting.add_argument("catalog")
     reporting.add_argument("--watch", action="store_true", help="report again after every group, until interrupted")
     reporting.add_argument("--webhook", help="a Discord webhook (default: the environment's DISCORD_WEBHOOK_URL)")
-    monitoring = commands.add_parser("monitor", help="serve the monitor's page over a feed directory")
+    monitoring = commands.add_parser("monitor", help="serve the monitor's page over a run's directory")
     monitoring.add_argument("directory", type=Path)
     monitoring.add_argument("--host", default="127.0.0.1")
     monitoring.add_argument("--port", type=int, default=8765)

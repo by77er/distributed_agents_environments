@@ -2,13 +2,13 @@
 
 `RunFeed` is a `RunHooks`: it appends one JSON line per run event and per model sample to `<directory>/<run_id>.jsonl`.
 A sample's line holds what the model was sent (every message, in a plain form), the tools it was offered, and its
-reply with its reasoning. `read` turns a directory of such files into what the monitor's page asks for.
+reply with its reasoning. `FeedReader` turns a directory of such files into what the monitor's page asks for.
 """
 
 import json
 import os
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import IO, Any, cast
 
@@ -143,87 +143,146 @@ def _ended(path: Path) -> bool:
 # Reading
 
 
+class Appended:
+    """A file of JSON lines, read as it grows. `more` gives the lines appended since it was last called; `after`
+    reads lines again from the file, by their place in it, so that a reader need not keep what it has read (a run's
+    samples hold every message the model was sent)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._end = 0
+        self._starts: list[int] = []
+
+    def __len__(self) -> int:
+        return len(self._starts)
+
+    def more(self) -> list[dict[str, Any]]:
+        try:
+            if self.path.stat().st_size <= self._end:
+                return []
+            with self.path.open("rb") as file:
+                file.seek(self._end)
+                data = file.read()
+        except OSError:
+            return []
+        data = data[: data.rfind(b"\n") + 1]  # a line still being written is left for the next read
+        read: list[dict[str, Any]] = []
+        for at, line in _parsed(data):
+            self._starts.append(self._end + at)
+            read.append(line)
+        self._end += len(data)
+        return read
+
+    def after(self, index: int) -> list[dict[str, Any]]:
+        if index >= len(self._starts):
+            return []
+        with self.path.open("rb") as file:
+            file.seek(self._starts[index])
+            data = file.read(self._end - self._starts[index])
+        return [line for _, line in _parsed(data)]
+
+
+def _parsed(data: bytes) -> Iterator[tuple[int, dict[str, Any]]]:
+    """The JSON lines in `data`, each with where it begins (a line its writer was stopped in the middle of is no
+    line)."""
+    at = 0
+    for raw in data.splitlines(keepends=True):
+        try:
+            line: Any = json.loads(raw) if raw.strip() else None
+        except ValueError:
+            line = None
+        if isinstance(line, dict):
+            yield at, cast(dict[str, Any], line)
+        at += len(raw)
+
+
 class FeedReader:
-    """Reads a feed directory incrementally: each call picks up what was appended since the last."""
+    """Reads a feed directory incrementally: each call picks up what was appended since the last. Of a run it
+    keeps a summary; the run's lines are read from its file when they are asked for."""
 
     def __init__(self, directory: Path) -> None:
         self.directory = directory
-        self._offsets: dict[str, int] = {}
-        self._lines: dict[str, list[dict[str, Any]]] = {}
+        self._runs: dict[str, tuple[Appended, _Summary]] = {}
+        self._job = Appended(directory / f"{JOB}.jsonl")
+        self._job_lines: list[dict[str, Any]] = []
 
     def refresh(self) -> None:
+        here: set[str] = set()
         for path in self.directory.glob("*.jsonl"):
-            run_id = path.stem
-            offset = self._offsets.get(run_id, 0)
-            if path.stat().st_size <= offset:
+            if path.stem == JOB:
                 continue
-            with path.open("rb") as file:
-                file.seek(offset)
-                data = file.read()
-            end = data.rfind(b"\n") + 1  # a line still being written is left for the next read
-            lines = self._lines.setdefault(run_id, [])
-            for raw in data[:end].splitlines():
-                if raw.strip():
-                    try:
-                        lines.append(json.loads(raw))
-                    except ValueError:  # a line its writer was stopped in the middle of
-                        continue
-            self._offsets[run_id] = offset + end
-        for run_id in [run_id for run_id in self._lines if not (self.directory / f"{run_id}.jsonl").exists()]:
-            del self._lines[run_id], self._offsets[run_id]
+            here.add(path.stem)
+            file, summary = self._runs.setdefault(path.stem, (Appended(path), _Summary()))
+            for line in file.more():
+                summary.add(line)
+        for run_id in set(self._runs) - here:
+            del self._runs[run_id]
+        self._job_lines.extend(self._job.more())
 
     def runs(self) -> list[dict[str, Any]]:
         """Every run in the feed, newest first: its labels, state, rewards and how much it has done."""
         self.refresh()
-        summaries = [summary(run_id, lines) for run_id, lines in self._lines.items() if run_id != JOB]
+        summaries = [summary.of(run_id) for run_id, (_, summary) in self._runs.items()]
         return sorted(summaries, key=lambda run: run["started"], reverse=True)
 
     def job(self, after: int = 0) -> list[dict[str, Any]]:
         """What the rollout job did, from index `after` on: tickets, episodes, published weights, the trainer's
         iterations, the engines' throughput."""
-        return self.lines(JOB, after)
+        self.refresh()
+        return self._job_lines[after:]
 
     def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         """A run's lines from index `after` on."""
         self.refresh()
-        return self._lines.get(run_id, [])[after:]
+        return self._runs[run_id][0].after(after) if run_id in self._runs else []
 
 
-def summary(run_id: str, lines: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    labels: dict[str, Any] = {}
-    state, started, updated = "running", 0.0, 0.0
-    events: list[tuple[str, Mapping[str, Any]]] = []
-    slots: list[str] = []
-    samples = 0
-    for line in lines:
-        updated = max(updated, float(line.get("at", 0.0)))
+class _Summary:
+    """What the page lists of a run, kept up as its lines are read."""
+
+    def __init__(self) -> None:
+        self.labels: dict[str, Any] = {}
+        self.state = "running"
+        self.started = self.updated = 0.0
+        self.slots: list[str] = []
+        self.samples = self.lines = 0
+        self.rewarding: list[tuple[str, Mapping[str, Any]]] = []
+
+    def add(self, line: Mapping[str, Any]) -> None:
+        self.lines += 1
+        self.updated = max(self.updated, float(line.get("at", 0.0)))
         if line["kind"] == "sample":
-            samples += 1
-            if line["slot"] not in slots:
-                slots.append(line["slot"])
-            continue
+            self.samples += 1
+            if line["slot"] not in self.slots:
+                self.slots.append(line["slot"])
+            return
         payload: Any = line.get("payload") or {}
-        events.append((str(line["type"]), payload))
         match line["type"]:
             case RunEventType.RUN_CREATED:
-                labels = dict(payload.get("labels") or {})
-                started = float(line["at"])
+                self.labels = dict(payload.get("labels") or {})
+                self.started = float(line["at"])
             case RunEventType.RUN_COMPLETED:
-                state = "completed"
+                self.state = "completed"
             case RunEventType.RUN_FAILED:
-                state = "failed"
+                self.state = "failed"
             case RunEventType.RUN_CANCELLED:
-                state = "cancelled"
+                self.state = "cancelled"
+            case RunEventType.REWARD_ASSIGNED:
+                self.rewarding.append((str(line["type"]), payload))
+            case RunEventType.OBSERVATION_RECORDED if payload.get("reward") is not None:
+                self.rewarding.append((str(line["type"]), {"reward": payload["reward"]}))
             case _:
                 pass
-    return {
-        "run_id": run_id,
-        "labels": labels,
-        "state": state,
-        "started": started,
-        "updated": updated,
-        "rewards": {slot: by_key.get(DEFAULT, 0.0) for slot, by_key in assigned(events).items()},
-        "slots": slots,
-        "samples": samples,
-        "lines": len(lines),
-    }
+
+    def of(self, run_id: str) -> dict[str, Any]:
+        return {
+            "run_id": run_id,
+            "labels": self.labels,
+            "state": self.state,
+            "started": self.started,
+            "updated": self.updated,
+            "rewards": {slot: by_key.get(DEFAULT, 0.0) for slot, by_key in assigned(self.rewarding).items()},
+            "slots": self.slots,
+            "samples": self.samples,
+            "lines": self.lines,
+        }

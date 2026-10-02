@@ -1,0 +1,12 @@
+"""Where a run keeps what, under its directory: an open profile writes there, and the monitor and the report read."""
+
+LEDGER = "ledger"
+"""The run's tables, the policies' versions and the fences, in files (unless the profile names another place)."""
+JOBS = "jobs"
+"""The rollout jobs' logs, a directory per job."""
+FEED = "feed"
+"""The monitor's feed."""
+BLOBS = "blobs"
+"""Episodes' traces and versions' files (unless the profile names a blob store)."""
+PROCESSES = "engine.json"
+"""The engines' processes, noted so that a later process can end them if this one dies without doing so."""

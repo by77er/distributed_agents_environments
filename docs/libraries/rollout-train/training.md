@@ -45,7 +45,7 @@ and every action is one that can be taken twice.
 | Table | Written | Holds |
 |---|---|---|
 | `runs/RUN/groups` | before a group is asked for | the row, and the start every episode of the group is given |
-| `runs/RUN/steps` | before the trainer is called | the version the step starts from, the number of the one it will make, the batch (a blob), the seed |
+| `runs/RUN/steps` | before the trainer is called | the policy, the version the step starts from, the number of the one it will make, the batch (a blob) and how many sequences it has, the seed, when it was decided |
 | `runs/RUN/iterations` | last | how the group went and what was done with it: an [`Iteration`](../../guide/reference.md#iteration) |
 
 | It died | Started again, it |

@@ -24,7 +24,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout.contracts import BlobReference
 from rollout.harness.blobs import Blobs
-from rollout_train.ledger import Fence, Ledger
+from rollout_train.ledger import Fence, Ledger, between
 
 
 @dataclass(frozen=True)
@@ -83,12 +83,11 @@ class Policies:
 
     async def writer(self, policy: str) -> Fence:
         """Become the one that may add versions to a policy: whoever was is shut out."""
-        return await self.ledger.take(f"policies/{policy}")
+        return await self.ledger.take(scope(policy))
 
     async def versions(self, policy: str) -> list[Version]:
         """A policy's versions, oldest first."""
-        records = await self.ledger.read(_table(policy))
-        return [_VERSION.validate_python(record) for record in records.values()]
+        return await versions_in(self.ledger, policy)
 
     async def head(self, policy: str) -> Version | None:
         """A policy's newest version, if it has one."""
@@ -156,8 +155,27 @@ def _written(contents: Mapping[str, bytes], directory: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
+def scope(policy: str) -> str:
+    """The scope whose fence a policy's writer holds."""
+    return _POLICIES + policy
+
+
 def _table(policy: str) -> str:
-    return f"policies/{policy}/versions"
+    return scope(policy) + _VERSIONS
+
+
+_POLICIES, _VERSIONS = "policies/", "/versions"
+
+
+async def versions_in(ledger: Ledger, policy: str) -> list[Version]:
+    """A policy's versions as a ledger has them, oldest first (for a reader that has no use for their files)."""
+    records = await ledger.read(_table(policy))
+    return [_VERSION.validate_python(record) for record in records.values()]
+
+
+async def policies_in(ledger: Ledger) -> list[str]:
+    """The policies a ledger has versions of, by name."""
+    return [policy for table in await ledger.tables() if (policy := between(table, _POLICIES, _VERSIONS))]
 
 
 async def kept(path: Path, blobs: Blobs) -> Manifest:

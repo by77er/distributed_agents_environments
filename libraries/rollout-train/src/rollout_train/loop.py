@@ -40,7 +40,7 @@ from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Batch, Grpo
 from rollout_train.curriculum import Curriculum
 from rollout_train.policies import Policies, Version, named
-from rollout_train.record import GROUPS, ITERATIONS, STEPS, Iteration, table
+from rollout_train.record import GROUPS, ITERATIONS, STEPS, Iteration, scope, table
 from rollout_train.rollouts import Episode, Jobs
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Trainer
 
@@ -76,7 +76,7 @@ async def train(
     set of its own name). `curriculum` is one that has recorded nothing: the run's iterations are folded into it."""
     algorithm = algorithm if algorithm is not None else Grpo()
     ledger, blobs = policies.ledger, policies.blobs
-    fence = await ledger.take(f"runs/{run}")  # whoever ran this before can no longer write
+    fence = await ledger.take(scope(run))  # whoever ran this before can no longer write
     writer = await policies.writer(policy)
     decided = {int(number): _mapping(group) for number, group in (await ledger.read(table(run, GROUPS))).items()}
     logged = await ledger.read(table(run, ITERATIONS))
@@ -149,8 +149,11 @@ async def train(
             trained = [[weighted.source, weighted.advantage] for weighted in batch.sequences]
             manifest = await blobs.put(json.dumps(trained).encode(), "application/json")
             decision: dict[str, JsonValue] = {
+                "policy": policy,
                 "parent": parent.name if parent else None,
                 "number": (parent.number if parent else 0) + 1,
+                "sequences": len(trained),
+                "decided": round(time.time(), 1),
                 "batch": manifest.model_dump(mode="json"),
                 "seed": number,
             }

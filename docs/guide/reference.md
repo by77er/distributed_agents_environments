@@ -16,7 +16,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: policies being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`Epoch`](#epoch), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
-- **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over a job and its runs. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed)
+- **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over a job and its runs. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -2603,6 +2603,8 @@ on one machine may share it: every operation holds a lock on the directory.
 - `async def take(self, scope: str) -> Fence`
 - `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool`
 - `async def read(self, table: str) -> dict[str, JsonValue]`
+- `async def tables(self) -> list[str]`
+- `async def fences(self) -> dict[str, int]`
 
 ### `group_advantages`
 
@@ -2692,6 +2694,8 @@ class Ledger(Protocol)
 - `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool` — Append a record under `key`, unless the table has that key: then nothing changes and False is returned.
   Raises `Fenced` if `fence` is not its scope's newest.
 - `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended.
+- `async def tables(self) -> list[str]` — The tables that have records, by name.
+- `async def fences(self) -> dict[str, int]` — The newest fence of every scope that has been taken.
 
 ### `Manifest`
 
@@ -3216,7 +3220,8 @@ A live web page over a job and its runs.
 class FeedReader
 ```
 
-Reads a feed directory incrementally: each call picks up what was appended since the last.
+Reads a feed directory incrementally: each call picks up what was appended since the last. Of a run it
+keeps a summary; the run's lines are read from its file when they are asked for.
 
 **Methods**
 
@@ -3259,6 +3264,20 @@ when the next one starts, so that a monitor does not show them running for ever.
 - `def on_job(self, event: Mapping[str, JsonValue]) -> None`
 - `def on_sample(self, sample: ModelSample) -> None`
 - `def close(self) -> None`
+
+### `System`
+
+*class* · `libraries/rollout-train/src/rollout_train/monitor/system.py`
+
+```python
+class System
+```
+
+**Methods**
+
+- `def __init__(self, directory: Path, feed: FeedReader) -> None`
+- `async def snapshot(self) -> dict[str, Any]` — Where everything stands now: the runs' groups that are not done with and the ones that are, the
+  policies' versions, the jobs, what each channel serves and how fast, the machine, and what is kept.
 
 ## `rollout_train.testing`
 

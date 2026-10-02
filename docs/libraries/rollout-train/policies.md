@@ -55,5 +55,7 @@ starting again reads it back.
 | Fences | Whoever means to write takes the fence of a scope: a number higher than any taken before. An append that carries an older fence is refused (`Fenced`). |
 
 `FileLedger` keeps each table as a file of JSON lines in a directory, which processes on one machine may share.
+A ledger also lists its tables and its scopes' fences: `runs_in` and `policies_in` read from the tables' names
+which runs and which policies it has, and the [monitor](monitor.md) shows them.
 The training loop's tables are described under [dying and starting again](training.md#dying-and-starting-again); a
 policy's versions are the table `policies/NAME/versions`.

@@ -17,7 +17,8 @@ import httpx
 
 from rollout.catalog import Row
 from rollout_train.curriculum import Curriculum
-from rollout_train.ledger import LEDGER, FileLedger, Ledger
+from rollout_train.layout import LEDGER
+from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.record import Iteration, iterations
 
 MAX_MESSAGE = 1900

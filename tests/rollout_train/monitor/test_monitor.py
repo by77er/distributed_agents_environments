@@ -46,7 +46,7 @@ async def test_the_feed_holds_a_run_as_it_happened_and_the_page_can_ask_for_it(t
     assert run["labels"] == {"group": "0001", "task": "t003", "episode": "2"}
     assert run["rewards"] == {"ada": 2.0} and run["slots"] == ["ada"] and run["samples"] == 1
 
-    transport = httpx.ASGITransport(app=create_app(tmp_path / "feed"))
+    transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         assert "Runs monitor" in (await client.get("/")).text
         assert (await client.get("/api/runs")).json()[0]["run_id"] == handle.run_id
@@ -104,7 +104,7 @@ async def test_what_a_job_did_is_in_the_feed_beside_its_runs(tmp_path: Path) -> 
     assert reader.runs() == [] and [line["kind"] for line in reader.job()] == ["ticket", "iteration"]
     RunFeed(tmp_path / "feed")  # the next writer leaves the job's file as it is (it is not a run that was cut off)
     assert [line["kind"] for line in FeedReader(tmp_path / "feed").job()] == ["ticket", "iteration"]
-    transport = httpx.ASGITransport(app=create_app(tmp_path / "feed"))
+    transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         later = (await client.get("/api/job", params={"after": 1})).json()
         assert [line["iteration"] for line in later["lines"]] == [1]

@@ -68,7 +68,7 @@ await job.publish("policy", step.adapter, step.path)
   and continued, with the logprobs it sampled them at.
 - `rollout_train.train` is the loop most runs use: a curriculum over a catalog, groups, a step per group.
 - Watching: `job.status()`, the job's own events (tickets, episodes, published weights, your notes), and each run's
-  feed, on one page (`rollout monitor RUN/feed`).
+  feed, on one page (`rollout monitor RUN`).
 
 The same code holds `RolloutJobs` (runs in this process) or `RolloutClient(url)` (runs elsewhere).
 

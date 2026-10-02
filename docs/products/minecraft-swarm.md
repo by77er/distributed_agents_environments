@@ -16,12 +16,13 @@ library's.
 uv sync --all-extras
 PROFILE=environments/minecraft/profiles/one-gpu.toml         # one 16 GB GPU: an engine, and a trainer that shares it
 uv run rollout train $PROFILE minecraft_swarm.catalog:catalog --directory RUN
-uv run rollout monitor RUN/feed                              # the page over the run: http://localhost:8765
+uv run rollout monitor RUN                                   # the page over the run: http://localhost:8765
 scripts/train-with-memory-log.sh RUN $PROFILE minecraft_swarm.catalog:catalog   # train, log memory, serve the monitor
 uv run minecraft-swarm server --seed 12345                   # a temporary server to look at (join with any client)
 ```
 
-`rollout train` writes the monitor's feed to `RUN/feed`, and `rollout monitor RUN/feed` serves the page over it.
+`rollout train` writes the monitor's feed to `RUN/feed`, and `rollout monitor RUN` serves the page over the run's
+directory.
 `scripts/train-with-memory-log.sh` starts both, and writes `train.log` and the memory logs into `RUN`. The page shows
 the groups and updates, every episode of every group and, for each agent, what it sees (the map included), what it
 thinks, what it does and what comes back ([monitor](../libraries/rollout-train/monitor.md)).
