@@ -15,15 +15,17 @@ from rollout_train.monitor.feed import FeedReader
 from rollout_train.monitor.system import System
 
 PAGE = Path(__file__).with_name("page.html")
+SCRIPT = Path(__file__).with_name("monitor.js")
 
 
 def create_app(directory: Path) -> Starlette:
     """Serves the page and what it asks for, over a run's directory (`rollout_train.layout`):
 
     - `/api/system`: where the run stands (`System.snapshot`);
-    - `/api/runs`: every run in the feed, summarised;
-    - `/api/runs/{run_id}?after=N`: a run's feed lines from index N on;
-    - `/api/job?after=N`: what the rollout job did (its groups, updates and engines).
+    - `/api/groups/{run}/{number}`: one group, its rollouts, its step and its outcome (`System.group`);
+    - `/api/rollouts/{run_id}?after=N`: one rollout's lines from index N on, and what its episode reported
+      (`System.rollout`);
+    - `/api/runs`: every run in the feed, summarised.
 
     It only reads the directory; the runs' own process writes it."""
     reader = FeedReader(directory / FEED)
@@ -32,20 +34,22 @@ def create_app(directory: Path) -> Starlette:
     async def page(request: Request) -> Response:
         return HTMLResponse(await asyncio.to_thread(PAGE.read_text))
 
+    async def script(request: Request) -> Response:
+        return Response(await asyncio.to_thread(SCRIPT.read_text), media_type="text/javascript")
+
     async def state(request: Request) -> Response:
         return JSONResponse(await system.snapshot())
 
+    async def group(request: Request) -> Response:
+        found = await system.group(request.path_params["run"], int(request.path_params["number"]))
+        return JSONResponse(found) if found is not None else JSONResponse({"error": "no such group"}, status_code=404)
+
+    async def rollout(request: Request) -> Response:
+        after = int(request.query_params.get("after", "0"))
+        return JSONResponse(await system.rollout(request.path_params["run_id"], after))
+
     async def runs(request: Request) -> Response:
         return JSONResponse(await asyncio.to_thread(reader.runs))
-
-    async def run(request: Request) -> Response:
-        run_id = request.path_params["run_id"]
-        after = int(request.query_params.get("after", "0"))
-        return JSONResponse({"run_id": run_id, "lines": await asyncio.to_thread(reader.lines, run_id, after)})
-
-    async def job(request: Request) -> Response:
-        after = int(request.query_params.get("after", "0"))
-        return JSONResponse({"lines": await asyncio.to_thread(reader.job, after)})
 
     @contextlib.asynccontextmanager
     async def measuring(app: Starlette) -> AsyncGenerator[None]:
@@ -57,9 +61,10 @@ def create_app(directory: Path) -> Starlette:
 
     routes = [
         Route("/", page),
+        Route("/monitor.js", script),
         Route("/api/system", state),
+        Route("/api/groups/{run}/{number:int}", group),
+        Route("/api/rollouts/{run_id}", rollout),
         Route("/api/runs", runs),
-        Route("/api/runs/{run_id}", run),
-        Route("/api/job", job),
     ]
     return Starlette(routes=routes, lifespan=measuring)

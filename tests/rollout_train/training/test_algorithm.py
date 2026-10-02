@@ -39,7 +39,7 @@ def test_the_fastest_of_the_episodes_that_saturated_the_task_scores_a_point_more
     assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.sequences) == 12
     assert sorted({round(weighted.advantage, 3) for weighted in tied.sequences}) == [-0.333, 0.667]
     untied = Grpo(tie_break=False).batch(group, Budget(), random.Random(0))  # nothing to compare them by
-    assert not untied.sequences and untied.skipped == "every episode scored the same"
+    assert not untied.sequences and untied.skipped == "every rollout scored the same"
 
 
 def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from_the_mean() -> None:
@@ -52,7 +52,7 @@ def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from
     assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).sequences] == [
         weighted.advantage for weighted in batch.sequences
     ]  # an episode that did not complete is no part of the comparison
-    assert Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped == "1 of 2 episodes completed"
+    assert Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped == "1 of 2 rollouts completed"
 
 
 def test_an_update_takes_an_even_share_of_every_episodes_sequences() -> None:

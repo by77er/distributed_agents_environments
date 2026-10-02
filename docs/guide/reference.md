@@ -3278,6 +3278,11 @@ class System
 - `def __init__(self, directory: Path, feed: FeedReader) -> None`
 - `async def snapshot(self) -> dict[str, Any]` — Where everything stands now: the runs' groups that are not done with and the ones that are, the
   policies' versions, the jobs, what each channel serves and how fast, the machine, and what is kept.
+- `async def group(self, run: str, number: int) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
+  its step and the version it made, and its outcome.
+- `async def rollout(self, run_id: str, after: int = 0) -> dict[str, Any]` — One rollout: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
+  replies and tool calls from the events the job kept), what its episode reported when it ended, and where it
+  sits: its job, its group and its labels.
 
 ## `rollout_train.testing`
 

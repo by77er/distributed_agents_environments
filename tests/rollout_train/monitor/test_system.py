@@ -44,6 +44,28 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         system = (await client.get("/api/system")).json()
+        group = (await client.get("/api/groups/train/1")).json()
+        assert "monitor.js" in (await client.get("/")).text and (await client.get("/monitor.js")).status_code == 200
+        assert (await client.get("/api/groups/train/9")).status_code == 404
+        rollout = (await client.get(f"/api/rollouts/{group['episodes'][0]['run_id']}")).json()
+    assert group["number"] == 1 and group["stage"] == "done" and group["outcome"]["iteration"] == 1
+    assert len(group["episodes"]) == 4 and all(
+        each["state"] == "completed" and "info" in each for each in group["episodes"]
+    )
+    assert (
+        rollout["source"] == "feed"
+        and rollout["labels"]["iteration"] == "1"
+        and rollout["ended"]["state"] == "completed"
+    )
+    assert any(line["kind"] == "sample" and line["messages"] for line in rollout["lines"])
+
+    # Once the feed has let a rollout go, its replies and tool calls are read back from the events the job kept.
+    kept = await System(tmp_path, FeedReader(tmp_path / "elsewhere")).rollout(rollout["run_id"])
+    samples = [line for line in kept["lines"] if line["kind"] == "sample"]
+    assert kept["source"] == "archive" and samples and all(not each["messages"] and each["reply"] for each in samples)
+    assert [line["reply"] for line in samples] == [
+        line["reply"] for line in rollout["lines"] if line["kind"] == "sample"
+    ]
     (run,) = system["runs"]
     assert run["run"] == "train" and run["fence"] == 1 and run["decided"] == 3 and run["open"] == []
     assert [line["iteration"] for line in run["iterations"]] == [1, 2, 3]

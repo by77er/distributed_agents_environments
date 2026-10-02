@@ -50,13 +50,13 @@ async def test_the_feed_holds_a_run_as_it_happened_and_the_page_can_ask_for_it(t
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         assert "Runs monitor" in (await client.get("/")).text
         assert (await client.get("/api/runs")).json()[0]["run_id"] == handle.run_id
-        lines = (await client.get(f"/api/runs/{handle.run_id}")).json()["lines"]
+        lines = (await client.get(f"/api/rollouts/{handle.run_id}")).json()["lines"]
         (sample,) = [line for line in lines if line["kind"] == "sample"]
         assert sample["slot"] == "ada" and sample["tools"] == ["mine"]
         assert [message["text"] for message in sample["messages"]] == ["You mine.", "You see a wall."]  # what it saw
         assert sample["reply"]["calls"] == [{"id": "c1", "name": "mine", "arguments": {"x": 3}}]  # what it did
         assert next(line["type"] for line in lines if line["kind"] == "event") == "run.created"
-        later = (await client.get(f"/api/runs/{handle.run_id}", params={"after": len(lines)})).json()
+        later = (await client.get(f"/api/rollouts/{handle.run_id}", params={"after": len(lines)})).json()
         assert later["lines"] == []  # the page asks only for what is new
 
 
@@ -92,10 +92,7 @@ def test_runs_a_stopped_writer_left_open_are_marked_cancelled_by_the_next(tmp_pa
     assert len((directory / "r_done.jsonl").read_text().splitlines()) == 2  # an ended run is left as it is
 
 
-async def test_what_a_job_did_is_in_the_feed_beside_its_runs(tmp_path: Path) -> None:
-    pytest.importorskip("starlette")
-    from rollout_train.monitor.app import create_app
-
+def test_what_a_job_did_is_in_the_feed_beside_its_runs(tmp_path: Path) -> None:
     feed = RunFeed(tmp_path / "feed", keep=1)
     feed.on_job({"kind": "ticket", "job": "train", "ticket": "t_1", "count": 4})
     feed.on_job({"kind": "iteration", "job": "train", "iteration": 1, "task": "say-yes", "rewards": [1.0, 0.0]})
@@ -104,8 +101,3 @@ async def test_what_a_job_did_is_in_the_feed_beside_its_runs(tmp_path: Path) -> 
     assert reader.runs() == [] and [line["kind"] for line in reader.job()] == ["ticket", "iteration"]
     RunFeed(tmp_path / "feed")  # the next writer leaves the job's file as it is (it is not a run that was cut off)
     assert [line["kind"] for line in FeedReader(tmp_path / "feed").job()] == ["ticket", "iteration"]
-    transport = httpx.ASGITransport(app=create_app(tmp_path))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
-        later = (await client.get("/api/job", params={"after": 1})).json()
-        assert [line["iteration"] for line in later["lines"]] == [1]
-        assert "drawJob" in (await client.get("/")).text

@@ -9,19 +9,22 @@ is alive or not, and what it says of a group is what a loop that started now wou
 
 import asyncio
 import json
+import lzma
 import shutil
 import subprocess
 import time
 from collections import deque
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import JsonValue
 
-from rollout_train.layout import JOBS, LEDGER, PROCESSES
+from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
+from rollout.harness.blobs import FileBlobStore
+from rollout_train.layout import BLOBS, JOBS, LEDGER, PROCESSES
 from rollout_train.ledger import FileLedger
-from rollout_train.monitor.feed import Appended, FeedReader
+from rollout_train.monitor.feed import Appended, FeedReader, plain
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
 from rollout_train.record import GROUPS, ITERATIONS, STEPS, runs_in, table
@@ -41,7 +44,11 @@ STEPPING = "stepping"
 the step again."""
 MADE = "made"
 """The version is made; the group's outcome is not written yet."""
+DONE = "done"
+"""Its outcome is written."""
 
+ARCHIVED = 8
+"""Episodes read back from their events that are kept at a time."""
 SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
@@ -53,6 +60,9 @@ class System:
         self.machine = Machine(directory)
         self._ledger = FileLedger(directory / LEDGER)
         self._jobs: dict[str, _JobLog] = {}
+        self._blobs = FileBlobStore(directory / BLOBS)
+        self._archive: dict[str, list[dict[str, Any]]] = {}
+        """Episodes read back from their events, the newest few."""
 
     async def snapshot(self) -> dict[str, Any]:
         """Where everything stands now: the runs' groups that are not done with and the ones that are, the
@@ -69,6 +79,80 @@ class System:
                 versions = await versions_in(self._ledger, policy)
                 policies.append(_policy(policy, versions, fences.get(policy_scope(policy))))
         return await asyncio.to_thread(self._assembled, tables, fences, runs, policies)
+
+    async def group(self, run: str, number: int) -> dict[str, Any] | None:
+        """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
+        its step and the version it made, and its outcome."""
+        if not await asyncio.to_thread(self._ledger.directory.exists):
+            return None
+        tables = {name: await self._ledger.read(table(run, name)) for name in (GROUPS, STEPS, ITERATIONS)}
+        record: Any = tables[GROUPS].get(str(number))
+        if record is None:
+            return None
+        versions = {
+            version.name: version
+            for policy in await policies_in(self._ledger)
+            for version in await versions_in(self._ledger, policy)
+        }
+        return await asyncio.to_thread(self._group, run, str(number), record, tables, versions)
+
+    def _group(
+        self,
+        run: str,
+        number: str,
+        record: Mapping[str, Any],
+        tables: Mapping[str, Mapping[str, JsonValue]],
+        versions: Mapping[str, Version],
+    ) -> dict[str, Any]:
+        jobs = self._job_logs()
+        group = _group(number, record, tables, set(versions), jobs.get(run), self.feed.runs())
+        outcome: Any = tables[ITERATIONS].get(number)
+        adapter: Any = outcome.get("adapter") if outcome else None
+        step: Any = group["step"]
+        made = versions.get(str(adapter)) or versions.get(str(step.get("makes") if step else None))
+        return {
+            **group,
+            "run": run,
+            "parameters": record.get("parameters"),
+            "outcome": _iteration(outcome) if outcome else None,
+            "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
+        }
+
+    async def rollout(self, run_id: str, after: int = 0) -> dict[str, Any]:
+        """One rollout: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
+        replies and tool calls from the events the job kept), what its episode reported when it ended, and where it
+        sits: its job, its group and its labels."""
+        ended, summary = await asyncio.to_thread(self._found, run_id)
+        if summary is not None:
+            source, lines = "feed", await asyncio.to_thread(self.feed.lines, run_id, after)
+        elif ended is not None and ended.get("events"):
+            source, lines = "archive", (await self._archived(run_id, ended["events"]))[after:]
+        else:
+            source, lines = None, []
+        labels: Any = (summary or {}).get("labels") or (ended or {}).get("labels") or {}
+        return {
+            "run_id": run_id,
+            "labels": labels,
+            "state": (ended or {}).get("state") or (summary or {}).get("state"),
+            "ended": {key: value for key, value in ended.items() if key != "events"} if ended else None,
+            "source": source,
+            "lines": lines,
+        }
+
+    def _found(self, run_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """An episode in the jobs' logs (once it has ended) and in the feed (while the feed keeps it)."""
+        jobs = self._job_logs()
+        ended = next((each for job in jobs.values() for each in job.episodes if each["run_id"] == run_id), None)
+        return ended, next((run for run in self.feed.runs() if run["run_id"] == run_id), None)
+
+    async def _archived(self, run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
+        if run_id not in self._archive:
+            data = await self._blobs.read(BlobReference.model_validate(events))
+            lines = (await asyncio.to_thread(lzma.decompress, data)).decode().splitlines()
+            self._archive[run_id] = _replayed([RunEvent.model_validate_json(line) for line in lines])
+            while len(self._archive) > ARCHIVED:
+                del self._archive[next(iter(self._archive))]
+        return self._archive[run_id]
 
     def _assembled(
         self,
@@ -136,58 +220,106 @@ def _run(
 ) -> dict[str, Any]:
     """A run: its groups that are not done with, each with its stage and its episodes, and the ones that are."""
     groups: Any = tables[GROUPS]
-    steps: Any = tables[STEPS]
     done: Any = tables[ITERATIONS]
-    open_groups: list[dict[str, Any]] = []
-    for number in sorted((number for number in groups if number not in done), key=int):
-        group = groups[number]
-        ticket = job.asked(number) if job else None
-        asked = ticket["id"] if ticket else None
-        episodes: dict[str, dict[str, Any]] = {}
-        for each in reversed(in_feed):  # (oldest first)
-            if asked and each["labels"].get("ticket") == asked:
-                reward = next(iter(each["rewards"].values()), None)
-                episodes[each["run_id"]] = {
-                    "run_id": each["run_id"],
-                    "episode": each["labels"].get("episode"),
-                    "state": each["state"],
-                    "samples": each["samples"],
-                    "reward": reward,
-                    "updated": each["updated"],
-                    "in_feed": True,
-                }
-        for ended in job.of(asked) if job and asked else []:
-            episodes.setdefault(ended["run_id"], {"samples": None, "updated": None, "in_feed": False}).update(ended)
-        counted = [each for each in episodes.values() if "outcome" in each and not each.get("interrupted")]
-        step = steps.get(number)
-        if step is not None:
-            policy = step.get("policy") or (parsed(step["parent"])[0] if step.get("parent") else None)
-            name = named(policy, int(step["number"])) if policy else None
-            step = {**step, "makes": name}
-            step.pop("batch", None)
-            stage = MADE if name in made else STEPPING
-        elif ticket is None:
-            stage = DECIDED
-        elif len(counted) >= int(ticket["count"]):
-            stage = ENDED
-        else:
-            stage = PLAYING if episodes else WAITING
-        open_groups.append(
-            {
-                "number": int(number),
-                "task": group.get("task"),
-                "title": group.get("title"),
-                "decided": group.get("decided"),
-                "stage": stage,
-                "ticket": asked,
-                "count": int(ticket["count"]) if ticket else None,
-                "ended": len(counted),
-                "episodes": sorted(episodes.values(), key=lambda each: (str(each.get("episode")), each["run_id"])),
-                "step": step,
-            }
-        )
+    open_groups = [
+        _group(number, groups[number], tables, made, job, in_feed)
+        for number in sorted((number for number in groups if number not in done), key=int)
+    ]
     iterations = [_iteration(done[number]) for number in sorted(done, key=int)]
     return {"run": run, "fence": fence, "decided": len(groups), "open": open_groups, "iterations": iterations}
+
+
+def _group(
+    number: str,
+    group: Mapping[str, Any],
+    tables: Mapping[str, Mapping[str, JsonValue]],
+    made: set[str],
+    job: "_JobLog | None",
+    in_feed: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """A group: its stage, its episodes (from the feed while they run, from the job's log once they end) and its
+    step, if one is decided."""
+    steps: Any = tables[STEPS]
+    ticket = job.asked(number) if job else None
+    asked = ticket["id"] if ticket else None
+    episodes: dict[str, dict[str, Any]] = {}
+    for each in reversed(in_feed):  # (oldest first)
+        if asked and each["labels"].get("ticket") == asked:
+            episodes[each["run_id"]] = {
+                "run_id": each["run_id"],
+                "episode": each["labels"].get("episode"),
+                "state": each["state"],
+                "samples": each["samples"],
+                "reward": next(iter(each["rewards"].values()), None),
+                "updated": each["updated"],
+                "in_feed": True,
+            }
+    for ended in job.of(asked) if job and asked else []:
+        episodes.setdefault(ended["run_id"], {"samples": None, "updated": None, "in_feed": False}).update(ended)
+    counted = [each for each in episodes.values() if "outcome" in each and not each.get("interrupted")]
+    step = steps.get(number)
+    if number in tables[ITERATIONS]:
+        stage = DONE
+    elif step is not None:
+        stage = MADE if _makes(step) in made else STEPPING
+    elif ticket is None:
+        stage = DECIDED
+    elif len(counted) >= int(ticket["count"]):
+        stage = ENDED
+    else:
+        stage = PLAYING if episodes else WAITING
+    if step is not None:
+        step = {key: value for key, value in step.items() if key != "batch"} | {"makes": _makes(step)}
+    return {
+        "number": int(number),
+        "task": group.get("task"),
+        "title": group.get("title"),
+        "decided": group.get("decided"),
+        "stage": stage,
+        "ticket": asked,
+        "count": int(ticket["count"]) if ticket else None,
+        "ended": len(counted),
+        "episodes": sorted(episodes.values(), key=lambda each: (str(each.get("episode")), each["run_id"])),
+        "step": step,
+    }
+
+
+def _makes(step: Mapping[str, Any]) -> str | None:
+    """The version a step's decision names."""
+    policy = step.get("policy") or (parsed(step["parent"])[0] if step.get("parent") else None)
+    return named(policy, int(step["number"])) if policy else None
+
+
+def _replayed(events: list[RunEvent]) -> list[dict[str, Any]]:
+    """A run's lines as the feed would have had them, from its events: what was sent to a model is kept only as a
+    digest, so a sample has its reply and no messages."""
+    requested: dict[str, tuple[float, Mapping[str, Any]]] = {}
+    lines: list[dict[str, Any]] = []
+    for event in events:
+        at, payload = event.recorded_at.timestamp(), cast(Mapping[str, Any], event.payload)
+        if event.type is RunEventType.EFFECT_REQUESTED and payload.get("kind") == "model.sample":
+            requested[str(payload["effect_id"])] = (at, payload)
+            continue
+        if event.type is RunEventType.EFFECT_COMPLETED and str(payload.get("effect_id")) in requested:
+            began, request = requested.pop(str(payload["effect_id"]))
+            result: Any = payload.get("payload") or {}
+            if "message" in result:
+                lines.append(
+                    {
+                        "kind": "sample",
+                        "slot": str(request["payload"]["session_id"]).rsplit("/", 1)[-1],
+                        "effect_id": payload["effect_id"],
+                        "at": at,
+                        "seconds": round(at - began, 2),
+                        "messages": [],
+                        "tools": list(request["payload"].get("tools") or []),
+                        "reply": plain(Message.model_validate(result["message"])),
+                        "finish_reason": result.get("finish_reason"),
+                    }
+                )
+                continue
+        lines.append({"kind": "event", "seq": event.seq, "type": event.type.value, "at": at, "payload": payload})
+    return lines
 
 
 def _iteration(line: Mapping[str, Any]) -> dict[str, Any]:
@@ -289,6 +421,9 @@ class _JobLog:
                     "reward": episode.reward,
                     "solved": episode.solved,
                     "sampled": sum(record.sampled.values()),
+                    "labels": dict(episode.labels),
+                    "info": dict(episode.info),
+                    "events": record.events.model_dump(mode="json") if record.events else None,
                 }
             )
         logs = [path for path in (self.directory / TICKETS, self.directory / EPISODES) if path.exists()]
@@ -300,7 +435,11 @@ class _JobLog:
         return asked[-1] if asked else None
 
     def of(self, ticket: str) -> list[dict[str, Any]]:
-        return [episode for episode in self.episodes if episode["ticket"] == ticket]
+        return [
+            {key: value for key, value in episode.items() if key != "events"}
+            for episode in self.episodes
+            if episode["ticket"] == ticket
+        ]
 
     def counts(self) -> dict[str, Any]:
         outcomes: dict[str, int] = {}
