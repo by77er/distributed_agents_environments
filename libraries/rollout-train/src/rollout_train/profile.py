@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
 from rollout.names import named
@@ -91,6 +92,9 @@ class Profile:
     """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
     """Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`."""
+    blobs: Mapping[str, Any] = field(default_factory=dict[str, Any])
+    """Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called
+    with the other entries. Without one, files under `directory/blobs`."""
     runs_gib: float = 0.0
     """System memory that must be available to admit runs."""
     training_gib: float = 0.0
@@ -112,11 +116,13 @@ class Profile:
             channels[name] = ChannelSpec(**given, engines=engines)
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
+        blobs = _table(described, "blobs")
         top = _only(described, "the profile", "directory", "runner", "serve", "address", "tools", "feed_runs")
         top["directory"] = directory or Path(top["directory"]).expanduser()
         return cls(
             **top,
             **memory,
+            blobs=blobs,
             channels=channels,
             trainer=TrainerSpec(
                 kind=trainer.pop("kind"),
@@ -157,6 +163,8 @@ class Platform:
         self.trainer: Trainer | None = None
         self.tool_bindings: dict[str, ToolBinding] = {}
         """Where a run finds each tool set the profile names (for a run's binding)."""
+        self.blobs: Blobs
+        """Where the jobs keep their episodes."""
 
     @classmethod
     async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> "Platform":
@@ -206,21 +214,27 @@ class Platform:
             tool_sets[name] = named(where)(directory)
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
+        store = dict(profile.blobs)
+        self.blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(directory / "blobs")
         runner: Runner
         if profile.runner == "durable":
             from rollout_durable import DurableRunner
 
-            runner = DurableRunner(directory / "runs", recorder=self.recorder, tool_sets=tool_sets, hooks=[feed])
+            runner = DurableRunner(
+                directory / "runs", recorder=self.recorder, tool_sets=tool_sets, hooks=[feed], blobs=self.blobs
+            )
         elif profile.runner == "local":
             from rollout.local import LocalRunner
 
-            runner = LocalRunner(recorder=self.recorder, tool_sets=tool_sets, hooks=[feed])
+            runner = LocalRunner(recorder=self.recorder, tool_sets=tool_sets, hooks=[feed], blobs=self.blobs)
         else:
             raise ValueError(f"runner is {profile.runner!r}: it is local or durable")
         await runner.launch()
         stack.push_async_callback(runner.close)
         guard = _needs(profile.runs_gib, "to run more episodes")
-        self.jobs = RolloutJobs(runner, self.recorder, log=directory / "jobs", hooks=[feed], guard=guard)
+        self.jobs = RolloutJobs(
+            runner, self.recorder, log=directory / "jobs", blobs=self.blobs, hooks=[feed], guard=guard
+        )
         stack.push_async_callback(self.jobs.close)
         self.trainer = learner
         if learner is not None and described is not None and described.colocated:

@@ -6,7 +6,7 @@ longest sequence, and how many a step can afford. Those come from its hardware, 
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from rollout_train.recorder import Epoch
@@ -18,6 +18,8 @@ class Weighted:
 
     epoch: Epoch
     advantage: float
+    source: str = ""
+    """Where the sequence is from, for the record of what a step trained on: `cursor/slot/index` in the job's log."""
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,9 @@ class Step:
     path: str
     """Where engines read them."""
     metrics: Mapping[str, float]
+    artifacts: Mapping[str, str] = field(default_factory=dict[str, str])
+    """What the step left behind, by name, as paths of files and directories: the weights, and whatever the trainer
+    would need to go on from exactly here. Whoever keeps a record of the run keeps these."""
 
 
 class StepFailed(Exception):

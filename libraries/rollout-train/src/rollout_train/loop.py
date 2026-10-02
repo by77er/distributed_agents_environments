@@ -7,8 +7,9 @@ left of the one before, and each group is trained on when its last episode ends,
 run on (their tokens then carry two weights versions, which the trainer's objective corrects for).
 
 What it writes (to the store): `metrics.jsonl`, one `Iteration` per group; `curriculum.json`. The same lines go to
-the job as `iteration` notes, for whoever watches. A loop started again over the same store goes on after the last
-group logged, on starts drawn anew.
+the job as `iteration` notes, for whoever watches. Given a blob store, it also keeps what each step trained on and
+what the step left behind (the weights, and what the trainer goes on from), and the line names them. A loop
+started again over the same store goes on after the last group logged, on starts drawn anew.
 """
 
 import asyncio
@@ -16,12 +17,14 @@ import json
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from rollout.catalog import Catalog, Row, binding_for
+from rollout.harness.blobs import Blobs
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo
 from rollout_train.curriculum import Curriculum
-from rollout_train.record import METRICS, Iteration, Store, iterations
+from rollout_train.record import METRICS, Iteration, Store, iterations, kept
 from rollout_train.rollouts import Episode, Jobs
 from rollout_train.trainer import StepFailed, Trainer
 
@@ -51,11 +54,12 @@ async def train(
     seed: int = 0,
     binding: RunBinding | None = None,
     curriculum: Curriculum | None = None,
+    blobs: Blobs | None = None,
 ) -> None:
     """Train `channel`'s policy on `catalog` for `groups` more groups. `algorithm` is `Grpo()` unless given.
     `overlap`: the next group starts when at most this many episodes of earlier groups are still running. `binding`
     says how the program's model slots and imports are served (by default: every slot from `channel`, each import
-    from the tool set of its own name)."""
+    from the tool set of its own name). `blobs` is where each step's batch and what it left behind are kept."""
     algorithm = algorithm if algorithm is not None else Grpo()
     done = max((line.iteration for line in iterations(store)), default=0)
     rng = random.Random(f"{seed}-{done}")  # a run that is started again draws new starts, not the same ones
@@ -125,6 +129,14 @@ async def train(
                         line.version = await job.publish(channel, step.adapter, step.path)
                         line.adapter = step.adapter
                         line.update = {key: round(value, 5) for key, value in step.metrics.items()}
+                        if blobs is not None:  # (while the next group plays on: the step is not held up for it)
+                            trained = [[weighted.source, weighted.advantage] for weighted in batch.sequences]
+                            manifest = await blobs.put(json.dumps(trained).encode(), "application/json")
+                            line.batch = manifest.model_dump(mode="json")
+                            line.checkpoint = {
+                                name: (await kept(Path(path), blobs)).model_dump(mode="json")
+                                for name, path in step.artifacts.items()
+                            }
                 line.time = round(time.time(), 1)
                 line.seconds = round(line.time - group.started, 1)
                 line.unlocked = len(curriculum.unlocked())

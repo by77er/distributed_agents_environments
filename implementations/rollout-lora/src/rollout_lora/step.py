@@ -39,6 +39,8 @@ class ClippedPolicyGradient:
 
     def __post_init__(self) -> None:
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=self.settings.learning_rate, weight_decay=0.0)
+        self.minibatches: list[dict[str, float]] = []
+        """What each minibatch of the last pass did, in order (`step` returns their totals)."""
 
     def step(self, sequences: Sequence[Weighted], *, seed: int = 0) -> dict[str, float]:
         """One pass over the sequences, in shuffled minibatches of about `tokens_per_step` sampled tokens."""
@@ -55,6 +57,7 @@ class ClippedPolicyGradient:
         divergences: list[float] = []  # of each minibatch that was stepped on, as it found the policy
         out_of_memory = 0
         stopped = False
+        self.minibatches = []
         for batch in batches:
             batch_tokens = sum(sequence.epoch.sampled for sequence in batch)
             sums = dict.fromkeys(totals, 0.0)
@@ -99,6 +102,16 @@ class ClippedPolicyGradient:
                 totals[key] += value
             norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), settings.max_gradient_norm)
             gradient_norms.append(float(norm))
+            self.minibatches.append(
+                {
+                    "sequences": sums["sequences"],
+                    "tokens": sums["tokens"],
+                    "loss": sums["loss"] / sums["tokens"],
+                    "clip_fraction": sums["clipped"] / sums["tokens"],
+                    "kl": divergence,
+                    "gradient_norm": float(norm),
+                }
+            )
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
         tokens = max(totals["tokens"], 1.0)

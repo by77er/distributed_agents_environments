@@ -84,6 +84,8 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
     assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_job.jsonl").exists()
+    kept = (tmp_path / "run" / "jobs" / "train" / "episodes.jsonl").read_text().splitlines()
+    assert len(kept) == 8 and any((tmp_path / "run" / "blobs").iterdir())  # every episode, and its traces
 
 
 async def test_a_profile_that_cannot_start_stops_what_it_started(tmp_path: Path) -> None:

@@ -114,6 +114,16 @@ Every line has the row, the rewards, `solved` and durations of the episodes fit 
 failed and why, how many sequences were recorded and how many trained on, the algorithm's notes, and how many rows
 are unlocked. `iterations(store)` reads them back.
 
+Given a blob store (`train(..., blobs=...)`), a group that was trained on also has:
+
+| Field | Names |
+|---|---|
+| `batch` | A blob: every sequence the step trained on, as its place in the job's log (`cursor/slot/index`) and its advantage |
+| `checkpoint` | Blobs by name: what the step left behind ([`Step.artifacts`](../../guide/reference.md#step)). A directory is kept as a tar archive |
+
+With the job's [log](rollouts.md#the-log), that is the whole run: every episode, what each step was trained on, and
+the weights and trainer state after it.
+
 A [`Store`](../../guide/reference.md#store) holds the run's small state as named texts.
 [`Directory`](../../guide/reference.md#directory) is one in a directory.
 

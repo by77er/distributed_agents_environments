@@ -8,10 +8,11 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue
 
+from rollout.contracts import RunEventType
 from rollout.harness import ModelBinding, RecordedModel, RunBinding, agent_program
 from rollout.local import LocalRunner
 from rollout_train.recorder import Recorder
-from rollout_train.rollouts import Episode, JobHooks, Outcome, Refused, RolloutJob, RolloutJobs
+from rollout_train.rollouts import Episode, JobHooks, Outcome, Refused, RolloutJob, RolloutJobs, events_of
 from rollout_train.testing import plain_channel
 from tests.rollout_train.rollouts.games import GATES, Gated, Guess
 
@@ -80,9 +81,9 @@ async def test_the_stream_is_read_with_a_cursor_while_runs_are_still_going() -> 
     assert await held.episodes() == [second] and len(await quick.episodes()) == 1
 
 
-async def _until_closed(job: RolloutJob, rollouts: RolloutJobs) -> AsyncIterator[Episode]:
+async def _until_closed(job: RolloutJob, rollouts: RolloutJobs, cursor: int = 0) -> AsyncIterator[Episode]:
     await rollouts.close()
-    async for episode in job.episodes():
+    async for episode in job.episodes(cursor):
         yield episode
 
 
@@ -140,19 +141,47 @@ async def test_weights_published_through_the_job_mark_what_is_sampled_afterwards
     await rollouts.close()
 
 
-async def test_a_named_job_keeps_what_was_not_acknowledged_for_the_next_process(tmp_path: Path) -> None:
+async def test_a_job_with_a_log_keeps_every_episode_and_can_be_read_again_from_any_cursor(tmp_path: Path) -> None:
     rollouts, _, _ = jobs("yes", "no", log=tmp_path)
     job = await start(rollouts, name="main")
     episodes = await (await job.run({"word": "yes"}, labels={"group": "g"}, count=3)).episodes()
-    await job.acknowledge(episodes[0].cursor)
+    await job.acknowledge(episodes[1].cursor)
     await rollouts.close()
-    assert sorted(path.name for path in (tmp_path / "main").iterdir()) == ["000000002.json", "000000003.json"]
+    lines = (tmp_path / "main" / "episodes.jsonl").read_text().splitlines()
+    assert [json.loads(line)["episode"]["cursor"] for line in lines] == [1, 2, 3]
+    assert all(len(line) < 2000 for line in lines)  # a record is small: its tokens are in the blob store
+    assert (tmp_path / "main" / "acknowledged").read_text() == "2"
 
-    again, _, _ = jobs("yes", log=tmp_path)
+    again, _, _ = jobs("yes", log=tmp_path)  # another process, later
     resumed = await start(again, name="main")
-    kept = [episode async for episode in _until_closed(resumed, again)]
-    assert [episode.cursor for episode in kept] == [2, 3] and kept[0] == episodes[1]  # tokens, spans and all
-    assert json.loads((tmp_path / "main" / "000000002.json").read_text())["labels"]["group"] == "g"
+    status = await resumed.status()
+    assert (status.finished, status.acknowledged) == (3, 2)
+    kept = [episode async for episode in _until_closed(resumed, again, cursor=0)]
+    assert kept == episodes  # all three, acknowledged or not: tokens, spans, logprobs and all
+    (later,) = [episode async for episode in resumed.episodes(2)]
+    assert later == episodes[2]
+
+    # A record also names its run's events, which a span's effect joins its trace to.
+    assert again.blobs is not None
+    record = resumed.after(2)[0]
+    events = await events_of(record, again.blobs)
+    assert events[0].type is RunEventType.RUN_CREATED and events[-1].type is RunEventType.RUN_COMPLETED
+    (span,) = later.traces["policy"].epochs[0].spans
+    sampled = [event for event in events if event.type is RunEventType.EFFECT_REQUESTED]
+    assert span.effect_id in {str(event.payload["effect_id"]) for event in sampled}  # type: ignore[index]
+    assert record.sampled == {"policy": span.end - span.start}
+
+
+async def test_a_job_with_no_log_holds_episodes_until_they_are_acknowledged() -> None:
+    rollouts, _, _ = jobs("yes")
+    job = await start(rollouts)
+    episodes = await (await job.run({"word": "yes"}, count=2)).episodes()
+    assert [record.episode.cursor for record in job.after(0)] == [1, 2]
+    await job.acknowledge(1)
+    assert [record.episode.cursor for record in job.after(0)] == [2] and await job.episode(job.after(0)[0]) == episodes[
+        1
+    ]
+    await rollouts.close()
 
 
 async def test_a_job_started_again_under_its_name_takes_the_place_of_the_one_before(tmp_path: Path) -> None:

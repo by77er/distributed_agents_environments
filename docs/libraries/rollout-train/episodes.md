@@ -24,6 +24,9 @@ what the recorder kept of each of its model slots.
 
 A run that could not start is a failed episode whose `detail` says why, with no traces.
 
+A job that keeps a log stores the episode as it is assembled: a small record, and its traces and its run's events
+as blobs ([the log](rollouts.md#the-log)).
+
 ## Rewards
 
 Rewards are summed by model slot and by key.

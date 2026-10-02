@@ -1,7 +1,8 @@
 """Rollout jobs for a caller on another machine: the same `Jobs`, `Job` and `Ticket`, over HTTP.
 
-`create_app(jobs)` serves jobs that run where the runner and the recorder are; `RolloutClient(url)` is what a
-trainer elsewhere holds. Nothing in a training loop written against `Jobs` says which one it has.
+`create_app(jobs)` serves jobs that run where the runner and the recorder are; `RolloutClient(url, blobs)` is what
+a trainer elsewhere holds. Nothing in a training loop written against `Jobs` says which one it has. Episodes cross
+as their records; their traces are read from the blob store both sides share.
 
     POST /jobs                                   start a job                    → {"job": id}
     POST /jobs/{job}/runs                        queue runs of a row            → {"ticket": id}
@@ -25,14 +26,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from rollout.harness.blobs import Blobs
 from rollout.harness.runner import ProgramReference, RunBinding
-from rollout_train.rollouts.episodes import Episode
+from rollout_train.rollouts.episodes import Episode, Record, loaded
 from rollout_train.rollouts.jobs import Refused, RolloutJob, RolloutJobs, Status
 
 WAIT_SECONDS = 20.0
 
 
 def create_app(jobs: RolloutJobs) -> Starlette:
+    if jobs.blobs is None:
+        raise ValueError("jobs served over HTTP keep their episodes in a blob store: give RolloutJobs a log")
+
     def job_of(request: Request) -> RolloutJob:
         return jobs.job(request.path_params["job"])
 
@@ -52,24 +57,17 @@ def create_app(jobs: RolloutJobs) -> Starlette:
         return JSONResponse({"ticket": ticket.id})
 
     async def ticket(request: Request) -> Response:
-        held = job_of(request).ticket(request.path_params["ticket"])
+        job = job_of(request)
+        held = job.ticket(request.path_params["ticket"])
         if not await held.ready(float(request.query_params.get("wait", WAIT_SECONDS))):
             return JSONResponse({"done": False, "episodes": [], "refused": None})
-        return JSONResponse({"done": True, "episodes": [e.to_json() for e in held.ended], "refused": held.refused})
+        records = [record.to_json() for record in job.records(held.ended)]
+        return JSONResponse({"done": True, "episodes": records, "refused": held.refused})
 
     async def episodes(request: Request) -> Response:
-        cursor = int(request.query_params.get("cursor", "0"))
-        stream = job_of(request).episodes(cursor)
-        ready: list[dict[str, Any]] = []
-        closed = False
-        try:
-            first = await asyncio.wait_for(anext(stream), float(request.query_params.get("wait", WAIT_SECONDS)))
-            ready = [first.to_json()] + [e.to_json() for e in job_of(request).after(first.cursor)]
-        except TimeoutError:
-            pass
-        except StopAsyncIteration:
-            closed = True
-        return JSONResponse({"episodes": ready, "closed": closed})
+        job, cursor = job_of(request), int(request.query_params.get("cursor", "0"))
+        closed = not await job.news(cursor, float(request.query_params.get("wait", WAIT_SECONDS)))
+        return JSONResponse({"episodes": [record.to_json() for record in job.after(cursor)], "closed": closed})
 
     async def acknowledge(request: Request) -> Response:
         await job_of(request).acknowledge(int((await request.json())["cursor"]))
@@ -103,10 +101,11 @@ def create_app(jobs: RolloutJobs) -> Starlette:
 
 
 class RolloutClient:
-    """`Jobs`, served at `url`."""
+    """`Jobs`, served at `url`. `blobs` is the store the served jobs keep their episodes in."""
 
-    def __init__(self, url: str, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, url: str, blobs: Blobs, *, client: httpx.AsyncClient | None = None) -> None:
         self._http = client or httpx.AsyncClient(base_url=url, timeout=WAIT_SECONDS + 30)
+        self._blobs = blobs
 
     async def start(
         self, *, program: ProgramReference, binding: RunBinding, in_flight: int, name: str = ""
@@ -117,28 +116,30 @@ class RolloutClient:
             "in_flight": in_flight,
             "name": name,
         }
-        return RemoteJob((await _post(self._http, "/jobs", body))["job"], self._http)
+        return RemoteJob((await _post(self._http, "/jobs", body))["job"], self._http, self._blobs)
 
     async def close(self) -> None:
         await self._http.aclose()
 
 
 class RemoteJob:
-    def __init__(self, job_id: str, http: httpx.AsyncClient) -> None:
+    def __init__(self, job_id: str, http: httpx.AsyncClient, blobs: Blobs) -> None:
         self.id = job_id
         self._http = http
+        self._blobs = blobs
 
     async def run(
         self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1
     ) -> "RemoteTicket":
         body = {"parameters": parameters, "labels": dict(labels or {}), "count": count}
-        return RemoteTicket((await _post(self._http, f"/jobs/{self.id}/runs", body))["ticket"], self.id, self._http)
+        ticket = (await _post(self._http, f"/jobs/{self.id}/runs", body))["ticket"]
+        return RemoteTicket(ticket, self.id, self._http, self._blobs)
 
     async def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]:
         while True:
             answer = await _get(self._http, f"/jobs/{self.id}/episodes", cursor=cursor)
             for data in answer["episodes"]:
-                episode = Episode.from_json(data)
+                episode = await loaded(Record.from_json(data), self._blobs)
                 cursor = episode.cursor
                 yield episode
             if answer["closed"]:
@@ -159,10 +160,11 @@ class RemoteJob:
 
 
 class RemoteTicket:
-    def __init__(self, ticket_id: str, job: str, http: httpx.AsyncClient) -> None:
+    def __init__(self, ticket_id: str, job: str, http: httpx.AsyncClient, blobs: Blobs) -> None:
         self.id = ticket_id
         self._job = job
         self._http = http
+        self._blobs = blobs
 
     async def episodes(self) -> list[Episode]:
         while True:
@@ -170,7 +172,8 @@ class RemoteTicket:
             if answer["done"]:
                 if answer["refused"] is not None:
                     raise Refused(answer["refused"])
-                return [Episode.from_json(data) for data in answer["episodes"]]
+                records = [Record.from_json(data) for data in answer["episodes"]]
+                return list(await asyncio.gather(*(loaded(record, self._blobs) for record in records)))
 
 
 async def _post(http: httpx.AsyncClient, path: str, body: Mapping[str, Any]) -> dict[str, Any]:

@@ -51,6 +51,8 @@ class Span:
     start: int
     end: int
     version: int
+    effect_id: str = ""
+    """The sample that produced them: the `effect_id` its run's events know it by."""
 
 
 @dataclass(frozen=True)
@@ -116,7 +118,7 @@ class Recorder:
                 if sampled and start is None:
                     start = position
                 elif not sampled and start is not None:
-                    spans.append(Span(start, position, turn.version))
+                    spans.append(Span(start, position, turn.version, turn.effect_id))
                     start = None
             logprobs = list(parent.logprobs) if parent else []
             logprobs += [value for value, sampled in zip(turn.logprobs, turn.mask, strict=True) if sampled]

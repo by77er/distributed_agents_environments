@@ -104,8 +104,8 @@ async def test_thinking_over_budget_is_closed_unsampled_and_the_answer_follows(t
     assert epoch.tokens[: len(prompt)] == prompt
     # Two sampled spans, around the forced close: the eight tokens of thought, and the answer. Both at version 3.
     assert epoch.spans == [
-        Span(len(prompt), len(prompt) + 8, 3),
-        Span(len(prompt) + 8 + len(forced), len(epoch.tokens), 3),
+        Span(len(prompt), len(prompt) + 8, 3, "r_1:0:0"),
+        Span(len(prompt) + 8 + len(forced), len(epoch.tokens), 3, "r_1:0:0"),
     ]
     assert epoch.sampled == 8 + answer and epoch.logprobs == [-0.5] * (8 + answer)
     assert engine.adapters == ["step-3", "step-3"]
@@ -120,7 +120,7 @@ async def test_thinking_that_closes_in_budget_needs_no_forcing(tokenizer: Tokeni
     recorder = Recorder({"policy": channel(engine, thinking=64)})
     result = await recorder.endpoint(POLICY).sample(sample_request([Message.user("Hi")]))
     (epoch,) = recorder.export("r_1/ada")
-    assert epoch.spans == [Span(len(engine.prompts[0]), len(epoch.tokens), 0)]  # one span: all of it sampled
+    assert epoch.spans == [Span(len(engine.prompts[0]), len(epoch.tokens), 0, "r_1:0:0")]  # all of it sampled
     assert result.message.text == "Nothing to do." and result.finish_reason is FinishReason.STOP
 
 
@@ -194,7 +194,7 @@ async def test_a_request_can_cap_its_output_down_to_no_thinking_at_all(tokenizer
     assert result.message.text == "A summary." and engine.budgets == [16]  # one generation: the answer
     (epoch,) = recorder.export("r_1/ada")
     forced = len(qwen35(tokenizer).encode("\n</think>\n\n"))
-    assert epoch.spans == [Span(len(engine.prompts[0]), len(epoch.tokens), 0)]  # after the close, which is unsampled
+    assert epoch.spans == [Span(len(engine.prompts[0]), len(epoch.tokens), 0, "r_1:0:0")]  # after the forced close
     assert len(engine.prompts[0]) == len(epoch.tokens) - epoch.sampled  # (the engine was shown the close)
     assert forced > 0
 

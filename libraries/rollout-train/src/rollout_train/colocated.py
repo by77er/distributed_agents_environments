@@ -52,4 +52,4 @@ class Colocated:
             for channel in self._channels:
                 channel.resume()
         timing = {"waited_for_requests_seconds": waited, "update_seconds": time.monotonic() - started}
-        return Step(step.adapter, step.path, {**step.metrics, **timing})
+        return Step(step.adapter, step.path, {**step.metrics, **timing}, step.artifacts)

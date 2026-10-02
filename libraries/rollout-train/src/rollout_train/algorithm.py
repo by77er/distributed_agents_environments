@@ -113,10 +113,10 @@ class Grpo:
         if advantages is None:
             return Batch(skipped="every episode scored the same", notes=notes)
         weighted = [
-            Weighted(epoch, advantage)
+            Weighted(epoch, advantage, f"{episode.cursor}/{slot}/{index}")
             for episode, advantage in zip(good, advantages, strict=True)
             if advantage != 0.0
-            for trace in episode.traces.values()
-            for epoch in trace.epochs
+            for slot, trace in episode.traces.items()
+            for index, epoch in enumerate(trace.epochs)
         ]
         return Batch(spread(weighted, budget.sequences, rng), notes=notes)

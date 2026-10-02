@@ -22,7 +22,7 @@ own process or jobs served elsewhere, and cannot tell which.
 
 | | In this process | Over HTTP |
 |---|---|---|
-| Jobs | `RolloutJobs(runner, recorder)`, over any [`Runner`](../rollout/README.md#runner) | `RolloutClient(url)` |
+| Jobs | `RolloutJobs(runner, recorder, log=..., blobs=...)`, over any [`Runner`](../rollout/README.md#runner) | `RolloutClient(url, blobs)` |
 | Served by | | `rollout_train.rollouts.service.create_app(jobs)`, which a profile's `serve` starts ([deploying](../../guide/deploying.md)) |
 
 ## A job
@@ -53,11 +53,10 @@ own process or jobs served elsewhere, and cannot tell which.
   they ended. `RolloutTicket.ready(seconds)` waits that long at most and says whether the ticket is over.
 - **Asynchronous training** is reading the stream while runs are in flight. Nothing waits for a batch: each sampled
   token carries the weights version it was sampled at, and the caller decides how stale it tolerates data.
-- **Acknowledging** a cursor says that everything through it has been consumed. The job then drops those episodes,
-  and every ticket whose episodes are all acknowledged. Until then `job.ticket(id)` finds a ticket by its id, as
+- **Acknowledging** a cursor says that everything through it has been consumed. The job then lets go of every
+  ticket whose episodes are all acknowledged. Until then `job.ticket(id)` finds a ticket by its id, as
   `jobs.job(id)` finds a job: the HTTP service holds nothing else.
-- **A caller that stops** goes on from its cursor. With a `log` directory, `RolloutJobs` keeps each job's
-  unacknowledged episodes on disk, and a job started again under its name reads them back.
+- **A caller that stops** goes on from its cursor: a job started again under its name knows how far its caller got.
 - **The recorder forgets a run** once its episode is assembled: the episode holds everything training needs of it.
 - **Closing** a job stops admission, refuses the tickets still queued, and ends every `episodes` stream. Runs that
   were in flight become cancelled episodes.
@@ -66,11 +65,31 @@ own process or jobs served elsewhere, and cannot tell which.
 ([channels](channels.md#publishing-weights)). `job.status()` counts the runs queued and running, the episodes
 finished and the cursor acknowledged.
 
+## The log
+
+A job given a `log` directory keeps every episode, from the moment its run ends.
+
+| Kept | Where | What |
+|---|---|---|
+| A [`Record`](../../guide/reference.md#record) per episode | one line of `log/JOB/episodes.jsonl` | Everything about the episode but its token sequences: labels, outcome, result, rewards, tokens sampled by slot. It names two blobs |
+| The traces | a blob | Each slot's sequences, spans and logprobs |
+| The run's events | a blob | Its tool calls and their results, observations and rewards, as the runner recorded them |
+| How far the caller got | `log/JOB/acknowledged` | The cursor acknowledged |
+
+- **Nothing is deleted.** Acknowledging records the caller's cursor and frees the job's memory. `job.episodes(cursor)`
+  reads the log from any cursor, traces and all, so earlier episodes can be trained on again.
+- **Blobs** go to the [`Blobs`](../../guide/reference.md#blobs) store the jobs are given, or to files under
+  `log/blobs`. They are JSON, compressed. How long they are kept is the store's business.
+- **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trace can be
+  joined to what the action it sampled did. `events_of(record, blobs)` reads the events.
+- **Without a log** a job holds episodes in memory until they are acknowledged, and then they are gone.
+
 ## Over HTTP
 
 `RolloutClient` polls. A read of a ticket or of the stream waits on the server for news, up to a `wait` in seconds,
 and then answers with what there is. The routes are listed in `rollout_train.rollouts.service`. Episodes cross as
-JSON (`Episode.to_json`, `Episode.from_json`), the form the log keeps them in.
+their records, and the client reads their traces from the blob store, which both sides share. Jobs served over HTTP
+therefore need a log.
 
 ## Catalog
 

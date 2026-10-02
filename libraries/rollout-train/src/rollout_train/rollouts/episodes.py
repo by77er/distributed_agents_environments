@@ -3,16 +3,25 @@
 Its labels say which group and task it came from; its outcome and result say how it went; its traces hold, for each
 model slot, the token sequences the policy saw and continued, with the logprobs it sampled them at. Nothing else
 about the run is needed to compute a loss, and nothing here says where the run executed.
+
+An episode is kept as a `Record`: one line, small enough for a log, that names two blobs. One holds the traces; the
+other the run's events (its tool calls and their results, observations, rewards), which a span's `effect_id` joins a
+trace to. `stored` writes them and `loaded` reads them back, so an episode outlives the process that ran it for as
+long as the blob store keeps it.
 """
 
+import asyncio
+import json
+import lzma
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
 from pydantic import JsonValue, TypeAdapter
 
-from rollout.contracts import RunEvent, RunEventType
+from rollout.contracts import BlobReference, RunEvent, RunEventType
+from rollout.harness.blobs import Blobs
 from rollout_train.recorder import Epoch
 
 POLICY = "policy"
@@ -85,15 +94,68 @@ class Episode:
         took = self.info.get("duration")
         return float(took) if isinstance(took, int | float) and not isinstance(took, bool) else None
 
+
+@dataclass(frozen=True)
+class Record:
+    """An episode as it is logged and sent: everything but its traces, and where those and its events are kept."""
+
+    episode: Episode
+    """With no epochs in its traces: their rewards only."""
+    traces: BlobReference | None = None
+    events: BlobReference | None = None
+    sampled: Mapping[str, int] = field(default_factory=dict[str, int])
+    """Tokens the policy sampled, by model slot."""
+
     def to_json(self) -> dict[str, Any]:
-        return _EPISODE.dump_python(self, mode="json")
+        return _RECORD.dump_python(self, mode="json")
 
     @classmethod
-    def from_json(cls, data: Mapping[str, Any]) -> "Episode":
-        return _EPISODE.validate_python(data)
+    def from_json(cls, data: Mapping[str, Any]) -> "Record":
+        return _RECORD.validate_python(data)
 
 
-_EPISODE = TypeAdapter(Episode)
+_RECORD = TypeAdapter(Record)
+_EPOCHS = TypeAdapter(dict[str, list[Epoch]])
+COMPRESSED = "application/x-xz"
+"""Blobs are JSON, compressed: an episode's sequences repeat their prompts, and shrink to a few percent."""
+
+
+async def stored(episode: Episode, events: Sequence[RunEvent], blobs: Blobs) -> Record:
+    """Keep an episode's traces and its run's events in `blobs`; returns the record that names them."""
+    epochs = {slot: trace.epochs for slot, trace in episode.traces.items()}
+    lines = "".join(event.model_dump_json() + "\n" for event in events).encode()
+    traces, kept = await asyncio.gather(
+        asyncio.to_thread(lzma.compress, _EPOCHS.dump_json(epochs), preset=1),
+        asyncio.to_thread(lzma.compress, lines, preset=1),
+    )
+    return Record(
+        episode=_without_epochs(episode),
+        traces=await blobs.put(traces, COMPRESSED),
+        events=await blobs.put(kept, COMPRESSED),
+        sampled={slot: sum(epoch.sampled for epoch in trace.epochs) for slot, trace in episode.traces.items()},
+    )
+
+
+async def loaded(record: Record, blobs: Blobs) -> Episode:
+    """The episode a record names, with its traces read back from `blobs`."""
+    if record.traces is None:
+        return record.episode
+    packed = await blobs.read(record.traces)
+    epochs = _EPOCHS.validate_json(await asyncio.to_thread(lzma.decompress, packed))
+    traces = {slot: Trace(epochs.get(slot, []), trace.rewards) for slot, trace in record.episode.traces.items()}
+    return replace(record.episode, traces=traces)
+
+
+async def events_of(record: Record, blobs: Blobs) -> list[RunEvent]:
+    """The events of the run a record names, as its runner recorded them."""
+    if record.events is None:
+        return []
+    lines = (await asyncio.to_thread(lzma.decompress, await blobs.read(record.events))).decode().splitlines()
+    return [RunEvent.model_validate(json.loads(line)) for line in lines]
+
+
+def _without_epochs(episode: Episode) -> Episode:
+    return replace(episode, traces={slot: Trace([], trace.rewards) for slot, trace in episode.traces.items()})
 
 
 def rewards(events: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, dict[str, float]]:

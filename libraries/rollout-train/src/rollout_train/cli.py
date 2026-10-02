@@ -58,7 +58,7 @@ async def _train(profile: Path, directory: Path | None, catalog: str, groups: in
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
             platform.jobs, rows, platform.trainer, platform.store, channel=channel, groups=groups, seed=seed,
-            binding=binding,
+            binding=binding, blobs=platform.blobs,
         )  # fmt: skip
 
 

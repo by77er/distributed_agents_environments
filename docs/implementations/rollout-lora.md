@@ -45,6 +45,10 @@ gives `sequence_tokens` to the trained channel as its longest turn, so that ever
 |---|---|
 | `adapters/step-N/` | The adapter after step N, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is. Weights are saved as float32: each step resumes from this file, and updates are smaller than bfloat16 resolves |
 | `trainer/optimizer.pt` | The optimizer's state after the latest step |
+| `trainer/minibatches.jsonl` | What each minibatch of the latest step did: sequences, tokens, loss, clipped share, KL estimate, gradient norm |
+
+Each step names all three as its artifacts, so a run that keeps a record keeps them for every step
+([the record](../libraries/rollout-train/training.md#the-record)).
 
 A `LoraTrainer` made over a directory that has adapters goes on from the highest `step-N` (`steps`, `latest`). An
 open profile publishes `latest` to the trained channel before the first episode.

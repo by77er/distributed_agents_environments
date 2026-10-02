@@ -12,6 +12,7 @@ counted and left out (`minibatches_out_of_memory`). The process ends with the pr
 """
 
 import asyncio
+import json
 import multiprocessing
 import traceback
 from collections.abc import Sequence
@@ -74,6 +75,10 @@ class TrainerProcess:
         return payload
 
 
+OPTIMIZER = "optimizer.pt"
+"""The optimizer's state after the latest step, in the job's `state` directory."""
+MINIBATCHES = "minibatches.jsonl"
+"""What each minibatch of the latest step did, one line each."""
 MEMORY_MARGIN = 256 * 2**20
 """GPU memory left free of what was free when a step started (other programs' use moves a little)."""
 
@@ -107,7 +112,7 @@ def _step(
         if previous is not None:
             load_adapter(policy.model, previous)
         trainer = ClippedPolicyGradient(policy, settings)
-        optimizer_state = job.state / "optimizer.pt"
+        optimizer_state = job.state / OPTIMIZER
         if previous is not None and optimizer_state.exists():
             trainer.optimizer.load_state_dict(torch.load(optimizer_state, map_location="cuda"))
             for group in trainer.optimizer.param_groups:  # (the saved state carries the rate it was saved with)
@@ -116,6 +121,7 @@ def _step(
         policy.save(adapter)
         job.state.mkdir(parents=True, exist_ok=True)
         torch.save(trainer.optimizer.state_dict(), optimizer_state)
+        (job.state / MINIBATCHES).write_text("".join(json.dumps(each) + "\n" for each in trainer.minibatches))
         metrics["peak_gpu_gib"] = torch.cuda.max_memory_reserved() / 2**30
         metrics["free_gpu_gib"] = free / 2**30  # when the step started: what it was allowed, less the margin
         connection.send(("done", metrics))

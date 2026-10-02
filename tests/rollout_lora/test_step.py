@@ -48,6 +48,16 @@ def test_a_positive_advantage_makes_its_tokens_likelier_and_a_negative_one_rarer
     assert after["good"] > before["good"] and after["bad"] < before["bad"]
 
 
+def test_a_pass_keeps_what_each_minibatch_did() -> None:
+    policy = ToyPolicy()
+    settings = LoraSettings(learning_rate=0.05, tokens_per_step=3, max_kl=None)
+    trainer = ClippedPolicyGradient(policy, settings)  # type: ignore[arg-type]
+    metrics = trainer.step([sequence(policy, [1, 2, 3, 4], 1.0), sequence(policy, [1, 5, 6, 7], -1.0)])
+    assert len(trainer.minibatches) == metrics["optimizer_steps"] == 2
+    assert [each["tokens"] for each in trainer.minibatches] == [3.0, 3.0]
+    assert set(trainer.minibatches[0]) == {"sequences", "tokens", "loss", "clip_fraction", "kl", "gradient_norm"}
+
+
 def test_forced_tokens_are_never_trained_on() -> None:
     policy = ToyPolicy()
     tokens = [1, 2, 3]

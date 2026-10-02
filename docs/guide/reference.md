@@ -11,7 +11,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.catalog`](#rolloutcatalog)** — What an environment offers to be trained on. [`binding_for`](#binding_for), [`Catalog`](#catalog), [`Row`](#row)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
-- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Rollout jobs: rows in, episodes out, weights published. [`Episode`](#episode), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`Outcome`](#outcome), [`Recorded`](#recorded), [`Refused`](#refused), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`RolloutTicket`](#rolloutticket), [`Status`](#status), [`Ticket`](#ticket), [`Trace`](#trace)
+- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Rollout jobs: rows in, episodes out, weights published. [`Episode`](#episode), [`events_of`](#events_of), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`loaded`](#loaded), [`Outcome`](#outcome), [`Record`](#record), [`Recorded`](#recorded), [`Refused`](#refused), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`RolloutTicket`](#rolloutticket), [`Status`](#status), [`stored`](#stored), [`Ticket`](#ticket), [`Trace`](#trace)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Directory`](#directory), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Iteration`](#iteration), [`iterations`](#iterations), [`Step`](#step), [`StepFailed`](#stepfailed), [`Store`](#store), [`train`](#train), [`Trainer`](#trainer), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: policies being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`Epoch`](#epoch), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
@@ -2169,8 +2169,16 @@ class Episode
 - `@property def solved(self) -> bool` — Whether the program said its task was solved (`info["solved"]`).
 - `@property def saturated(self) -> bool` — Whether the program said nothing was left to earn (`info["saturated"]`).
 - `@property def duration(self) -> float | None` — How long the program said it took, in the task's own units (`info["duration"]`), if it said.
-- `def to_json(self) -> dict[str, Any]`
-- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Episode'`
+
+### `events_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+
+```python
+async def events_of(record: Record, blobs: Blobs) -> list[RunEvent]
+```
+
+The events of the run a record names, as its runner recorded them.
 
 ### `Job`
 
@@ -2187,8 +2195,8 @@ class Job(Protocol)
 **Methods**
 
 - `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> Ticket` — Queue `count` runs of one row. They start together, when there is room for all of them.
-- `def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]` — Every episode after `cursor`, then new ones as runs end, until the job is closed.
-- `async def acknowledge(self, cursor: int) -> None` — The caller has consumed everything through `cursor`: it need not be kept.
+- `def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]` — Every episode after `cursor` that the job has, then new ones as runs end, until the job is closed.
+- `async def acknowledge(self, cursor: int) -> None` — The caller has consumed everything through `cursor`: a job started again goes on from there.
 - `async def publish(self, channel: str, adapter: str, path: str) -> int` — Serve new weights on a channel from now on; returns the channel's new version.
 - `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None` — Put something of the caller's own (an update's statistics, say) where whoever watches the job sees it.
 - `async def status(self) -> Status`
@@ -2222,6 +2230,16 @@ served elsewhere.
 
 - `async def start(self, *, program: ProgramReference, binding: RunBinding, in_flight: int, name: str = '') -> 'Job'`
 
+### `loaded`
+
+*function* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+
+```python
+async def loaded(record: Record, blobs: Blobs) -> Episode
+```
+
+The episode a record names, with its traces read back from `blobs`.
+
 ### `Outcome`
 
 *class* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
@@ -2235,6 +2253,28 @@ class Outcome(StrEnum)
 | `COMPLETED` | `'completed'` |  |
 | `FAILED` | `'failed'` | The program raised: its `detail` says what. |
 | `CANCELLED` | `'cancelled'` |  |
+
+### `Record`
+
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+
+```python
+class Record
+```
+
+An episode as it is logged and sent: everything but its traces, and where those and its events are kept.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `episode` | `Episode` | required | With no epochs in its traces: their rewards only. |
+| `traces` | `BlobReference \| None` | `None` |  |
+| `events` | `BlobReference \| None` | `None` |  |
+| `sampled` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | Tokens the policy sampled, by model slot. |
+
+**Methods**
+
+- `def to_json(self) -> dict[str, Any]`
+- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Record'`
 
 ### `Recorded`
 
@@ -2274,11 +2314,14 @@ A job over a runner. Created by `RolloutJobs.start`.
 
 **Methods**
 
-- `def __init__(self, job_id: str, specification: RunSpecification, runner: Runner, recorder: Recorded, *, in_flight: int, log: Path | None, hooks: Sequence[JobHooks], guard: Callable[[], None] | None) -> None`
+- `def __init__(self, job_id: str, specification: RunSpecification, runner: Runner, recorder: Recorded, *, in_flight: int, log: Path | None, blobs: Blobs | None, hooks: Sequence[JobHooks], guard: Callable[[], None] | None) -> None`
 - `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> RolloutTicket`
 - `async def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]`
+- `async def news(self, cursor: int, seconds: float) -> bool` — Wait up to `seconds` for an episode after `cursor`; False once the job is closed and none is left.
 - `def ticket(self, ticket: str) -> RolloutTicket` — A ticket by its id (for a caller that holds only the id), until its episodes are acknowledged.
-- `def after(self, cursor: int) -> list[Episode]` — The episodes after `cursor` that are in the log now.
+- `def after(self, cursor: int) -> list[Record]` — The records after `cursor` that are in the log now.
+- `async def episode(self, record: Record) -> Episode` — The episode a record of this job's log names, with its traces.
+- `def records(self, episodes: Sequence[Episode]) -> list[Record]` — The log's records of some of its episodes.
 - `async def acknowledge(self, cursor: int) -> None`
 - `async def publish(self, channel: str, adapter: str, path: str) -> int`
 - `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None`
@@ -2293,13 +2336,14 @@ A job over a runner. Created by `RolloutJobs.start`.
 class RolloutJobs
 ```
 
-Starts jobs on a runner. `log` keeps each job's unacknowledged episodes on disk (under `log/JOB`), so that a
-caller that stops can go on from its cursor; `guard` is called before runs are admitted and raises to refuse them
-(a machine out of memory, say).
+Starts jobs on a runner. `log` is where each job keeps its log (under `log/JOB`), so that every episode
+outlives the process and a caller that stops can go on from its cursor; the episodes' traces and events go to
+`blobs` (by default a store in files under `log/blobs`). `guard` is called before runs are admitted and raises
+to refuse them (a machine out of memory, say).
 
 **Methods**
 
-- `def __init__(self, runner: Runner, recorder: Recorded, *, log: Path | None = None, hooks: Sequence[JobHooks] = (), guard: Callable[[], None] | None = None) -> None`
+- `def __init__(self, runner: Runner, recorder: Recorded, *, log: Path | None = None, blobs: Blobs | None = None, hooks: Sequence[JobHooks] = (), guard: Callable[[], None] | None = None) -> None`
 - `async def start(self, *, program: ProgramReference, binding: RunBinding, in_flight: int, name: str = '') -> RolloutJob` — A job that runs `program` (with each ticket's row as its parameters) under `binding`, at most `in_flight`
   runs at a time. A `name` makes the job's log one a later caller finds again: a job of that name that is
   still open is closed first (its runs are cancelled), and the new one goes on over its log.
@@ -2344,6 +2388,16 @@ class Status
 | `running` | `int` | required |  |
 | `finished` | `int` | required | Episodes in the log, of every outcome. |
 | `acknowledged` | `int` | required | The cursor the caller has consumed through. |
+
+### `stored`
+
+*function* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+
+```python
+async def stored(episode: Episode, events: Sequence[RunEvent], blobs: Blobs) -> Record
+```
+
+Keep an episode's traces and its run's events in `blobs`; returns the record that names them.
 
 ### `Ticket`
 
@@ -2566,6 +2620,8 @@ class Iteration
 | `skipped` | `str \| None` | `None` | Why the group was not trained on, if the algorithm found nothing to train on. |
 | `error` | `str \| None` | `None` | What went wrong, if the trainer's step failed. |
 | `adapter` | `str \| None` | `None` | The weights the step produced. |
+| `batch` | `Mapping[str, JsonValue] \| None` | `None` | A blob's reference: the sequences the step trained on, each as `[source, advantage]`. |
+| `checkpoint` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | Blobs' references, by name: what the step left behind (the weights, and what the trainer goes on from). |
 | `version` | `int \| None` | `None` | The channel's version once they were published. |
 | `unlocked` | `int` | `0` | Rows of the catalog unlocked after this group. |
 
@@ -2597,6 +2653,7 @@ class Step
 | `adapter` | `str` | required | The name of the new weights. |
 | `path` | `str` | required | Where engines read them. |
 | `metrics` | `Mapping[str, float]` | required |  |
+| `artifacts` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | What the step left behind, by name, as paths of files and directories: the weights, and whatever the trainer would need to go on from exactly here. Whoever keeps a record of the run keeps these. |
 
 ### `StepFailed`
 
@@ -2629,13 +2686,13 @@ Where a training run keeps its small state: a directory, or anything else that h
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, store: Store, *, channel: str, algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None) -> None
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, store: Store, *, channel: str, algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, blobs: Blobs | None = None) -> None
 ```
 
 Train `channel`'s policy on `catalog` for `groups` more groups. `algorithm` is `Grpo()` unless given.
 `overlap`: the next group starts when at most this many episodes of earlier groups are still running. `binding`
 says how the program's model slots and imports are served (by default: every slot from `channel`, each import
-from the tool set of its own name).
+from the tool set of its own name). `blobs` is where each step's batch and what it left behind are kept.
 
 ### `Trainer`
 
@@ -2668,6 +2725,7 @@ A sequence to train on, and its advantage: every token the policy sampled in it 
 |---|---|---|---|
 | `epoch` | `Epoch` | required |  |
 | `advantage` | `float` | required |  |
+| `source` | `str` | `''` | Where the sequence is from, for the record of what a step trained on: `cursor/slot/index` in the job's log. |
 
 ## `rollout_train.inference`
 
@@ -2899,6 +2957,7 @@ Tokens `start` to `end` (exclusive) of an epoch were sampled by the policy, at w
 | `start` | `int` | required |  |
 | `end` | `int` | required |  |
 | `version` | `int` | required |  |
+| `effect_id` | `str` | `''` | The sample that produced them: the `effect_id` its run's events know it by. |
 
 ### `ThinkingFormat`
 
@@ -3013,6 +3072,7 @@ class Profile
 | `serve` | `str \| None` | `None` | `host:port` to serve the rollout jobs and the model endpoint for harnesses on. |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
+| `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
 | `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
 | `feed_runs` | `int \| None` | `None` | Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are deleted). |

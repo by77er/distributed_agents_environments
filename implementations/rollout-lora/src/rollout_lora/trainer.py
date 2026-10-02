@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from rollout_lora.settings import LoraSettings
-from rollout_lora.worker import Job, TrainerProcess
+from rollout_lora.worker import MINIBATCHES, OPTIMIZER, Job, TrainerProcess
 from rollout_train.trainer import Budget, Step, Weighted
 
 
@@ -20,7 +20,8 @@ class LoraTrainer:
         self.budget = Budget(self.settings.sequence_tokens, self.settings.sequences_per_step)
         self._adapters = directory / "adapters"
         self._adapters.mkdir(parents=True, exist_ok=True)
-        self._process = TrainerProcess(Job(model, directory / "trainer", self.settings))
+        self._state = directory / "trainer"
+        self._process = TrainerProcess(Job(model, self._state, self.settings))
         steps = [
             int(path.name.removeprefix("step-"))
             for path in self._adapters.glob("step-*")
@@ -39,4 +40,9 @@ class LoraTrainer:
         previous = self._adapters / f"step-{self.steps}" if self.steps else None
         metrics = await self._process.step(batch, seed=seed, adapter=self._adapters / name, previous=previous)
         self.steps += 1
-        return Step(name, str(self._adapters / name), metrics)
+        artifacts = {
+            "adapter": str(self._adapters / name),
+            "optimizer": str(self._state / OPTIMIZER),
+            "minibatches": str(self._state / MINIBATCHES),
+        }
+        return Step(name, str(self._adapters / name), metrics, artifacts)

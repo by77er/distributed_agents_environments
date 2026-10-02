@@ -3,13 +3,19 @@
 The loop writes these and sends them to the job as `iteration` notes; the report and the monitor read them.
 """
 
+import asyncio
+import io
 import json
+import tarfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import JsonValue
+
+from rollout.contracts import BlobReference
+from rollout.harness.blobs import Blobs
 
 
 @dataclass
@@ -44,6 +50,10 @@ class Iteration:
     """What went wrong, if the trainer's step failed."""
     adapter: str | None = None
     """The weights the step produced."""
+    batch: Mapping[str, JsonValue] | None = None
+    """A blob's reference: the sequences the step trained on, each as `[source, advantage]`."""
+    checkpoint: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+    """Blobs' references, by name: what the step left behind (the weights, and what the trainer goes on from)."""
     version: int | None = None
     """The channel's version once they were published."""
     unlocked: int = 0
@@ -56,6 +66,20 @@ class Iteration:
     def from_json(cls, data: Mapping[str, Any]) -> "Iteration":
         known = {each.name for each in fields(cls)}
         return cls(**{key: value for key, value in data.items() if key in known})
+
+
+async def kept(path: Path, blobs: Blobs) -> BlobReference:
+    """Keep a file, or a directory as a tar archive, in `blobs`."""
+
+    def read() -> tuple[bytes, str]:
+        if path.is_file():
+            return path.read_bytes(), "application/octet-stream"
+        packed = io.BytesIO()
+        with tarfile.open(fileobj=packed, mode="w") as archive:
+            archive.add(path, arcname=path.name)
+        return packed.getvalue(), "application/x-tar"
+
+    return await blobs.put(*await asyncio.to_thread(read))
 
 
 class Store(Protocol):
