@@ -1,6 +1,6 @@
 # Several runners
 
-Status: **Working** (2026-10-02) · Code: `rollout.durable.runner`, `rollout.database`
+Status: **Working** (2026-10-02) · Code: `rollout_durable.runner`, `rollout_durable.database`
 
 Several `DurableRunner` processes can share one Postgres database. They are peers: any of them accepts messages and
 cancellations for any run, and any of them can execute any run. Without `database`, a runner keeps its state in SQLite
@@ -17,7 +17,7 @@ runner = DurableRunner(
 
 | Parameter of `DurableRunner` | Default | Meaning |
 |---|---|---|
-| `database` | `None` (SQLite in `directory`) | a Postgres URL, or a `rollout.database.Database`, shared with other runners |
+| `database` | `None` (SQLite in `directory`) | a Postgres URL, or a `rollout_durable.database.Database`, shared with other runners |
 | `runner_id` | `runner-` and 12 random hex digits; `local` on SQLite | this runner's name among them; it is also DBOS's executor id |
 | `heartbeat_interval` | `2.0` | seconds between heartbeats |
 | `takeover_after` | `timedelta(seconds=15)` | how long a heartbeat may stop before another runner recovers the runs |
@@ -85,7 +85,7 @@ The tests start a throwaway Postgres with `pgembed`, a development dependency th
 
 - The in-process integration tests (durable runner, eviction, computer tools, agent sessions, coordination) run on
   both SQLite and Postgres.
-- `tests/durable/test_cluster.py` runs two or three runners as separate processes on one database. Messages through
+- `tests/rollout_durable/test_cluster.py` runs two or three runners as separate processes on one database. Messages through
   different runners reach one run in order, once each, including a new conversation messaged through every runner at
   once and a retry through every runner. A killed runner's run is taken over. A restarted runner releases its runs at
   once. A command in flight when its runner is killed is not run again by the runner that takes over. An evicted run

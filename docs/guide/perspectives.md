@@ -65,7 +65,7 @@ await job.publish("policy", step.adapter, step.path)
   weights version it was sampled at.
 - An **episode** has its labels, its outcome, its result, and for each model slot the token sequences the policy saw
   and continued, with the logprobs it sampled them at.
-- `rollout.training.train` is the loop most runs use: a curriculum over a catalog, groups, a step per group.
+- `rollout_train.train` is the loop most runs use: a curriculum over a catalog, groups, a step per group.
 - Watching: `job.status()`, the job's own events (tickets, episodes, published weights, your notes), and each run's
   feed, on one page (`rollout monitor RUN/feed`).
 

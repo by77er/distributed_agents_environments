@@ -1,6 +1,6 @@
 # Durability
 
-Status: **Working** (2026-10-02) · Code: `rollout.durable`
+Status: **Working** (2026-10-02) · Code: `rollout_durable`
 
 `DurableRunner` implements the `Runner` protocol on DBOS, a durable-workflow library over SQLite or Postgres. A run
 survives the death of its process: restarted, it continues where it stopped without repeating the effects it already

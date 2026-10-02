@@ -10,9 +10,9 @@ from project_assistant.http import create_app
 from project_assistant.notes import NotesStore
 from project_assistant.repository import RepositoryTools
 from project_assistant.service import AssistantService, Settings
-from rollout.core.contracts import Conflict, RunEventType, Text, ToolCall
-from rollout.core.harness import DeliveryMode, DirectModel, Envelope, rollout
-from rollout.core.testing import ScriptedModelEndpoint, ScriptedReply, local_run, tool_call_reply
+from rollout.contracts import Conflict, RunEventType, Text, ToolCall
+from rollout.harness import DeliveryMode, DirectModel, Envelope, rollout
+from rollout.testing import ScriptedModelEndpoint, ScriptedReply, local_run, tool_call_reply
 
 
 @pytest.fixture

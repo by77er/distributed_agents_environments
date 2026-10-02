@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from rollout.core.harness import Blobs, FileBlobStore
-from rollout.database import create_database, temporary_postgres
+from rollout.harness import Blobs, FileBlobStore
+from rollout_durable.database import create_database, temporary_postgres
 
 
 @pytest.fixture(scope="session")
@@ -80,6 +80,6 @@ def blob_store(request: pytest.FixtureRequest, tmp_path: Path) -> Blobs:
     """Each test using this runs twice: with a `FileBlobStore` and with an `S3BlobStore`."""
     if request.param == "file":
         return FileBlobStore(tmp_path / "blobs")
-    from rollout.adapters.s3 import S3BlobStore
+    from rollout_s3 import S3BlobStore
 
     return S3BlobStore.from_url(f"s3://{request.getfixturevalue('s3_bucket')}/blobs")

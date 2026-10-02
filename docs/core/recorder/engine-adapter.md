@@ -1,6 +1,6 @@
 # Engines
 
-Status: **Working** (2026-10-02) · Code: `rollout.inference` · See [inference](../../inference/README.md)
+Status: **Working** (2026-10-02) · Code: `rollout_train.inference` · See [inference](../../inference/README.md)
 
 An engine is one replica serving a model: tokens in; tokens, logprobs and a finish reason out.
 

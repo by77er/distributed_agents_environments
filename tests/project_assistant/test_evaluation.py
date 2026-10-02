@@ -1,7 +1,7 @@
 from project_assistant.evaluation.harness import EvaluationSettings, evaluate, summarize
-from rollout.core.contracts import Role, ToolCall
-from rollout.core.harness import DirectModel
-from rollout.core.testing import ScriptedModelEndpoint, tool_call_reply
+from rollout.contracts import Role, ToolCall
+from rollout.harness import DirectModel
+from rollout.testing import ScriptedModelEndpoint, tool_call_reply
 
 
 async def test_a_scenario_is_checked_judged_and_measured() -> None:

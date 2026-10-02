@@ -1,7 +1,7 @@
 # Testing
 
 Tasks and agents are tested against a scripted model: no GPU, no network, and deterministic. The helpers live in
-`rollout.core.testing`.
+`rollout.testing`.
 
 ## The scripted endpoint
 
@@ -54,9 +54,9 @@ With `pytest-asyncio` in auto mode (configured in `pyproject.toml`), test functi
 ```python
 import asyncio
 
-from rollout.core.contracts import Message, RunEventType, SampleRequest, ToolCall
-from rollout.core.harness import Agent, End, Observation, RunContext, Task, rollout, tool
-from rollout.core.testing import events_of, local_run, payload, tool_call_reply
+from rollout.contracts import Message, RunEventType, SampleRequest, ToolCall
+from rollout.harness import Agent, End, Observation, RunContext, Task, rollout, tool
+from rollout.testing import events_of, local_run, payload, tool_call_reply
 
 
 class Thermostat(Task):

@@ -1,0 +1,25 @@
+[project]
+name = "project-assistant"
+version = "0.0.0"
+description = "A long-lived conversational agent about one code repository"
+requires-python = ">=3.13"
+dependencies = [
+    "rollout[http]",
+    "rollout-durable",
+    "rollout-openai",
+]
+
+[project.scripts]
+project-assistant = "project_assistant.__main__:main"
+
+[tool.uv.sources]
+rollout = { workspace = true }
+rollout-durable = { workspace = true }
+rollout-openai = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/project_assistant"]

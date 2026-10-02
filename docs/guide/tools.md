@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from rollout.core.harness import Observation, RunContext, Task, tool
+from rollout.harness import Observation, RunContext, Task, tool
 
 
 class Library(Task):
@@ -99,9 +99,9 @@ ends the episode. `score` can then judge the final answer.
 ```python
 import asyncio
 
-from rollout.core.contracts import Role, ToolCall, ToolResultBlock
-from rollout.core.harness import Agent, rollout
-from rollout.core.testing import local_run, tool_call_reply
+from rollout.contracts import Role, ToolCall, ToolResultBlock
+from rollout.harness import Agent, rollout
+from rollout.testing import local_run, tool_call_reply
 
 
 class FindBook(Library):
@@ -177,10 +177,10 @@ from collections.abc import Mapping, Sequence
 
 from pydantic import JsonValue
 
-from rollout.core.contracts import Text, ToolResult, ToolSpecification
-from rollout.core.harness import DirectModel, ModelBinding, RunBinding, RunSpecification, ToolBinding, agent_program
-from rollout.core.local import LocalRunner
-from rollout.core.testing import ScriptedModelEndpoint
+from rollout.contracts import Text, ToolResult, ToolSpecification
+from rollout.harness import DirectModel, ModelBinding, RunBinding, RunSpecification, ToolBinding, agent_program
+from rollout.local import LocalRunner
+from rollout.testing import ScriptedModelEndpoint
 
 
 class Bookmarks:
@@ -241,7 +241,7 @@ Under the durable runner, a call that a crash interrupted is handled by the tool
 
 ### Serving a tool set over HTTP
 
-`rollout.core.harness.remote.serve(tool_set)` returns a Starlette application with two routes:
+`rollout.harness.remote.serve(tool_set)` returns a Starlette application with two routes:
 
 | Route | Body | Answer |
 |---|---|---|

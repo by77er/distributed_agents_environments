@@ -1,6 +1,6 @@
 # Harness
 
-Status: **Working** (2026-10-02) · Code: `rollout.core.harness`
+Status: **Working** (2026-10-02) · Code: `rollout.harness`
 
 The harness is the framework-owned rollout loop and the interfaces around it. The loop drives a **task** (the
 environment the agent acts in) with an **agent** (the policy side). A **runner** executes runs of it.
@@ -21,7 +21,7 @@ is the reference for the rest: the loop itself, programs, run specifications and
 
 ## The loop
 
-`rollout(task, agent, run)` runs one episode. This is `rollout.core.harness.loop`, without its validation calls:
+`rollout(task, agent, run)` runs one episode. This is `rollout.harness.loop`, without its validation calls:
 
 ```python
 async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
@@ -162,8 +162,8 @@ class RunHandle(Protocol):
 
 | Runner | Code | Behaviour |
 |---|---|---|
-| `LocalRunner(...)` | `rollout.core.local` | Runs each program as a task on the current asyncio loop. Nothing persists: a process crash loses its runs. |
-| `DurableRunner(directory, ...)` | `rollout.durable` | Runs each program inside a DBOS workflow in the runner's process. Effects are recorded steps, so a run resumes after a crash ([durability](../../durability/README.md)). Needs `await launch()` before use and `await close()` after. |
+| `LocalRunner(...)` | `rollout.local` | Runs each program as a task on the current asyncio loop. Nothing persists: a process crash loses its runs. |
+| `DurableRunner(directory, ...)` | `rollout_durable` | Runs each program inside a DBOS workflow in the runner's process. Effects are recorded steps, so a run resumes after a crash ([durability](../../durability/README.md)). Needs `await launch()` before use and `await close()` after. |
 
 Both take `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
 bindings, by name), `environments` (an `EnvironmentService`), `blobs`, `recorder` (serves recorded bindings) and

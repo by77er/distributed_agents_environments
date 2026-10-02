@@ -10,7 +10,7 @@ them is not this program's business: it sends each slot's model messages and too
 talks through the game's chat: an observation shows the last few messages an agent has heard or said, each with
 its age in turns.
 
-What an agent remembers is a `rollout.core.harness.Memory`: the current observation in full, with the map; its recent
+What an agent remembers is a `rollout.harness.Memory`: the current observation in full, with the map; its recent
 turns as `describe(recalled=True)` gives them (what was in sight, what it did, how that went, without the map); and,
 of everything older, a summary it wrote itself when its memory was full. The team compacts in the same turn: a turn
 waits for its slowest agent, so agents that write their summaries together hold the team up once, and agents that
@@ -38,8 +38,8 @@ from minecraft_swarm.prompts import (
     system_prompt,
 )
 from minecraft_swarm.tasks import TEAM, TURNS_PER_MINUTE, Task, catalog
-from rollout.core.contracts import Message, Text, ToolCall
-from rollout.core.harness import Memory, ModelSlot, Program, RunContext
+from rollout.contracts import Message, Text, ToolCall
+from rollout.harness import Memory, ModelSlot, Program, RunContext
 
 TICKS_PER_MINUTE = 60 * TICKS_PER_SECOND
 SPARE_TURNS = 4

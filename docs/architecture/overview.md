@@ -17,11 +17,11 @@ says which engines, trainer, runner and tool sets stand behind all of it.
 | Layer | Package | What it holds |
 |---|---|---|
 | Harness | `rollout.core` | Programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory |
-| Durability | `rollout.durable` | `DurableRunner`: runs that survive their process, on DBOS |
-| Environments | `rollout.environments` | Computers for tasks: backends and the tools that act on them |
-| Inference | `rollout.inference`, `rollout.recorder` | Channels and engines; token-exact recording; the endpoint for harnesses |
-| Training | `rollout.rollouts`, `rollout.training` | Rollout jobs and episodes; the loop, the group algorithm, the curriculum, the trainer |
-| Deployment | `rollout.profile`, `rollout.cli`, `rollout.monitor` | A deployment described and opened; the `rollout` command; the live page |
+| Durability | `rollout_durable` | `DurableRunner`: runs that survive their process, on DBOS |
+| Environments | `rollout_computers` | Computers for tasks: backends and the tools that act on them |
+| Inference | `rollout_train.inference`, `rollout_train.recorder` | Channels and engines; token-exact recording; the endpoint for harnesses |
+| Training | `rollout_train.rollouts`, `rollout_train` | Rollout jobs and episodes; the loop, the group algorithm, the curriculum, the trainer |
+| Deployment | `rollout_train.profile`, `rollout_train.cli`, `rollout_train.monitor` | A deployment described and opened; the `rollout` command; the live page |
 
 Code above a protocol never learns which implementation it holds. Task and agent code is the same under either
 runner; a training loop is the same with everything in one process or with runs, engines and trainer elsewhere.

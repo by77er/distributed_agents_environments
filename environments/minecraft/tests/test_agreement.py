@@ -14,14 +14,14 @@ from typing import Any
 
 import pytest
 import yaml
+
 from minecraft_swarm import control
 from minecraft_swarm.limits import LIMITS
 from minecraft_swarm.paper import CONFIG, PAPER_VERSION, PLUGIN_SOURCES, server_properties
 from minecraft_swarm.prompts import ACTIONS, DIRECTION, SLOT, SYMBOLS, symbol, system_prompt
 from minecraft_swarm.tasks import catalog
 from minecraft_swarm.worlds import OPERATIONS, MinecraftTools, MinecraftWorlds
-
-from rollout.core.contracts import RetryClass
+from rollout.contracts import RetryClass
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
 CHUNK = 16

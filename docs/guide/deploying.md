@@ -12,14 +12,14 @@ address = "http://trainer-1:8900"             # what others reach it at, if not 
 
 [channels.policy]
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
-renderer = "rollout.recorder.renderers:qwen35"   # the model family's token format
-engine = "rollout.inference.vllm:VllmEngine"     # what serves it; each entry of `engines` is one replica's options
+renderer = "rollout_qwen:qwen35"   # the model family's token format
+engine = "rollout_vllm:VllmEngine"     # what serves it; each entry of `engines` is one replica's options
 engines = [{ gpu_memory_utilization = 0.78, max_model_len = 8192, max_num_seqs = 20 }]
 thinking_tokens = 1024
 answer_tokens = 400
 
 [trainer]
-kind = "rollout.lora:LoraTrainer"             # what trains; the keys below it does not name here are its settings
+kind = "rollout_lora:LoraTrainer"             # what trains; the keys below it does not name here are its settings
 channel = "policy"                            # the channel whose policy it trains
 colocated = true                              # it shares the engines' GPU: they sleep while it steps
 rank = 32

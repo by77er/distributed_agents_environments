@@ -8,6 +8,23 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'darwin'",
 ]
 
+[manifest]
+members = [
+    "agent-sessions",
+    "minecraft-swarm",
+    "project-assistant",
+    "rollout",
+    "rollout-computers",
+    "rollout-durable",
+    "rollout-lora",
+    "rollout-openai",
+    "rollout-qwen",
+    "rollout-s3",
+    "rollout-train",
+    "rollout-vllm",
+    "rollout-workspace",
+]
+
 [[package]]
 name = "accelerate"
 version = "1.15.0"
@@ -33,6 +50,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b3/92/2c3e2ad5ce9683876729034082af19cfb3fbafd1c298b22a0b0c10ecfdc5/agent_detector-2.0.0.tar.gz", hash = "sha256:19c8ae185dbdca23c24abdcd8ac2cf58b8e84dc284c6f6db536656601f9ffc3f", size = 55094, upload-time = "2026-09-02T14:19:51.88Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/72/15/504337e302d070bd2ff2f39418bb17d2ad73c662c403a4f37cb4e5c5b237/agent_detector-2.0.0-py3-none-any.whl", hash = "sha256:22c6a1c9c23894a12f55aea625f060b8d3330fba774de72d02d5442bb580417f", size = 9352, upload-time = "2026-09-02T14:19:50.971Z" },
+]
+
+[[package]]
+name = "agent-sessions"
+version = "0.0.0"
+source = { editable = "products/agent-sessions" }
+dependencies = [
+    { name = "rollout", extra = ["http"] },
+    { name = "rollout-computers" },
+    { name = "rollout-durable" },
+    { name = "rollout-openai" },
+    { name = "rollout-s3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
+    { name = "rollout-computers", editable = "implementations/rollout-computers" },
+    { name = "rollout-durable", editable = "implementations/rollout-durable" },
+    { name = "rollout-openai", editable = "implementations/rollout-openai" },
+    { name = "rollout-s3", editable = "implementations/rollout-s3" },
 ]
 
 [[package]]
@@ -2213,6 +2251,21 @@ wheels = [
 ]
 
 [[package]]
+name = "minecraft-swarm"
+version = "0.0.0"
+source = { editable = "environments/minecraft" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "rollout" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "rollout", editable = "libraries/rollout" },
+]
+
+[[package]]
 name = "mistral-common"
 version = "1.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3373,6 +3426,23 @@ wheels = [
 ]
 
 [[package]]
+name = "project-assistant"
+version = "0.0.0"
+source = { editable = "products/project-assistant" }
+dependencies = [
+    { name = "rollout", extra = ["http"] },
+    { name = "rollout-durable" },
+    { name = "rollout-openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
+    { name = "rollout-durable", editable = "implementations/rollout-durable" },
+    { name = "rollout-openai", editable = "implementations/rollout-openai" },
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4279,7 +4349,7 @@ wheels = [
 [[package]]
 name = "rollout"
 version = "0.0.0"
-source = { editable = "." }
+source = { editable = "libraries/rollout" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -4287,39 +4357,193 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-assistant = [
-    { name = "pillow" },
+http = [
     { name = "starlette" },
     { name = "uvicorn" },
 ]
-durable = [
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "pydantic", specifier = ">=2.11" },
+    { name = "rfc8785", specifier = ">=0.1.4" },
+    { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
+]
+provides-extras = ["http"]
+
+[[package]]
+name = "rollout-computers"
+version = "0.0.0"
+source = { editable = "implementations/rollout-computers" }
+dependencies = [
+    { name = "pillow" },
+    { name = "rollout" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pillow", specifier = ">=11" },
+    { name = "rollout", editable = "libraries/rollout" },
+]
+
+[[package]]
+name = "rollout-durable"
+version = "0.0.0"
+source = { editable = "implementations/rollout-durable" }
+dependencies = [
     { name = "dbos" },
+    { name = "rollout" },
     { name = "sqlalchemy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dbos", specifier = ">=3.1" },
+    { name = "rollout", editable = "libraries/rollout" },
+    { name = "sqlalchemy", specifier = ">=2" },
+]
+
+[[package]]
+name = "rollout-lora"
+version = "0.0.0"
+source = { editable = "implementations/rollout-lora" }
+dependencies = [
+    { name = "accelerate" },
+    { name = "flash-linear-attention" },
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "rollout" },
+    { name = "rollout-train" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", specifier = ">=1.0" },
+    { name = "flash-linear-attention", specifier = ">=0.5" },
+    { name = "huggingface-hub", specifier = ">=0.30" },
+    { name = "numpy", specifier = ">=2" },
+    { name = "rollout", editable = "libraries/rollout" },
+    { name = "rollout-train", editable = "libraries/rollout-train" },
+    { name = "safetensors", specifier = ">=0.5" },
+    { name = "torch", specifier = ">=2.5" },
+    { name = "transformers", specifier = ">=4.57" },
+]
+
+[[package]]
+name = "rollout-openai"
+version = "0.0.0"
+source = { editable = "implementations/rollout-openai" }
+dependencies = [
+    { name = "rollout" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rollout", editable = "libraries/rollout" }]
+
+[[package]]
+name = "rollout-qwen"
+version = "0.0.0"
+source = { editable = "implementations/rollout-qwen" }
+dependencies = [
+    { name = "rollout-train" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rollout-train", editable = "libraries/rollout-train" },
+    { name = "transformers", specifier = ">=4.57" },
+]
+
+[[package]]
+name = "rollout-s3"
+version = "0.0.0"
+source = { editable = "implementations/rollout-s3" }
+dependencies = [
+    { name = "boto3" },
+    { name = "rollout" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.40" },
+    { name = "rollout", editable = "libraries/rollout" },
+]
+
+[[package]]
+name = "rollout-train"
+version = "0.0.0"
+source = { editable = "libraries/rollout-train" }
+dependencies = [
+    { name = "rollout" },
+]
+
+[package.optional-dependencies]
+durable = [
+    { name = "rollout-durable" },
 ]
 http = [
     { name = "starlette" },
     { name = "uvicorn" },
 ]
-minecraft = [
-    { name = "pyyaml" },
-]
 report = [
     { name = "matplotlib" },
 ]
-s3 = [
-    { name = "boto3" },
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib", marker = "extra == 'report'", specifier = ">=3.9" },
+    { name = "rollout", editable = "libraries/rollout" },
+    { name = "rollout-durable", marker = "extra == 'durable'", editable = "implementations/rollout-durable" },
+    { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]
-training = [
-    { name = "accelerate" },
-    { name = "flash-linear-attention" },
-    { name = "huggingface-hub" },
-    { name = "numpy" },
-    { name = "safetensors" },
-    { name = "torch" },
-]
-vllm = [
+provides-extras = ["http", "report", "durable"]
+
+[[package]]
+name = "rollout-vllm"
+version = "0.0.0"
+source = { editable = "implementations/rollout-vllm" }
+dependencies = [
+    { name = "rollout" },
+    { name = "rollout-train" },
     { name = "transformers" },
     { name = "vllm", marker = "sys_platform == 'linux'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rollout", editable = "libraries/rollout" },
+    { name = "rollout-train", editable = "libraries/rollout-train" },
+    { name = "transformers", specifier = ">=4.57" },
+    { name = "vllm", marker = "sys_platform == 'linux'", specifier = ">=0.30" },
+]
+
+[[package]]
+name = "rollout-workspace"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "agent-sessions" },
+    { name = "minecraft-swarm" },
+    { name = "project-assistant" },
+    { name = "rollout", extra = ["http"] },
+    { name = "rollout-computers" },
+    { name = "rollout-durable" },
+    { name = "rollout-openai" },
+    { name = "rollout-s3" },
+    { name = "rollout-train", extra = ["http", "report"] },
+]
+
+[package.optional-dependencies]
+gpu = [
+    { name = "rollout-lora" },
+    { name = "rollout-qwen" },
+    { name = "rollout-vllm" },
 ]
 
 [package.dev-dependencies]
@@ -4339,29 +4563,20 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", marker = "extra == 'training'", specifier = ">=1.0" },
-    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.40" },
-    { name = "dbos", marker = "extra == 'durable'", specifier = ">=3.1" },
-    { name = "flash-linear-attention", marker = "extra == 'training'", specifier = ">=0.5" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "huggingface-hub", marker = "extra == 'training'", specifier = ">=0.30" },
-    { name = "matplotlib", marker = "extra == 'report'", specifier = ">=3.9" },
-    { name = "numpy", marker = "extra == 'training'", specifier = ">=2" },
-    { name = "pillow", marker = "extra == 'assistant'", specifier = ">=11" },
-    { name = "pydantic", specifier = ">=2.11" },
-    { name = "pyyaml", marker = "extra == 'minecraft'", specifier = ">=6" },
-    { name = "rfc8785", specifier = ">=0.1.4" },
-    { name = "safetensors", marker = "extra == 'training'", specifier = ">=0.5" },
-    { name = "sqlalchemy", marker = "extra == 'durable'", specifier = ">=2" },
-    { name = "starlette", marker = "extra == 'assistant'", specifier = ">=0.48" },
-    { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
-    { name = "torch", marker = "extra == 'training'", specifier = ">=2.5" },
-    { name = "transformers", marker = "extra == 'vllm'", specifier = ">=4.57" },
-    { name = "uvicorn", marker = "extra == 'assistant'", specifier = ">=0.37" },
-    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
-    { name = "vllm", marker = "sys_platform == 'linux' and extra == 'vllm'", specifier = ">=0.30" },
+    { name = "agent-sessions", editable = "products/agent-sessions" },
+    { name = "minecraft-swarm", editable = "environments/minecraft" },
+    { name = "project-assistant", editable = "products/project-assistant" },
+    { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
+    { name = "rollout-computers", editable = "implementations/rollout-computers" },
+    { name = "rollout-durable", editable = "implementations/rollout-durable" },
+    { name = "rollout-lora", marker = "extra == 'gpu'", editable = "implementations/rollout-lora" },
+    { name = "rollout-openai", editable = "implementations/rollout-openai" },
+    { name = "rollout-qwen", marker = "extra == 'gpu'", editable = "implementations/rollout-qwen" },
+    { name = "rollout-s3", editable = "implementations/rollout-s3" },
+    { name = "rollout-train", extras = ["http", "report"], editable = "libraries/rollout-train" },
+    { name = "rollout-vllm", marker = "extra == 'gpu'", editable = "implementations/rollout-vllm" },
 ]
-provides-extras = ["vllm", "training", "durable", "http", "report", "minecraft", "assistant", "s3"]
+provides-extras = ["gpu"]
 
 [package.metadata.requires-dev]
 dev = [

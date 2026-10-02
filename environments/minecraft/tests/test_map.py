@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from minecraft_swarm.prompts import describe, render_map, symbol
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"

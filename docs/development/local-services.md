@@ -44,7 +44,7 @@ uv run agents serve --database "$ROLLOUT_DATABASE" --blobs "$ROLLOUT_BLOBS" --ru
 
 Running several such servers is described in [several runners](../durability/runners.md).
 
-`--blobs s3://bucket/prefix` keeps images in object storage through `rollout.adapters.s3.S3BlobStore`, which needs
+`--blobs s3://bucket/prefix` keeps images in object storage through `rollout_s3.S3BlobStore`, which needs
 the `s3` extra. Each blob is one object named by its SHA-256 under the prefix. The endpoint and credentials come from
 the usual `AWS_*` variables, so the same flag works on AWS S3 and on S3-compatible services. Environments stay
 directories under `--state`.

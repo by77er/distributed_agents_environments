@@ -1,6 +1,6 @@
 # Inference
 
-Status: **Working** (2026-10-02) · Code: `rollout.inference` · See [engines](../core/recorder/engine-adapter.md), [recorder](../core/recorder/README.md)
+Status: **Working** (2026-10-02) · Code: `rollout_train.inference` · See [engines](../core/recorder/engine-adapter.md), [recorder](../core/recorder/README.md)
 
 A **channel** is a policy being served, by name. Task code never sees one: a run's binding names a channel for a
 model slot, and the recorder samples from it. Whoever trains publishes new weights to it; whoever deploys decides

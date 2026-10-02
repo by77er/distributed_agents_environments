@@ -48,8 +48,8 @@ re-raises after `teardown`, and `score` does not run. The loop itself is in
 An `Observation` is what the model sees next. Its first argument takes text, a `Message`, or a list of messages:
 
 ```python
-from rollout.core.contracts import Message, Role, Text
-from rollout.core.harness import End, Ending, Observation, WaitFor
+from rollout.contracts import Message, Role, Text
+from rollout.harness import End, Ending, Observation, WaitFor
 
 Observation("Guess the word.")                                   # one USER text message
 Observation(Message.user("Guess the word."))                     # the same, explicitly
@@ -101,9 +101,9 @@ guesses, and truncates after three replies.
 ```python
 import asyncio
 
-from rollout.core.contracts import Message
-from rollout.core.harness import Agent, End, Ending, Observation, RunContext, Task, rollout
-from rollout.core.testing import local_run
+from rollout.contracts import Message
+from rollout.harness import Agent, End, Ending, Observation, RunContext, Task, rollout
+from rollout.testing import local_run
 
 
 class Wordle(Task):
@@ -155,7 +155,7 @@ A task can sample models itself, for example a simulated user or an opponent. De
 sample it through `run.models[...]`. Only the `policy` slot's replies form the agent's turns.
 
 ```python
-from rollout.core.harness import ModelSlot
+from rollout.harness import ModelSlot
 
 
 class SimulatedSupport(Task):

@@ -4,6 +4,7 @@ import asyncio
 import shutil
 
 import pytest
+
 from minecraft_swarm.control import Control
 from minecraft_swarm.paper import (
     PAPER_VERSION,

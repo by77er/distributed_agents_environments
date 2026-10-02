@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import JsonValue
+
 from minecraft_swarm.catalog import Swarm
 from minecraft_swarm.episode import TICKS_PER_MINUTE, SwarmEpisode, action, answer
 from minecraft_swarm.prompts import COMPACT, NO_CALL, ONE_CALL
 from minecraft_swarm.tasks import TEAM, catalog
 from minecraft_swarm.worlds import DROP_TICKS, OPERATIONS, WINDOW_TICKS, MinecraftTools, MinecraftWorlds
-from pydantic import JsonValue
-
-from rollout.core.contracts import (
+from rollout.contracts import (
     CapabilityContract,
     FinishReason,
     Message,
@@ -31,7 +31,7 @@ from rollout.core.contracts import (
     ToolSpecification,
     Usage,
 )
-from rollout.core.harness import (
+from rollout.harness import (
     DirectModel,
     Memory,
     ModelBinding,
@@ -42,8 +42,8 @@ from rollout.core.harness import (
     ToolBinding,
     register,
 )
-from rollout.core.local import LocalRunner
-from rollout.core.testing import payload, tool_call_reply
+from rollout.local import LocalRunner
+from rollout.testing import payload, tool_call_reply
 
 LIMIT, OUTPUT = 5_000, 1_400
 """The scripted model's context limit and the room it may use to answer. It counts 100 tokens a message."""
@@ -180,7 +180,7 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
     runner: Any
     if runner_kind == "durable":
         pytest.importorskip("dbos")
-        from rollout.durable import DurableRunner
+        from rollout_durable import DurableRunner
 
         runner = DurableRunner(
             tmp_path / "state", providers={"scripted": lambda _: model}, tool_sets={"minecraft": world}

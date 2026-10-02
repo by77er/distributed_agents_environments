@@ -13,9 +13,9 @@ from session_scripts import script
 
 from agent_sessions.faults import Server, Servers
 from agent_sessions.service import SessionInfo, SessionsService, Settings
-from rollout.core.contracts import Text, ToolResultBlock
-from rollout.core.harness import DirectModel
-from rollout.core.testing import ScriptedModelEndpoint
+from rollout.contracts import Text, ToolResultBlock
+from rollout.harness import DirectModel
+from rollout.testing import ScriptedModelEndpoint
 
 IMAGE_CACHE = Path.home() / ".cache" / "rollout" / "images"
 

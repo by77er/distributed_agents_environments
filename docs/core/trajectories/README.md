@@ -1,6 +1,6 @@
 # Episodes
 
-Status: **Working** (2026-10-02) · Code: `rollout.rollouts.episodes`, `rollout.recorder` · See [rollouts](../rollouts/README.md), [recorder](../recorder/README.md)
+Status: **Working** (2026-10-02) · Code: `rollout_train.rollouts.episodes`, `rollout_train.recorder` · See [rollouts](../rollouts/README.md), [recorder](../recorder/README.md)
 
 An episode is one finished run as whoever trains on it sees it. Nothing in it says where the run executed.
 

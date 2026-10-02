@@ -1,13 +1,13 @@
 # Monitor
 
-Status: **Working** (2026-10-02) · Code: `rollout.monitor`
+Status: **Working** (2026-10-02) · Code: `rollout_train.monitor`
 
 The monitor is a web page for watching training as it happens, at both levels: what the job is doing (groups
 submitted, episodes ended, updates, weights published, how the engines are doing), and for each run, every model
 slot's turns: what the model was sent, what it thought, what it did and what came back.
 
 ```python
-from rollout.monitor import RunFeed
+from rollout_train.monitor import RunFeed
 
 feed = RunFeed(directory)
 runner = LocalRunner(hooks=[feed])                    # every run's events and samples

@@ -1,43 +1,43 @@
+# The workspace: interface libraries, implementations of what they define, products, and environments.
+#   uv sync                 everything that needs no GPU
+#   uv sync --all-extras    with the engine, the trainer and the model family's renderer (Linux, NVIDIA GPU)
 [project]
-name = "rollout"
+name = "rollout-workspace"
 version = "0.0.0"
 description = "Durable, scalable agents and environments for agent products and reinforcement learning"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pydantic>=2.11",
-    "rfc8785>=0.1.4",
-    "httpx>=0.28",
+    "rollout[http]",
+    "rollout-train[http,report]",
+    "rollout-durable",
+    "rollout-computers",
+    "rollout-openai",
+    "rollout-s3",
+    "project-assistant",
+    "agent-sessions",
+    "minecraft-swarm",
 ]
-
-[project.scripts]
-rollout = "rollout.cli:main"
-project-assistant = "project_assistant.__main__:main"
-agents = "agent_sessions.cli:main"
-minecraft-swarm = "minecraft_swarm.cli:main"
 
 [project.optional-dependencies]
-vllm = ["vllm>=0.30; sys_platform == 'linux'", "transformers>=4.57"]
-training = [
-    "torch>=2.5",
-    "numpy>=2",
-    "safetensors>=0.5",
-    "huggingface-hub>=0.30",
-    "accelerate>=1.0",  # transformers places a model on a device with it
-    "flash-linear-attention>=0.5",  # the kernels of Qwen3.5's linear-attention layers
-]
-durable = ["dbos>=3.1", "sqlalchemy>=2"]
-http = ["starlette>=0.48", "uvicorn>=0.37"]
-report = ["matplotlib>=3.9"]
-minecraft = ["pyyaml>=6"]
-assistant = [
-    "pillow>=11",
-    "starlette>=0.48",
-    "uvicorn>=0.37",
-]
-s3 = [
-    "boto3>=1.40",
-]
+gpu = ["rollout-vllm", "rollout-lora", "rollout-qwen"]
+
+[tool.uv.workspace]
+members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft"]
+
+[tool.uv.sources]
+rollout = { workspace = true }
+rollout-train = { workspace = true }
+rollout-durable = { workspace = true }
+rollout-vllm = { workspace = true }
+rollout-lora = { workspace = true }
+rollout-qwen = { workspace = true }
+rollout-computers = { workspace = true }
+rollout-openai = { workspace = true }
+rollout-s3 = { workspace = true }
+project-assistant = { workspace = true }
+agent-sessions = { workspace = true }
+minecraft-swarm = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -54,18 +54,12 @@ docs = [
     "mkdocs-material>=9.6",
 ]
 
-[build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/rollout", "src/project_assistant", "src/agent_sessions", "environments/minecraft/minecraft_swarm"]
-
 [tool.ruff]
 line-length = 120
 target-version = "py313"
 # Code in docs/ is illustrative and hand-aligned for reading.
 extend-exclude = ["docs"]
+src = ["libraries/*/src", "implementations/*/src", "products/*/src", "environments/minecraft", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
@@ -73,8 +67,21 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
 ignore = ["RUF012"]
 
 [tool.pyright]
-include = ["src", "tests", "scripts", "environments"]
-extraPaths = ["src", "environments/minecraft"]
+include = ["libraries", "implementations", "products", "environments", "tests", "scripts"]
+extraPaths = [
+    "libraries/rollout/src",
+    "libraries/rollout-train/src",
+    "implementations/rollout-durable/src",
+    "implementations/rollout-vllm/src",
+    "implementations/rollout-lora/src",
+    "implementations/rollout-qwen/src",
+    "implementations/rollout-computers/src",
+    "implementations/rollout-openai/src",
+    "implementations/rollout-s3/src",
+    "products/project-assistant/src",
+    "products/agent-sessions/src",
+    "environments/minecraft",
+]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 

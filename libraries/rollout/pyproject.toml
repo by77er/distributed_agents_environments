@@ -1,0 +1,20 @@
+[project]
+name = "rollout"
+version = "0.0.0"
+description = "Agents and environments: tasks, agents, programs, tools, conversations, and a runner in this process"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.11",
+    "rfc8785>=0.1.4",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+http = ["starlette>=0.48", "uvicorn>=0.37"]  # to serve a tool set over HTTP
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rollout"]

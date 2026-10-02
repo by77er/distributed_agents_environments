@@ -11,9 +11,9 @@ A `DirectModel` binding names a provider, a model and sampling parameters. The r
 factory registered for that provider:
 
 ```python fragment
-from rollout.adapters.responses import codex_provider
-from rollout.core.harness import DirectModel, ModelBinding, RunBinding, SamplingParameters
-from rollout.core.local import LocalRunner
+from rollout_openai import codex_provider
+from rollout.harness import DirectModel, ModelBinding, RunBinding, SamplingParameters
+from rollout.local import LocalRunner
 
 runner = LocalRunner(providers={"codex": codex_provider()})
 binding = RunBinding(models={
@@ -40,7 +40,7 @@ and writes the new tokens back in Codex's own format, so the Codex CLI and this 
 `codex_provider()` uses it; for an API key, register a factory yourself:
 
 ```python fragment
-from rollout.adapters.responses import ApiKey, ResponsesEndpoint
+from rollout_openai import ApiKey, ResponsesEndpoint
 
 key = ApiKey(os.environ["OPENAI_API_KEY"])
 runner = LocalRunner(providers={

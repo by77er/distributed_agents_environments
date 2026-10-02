@@ -27,7 +27,7 @@ from minecraft_swarm.harness import Harness
 from minecraft_swarm.limits import LIMITS, TICKS_PER_SECOND
 from minecraft_swarm.paper import Installation, PaperServer, sweep
 from minecraft_swarm.tasks import TEAM, Built, Task, build, catalog, saturated, score, solved
-from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
+from rollout.contracts import RetryClass, Text, ToolResult, ToolSpecification
 
 WINDOW_TICKS = LIMITS.window_seconds * TICKS_PER_SECOND
 """The most game ticks a window runs: it is over sooner when every action has finished."""

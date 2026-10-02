@@ -1,6 +1,6 @@
 # Determinism
 
-Status: **Working** (2026-10-02) · Code: `rollout.durable.context`, `rollout.core.local.context`
+Status: **Working** (2026-10-02) · Code: `rollout_durable.context`, `rollout.local.context`
 
 Task, agent and program code is ordinary `async` Python. Under the `LocalRunner` it runs once. Under the
 `DurableRunner` it can run several times, because the runner resumes a run by **replay**. This page says what replay

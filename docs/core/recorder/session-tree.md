@@ -1,6 +1,6 @@
 # Epochs: what a session exports
 
-Status: **Working** (2026-10-02) · Code: `rollout.recorder.Recorder.export`
+Status: **Working** (2026-10-02) · Code: `rollout_train.recorder.Recorder.export`
 
 A session (one model slot of one run) is a series of samples. Training wants token sequences. The recorder joins
 samples into sequences by one rule:

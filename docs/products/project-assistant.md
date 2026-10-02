@@ -1,6 +1,6 @@
 # Project assistant
 
-Status: **Working** (2026-10-02) · Code: `src/project_assistant`
+Status: **Working** (2026-10-02) · Code: `products/project-assistant/src/project_assistant`
 
 A long-lived conversational agent about one code repository, served over HTTP. It answers questions grounded in the
 repository, remembers decisions across conversations, and follows up when asked.

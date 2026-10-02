@@ -7,7 +7,7 @@ from pydantic import JsonValue
 
 from minecraft_swarm.limits import LIMITS
 from minecraft_swarm.tasks import CHAINS, EARLY, TEAM, Objective, Task
-from rollout.core.contracts import ToolSpecification
+from rollout.contracts import ToolSpecification
 
 NUMBERS = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",

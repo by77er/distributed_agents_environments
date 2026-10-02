@@ -1,6 +1,6 @@
 # Rollouts
 
-Status: **Working** (2026-10-02) · Code: `rollout.rollouts` · See [episodes](../trajectories/README.md), [training](../training.md)
+Status: **Working** (2026-10-02) · Code: `rollout_train.rollouts` · See [episodes](../trajectories/README.md), [training](../training.md)
 
 Runs a task's rows at scale and delivers the finished runs as one stream of episodes per job. The caller, typically
 whoever trains, decides what to run, how often and how to group it: a job knows no algorithm.
@@ -41,12 +41,12 @@ version = await job.publish("policy", "step-3", "/adapters/step-3")
 ## Where it runs
 
 `RolloutJobs(runner, recorder)` runs jobs on any `Runner`: one that runs programs in this process, or a durable one
-over a database. `rollout.rollouts.service.create_app(jobs)` serves them over HTTP and `RolloutClient(url)` is the same
+over a database. `rollout_train.rollouts.service.create_app(jobs)` serves them over HTTP and `RolloutClient(url)` is the same
 `Jobs` for a caller on another machine. The training loop is tested under both.
 
 ## Catalog
 
-What an environment offers to be trained on (`rollout.rollouts.Catalog`): the program, its rows (easiest first), and
+What an environment offers to be trained on (`rollout_train.rollouts.Catalog`): the program, its rows (easiest first), and
 how one start of a row is drawn. See [three ways in](../../guide/perspectives.md).
 
 ## Watching

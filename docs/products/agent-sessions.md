@@ -1,6 +1,6 @@
 # Agent sessions
 
-Status: **Working** (2026-10-02) · Code: `src/agent_sessions`, `rollout.coordination`
+Status: **Working** (2026-10-02) · Code: `products/agent-sessions/src/agent_sessions`, `agent_sessions.coordination`
 
 Independent agent sessions, each with its own computer, that create and message each other and share a board. You
 manage them from the terminal.

@@ -5,6 +5,7 @@ import random
 from typing import Any
 
 import pytest
+
 from minecraft_swarm.prompts import goal
 from minecraft_swarm.tasks import (
     CHAINS,

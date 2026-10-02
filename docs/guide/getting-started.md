@@ -19,9 +19,9 @@ with a reward of 1 for the right answer.
 ```python
 import asyncio
 
-from rollout.core.contracts import Message
-from rollout.core.harness import Agent, End, Observation, RunContext, Task, rollout
-from rollout.core.testing import local_run
+from rollout.contracts import Message
+from rollout.harness import Agent, End, Observation, RunContext, Task, rollout
+from rollout.testing import local_run
 
 
 class Arithmetic(Task):

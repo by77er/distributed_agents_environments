@@ -16,26 +16,32 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "src"
 OUTPUT = ROOT / "docs" / "guide" / "reference.md"
 
 PUBLIC_MODULES = [
-    ("rollout.core.harness", "Writing tasks and agents."),
-    ("rollout.core.contracts", "Types that cross layers: canonical content, identifiers, digests, effects, events."),
-    ("rollout.core.local", "In-process implementations for the local profile."),
-    ("rollout.core.testing", "Test doubles: a scripted model endpoint and helpers."),
-    ("rollout.rollouts", "Rollout jobs: rows in, episodes out, weights published; in process or over HTTP."),
-    ("rollout.training", "The training loop, the group algorithm, the curriculum and the trainer."),
-    ("rollout.inference", "Channels: policies being served, and the engines behind them."),
-    ("rollout.recorder", "The model endpoint for trainable channels: token-exact recording."),
-    ("rollout.profile", "A deployment, described and opened."),
-    ("rollout.monitor", "A live web page over a job and its runs."),
-    ("rollout.durable", "The durability layer: runs that survive crashes and restarts, on DBOS."),
-    ("rollout.environments", "Environment backends: services that give runs computers."),
-    ("rollout.environments.tools", "Tools for agents that work on a computer: shell, files, edits and images."),
-    ("rollout.coordination", "Coordination between runs: participants, messages and a shared board."),
-    ("rollout.adapters.s3", "Blobs in S3 or any S3-compatible object store."),
-    ("rollout.adapters.responses", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
+    # libraries/rollout
+    ("rollout.harness", "Writing tasks, agents and programs; runners; memory; tool sets."),
+    ("rollout.contracts", "Types that cross layers: canonical content, identifiers, digests, effects, events."),
+    ("rollout.catalog", "What an environment offers to be trained on."),
+    ("rollout.local", "The runner in this process."),
+    ("rollout.testing", "Test doubles: a scripted model endpoint and helpers."),
+    # libraries/rollout-train
+    ("rollout_train.rollouts", "Rollout jobs: rows in, episodes out, weights published."),
+    ("rollout_train", "The training loop, the group algorithm, the curriculum, and what they ask of a trainer."),
+    ("rollout_train.inference", "Channels: policies being served, and what they ask of an engine."),
+    ("rollout_train.recorder", "The model endpoint for trainable channels: token-exact recording."),
+    ("rollout_train.profile", "A deployment, described and opened."),
+    ("rollout_train.monitor", "A live web page over a job and its runs."),
+    ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),
+    # implementations
+    ("rollout_durable", "A runner whose runs survive their process, on DBOS."),
+    ("rollout_vllm", "An engine on vLLM."),
+    ("rollout_lora", "A trainer for 4-bit checkpoints with LoRA."),
+    ("rollout_qwen", "Renderers for the Qwen model families."),
+    ("rollout_computers", "Environment backends: services that give runs computers."),
+    ("rollout_computers.tools", "Tools for agents that work on a computer: shell, files, edits and images."),
+    ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
+    ("rollout_s3", "Blobs in S3 or any S3-compatible object store."),
 ]
 
 
@@ -130,7 +136,7 @@ def defines(node: ast.stmt, name: str) -> bool:
 
 
 def describe(name: str, node: ast.stmt, path: Path, following: ast.stmt | None) -> Definition:
-    relative = path.relative_to(SOURCE)
+    relative = path.relative_to(ROOT)
     if isinstance(node, ast.ClassDef):
         definition = Definition(name, "class", relative, node, ast.get_docstring(node) or "")
         definition.fields, definition.methods = class_members(node)

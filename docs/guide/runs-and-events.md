@@ -12,7 +12,7 @@ effect identities, records events, and delivers messages. Nothing persists; a pr
 
 ```python fragment
 LocalRunContext(
-    run_id: str,                                 # r_{ulid}; see rollout.core.contracts.new_run_id
+    run_id: str,                                 # r_{ulid}; see rollout.contracts.new_run_id
     endpoints: Mapping[str, ModelEndpoint],      # one endpoint per model slot
     *,
     context_hints: ContextHints | None = None,   # the task's hints, for the agent
@@ -69,9 +69,9 @@ Each `RunEvent` has `run_id`, `seq` (gapless from 0), `type`, `schema_version`, 
 ```python
 import asyncio
 
-from rollout.core.contracts import Message, RunEventType
-from rollout.core.harness import Agent, End, Observation, RunContext, Task, rollout
-from rollout.core.testing import events_of, local_run, payload
+from rollout.contracts import Message, RunEventType
+from rollout.harness import Agent, End, Observation, RunContext, Task, rollout
+from rollout.testing import events_of, local_run, payload
 
 
 class Addition(Task):
@@ -116,9 +116,9 @@ program, named so that another process could re-create it, and a binding that sa
 slot. Direct model bindings name a provider, and the runner creates endpoints with the factory registered for it.
 
 ```python
-from rollout.core.harness import DirectModel, ModelBinding, RunBinding, RunSpecification, RunStatus, agent_program
-from rollout.core.local import LocalRunner
-from rollout.core.testing import ScriptedModelEndpoint
+from rollout.harness import DirectModel, ModelBinding, RunBinding, RunSpecification, RunStatus, agent_program
+from rollout.local import LocalRunner
+from rollout.testing import ScriptedModelEndpoint
 
 
 async def run_with_runner() -> None:

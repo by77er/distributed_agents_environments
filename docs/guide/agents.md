@@ -42,9 +42,9 @@ how much history is useful with `context_hints`; agents should honor them, and t
 ```python
 import asyncio
 
-from rollout.core.contracts import Message
-from rollout.core.harness import Agent, ContextHints, HistoryShape, Observation, RunContext, Task, rollout
-from rollout.core.testing import local_run
+from rollout.contracts import Message
+from rollout.harness import Agent, ContextHints, HistoryShape, Observation, RunContext, Task, rollout
+from rollout.testing import local_run
 
 
 class Board(Task):

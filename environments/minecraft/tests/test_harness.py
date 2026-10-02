@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from minecraft_swarm import worlds
 from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness

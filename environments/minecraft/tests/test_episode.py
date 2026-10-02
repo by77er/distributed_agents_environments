@@ -7,11 +7,11 @@ from collections.abc import Mapping
 
 import httpx
 import pytest
+
 from minecraft_swarm.episode import SwarmEpisode
 from minecraft_swarm.tasks import TEAM
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
-
-from rollout.core.contracts import (
+from rollout.contracts import (
     CapabilityContract,
     FinishReason,
     RunEventType,
@@ -20,7 +20,7 @@ from rollout.core.contracts import (
     ToolCall,
     Usage,
 )
-from rollout.core.harness import (
+from rollout.harness import (
     DirectModel,
     ModelBinding,
     ProgramReference,
@@ -31,9 +31,9 @@ from rollout.core.harness import (
     ToolSet,
     register,
 )
-from rollout.core.harness.remote import RemoteToolSet, serve
-from rollout.core.local import LocalRunner
-from rollout.core.testing import payload, tool_call_reply
+from rollout.harness.remote import RemoteToolSet, serve
+from rollout.local import LocalRunner
+from rollout.testing import payload, tool_call_reply
 
 DROPPED = re.compile(r"(\d+) diamond at \((-?\d+), (-?\d+), (-?\d+)\)")
 

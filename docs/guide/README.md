@@ -56,14 +56,14 @@ Every Python example in this guide runs as part of the test suite (`tests/test_d
 
 | Import from | For |
 |---|---|
-| `rollout.core.harness` | `Task`, `Agent`, `tool`, `Observation`, `End`, `WaitFor`, `RunContext`, `rollout`, conversation types |
-| `rollout.core.contracts` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
-| `rollout.core.local` | `LocalRunContext`: runs an episode in process |
-| `rollout.core.testing` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
-| `rollout.rollouts` | `Jobs`, `Job`, `Ticket`, `Episode`, `Catalog`, `Row`, `RolloutJobs`; `RolloutClient` in `rollout.rollouts.service` |
-| `rollout.training` | `train`, `Grpo`, `Curriculum`, `Trainer`, `LoraTrainer`, `Colocated` |
-| `rollout.inference`, `rollout.recorder` | `Channel`, `Engine`, `Limits`; `Recorder`, `Epoch`, renderers |
-| `rollout.profile` | `Profile`, `Platform` |
+| `rollout.harness` | `Task`, `Agent`, `tool`, `Observation`, `End`, `WaitFor`, `RunContext`, `rollout`, conversation types |
+| `rollout.contracts` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
+| `rollout.local` | `LocalRunContext`: runs an episode in process |
+| `rollout.testing` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
+| `rollout_train.rollouts` | `Jobs`, `Job`, `Ticket`, `Episode`, `Catalog`, `Row`, `RolloutJobs`; `RolloutClient` in `rollout_train.rollouts.service` |
+| `rollout_train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `LoraTrainer`, `Colocated` |
+| `rollout_train.inference`, `rollout_train.recorder` | `Channel`, `Engine`, `Limits`; `Recorder`, `Epoch`, renderers |
+| `rollout_train.profile` | `Profile`, `Platform` |
 
 ## Conventions
 

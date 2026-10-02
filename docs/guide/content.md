@@ -2,7 +2,7 @@
 
 Everything a model reads or writes is **canonical content**: model-agnostic messages made of typed blocks. Task
 and agent code use only this form; rendering to a model's tokens happens in the recorder or inside a provider.
-The types live in `rollout.core.contracts` and are specified in
+The types live in `rollout.contracts` and are specified in
 [canonical content](../contracts/canonical-content.md).
 
 ## Messages and blocks
@@ -18,7 +18,7 @@ A `Message` has a `Role` and a sequence of content blocks:
 | `Reasoning` | `reasoning` | portable text, or opaque policy-scoped reasoning | ASSISTANT |
 
 ```python
-from rollout.core.contracts import Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
+from rollout.contracts import Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
 
 question = Message.user("What is the weather in Lisbon?")
 call = Message(
@@ -77,8 +77,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from rollout.core.contracts import Media
-from rollout.core.harness import FileBlobStore
+from rollout.contracts import Media
+from rollout.harness import FileBlobStore
 
 
 async def store_an_image() -> None:
@@ -97,7 +97,7 @@ asyncio.run(store_an_image())
 | Store | Keeps |
 |---|---|
 | `FileBlobStore(directory)` | one file per blob, named by its SHA-256 |
-| `rollout.adapters.s3.S3BlobStore` | one object per blob, in S3 or an S3-compatible store |
+| `rollout_s3.S3BlobStore` | one object per blob, in S3 or an S3-compatible store |
 
 Both implement `Blobs` (`put`, `read`). A runner takes one as `blobs=`. Blobs are read by hash, so stores are
 interchangeable.
@@ -123,7 +123,7 @@ Digests are lowercase hexadecimal SHA-256 over [RFC 8785](https://www.rfc-editor
 Fields that are `None` are left out, so adding an optional field later does not change existing digests.
 
 ```python
-from rollout.core.contracts import arguments_digest, context_digests, message_digest
+from rollout.contracts import arguments_digest, context_digests, message_digest
 
 assert arguments_digest({"b": 1, "a": 2}) == arguments_digest({"a": 2, "b": 1})    # key order does not matter
 assert message_digest(question) == message_digest(question.model_copy(update={"meta": {"trace": "x"}}))

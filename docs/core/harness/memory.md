@@ -1,6 +1,6 @@
 # Memory
 
-Status: **Working** (2026-10-02) · Code: `rollout.core.harness.memory`
+Status: **Working** (2026-10-02) · Code: `rollout.harness.memory`
 
 A long episode outgrows any model's context. `Memory` keeps a context that fits, whatever the model: the agent's
 recent turns as they were, and its own summary of everything older.

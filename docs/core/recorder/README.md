@@ -1,6 +1,6 @@
 # Recorder
 
-Status: **Working** (2026-10-02) · Code: `rollout.recorder` · See [inference](../../inference/README.md), [episodes](../trajectories/README.md)
+Status: **Working** (2026-10-02) · Code: `rollout_train.recorder` · See [inference](../../inference/README.md), [episodes](../trajectories/README.md)
 
 Serves the model slots a run binds to a trainable channel, and keeps what training needs of every sample: the tokens
 the policy was shown, the tokens it sampled, their logprobs, and the weights version that sampled them.

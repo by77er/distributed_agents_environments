@@ -1,6 +1,6 @@
 # Evicting idle runs
 
-Status: **Working** (2026-10-02) · Code: `rollout.durable.runner`
+Status: **Working** (2026-10-02) · Code: `rollout_durable.runner`
 
 A run that waits for a message is a DBOS workflow blocked in a receive. It holds its coroutine chain (program, task,
 agent, history) in memory, and on SQLite DBOS polls the database once per second for every waiting receive. The
@@ -57,7 +57,7 @@ Waking a run with 10 or with 200 recorded steps executed none of them again.
 
 ## Tests
 
-`tests/durable/test_eviction.py` evicts a run and wakes it by a message (no model call on replay, gapless events),
+`tests/rollout_durable/test_eviction.py` evicts a run and wakes it by a message (no model call on replay, gapless events),
 wakes a run at its wait's deadline, and cancels an evicted run. The agent sessions fault evaluation kills servers
 while every session is evicted and again while they wake
 ([agent sessions](../products/agent-sessions.md#durability-under-faults)).

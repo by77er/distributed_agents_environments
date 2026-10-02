@@ -1,13 +1,13 @@
 # Hooks
 
-Status: **Working** (2026-10-01) · Code: `rollout.core.harness.hooks`
+Status: **Working** (2026-10-01) · Code: `rollout.harness.hooks`
 
 Hooks watch runs as they happen. A runner calls its hooks for every run event it records and for every model sample
 it performs, so that logging, metrics and live views need nothing from the program being run.
 
 ```python
-from rollout.core.harness import ModelSample, RunHooks
-from rollout.core.local import LocalRunner
+from rollout.harness import ModelSample, RunHooks
+from rollout.local import LocalRunner
 
 class Watch(RunHooks):
     def on_event(self, event):          # every event of every run, as it is recorded

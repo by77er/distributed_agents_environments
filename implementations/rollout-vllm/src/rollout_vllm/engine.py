@@ -1,0 +1,133 @@
+"""vLLM as an engine.
+
+`VllmEngine` drives vLLM's async engine, whose engine core runs in its own process: when it sleeps, its GPU memory
+is free for a trainer. Sleeping drops the weights (they are read again from the checkpoint on waking, about 3 s from
+the file cache) rather than parking them in system memory, where 8 GiB of them sat next to the trainer.
+
+LoRA adapters are registered by name (`load_adapter`); a request names the adapter it samples from. Entry points
+that start an engine must guard `if __name__ == "__main__":` (vLLM starts its process with `spawn`).
+"""
+
+import itertools
+import os
+from collections.abc import Sequence
+from typing import Any
+
+from rollout.processes import children
+from rollout_train.inference.channel import Generation
+
+
+class VllmEngine:
+    def __init__(
+        self,
+        model: str,
+        *,
+        gpu_memory_utilization: float = 0.72,
+        max_model_len: int = 8192,
+        max_num_seqs: int = 32,
+        max_num_batched_tokens: int = 4096,
+        max_lora_rank: int = 32,
+        max_loras: int = 2,
+        language_model_only: bool = True,
+        seed: int = 0,
+    ) -> None:
+        os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+        from vllm import AsyncEngineArgs
+        from vllm.v1.engine.async_llm import AsyncLLM
+
+        arguments = AsyncEngineArgs(
+            model=model,
+            dtype="bfloat16",
+            max_model_len=max_model_len,
+            gpu_memory_utilization=gpu_memory_utilization,
+            max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
+            enable_lora=True,
+            max_lora_rank=max_lora_rank,  # pyright: ignore[reportArgumentType] (a Literal of allowed ranks)
+            max_loras=max_loras,
+            enable_sleep_mode=True,
+            language_model_only=language_model_only,
+            logprobs_mode="processed_logprobs",  # the distribution actually sampled from (after temperature)
+            seed=seed,
+        )
+        self.model = model
+        self.max_model_len = max_model_len
+        """The longest sequence (prompt and completion) the engine accepts; a recorder channel reads it."""
+        self._engine: Any = AsyncLLM.from_engine_args(arguments)
+        self._requests = itertools.count()
+        self._adapters: dict[str, Any] = {}
+        self._adapter_ids = itertools.count(1)
+
+    async def generate(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        adapter: str | None,
+    ) -> Generation:
+        from vllm import SamplingParams
+        from vllm.inputs import TokensPrompt
+
+        params = SamplingParams(
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            stop_token_ids=list(stop_token_ids),
+            logprobs=0,
+            detokenize=False,
+            skip_special_tokens=False,
+        )
+        lora = self._adapters[adapter] if adapter is not None else None
+        final: Any = None
+        async for output in self._engine.generate(
+            TokensPrompt(prompt_token_ids=list(prompt)), params, f"r{next(self._requests)}", lora_request=lora
+        ):
+            final = output
+        completion = final.outputs[0]
+        tokens = list(completion.token_ids)
+        entries: list[Any] = list(completion.logprobs or [])
+        missing = len(entries) != len(tokens) or any(
+            entry is None or token not in entry for token, entry in zip(tokens, entries, strict=False)
+        )
+        if missing:  # (it could not be trained on, and as NaN it would undo the adapter)
+            raise RuntimeError("the engine returned a sampled token without its logprob")
+        logprobs = [float(entry[token].logprob) for token, entry in zip(tokens, entries, strict=True)]
+        finish = "length" if completion.finish_reason == "length" else "stop"
+        return Generation(tokens=tokens, logprobs=logprobs, finish_reason=finish)
+
+    async def load_adapter(self, name: str, path: str) -> None:
+        """Register a LoRA adapter (a PEFT directory) under `name`; samples name it to use it."""
+        from vllm.lora.request import LoRARequest
+
+        request = LoRARequest(name, next(self._adapter_ids), path)
+        await self._engine.add_lora(request)
+        self._adapters[name] = request
+
+    async def remove_adapter(self, name: str) -> None:
+        request = self._adapters.pop(name, None)
+        if request is not None:
+            await self._engine.remove_lora(request.lora_int_id)
+
+    async def sleep(self) -> None:
+        """Free the GPU: the cache is discarded and the weights dropped (they are read again on waking)."""
+        await self._engine.reset_prefix_cache()
+        await self._engine.sleep(level=2)
+
+    async def wake(self) -> None:
+        await self._engine.wake_up(tags=["weights"])
+        await self._engine.collective_rpc("reload_weights")
+        await self._engine.wake_up(tags=["kv_cache"])
+
+    @property
+    def processes(self) -> list[int]:
+        return children(ENGINE_PROCESS)
+
+    def close(self) -> None:
+        self._engine.shutdown()
+
+
+ENGINE_PROCESS = "VLLM::Engine"
+"""How an engine core's process is named (the start of it: the kernel keeps fifteen characters)."""

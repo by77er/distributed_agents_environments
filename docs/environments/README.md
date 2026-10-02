@@ -1,15 +1,15 @@
 # Environments
 
-Status: **Working** (2026-10-02) · Code: `rollout.core.harness.environments`, `rollout.environments`
+Status: **Working** (2026-10-02) · Code: `rollout.harness.environments`, `rollout_computers`
 
 An environment is a computer that task code creates and acts on: it runs shell commands and reads and writes files.
 Task code sees `run.environments` and `Environment` handles. Every operation on them is an effect, performed by an
 `EnvironmentService`: the backend a runner is given. `run.environments` is `None` when the runner has no backend.
 
 ```python
-from rollout.core.harness import EnvironmentSpecification, RunContext, Task
-from rollout.environments import NamespaceEnvironments
-from rollout.environments.tools import ComputerTools
+from rollout.harness import EnvironmentSpecification, RunContext, Task
+from rollout_computers import NamespaceEnvironments
+from rollout_computers.tools import ComputerTools
 
 runner = LocalRunner(providers=providers, environments=NamespaceEnvironments(Path("state/environments")))
 
@@ -22,7 +22,7 @@ class Build(ComputerTools, Task):                      # the agent gets shell an
 
 ## What task code sees
 
-`rollout.core.harness` exports these types.
+`rollout.harness` exports these types.
 
 | `EnvironmentSpecification` field | Default | Meaning |
 |---|---|---|
@@ -78,7 +78,7 @@ class EnvironmentService(Protocol):
     async def destroy(self, environment_id: str) -> None: ...
 ```
 
-`rollout.environments` has two.
+`rollout_computers` has two.
 
 | | `NamespaceEnvironments(directory, images=None)` | `LocalEnvironments(directory, *, variables=None)` |
 |---|---|---|
@@ -109,7 +109,7 @@ the latest stable release at first use, which the store then pins. `NamespaceEnv
 
 ## Computer tools
 
-`rollout.environments.tools.ComputerTools` is a mixin for a `Task` that gives its agent a computer. Set
+`rollout_computers.tools.ComputerTools` is a mixin for a `Task` that gives its agent a computer. Set
 `environment_id`, usually in `setup`. The methods are `@tool`s ([tools](../guide/tools.md)) over the environment, so
 they work under any runner.
 

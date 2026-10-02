@@ -13,8 +13,8 @@ A message is an `Envelope`: canonical content blocks, optional structured `data`
 select on.
 
 ```python
-from rollout.core.contracts import Text
-from rollout.core.harness import Envelope
+from rollout.contracts import Text
+from rollout.harness import Envelope
 
 hello = Envelope(content=[Text(text="Hi, can you help me with my order?")])
 approval = Envelope(kind="approval", data={"approved": True, "by": "reviewer-7"})
@@ -42,9 +42,9 @@ first, the loop uses `WaitFor.on_timeout`, which by default ends the episode as 
 import asyncio
 from datetime import timedelta
 
-from rollout.core.contracts import Message, Role
-from rollout.core.harness import Agent, DeliveryMode, Ending, Observation, RunContext, Task, WaitFor, rollout
-from rollout.core.testing import local_run
+from rollout.contracts import Message, Role
+from rollout.harness import Agent, DeliveryMode, Ending, Observation, RunContext, Task, WaitFor, rollout
+from rollout.testing import local_run
 
 
 class Support(Task):
@@ -92,7 +92,7 @@ A sender gives a message a `Priority`. The run's `DeliveryPolicy` (`RunBinding.d
 | `INTERRUPT` (`HIGH`) | resumes it | the reply is cancelled; `Task.resume` handles the message | tools finish (side effects cannot be undone), then merged like `STEER` |
 
 ```python
-from rollout.core.harness import DeliveryPolicy, Priority
+from rollout.harness import DeliveryPolicy, Priority
 
 policy = DeliveryPolicy(max_priority_by_sender={"webhook": Priority.LOW})
 assert policy.mode(Priority.HIGH) is DeliveryMode.INTERRUPT
@@ -116,8 +116,8 @@ samples the agent makes per reply. The model endpoint receives a best-effort `ca
 message.
 
 ```python
-from rollout.core.contracts import RunEventType, SampleRequest
-from rollout.core.testing import events_of, payload
+from rollout.contracts import RunEventType, SampleRequest
+from rollout.testing import events_of, payload
 
 
 class Chat(Task):
@@ -181,10 +181,10 @@ Replies leave a run with `run.emit(kind, payload, to=...)`. It is an `output.emi
 `output.emitted` event, which clients read from the run's event stream.
 
 ```python
-from rollout.core.harness import Address, Deployment, DirectModel, ModelBinding, RunBinding, RunSpecification
-from rollout.core.harness import agent_program
-from rollout.core.local import LocalRunner
-from rollout.core.testing import ScriptedModelEndpoint
+from rollout.harness import Address, Deployment, DirectModel, ModelBinding, RunBinding, RunSpecification
+from rollout.harness import agent_program
+from rollout.local import LocalRunner
+from rollout.testing import ScriptedModelEndpoint
 
 
 class Replying(Support):

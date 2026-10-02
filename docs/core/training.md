@@ -1,6 +1,6 @@
 # Training
 
-Status: **Working** (2026-10-02) · Code: `rollout.training` · See [rollouts](rollouts/README.md), [episodes](trajectories/README.md)
+Status: **Working** (2026-10-02) · Code: `rollout_train` · See [rollouts](rollouts/README.md), [episodes](trajectories/README.md)
 
 The loop, the group algorithm and the curriculum, written against `Jobs`, `Trainer` and `Store` only, and a reference
 trainer for 4-bit checkpoints with LoRA.

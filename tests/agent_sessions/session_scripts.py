@@ -2,7 +2,7 @@
 
 import asyncio
 
-from rollout.core.contracts import (
+from rollout.contracts import (
     CapabilityContract,
     FinishReason,
     Message,
@@ -14,8 +14,8 @@ from rollout.core.contracts import (
     ToolResultBlock,
     Usage,
 )
-from rollout.core.harness import DirectModel
-from rollout.core.testing import tool_call_reply
+from rollout.harness import DirectModel
+from rollout.testing import tool_call_reply
 
 
 def call(tool: str, /, **arguments: object) -> Message:

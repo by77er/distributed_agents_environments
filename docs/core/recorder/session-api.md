@@ -1,6 +1,6 @@
 # The recorder over HTTP
 
-Status: **Working** (2026-10-02) · Code: `rollout.recorder.compat`
+Status: **Working** (2026-10-02) · Code: `rollout_train.recorder.compat`
 
 For a harness that brings its own loop: a coding agent running inside an environment, or any program that already
 knows how to talk to a model. It needs no agent loop from this library. The program that launches it asks its model

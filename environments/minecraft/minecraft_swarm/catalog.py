@@ -1,4 +1,4 @@
-"""The catalog of the Minecraft swarm: what there is to train on, as rows (`rollout.rollouts.Catalog`).
+"""The catalog of the Minecraft swarm: what there is to train on, as rows (`rollout_train.rollouts.Catalog`).
 
 A row is a task; a start of it is a world and a layout drawn at random: episodes given the same start begin
 identically.
@@ -12,8 +12,8 @@ from pydantic import JsonValue
 
 from minecraft_swarm.episode import SwarmEpisode
 from minecraft_swarm.tasks import catalog as tasks
-from rollout.core.harness import ProgramReference, register
-from rollout.rollouts import Row
+from rollout.catalog import Row
+from rollout.harness import ProgramReference, register
 
 
 @dataclass(frozen=True)
