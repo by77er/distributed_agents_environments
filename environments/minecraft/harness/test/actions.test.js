@@ -5,7 +5,7 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const { Vec3 } = require('vec3')
-const { ACTIONS, ActionError, burnTicks, opened, WORN } = require('../lib/actions')
+const { ACTIONS, ActionError, burnTicks, opened, straight, WORN } = require('../lib/actions')
 const { firstHit } = require('../lib/observe')
 const { world, botIn } = require('./world')
 
@@ -58,4 +58,17 @@ test('a ray along an axis from a whole coordinate stops at the wall', () => {
   assert.deepStrictEqual([hit.name, hit.position.x], ['stone', 5])
   const up = firstHit(bot, new Vec3(2, 64, 0), new Vec3(0, 1, 0), 24) // every coordinate whole
   assert.deepStrictEqual([up.name, up.position.y], ['stone', 66])
+})
+
+test('a walk that has no way to its end goes as far as feet would, and says what stopped it', () => {
+  const blocks = world()
+  blocks.carve(0, 4, 64, 65, 0, 0) // a corridor east from the origin, five long; stone beyond
+  blocks.carve(0, 0, 64, 65, 1, 3) // and one south, with a pit at its end
+  blocks.carve(0, 0, 60, 65, 4, 4)
+  const bot = botIn(blocks, new Vec3(0.5, 64, 0.5))
+  const start = new Vec3(0, 64, 0)
+  assert.deepStrictEqual(straight(bot, start, new Vec3(1, 0, 0), 32), { steps: 4, obstacle: 'stone' })
+  assert.deepStrictEqual(straight(bot, start, new Vec3(1, 0, 0), 3), { steps: 3, obstacle: null })
+  assert.deepStrictEqual(straight(bot, start, new Vec3(-1, 0, 0), 8), { steps: 0, obstacle: 'stone' })
+  assert.deepStrictEqual(straight(bot, start, new Vec3(0, 0, 1), 8), { steps: 3, obstacle: null }) // the ground ends
 })

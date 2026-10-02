@@ -108,7 +108,7 @@ Next to you, at head height and at foot height:
 
 | Actions (16) | |
 |---|---|
-| Moving | `move_to` a place seen, `move` in a direction; both pick up what they pass over, dig through what the agent's tools break within five seconds a block (and what would drop something), and bridge or pillar with dirt, cobblestone, cobbled deepslate or netherrack from the inventory where there is no other way |
+| Moving | `move_to` a place seen, `move` in a direction; both pick up what they pass over, dig through what the agent's tools break within five seconds a block (and what would drop something), and bridge or pillar with dirt, cobblestone, cobbled deepslate or netherrack from the inventory where there is no other way; a `move` that cannot reach its end goes as far as feet would and names what stopped it |
 | Blocks | `mine` one block (a torch or a cobweb too), `place_at` a free position in sight (into lava or a plant too), `use` an item on a block (flint and steel, buckets, an eye of ender on a portal frame; a chest shows its contents; a bed is slept in) |
 | Items | `use` an item in the air (eat, throw an eye of ender), `craft` (a failure names what the recipe takes), `smelt` (with the fuel for what goes in: an item takes 200 ticks, coal burns 1,600, planks 300, a stick 100), `take_smelted`, `take`, `store`, `toss` (toward a position within three blocks; whoever stands there picks it up), `equip` (armor goes where it is worn) |
 | Creatures | `attack` (walks up and strikes until it is dead), `shoot` (bow; aims for the arrow's drop and the target's motion) |

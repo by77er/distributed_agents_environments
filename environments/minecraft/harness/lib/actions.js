@@ -36,7 +36,21 @@ const ACTIONS = {
     const start = bot.entity.position.floored()
     const target = start.plus(vector.scaled(count))
     const goal = vector.y === 0 ? new goals.GoalXZ(target.x, target.z) : new goals.GoalY(target.y)
-    await travel(bot, goal, context)
+    try {
+      await travel(bot, goal, context)
+    } catch (error) {
+      // No way to the far end (a wall the bot's tools do not break): go as far that way as feet would, to the wall.
+      if (!(error instanceof ActionError) || vector.y !== 0) throw error
+      const { steps, obstacle } = straight(bot, start, vector, count)
+      if (steps === 0) {
+        throw new ActionError(obstacle
+          ? `you cannot go ${direction} from here: ${obstacle} is in the way, and your tools do not break it within five seconds`
+          : `you cannot go ${direction} from here: there is no ground to walk on`)
+      }
+      const end = start.plus(vector.scaled(steps))
+      await travel(bot, new goals.GoalBlock(end.x, end.y, end.z), context)
+      return { arrived_at: position(bot), moved: round(bot.entity.position.distanceTo(start)), stopped_by: obstacle ?? 'no ground beyond' }
+    }
     return { arrived_at: position(bot), moved: round(bot.entity.position.distanceTo(start)) }
   },
 
@@ -141,7 +155,7 @@ const ACTIONS = {
   },
 
   async take (bot, { x, y, z, item, count }, context) {
-    const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
+    const block = container_(visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z'))))
     const container = await opened(bot.openContainer(block), block.name)
     try {
       const wanted = itemNamed(bot, item)
@@ -154,7 +168,7 @@ const ACTIONS = {
   },
 
   async store (bot, { x, y, z, item, count }, context) {
-    const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
+    const block = container_(visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z'))))
     const container = await opened(bot.openContainer(block), block.name)
     try {
       const wanted = itemNamed(bot, item)
@@ -579,6 +593,27 @@ function stationInReach (bot, name) {
   return null
 }
 
+// How many blocks from `start` the bot can walk straight along `vector` on level ground (at most `count`), and what
+// stops it there: the name of the block in the way, or null where the ground ends.
+function straight (bot, start, vector, count) {
+  const empty = block => block !== null && block.boundingBox === 'empty' && block.name !== 'lava'
+  for (let steps = 0; steps < count; steps++) {
+    const next = start.plus(vector.scaled(steps + 1))
+    const feet = bot.blockAt(next); const head = bot.blockAt(next.offset(0, 1, 0)); const floor = bot.blockAt(next.offset(0, -1, 0))
+    if (!empty(feet)) return { steps, obstacle: feet?.name ?? 'the unknown' }
+    if (!empty(head)) return { steps, obstacle: head?.name ?? 'the unknown' }
+    if (!floor || floor.boundingBox !== 'block') return { steps, obstacle: null }
+  }
+  return { steps: count, obstacle: null }
+}
+
+function container_ (block) {
+  if (!/chest$|^barrel$|shulker_box$/.test(block.name)) {
+    throw new ActionError(`(${block.position.x}, ${block.position.y}, ${block.position.z}) is ${block.name}, not a chest`)
+  }
+  return block
+}
+
 // The window of a chest or furnace, or an error if it does not open in a few seconds (a chest under a solid block
 // never does, and mineflayer would wait twenty seconds for it).
 function opened (opening, name) {
@@ -662,4 +697,4 @@ function sleep (ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
 
 class Interrupted extends Error {}
 
-module.exports = { ACTIONS, ActionError, Interrupted, burnTicks, opened, WORN }
+module.exports = { ACTIONS, ActionError, Interrupted, burnTicks, opened, straight, WORN }

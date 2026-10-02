@@ -105,7 +105,8 @@ AT = ["x", "y", "z"]
 
 WALKING = (
     "Walking digs through what is in the way if your tools break it within five seconds a block, and bridges or "
-    "pillars with dirt, cobblestone, cobbled_deepslate or netherrack you carry where there is no other way."
+    "pillars with dirt, cobblestone, cobbled_deepslate or netherrack you carry where there is no other way. Where it "
+    "cannot get through, it stops and says what is in the way."
 )
 
 ACTIONS = [
