@@ -5,9 +5,14 @@ optimizer's state from the previous step's files, trains, saves and exits. Exiti
 memory: a trainer parked in system memory between steps, next to a sleeping engine's offloaded weights, can exhaust a
 small machine. An engine's client libraries can also change how transformers builds models in the process that uses
 them (vLLM swaps in its own configuration classes), which a separate process avoids.
+
+The process may use the GPU memory that is free when it starts and no more: where a driver lets a process spill into
+system memory (Windows does), a step that needs more would crawl instead of failing, and a minibatch that fails is
+counted and left out (`minibatches_out_of_memory`). The process ends with the process that started it.
 """
 
 import asyncio
+import contextlib
 import multiprocessing
 import traceback
 from collections.abc import Sequence
@@ -26,7 +31,7 @@ class TrainerSettings:
     """Where the optimizer's state is kept between steps."""
     rank: int = 32
     alpha: float = 64.0
-    learning_rate: float = 2e-5
+    learning_rate: float = 5e-5
     max_sequence_tokens: int | None = None
     """Sequences longer than this are left out of a step (see `GroupRelativeTrainer`)."""
 
@@ -64,6 +69,20 @@ class TrainerProcess:
         return payload
 
 
+MEMORY_MARGIN = 256 * 2**20
+"""GPU memory left free of what was free when a step started (other programs' use moves a little)."""
+
+
+def _end_with_parent() -> None:
+    """Have the kernel end this process when the one that started it dies (Linux), so that a driver killed during a
+    step does not leave a trainer holding the GPU and writing an adapter nobody is waiting for."""
+    import ctypes
+    import signal
+
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+
+
 def _step(
     connection: Connection,
     settings: TrainerSettings,
@@ -75,9 +94,14 @@ def _step(
     try:
         import os
 
+        _end_with_parent()
         # Reserve close to what is used: fragmentation would otherwise cost about 0.7 GiB at the peak.
         os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         import torch
+
+        free, total = torch.cuda.mem_get_info()
+        allowed = max(0.05, min(1.0, (free - MEMORY_MARGIN) / total))
+        torch.cuda.set_per_process_memory_fraction(allowed)  # pyright: ignore[reportUnknownMemberType]
 
         from rollout.training.grpo import GroupRelativeTrainer
         from rollout.training.lora import load_adapter
@@ -92,11 +116,14 @@ def _step(
         optimizer_state = settings.state / "optimizer.pt"
         if previous is not None and optimizer_state.exists():
             trainer.optimizer.load_state_dict(torch.load(optimizer_state, map_location="cuda"))
+            for group in trainer.optimizer.param_groups:  # (the saved state carries the rate it was saved with)
+                group["lr"] = settings.learning_rate
         metrics: dict[str, Any] = trainer.step(sequences, seed=seed)
         policy.save(adapter)
         settings.state.mkdir(parents=True, exist_ok=True)
         torch.save(trainer.optimizer.state_dict(), optimizer_state)
-        metrics["peak_gpu_gib"] = torch.cuda.max_memory_allocated() / 2**30
+        metrics["peak_gpu_gib"] = torch.cuda.max_memory_reserved() / 2**30
+        metrics["free_gpu_gib"] = free / 2**30  # when the step started: what it was allowed, less the margin
         connection.send(("done", metrics))
     except Exception:
         connection.send(("error", traceback.format_exc()))

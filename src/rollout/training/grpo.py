@@ -8,8 +8,9 @@
 - **Dynamic sampling** (DAPO): a group whose rewards are all equal carries no signal and is skipped.
 - **Update**: PPO's clipped objective against the behavior policy, the logprobs the engine recorded while sampling
   (as asynchronous RL does): one pass both corrects the engine/trainer mismatch and bounds each update. The clip is
-  asymmetric (DAPO's clip-higher: 1 - 0.2 to 1 + 0.28) and the loss is a token-level mean over the whole batch.
-  No KL penalty. Tokens the recorder forced (closing an over-budget thought) are never trained on.
+  asymmetric (DAPO's clip-higher: 1 - 0.2 to 1 + 0.28) and the loss is a token-level mean over each minibatch.
+  No KL penalty; the pass stops early if the policy has moved further from the behavior policy than `max_kl`.
+  Tokens the recorder forced (closing an over-budget thought) are never trained on.
 """
 
 import random
@@ -54,11 +55,16 @@ def group_advantages(rewards: Sequence[float]) -> list[float] | None:
 @dataclass
 class GroupRelativeTrainer:
     policy: TrainablePolicy
-    learning_rate: float = 2e-5
+    learning_rate: float = 5e-5
     clip_low: float = 0.2
     clip_high: float = 0.28
-    tokens_per_step: int = 16_384
-    """Sampled tokens per optimizer step (gradients accumulate over sequences until then)."""
+    tokens_per_step: int = 4_096
+    """Sampled tokens per optimizer step (gradients accumulate over sequences until then). Adam moves a weight by at
+    most the learning rate a step, so how far an update goes is set by how many steps its tokens make."""
+    max_kl: float | None = 0.02
+    """Stop the pass when a minibatch, before its step, finds the policy this far (in nats per token, estimated on
+    the sampled tokens) beyond where the first minibatch found it. The first minibatch's value is the floor: the
+    engine's and the trainer's numerical difference, and how stale the turns are."""
     max_gradient_norm: float = 1.0
     max_sequence_tokens: int | None = None
     """A guard: longer sequences are left out of a step and counted (`sequences_too_long`), since one too long for
@@ -90,39 +96,54 @@ class GroupRelativeTrainer:
         ]
         too_long = len(sequences) - len(order)
         random.Random(seed).shuffle(order)
-        batches: list[list[TrainingSequence]] = [[]]
-        counted = 0
-        for sequence in order:
-            if counted >= self.tokens_per_step:
-                batches.append([])
-                counted = 0
-            batches[-1].append(sequence)
-            counted += sum(sequence.loss_mask)
+        batches = minibatches(order, self.tokens_per_step)
         self.policy.model.train()
-        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0, "kl": 0.0}
+        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0, "sequences": 0.0}
         gradient_norms: list[float] = []
+        divergences: list[float] = []  # of each minibatch that was stepped on, as it found the policy
+        out_of_memory = 0
+        stopped = False
         for batch in batches:
             batch_tokens = sum(sum(sequence.loss_mask) for sequence in batch)
-            if batch_tokens == 0:
+            sums = dict.fromkeys(totals, 0.0)
+            divergence = 0.0
+            try:
+                for sequence in batch:
+                    positions = [index for index, sampled in enumerate(sequence.loss_mask) if sampled and index > 0]
+                    if not positions:
+                        continue
+                    logprobs = self.policy.logprobs(sequence.tokens, positions)
+                    behavior = torch.tensor([sequence.behavior_logprobs[i] for i in positions], device=logprobs.device)
+                    if not bool(torch.isfinite(behavior).all()):  # (one NaN would make every weight NaN)
+                        raise ValueError("a sampled token has no behavior logprob")
+                    ratio = torch.exp(logprobs - behavior)
+                    advantage = torch.full_like(ratio, sequence.advantage)
+                    clipped = torch.clamp(ratio, 1 - self.clip_low, 1 + self.clip_high)
+                    per_token = -torch.minimum(ratio * advantage, clipped * advantage)
+                    (per_token.sum() / batch_tokens).backward()  # a token-level mean over the minibatch
+                    with torch.no_grad():
+                        sums["loss"] += float(per_token.sum())
+                        sums["clipped"] += float((ratio != clipped).sum())
+                        sums["ratio"] += float(ratio.sum())
+                        sums["mismatch"] += float((logprobs - behavior).abs().sum())
+                        sums["tokens"] += len(positions)
+                        sums["sequences"] += 1
+                        divergence += float((behavior - logprobs).sum())
+            except torch.OutOfMemoryError:  # a gradient with a sequence missing is not this minibatch's: drop it
+                self.optimizer.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                out_of_memory += 1
                 continue
-            for sequence in batch:
-                positions = [index for index, sampled in enumerate(sequence.loss_mask) if sampled and index > 0]
-                if not positions:
-                    continue
-                logprobs = self.policy.logprobs(sequence.tokens, positions)
-                behavior = torch.tensor([sequence.behavior_logprobs[i] for i in positions], device=logprobs.device)
-                ratio = torch.exp(logprobs - behavior)
-                advantage = torch.full_like(ratio, sequence.advantage)
-                clipped = torch.clamp(ratio, 1 - self.clip_low, 1 + self.clip_high)
-                per_token = -torch.minimum(ratio * advantage, clipped * advantage)
-                (per_token.sum() / batch_tokens).backward()  # a token-level mean over the minibatch
-                with torch.no_grad():
-                    totals["loss"] += float(per_token.sum())
-                    totals["clipped"] += float((ratio != clipped).sum())
-                    totals["ratio"] += float(ratio.sum())
-                    totals["mismatch"] += float((logprobs - behavior).abs().sum())
-                    totals["kl"] += float((behavior - logprobs).sum())
-                    totals["tokens"] += len(positions)
+            if sums["tokens"] == 0:
+                continue
+            divergence /= sums["tokens"]
+            if self.max_kl is not None and divergences and divergence - divergences[0] > self.max_kl:
+                self.optimizer.zero_grad(set_to_none=True)
+                stopped = True
+                break
+            divergences.append(divergence)
+            for key, value in sums.items():
+                totals[key] += value
             norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_gradient_norm)
             gradient_norms.append(float(norm))
             self.optimizer.step()
@@ -133,14 +154,36 @@ class GroupRelativeTrainer:
             "clip_fraction": totals["clipped"] / tokens,
             "mean_ratio": totals["ratio"] / tokens,
             "mean_mismatch": totals["mismatch"] / tokens,
-            # KL(behavior || policy) estimated on the sampled tokens, as each minibatch saw the policy: the first
-            # minibatch measures only the engine's and the trainer's numerical difference, later ones the drift.
-            "approx_kl": totals["kl"] / tokens,
+            # KL(behavior || policy) estimated on the sampled tokens, as each minibatch found the policy before its
+            # step. The first minibatch's is the floor (numerical difference between engine and trainer, and how
+            # stale the turns are); the last one's, less the floor, is how far this update moved the policy.
+            "kl_floor": divergences[0] if divergences else 0.0,
+            "kl_moved": divergences[-1] - divergences[0] if divergences else 0.0,
             "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "tokens": totals["tokens"],
-            "sequences": float(len(order)),
+            "sequences": totals["sequences"],
+            "sequences_given": float(len(sequences)),
             "sequences_too_long": float(too_long),
             "longest_sequence_tokens": float(max((len(sequence.tokens) for sequence in order), default=0)),
-            "optimizer_steps": float(len(batches)),
+            "optimizer_steps": float(len(gradient_norms)),
+            "stopped_at_max_kl": float(stopped),
+            "minibatches_out_of_memory": float(out_of_memory),
             "seconds": time.monotonic() - started,
         }
+
+
+def minibatches(sequences: Sequence[TrainingSequence], tokens_per_step: int) -> list[list[TrainingSequence]]:
+    """The sequences in order, cut where a minibatch has reached `tokens_per_step` sampled tokens. A last minibatch
+    of less than half that joins the one before: Adam's step is as large for a handful of tokens as for a full
+    minibatch."""
+    batches: list[list[TrainingSequence]] = [[]]
+    counted = 0
+    for sequence in sequences:
+        if counted >= tokens_per_step:
+            batches.append([])
+            counted = 0
+        batches[-1].append(sequence)
+        counted += sum(sequence.loss_mask)
+    if len(batches) > 1 and counted < tokens_per_step / 2:
+        batches[-2].extend(batches.pop())
+    return [batch for batch in batches if batch]

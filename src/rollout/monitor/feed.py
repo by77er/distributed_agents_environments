@@ -6,10 +6,11 @@ reply with its reasoning. `read` turns a directory of such files into what the m
 """
 
 import json
+import os
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, cast
 
 from pydantic import JsonValue
 
@@ -48,7 +49,9 @@ def plain(message: Message) -> dict[str, JsonValue]:
 class RunFeed(RunHooks):
     """Writes every run's events and samples under `directory`, one file per run, as they happen.
 
-    `keep` bounds the directory: when more runs than that have files, the oldest are deleted.
+    `keep` bounds the directory: when more runs than that have files, the oldest are deleted. A directory has one
+    writer at a time: runs that an earlier writer left without an end (its process was stopped) are marked cancelled
+    when the next one starts, so that a monitor does not show them running for ever.
     """
 
     def __init__(self, directory: Path, *, keep: int = 200) -> None:
@@ -56,6 +59,13 @@ class RunFeed(RunHooks):
         self.keep = keep
         directory.mkdir(parents=True, exist_ok=True)
         self._files: dict[str, IO[str]] = {}
+        for path in directory.glob("*.jsonl"):
+            if not _ended(path):
+                written = path.stat()
+                line = {"kind": "event", "seq": -1, "type": RunEventType.RUN_CANCELLED.value, "at": written.st_mtime}
+                with path.open("a") as file:
+                    file.write("\n" + json.dumps({**line, "payload": {"detail": "its writer stopped"}}) + "\n")
+                os.utime(path, (written.st_atime, written.st_mtime))  # it is as old as its run, for pruning
 
     def on_event(self, event: RunEvent) -> None:
         line: dict[str, JsonValue] = {
@@ -107,6 +117,18 @@ class RunFeed(RunHooks):
                 path.unlink(missing_ok=True)
 
 
+def _ended(path: Path) -> bool:
+    """Whether a run's file closes with the event that ends a run (its last line; read from the file's tail)."""
+    with path.open("rb") as file:
+        file.seek(max(0, path.stat().st_size - 4096))
+        tail = file.read().decode(errors="replace").strip().rsplit("\n", 1)[-1]
+    try:
+        line: Any = json.loads(tail)
+    except ValueError:  # (a long line cut by the read, or one its writer never finished)
+        return False
+    return isinstance(line, dict) and cast(dict[str, Any], line).get("type") in {kind.value for kind in ENDED}
+
+
 # Reading
 
 
@@ -131,7 +153,10 @@ class FeedReader:
             lines = self._lines.setdefault(run_id, [])
             for raw in data[:end].splitlines():
                 if raw.strip():
-                    lines.append(json.loads(raw))
+                    try:
+                        lines.append(json.loads(raw))
+                    except ValueError:  # a line its writer was stopped in the middle of
+                        continue
             self._offsets[run_id] = offset + end
         for run_id in [run_id for run_id in self._lines if not (self.directory / f"{run_id}.jsonl").exists()]:
             del self._lines[run_id], self._offsets[run_id]

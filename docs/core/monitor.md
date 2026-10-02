@@ -17,7 +17,7 @@ rollout-monitor DIRECTORY --port 8765                 # read it: http://localhos
 
 | Piece | What it does |
 |---|---|
-| `RunFeed(directory, keep=200)` | [Hooks](harness/hooks.md) that append one JSON line per run event and per model sample to `<run_id>.jsonl`. A sample's line holds every message sent (text, reasoning, tool calls, tool results), the tools offered and the reply. Only the newest `keep` runs are kept. |
+| `RunFeed(directory, keep=200)` | [Hooks](harness/hooks.md) that append one JSON line per run event and per model sample to `<run_id>.jsonl`. A sample's line holds every message sent (text, reasoning, tool calls, tool results), the tools offered and the reply. Only the newest `keep` runs are kept. A directory has one writer at a time: runs an earlier writer left without an end (its process was stopped) are marked cancelled when the next one starts. |
 | `rollout-monitor`, `create_app(directory)` | A Starlette app over a feed directory. It only reads; the process running the runs writes. `/api/runs` summarises every run; `/api/runs/{run_id}?after=N` returns a run's lines from index N. |
 | The page | Runs on the left, grouped by the label `group` and titled by `title` or `task` (labels are given to `runner.start(specification, labels=...)`; `episode` names a run within its group). For the chosen run: one column per slot, a slider over turns, and for the turn shown: **Sees** (the last message sent, or the whole context), **Thinks** (reasoning), **Does** (tool calls), **Result** (what the call returned, from the next turn). Other effects (tool calls the program itself made) are listed below. The page asks for news every two seconds. |
 

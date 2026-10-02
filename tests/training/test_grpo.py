@@ -3,10 +3,11 @@
 
 from collections.abc import Sequence
 
+import pytest
 import torch
 from torch import nn
 
-from rollout.training.grpo import GroupRelativeTrainer, TrainingSequence, group_advantages
+from rollout.training.grpo import GroupRelativeTrainer, TrainingSequence, group_advantages, minibatches
 
 
 def test_advantages_are_centered_but_not_scaled() -> None:
@@ -68,4 +69,37 @@ def test_sequences_too_long_for_the_gpu_are_left_out_and_counted() -> None:
     metrics = trainer.step([short, long])
     assert metrics["sequences"] == 1 and metrics["sequences_too_long"] == 1
     assert metrics["longest_sequence_tokens"] == 3
-    assert "approx_kl" in metrics and metrics["gradient_norm"] >= 0
+    assert metrics["sequences_given"] == 2 and metrics["gradient_norm"] >= 0
+
+
+def test_a_small_last_minibatch_joins_the_one_before() -> None:
+    policy = ToyPolicy()
+    four = [sequence(policy, [1, 2, 3, 4, 5], 1.0) for _ in range(5)]  # four sampled tokens each
+    assert [len(batch) for batch in minibatches(four, 10)] == [3, 2]
+    assert [len(batch) for batch in minibatches(four[:4], 10)] == [4]  # not [3, 1]: Adam would step as far for one
+    assert [len(batch) for batch in minibatches(four[:1], 10)] == [1] and minibatches([], 10) == []
+
+
+def test_the_pass_stops_once_the_policy_has_moved_as_far_as_allowed() -> None:
+    def run(max_kl: float | None) -> tuple[dict[str, float], ToyPolicy]:
+        torch.manual_seed(0)
+        policy = ToyPolicy()
+        good, bad = sequence(policy, [1, 2, 3, 4], 1.0), sequence(policy, [1, 5, 6, 7], -1.0)
+        trainer = GroupRelativeTrainer(policy, learning_rate=0.5, tokens_per_step=6, max_kl=max_kl)  # type: ignore[arg-type]
+        return trainer.step([good, bad] * 10), policy
+
+    free, _ = run(None)
+    assert free["optimizer_steps"] == 10 and not free["stopped_at_max_kl"] and free["kl_moved"] > 0.05
+    assert abs(free["kl_floor"]) < 1e-6  # the first minibatch finds the policy where it was sampled
+    held, _ = run(0.05)
+    assert held["stopped_at_max_kl"] and held["optimizer_steps"] < 10 and held["sequences"] < 20
+    assert held["kl_moved"] <= 0.05  # the minibatch that found it further was not stepped on
+
+
+def test_a_sampled_token_without_a_logprob_is_refused() -> None:
+    policy = ToyPolicy()
+    broken = TrainingSequence([1, 2, 3], [False, True, True], [float("nan"), -0.5, float("nan")], 1.0)
+    weights = [parameter.detach().clone() for parameter in policy.parameters()]
+    with pytest.raises(ValueError, match="no behavior logprob"):
+        GroupRelativeTrainer(policy).step([broken])  # type: ignore[arg-type]
+    assert all(torch.equal(a, b) for a, b in zip(weights, policy.parameters(), strict=True))

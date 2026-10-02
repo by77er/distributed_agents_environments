@@ -73,3 +73,20 @@ def test_the_feed_keeps_only_the_newest_runs(tmp_path: Path) -> None:
     feed._write("new", {"kind": "event"})  # pyright: ignore[reportPrivateUsage]
     feed.close()
     assert sorted(path.stem for path in directory.glob("*.jsonl")) == ["new", "old-3", "old-4"]
+
+
+def test_runs_a_stopped_writer_left_open_are_marked_cancelled_by_the_next(tmp_path: Path) -> None:
+    import json
+
+    directory = tmp_path / "feed"
+    directory.mkdir()
+    created = {"kind": "event", "seq": 0, "type": "run.created", "at": 1.0, "payload": {"labels": {"group": "0004"}}}
+    ended: dict[str, object] = {"kind": "event", "seq": 9, "type": "run.completed", "at": 2.0, "payload": {}}
+    (directory / "r_done.jsonl").write_text(json.dumps(created) + "\n" + json.dumps(ended) + "\n")
+    cut = json.dumps({"kind": "sample", "slot": "ada", "at": 3.0, "messages": ["x" * 9000]})[:-40]  # mid-line
+    (directory / "r_left.jsonl").write_text(json.dumps(created) + "\n" + cut)
+
+    RunFeed(directory)
+    state = {run["run_id"]: run["state"] for run in FeedReader(directory).runs()}
+    assert state == {"r_done": "completed", "r_left": "cancelled"}
+    assert len((directory / "r_done.jsonl").read_text().splitlines()) == 2  # an ended run is left as it is

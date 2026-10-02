@@ -9,7 +9,6 @@ points that start an engine must guard `if __name__ == "__main__":` (vLLM starts
 """
 
 import itertools
-import math
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -88,10 +87,13 @@ class VllmEngine:
             final = output
         completion = final.outputs[0]
         tokens = list(completion.token_ids)
-        logprobs = [
-            entry[token].logprob if entry is not None and token in entry else math.nan
-            for token, entry in zip(tokens, completion.logprobs or [None] * len(tokens), strict=True)
-        ]
+        entries: list[Any] = list(completion.logprobs or [])
+        missing = len(entries) != len(tokens) or any(
+            entry is None or token not in entry for token, entry in zip(tokens, entries, strict=False)
+        )
+        if missing:  # (it could not be trained on, and as NaN it would undo the adapter)
+            raise RuntimeError("the engine returned a sampled token without its logprob")
+        logprobs = [float(entry[token].logprob) for token, entry in zip(tokens, entries, strict=True)]
         finish = "length" if completion.finish_reason == "length" else "stop"
         return Generation(tokens=tokens, logprobs=logprobs, finish_reason=finish)
 

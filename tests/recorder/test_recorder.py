@@ -220,10 +220,29 @@ async def test_a_long_prompt_leaves_less_room_to_think_so_that_no_turn_is_too_lo
     recorder = Recorder({"policy": channel})
     await recorder.endpoint(RecordedModel(channel="policy")).sample(request(messages))
     prompt = engine.prompts[0]
-    room = limit - len(prompt) - 16  # what the prompt leaves, after room for the answer
+    forced = len(renderer.encode(renderer.thinking.forced_close))  # type: ignore[union-attr]
+    room = limit - len(prompt) - 16 - forced  # what the prompt leaves, after room for the answer and the close
     assert 0 < room < 64 and engine.budgets[0] == room  # not the channel's 64
     (turn,) = recorder.turns["r_1/ada"]
-    assert len(turn.prompt) + sum(turn.loss_mask) <= limit
+    assert len(turn.prompt) + len(turn.completion) <= limit
+
+
+async def test_a_request_can_cap_its_output_down_to_no_thinking_at_all(tokenizer: Tokenizer) -> None:
+    renderer = renderer_for("qwen3.5", tokenizer)
+    engine = ScriptedEngine(tokenizer, [("A summary.<|im_end|>", "stop")])
+    recorder = Recorder({"policy": Channel(engine, renderer, thinking_budget=64, answer_tokens=16)})
+    capped = request([Message.user("Sum up.")]).model_copy(update={"max_output_tokens": 16})
+    result = await recorder.endpoint(RecordedModel(channel="policy")).sample(capped)
+    assert result.message.text == "A summary." and engine.budgets == [16]  # one generation: the answer
+    (turn,) = recorder.turns["r_1/ada"]
+    forced = renderer.encode(renderer.thinking.forced_close)  # type: ignore[union-attr]
+    assert turn.completion[: len(forced)] == forced and turn.loss_mask[: len(forced)] == [False] * len(forced)
+    assert all(turn.loss_mask[len(forced) :]) and engine.prompts[0] == [*turn.prompt, *forced]
+
+    engine.script = [("thinking " * 30, "length"), ("\n\nhi<|im_end|>", "stop")]
+    partly = request([Message.user("Sum up.")], "r_1:0:9").model_copy(update={"max_output_tokens": 24})
+    await recorder.endpoint(RecordedModel(channel="policy")).sample(partly)
+    assert engine.budgets[1:] == [8, 16]  # what the cap leaves after the answer's room, then the answer
 
 
 async def test_a_channel_tells_programs_the_engines_own_limit_and_refuses_what_is_over_it(tokenizer: Tokenizer) -> None:

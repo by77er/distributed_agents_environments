@@ -6,8 +6,10 @@ channel; the recorder's endpoint renders the context to tokens, samples, parses 
 records the turn: prompt tokens, sampled tokens, a loss mask, behavior logprobs and the adapter that sampled them.
 
 Thinking has a budget: a first phase samples until thinking closes or the budget runs out; then the close is forced
-(masked from training) and a second phase samples the answer. Each turn is recorded as its own sequence, because
-chat templates of reasoning models drop earlier turns' thinking: re-rendered context differs from what was sampled.
+(masked from training) and a second phase samples the answer. A request may cap its own output (`max_output_tokens`):
+the answer's room comes first and thinking gets what is left, down to none (the block is closed before it starts).
+Each turn is recorded as its own sequence, because chat templates of reasoning models drop earlier turns' thinking:
+re-rendered context differs from what was sampled.
 """
 
 import asyncio
@@ -104,7 +106,8 @@ class MeteredEngine:
         stop_token_ids: Sequence[int],
         adapter: str | None,
     ) -> Generation:
-        await self._open.wait()
+        while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
+            await self._open.wait()
         started = time.monotonic()
         if self._in_flight == 0:
             self._busy_since = started
@@ -245,35 +248,42 @@ class RecordedEndpoint:
             return recorded[1]
         channel, renderer = self._channel, self._channel.renderer
         prompt = renderer.render(request.context.append, request.tools)
-        if len(prompt) + channel.answer_tokens > channel.limit:  # no room left to answer: the program must compact
+        thinking = renderer.thinking
+        budget, answer = channel.thinking_budget, channel.answer_tokens
+        if request.max_output_tokens is not None:  # the request's own cap: the answer first, thinking with the rest
+            answer = min(answer, request.max_output_tokens)
+            budget = min(budget, request.max_output_tokens - answer)
+        closing = len(renderer.encode(thinking.forced_close)) if thinking is not None and thinking.prompt_opens else 0
+        if len(prompt) + closing + answer > channel.limit:  # no room left to answer: the program must compact
             raise ContextOverflow(channel.limit)
+        if channel.max_sequence_tokens is not None:  # what the prompt leaves, after room for the answer
+            budget = max(0, min(budget, channel.max_sequence_tokens - len(prompt) - answer - closing))
         temperature, top_p = self._sampling.temperature, self._sampling.top_p
         stops = renderer.stop_token_ids()
         completion: list[int] = []
         mask: list[bool] = []
         logprobs: list[float] = []
         adapter, version = channel.adapter, channel.adapter_version
-        thinking = renderer.thinking
-        budget = channel.thinking_budget
-        if channel.max_sequence_tokens is not None:  # what the prompt leaves, after room for the answer
-            budget = max(0, min(budget, channel.max_sequence_tokens - len(prompt) - channel.answer_tokens))
-        if thinking is not None and thinking.prompt_opens and budget > 0:
-            first = await channel.engine.generate(
-                prompt, max_tokens=budget, temperature=temperature, top_p=top_p,
-                stop_token_ids=[*renderer.thinking_end_token_ids(), *stops], adapter=adapter,
-            )  # fmt: skip
-            completion += first.tokens
-            mask += [True] * len(first.tokens)
-            logprobs += first.logprobs
-            ended = bool(first.tokens) and first.tokens[-1] in stops
-            if first.finish_reason == "length":  # out of budget: close the thinking, unsampled
+        if thinking is not None and thinking.prompt_opens:
+            ended, spent = False, budget == 0  # with no room to think, the block the prompt opened is closed at once
+            if budget > 0:
+                first = await channel.engine.generate(
+                    prompt, max_tokens=budget, temperature=temperature, top_p=top_p,
+                    stop_token_ids=[*renderer.thinking_end_token_ids(), *stops], adapter=adapter,
+                )  # fmt: skip
+                completion += first.tokens
+                mask += [True] * len(first.tokens)
+                logprobs += first.logprobs
+                ended = bool(first.tokens) and first.tokens[-1] in stops
+                spent = first.finish_reason == "length"
+            if spent:  # out of budget: close the thinking, unsampled
                 forced = renderer.encode(thinking.forced_close)
                 completion += forced
                 mask += [False] * len(forced)
                 logprobs += [math.nan] * len(forced)
             if not ended:
                 second = await channel.engine.generate(
-                    [*prompt, *completion], max_tokens=channel.answer_tokens, temperature=temperature,
+                    [*prompt, *completion], max_tokens=answer, temperature=temperature,
                     top_p=top_p, stop_token_ids=stops, adapter=adapter,
                 )  # fmt: skip
                 completion += second.tokens
@@ -281,7 +291,7 @@ class RecordedEndpoint:
                 logprobs += second.logprobs
         else:
             only = await channel.engine.generate(
-                prompt, max_tokens=budget + channel.answer_tokens, temperature=temperature,
+                prompt, max_tokens=budget + answer, temperature=temperature,
                 top_p=top_p, stop_token_ids=stops, adapter=adapter,
             )  # fmt: skip
             completion, mask, logprobs = list(only.tokens), [True] * len(only.tokens), list(only.logprobs)
