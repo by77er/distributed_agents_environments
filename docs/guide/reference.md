@@ -12,7 +12,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Rollout jobs: rows in, episodes out, weights published. [`Episode`](#episode), [`events_of`](#events_of), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`loaded`](#loaded), [`Outcome`](#outcome), [`Record`](#record), [`Recorded`](#recorded), [`Refused`](#refused), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`RolloutTicket`](#rolloutticket), [`Status`](#status), [`stored`](#stored), [`Ticket`](#ticket), [`Trace`](#trace)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Directory`](#directory), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Iteration`](#iteration), [`iterations`](#iterations), [`Step`](#step), [`StepFailed`](#stepfailed), [`Store`](#store), [`train`](#train), [`Trainer`](#trainer), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Iteration`](#iteration), [`iterations`](#iterations), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Policies`](#policies), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trainer`](#trainer), [`Version`](#version), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: policies being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`Epoch`](#epoch), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -2194,10 +2194,13 @@ class Job(Protocol)
 
 **Methods**
 
-- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> Ticket` — Queue `count` runs of one row. They start together, when there is room for all of them.
+- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = '') -> Ticket` — Queue `count` runs of one row. They start together, when there is room for all of them. With a `key`,
+  asking again is asking for the same ticket: a caller that died after asking gets it back, with whatever
+  episodes it has.
 - `def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]` — Every episode after `cursor` that the job has, then new ones as runs end, until the job is closed.
 - `async def acknowledge(self, cursor: int) -> None` — The caller has consumed everything through `cursor`: a job started again goes on from there.
-- `async def publish(self, channel: str, adapter: str, path: str) -> int` — Serve new weights on a channel from now on; returns the channel's new version.
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel from now on; returns the version they are served as (`version`, where
+  the caller's policy numbers its own).
 - `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None` — Put something of the caller's own (an update's statistics, say) where whoever watches the job sees it.
 - `async def status(self) -> Status`
 
@@ -2290,7 +2293,7 @@ What a job needs of the recorder: each run's sequences, and somewhere to publish
 
 - `def sessions(self, run_id: str) -> dict[str, list[Epoch]]`
 - `def forget(self, run_id: str) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str) -> int`
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int`
 
 ### `Refused`
 
@@ -2315,18 +2318,18 @@ A job over a runner. Created by `RolloutJobs.start`.
 **Methods**
 
 - `def __init__(self, job_id: str, specification: RunSpecification, runner: Runner, recorder: Recorded, *, in_flight: int, log: Path | None, blobs: Blobs | None, hooks: Sequence[JobHooks], guard: Callable[[], None] | None) -> None`
-- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> RolloutTicket`
+- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = '') -> RolloutTicket`
 - `async def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]`
 - `async def news(self, cursor: int, seconds: float) -> bool` — Wait up to `seconds` for an episode after `cursor`; False once the job is closed and none is left.
 - `def ticket(self, ticket: str) -> RolloutTicket` — A ticket by its id (for a caller that holds only the id), until its episodes are acknowledged.
 - `def after(self, cursor: int) -> list[Record]` — The records after `cursor` that are in the log now.
 - `async def episode(self, record: Record) -> Episode` — The episode a record of this job's log names, with its traces.
-- `def records(self, episodes: Sequence[Episode]) -> list[Record]` — The log's records of some of its episodes.
 - `async def acknowledge(self, cursor: int) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str) -> int`
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int`
 - `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None`
 - `async def status(self) -> Status`
-- `async def close(self) -> None` — Stop admitting, cancel what is running, and end every `episodes` stream.
+- `async def close(self) -> None` — Stop admitting, cancel what is running, and end every `episodes` stream. A ticket that is not over is
+  refused to whoever waits on it here; a job with a log runs what it still owes when it is started again.
 
 ### `RolloutJobs`
 
@@ -2366,13 +2369,14 @@ A ticket of a `RolloutJob`. The job keeps it until its episodes are acknowledged
 | `parameters` | `JsonValue` | required |  |
 | `labels` | `Mapping[str, str]` | required |  |
 | `count` | `int` | required |  |
-| `ended` | `list[Episode]` | `field(default_factory=list[Episode])` |  |
+| `ended` | `list[Record]` | `field(default_factory=list[Record])` | Its runs that have ended, as the log has them. (A run the job itself cut short by closing is in the log, and is not one of these: it is run again when the job next starts.) |
 | `refused` | `str \| None` | `None` | Why the job would not run it, if it would not. |
 
 **Methods**
 
 - `async def episodes(self) -> list[Episode]`
 - `async def ready(self, seconds: float) -> bool` — Whether the ticket is over (its runs have all ended, or it was refused), waiting up to `seconds`.
+- `@property def owed(self) -> int` — Runs that have neither ended nor been started.
 
 ### `Status`
 
@@ -2483,6 +2487,21 @@ class Budget
 | `sequence_tokens` | `int \| None` | `None` | The longest sequence the trainer can train on (None: any). |
 | `sequences` | `int \| None` | `None` | How many sequences a step can afford (None: any number). |
 
+### `Checkpoint`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Checkpoint
+```
+
+A version's files on this machine: what a step starts from.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `weights` | `Path` | required |  |
+| `state` | `Path \| None` | `None` | What the trainer left for itself beside the weights (an optimizer's state, say), if it left any. |
+
 ### `Colocated`
 
 *class* · `libraries/rollout-train/src/rollout_train/colocated.py`
@@ -2498,8 +2517,7 @@ start (too little memory, say).
 **Methods**
 
 - `def __init__(self, trainer: Trainer, channels: Sequence[Pausable], *, guard: Callable[[], None] | None = None) -> None`
-- `@property def latest(self) -> tuple[str, str] | None`
-- `async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step`
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step`
 
 ### `complete_groups`
 
@@ -2533,36 +2551,58 @@ class Curriculum
 **Methods**
 
 - `def unlocked(self) -> list[Row]`
-- `def sample(self, pending: Collection[str] = ()) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
+- `def sample(self, pending: Collection[str] = (), rng: random.Random | None = None) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
   be choosing on what was known before it, so the others come first.
+- `def recorded(self, line: Iteration) -> None` — Take a logged group into account: the row of its title, or failing that of its key (a key that is a
+  place in a catalog changes when rows are added). A curriculum is the fold of a run's iterations.
 - `def weight(self, row: Row) -> float`
 - `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
 - `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
   longer untried, and it taught nothing.
 - `def record(self, row: Row) -> Record`
-- `def saved(self) -> dict[str, dict[str, object]]` — The records, as JSON: by key, each with its row's title.
-- `def restore(self, saved: Mapping[str, Mapping[str, object]]) -> None` — Records go to the row of the same title, if they were saved with one: a key that is a place in a catalog
-  changes when rows are added.
 
-### `Directory`
+### `Fence`
 
-*class* · `libraries/rollout-train/src/rollout_train/record.py`
+*class* · `libraries/rollout-train/src/rollout_train/ledger.py`
 
 ```python
-class Directory
+class Fence
 ```
 
-A `Store` in a directory.
+The right to write within a scope, until someone takes it again.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `path` | `Path` | required |  |
+| `scope` | `str` | required |  |
+| `number` | `int` | required |  |
+
+### `Fenced`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger.py`
+
+```python
+class Fenced(Exception)
+```
+
+A writer whose fence is no longer the newest tried to write: another has taken its place.
+
+### `FileLedger`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger.py`
+
+```python
+class FileLedger
+```
+
+A `Ledger` in a directory: a table is `<table>.jsonl`, one `{"key", "fence", "record"}` per line. Processes
+on one machine may share it: every operation holds a lock on the directory.
 
 **Methods**
 
-- `def read(self, name: str) -> str | None`
-- `def write(self, name: str, text: str) -> None`
-- `def append(self, name: str, line: str) -> None`
+- `def __init__(self, directory: Path) -> None`
+- `async def take(self, scope: str) -> Fence`
+- `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool`
+- `async def read(self, table: str) -> dict[str, JsonValue]`
 
 ### `group_advantages`
 
@@ -2606,8 +2646,8 @@ class Iteration
 | `time` | `float` | required | When the line was written, in seconds since the epoch. |
 | `task` | `str` | required | The row's key. |
 | `title` | `str` | `''` |  |
-| `rollout_seconds` | `float` | `0.0` | From the group's submission to its last episode's end. |
-| `seconds` | `float` | `0.0` | From the group's submission to this line. |
+| `rollout_seconds` | `float` | `0.0` | From the group's decision to its last episode's end. |
+| `seconds` | `float` | `0.0` | From the group's decision to this line. |
 | `rewards` | `list[float]` | `field(default_factory=list[float])` | Of the episodes fit to train on, as are `solved` and `durations`. |
 | `solved` | `list[bool]` | `field(default_factory=list[bool])` |  |
 | `durations` | `list[float \| None]` | `field(default_factory=list[float \| None])` |  |
@@ -2619,10 +2659,8 @@ class Iteration
 | `update` | `Mapping[str, float] \| None` | `None` | The trainer's statistics, if the group was trained on. |
 | `skipped` | `str \| None` | `None` | Why the group was not trained on, if the algorithm found nothing to train on. |
 | `error` | `str \| None` | `None` | What went wrong, if the trainer's step failed. |
-| `adapter` | `str \| None` | `None` | The weights the step produced. |
-| `batch` | `Mapping[str, JsonValue] \| None` | `None` | A blob's reference: the sequences the step trained on, each as `[source, advantage]`. |
-| `checkpoint` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | Blobs' references, by name: what the step left behind (the weights, and what the trainer goes on from). |
-| `version` | `int \| None` | `None` | The channel's version once they were published. |
+| `adapter` | `str \| None` | `None` | The policy version the step made, by name: its record has the weights, the batch and the trainer's state. |
+| `version` | `int \| None` | `None` | That version's number. |
 | `unlocked` | `int` | `0` | Rows of the catalog unlocked after this group. |
 
 **Methods**
@@ -2635,10 +2673,63 @@ class Iteration
 *function* · `libraries/rollout-train/src/rollout_train/record.py`
 
 ```python
-def iterations(store: Store) -> list[Iteration]
+async def iterations(ledger: Ledger, run: str = 'train') -> list[Iteration]
 ```
 
-The groups a run has logged, in the order they were logged.
+The groups a run is done with, by their numbers.
+
+### `Ledger`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger.py`
+
+```python
+class Ledger(Protocol)
+```
+
+**Methods**
+
+- `async def take(self, scope: str) -> Fence` — Take a scope's fence. Whoever held it can no longer write within the scope.
+- `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool` — Append a record under `key`, unless the table has that key: then nothing changes and False is returned.
+  Raises `Fenced` if `fence` is not its scope's newest.
+- `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended.
+
+### `Manifest`
+
+*class* · `libraries/rollout-train/src/rollout_train/policies.py`
+
+```python
+class Manifest
+```
+
+The files of a checkpoint, by their paths within it, each kept as a blob.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `files` | `Mapping[str, BlobReference]` | required |  |
+| `layout` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | How the weights are divided among the files, where they are divided: whoever wrote them says, so that a reader with the same division reads its own files and no others. |
+
+### `Policies`
+
+*class* · `libraries/rollout-train/src/rollout_train/policies.py`
+
+```python
+class Policies
+```
+
+The versions of every policy, in a ledger, and their files in a blob store.
+
+**Methods**
+
+- `def __init__(self, ledger: Ledger, blobs: Blobs) -> None`
+- `async def writer(self, policy: str) -> Fence` — Become the one that may add versions to a policy: whoever was is shut out.
+- `async def versions(self, policy: str) -> list[Version]` — A policy's versions, oldest first.
+- `async def head(self, policy: str) -> Version | None` — A policy's newest version, if it has one.
+- `async def version(self, name: str) -> Version` — The version a name says.
+- `async def add(self, fence: Fence, policy: str, number: int, *, weights: Path, state: Path | None = None, parent: str | None = None, batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Version` — Keep a checkpoint's files and append the version that names them. The append is what makes the version
+  exist: a writer that dies before it has made nothing, and one that repeats it (the same number) gets the
+  version that is there.
+- `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
+  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
 ### `Step`
 
@@ -2650,10 +2741,7 @@ class Step
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `adapter` | `str` | required | The name of the new weights. |
-| `path` | `str` | required | Where engines read them. |
 | `metrics` | `Mapping[str, float]` | required |  |
-| `artifacts` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | What the step left behind, by name, as paths of files and directories: the weights, and whatever the trainer would need to go on from exactly here. Whoever keeps a record of the run keeps these. |
 
 ### `StepFailed`
 
@@ -2665,34 +2753,21 @@ class StepFailed(Exception)
 
 A step did not produce weights: the policy is as it was, and a later step may succeed.
 
-### `Store`
-
-*class* · `libraries/rollout-train/src/rollout_train/record.py`
-
-```python
-class Store(Protocol)
-```
-
-Where a training run keeps its small state: a directory, or anything else that holds named texts.
-
-**Methods**
-
-- `def read(self, name: str) -> str | None`
-- `def write(self, name: str, text: str) -> None`
-- `def append(self, name: str, line: str) -> None`
-
 ### `train`
 
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, store: Store, *, channel: str, algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, blobs: Blobs | None = None) -> None
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None) -> None
 ```
 
-Train `channel`'s policy on `catalog` for `groups` more groups. `algorithm` is `Grpo()` unless given.
-`overlap`: the next group starts when at most this many episodes of earlier groups are still running. `binding`
-says how the program's model slots and imports are served (by default: every slot from `channel`, each import
-from the tool set of its own name). `blobs` is where each step's batch and what it left behind are kept.
+Train `policy` on `catalog` until `groups` more groups are done with (those a stopped loop left unfinished
+among them), serving it on `channel`. `directory` is where versions' files are kept on this machine while they
+are in use: the one being served and the one before it (a turn in progress finishes under the weights it began
+with); every version's files are in the blob store. `algorithm` is `Grpo()` unless given. `overlap`: the next
+group starts when at most this many episodes of earlier groups are still running. `binding` says how the
+program's model slots and imports are served (by default: every slot from `channel`, each import from the tool
+set of its own name). `curriculum` is one that has recorded nothing: the run's iterations are folded into it.
 
 ### `Trainer`
 
@@ -2702,14 +2777,41 @@ from the tool set of its own name). `blobs` is where each step's batch and what 
 class Trainer(Protocol)
 ```
 
+A trainer keeps nothing between steps that it cannot be given again: a step says what it starts from and
+where its files go, so any trainer can take any step of any policy.
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `budget` | `Budget` | required |  |
 
 **Methods**
 
-- `@property def latest(self) -> tuple[str, str] | None` — The newest weights' name and path, if a step has been taken (by this trainer or one before it).
-- `async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step` — Train on the batch, and return the new weights. Raises `StepFailed` if the step produced none.
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step` — Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
+  `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
+  produced no weights.
+
+### `Version`
+
+*class* · `libraries/rollout-train/src/rollout_train/policies.py`
+
+```python
+class Version
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `policy` | `str` | required |  |
+| `number` | `int` | required | From 1, in the order the policy's versions were made. |
+| `weights` | `Manifest` | required |  |
+| `parent` | `str \| None` | `None` | The version it was trained from, by name: of this policy, or of another (a fork). None: from the base. |
+| `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
+| `batch` | `BlobReference \| None` | `None` | What it was trained on: the sequences, each as its place in a job's log and its advantage. |
+| `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
+| `made` | `float` | `0.0` | When, in seconds since the epoch. |
+
+**Methods**
+
+- `@property def name(self) -> str`
 
 ### `Weighted`
 
@@ -2753,9 +2855,10 @@ class Channel
 - `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '') -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
   beginnings are cached.
-- `async def publish(self, adapter: str, path: str) -> int` — Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the new version.
-  The adapter before stays loaded, so that a turn in progress finishes under the weights it began with; the
-  one before that is dropped.
+- `async def publish(self, adapter: str, path: str, version: int | None = None) -> int` — Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the version it
+  is served as: `version` if one is given (a policy's own numbering, which means the same in every process),
+  or one more than the last. The adapter before stays loaded, so that a turn in progress finishes under the
+  weights it began with; the one before that is dropped. Publishing what is being served changes nothing.
 - `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
 - `def resume(self) -> None`
 - `async def sleep(self) -> None`
@@ -2857,6 +2960,7 @@ One token sequence of a session, as the policy saw and continued it.
 | `tokens` | `list[int]` | required |  |
 | `spans` | `list[Span]` | required |  |
 | `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
+| `channel` | `str` | `''` | The channel that sampled them. Its policy's versions are what the spans' `version`s count. |
 
 **Methods**
 
@@ -2918,7 +3022,7 @@ class Recorder
 - `def export(self, session_id: str) -> list[Epoch]` — The session's sequences, oldest first (see the module's description).
 - `def sessions(self, run_id: str) -> dict[str, list[Epoch]]` — What each model slot of a run exports, by slot.
 - `def forget(self, run_id: str) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str) -> int` — Serve new weights on a channel; returns its new version.
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel; returns the version they are served as.
 - `def served(self, key: str) -> tuple[str, ModelEndpoint] | None` — The session a harness's key names, and the endpoint that samples for it.
 
 ### `Renderer`
@@ -3048,7 +3152,7 @@ Stopping is better than exhausting the machine (a host may shut down rather than
 class Platform
 ```
 
-An open profile: `jobs` to run episodes with, a `trainer` to step, and a `store` for the run's state.
+An open profile: `jobs` to run episodes with, a `trainer` to step, and the `policies` it trains.
 
 **Methods**
 
@@ -3072,6 +3176,7 @@ class Profile
 | `serve` | `str \| None` | `None` | `host:port` to serve the rollout jobs and the model endpoint for harnesses on. |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
+| `ledger` | `Path \| None` | `None` | Where the run's tables and the policies' versions are kept, in files (by default `directory/ledger`). Runs that share it see each other's policies. |
 | `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
 | `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
@@ -3093,8 +3198,9 @@ class TrainerSpec
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `kind` | `str` | required | `module:name` of what makes the trainer, called with the channel's model, the run's directory and `settings`. |
-| `channel` | `str` | required | The channel whose policy it trains. |
+| `kind` | `str` | required | `module:name` of what makes the trainer, called with the channel's model and `settings`. |
+| `channel` | `str` | required | The channel that serves the policy it trains. |
+| `policy` | `str \| None` | `None` | The policy it trains, by name (by default the run directory's name). A policy that has versions is gone on with. |
 | `colocated` | `bool` | `False` | Whether it shares the channels' accelerator: their engines then sleep while it steps. |
 | `settings` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` |  |
 
@@ -3444,15 +3550,13 @@ class LoraTrainer
 ```
 
 Trains a LoRA adapter over `model`'s checkpoint, one step at a time, each in a fresh process on the GPU
-(`rollout_lora.worker`). Adapters are kept under `directory/adapters/step-N`, and the optimizer's state under
-`directory/trainer`; a trainer made again over the same directory goes on from the latest step. `settings` are
-`LoraSettings`' fields.
+(`rollout_lora.worker`). It keeps nothing between steps: a step starts from the adapter and the optimizer's
+state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields.
 
 **Methods**
 
-- `def __init__(self, model: str, directory: Path, **settings: Any) -> None`
-- `@property def latest(self) -> tuple[str, str] | None` — The newest adapter's name and path, if a step has been taken.
-- `async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step`
+- `def __init__(self, model: str, **settings: Any) -> None`
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step`
 
 ## `rollout_qwen`
 

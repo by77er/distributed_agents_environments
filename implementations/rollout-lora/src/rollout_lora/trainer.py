@@ -5,44 +5,19 @@ from pathlib import Path
 from typing import Any
 
 from rollout_lora.settings import LoraSettings
-from rollout_lora.worker import MINIBATCHES, OPTIMIZER, Job, TrainerProcess
-from rollout_train.trainer import Budget, Step, Weighted
+from rollout_lora.worker import TrainerProcess
+from rollout_train.trainer import Budget, Checkpoint, Step, Weighted
 
 
 class LoraTrainer:
     """Trains a LoRA adapter over `model`'s checkpoint, one step at a time, each in a fresh process on the GPU
-    (`rollout_lora.worker`). Adapters are kept under `directory/adapters/step-N`, and the optimizer's state under
-    `directory/trainer`; a trainer made again over the same directory goes on from the latest step. `settings` are
-    `LoraSettings`' fields."""
+    (`rollout_lora.worker`). It keeps nothing between steps: a step starts from the adapter and the optimizer's
+    state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields."""
 
-    def __init__(self, model: str, directory: Path, **settings: Any) -> None:
+    def __init__(self, model: str, **settings: Any) -> None:
         self.settings = LoraSettings(**settings)
         self.budget = Budget(self.settings.sequence_tokens, self.settings.sequences_per_step)
-        self._adapters = directory / "adapters"
-        self._adapters.mkdir(parents=True, exist_ok=True)
-        self._state = directory / "trainer"
-        self._process = TrainerProcess(Job(model, self._state, self.settings))
-        steps = [
-            int(path.name.removeprefix("step-"))
-            for path in self._adapters.glob("step-*")
-            if (path / "adapter_config.json").exists()
-        ]
-        self.steps = max(steps, default=0)
-        """Steps taken so far (over every process that has used the directory)."""
+        self._process = TrainerProcess(model, self.settings)
 
-    @property
-    def latest(self) -> tuple[str, str] | None:
-        """The newest adapter's name and path, if a step has been taken."""
-        return (f"step-{self.steps}", str(self._adapters / f"step-{self.steps}")) if self.steps else None
-
-    async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step:
-        name = f"step-{self.steps + 1}"
-        previous = self._adapters / f"step-{self.steps}" if self.steps else None
-        metrics = await self._process.step(batch, seed=seed, adapter=self._adapters / name, previous=previous)
-        self.steps += 1
-        artifacts = {
-            "adapter": str(self._adapters / name),
-            "optimizer": str(self._state / OPTIMIZER),
-            "minibatches": str(self._state / MINIBATCHES),
-        }
-        return Step(name, str(self._adapters / name), metrics, artifacts)
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+        return Step(await self._process.step(batch, seed=seed, parent=parent, into=into))

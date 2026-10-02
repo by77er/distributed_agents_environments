@@ -10,7 +10,7 @@ which engines stand behind it. An **engine** is one replica serving the channel'
 ```python
 channel = Channel("policy", engines=[engine_a, engine_b], renderer=renderer, limits=Limits(sequence=8000))
 generation = await channel.generate(prompt, max_tokens=64, ..., adapter=channel.adapter, session="r_1/ada")
-version = await channel.publish("step-3", "/adapters/step-3")
+version = await channel.publish("swarm@3", "/versions/swarm@3/weights", 3)
 ```
 
 A deployment describes its channels in a profile: the model, its renderer, its limits, and one entry per engine
@@ -55,8 +55,10 @@ for the answer after it, and the longest turn.
 
 ## Publishing weights
 
-`Channel.publish(adapter, path)` loads the adapter on every engine of the channel, samples from it from then on,
-and returns the channel's new version.
+`Channel.publish(adapter, path, version)` loads the adapter on every engine of the channel, samples from it from
+then on, and returns the version it is served as: the number given, which is the policy's own
+([policies](policies.md)), or one more than the last when none is given. Publishing what is being served changes
+nothing.
 
 - The adapter before stays loaded, so that a turn in progress (a thought, then its answer) finishes under the
   weights it began with. The one before that is dropped.

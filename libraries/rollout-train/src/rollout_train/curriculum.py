@@ -8,10 +8,11 @@ order, the first `start` of them, and `reach` past the hardest one solved at lea
 """
 
 import random
-from collections.abc import Collection, Mapping, Sequence
-from dataclasses import asdict, dataclass, field, fields
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass, field
 
 from rollout.catalog import Row
+from rollout_train.record import Iteration
 
 
 @dataclass
@@ -50,13 +51,26 @@ class Curriculum:
         count = max(self.start, solved[-1] + 1 + self.reach) if solved else self.start
         return list(self.rows[:count])
 
-    def sample(self, pending: Collection[str] = ()) -> Row:
+    def sample(self, pending: Collection[str] = (), rng: random.Random | None = None) -> Row:
         """The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
         be choosing on what was known before it, so the others come first."""
         unlocked = self.unlocked()
         candidates = [row for row in unlocked if row.key not in pending] or unlocked
         weights = [self.weight(row) for row in candidates]
-        return self.rng.choices(candidates, weights=weights, k=1)[0]
+        return (rng or self.rng).choices(candidates, weights=weights, k=1)[0]
+
+    def recorded(self, line: Iteration) -> None:
+        """Take a logged group into account: the row of its title, or failing that of its key (a key that is a
+        place in a catalog changes when rows are added). A curriculum is the fold of a run's iterations."""
+        by_title = {row.title: row for row in self.rows}
+        by_key = {row.key: row for row in self.rows}
+        row = by_title.get(line.title) or by_key.get(line.task)
+        if row is None:
+            return  # a row the catalog no longer has
+        if line.rewards:
+            self.update(row, line.rewards, line.solved)
+        else:
+            self.failed(row)
 
     def weight(self, row: Row) -> float:
         record = self.record(row)
@@ -89,20 +103,3 @@ class Curriculum:
 
     def record(self, row: Row) -> Record:
         return self.records.setdefault(row.key, Record())
-
-    def saved(self) -> dict[str, dict[str, object]]:
-        """The records, as JSON: by key, each with its row's title."""
-        titles = {row.key: row.title for row in self.rows}
-        return {key: {**asdict(record), "title": titles.get(key, "")} for key, record in self.records.items()}
-
-    def restore(self, saved: Mapping[str, Mapping[str, object]]) -> None:
-        """Records go to the row of the same title, if they were saved with one: a key that is a place in a catalog
-        changes when rows are added."""
-        by_title = {row.title: row.key for row in self.rows}
-        known = {field.name for field in fields(Record)}
-        for key, entry in saved.items():
-            title = entry.get("title")
-            if title is not None and title not in by_title:
-                continue  # a row the catalog no longer has
-            values = {name: value for name, value in entry.items() if name in known}
-            self.records[by_title[str(title)] if title is not None else key] = Record(**values)  # type: ignore[arg-type]

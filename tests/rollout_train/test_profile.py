@@ -10,9 +10,10 @@ from typing import Any
 import pytest
 
 from rollout.catalog import binding_for
-from rollout_train import Budget, Step, Weighted, iterations, train
+from rollout_train import Budget, Checkpoint, Step, Weighted, iterations, train
 from rollout_train import testing as support
 from rollout_train.profile import Profile
+from rollout_train.trainer import WEIGHTS
 from tests.rollout_train.rollouts.games import words
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,16 +45,14 @@ sequences_per_step = 3
 class Steps:
     """A trainer that trains nothing: what a profile's `[trainer]` names."""
 
-    def __init__(self, model: str, directory: Path, *, sequence_tokens: int, sequences_per_step: int) -> None:
-        self.model, self.directory = model, directory
+    def __init__(self, model: str, *, sequence_tokens: int, sequences_per_step: int) -> None:
+        self.model = model
         self.budget = Budget(sequence_tokens, sequences_per_step)
-        self.latest: tuple[str, str] | None = None
-        self.taken = 0
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step:
-        self.taken += 1
-        self.latest = (f"step-{self.taken}", f"/adapters/step-{self.taken}")
-        return Step(*self.latest, {"sequences": float(len(batch))})
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+        (into / WEIGHTS).mkdir(parents=True)
+        (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} sequences")
+        return Step({"sequences": float(len(batch))})
 
 
 def write(tmp_path: Path, text: str = PROFILE) -> Path:
@@ -78,9 +77,15 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         assert policy.limits.sequence == 900 and policy.limits.thinking == 64 and judge.limits.sequence is None
         assert platform.trainer is not None and platform.trainer.budget == Budget(900, 3)
         binding = binding_for(words, "policy", platform.tool_bindings)
-        await train(platform.jobs, words, platform.trainer, platform.store, channel="policy", groups=2, binding=binding)
-        trained = [line for line in iterations(platform.store) if line.update is not None]
-        assert trained and policy.version == len(trained) and judge.version == 0  # published to the trained channel
+        assert platform.policy == "run"  # (the run directory's name, unless the profile names the policy)
+        await train(
+            platform.jobs, words, platform.trainer, platform.policies, policy=platform.policy, channel="policy",
+            directory=tmp_path / "run" / "versions", groups=2, binding=binding,
+        )  # fmt: skip
+        trained = [line for line in await iterations(platform.ledger) if line.update is not None]
+        versions = await platform.policies.versions("run")
+        assert trained and [version.number for version in versions] == list(range(1, len(trained) + 1))
+        assert policy.adapter == versions[-1].name and judge.version == 0  # served on the trained channel only
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
     assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_job.jsonl").exists()

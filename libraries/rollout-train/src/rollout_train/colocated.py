@@ -2,9 +2,10 @@
 
 import time
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Protocol
 
-from rollout_train.trainer import Step, Trainer, Weighted
+from rollout_train.trainer import Checkpoint, Step, Trainer, Weighted
 
 
 class Pausable(Protocol):
@@ -29,11 +30,7 @@ class Colocated:
         self._guard = guard
         self.budget = trainer.budget
 
-    @property
-    def latest(self) -> tuple[str, str] | None:
-        return self._trainer.latest
-
-    async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step:
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
         started = time.monotonic()
         for channel in self._channels:
             await channel.pause()  # no request may be in flight when an engine goes to sleep
@@ -44,7 +41,7 @@ class Colocated:
             try:
                 if self._guard is not None:
                     self._guard()
-                step = await self._trainer.step(batch, seed=seed)
+                step = await self._trainer.step(batch, seed=seed, parent=parent, into=into)
             finally:
                 for channel in self._channels:
                     await channel.wake()
@@ -52,4 +49,4 @@ class Colocated:
             for channel in self._channels:
                 channel.resume()
         timing = {"waited_for_requests_seconds": waited, "update_seconds": time.monotonic() - started}
-        return Step(step.adapter, step.path, {**step.metrics, **timing}, step.artifacts)
+        return Step({**step.metrics, **timing})

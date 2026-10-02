@@ -57,8 +57,8 @@ async def _train(profile: Path, directory: Path | None, catalog: str, groups: in
         assert platform.trainer is not None
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
-            platform.jobs, rows, platform.trainer, platform.store, channel=channel, groups=groups, seed=seed,
-            binding=binding, blobs=platform.blobs,
+            platform.jobs, rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
+            directory=described.directory / "versions", groups=groups, seed=seed, binding=binding,
         )  # fmt: skip
 
 

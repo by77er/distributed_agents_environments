@@ -1,21 +1,23 @@
-"""What a training run writes down for each group: one line of `metrics.jsonl`.
+"""What a training run writes down: three tables in a ledger, by the group's number.
 
-The loop writes these and sends them to the job as `iteration` notes; the report and the monitor read them.
+- `groups`: what the run decided to play (the row, and the start every episode of the group is given). Written
+  before the group is asked for.
+- `steps`: what the run decided to train on (the version it starts from, the one it will make, the batch). Written
+  before the trainer is called.
+- `iterations`: how the group went and what was done with it (an `Iteration`). Written last: a group with an
+  iteration is done with.
+
+A run that is started again reads them and goes on: whatever has a decision and no outcome is taken up where it
+was left. The monitor and the report read `iterations`.
 """
 
-import asyncio
-import io
-import json
-import tarfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import JsonValue
 
-from rollout.contracts import BlobReference
-from rollout.harness.blobs import Blobs
+from rollout_train.ledger import Ledger
 
 
 @dataclass
@@ -28,9 +30,9 @@ class Iteration:
     """The row's key."""
     title: str = ""
     rollout_seconds: float = 0.0
-    """From the group's submission to its last episode's end."""
+    """From the group's decision to its last episode's end."""
     seconds: float = 0.0
-    """From the group's submission to this line."""
+    """From the group's decision to this line."""
     rewards: list[float] = field(default_factory=list[float])
     """Of the episodes fit to train on, as are `solved` and `durations`."""
     solved: list[bool] = field(default_factory=list[bool])
@@ -49,13 +51,9 @@ class Iteration:
     error: str | None = None
     """What went wrong, if the trainer's step failed."""
     adapter: str | None = None
-    """The weights the step produced."""
-    batch: Mapping[str, JsonValue] | None = None
-    """A blob's reference: the sequences the step trained on, each as `[source, advantage]`."""
-    checkpoint: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """Blobs' references, by name: what the step left behind (the weights, and what the trainer goes on from)."""
+    """The policy version the step made, by name: its record has the weights, the batch and the trainer's state."""
     version: int | None = None
-    """The channel's version once they were published."""
+    """That version's number."""
     unlocked: int = 0
     """Rows of the catalog unlocked after this group."""
 
@@ -68,51 +66,16 @@ class Iteration:
         return cls(**{key: value for key, value in data.items() if key in known})
 
 
-async def kept(path: Path, blobs: Blobs) -> BlobReference:
-    """Keep a file, or a directory as a tar archive, in `blobs`."""
-
-    def read() -> tuple[bytes, str]:
-        if path.is_file():
-            return path.read_bytes(), "application/octet-stream"
-        packed = io.BytesIO()
-        with tarfile.open(fileobj=packed, mode="w") as archive:
-            archive.add(path, arcname=path.name)
-        return packed.getvalue(), "application/x-tar"
-
-    return await blobs.put(*await asyncio.to_thread(read))
+def table(run: str, name: str) -> str:
+    """A run's table in the ledger."""
+    return f"runs/{run}/{name}"
 
 
-class Store(Protocol):
-    """Where a training run keeps its small state: a directory, or anything else that holds named texts."""
-
-    def read(self, name: str) -> str | None: ...
-    def write(self, name: str, text: str) -> None: ...
-    def append(self, name: str, line: str) -> None: ...
+GROUPS, STEPS, ITERATIONS = "groups", "steps", "iterations"
 
 
-@dataclass(frozen=True)
-class Directory:
-    """A `Store` in a directory."""
-
-    path: Path
-
-    def read(self, name: str) -> str | None:
-        file = self.path / name
-        return file.read_text() if file.exists() else None
-
-    def write(self, name: str, text: str) -> None:
-        self.path.mkdir(parents=True, exist_ok=True)
-        (self.path / name).write_text(text)
-
-    def append(self, name: str, line: str) -> None:
-        self.path.mkdir(parents=True, exist_ok=True)
-        with (self.path / name).open("a") as file:
-            file.write(line + "\n")
-
-
-METRICS = "metrics.jsonl"
-
-
-def iterations(store: Store) -> list[Iteration]:
-    """The groups a run has logged, in the order they were logged."""
-    return [Iteration.from_json(json.loads(line)) for line in (store.read(METRICS) or "").splitlines() if line.strip()]
+async def iterations(ledger: Ledger, run: str = "train") -> list[Iteration]:
+    """The groups a run is done with, by their numbers."""
+    logged = await ledger.read(table(run, ITERATIONS))
+    lines = [Iteration.from_json(record) for record in logged.values() if isinstance(record, dict)]
+    return sorted(lines, key=lambda line: line.iteration)

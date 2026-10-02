@@ -4,38 +4,68 @@ Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md),
 [API reference](../../guide/reference.md#rollout_train)
 
 The training loop, what it asks of an algorithm and of a trainer, and the curriculum. The loop is written against
-[`Jobs`](rollouts.md), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and `Store` only: the same loop
-runs with everything in one process and with the runs, the engines and the trainer on machines of their own.
+[`Jobs`](rollouts.md), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and [`Policies`](policies.md)
+only: the same loop runs with everything in one process and with the runs, the engines and the trainer on machines
+of their own.
 
 ```python
-await train(jobs, catalog, trainer, Directory(run), channel="policy", groups=100)
+await train(jobs, catalog, trainer, policies, policy="swarm", channel="policy", directory=versions, groups=100)
 ```
 
 `rollout train PROFILE CATALOG` runs this loop over what a profile describes: the profile opens into jobs, a
-trainer and a store, and names the channel to train ([deploying](../../guide/deploying.md)).
+trainer and the policies, and names the policy to train and the channel that serves it
+([deploying](../../guide/deploying.md)).
 
 ## The loop
 
-[`train`](../../guide/reference.md#train) trains one channel's policy on a catalog. `channel` names it: new weights
-are published to it, and unless a `binding` says otherwise every model slot of the catalog's program is served from
-it.
+[`train`](../../guide/reference.md#train) trains one [policy](policies.md) on a catalog and serves it on one
+channel. Unless a `binding` says otherwise, every model slot of the catalog's program is served from that channel.
 
 - **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled `group`,
   `iteration`, `task` and `title`. The curriculum picks the row and the catalog draws the start.
-- **Nothing waits for all episodes.** `OUTSTANDING` groups are kept submitted. The job starts the next group as
+- **Nothing waits for all episodes.** `OUTSTANDING` groups are kept asked for. The job starts the next group as
   soon as there is room beside what is left of the one before (`overlap`), and each group is trained on when its
-  last episode ends, while the next group's episodes run on. Their tokens then carry two weights versions, which
-  the trainer's objective corrects for.
-- **For each group**, in order: the curriculum records it, the algorithm says what to train on, the trainer steps,
-  the new weights are published to the channel, one line is written, and the group's episodes are acknowledged.
-- **A group with nothing to train on** is logged with the algorithm's reason (`skipped`), and the weights stay as
-  they were.
-- **A step that fails** (`StepFailed`) is logged with its `error`, and the weights stay as they were.
+  last episode ends, while the next group's episodes run on. Their tokens then carry two versions, which the
+  trainer's objective corrects for.
+- **For each group**: the curriculum records it, the algorithm says what to train on, the trainer steps from the
+  policy's newest version, the new version is added to the policy and served on the channel, and the group's
+  outcome is written.
+- **A group with nothing to train on** is logged with the algorithm's reason (`skipped`), and the policy stays as
+  it was.
+- **A step that fails** (`StepFailed`) is logged with its `error`, and the policy stays as it was.
   `FAILED_UPDATES` in a row stop the loop.
 - **A ticket the job refuses** stops the loop with [`Refused`](rollouts.md#guarantees).
-- **Started again** over the same store, the loop goes on after the last group logged, with the curriculum it
-  saved and on starts drawn anew. Episodes that a stopped loop left in the job's log are set aside: they are groups
-  no more.
+
+## Dying and starting again
+
+The loop can be killed at any moment and started again. It keeps nothing it cannot read back: what it decides and
+what happens are appended to three tables in the [ledger](policies.md#the-ledger), each under the group's number,
+and every action is one that can be taken twice.
+
+| Table | Written | Holds |
+|---|---|---|
+| `runs/RUN/groups` | before a group is asked for | the row, and the start every episode of the group is given |
+| `runs/RUN/steps` | before the trainer is called | the version the step starts from, the number of the one it will make, the batch (a blob), the seed |
+| `runs/RUN/iterations` | last | how the group went and what was done with it: an [`Iteration`](../../guide/reference.md#iteration) |
+
+| It died | Started again, it |
+|---|---|
+| after deciding a group | asks for that group again under the same key, and the job gives back the ticket it has |
+| while a group played | waits for the episodes the job still owes; the others are in the job's [log](rollouts.md#the-log) |
+| after a group ended | finds the group has no outcome, and takes it from there |
+| during a step | finds the step decided and no version made, and takes the step again from the same parent |
+| after the step | finds the version, serves it, and writes the group's outcome |
+
+- **A step that was decided is finished before another is decided.** A decision names the version it will make,
+  and only one group may make it.
+- **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
+  policy's table. A step that died before the append made nothing.
+- **One loop at a time.** Starting takes the run's fence and the policy's. A loop that was replaced, and does not
+  know it yet, has its next write refused.
+- **`groups` counts groups done with**, those a stopped loop left unfinished among them.
+
+What is redone: a step that was in progress, and the runs that were in flight if they ran in the loop's own process
+(the job runs them again from the same start).
 
 ## The algorithm (`Grpo`)
 
@@ -72,24 +102,24 @@ rather than tickets.
   start may be one the row can be set up from. After `FAILED_GROUPS` such groups in a row, the row counts as tried,
   and as having taught nothing.
 - **What it sees.** The task's own rewards, whatever the algorithm adds to them.
-- **Saved** as `curriculum.json` in the run's store after every group, each record with its row's title. Records
-  go back to the row of the same title, so they stay with their rows when a catalog changes.
+- **It is a fold.** A curriculum is rebuilt from the run's iterations when the loop starts: each goes to the row of
+  its title, so records stay with their rows when a catalog changes. A choice is made with a random number
+  generator seeded by the group's number, and is written down before it is acted on.
 
 ## The trainer
 
-A [`Trainer`](../../guide/reference.md#trainer) takes a batch, moves the policy and says where the new weights
-are. Nothing in the protocol says where it runs or what it trains.
+A [`Trainer`](../../guide/reference.md#trainer) takes a batch and makes new weights from given ones. It keeps
+nothing between steps that it cannot be given again, so any trainer can take any step of any policy.
 
 - **`budget`** ([`Budget`](../../guide/reference.md#budget)) is what the trainer can take: the longest sequence, and
   how many sequences a step can afford. It comes from the trainer's hardware, and nothing above the trainer chooses
   it. The algorithm selects within it, and a deployment makes the longest sequence its channel's longest turn
   ([limits](channels.md#limits)).
-- **`step(batch, seed=...)`** trains on [`Weighted`](../../guide/reference.md#weighted) sequences and returns a
-  [`Step`](../../guide/reference.md#step): the name of the new weights, where engines read them, and metrics.
+- **`step(batch, seed=..., parent=..., into=...)`** trains on [`Weighted`](../../guide/reference.md#weighted)
+  sequences, starting from a [`Checkpoint`](../../guide/reference.md#checkpoint) (a version's files on this
+  machine; none means the base model). It leaves the new weights in `into/weights`, as engines load them, and what
+  a later step starts from (an optimizer's state, say) in `into/state`. It returns its metrics.
 - **`StepFailed`** means the step produced no weights: the policy is as it was, and a later step may succeed.
-- **`latest`** is the name and path of the newest weights, if a step has been taken by this trainer or by one
-  before it over the same state. A deployment publishes them when it starts, so a run that is started again serves
-  its newest weights.
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
@@ -100,32 +130,22 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 ## The record
 
-A run writes one line per group to `metrics.jsonl` in its store: an
-[`Iteration`](../../guide/reference.md#iteration). The same line goes to the job as an `iteration` note, where the
-[monitor](monitor.md) reads it; the report reads the file.
+For each group the run appends an [`Iteration`](../../guide/reference.md#iteration) to its `iterations` table. The
+same line goes to the job as an `iteration` note, where the [monitor](monitor.md) reads it; the report reads the
+table (`iterations(ledger, run)`).
 
 | A group that was | Has |
 |---|---|
-| trained on | `update` (the trainer's metrics), `adapter` and `version` (the weights and the channel's version once published) |
+| trained on | `update` (the trainer's metrics), `adapter` (the version the step made, by name) and `version` (its number) |
 | not trained on | `skipped`: the algorithm's reason |
 | given to a step that failed | `error`: the last line of what the step raised |
 
 Every line has the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
 failed and why, how many sequences were recorded and how many trained on, the algorithm's notes, and how many rows
-are unlocked. `iterations(store)` reads them back.
+are unlocked.
 
-Given a blob store (`train(..., blobs=...)`), a group that was trained on also has:
-
-| Field | Names |
-|---|---|
-| `batch` | A blob: every sequence the step trained on, as its place in the job's log (`cursor/slot/index`) and its advantage |
-| `checkpoint` | Blobs by name: what the step left behind ([`Step.artifacts`](../../guide/reference.md#step)). A directory is kept as a tar archive |
-
-With the job's [log](rollouts.md#the-log), that is the whole run: every episode, what each step was trained on, and
-the weights and trainer state after it.
-
-A [`Store`](../../guide/reference.md#store) holds the run's small state as named texts.
-[`Directory`](../../guide/reference.md#directory) is one in a directory.
+With the job's [log](rollouts.md#the-log) and the policy's [versions](policies.md), that is the whole run: every
+episode, what each step was trained on, and the weights and the trainer's state after it.
 
 ## Reporting
 

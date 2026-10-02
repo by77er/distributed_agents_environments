@@ -38,7 +38,7 @@ class Recorded(Protocol):
 
     def sessions(self, run_id: str) -> dict[str, list[Epoch]]: ...
     def forget(self, run_id: str) -> None: ...
-    async def publish(self, channel: str, adapter: str, path: str) -> int: ...
+    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int: ...
 
 
 class JobHooks:
@@ -84,8 +84,12 @@ class Jobs(Protocol):
 class Job(Protocol):
     id: str
 
-    async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> Ticket:
-        """Queue `count` runs of one row. They start together, when there is room for all of them."""
+    async def run(
+        self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = ""
+    ) -> Ticket:
+        """Queue `count` runs of one row. They start together, when there is room for all of them. With a `key`,
+        asking again is asking for the same ticket: a caller that died after asking gets it back, with whatever
+        episodes it has."""
         ...
 
     def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]:
@@ -96,8 +100,9 @@ class Job(Protocol):
         """The caller has consumed everything through `cursor`: a job started again goes on from there."""
         ...
 
-    async def publish(self, channel: str, adapter: str, path: str) -> int:
-        """Serve new weights on a channel from now on; returns the channel's new version."""
+    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
+        """Serve new weights on a channel from now on; returns the version they are served as (`version`, where
+        the caller's policy numbers its own)."""
         ...
 
     async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None:
@@ -115,16 +120,21 @@ class RolloutTicket:
     parameters: JsonValue
     labels: Mapping[str, str]
     count: int
-    ended: list[Episode] = field(default_factory=list[Episode])
+    ended: list[Record] = field(default_factory=list[Record])
+    """Its runs that have ended, as the log has them. (A run the job itself cut short by closing is in the log,
+    and is not one of these: it is run again when the job next starts.)"""
     refused: str | None = None
     """Why the job would not run it, if it would not."""
+    _job: "RolloutJob | None" = None
+    _started: int = 0
     _done: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def episodes(self) -> list[Episode]:
         await self._done.wait()
         if self.refused is not None:
             raise Refused(self.refused)
-        return list(self.ended)
+        assert self._job is not None
+        return [await self._job.episode(record) for record in self.ended]
 
     async def ready(self, seconds: float) -> bool:
         """Whether the ticket is over (its runs have all ended, or it was refused), waiting up to `seconds`."""
@@ -133,6 +143,15 @@ class RolloutTicket:
         except TimeoutError:
             return False
         return True
+
+    @property
+    def owed(self) -> int:
+        """Runs that have neither ended nor been started."""
+        return self.count - len(self.ended) - self._started
+
+
+INTERRUPTED = "the job was closed"
+"""The `detail` of an episode whose run the job cut short by closing. It is not one of its ticket's episodes."""
 
 
 class RolloutJob:
@@ -176,21 +195,40 @@ class RolloutJob:
         self._tasks: set[asyncio.Task[None]] = set()
         if log is not None:
             log.mkdir(parents=True, exist_ok=True)
-            if (log / EPISODES).exists():
-                lines = (log / EPISODES).read_text().splitlines()
-                self._records = [Record.from_json(json.loads(line)) for line in lines if line.strip()]
+            self._records = [Record.from_json(line) for line in _lines(log / EPISODES)]
             self._last = self._records[-1].episode.cursor if self._records else 0
             if (log / ACKNOWLEDGED).exists():
                 self._acknowledged = int((log / ACKNOWLEDGED).read_text())
+            for asked in _lines(log / TICKETS):  # what was asked for and is not yet done with
+                ticket = RolloutTicket(asked["id"], asked["parameters"], asked["labels"], asked["count"], _job=self)
+                ticket.ended = [
+                    record
+                    for record in self._records
+                    if record.episode.ticket == ticket.id and record.episode.detail != INTERRUPTED
+                ]
+                if ticket.owed or any(record.episode.cursor > self._acknowledged for record in ticket.ended):
+                    self._tickets[ticket.id] = ticket
+                    if ticket.owed:
+                        self._queue.append(ticket)
+                    else:
+                        ticket._done.set()  # pyright: ignore[reportPrivateUsage]
 
     # For the caller
 
     async def run(
-        self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1
+        self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = ""
     ) -> RolloutTicket:
         if self._closed:
             raise RuntimeError(f"job {self.id} is closed")
-        ticket = RolloutTicket(f"t_{uuid.uuid4().hex[:10]}", parameters, dict(labels or {}), count)
+        ticket_id = f"t_{key}" if key else f"t_{uuid.uuid4().hex[:10]}"
+        if ticket_id in self._tickets:
+            self._spawn(self._admit())  # (a job that was started again has runs of it to start)
+            return self._tickets[ticket_id]
+        ticket = RolloutTicket(ticket_id, parameters, dict(labels or {}), count, _job=self)
+        if self._log is not None:
+            asked = {"id": ticket.id, "parameters": parameters, "labels": dict(ticket.labels), "count": count}
+            with (self._log / TICKETS).open("a") as file:
+                file.write(json.dumps(asked) + "\n")
         self._queue.append(ticket)
         self._tickets[ticket.id] = ticket
         self._tell("ticket", ticket=ticket.id, labels=dict(ticket.labels), count=count)
@@ -236,11 +274,6 @@ class RolloutJob:
             return held or record.episode
         return await loaded(record, self.blobs)
 
-    def records(self, episodes: Sequence[Episode]) -> list[Record]:
-        """The log's records of some of its episodes."""
-        by_cursor = {record.episode.cursor: record for record in self._records}
-        return [by_cursor[episode.cursor] for episode in episodes]
-
     async def acknowledge(self, cursor: int) -> None:
         self._acknowledged = max(self._acknowledged, cursor)
         for held in [held for held in self._held if held <= cursor]:
@@ -250,31 +283,33 @@ class RolloutJob:
         else:  # nowhere to keep them: what is acknowledged is gone
             self._records = self.after(cursor)
         for ticket in [t for t in self._tickets.values() if t._done.is_set()]:  # pyright: ignore[reportPrivateUsage]
-            if all(episode.cursor <= cursor for episode in ticket.ended):
+            if all(record.episode.cursor <= cursor for record in ticket.ended):
                 del self._tickets[ticket.id]
 
-    async def publish(self, channel: str, adapter: str, path: str) -> int:
-        version = await self._recorder.publish(channel, adapter, path)
-        self._tell("published", channel=channel, adapter=adapter, version=version)
-        return version
+    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
+        served = await self._recorder.publish(channel, adapter, path, version)
+        self._tell("published", channel=channel, adapter=adapter, version=served)
+        return served
 
     async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None:
         self._tell(kind, **payload)
 
     async def status(self) -> Status:
-        queued = sum(ticket.count for ticket in self._queue)
+        queued = sum(ticket.owed for ticket in self._queue)
         return Status(queued, self._running, self._last, self._acknowledged)
 
     async def close(self) -> None:
-        """Stop admitting, cancel what is running, and end every `episodes` stream."""
+        """Stop admitting, cancel what is running, and end every `episodes` stream. A ticket that is not over is
+        refused to whoever waits on it here; a job with a log runs what it still owes when it is started again."""
         self._closed = True
-        for ticket in self._queue:
-            ticket.refused = f"job {self.id} was closed before the ticket was admitted"
-            ticket._done.set()  # pyright: ignore[reportPrivateUsage]
         self._queue.clear()
         for task in list(self._tasks):
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        for ticket in self._tickets.values():
+            if not ticket._done.is_set():  # pyright: ignore[reportPrivateUsage]
+                ticket.refused = f"job {self.id} was closed before the ticket was over"
+                ticket._done.set()  # pyright: ignore[reportPrivateUsage]
         async with self._news:
             self._news.notify_all()
 
@@ -286,10 +321,12 @@ class RolloutJob:
         task.add_done_callback(self._tasks.discard)
 
     async def _admit(self) -> None:
-        """Start the tickets at the head of the queue that there is room for (all of a ticket's runs, or none)."""
+        """Start the tickets at the head of the queue that there is room for (all the runs a ticket is owed, or
+        none)."""
         while self._queue and not self._closed:
             ticket = self._queue[0]
-            if self._running and self._running + ticket.count > self._room:
+            owed = ticket.owed
+            if self._running and self._running + owed > self._room:
                 return
             self._queue.pop(0)
             if self._guard is not None:
@@ -299,10 +336,12 @@ class RolloutJob:
                     ticket.refused = f"{type(error).__name__}: {error}"
                     ticket._done.set()  # pyright: ignore[reportPrivateUsage]
                     continue
-            self._running += ticket.count
+            self._running += owed
+            first = len(ticket.ended) + 1
+            ticket._started += owed  # pyright: ignore[reportPrivateUsage]
             labels = {**ticket.labels, "job": self.id, "ticket": ticket.id}
             started: list[str] = []
-            for number in range(1, ticket.count + 1):
+            for number in range(first, first + owed):
                 try:
                     handle = await self._runner.start(
                         self._specification_for(ticket), labels={**labels, "episode": str(number)}
@@ -320,17 +359,19 @@ class RolloutJob:
 
     async def _watch(self, ticket: RolloutTicket, run_id: str, stream: AsyncIterator[RunEvent]) -> None:
         events: list[RunEvent] = []
+        interrupted = False
         try:
             async for event in stream:
                 events.append(event)
         except asyncio.CancelledError:  # the job is closing: its runs are not left running for nobody
+            interrupted = True
             with contextlib.suppress(Exception):
                 await self._runner.cancel(run_id, reason=f"job {self.id} was closed")
             raise
         finally:
             epochs = self._recorder.sessions(run_id)
             self._recorder.forget(run_id)
-            await self._ended(ticket, run_id, events, epochs)
+            await self._ended(ticket, run_id, events, epochs, interrupted=interrupted)
 
     async def _ended(
         self,
@@ -339,18 +380,21 @@ class RolloutJob:
         events: Sequence[RunEvent],
         epochs: Mapping[str, list[Epoch]],
         detail: str | None = None,
+        interrupted: bool = False,
     ) -> None:
         """A run is over, however it ended: its episode goes into the log, and whoever waits is told."""
         self._running -= 1
+        ticket._started -= 1  # pyright: ignore[reportPrivateUsage]
         async with self._logging:  # the log is in the order of its cursors, whichever episode is stored first
             cursor = self._last + 1
-            if events:
+            if events and not interrupted:
                 episode = assemble(
                     events, epochs, cursor=cursor, job=self.id, ticket=ticket.id, parameters=ticket.parameters
                 )
-            else:  # it never started, or was cancelled before its first event: still an episode, so counts are exact
+            else:  # it never started, or was cut short: still an episode, so that counts are exact
                 outcome = Outcome.FAILED if detail else Outcome.CANCELLED
-                episode = Episode(cursor, self.id, ticket.id, run_id, ticket.labels, ticket.parameters, outcome, detail)
+                why = INTERRUPTED if interrupted else detail
+                episode = Episode(cursor, self.id, ticket.id, run_id, ticket.labels, ticket.parameters, outcome, why)
             record = Record(episode) if self.blobs is None else await stored(episode, events, self.blobs)
             self._held[cursor] = episode
             self._records.append(record)
@@ -358,9 +402,10 @@ class RolloutJob:
                 with (self._log / EPISODES).open("a") as file:
                     file.write(json.dumps(record.to_json()) + "\n")
             self._last = cursor
-        ticket.ended.append(episode)
-        if len(ticket.ended) == ticket.count:
-            ticket._done.set()  # pyright: ignore[reportPrivateUsage]
+        if not interrupted:
+            ticket.ended.append(record)
+            if len(ticket.ended) == ticket.count:
+                ticket._done.set()  # pyright: ignore[reportPrivateUsage]
         self._tell(
             "episode",
             cursor=episode.cursor,
@@ -384,10 +429,23 @@ class RolloutJob:
             hook.on_job(event)
 
 
+def _lines(path: Path) -> list[Any]:
+    """The JSON lines of a file, if it is there (a line its writer died in the middle of is no line)."""
+    if not path.exists():
+        return []
+    read: list[Any] = []
+    for line in path.read_text().splitlines():
+        with contextlib.suppress(ValueError):
+            read.append(json.loads(line))
+    return read
+
+
 EPISODES = "episodes.jsonl"
 """A job's log, in its directory: one `Record` per line, in the order the episodes ended."""
 ACKNOWLEDGED = "acknowledged"
 """The cursor the job's caller has consumed through."""
+TICKETS = "tickets.jsonl"
+"""What the job was asked to run: one ticket per line, as it was asked."""
 
 
 class RolloutJobs:
@@ -435,6 +493,7 @@ class RolloutJobs:
             guard=self._guard,
         )
         self._jobs[job_id] = job
+        job._spawn(job._admit())  # pyright: ignore[reportPrivateUsage] (runs a job of that name still owes)
         return job
 
     def job(self, job: str) -> RolloutJob:

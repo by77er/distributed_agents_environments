@@ -6,7 +6,8 @@ longest sequence, and how many a step can afford. Those come from its hardware, 
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from rollout_train.recorder import Epoch
@@ -31,15 +32,23 @@ class Budget:
 
 
 @dataclass(frozen=True)
+class Checkpoint:
+    """A version's files on this machine: what a step starts from."""
+
+    weights: Path
+    state: Path | None = None
+    """What the trainer left for itself beside the weights (an optimizer's state, say), if it left any."""
+
+
+@dataclass(frozen=True)
 class Step:
-    adapter: str
-    """The name of the new weights."""
-    path: str
-    """Where engines read them."""
     metrics: Mapping[str, float]
-    artifacts: Mapping[str, str] = field(default_factory=dict[str, str])
-    """What the step left behind, by name, as paths of files and directories: the weights, and whatever the trainer
-    would need to go on from exactly here. Whoever keeps a record of the run keeps these."""
+
+
+WEIGHTS = "weights"
+"""Under a step's directory: the new weights, as engines load them."""
+STATE = "state"
+"""Under a step's directory: what the trainer goes on from, and what the step did."""
 
 
 class StepFailed(Exception):
@@ -47,13 +56,13 @@ class StepFailed(Exception):
 
 
 class Trainer(Protocol):
+    """A trainer keeps nothing between steps that it cannot be given again: a step says what it starts from and
+    where its files go, so any trainer can take any step of any policy."""
+
     budget: Budget
 
-    @property
-    def latest(self) -> tuple[str, str] | None:
-        """The newest weights' name and path, if a step has been taken (by this trainer or one before it)."""
-        ...
-
-    async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step:
-        """Train on the batch, and return the new weights. Raises `StepFailed` if the step produced none."""
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+        """Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
+        `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
+        produced no weights."""
         ...

@@ -1,6 +1,6 @@
 """Report a training run's progress: a chart of the climb through the curriculum, and a summary in words.
 
-Reads what the training loop writes (`metrics.jsonl`, `curriculum.json`) and can post both to a Discord webhook, once
+Reads the run's iterations from its ledger and can post both to a Discord webhook, once
 or after every group (`rollout report RUN CATALOG --watch`). The webhook's address comes from `--webhook` or the
 environment variable `DISCORD_WEBHOOK_URL`; it is a secret and is never written anywhere.
 """
@@ -17,7 +17,8 @@ import httpx
 
 from rollout.catalog import Row
 from rollout_train.curriculum import Curriculum
-from rollout_train.record import Directory, Iteration, iterations
+from rollout_train.ledger import LEDGER, FileLedger, Ledger
+from rollout_train.record import Iteration, iterations
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
@@ -182,22 +183,30 @@ async def post(webhook: str, text: str, image: bytes | None, *, client: httpx.As
 
 
 async def report(
-    directory: Path, rows: Sequence[Row], webhook: str | None, *, watch: bool = False, interval: float = 30.0
+    directory: Path,
+    rows: Sequence[Row],
+    webhook: str | None,
+    *,
+    ledger: Ledger | None = None,
+    run: str = "train",
+    watch: bool = False,
+    interval: float = 30.0,
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
-    `watch`, again after every new group, until interrupted."""
-    store = Directory(directory)
+    `watch`, again after every new group, until interrupted. The run's iterations are read from `ledger` (by
+    default the one in files under the run's directory)."""
+    ledger = ledger or FileLedger(directory / LEDGER)
     reported = -1
     while True:
-        lines = iterations(store)
+        lines = await iterations(ledger, run)
         if len(lines) != reported:
             reported = len(lines)
             curriculum = Curriculum(rows)
-            if saved := store.read("curriculum.json"):
-                curriculum.restore(json.loads(saved))
+            for line in lines:
+                curriculum.recorded(line)
             text = summary(directory.name, lines, curriculum)
             image = chart(lines, rows, title=f"{directory.name}: climb through the curriculum") if lines else None
-            store.write("progress.md", text + "\n")
+            (directory / "progress.md").write_text(text + "\n")
             if image is not None:
                 (directory / "progress.png").write_bytes(image)
             if webhook:

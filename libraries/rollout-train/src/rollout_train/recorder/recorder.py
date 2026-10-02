@@ -63,6 +63,8 @@ class Epoch:
     spans: list[Span]
     logprobs: list[float]
     """Behavior logprobs of the tokens inside the spans, in order."""
+    channel: str = ""
+    """The channel that sampled them. Its policy's versions are what the spans' `version`s count."""
 
     @property
     def sampled(self) -> int:
@@ -78,6 +80,7 @@ class _Turn:
     """True where the policy sampled the token; False where the recorder forced it."""
     logprobs: list[float]
     version: int
+    channel: str
 
 
 @dataclass
@@ -122,7 +125,7 @@ class Recorder:
                     start = None
             logprobs = list(parent.logprobs) if parent else []
             logprobs += [value for value, sampled in zip(turn.logprobs, turn.mask, strict=True) if sampled]
-            epochs.append(Epoch([*turn.prompt, *turn.completion], spans, logprobs))
+            epochs.append(Epoch([*turn.prompt, *turn.completion], spans, logprobs, turn.channel))
         return [epoch for index, epoch in enumerate(epochs) if index not in dropped and epoch.spans]
 
     def sessions(self, run_id: str) -> dict[str, list[Epoch]]:
@@ -140,9 +143,9 @@ class Recorder:
         for key in [key for key, (session, _) in self._keys.items() if of_run(session)]:
             del self._keys[key]
 
-    async def publish(self, channel: str, adapter: str, path: str) -> int:
-        """Serve new weights on a channel; returns its new version."""
-        return await self.channels[channel].publish(adapter, path)
+    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
+        """Serve new weights on a channel; returns the version they are served as."""
+        return await self.channels[channel].publish(adapter, path, version)
 
     def served(self, key: str) -> tuple[str, ModelEndpoint] | None:
         """The session a harness's key names, and the endpoint that samples for it."""
@@ -238,7 +241,7 @@ class RecordedEndpoint:
                 context_limit=channel.context_limit,
             ),
         )
-        turn = _Turn(request.effect_id, array("i", prompt), completion, mask, logprobs, version)
+        turn = _Turn(request.effect_id, array("i", prompt), completion, mask, logprobs, version, channel.name)
         self._recorder._turns.setdefault(request.session_id, []).append(turn)  # pyright: ignore[reportPrivateUsage]
         self._recorder._by_effect[request.effect_id] = result  # pyright: ignore[reportPrivateUsage]
         return result

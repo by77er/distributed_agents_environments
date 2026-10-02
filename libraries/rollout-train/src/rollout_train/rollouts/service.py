@@ -53,15 +53,16 @@ def create_app(jobs: RolloutJobs) -> Starlette:
 
     async def run(request: Request) -> Response:
         body = await request.json()
-        ticket = await job_of(request).run(body["parameters"], labels=body.get("labels"), count=int(body["count"]))
+        ticket = await job_of(request).run(
+            body["parameters"], labels=body.get("labels"), count=int(body["count"]), key=str(body.get("key", ""))
+        )
         return JSONResponse({"ticket": ticket.id})
 
     async def ticket(request: Request) -> Response:
-        job = job_of(request)
-        held = job.ticket(request.path_params["ticket"])
+        held = job_of(request).ticket(request.path_params["ticket"])
         if not await held.ready(float(request.query_params.get("wait", WAIT_SECONDS))):
             return JSONResponse({"done": False, "episodes": [], "refused": None})
-        records = [record.to_json() for record in job.records(held.ended)]
+        records = [record.to_json() for record in held.ended]
         return JSONResponse({"done": True, "episodes": records, "refused": held.refused})
 
     async def episodes(request: Request) -> Response:
@@ -75,7 +76,7 @@ def create_app(jobs: RolloutJobs) -> Starlette:
 
     async def publish(request: Request) -> Response:
         body = await request.json()
-        version = await job_of(request).publish(body["channel"], body["adapter"], body["path"])
+        version = await job_of(request).publish(body["channel"], body["adapter"], body["path"], body.get("version"))
         return JSONResponse({"version": version})
 
     async def note(request: Request) -> Response:
@@ -129,9 +130,9 @@ class RemoteJob:
         self._blobs = blobs
 
     async def run(
-        self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1
+        self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = ""
     ) -> "RemoteTicket":
-        body = {"parameters": parameters, "labels": dict(labels or {}), "count": count}
+        body = {"parameters": parameters, "labels": dict(labels or {}), "count": count, "key": key}
         ticket = (await _post(self._http, f"/jobs/{self.id}/runs", body))["ticket"]
         return RemoteTicket(ticket, self.id, self._http, self._blobs)
 
@@ -148,8 +149,8 @@ class RemoteJob:
     async def acknowledge(self, cursor: int) -> None:
         await _post(self._http, f"/jobs/{self.id}/acknowledge", {"cursor": cursor})
 
-    async def publish(self, channel: str, adapter: str, path: str) -> int:
-        body = {"channel": channel, "adapter": adapter, "path": path}
+    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
+        body = {"channel": channel, "adapter": adapter, "path": path, "version": version}
         return int((await _post(self._http, f"/jobs/{self.id}/publish", body))["version"])
 
     async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None:

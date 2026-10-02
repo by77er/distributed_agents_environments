@@ -22,7 +22,7 @@ answer_tokens = 400
 
 [trainer]
 kind = "rollout_lora:LoraTrainer"             # what trains; the keys below it does not name here are its settings
-channel = "policy"                            # the channel whose policy it trains
+channel = "policy"                            # the channel that serves the policy it trains
 colocated = true                              # it shares the engines' GPU: they sleep while it steps
 rank = 32
 learning_rate = 5e-5
@@ -59,6 +59,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the rollout service and the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listen, and the URL others reach them at | A training loop elsewhere connects with `RolloutClient(url)` |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
+| `ledger` | A directory for the run's tables and the policies' versions ([policies](../libraries/rollout-train/policies.md)). Without it, `directory/ledger`. `[trainer] policy` names the policy to train (by default the run directory's name); a policy that has versions is gone on with | Runs that share a ledger and a blob store see each other's policies |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before runs are admitted (`runs_gib`) and before a colocated step starts (`training_gib`); short of it the run stops with `NotEnoughMemory` rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
@@ -73,7 +74,7 @@ are their own.
 |---|---|---|
 | `engine` of a channel | The channel's `model`, and one entry of `engines` as keyword arguments. Once per entry | `rollout_vllm:VllmEngine` ([vLLM engine](../implementations/rollout-vllm.md)) |
 | `renderer` of a channel | The channel's `model` | `rollout_qwen:qwen35`, `rollout_qwen:qwen3` ([Qwen renderers](../implementations/rollout-qwen.md)) |
-| `kind` of the trainer | The trained channel's `model`, the run's directory, and every other key of `[trainer]` except `channel` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)) |
+| `kind` of the trainer | The trained channel's `model`, and every other key of `[trainer]` except `channel`, `policy` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)) |
 | An entry of `tools` | The run's directory | An environment's own, such as `minecraft_swarm.worlds:tools` ([Minecraft swarm](../products/minecraft-swarm.md)) |
 
 `rollout_train.testing` has a scripted engine and a readable renderer for profiles that need no GPU
@@ -87,7 +88,10 @@ In code, a profile opens into a platform:
 ```python fragment
 async with Profile.load(Path("profile.toml")).open() as platform:
     binding = binding_for(catalog, "policy", platform.tool_bindings)
-    await train(platform.jobs, catalog, platform.trainer, platform.store, channel="policy", binding=binding)
+    await train(
+        platform.jobs, catalog, platform.trainer, platform.policies, policy=platform.policy, channel="policy",
+        directory=platform.profile.directory / "versions", binding=binding,
+    )
 ```
 
 Opening starts, in order: the trainer; each channel's engines; the channels, the trained one with the trainer's

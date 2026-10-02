@@ -195,15 +195,23 @@ async def test_a_job_started_again_under_its_name_takes_the_place_of_the_one_bef
     recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})
     rollouts = RolloutJobs(Watched(recorder=recorder), recorder, log=tmp_path)
     first = await start(rollouts, task=Gated, name="main")
-    waiting = await first.run({"word": "yes", "gate": "never"})
+    waiting = await first.run({"word": "yes", "gate": "later"}, key="group-1")
     await asyncio.sleep(0.05)
-    second = await start(rollouts, name="main")  # the first is closed: its run is cancelled, and is an episode
-    (cancelled,) = await waiting.episodes()
-    assert cancelled.outcome is Outcome.CANCELLED and rollouts.job("main") is second
-    assert cancels == [cancelled.run_id]  # in the runner too: it is not left running for nobody
-    assert (await second.status()).finished == 1  # the log is one log: the new job goes on after it
-    (episode,) = await (await second.run({"word": "yes"})).episodes()
-    assert episode.cursor == 2
+    second = await start(rollouts, name="main", task=Gated)  # the first is closed, and its run with it
+    with pytest.raises(Refused, match="closed before the ticket was over"):
+        await waiting.episodes()
+    assert rollouts.job("main") is second and len(cancels) == 1  # in the runner too: it is not left running
+    (cut,) = second.after(0)
+    assert cut.episode.outcome is Outcome.CANCELLED and cut.episode.run_id == cancels[0]
+
+    # What was asked for is still owed: the new job runs it again, and asking again by its key finds it.
+    again = await second.run({"word": "yes", "gate": "later"}, key="group-1")
+    await asyncio.sleep(0.05)
+    assert again.id == waiting.id == "t_group-1" and (await second.status()).running == 1
+    GATES["later"].set()
+    (episode,) = await again.episodes()
+    assert episode.outcome is Outcome.COMPLETED and episode.cursor == 2  # the log is one log
+    assert len((tmp_path / "main" / "tickets.jsonl").read_text().splitlines()) == 1  # asked for once
     await rollouts.close()
 
 

@@ -41,17 +41,17 @@ gives `sequence_tokens` to the trained channel as its longest turn, so that ever
 
 ## Files
 
-| Path under the run's directory | Holds |
+A step is told where its files go (`into`) and leaves:
+
+| Path under `into` | Holds |
 |---|---|
-| `adapters/step-N/` | The adapter after step N, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is. Weights are saved as float32: each step resumes from this file, and updates are smaller than bfloat16 resolves |
-| `trainer/optimizer.pt` | The optimizer's state after the latest step |
-| `trainer/minibatches.jsonl` | What each minibatch of the latest step did: sequences, tokens, loss, clipped share, KL estimate, gradient norm |
+| `weights/` | The adapter, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is. Weights are saved as float32: the next step starts from this file, and updates are smaller than bfloat16 resolves |
+| `state/optimizer.pt` | The optimizer's state after the step |
+| `state/minibatches.jsonl` | What each minibatch of the step did: sequences, tokens, loss, clipped share, KL estimate, gradient norm |
 
-Each step names all three as its artifacts, so a run that keeps a record keeps them for every step
-([the record](../libraries/rollout-train/training.md#the-record)).
-
-A `LoraTrainer` made over a directory that has adapters goes on from the highest `step-N` (`steps`, `latest`). An
-open profile publishes `latest` to the trained channel before the first episode.
+The trainer keeps nothing of its own between steps: a step starts from the adapter and the optimizer's state of
+the version it is given, so any `LoraTrainer` can take any step of any policy. A run keeps each step's files as a
+[version](../libraries/rollout-train/policies.md) of the policy it trains.
 
 ## A fresh process per step
 
@@ -106,7 +106,7 @@ A sampled token whose recorded logprob is not finite fails the step.
 
 ## Metrics
 
-A step returns these. The training loop writes them as `update` in the group's line of `metrics.jsonl`.
+A step returns these. The training loop keeps them with the version the step made, and as `update` in the group's iteration.
 
 | Metric | Meaning |
 |---|---|

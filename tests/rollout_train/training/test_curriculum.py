@@ -1,10 +1,9 @@
 """The curriculum unlocks harder rows as easier ones are solved, and favors rows whose groups differ."""
 
-import json
 import random
 
 from rollout.catalog import Row
-from rollout_train import Curriculum
+from rollout_train import Curriculum, Iteration
 
 ROWS = [Row(f"r{number:02d}", f"row {number}") for number in range(1, 21)]
 
@@ -54,15 +53,20 @@ def test_a_row_whose_group_is_still_running_is_not_chosen_again() -> None:
     assert curriculum.sample(pending=[row.key for row in ROWS[:3]]) in ROWS[:3]  # unless nothing else is unlocked
 
 
-def test_records_are_kept_by_title_so_that_a_changed_catalog_does_not_move_them() -> None:
-    curriculum = Curriculum(ROWS, random.Random(0))
-    curriculum.update(ROWS[4], [1, 2], [True, False])
-    saved = json.loads(json.dumps(curriculum.saved()))
+def test_a_curriculum_is_the_fold_of_a_runs_iterations_by_title_whatever_the_catalog_has_become() -> None:
+    lines = [
+        Iteration(1, 0.0, ROWS[4].key, ROWS[4].title, rewards=[1.0, 2.0], solved=[True, False]),
+        Iteration(2, 0.0, ROWS[0].key, ROWS[0].title),  # none of its episodes completed
+        Iteration(3, 0.0, "gone", "a row the catalog no longer has", rewards=[1.0], solved=[True]),
+    ]
     shifted = [Row(f"x{index}", row.title) for index, row in enumerate(ROWS[2:])]  # two rows gone: other keys
-    again = Curriculum(shifted, random.Random(0))
-    again.restore(saved)
-    assert again.record(shifted[2]).attempts == 1 and again.record(shifted[2]).reward == 1.5
-    assert [key for key, record in again.records.items() if record.attempts] == ["x2"]
-    old = Curriculum(ROWS)  # records saved without titles go by key, and fields a record no longer has are dropped
-    old.restore({"r05": {"attempts": 2, "success": 1.0, "reward": 3.0, "gone": 1}})
-    assert old.record(ROWS[4]).attempts == 2
+    curriculum = Curriculum(shifted, random.Random(0))
+    for line in lines:
+        curriculum.recorded(line)
+    assert curriculum.record(shifted[2]).attempts == 1 and curriculum.record(shifted[2]).reward == 1.5
+    assert [key for key, record in curriculum.records.items() if record.attempts] == ["x2"]
+    same = Curriculum(ROWS)
+    for line in lines:
+        same.recorded(line)
+    assert same.record(ROWS[4]).attempts == 1 and same.record(ROWS[0]).failures == 1
+    assert same.sample(rng=random.Random(5)) == same.sample(rng=random.Random(5))  # a choice can be made again

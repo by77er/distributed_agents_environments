@@ -1,6 +1,5 @@
 """Reporting a run: the summary in words, the chart, and the post to a webhook (on made-up groups)."""
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +7,8 @@ import httpx
 import pytest
 
 from rollout.catalog import Row
-from rollout_train import Curriculum, Directory, iterations
+from rollout_train import Curriculum, FileLedger, Iteration, iterations
+from rollout_train.record import ITERATIONS, table
 from rollout_train.report import chart, hours, post, report, summary
 
 ROWS = [Row(f"r{number}", f"row {number}") for number in range(1, 8)]
@@ -25,31 +25,33 @@ def groups() -> list[dict[str, Any]]:
         "tokens": 6800.0,
     }
     return [
-        {"iteration": 1, "time": 1800.0, "task": "r1", "rewards": [9.0, 9.0], "solved": [True, True], "failed": 0,
-         "seconds": 1800, "unlocked": 3, "skipped": "every episode scored the same"},
-        {"iteration": 2, "time": 3600.0, "task": "r3", "rewards": [0.0, 2.0, 10.0, 11.0],
+        {"iteration": 1, "time": 1800.0, "task": "r1", "title": "row 1", "rewards": [9.0, 9.0],
+         "solved": [True, True], "failed": 0, "seconds": 1800, "unlocked": 3,
+         "skipped": "every episode scored the same"},
+        {"iteration": 2, "time": 3600.0, "task": "r3", "title": "row 3", "rewards": [0.0, 2.0, 10.0, 11.0],
          "solved": [False, True, True, True], "failed": 0, "seconds": 1800, "unlocked": 7, "adapter": "step-1",
          "version": 1, "sequences_recorded": 680, "sequences_trained": 384,
          "update": {**update, "gradient_norm": 0.42}},
     ]  # fmt: skip
 
 
-def run(tmp_path: Path) -> tuple[Path, Curriculum]:
+async def run(tmp_path: Path) -> tuple[Path, list[Iteration], Curriculum]:
+    """A run's directory with two groups in its ledger; its iterations; and the curriculum they fold to."""
     directory = tmp_path / "run-1"
-    store = Directory(directory)
-    for line in groups():
-        store.append("metrics.jsonl", json.dumps(line))
+    ledger = FileLedger(directory / "ledger")
+    fence = await ledger.take("runs/train")
+    for line in reversed(groups()):  # (groups do not always end in the order they were started in)
+        await ledger.append(table("train", ITERATIONS), str(line["iteration"]), line, fence)
+    lines = await iterations(ledger)
     curriculum = Curriculum(ROWS)
-    curriculum.update(ROWS[0], [9.0, 9.0], [True, True])
-    curriculum.update(ROWS[2], [0.0, 2.0, 10.0, 11.0], [False, True, True, True])
-    store.write("curriculum.json", json.dumps(curriculum.saved()))
-    return directory, curriculum
+    for line in lines:
+        curriculum.recorded(line)
+    return directory, lines, curriculum
 
 
-def test_the_summary_gives_the_latest_group_what_its_update_did_and_each_rows_record(tmp_path: Path) -> None:
-    directory, curriculum = run(tmp_path)
-    lines = iterations(Directory(directory))
-    assert hours(lines) == [0.5, 1.0]
+async def test_the_summary_gives_the_latest_group_what_its_update_did_and_each_rows_record(tmp_path: Path) -> None:
+    _, lines, curriculum = await run(tmp_path)
+    assert [line.iteration for line in lines] == [1, 2] and hours(lines) == [0.5, 1.0]
     text = summary("run-1", lines, curriculum)
     assert "**run-1** — group 2, 1.0 h in, 1 updates (serving step-1)" in text
     assert "rewards 0 / 2 / 10 / 11 (mean 5.75, sd 4.82); solved 3/4" in text
@@ -64,12 +66,12 @@ def test_the_summary_gives_the_latest_group_what_its_update_did_and_each_rows_re
 
 async def test_a_report_writes_the_summary_and_the_chart_into_the_runs_directory(tmp_path: Path) -> None:
     pytest.importorskip("matplotlib")
-    directory, _ = run(tmp_path)
-    image = chart(iterations(Directory(directory)), ROWS)
+    directory, lines, _ = await run(tmp_path)
+    image = chart(lines, ROWS)
     assert image.startswith(b"\x89PNG") and len(image) > 10_000
     await report(directory, ROWS, None)
     assert (directory / "progress.png").read_bytes().startswith(b"\x89PNG")
-    assert "`r3` row 3 — 1 groups, solved 75%" in (directory / "progress.md").read_text()  # (the saved curriculum)
+    assert "`r3` row 3 — 1 groups, solved 75%" in (directory / "progress.md").read_text()  # (folded from the ledger)
 
 
 async def test_a_report_is_posted_with_the_chart_attached() -> None:

@@ -22,8 +22,9 @@ from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
-from rollout_train import Colocated, Directory, Trainer
+from rollout_train import Colocated, FileLedger, Ledger, Policies, Trainer
 from rollout_train.inference import Channel, Engine, Limits
+from rollout_train.ledger import LEDGER
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.rollouts import RolloutJobs
@@ -49,10 +50,12 @@ class ChannelSpec:
 @dataclass(frozen=True)
 class TrainerSpec:
     kind: str
-    """`module:name` of what makes the trainer, called with the channel's model, the run's directory and
-    `settings`."""
+    """`module:name` of what makes the trainer, called with the channel's model and `settings`."""
     channel: str
-    """The channel whose policy it trains."""
+    """The channel that serves the policy it trains."""
+    policy: str | None = None
+    """The policy it trains, by name (by default the run directory's name). A policy that has versions is gone on
+    with."""
     colocated: bool = False
     """Whether it shares the channels' accelerator: their engines then sleep while it steps."""
     settings: Mapping[str, Any] = field(default_factory=dict[str, Any])
@@ -92,6 +95,9 @@ class Profile:
     """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
     """Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`."""
+    ledger: Path | None = None
+    """Where the run's tables and the policies' versions are kept, in files (by default `directory/ledger`).
+    Runs that share it see each other's policies."""
     blobs: Mapping[str, Any] = field(default_factory=dict[str, Any])
     """Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called
     with the other entries. Without one, files under `directory/blobs`."""
@@ -117,8 +123,11 @@ class Profile:
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
-        top = _only(described, "the profile", "directory", "runner", "serve", "address", "tools", "feed_runs")
+        known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs")
+        top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
+        if "ledger" in top:
+            top["ledger"] = Path(top["ledger"]).expanduser()
         return cls(
             **top,
             **memory,
@@ -127,6 +136,7 @@ class Profile:
             trainer=TrainerSpec(
                 kind=trainer.pop("kind"),
                 channel=trainer.pop("channel"),
+                policy=trainer.pop("policy", None),
                 colocated=trainer.pop("colocated", False),
                 settings=trainer,
             )
@@ -152,11 +162,15 @@ def _only(table: dict[str, Any], where: str, *known: str) -> dict[str, Any]:
 
 
 class Platform:
-    """An open profile: `jobs` to run episodes with, a `trainer` to step, and a `store` for the run's state."""
+    """An open profile: `jobs` to run episodes with, a `trainer` to step, and the `policies` it trains."""
 
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
-        self.store = Directory(profile.directory)
+        self.ledger: Ledger = FileLedger(profile.ledger or profile.directory / LEDGER)
+        self.policies: Policies
+        """The policies' versions, in the ledger and the blob store."""
+        self.policy = (profile.trainer.policy if profile.trainer else None) or profile.directory.name
+        """The policy the profile's trainer trains."""
         self.channels: dict[str, Channel] = {}
         self.recorder: Recorder
         self.jobs: RolloutJobs
@@ -179,7 +193,7 @@ class Platform:
         described = profile.trainer
         learner: Trainer | None = None
         if described is not None:
-            learner = named(described.kind)(profile.channels[described.channel].model, directory, **described.settings)
+            learner = named(described.kind)(profile.channels[described.channel].model, **described.settings)
         started: list[Engine] = []
         for name, spec in profile.channels.items():
             engines: list[Engine] = []
@@ -200,8 +214,6 @@ class Platform:
                     sequence=trained.budget.sequence_tokens if trained is not None else None,
                 ),
             )
-            if trained is not None and trained.latest is not None:
-                await self.channels[name].publish(*trained.latest)  # a run started again serves its newest weights
         address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
         self.recorder = Recorder(self.channels, base_url=f"{address}{SERVED_UNDER}" if address else None)
         feed = RunFeed(directory / "feed", **({"keep": profile.feed_runs} if profile.feed_runs else {}))
@@ -216,6 +228,7 @@ class Platform:
             stack.push_async_callback(_closed, tool_sets[name])
         store = dict(profile.blobs)
         self.blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(directory / "blobs")
+        self.policies = Policies(self.ledger, self.blobs)
         runner: Runner
         if profile.runner == "durable":
             from rollout_durable import DurableRunner

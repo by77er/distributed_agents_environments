@@ -16,7 +16,6 @@ import json
 import multiprocessing
 import traceback
 from collections.abc import Sequence
-from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from pathlib import Path
@@ -24,48 +23,39 @@ from typing import Any
 
 from rollout.processes import end_with_parent
 from rollout_lora.settings import LoraSettings
-from rollout_train.trainer import StepFailed, Weighted
-
-
-@dataclass(frozen=True)
-class Job:
-    """What a step's process is told."""
-
-    checkpoint: str
-    state: Path
-    """Where the optimizer's state is kept between steps."""
-    settings: LoraSettings
+from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Weighted
 
 
 class TrainerProcess:
-    def __init__(self, job: Job) -> None:
-        self.job = job
+    def __init__(self, checkpoint: str, settings: LoraSettings) -> None:
+        self.checkpoint = checkpoint
+        self.settings = settings
         self._lock = asyncio.Lock()
         self._process: BaseProcess | None = None
 
     async def step(
-        self, sequences: Sequence[Weighted], *, seed: int, adapter: Path, previous: Path | None
+        self, sequences: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path
     ) -> dict[str, float]:
-        """Train one step on the GPU (the engine must have freed it) from the `previous` adapter, and save `adapter`."""
+        """Train one step on the GPU (the engine must have freed it) from `parent`, and leave the adapter in
+        `into/weights` and the optimizer's state in `into/state`."""
         async with self._lock:
             try:
-                return await asyncio.to_thread(self._run, list(sequences), seed, adapter, previous)
+                return await asyncio.to_thread(self._run, list(sequences), seed, parent, into)
             except asyncio.CancelledError:  # whoever waited is gone: the step is not left running for nobody
                 if self._process is not None and self._process.is_alive():
                     self._process.terminate()
                 raise
 
-    def _run(self, sequences: list[Weighted], seed: int, adapter: Path, previous: Path | None) -> dict[str, float]:
+    def _run(self, sequences: list[Weighted], seed: int, parent: Checkpoint | None, into: Path) -> dict[str, float]:
         context = multiprocessing.get_context("spawn")
-        parent, child = context.Pipe()
-        process = context.Process(
-            target=_step, args=(child, self.job, sequences, seed, adapter, previous), name="trainer"
-        )
+        ours, child = context.Pipe()
+        arguments = (child, self.checkpoint, self.settings, sequences, seed, parent, into)
+        process = context.Process(target=_step, args=arguments, name="trainer")
         process.start()
         self._process = process
         child.close()
         try:
-            kind, payload = parent.recv()
+            kind, payload = ours.recv()
         except EOFError:
             process.join()
             raise StepFailed(f"the trainer exited without a result (exit code {process.exitcode})") from None
@@ -76,20 +66,21 @@ class TrainerProcess:
 
 
 OPTIMIZER = "optimizer.pt"
-"""The optimizer's state after the latest step, in the job's `state` directory."""
+"""In a step's state: the optimizer's state after it."""
 MINIBATCHES = "minibatches.jsonl"
-"""What each minibatch of the latest step did, one line each."""
+"""In a step's state: what each of its minibatches did, one line each."""
 MEMORY_MARGIN = 256 * 2**20
 """GPU memory left free of what was free when a step started (other programs' use moves a little)."""
 
 
 def _step(
     connection: Connection,
-    job: Job,
+    checkpoint: str,
+    settings: LoraSettings,
     sequences: list[Weighted],
     seed: int,
-    adapter: Path,
-    previous: Path | None,
+    parent: Checkpoint | None,
+    into: Path,
 ) -> None:
     try:
         import os
@@ -107,21 +98,19 @@ def _step(
         from rollout_lora.policy import Policy
         from rollout_lora.step import ClippedPolicyGradient
 
-        settings = job.settings
-        policy = Policy.load(job.checkpoint, rank=settings.rank, alpha=settings.alpha)
-        if previous is not None:
-            load_adapter(policy.model, previous)
+        policy = Policy.load(checkpoint, rank=settings.rank, alpha=settings.alpha)
+        if parent is not None:
+            load_adapter(policy.model, parent.weights)
         trainer = ClippedPolicyGradient(policy, settings)
-        optimizer_state = job.state / OPTIMIZER
-        if previous is not None and optimizer_state.exists():
-            trainer.optimizer.load_state_dict(torch.load(optimizer_state, map_location="cuda"))
+        if parent is not None and parent.state is not None and (parent.state / OPTIMIZER).exists():
+            trainer.optimizer.load_state_dict(torch.load(parent.state / OPTIMIZER, map_location="cuda"))
             for group in trainer.optimizer.param_groups:  # (the saved state carries the rate it was saved with)
                 group["lr"] = settings.learning_rate
         metrics: dict[str, Any] = trainer.step(sequences, seed=seed)
-        policy.save(adapter)
-        job.state.mkdir(parents=True, exist_ok=True)
-        torch.save(trainer.optimizer.state_dict(), optimizer_state)
-        (job.state / MINIBATCHES).write_text("".join(json.dumps(each) + "\n" for each in trainer.minibatches))
+        policy.save(into / WEIGHTS)
+        (into / STATE).mkdir(parents=True, exist_ok=True)
+        torch.save(trainer.optimizer.state_dict(), into / STATE / OPTIMIZER)
+        (into / STATE / MINIBATCHES).write_text("".join(json.dumps(each) + "\n" for each in trainer.minibatches))
         metrics["peak_gpu_gib"] = torch.cuda.max_memory_reserved() / 2**30
         metrics["free_gpu_gib"] = free / 2**30  # when the step started: what it was allowed, less the margin
         connection.send(("done", metrics))

@@ -38,6 +38,8 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 - [Contracts](docs/libraries/rollout/contracts/README.md): the types that cross layers
 - [Memory](docs/libraries/rollout/memory.md): a context that fits any model, for long episodes
 - [Rollouts](docs/libraries/rollout-train/rollouts.md): jobs, tickets, the stream of episodes, publishing weights
+- [Policies and the ledger](docs/libraries/rollout-train/policies.md): policy versions, manifests, append-only
+  tables and fences
 - [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
 - [Training](docs/libraries/rollout-train/training.md): the loop, group-relative advantages, the curriculum, the
   trainer protocol
