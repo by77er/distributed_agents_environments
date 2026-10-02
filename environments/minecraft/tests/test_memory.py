@@ -49,8 +49,10 @@ TURNS = 19
 class MadeUpWorld:
     """The `minecraft` tool set without a server: each agent stands one block further east every turn."""
 
-    def __init__(self) -> None:
+    def __init__(self, ticks: int = 110) -> None:
         self.observed: dict[str, int] = dict.fromkeys(TEAM, 0)
+        self.ticks = ticks
+        """Game time each window takes."""
 
     def specifications(self) -> Sequence[ToolSpecification]:
         return MinecraftTools(MinecraftWorlds()).specifications()
@@ -69,7 +71,7 @@ class MadeUpWorld:
             case "act":
                 value = {"started": True}
             case "window":
-                value = {"ticks": 110, "done": False}
+                value = {"ticks": self.ticks, "done": False}
             case "score":
                 value = {"reward": 3.0, "solved": True, "team_diamonds": 3}
             case _:
@@ -223,6 +225,32 @@ async def test_a_crowded_context_is_compacted_into_a_summary_and_stays_bounded(
     second = texts(compactions[1])
     assert second[1].endswith("SUMMARY 1 for ada") and "You are ada, at (7, 64, 0)" in second[2]
     assert texts(acting[-1])[1].endswith("SUMMARY 2 for ada")
+
+
+async def test_an_episode_ends_when_its_turns_are_spent_however_little_game_time_they_took() -> None:
+    def spec() -> RunSpecification:
+        binding = RunBinding(
+            models={name: ModelBinding(direct=DirectModel(provider="scripted", model="m")) for name in TEAM},
+            imports={"minecraft": ToolBinding(local="minecraft")},
+        )
+        program = ProgramReference(program=register(SwarmEpisode), parameters={"task": "t001"})
+        return RunSpecification(program=program, binding=binding)
+
+    async def play(ticks: int) -> dict[str, Any]:
+        runner = LocalRunner(
+            providers={"scripted": lambda _: Remembering()}, tool_sets={"minecraft": MadeUpWorld(ticks)}
+        )
+        handle = await runner.start(spec())
+        assert (await handle.result()).status is RunStatus.COMPLETED
+        (result,) = [payload(e)["payload"] for e in handle.recorded_events() if e.type is RunEventType.OUTPUT_EMITTED]
+        assert isinstance(result, dict)
+        return result
+
+    # t001 has three minutes of game time, and so 36 turns.
+    quick = await play(ticks=20)  # actions that end at once: a second of game time a turn
+    assert quick["turns"] == 36 and quick["ended"] == "turns" and quick["game_minutes"] == 0.6
+    slow = await play(ticks=110)  # full windows: the game time runs out first
+    assert slow["turns"] == 33 and slow["ended"] == "game time"
 
 
 async def test_a_context_that_overflows_is_compacted_and_tried_again() -> None:

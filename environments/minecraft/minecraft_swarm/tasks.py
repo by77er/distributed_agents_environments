@@ -31,6 +31,10 @@ from pydantic import BaseModel, ConfigDict
 from minecraft_swarm.control import Control
 
 DIAMOND_DEPTH = -58
+TURNS_PER_MINUTE = 12
+"""A task's budget of turns for each minute of its budget of game time: what the minute would take if every turn ran
+its full five seconds. Turns are what cost real time (each is a round of thinking), and a turn whose actions end
+quickly spends little game time: without this, four minutes of game time ran to over a hundred turns."""
 
 MILESTONES: dict[str, float] = {
     "story/mine_stone": 1,
@@ -156,7 +160,13 @@ class Task(BaseModel):
     apart: bool = False
     """The team starts in different places (staged rooms only)."""
     minutes: float
-    """Budget of game time (it passes only while actions happen)."""
+    """Budget of game time (it passes only while actions happen). The task also ends after `turns` turns."""
+
+    @property
+    def turns(self) -> int:
+        """Budget of turns."""
+        return round(self.minutes * TURNS_PER_MINUTE)
+
     goal: str | None = None
     """What counts as solving the task: for a progress task the milestone it is about, for a crafting task the item
     to make."""
@@ -259,17 +269,29 @@ STONE_PICKAXE: list[Step] = [
 ]
 FURNACE: list[Step] = [*STONE_PICKAXE, ("a furnace", ("furnace",), 3)]
 IRON: list[Step] = [*FURNACE, ("raw iron", ("raw_iron",), 4), ("an iron ingot", ("iron_ingot",), 5)]
+IRON_PICKAXE: list[Step] = [*IRON, ("an iron pickaxe", ("iron_pickaxe",), 6)]
 CHAINS: dict[str, list[Step]] = {
     "crafting_table": TABLE,
     "wooden_pickaxe": WOODEN_PICKAXE,
     "stone_pickaxe": STONE_PICKAXE,
     "furnace": FURNACE,
     "torch": [*FURNACE, ("coal or charcoal", ("coal", "charcoal"), 3), ("torches", ("torch",), 3)],
-    "iron_pickaxe": [*IRON, ("an iron pickaxe", ("iron_pickaxe",), 6)],
+    "iron_pickaxe": IRON_PICKAXE,
     "bucket": [*IRON, ("a bucket", ("bucket",), 6)],
     "shield": [*IRON, ("a shield", ("shield",), 6)],
+    "diamond": [*IRON_PICKAXE, ("a diamond", ("diamond",), 8)],
+    "diamond_pickaxe": [*IRON_PICKAXE, ("diamonds", ("diamond",), 8), ("a diamond pickaxe", ("diamond_pickaxe",), 10)],
 }
-"""Crafting tasks: for each item to make, the steps from nothing that lead to it. Everything must be gathered."""
+"""Crafting tasks: for each item to make, the steps from nothing that lead to it. Everything must be gathered. The
+longest run from wood to diamonds: the surface is far above diamond depth, so they include the way down."""
+EARLY: list[Step] = [
+    ("logs", ("*_log",), 0.5),
+    ("planks", ("*_planks",), 0.5),
+    ("a crafting table", ("crafting_table",), 1),
+    ("a wooden pickaxe", ("wooden_pickaxe",), 1),
+]
+"""The first steps of the game, which have no advancement of their own: they count toward progress for a team that
+starts with nothing."""
 CRAFT_MINUTES = {
     "crafting_table": 6,
     "wooden_pickaxe": 8,
@@ -279,6 +301,8 @@ CRAFT_MINUTES = {
     "iron_pickaxe": 35,
     "bucket": 35,
     "shield": 35,
+    "diamond": 60,
+    "diamond_pickaxe": 70,
 }
 
 
@@ -425,6 +449,9 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
         return float(sum(weight for name, _, weight in steps if name in made))
     earned = set(state.get("team_advancements", []))
     reward = float(sum(weight for key, weight in MILESTONES.items() if key in earned))
+    if task.kit is Kit.NOTHING:  # from nothing, the steps before the first advancement count too
+        made = set(done(EARLY, state.get("team_obtained", {})))
+        reward += sum(weight for name, _, weight in EARLY if name in made)
     if "end/kill_dragon" not in earned:  # hurting the dragon counts for something
         reward += DRAGON_DAMAGE * float(state.get("dragon_damage", 0.0))
     return reward

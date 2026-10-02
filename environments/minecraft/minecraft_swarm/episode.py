@@ -1,9 +1,9 @@
 """The swarm episode: four agents, one shared reward, the world frozen while they think.
 
 Each turn, every agent observes, thinks and calls one action tool, all at once while the world is frozen; then the
-world runs one window while the actions happen. The episode ends when its budget of game time is spent, or earlier
-when nothing is left to earn. Its reward, the task's objective scored from the plugin's ground truth, goes to every
-agent: the swarm is rewarded equally.
+world runs one window while the actions happen. The episode ends when its budget of game time or of turns is spent,
+or earlier when nothing is left to earn. Its reward, the task's objective scored from the plugin's ground truth,
+goes to every agent: the swarm is rewarded equally.
 
 Each agent is a model slot of its own (`ada`, `ben`, `cy`, `dee`): its own context and its own recorded session.
 Bound to the same recorded channel, they are one policy. The team talks through the game's chat: an observation
@@ -26,7 +26,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from minecraft_swarm.prompts import ACTIONS, CHAT_LINES, COMPACT, REMEMBERED, TEAM, describe, system_prompt
-from minecraft_swarm.tasks import Task, catalog
+from minecraft_swarm.tasks import TURNS_PER_MINUTE, Task, catalog
 from rollout.core.contracts import ContextOverflow, Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
 from rollout.core.harness import Model, ModelSlot, Program, RunContext
 
@@ -59,7 +59,7 @@ class Memory:
 
 class SwarmEpisode(Program):
     """Parameters: `task` (an id from the catalog), `world_seed`, `layout_seed`; optionally `minutes` (a shorter
-    budget of game time) and `turns` (a cap on turns)."""
+    budget of game time) and `turns` (a lower cap on turns than the task's own)."""
 
     def __init__(self, parameters: Mapping[str, JsonValue] | None = None) -> None:
         parameters = parameters or {}
@@ -69,7 +69,8 @@ class SwarmEpisode(Program):
         self.layout_seed = int(cast(int, parameters.get("layout_seed", 0)))
         self.minutes = min(self.task.minutes, float(cast(float, parameters.get("minutes", self.task.minutes))))
         turns = parameters.get("turns")
-        self.max_turns = int(cast(int, turns)) if turns is not None else None
+        budget = round(self.minutes * TURNS_PER_MINUTE)  # the task's budget of turns, for the game time it is given
+        self.max_turns = budget if turns is None else min(budget, int(cast(int, turns)))
         self.chat: dict[str, list[tuple[int, str, str]]] = {name: [] for name in TEAM}
         """What each agent has heard and said lately: (turn, speaker, message), oldest first."""
 
@@ -89,7 +90,8 @@ class SwarmEpisode(Program):
         spent = 0.0
         turn = 0
         try:
-            while spent < budget and (self.max_turns is None or turn < self.max_turns):
+            done = False
+            while spent < budget and turn < self.max_turns:
                 turn += 1
                 observations = await run.gather(
                     *(self._call(run, "observe", {"episode": episode, "agent": name}) for name in TEAM)
@@ -109,6 +111,7 @@ class SwarmEpisode(Program):
                 window = await self._call(run, "window", {"episode": episode})
                 spent += float(cast(int, window["ticks"]))
                 if window.get("done"):
+                    done = True
                     break
             score = await self._call(run, "score", {"episode": episode})
         finally:
@@ -117,7 +120,14 @@ class SwarmEpisode(Program):
         for name in TEAM:  # the swarm is rewarded equally
             run.reward(reward, slot=name)
         compactions = max(memory.compactions for memory in memories.values())
-        result = {"task": self.task.id, "turns": turn, "game_minutes": spent / TICKS_PER_MINUTE, **score}
+        ended = "nothing left to earn" if done else "game time" if spent >= budget else "turns"
+        result = {
+            "task": self.task.id,
+            "turns": turn,
+            "game_minutes": spent / TICKS_PER_MINUTE,
+            "ended": ended,
+            **score,
+        }
         await run.emit("result", {**result, "compactions": compactions})
 
     async def _think(

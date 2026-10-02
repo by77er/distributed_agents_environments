@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from minecraft_swarm.tasks import CHAINS, Objective, Task
+from minecraft_swarm.tasks import CHAINS, EARLY, Kit, Objective, Task
 from rollout.core.contracts import ToolSpecification
 
 TEAM = ["ada", "ben", "cy", "dee"]
@@ -70,6 +70,9 @@ def system_prompt(task: Task) -> str:
 
 def goal(task: Task) -> str:
     """What the task asks, as agents read it."""
+    if task.objective is Objective.PROGRESS and task.kit is Kit.NOTHING:  # the first steps count too
+        early = ", ".join(name for name, _, _ in EARLY)
+        return GOALS[Objective.PROGRESS].replace("in order: mining stone", f"in order: {early}, mining stone")
     if task.objective is not Objective.CRAFT:
         return GOALS[task.objective]
     steps = [name for name, _, _ in CHAINS[str(task.goal)]]

@@ -24,7 +24,7 @@ map included), what it thinks, what it does and what comes back (the [monitor](.
 | Server configuration | `config/` | Paper 1.21.11 (checked by SHA-256), offline mode, anti-xray, nether and end enabled; merged into Paper's defaults. |
 | Paper servers | `minecraft_swarm/paper.py` | Builds the plugin with `javac`, generates a template server per world seed and configuration, and starts temporary servers as copies of it (about 8 s). |
 | Harness (Node) | `harness/` | One mineflayer bot per agent: filtered observations, a vocabulary of actions, the chat filter, and pausing while ticks are frozen. |
-| Tasks | `minecraft_swarm/tasks.py` | 57 tasks in three tiers, each built in a live world from ground truth and scored by its own objective. |
+| Tasks | `minecraft_swarm/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective. |
 | Episode | `minecraft_swarm/episode.py` | The lockstep loop: four agents act, the world runs, repeat, until the task's budget of game time is spent; the team's score is every agent's reward. |
 | World service | `minecraft_swarm/worlds.py`, `service.py` | Temporary worlds and ground-truth scores in process, or over HTTP for rollout workers elsewhere. |
 | Curriculum | `minecraft_swarm/curriculum.py` | Which task next: learning progress over the unlocked tasks. |
@@ -131,12 +131,14 @@ room to think, so that every turn can be trained on.
 
 ## Tasks and curriculum
 
-A task is a starting state, a budget of game time and an objective scored from ground truth.
+A task is a starting state, a budget and an objective scored from ground truth. The budget is game time and, at
+twelve turns to the minute, turns: a turn whose actions end quickly spends little game time but a whole round of
+thinking, and four minutes of game time once ran to over a hundred turns and eighty minutes.
 
 | Tier | Tasks | What is given | Objective |
 |---|---|---|---|
 | Skills (staged) | 21, 3 to 16 minutes | The plugin builds the situation: diamonds on the floor of a lit room, chests around corners, natural ore exposed in a pocket's wall or hidden 4 to 24 blocks away. Kits remove steps of the tech tree (iron pickaxe → ingots → raw iron → stone tools); kits are given to everyone, to one agent, or dealt in parts. | Diamonds the team holds at the end |
-| Skills (crafting) | 8, 6 to 35 minutes | Nothing at all, on a peaceful surface with a tree trunk within reach. The task names an item several recipes deep, and everything for it must be gathered: a crafting table, a wooden pickaxe, a stone pickaxe, a furnace, torches, an iron pickaxe, a bucket, a shield. | The steps of the item's chain the team got done |
+| Skills (crafting) | 10, 6 to 70 minutes | Nothing at all, on a peaceful surface with a tree trunk within reach. The task names an item several recipes deep, and everything for it must be gathered: a crafting table, a wooden pickaxe, a stone pickaxe, a furnace, torches, an iron pickaxe, a bucket, a shield, a diamond, a diamond pickaxe (wood to diamonds, the way down included). | The steps of the item's chain the team got done |
 | Survival (natural) | 25, 15 to 66 minutes | Nothing is staged: a natural cave, the surface, the nether, beside a fortress, near or inside a stronghold, or the end; a real day and night, mobs, and inventory lost on death. Kits run from iron tools down to nothing, or prepare one stage of the game (obsidian and flint for a portal, a bow for blazes, eyes of ender, armor for the dragon). | Diamonds held, or progress |
 | Game | 3, 240 minutes | A bare spawn on the surface, nothing given; easy, normal and hard. | Progress |
 
@@ -152,7 +154,9 @@ start or the kit granted do not count), each once:
 | Mine a diamond | 4 | Enter the end | 12 |
 | Form obsidian | 3 | Kill the dragon | 40 |
 
-A dragon left alive still counts for 20 times the most it was hurt, as a share of its health.
+A dragon left alive still counts for 20 times the most it was hurt, as a share of its health. For a team that starts
+with nothing, the first steps of the game, which have no advancement, count too: logs 0.5, planks 0.5, a crafting
+table 1, a wooden pickaxe 1.
 
 **Crafting** is scored from what the team got hold of after the episode began: every item a member picked up, crafted
 or took from a furnace. Each step of the chain to the task's item counts once, with a weight that grows along the

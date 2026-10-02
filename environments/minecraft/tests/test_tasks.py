@@ -125,6 +125,39 @@ def test_crafting_tasks_reward_each_step_of_the_chain_once_and_are_solved_by_the
     assert next(t.goal for t in catalog() if t.objective is Objective.CRAFT) == "crafting_table"  # the shortest first
 
 
+def test_the_crafting_ladder_runs_from_wood_to_diamonds() -> None:
+    crafting = [task for task in catalog() if task.objective is Objective.CRAFT]
+    assert [task.goal for task in crafting][-2:] == ["diamond", "diamond_pickaxe"]  # the longest chains last
+    names = [name for name, _, _ in CHAINS["diamond_pickaxe"]]
+    assert names[:2] == ["logs", "planks"] and names[-4:] == [
+        "an iron ingot",
+        "an iron pickaxe",
+        "diamonds",
+        "a diamond pickaxe",
+    ]
+    weights = [weight for _, _, weight in CHAINS["diamond_pickaxe"]]
+    assert weights[-1] == max(weights) and sum(weights) == 49  # later steps are worth more
+
+
+def test_from_nothing_the_first_steps_count_toward_progress() -> None:
+    game = catalog()[-1]
+    kitted = find(Start.FORTRESS, Kit.FORTRESS_READY)
+    state: dict[str, Any] = {
+        "team_advancements": ["story/mine_stone"],
+        "team_obtained": {"oak_log": 3, "oak_planks": 12, "crafting_table": 1, "wooden_pickaxe": 1},
+    }
+    assert score(game, state) == MILESTONES["story/mine_stone"] + 3  # logs, planks, a table, a wooden pickaxe
+    assert score(kitted, state) == MILESTONES["story/mine_stone"]  # a team given a kit earns nothing for wood
+    assert "in order: logs, planks, a crafting table, a wooden pickaxe, mining stone" in goal(game)
+    assert "in order: mining stone" in goal(kitted)
+
+
+def test_a_task_has_a_budget_of_turns_as_well_as_of_game_time() -> None:
+    tasks = {task.goal or task.id: task for task in catalog()}
+    assert tasks["t001"].minutes == 3 and tasks["t001"].turns == 36  # twelve turns to the minute
+    assert tasks["diamond_pickaxe"].turns == 840
+
+
 def test_gear_is_dealt_by_coordination() -> None:
     every = kits(find(Start.ORE_IN_SIGHT, Kit.RAW_IRON), TEAM, random.Random(1))
     assert all({"item": "furnace"} in inventory for inventory in every.values())
