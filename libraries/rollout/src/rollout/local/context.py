@@ -240,7 +240,7 @@ class LocalRunContext:
         return undelivered
 
     def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None:
-        """Deliver a message to this run (docs/core/harness/conversations.md#priority-and-delivery-mode)."""
+        """Deliver a message to this run (docs/guide/conversations.md#priority-and-delivery-mode)."""
         self.record_event(
             RunEventType.MESSAGE_RECEIVED, {"envelope": envelope.model_dump(mode="json"), "mode": mode.value}
         )

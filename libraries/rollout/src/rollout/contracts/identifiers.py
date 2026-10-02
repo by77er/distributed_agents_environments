@@ -1,4 +1,4 @@
-"""Identifiers with a normative structure (docs/contracts/identifiers.md).
+"""Identifiers with a normative structure (docs/libraries/rollout/contracts/identifiers.md).
 
 All other identifiers are opaque strings. Only the structures built and parsed here may be relied on.
 """
@@ -60,7 +60,7 @@ def effect_id(run_id: str, generation: int, ordinal: int) -> str:
 
 @dataclass(frozen=True)
 class SessionIdentity:
-    """The parts of a `session_id`: `{run_id}/{model_slot}` for runs, `u_{ulid}/{model_slot}` when unmanaged."""
+    """The parts of a `session_id`: `{run_id}/{model_slot}`."""
 
     owner: str
     model_slot: str

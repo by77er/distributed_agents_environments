@@ -1,4 +1,4 @@
-"""`Task`: the environment an agent acts in, in the reinforcement-learning sense (docs/core/harness/task.md)."""
+"""`Task`: the environment an agent acts in, in the reinforcement-learning sense (docs/guide/tasks.md)."""
 
 import asyncio
 import json

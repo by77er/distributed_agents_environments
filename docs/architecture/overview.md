@@ -1,7 +1,5 @@
 # Architecture overview
 
-Status: **Working** (2026-10-02)
-
 ## The system in one paragraph
 
 A **run** is one episode of a **program**: usually an agent acting in a **task**. The task is the environment in the
@@ -14,33 +12,44 @@ says which engines, trainer, runner and tool sets stand behind all of it.
 
 ## Layers
 
-| Layer | Package | What it holds |
+The repository is a workspace of packages in four layers. Each package's directory, import name and page are in the
+[documentation index](../README.md#packages).
+
+| Layer | Packages | What it holds |
 |---|---|---|
-| Harness | `rollout.core` | Programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory |
-| Durability | `rollout_durable` | `DurableRunner`: runs that survive their process, on DBOS |
-| Environments | `rollout_computers` | Computers for tasks: backends and the tools that act on them |
-| Inference | `rollout_train.inference`, `rollout_train.recorder` | Channels and engines; token-exact recording; the endpoint for harnesses |
-| Training | `rollout_train.rollouts`, `rollout_train` | Rollout jobs and episodes; the loop, the group algorithm, the curriculum, the trainer |
-| Deployment | `rollout_train.profile`, `rollout_train.cli`, `rollout_train.monitor` | A deployment described and opened; the `rollout` command; the live page |
+| Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the catalog |
+| | `rollout-train` | Reinforcement learning on `rollout`: rollout jobs and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the profile, the `rollout` command and the monitor |
+| Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
+| Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
+| Environments | `minecraft-swarm` | An environment to train on |
+
+What may depend on what is checked by `tests/test_layers.py`:
+
+- a package imports only the workspace packages its project file declares;
+- the libraries require no implementation, and `rollout` requires no other workspace package;
+- an environment imports `rollout` and nothing above it.
 
 Code above a protocol never learns which implementation it holds. Task and agent code is the same under either
-runner; a training loop is the same with everything in one process or with runs, engines and trainer elsewhere.
+runner; a training loop is the same with everything in one process or with runs, engines and trainer elsewhere. A
+profile names engines, renderers, trainers and tool sets as `module:name`, so `rollout-train` imports none of them.
 
 ## Protocols and their implementations
 
-| Protocol | Between | Implementations | Defined in |
+| Protocol | Defined in | Between | Implementations |
 |---|---|---|---|
-| `Runner` | callers → runs | `LocalRunner`, `DurableRunner` | [harness](../core/harness/README.md#runner) |
-| `ModelEndpoint` | runners → models | `Recorder` endpoints, the Responses API adapter, `ScriptedModelEndpoint` | [model endpoint](../contracts/model-endpoint.md) |
-| `Engine` | channels → replicas | `VllmEngine` | [engines](../core/recorder/engine-adapter.md) |
-| `ToolSet` | runs → imported tools | a tool set in process, `RemoteToolSet` over HTTP | [tools](../guide/tools.md) |
-| `EnvironmentService` | runs → computers | `NamespaceEnvironments`, `LocalEnvironments` | [environments](../environments/README.md) |
-| `Jobs`, `Job`, `Ticket` | training → runs | `RolloutJobs`, `RolloutClient` over HTTP | [rollouts](../core/rollouts/README.md) |
-| `Catalog` | training → an environment's rows | one per environment | [three ways in](../guide/perspectives.md#building-an-environment) |
-| `Trainer` | training → weights | `LoraTrainer`, `Colocated` | [training](../core/training.md#the-trainer) |
-| `RunHooks`, `JobHooks` | runners and jobs → observers | `RunFeed` | [hooks](../core/harness/hooks.md), [monitor](../core/monitor.md) |
+| [`Runner`](../guide/reference.md#runner) | `rollout.harness` | callers → runs | `LocalRunner` (`rollout.local`), `DurableRunner` ([`rollout_durable`](../implementations/rollout-durable/README.md)) |
+| [`ModelEndpoint`](../libraries/rollout/contracts/model-endpoint.md) | `rollout.contracts` | runners → models | the [recorder](../libraries/rollout-train/recorder.md)'s endpoints, `ResponsesEndpoint` ([`rollout_openai`](../guide/models.md)), `ScriptedModelEndpoint` ([`rollout.testing`](../guide/testing.md)) |
+| [`Engine`](../guide/reference.md#engine) | `rollout_train.inference` | channels → replicas | `VllmEngine` ([`rollout_vllm`](../implementations/rollout-vllm.md)), `ScriptedEngine` (`rollout_train.testing`) |
+| [`Renderer`](../guide/reference.md#renderer) | `rollout_train.recorder` | the recorder → a model family's tokens | `qwen35`, `qwen3` ([`rollout_qwen`](../implementations/rollout-qwen.md)), `PlainRenderer` (`rollout_train.testing`) |
+| [`Trainer`](../guide/reference.md#trainer) | `rollout_train` | training → weights | `LoraTrainer` ([`rollout_lora`](../implementations/rollout-lora.md)); `Colocated` wraps one that shares the engines' accelerator |
+| [`ToolSet`](../guide/reference.md#toolset) | `rollout.harness` | runs → imported tools | a tool set in process, `RemoteToolSet` over HTTP ([tools](../guide/tools.md#imported-tools)) |
+| [`EnvironmentService`](../guide/reference.md#environmentservice) | `rollout.harness` | runs → computers | `NamespaceEnvironments`, `LocalEnvironments` ([`rollout_computers`](../implementations/rollout-computers.md)) |
+| [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
+| [`Jobs`, `Job`, `Ticket`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `RolloutJobs`, `RolloutClient` over HTTP |
+| [`Catalog`](../guide/reference.md#catalog) | `rollout.catalog` | training → an environment's rows | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
+| [`RunHooks`](../libraries/rollout/hooks.md), `JobHooks` | `rollout.harness`, `rollout_train.rollouts` | runners and jobs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
 
-Types that cross these boundaries are defined once, in [contracts](../contracts/README.md).
+Types that cross these boundaries are defined once, in [contracts](../libraries/rollout/contracts/README.md).
 
 ## Visibility
 
@@ -67,7 +76,7 @@ task.respond(reply) ──▶ run_tools ──▶ @tool method ──▶ (an imp
 ```
 
 Everything that leaves task or agent code on the way is an **effect** with an identity:
-`{run_id}:{generation}:{ordinal}` and a digest of its arguments ([effects](../contracts/effects.md)).
+`{run_id}:{generation}:{ordinal}` and a digest of its arguments ([effects](../libraries/rollout/contracts/effects.md)).
 
 | | `LocalRunner` | `DurableRunner` |
 |---|---|---|
@@ -75,9 +84,9 @@ Everything that leaves task or agent code on the way is an **effect** with an id
 | An effect | a call, recorded as run events | a durable step: its first recorded result is final |
 | After a crash | runs in flight are lost; a rollout job reports them as failed episodes | the program is run again and recorded effects return their results; what was in flight is performed again under the same identity |
 | A side effect that cannot be deduplicated | performed once | guarded by an attempt marker: a possible duplicate is reported as `OUTCOME_UNKNOWN` to the model, never silently retried |
-| Messages | delivered in process | delivered once by `message_id`, to whichever runner holds the conversation |
+| Messages | delivered once by `message_id`, in process | delivered once by `message_id`, through any runner sharing the database |
 
 A tool's `retry_class` says what re-execution may do: `PURE` and `IDEMPOTENT` calls are performed again;
 `SIDE_EFFECTING` and `UNKNOWN` calls are performed again only against a tool set that deduplicates by effect
 identity, and are guarded otherwise. Cancellation is cooperative: it is delivered at the next turn boundary, and
-`teardown` runs. The durable runner is described in [durability](../durability/README.md).
+`teardown` runs. The durable runner is described in [durable runner](../implementations/rollout-durable/README.md).

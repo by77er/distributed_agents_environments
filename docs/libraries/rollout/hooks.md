@@ -1,6 +1,7 @@
 # Hooks
 
-Status: **Working** (2026-10-01) · Code: `rollout.harness.hooks`
+Code: `rollout.harness.hooks` · See [`RunHooks`](../../guide/reference.md#runhooks),
+[`ModelSample`](../../guide/reference.md#modelsample)
 
 Hooks watch runs as they happen. A runner calls its hooks for every run event it records and for every model sample
 it performs, so that logging, metrics and live views need nothing from the program being run.
@@ -21,7 +22,7 @@ runner = LocalRunner(hooks=[Watch()])   # DurableRunner takes the same argument
 | Hook | Called | Carries |
 |---|---|---|
 | `on_event(event)` | when a run event is recorded | the `RunEvent`: lifecycle, effects (tool calls with arguments and results), rewards, outputs. A model sample appears here by its context's digest only. |
-| `on_sample(sample)` | when a model endpoint replies | a `ModelSample`: `run_id`, `slot`, the `SampleRequest` (`request.context.append` is every message sent; `request.tools` the tools offered), the `SampleResult`, and how long the endpoint took |
+| `on_sample(sample)` | when a model endpoint replies | the run and slot, the `SampleRequest` (every message sent, and the tools offered), the `SampleResult`, and how long the endpoint took |
 
 Rules:
 
@@ -30,6 +31,9 @@ Rules:
 - A hook that raises is logged and ignored. A hook never fails a run.
 - Hooks see what their own runner's process records and performs. Under a durable runner, a run that moves to another
   process after a crash is seen from there on by that process's hooks; a sample retried after a crash is seen again.
+- A harness that samples at a slot's address ([the recorder over HTTP](../rollout-train/harness-endpoint.md)) is
+  seen like any other sample.
 - Hooks are observers. They cannot change a request or a reply; code that must is a `ModelEndpoint`.
 
-The [monitor](../monitor.md) is built on hooks.
+The [monitor](../rollout-train/monitor.md) is built on hooks. A rollout job has hooks of its own
+([`JobHooks`](../rollout-train/rollouts.md#watching)).

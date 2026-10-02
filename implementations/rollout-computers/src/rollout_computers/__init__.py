@@ -1,9 +1,8 @@
-"""Environment backends: services that give runs computers (docs/environments/README.md).
+"""Environment backends: services that give runs computers (docs/implementations/rollout-computers.md).
 
-`rollout.core` defines what task code sees (`run.environments`, `Environment`); a backend here implements the
+`rollout.harness` defines what task code sees (`run.environments`, `Environment`); a backend here implements the
 `EnvironmentService` a runner is given. The namespace backend isolates processes and files; the local backend
-runs commands on the host itself, for uses where a sandbox matters less than convenience. MicroVMs come later behind
-the same protocol.
+runs commands on the host itself, for uses where a sandbox matters less than convenience.
 """
 
 from rollout_computers.images import ImageStore

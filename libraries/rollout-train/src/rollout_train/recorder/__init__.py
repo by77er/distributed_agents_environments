@@ -1,4 +1,5 @@
-"""The recorder (docs/core/recorder): serves trainable model channels and records what trainers need.
+"""The recorder: serves trainable model channels and records what trainers need
+(docs/libraries/rollout-train/recorder.md).
 
 - `renderers`: what a model family's token format must provide, and the pieces most are built from.
 - `recorder`: `Recorder` serves a run's recorded bindings; a session exports `Epoch`s (token sequences with the

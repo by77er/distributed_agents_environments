@@ -1,4 +1,4 @@
-"""The framework-owned loop and the interfaces task and agent code are written against (docs/core/harness/)."""
+"""The framework-owned loop and the interfaces task and agent code are written against (docs/libraries/rollout/)."""
 
 from rollout.harness.agent import Agent
 from rollout.harness.blobs import Blobs, FileBlobStore

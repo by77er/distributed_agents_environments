@@ -156,13 +156,22 @@ async def test_a_named_job_keeps_what_was_not_acknowledged_for_the_next_process(
 
 
 async def test_a_job_started_again_under_its_name_takes_the_place_of_the_one_before(tmp_path: Path) -> None:
-    rollouts, _, _ = jobs("yes", log=tmp_path)
+    cancels: list[str] = []
+
+    class Watched(LocalRunner):
+        async def cancel(self, run_id: str, *, reason: str) -> None:
+            cancels.append(run_id)
+            await super().cancel(run_id, reason=reason)
+
+    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})
+    rollouts = RolloutJobs(Watched(recorder=recorder), recorder, log=tmp_path)
     first = await start(rollouts, task=Gated, name="main")
     waiting = await first.run({"word": "yes", "gate": "never"})
     await asyncio.sleep(0.05)
     second = await start(rollouts, name="main")  # the first is closed: its run is cancelled, and is an episode
     (cancelled,) = await waiting.episodes()
     assert cancelled.outcome is Outcome.CANCELLED and rollouts.job("main") is second
+    assert cancels == [cancelled.run_id]  # in the runner too: it is not left running for nobody
     assert (await second.status()).finished == 1  # the log is one log: the new job goes on after it
     (episode,) = await (await second.run({"word": "yes"})).episodes()
     assert episode.cursor == 2

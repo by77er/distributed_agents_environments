@@ -68,7 +68,7 @@ async def search(self, query: str) -> list[str]: ...
 |---|---|
 | `name` | The name the model sees (default: the method name). Must match `^[a-zA-Z0-9_-]{1,64}$`. |
 | `retry_class` | The specification's `retry_class`: `PURE` (default), `IDEMPOTENT`, `SIDE_EFFECTING` or `UNKNOWN`. Runners act on it for [imported tools](#imported-tools). |
-| `timeout` | A time limit for the body, also written to the specification as `timeout_ms`. Exceeding it returns an error result to the model. |
+| `timeout` | A time limit for the body. Exceeding it returns an error result to the model. |
 
 ## What a tool returns
 
@@ -236,8 +236,12 @@ Under the durable runner, a call that a crash interrupted is handled by the tool
 | Tool | The interrupted call |
 |---|---|
 | `PURE` or `IDEMPOTENT` | is made again, with the same `effect_id` |
-| `SIDE_EFFECTING` or `UNKNOWN`, in a tool set with the attribute `deduplicates = True` | is made again: the tool set performs each `effect_id` at most once |
+| `SIDE_EFFECTING` or `UNKNOWN`, in a `DeduplicatingToolSet` whose `deduplicates` is true | is made again: the tool set performs each `effect_id` at most once |
 | `SIDE_EFFECTING` or `UNKNOWN` otherwise | is not made again: the effect completes as `outcome_unknown`, and the model receives an error result saying the call may or may not have taken effect |
+
+A tool set is a `DeduplicatingToolSet` when it has a `deduplicates` attribute; one without it is treated as one that
+does not deduplicate. A tool set served over HTTP reports the attribute of the tool set behind it, so the guarantee
+holds for `ToolBinding(url=...)` too ([effects](../libraries/rollout/contracts/effects.md#receivers-that-deduplicate)).
 
 ### Serving a tool set over HTTP
 
@@ -245,7 +249,7 @@ Under the durable runner, a call that a crash interrupted is handled by the tool
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /specifications` | | the tool specifications |
+| `GET /specifications` | | `specifications`: the tool specifications; `deduplicates`: whether the tool set deduplicates |
 | `POST /call` | `name`, `arguments`, `effect_id`, `arguments_digest` | the `ToolResult`; status 500 with `error` when the tool set raised |
 
 `rollout tools FACTORY [--directory DIRECTORY] [--host 127.0.0.1] [--port 8700]` serves the tool set that

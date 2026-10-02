@@ -1,4 +1,4 @@
-"""Runners, run specifications and deployments (docs/core/harness/README.md#runner)."""
+"""Runners, run specifications and deployments (docs/libraries/rollout/README.md#runner)."""
 
 import importlib
 from abc import ABC, abstractmethod

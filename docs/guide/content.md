@@ -3,7 +3,7 @@
 Everything a model reads or writes is **canonical content**: model-agnostic messages made of typed blocks. Task
 and agent code use only this form; rendering to a model's tokens happens in the recorder or inside a provider.
 The types live in `rollout.contracts` and are specified in
-[canonical content](../contracts/canonical-content.md).
+[canonical content](../libraries/rollout/contracts/canonical-content.md).
 
 ## Messages and blocks
 
@@ -15,7 +15,7 @@ A `Message` has a `Role` and a sequence of content blocks:
 | `Media` | `media` | `media_type` and a `BlobReference` (image, audio, document) | any role |
 | `ToolCall` | `tool_call` | `call_id`, `name`, `arguments` (a JSON object) | ASSISTANT only |
 | `ToolResultBlock` | `tool_result` | `call_id` and a `ToolResult` | TOOL only, which holds nothing else |
-| `Reasoning` | `reasoning` | portable text, or opaque policy-scoped reasoning | ASSISTANT |
+| `Reasoning` | `reasoning` | the model's reasoning as portable text, which a renderer may render or drop | ASSISTANT |
 
 ```python
 from rollout.contracts import Message, Role, Text, ToolCall, ToolResult, ToolResultBlock
@@ -45,15 +45,13 @@ with pytest.raises(ValidationError):
     Message(role=Role.USER, content=[ToolCall(call_id="c1", name="weather", arguments={})])
 ```
 
-`name` optionally names the speaker (for multi-agent conversations). `meta` is a string map that is never shown to
-the model and never affects digests; the core uses `meta["effect_id"]` to link a reply to the sample that produced
-it.
+`meta` is a string map that is never shown to the model and never affects digests; the core uses
+`meta["effect_id"]` to link a reply to the sample that produced it.
 
 ## Tool specifications and results
 
-`ToolSpecification` is what the model sees about a tool (`name`, `description`, `input_schema`, `output_schema`)
-plus fields it never sees (`annotations`, `retry_class`, `timeout_ms`, `max_result_bytes`). `@tool` builds one from
-a method ([tools](tools.md)).
+`ToolSpecification` is what the model sees about a tool (`name`, `description`, `input_schema`) plus one field it
+never sees (`retry_class`). `@tool` builds one from a method ([tools](tools.md)).
 
 `ToolResult` is what a tool produces:
 
@@ -62,8 +60,7 @@ a method ([tools](tools.md)).
 | `content` | text and media blocks shown to the model |
 | `structured` | an optional JSON value |
 | `is_error` | a tool-level error the model should see and reason about |
-| `truncated`, `overflow` | set by a tool that cut its output: a flag, and a `BlobReference` to the full output |
-| `provenance` | `untrusted`: whether the result came from untrusted input; `binding_kind`: what kind of binding produced it |
+| `truncated` | set by a tool that cut its output: `content` is only part of what the tool produced |
 
 ## Media and blobs
 

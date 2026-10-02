@@ -81,7 +81,7 @@ asyncio.run(main())
 
 `select_context` returns the complete message list for the turn, and every sample sends it whole. A context that
 is not an extension of the previous turn's (a window moving, a summary replacing old turns) needs no special
-handling. For episodes that outgrow the model's context, [memory](../core/harness/memory.md) keeps one that fits.
+handling. For episodes that outgrow the model's context, [memory](../libraries/rollout/memory.md) keeps one that fits.
 
 ## How the agent acts
 
@@ -117,7 +117,7 @@ separate model slot that the task declares.
 | Member | Meaning |
 |---|---|
 | `await sample(messages, *, tools=(), max_output_tokens=None, tool_choice=None)` | one assistant `Message` |
-| `capabilities` | the slot's `CapabilityContract`: context limit, maximum output tokens, tool calling, modalities |
+| `capabilities` | the slot's `CapabilityContract`: the context limit and the maximum output tokens |
 | `usage` | the latest sample's `Usage` (`context_used`, `context_limit`), or `None` before the first; for compaction decisions |
 | `address()` | a `ModelAddress` (`base_url`, `api_key`, `model`) at which a harness that brings its own loop reaches this slot's model; raises `RuntimeError` when the endpoint is not served over HTTP |
 

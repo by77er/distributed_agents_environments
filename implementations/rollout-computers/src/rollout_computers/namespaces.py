@@ -1,4 +1,4 @@
-"""An environment backend on unprivileged Linux namespaces (docs/environments/README.md).
+"""An environment backend on unprivileged Linux namespaces (docs/implementations/rollout-computers.md).
 
 Each environment is a directory holding its own copy of a base image's root filesystem. A command runs in new user,
 mount and PID namespaces, chrooted into that root filesystem, as root inside (mapped to the host user outside):

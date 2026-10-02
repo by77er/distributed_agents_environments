@@ -20,7 +20,6 @@ LocalRunContext(
     environment_service: EnvironmentService | None = None,   # the backend behind run.environments
     blobs: Blobs | None = None,                  # run.blobs
     conversation: ConversationKey | None = None,
-    generation: int = 0,                         # the middle part of every effect_id
     on_event: Callable[[RunEvent], None] | None = None,   # called for each event as it is recorded
     retain_events: bool = True,                  # keep every event in `events`
 )
@@ -48,18 +47,19 @@ An **effect** is an operation that leaves task or agent code:
 | `output.emit` | `run.emit(...)` |
 
 Each effect gets an identity that is the same every time the run's code is run again, which is what makes retries
-safe under the durable runner ([determinism](../core/harness/determinism.md)):
+safe under the durable runner ([determinism](../libraries/rollout/determinism.md)):
 
 | Identifier | Format | Example |
 |---|---|---|
 | `run_id` | `r_{ulid}` | `r_01M3KEZ1MEYZHX9V33XZH65STF` |
-| `effect_id` | `{run_id}:{generation}:{ordinal}`: the k-th effect the run requested; runners use generation 0 | `r_01M3…STF:0:0` |
+| `effect_id` | `{run_id}:{generation}:{ordinal}`: the k-th effect the run requested; the generation is 0 for every run | `r_01M3…STF:0:0` |
 | `session_id` | `{run_id}/{model_slot}` | `r_01M3…STF/policy` |
 | `arguments_digest` | SHA-256 of the canonical JSON of the effect's arguments | `b09f2be8…` |
 
 Both reach whatever performs the effect, so a receiver that deduplicates performs each `effect_id` once and can
-tell a repeat from a different call. `EffectIdentity.parse` and `SessionIdentity.parse` split identifiers into their
-parts; no other identifier should be parsed.
+tell a repeat from a different call. `EffectIdentity.parse`, `SessionIdentity.parse` and `ConversationKey.parse`
+split identifiers into their parts; no other identifier should be parsed
+([identifiers](../libraries/rollout/contracts/identifiers.md)).
 
 ## Events
 
@@ -139,7 +139,7 @@ asyncio.run(run_with_runner())
 ```
 
 The handle's `context` is the run's `LocalRunContext`. Sending messages, cancelling, deployments, bindings and the
-`DurableRunner` are in the [harness reference](../core/harness/README.md#runner).
+`DurableRunner` are in the [harness reference](../libraries/rollout/README.md#runner).
 
 ## Event types
 
@@ -158,11 +158,11 @@ The handle's `context` is the run's `LocalRunContext`. Sending messages, cancell
 | `turn.interrupted` | an interrupt cancels the agent's reply | `reply_effect_id` of the cancelled sample, if one was in flight |
 | `run.cancel_requested` | `runner.cancel(run_id, reason=...)` | `reason`, `by` |
 | `run.completed` | the program returned | `outcome` |
-| `run.failed` | the program raised | `class`, `detail` ([failures](../core/harness/README.md#failures)) |
+| `run.failed` | the program raised | `class`, `detail` ([failures](../libraries/rollout/README.md#failures)) |
 | `run.cancelled` | the run stopped after a cancellation | |
 
 A `model.sample` effect's arguments are the `session_id`, the context digest, the spec hashes of the offered tools,
 `max_output_tokens` and `tool_choice`. Its completion payload is the `SampleResult`: message, finish reason, usage.
 Tokens and logprobs never appear in run events; they live in the recorder.
 
-The events are specified in [run events](../contracts/run-events.md).
+The events are specified in [run events](../libraries/rollout/contracts/run-events.md).

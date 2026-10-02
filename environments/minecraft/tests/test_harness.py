@@ -390,6 +390,7 @@ async def test_a_frozen_game_holds_players_as_they_were_and_nobody_starts_on_the
 
     # Fire under ada: while the game runs it burns her; while it is frozen she is held as she was, however long.
     here = observation["self"]["position"]
+    await world.control.set_food("ada", 10)  # (a well-fed player heals as fast as fire burns)
     await world.control.set_block(here["x"], here["y"], here["z"], "fire")
     await world.harness.thaw()
     await world.harness.act("ben", {"name": "wait"})  # a window is over when nobody acts: keep this one open

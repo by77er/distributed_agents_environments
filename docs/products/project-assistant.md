@@ -1,14 +1,15 @@
 # Project assistant
 
-Status: **Working** (2026-10-02) · Code: `products/project-assistant/src/project_assistant`
+Code: `products/project-assistant`
 
 A long-lived conversational agent about one code repository, served over HTTP. It answers questions grounded in the
-repository, remembers decisions across conversations, and follows up when asked.
+repository, remembers decisions across conversations, and follows up when asked. The package is `project-assistant`
+(import `project_assistant`); it is built on `rollout`, `rollout-durable` and `rollout-openai`.
 
 ## Running it
 
 ```bash
-uv sync --extra assistant --extra durable
+uv sync                                                        # at the repository root: installs every product
 uv run project-assistant serve --repository /path/to/repo      # http://127.0.0.1:8420, on the local Codex login
 
 curl -s localhost:8420/conversations/dev-1/messages -d '{"text": "Where is billing implemented?"}'
@@ -20,7 +21,7 @@ curl -s localhost:8420/conversations/dev-1/transcript
 | `--repository PATH` | the current directory | the repository the assistant answers about |
 | `--model`, `--reasoning-effort` | `gpt-6-astra`, `low` | the model; effort is `low`, `medium` or `high` |
 | `--host`, `--port` | `127.0.0.1`, `8420` | where the server listens |
-| `--state DIR` | none | run on the `DurableRunner` with its state here, so conversations survive restarts ([durability](../durability/README.md)); without it they live in memory, on the `LocalRunner` |
+| `--state DIR` | none | run on the `DurableRunner` with its state here, so conversations survive restarts ([durable runner](../implementations/rollout-durable/README.md)); without it they live in memory, on the `LocalRunner` |
 | `--notes PATH` | `.rollout/notes.sqlite` in the repository | the notes database |
 | `--ledger PATH` | none | append every model call to this file |
 
@@ -42,12 +43,12 @@ it ([conversations](../guide/conversations.md)).
 | The conversation | one run of the deployment `assistant/{repository name}`, keyed by the conversation key. It waits for messages with `WaitFor` and never ends on its own |
 | Answers | `ProjectAgent` samples the `policy` slot with a system prompt naming the repository and the time. Replies leave the run with `run.emit("reply", …)` |
 | Repository tools | `RepositoryTools`, an imported tool set: `list_files`, `search`, `read_file`, `git_log`, confined to the repository. As effects, their results are recorded, so a durable run replays them |
-| Notes | `NotesStore`, an imported tool set in SQLite: `save_note`, `search_notes`, `list_notes`. Every conversation shares it; saves deduplicate by `effect_id` |
+| Notes | `NotesStore`, an imported tool set in SQLite: `save_note`, `search_notes`, `list_notes`. Every conversation shares it; saves deduplicate by `effect_id` ([the database](../implementations/rollout-durable/runners.md#the-database)) |
 | Follow-ups | the `schedule_follow_up` `@tool` records a due time from `run.now()`. The task's `WaitFor` times out at the next one and wakes the assistant with a follow-up observation |
-| Model | the Responses API adapter on the local Codex login |
+| Model | the Responses API adapter on the local Codex login ([models](../guide/models.md)) |
 
-On the `DurableRunner`, a conversation idle for 5 minutes is unloaded from memory and woken by its next message or
-follow-up ([evicting idle runs](../durability/eviction.md)).
+On the `DurableRunner`, a conversation that has waited for the runner's `evict_after` is unloaded from memory and
+woken by its next message or follow-up ([evicting idle runs](../implementations/rollout-durable/eviction.md)).
 
 ## Evaluations
 

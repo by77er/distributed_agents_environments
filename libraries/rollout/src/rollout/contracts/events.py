@@ -1,4 +1,4 @@
-"""Run events: the typed record of what happened in a run (docs/contracts/run-events.md).
+"""Run events: the typed record of what happened in a run (docs/libraries/rollout/contracts/run-events.md).
 
 The catalog is closed: a new event type requires a change to the contract.
 """
@@ -59,4 +59,4 @@ class RunEvent(ContractModel):
     recorded_at: datetime
     """Exposed to code as `run.now()` for inputs."""
     payload: JsonValue = None
-    """Type-specific; see docs/contracts/run-events.md."""
+    """Type-specific; see docs/libraries/rollout/contracts/run-events.md."""

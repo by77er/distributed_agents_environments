@@ -1,4 +1,5 @@
-"""The model endpoint contract: the only thing code knows about models (docs/contracts/model-endpoint.md).
+"""The model endpoint contract: the only thing code knows about models
+(docs/libraries/rollout/contracts/model-endpoint.md).
 
 Implemented by the recorder and by direct adapters; code cannot tell which serves a model slot.
 """

@@ -1,4 +1,5 @@
-"""A SQL database for the platform's stores: SQLite for one process, Postgres for many (docs/durability/runners.md).
+"""A SQL database for the platform's stores: SQLite for one process, Postgres for many
+(docs/implementations/rollout-durable/runners.md).
 
 Stores write portable SQL through `sql` (named parameters, `ON CONFLICT`, `RETURNING`) and declare their tables with
 SQLAlchemy metadata, so the same store code runs on both. The database also provides what several processes sharing
@@ -9,7 +10,7 @@ it need:
   other calls (a Postgres advisory lock, released if the holder's connection drops).
 
 A store whose tools write deduplicates them by `effect_id` with `effects_table` and `recorded`
-(docs/contracts/effects.md).
+(docs/libraries/rollout/contracts/effects.md).
 """
 
 import asyncio

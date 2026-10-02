@@ -1,7 +1,8 @@
 """Notes: the assistant's memory across conversations, as an imported tool set backed by SQLite.
 
-Saving a note is a side effect, so the store deduplicates by `effect_id` (docs/contracts/effects.md): a repeated
-effect returns the recorded result, and a known `effect_id` with different arguments is rejected as a conflict.
+Saving a note is a side effect, so the store deduplicates by `effect_id`
+(docs/libraries/rollout/contracts/effects.md): a repeated effect returns the recorded result, and a known `effect_id`
+with different arguments is rejected as a conflict.
 """
 
 import asyncio

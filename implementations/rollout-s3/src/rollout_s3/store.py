@@ -1,5 +1,5 @@
 """Blobs in S3 or any S3-compatible object store: MinIO, Cloudflare R2, SeaweedFS, Ceph, Google Cloud Storage's XML
-API (docs/contracts/canonical-content.md). Needs the `s3` extra (boto3).
+API (docs/libraries/rollout/contracts/canonical-content.md). Needs the `s3` extra (boto3).
 
 Each blob is an object named by its SHA-256 under a prefix, e.g. `s3://bucket/blobs/ab/abcdef…`. Storing is
 idempotent (an object that exists is not written again), and reads verify the hash. Since blobs are read by hash,

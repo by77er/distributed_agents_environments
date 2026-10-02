@@ -1,4 +1,5 @@
-"""Canonical content: the model-agnostic form of what a model reads or writes (docs/contracts/canonical-content.md)."""
+"""Canonical content: the model-agnostic form of what a model reads or writes
+(docs/libraries/rollout/contracts/canonical-content.md)."""
 
 import re
 from collections.abc import Mapping
@@ -11,7 +12,7 @@ from rollout.contracts.base import ContractModel, FrozenSequence
 
 
 class BlobReference(ContractModel):
-    """Content kept in object storage (any block larger than 64 KiB)."""
+    """Content kept in a blob store, named by where it is and what it hashes to."""
 
     uri: str
     sha256: str

@@ -221,7 +221,7 @@ def format_arguments(arguments: ast.arguments) -> str:
 
 def render_definition(definition: Definition) -> list[str]:
     node = definition.node
-    lines = [f"### `{definition.name}`", "", f"*{definition.kind}* · `src/{definition.path}`", ""]
+    lines = [f"### `{definition.name}`", "", f"*{definition.kind}* · `{definition.path}`", ""]
     if isinstance(node, ast.ClassDef):
         bases = ", ".join(ast.unparse(base) for base in node.bases)
         lines += ["```python", f"class {node.name}({bases})" if bases else f"class {node.name}", "```", ""]

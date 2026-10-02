@@ -285,7 +285,7 @@ class LocalRunner(MessageRouter):
             outcome = RunOutcome(status=RunStatus.FAILED, failure_class=RunFailureClass.TASK_ERROR, detail=detail)
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
         if context.environments is not None:
-            await context.environments.release_all()  # environments the run still owns (P12)
+            await context.environments.release_all()  # environments the run still owns
         handle.finish(outcome)
         self._leave_conversation(handle)
 

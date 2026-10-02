@@ -1,4 +1,4 @@
-"""The durability layer: `DurableRunner`, on DBOS (docs/durability/README.md)."""
+"""The durability layer: `DurableRunner`, on DBOS (docs/implementations/rollout-durable/README.md)."""
 
 from rollout_durable.context import DurableRunContext, RunCancelled
 from rollout_durable.runner import DurableRunHandle, DurableRunner

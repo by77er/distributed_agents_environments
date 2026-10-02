@@ -1,14 +1,16 @@
 # Agent sessions
 
-Status: **Working** (2026-10-02) · Code: `products/agent-sessions/src/agent_sessions`, `agent_sessions.coordination`
+Code: `products/agent-sessions`
 
 Independent agent sessions, each with its own computer, that create and message each other and share a board. You
-manage them from the terminal.
+manage them from the terminal. The package is `agent-sessions` (import `agent_sessions`); it is built on `rollout`,
+`rollout-durable`, `rollout-computers`, `rollout-openai` and `rollout-s3`. Its subpackage
+`agent_sessions.coordination` holds the directory of participants, the messages and the board.
 
 ## Running it
 
 ```bash
-uv sync --extra assistant --extra durable
+uv sync                                               # at the repository root: installs every product
 uv run agents serve                                   # http://127.0.0.1:8421; state in ~/.local/state/agent-sessions
 
 uv run agents new lead "Create two workers, post three tasks to the board channel 'jobs', report to me when done."
@@ -29,13 +31,13 @@ The client commands talk to the server at `$AGENTS_URL` (default `http://127.0.0
 | `--host`, `--port` | `127.0.0.1`, `8421` | where the server listens |
 | `--model`, `--reasoning-effort` | `gpt-6-astra`, `low` | the model, on the local Codex login; effort is `low`, `medium` or `high` |
 | `--environment` | `namespaces` | where sessions' commands run (below) |
-| `--evict-after SECONDS` | `300` | how long a session waits before it is unloaded from memory and shown as sleeping; `0` keeps every session loaded ([evicting idle runs](../durability/eviction.md)) |
+| `--evict-after SECONDS` | `300` | how long a session waits before it is unloaded from memory and shown as sleeping; `0` keeps every session loaded ([evicting idle runs](../implementations/rollout-durable/eviction.md)) |
 | `--in-memory` | off | run on the `LocalRunner`: nothing survives a restart |
-| `--database URL`, `--runner-id NAME` | SQLite in `--state` | several servers on one Postgres ([several runners](../durability/runners.md)) |
+| `--database URL`, `--runner-id NAME` | SQLite in `--state` | several servers on one Postgres ([several runners](../implementations/rollout-durable/runners.md)) |
 | `--blobs s3://bucket/prefix` | files in `--state` | where images are kept ([local services](../development/local-services.md)) |
 
 Unless `--in-memory` is given, sessions run on the `DurableRunner` and survive restarts of the server
-([durability](../durability/README.md)).
+([durable runner](../implementations/rollout-durable/README.md)).
 
 | `--environment` | Each session gets | Isolation |
 |---|---|---|
@@ -44,7 +46,8 @@ Unless `--in-memory` is given, sessions run on the `DurableRunner` and survive r
 
 A session is told which computer it has. On `local` it is asked to stay in its workspace and not to install software
 system-wide unless asked; nothing enforces that. A state directory keeps the backend it started with: the server
-refuses to serve it with the other one. The backends are described in [environments](../environments/README.md).
+refuses to serve it with the other one. The backends are described in
+[computers](../implementations/rollout-computers.md).
 
 ## What a session is
 
@@ -54,7 +57,7 @@ refuses to serve it with the other one. The backends are described in [environme
 | Its computer | an environment created in the task's `setup` and destroyed in `teardown`, with the `ComputerTools`: `shell`, `read_file`, `write_file`, `edit_file`, `read_image` |
 | Sessions | `SessionTools`: `list_sessions`, `create_session`, `send_message` (urgent messages interrupt) |
 | The board | `BoardTools`: `post`, `read_board`, `claim_task`, `resolve_task`, `subscribe`, `unsubscribe`. Channels hold notes and tasks; a claim is exclusive; subscribers get new posts as low-priority messages |
-| Delivery | the tools only write to the `CoordinationStore`, each write recorded against its `effect_id`. A `Relay` delivers the store's outbox through the runner, with the outbox key as idempotency key, so each message arrives once |
+| Delivery | the tools only write to the `CoordinationStore`, each write recorded against its `effect_id` ([the database](../implementations/rollout-durable/runners.md#the-database)). A `Relay` delivers the store's outbox through the runner, with the outbox key as idempotency key, so each message arrives once |
 | You | the `operator` participant. Sessions reach you with `send_message(to="operator")`, which fills your inbox. Your messages steer a session, or interrupt it with `--urgent` |
 
 Messages from other sessions reach a session as `[message from NAME] …`, and board notices as `[board #CHANNEL] …`.
@@ -103,4 +106,5 @@ guarantees, made once every session is waiting or sleeping:
 | seed 13 | 5 | 4 | 15, each once | 2 | 5 | passed in 110 s |
 | seed 21, `--environment local` | 5 | 5 | 17, each once | 0 of 10 | 10 of 67 | passed in 123 s |
 
-The result with three servers sharing a Postgres is in [several runners](../durability/runners.md#fault-evaluation).
+The result with three servers sharing a Postgres is in
+[several runners](../implementations/rollout-durable/runners.md#fault-evaluation).

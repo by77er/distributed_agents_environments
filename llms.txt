@@ -1,45 +1,62 @@
 # rollout
 
-> Durable, scalable agents and environments for agent products and reinforcement learning. A Python 3.13 library
-> (`rollout`, managed with uv): tasks define environments and tools, agents decide what the model sees, and a
-> framework-owned loop runs episodes; rollout jobs turn finished runs into labelled episodes with token traces, a
-> training loop steps a trainer on them, and a deployment profile says which engines and machines stand behind it.
-> The developer guide describes the code as built.
+> Durable, scalable agents and environments for agent products and reinforcement learning. A uv workspace of Python
+> 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (rollout jobs,
+> episodes with token traces, the training loop, channels, the recorder, deployment profiles), one package per
+> implementation (a durable runner, a vLLM engine, a LoRA trainer, Qwen renderers, computers, an OpenAI endpoint, an
+> S3 blob store), two products and one environment. The documentation describes the code as built.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
-are frozen pydantic models; type names are never abbreviated. Every Python example in the guide runs in the test
-suite, and the API reference is generated from the source.
+are frozen pydantic models; type names are never abbreviated. In the guide, a block tagged exactly `python` runs in
+the test suite and a block tagged `python fragment` does not. The API reference is generated from the source.
 
-## Developer guide
+## Guide
 
 - [Guide index](docs/guide/README.md): what is available, concepts, where each name lives
 - [Three ways in](docs/guide/perspectives.md): the surface for building an environment, for designing training,
   and for deploying
 - [Getting started](docs/guide/getting-started.md): install, a first task, one episode against a scripted model
-- [Tasks](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, extra model slots
+- [Tasks](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, more model slots
 - [Tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as observations
 - [Agents](docs/guide/agents.md): context selection, context hints, acting, the `Model` interface
 - [Conversations](docs/guide/conversations.md): `WaitFor`, message kinds, priorities, queue / steer / interrupt
-- [Content](docs/guide/content.md): messages, blocks, tool results, immutability, digests
+- [Content](docs/guide/content.md): messages, blocks, tool results, blobs (files or S3), digests
 - [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, failures
 - [Models](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
 - [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
-- [Deploying](docs/guide/deploying.md): the profile (channels, engines, trainer, runner, tool sets) and the `rollout` CLI
-
-## Training
-
-- [Rollouts](docs/core/rollouts/README.md): jobs, tickets, the stream of episodes, publishing weights
-- [Episodes](docs/core/trajectories/README.md): what a finished run carries for training
-- [Training](docs/core/training.md): the loop, group-relative advantages, the curriculum, the trainer protocol
-- [Recorder](docs/core/recorder/README.md) and [inference](docs/inference/README.md): channels, engines, token
-  recording, the OpenAI-compatible endpoint for harnesses
-- [Memory](docs/core/harness/memory.md): a context that fits any model, for long episodes
-- [Monitor](docs/core/monitor.md): a live page over a job and its runs
-
-## Reference
-
+- [Deploying](docs/guide/deploying.md): the profile file and the `rollout` command
 - [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
+
+## Architecture
+
+- [Overview](docs/architecture/overview.md): layers, protocols and their implementations
+- [Glossary](docs/architecture/glossary.md)
+
+## Libraries
+
+- [Harness](docs/libraries/rollout/README.md): the loop, programs, runners
+- [Contracts](docs/libraries/rollout/contracts/README.md): the types that cross layers
+- [Memory](docs/libraries/rollout/memory.md): a context that fits any model, for long episodes
+- [Rollouts](docs/libraries/rollout-train/rollouts.md): jobs, tickets, the stream of episodes, publishing weights
+- [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
+- [Training](docs/libraries/rollout-train/training.md): the loop, group-relative advantages, the curriculum, the
+  trainer protocol
+- [Recorder](docs/libraries/rollout-train/recorder.md) and [channels](docs/libraries/rollout-train/channels.md):
+  token recording, engines, limits, the OpenAI-compatible endpoint for harnesses
+- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a job and its runs
+
+## Implementations
+
+- [Durable runner](docs/implementations/rollout-durable/README.md): runs that survive their process
+- [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
+  [Qwen renderers](docs/implementations/rollout-qwen.md): what a profile names
+- [Computers](docs/implementations/rollout-computers.md): environment backends and shell and file tools
+
+## Products and environments
+
+- [Project assistant](docs/products/project-assistant.md), [agent sessions](docs/products/agent-sessions.md)
+- [Minecraft swarm](docs/products/minecraft-swarm.md): four agents in a Minecraft world, trained on a curriculum
 
 ## Everything else
 
-- [Documentation index](docs/README.md): architecture overview, contracts, durability, environments, products
+- [Documentation index](docs/README.md): every page, and the table of packages

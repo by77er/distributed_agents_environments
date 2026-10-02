@@ -1,9 +1,9 @@
-"""`DurableRunner`: runs survive crashes and restarts (docs/durability/README.md).
+"""`DurableRunner`: runs survive crashes and restarts (docs/implementations/rollout-durable/README.md).
 
 Each run is a DBOS workflow whose id is the `run_id`. The program runs inside the workflow, in the runner's process.
 
 State lives in one directory (SQLite, for one runner), or in a Postgres database that several runners share
-(`database=`; docs/durability/runners.md):
+(`database=`; docs/implementations/rollout-durable/runners.md):
 
 - the DBOS system database: workflow inputs, recorded steps, messages (`dbos.sqlite`, or the `dbos` schema);
 - the run store: run events, runs, conversations, delivered messages and runners (`runs.sqlite`; see `RunStore`).
@@ -156,7 +156,8 @@ class DurableRunner(MessageRouter):
         takeover_after: timedelta = timedelta(seconds=15),
     ) -> None:
         """`evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
-        `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
+        `eviction_interval`: how often, in seconds, to look for runs to evict or wake
+        (docs/implementations/rollout-durable/eviction.md).
 
         `database`: a Postgres URL (or `Database`) shared with other runners; without it, state is SQLite in
         `directory` and this runner is the only one. `runner_id` names this runner among them: a runner restarted
@@ -343,7 +344,7 @@ class DurableRunner(MessageRouter):
             outcome = RunOutcome(status=RunStatus.FAILED, failure_class=RunFailureClass.TASK_ERROR, detail=detail)
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
         if context.environments is not None:
-            await context.environments.release_all()  # environments the run still owns (P12)
+            await context.environments.release_all()  # environments the run still owns
         undelivered = await context.undelivered()
         self.store.finish_run(run_id, outcome.status.value, outcome.model_dump(mode="json", exclude_none=True))
         return {"undelivered": [envelope.model_dump(mode="json") for envelope in undelivered]}
@@ -408,7 +409,7 @@ class DurableRunner(MessageRouter):
             self.store.touch(run_id, utc_now())
             await self._wake_if_evicted(run_id)
 
-    # Eviction (docs/durability/eviction.md)
+    # Eviction (docs/implementations/rollout-durable/eviction.md)
 
     async def _wake_if_evicted(self, run_id: str) -> None:
         """Resume an evicted run; its replay returns recorded steps and then takes the new message. Hold its lock."""

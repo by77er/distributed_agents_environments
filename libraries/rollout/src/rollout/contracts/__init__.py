@@ -1,4 +1,4 @@
-"""Types that cross layers, defined once (docs/contracts/). Modules mirror the contract documents."""
+"""Types that cross layers, defined once (docs/libraries/rollout/contracts/). Modules mirror the contract documents."""
 
 from rollout.contracts.base import ContractModel, FrozenSequence
 from rollout.contracts.content import (
@@ -28,7 +28,6 @@ from rollout.contracts.digests import (
 )
 from rollout.contracts.effects import (
     Conflict,
-    EffectCompletion,
     EffectKind,
     EffectStatus,
     OutcomeUnknown,
@@ -83,7 +82,6 @@ __all__ = [
     "ContextOverflow",
     "ContractModel",
     "ContractViolation",
-    "EffectCompletion",
     "EffectIdentity",
     "EffectKind",
     "EffectStatus",

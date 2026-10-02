@@ -214,4 +214,4 @@ asyncio.run(through_the_runner())
 ```
 
 Under the durable runner a wait survives restarts, and a run that has waited long is unloaded from memory until its
-next message or its timeout: see [evicting idle runs](../durability/eviction.md).
+next message or its timeout: see [evicting idle runs](../implementations/rollout-durable/eviction.md).

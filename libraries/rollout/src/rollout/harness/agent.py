@@ -1,4 +1,4 @@
-"""`Agent`: the policy side of the loop (docs/core/harness/agent.md)."""
+"""`Agent`: the policy side of the loop (docs/guide/agents.md)."""
 
 from typing import Any
 

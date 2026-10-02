@@ -13,7 +13,7 @@ class ContractModel(BaseModel):
     """Base for every contract type: immutable, and unknown fields are kept.
 
     Keeping unknown fields lets a component read and re-write a record written by newer code without dropping
-    what it does not understand (contracts evolution rule 4).
+    what it does not understand.
     """
 
     model_config = ConfigDict(frozen=True, extra="allow", use_attribute_docstrings=True)

@@ -1,4 +1,4 @@
-"""The episode as the agent sees it: observations and replies (docs/core/harness/agent.md)."""
+"""The episode as the agent sees it: observations and replies (docs/guide/agents.md)."""
 
 from dataclasses import dataclass
 from enum import StrEnum

@@ -10,6 +10,7 @@ database); `rollout_train.rollouts.service` offers the same job to a caller on a
 """
 
 import asyncio
+import contextlib
 import json
 import time
 import uuid
@@ -286,6 +287,10 @@ class RolloutJob:
         try:
             async for event in stream:
                 events.append(event)
+        except asyncio.CancelledError:  # the job is closing: its runs are not left running for nobody
+            with contextlib.suppress(Exception):
+                await self._runner.cancel(run_id, reason=f"job {self.id} was closed")
+            raise
         finally:
             epochs = self._recorder.sessions(run_id)
             self._recorder.forget(run_id)

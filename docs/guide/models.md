@@ -2,8 +2,8 @@
 
 A run's model slots are served by **model endpoints**. Which endpoint serves a slot is decided by the run's binding,
 never by task or agent code. A `ModelBinding` is either `direct` (a provider's API, on this page) or `recorded` (a
-trainable channel served through the [recorder](../core/recorder/README.md)). This page covers the adapter for the
-OpenAI Responses API.
+trainable channel served through the [recorder](../libraries/rollout-train/recorder.md)). This page covers the
+adapter for the OpenAI Responses API.
 
 ## Binding a slot to a provider
 
@@ -59,6 +59,13 @@ runner = LocalRunner(providers={
   raises `ValueError`. Media of other types is replaced by a line of text saying it was omitted.
 - **Stateless requests.** Every request carries the whole context (`store: false`). The model's reasoning is not
   carried from one turn to the next.
+- **Sampling parameters.** Of a binding's `SamplingParameters`, `reasoning_effort` is sent when it is set.
+  `temperature` and `top_p` are sent only when they differ from the API's own default: reasoning models reject the
+  two parameters whatever their value.
+- **Output cap.** A request's `max_output_tokens` is sent where the backend accepts it, which its credentials say
+  (`Credentials.accepts_max_output_tokens`). The public API accepts it, and counts reasoning tokens against it. The
+  Codex backend rejects the parameter, so `CodexLogin` leaves it out.
+- **Tool choice.** A request's `tool_choice` is sent to the provider.
 - **Results.** Text and tool calls come back as canonical blocks. The finish reason is `TOOL_USE` when the reply
   makes tool calls and `LENGTH` when the response was cut off. Usage reports the provider's token counts.
 - **Errors.** HTTP 429 raises `Overloaded`, a context that is too long raises `ContextOverflow`, rejected
@@ -72,5 +79,5 @@ runner = LocalRunner(providers={
 ## Trying it
 
 ```bash
-ROLLOUT_LIVE=1 uv run pytest tests/adapters -k live   # one real round trip; skipped unless ROLLOUT_LIVE=1
+ROLLOUT_LIVE=1 uv run pytest tests/rollout_openai -k live   # one real round trip; skipped unless ROLLOUT_LIVE=1
 ```

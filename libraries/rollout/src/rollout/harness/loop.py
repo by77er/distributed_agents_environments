@@ -1,4 +1,4 @@
-"""The framework-owned rollout loop (docs/core/harness/README.md#the-loop-normative)."""
+"""The framework-owned rollout loop (docs/libraries/rollout/README.md#the-loop)."""
 
 import asyncio
 
@@ -60,7 +60,7 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
 
 
 def _checked(observation: Observation | WaitFor, *, reply: Message | None) -> Observation | WaitFor:
-    """Enforce the validation rules of docs/core/harness/task.md; violations raise `InvalidObservation`."""
+    """Enforce the validation rules of docs/guide/tasks.md#validation; violations raise `InvalidObservation`."""
     calls = {call.call_id for call in reply.tool_calls} if reply is not None else set[str]()
     if isinstance(observation, WaitFor):
         if calls:

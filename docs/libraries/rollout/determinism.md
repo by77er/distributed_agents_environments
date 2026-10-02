@@ -1,6 +1,7 @@
 # Determinism
 
-Status: **Working** (2026-10-02) · Code: `rollout_durable.context`, `rollout.local.context`
+Code: `rollout.local.context`, `rollout_durable.context` · See [effects](contracts/effects.md),
+[durability](../../implementations/rollout-durable/README.md)
 
 Task, agent and program code is ordinary `async` Python. Under the `LocalRunner` it runs once. Under the
 `DurableRunner` it can run several times, because the runner resumes a run by **replay**. This page says what replay
@@ -19,7 +20,7 @@ A run is replayed when:
 - its runner starts again after a crash or a shutdown;
 - another runner on the same database takes it over, after the first runner's heartbeat stopped;
 - it was unloaded from memory while it waited, and a message, the wait's timeout or a cancellation wakes it
-  ([evicting idle runs](../../durability/eviction.md)).
+  ([evicting idle runs](../../implementations/rollout-durable/eviction.md)).
 
 Replay records the run's events again with the same `seq` and content; the store keeps the first copy of each.
 
@@ -33,22 +34,21 @@ Replay records the run's events again with the same `seq` and content; the store
 | `run.now()` | the same time: that of the latest recorded input (the run's start, the last effect's completion, the last message's sending, or the end of a wait that timed out) |
 | `run.random` | the same sequence: a `random.Random` seeded from `run_id` |
 | `await run.gather(*awaitables)` | awaits concurrently and returns results in argument order, as `asyncio.gather` does |
-| `run.patched(change_id)` | `True`, as on the first execution |
 | Everything else: hooks, `@tool` bodies, `__init__` of the task and the agent, `run.blobs.put`, `run.reward` | runs again |
 
 Guarded effects are commands in an environment (`Environment.execute`) and calls to side-effecting imported tools
-whose tool set does not deduplicate ([tools](../../guide/tools.md#after-a-crash)).
+whose tool set is not a `DeduplicatingToolSet` ([effects](contracts/effects.md#receivers-that-deduplicate)).
 
-Under the `LocalRunner` nothing is replayed: `run.now()` is the wall clock in UTC, and `run.random`, `run.gather`
-and `run.patched` behave as above.
+Under the `LocalRunner` nothing is replayed: `run.now()` is the wall clock in UTC, and `run.random` and `run.gather`
+behave as above.
 
 ## Effect identity
 
-The k-th effect a run requests has `effect_id = {run_id}:0:{k}`, and carries a digest of its arguments
-([identifiers](../../guide/runs-and-events.md#effects-and-their-identity)). Replay requests the same effects in the
-same order, so every identifier is the same on every execution. Receivers use it to perform an effect once: the
-recorder returns the recorded reply for an `effect_id` it has seen, and an environment's id is derived from the
-`effect_id` of its creation, so a repeated creation finds the same environment.
+The effects a run requests are numbered from 0 in the order it requests them, and the k-th has
+`effect_id = {run_id}:0:{k}`. Each carries a digest of its arguments ([effects](contracts/effects.md#identity)).
+Replay requests the same effects in the same order, so every identifier is the same on every execution. Receivers
+use it to perform an effect once: the recorder returns the recorded reply for an `effect_id` it has seen, and an
+environment's id is derived from the `effect_id` of its creation, so a repeated creation finds the same environment.
 
 ## Rules
 

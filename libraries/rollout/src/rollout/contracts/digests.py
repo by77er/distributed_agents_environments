@@ -1,4 +1,4 @@
-"""Digests over RFC 8785 canonical JSON (contracts evolution rule 6).
+"""Digests over RFC 8785 canonical JSON.
 
 Digests are lowercase hexadecimal SHA-256. A contract model is canonicalized from its JSON form with fields whose
 value is `None` omitted, so adding an optional field (default `None`) does not change the digest of existing

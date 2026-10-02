@@ -2,8 +2,9 @@
 
 Tool calls only write here; a `Relay` delivers the outbox through the runner. Every write a tool makes is recorded
 against its `effect_id` in the same transaction, so a repeated call returns the recorded result and a known
-`effect_id` with different arguments is rejected (docs/contracts/effects.md). Writes run one at a time, across every
-process sharing the database, so a claim or a check-then-insert is never interleaved with another write.
+`effect_id` with different arguments is rejected (docs/libraries/rollout/contracts/effects.md). Writes run one at a
+time, across every process sharing the database, so a claim or a check-then-insert is never interleaved with another
+write.
 """
 
 from collections.abc import Callable

@@ -43,6 +43,7 @@ markdown_extensions:
 plugins:
   - search
 
+# Every page under docs/ appears here once, in the order of docs/README.md.
 nav:
   - Home: README.md
   - Developer guide:
@@ -62,36 +63,39 @@ nav:
   - Architecture:
       - "Overview": architecture/overview.md
       - "Glossary": architecture/glossary.md
-  - Contracts:
-      - contracts/README.md
-      - "Identifiers": contracts/identifiers.md
-      - "Canonical content": contracts/canonical-content.md
-      - "Run events": contracts/run-events.md
-      - "Effects": contracts/effects.md
-      - "Model endpoint contract": contracts/model-endpoint.md
-  - Core:
-      - Harness:
-          - core/harness/README.md
-          - "Determinism rules for durable code": core/harness/determinism.md
-          - "Hooks": core/harness/hooks.md
-          - "Memory": core/harness/memory.md
-      - Recorder:
-          - core/recorder/README.md
-          - "The recorder over HTTP": core/recorder/session-api.md
-          - "Epochs": core/recorder/session-tree.md
-          - "Engines": core/recorder/engine-adapter.md
-      - "Rollouts": core/rollouts/README.md
-      - "Episodes": core/trajectories/README.md
-      - "Training": core/training.md
-      - "Monitor": core/monitor.md
-  - Inference: inference/README.md
-  - Durability:
-      - durability/README.md
-      - "Evicting idle runs": durability/eviction.md
-      - "Several runners": durability/runners.md
-  - Environments: environments/README.md
-  - Products:
+  - Libraries:
+      - rollout:
+          - libraries/rollout/README.md
+          - "Determinism rules for durable code": libraries/rollout/determinism.md
+          - "Hooks": libraries/rollout/hooks.md
+          - "Memory": libraries/rollout/memory.md
+          - Contracts:
+              - libraries/rollout/contracts/README.md
+              - "Identifiers": libraries/rollout/contracts/identifiers.md
+              - "Canonical content": libraries/rollout/contracts/canonical-content.md
+              - "Run events": libraries/rollout/contracts/run-events.md
+              - "Effects": libraries/rollout/contracts/effects.md
+              - "Model endpoint contract": libraries/rollout/contracts/model-endpoint.md
+      - rollout-train:
+          - "Rollouts": libraries/rollout-train/rollouts.md
+          - "Episodes": libraries/rollout-train/episodes.md
+          - "Training": libraries/rollout-train/training.md
+          - "Channels": libraries/rollout-train/channels.md
+          - "Recorder": libraries/rollout-train/recorder.md
+          - "The recorder over HTTP": libraries/rollout-train/harness-endpoint.md
+          - "Monitor": libraries/rollout-train/monitor.md
+  - Implementations:
+      - Durable runner:
+          - implementations/rollout-durable/README.md
+          - "Evicting idle runs": implementations/rollout-durable/eviction.md
+          - "Several runners": implementations/rollout-durable/runners.md
+      - "vLLM engine": implementations/rollout-vllm.md
+      - "LoRA trainer": implementations/rollout-lora.md
+      - "Qwen renderers": implementations/rollout-qwen.md
+      - "Computers": implementations/rollout-computers.md
+  - Products and environments:
       - "Project assistant": products/project-assistant.md
       - "Agent sessions": products/agent-sessions.md
       - "Minecraft swarm": products/minecraft-swarm.md
-  - Local services: development/local-services.md
+  - Development:
+      - "Local services": development/local-services.md

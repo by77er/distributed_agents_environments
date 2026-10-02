@@ -41,7 +41,7 @@ class MyTask(Task):
 The loop, in order: `setup`, `start`, then repeatedly the agent acts and `respond` answers, until an observation
 has `end` set or `max_turns` replies were made. Then `score`, then `teardown`. If a hook raises, `rollout()`
 re-raises after `teardown`, and `score` does not run. The loop itself is in
-[harness](../core/harness/README.md#the-loop).
+[harness](../libraries/rollout/README.md#the-loop).
 
 ## Observations
 
@@ -199,7 +199,7 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | `history` | the episode, read-only: `turns`, and `messages(hints)` ([agents](agents.md#what-the-model-sees)) |
 | `models`, `model` | the declared model slots by name; `model` is `models["policy"]` ([agents](agents.md#the-model-interface)) |
 | `tools` | the imported tools: `specifications()`, `await call(name, arguments)`, `name in run.tools` ([tools](tools.md#imported-tools)) |
-| `environments` | creates computers the run owns; `None` when the runner has no environment backend ([environments](../environments/README.md)) |
+| `environments` | creates computers the run owns; `None` when the runner has no environment backend ([environments](../implementations/rollout-computers.md)) |
 | `blobs` | stores bytes for `Media` blocks; `None` when the runner has no blob store ([content](content.md#media-and-blobs)) |
 | `context_hints` | the task's `context_hints`, for the agent |
 | `now()` | the current time, as a `datetime` |
@@ -208,19 +208,18 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | `exclude_from_training(reason)` | marks the run as unsuitable for training ([rewards](#rewards)) |
 | `await emit(kind, payload, *, to=None)` | durable output, such as a reply to a person ([conversations](conversations.md#sending-and-replying)) |
 | `await gather(*awaitables)` | awaits concurrently and returns the results in order, as `asyncio.gather` does |
-| `patched(change_id)` | returns `True` |
 
 ## Environments
 
 A task whose agent needs a computer creates one in `setup` with `await run.environments.create(specification)` and
 keeps the handle on `self`. Every operation on the handle is an effect. The runner destroys any environment the run
 still owns when the run ends. Handles, backends and the ready-made `ComputerTools` are described in
-[environments](../environments/README.md).
+[environments](../implementations/rollout-computers.md).
 
 ## State and determinism
 
 - Keep episode state on `self`. `__init__` receives the row's parameters once per run.
 - Use `run.now()` and `run.random` rather than `time.time()` or the `random` module. The durable runner resumes a
   run by running its code again, and these give the same values each time. The rules are in
-  [determinism](../core/harness/determinism.md).
+  [determinism](../libraries/rollout/determinism.md).
 - `teardown` must be idempotent: it runs on every path once `setup` began, including failures and cancellation.

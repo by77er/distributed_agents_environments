@@ -7,7 +7,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 ## Contents
 
 - **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Memory`](#memory), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
-- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.catalog`](#rolloutcatalog)** — What an environment offers to be trained on. [`binding_for`](#binding_for), [`Catalog`](#catalog), [`Row`](#row)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
@@ -33,7 +33,7 @@ Writing tasks, agents and programs; runners; memory; tool sets.
 
 ### `Address`
 
-*class* · `src/libraries/rollout/src/rollout/harness/conversations.py`
+*class* · `libraries/rollout/src/rollout/harness/conversations.py`
 
 ```python
 class Address(ContractModel)
@@ -48,7 +48,7 @@ Where a message or output goes.
 
 ### `Agent`
 
-*class* · `src/libraries/rollout/src/rollout/harness/agent.py`
+*class* · `libraries/rollout/src/rollout/harness/agent.py`
 
 ```python
 class Agent
@@ -71,7 +71,7 @@ context (compaction, windows) or the way it acts (plan-then-act, self-critique).
 
 ### `agent_program`
 
-*function* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 def agent_program(task: type[Task], agent: type[Agent] = Agent, *, task_parameters: JsonValue = None, agent_configuration: JsonValue = None) -> ProgramReference
@@ -81,7 +81,7 @@ A reference to the task loop for `task` and `agent`.
 
 ### `AgentProgram`
 
-*class* · `src/libraries/rollout/src/rollout/harness/program.py`
+*class* · `libraries/rollout/src/rollout/harness/program.py`
 
 ```python
 class AgentProgram(Program)
@@ -100,7 +100,7 @@ The task loop: a task and an agent.
 
 ### `bind`
 
-*function* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 def bind(reference: ProgramReference, channel: str, *, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding
@@ -111,7 +111,7 @@ the tool set registered under the import's own name (or as `tools` says).
 
 ### `Blobs`
 
-*class* · `src/libraries/rollout/src/rollout/harness/blobs.py`
+*class* · `libraries/rollout/src/rollout/harness/blobs.py`
 
 ```python
 class Blobs(Protocol)
@@ -124,7 +124,7 @@ class Blobs(Protocol)
 
 ### `CompactingAgent`
 
-*class* · `src/libraries/rollout/src/rollout/harness/memory.py`
+*class* · `libraries/rollout/src/rollout/harness/memory.py`
 
 ```python
 class CompactingAgent(Agent)
@@ -144,7 +144,7 @@ the agent's own summary of the older ones.
 
 ### `ContextHints`
 
-*class* · `src/libraries/rollout/src/rollout/harness/history.py`
+*class* · `libraries/rollout/src/rollout/harness/history.py`
 
 ```python
 class ContextHints
@@ -159,7 +159,7 @@ Advisory for the agent: how much history the task needs the model to see.
 
 ### `ConversationKey`
 
-*class* · `src/libraries/rollout/src/rollout/harness/conversations.py`
+*class* · `libraries/rollout/src/rollout/harness/conversations.py`
 
 ```python
 class ConversationKey(ContractModel)
@@ -181,7 +181,7 @@ Identifies a conversation: a deployment and a caller-chosen key. One live run pe
 
 ### `DeduplicatingToolSet`
 
-*class* · `src/libraries/rollout/src/rollout/harness/imports.py`
+*class* · `libraries/rollout/src/rollout/harness/imports.py`
 
 ```python
 class DeduplicatingToolSet(ToolSet, Protocol)
@@ -189,7 +189,7 @@ class DeduplicatingToolSet(ToolSet, Protocol)
 
 A tool set that says whether it performs each `effect_id` at most once (a `deduplicates = True` attribute, on
 a class). The side-effecting tools of one that does are re-executed after a crash rather than guarded
-(docs/contracts/effects.md).
+(docs/libraries/rollout/contracts/effects.md).
 
 **Methods**
 
@@ -197,7 +197,7 @@ a class). The side-effecting tools of one that does are re-executed after a cras
 
 ### `DeliveryMode`
 
-*class* · `src/libraries/rollout/src/rollout/harness/conversations.py`
+*class* · `libraries/rollout/src/rollout/harness/conversations.py`
 
 ```python
 class DeliveryMode(StrEnum)
@@ -213,7 +213,7 @@ How a message reaches a run that is busy.
 
 ### `DeliveryPolicy`
 
-*class* · `src/libraries/rollout/src/rollout/harness/conversations.py`
+*class* · `libraries/rollout/src/rollout/harness/conversations.py`
 
 ```python
 class DeliveryPolicy(ContractModel)
@@ -232,7 +232,7 @@ Maps priorities to delivery modes. Default: LOW → QUEUE, NORMAL → STEER, HIG
 
 ### `Deployment`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class Deployment(ContractModel)
@@ -247,7 +247,7 @@ A named, addressable agent: conversations addressed to it start runs of its spec
 
 ### `DirectModel`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class DirectModel(ContractModel)
@@ -263,7 +263,7 @@ A model served by a provider's API through a direct adapter; nothing is recorded
 
 ### `Effects`
 
-*class* · `src/libraries/rollout/src/rollout/harness/model.py`
+*class* · `libraries/rollout/src/rollout/harness/model.py`
 
 ```python
 class Effects(Protocol)
@@ -280,7 +280,7 @@ How a run performs effects. The runner decides what performing means: a direct c
 
 ### `End`
 
-*function* · `src/libraries/rollout/src/rollout/harness/observation.py`
+*function* · `libraries/rollout/src/rollout/harness/observation.py`
 
 ```python
 def End(reward: float | None = None, *, truncated: bool = False, info: Mapping[str, Any] | None = None) -> Observation
@@ -290,7 +290,7 @@ A terminal observation.
 
 ### `Ending`
 
-*class* · `src/libraries/rollout/src/rollout/harness/observation.py`
+*class* · `libraries/rollout/src/rollout/harness/observation.py`
 
 ```python
 class Ending(StrEnum)
@@ -305,7 +305,7 @@ How an episode ended.
 
 ### `EndpointModel`
 
-*class* · `src/libraries/rollout/src/rollout/harness/model.py`
+*class* · `libraries/rollout/src/rollout/harness/model.py`
 
 ```python
 class EndpointModel
@@ -323,7 +323,7 @@ A model slot bound to an endpoint. Every sample sends the full context.
 
 ### `Envelope`
 
-*class* · `src/libraries/rollout/src/rollout/harness/conversations.py`
+*class* · `libraries/rollout/src/rollout/harness/conversations.py`
 
 ```python
 class Envelope(ContractModel)
@@ -342,7 +342,7 @@ A message delivered to a run.
 
 ### `Environment`
 
-*class* · `src/libraries/rollout/src/rollout/harness/environments.py`
+*class* · `libraries/rollout/src/rollout/harness/environments.py`
 
 ```python
 class Environment
@@ -360,7 +360,7 @@ A handle to one environment. Its methods are effects.
 
 ### `Environments`
 
-*class* · `src/libraries/rollout/src/rollout/harness/environments.py`
+*class* · `libraries/rollout/src/rollout/harness/environments.py`
 
 ```python
 class Environments
@@ -377,7 +377,7 @@ class Environments
 
 ### `EnvironmentService`
 
-*class* · `src/libraries/rollout/src/rollout/harness/environments.py`
+*class* · `libraries/rollout/src/rollout/harness/environments.py`
 
 ```python
 class EnvironmentService(Protocol)
@@ -395,7 +395,7 @@ An environment backend. Every method must be safe to repeat with the same argume
 
 ### `EnvironmentSpecification`
 
-*class* · `src/libraries/rollout/src/rollout/harness/environments.py`
+*class* · `libraries/rollout/src/rollout/harness/environments.py`
 
 ```python
 class EnvironmentSpecification(ContractModel)
@@ -408,7 +408,7 @@ class EnvironmentSpecification(ContractModel)
 
 ### `ExecutionResult`
 
-*class* · `src/libraries/rollout/src/rollout/harness/environments.py`
+*class* · `libraries/rollout/src/rollout/harness/environments.py`
 
 ```python
 class ExecutionResult(ContractModel)
@@ -424,7 +424,7 @@ class ExecutionResult(ContractModel)
 
 ### `FileBlobStore`
 
-*class* · `src/libraries/rollout/src/rollout/harness/blobs.py`
+*class* · `libraries/rollout/src/rollout/harness/blobs.py`
 
 ```python
 class FileBlobStore
@@ -440,7 +440,7 @@ Implements `Blobs` in a directory: one file per blob, named by its SHA-256.
 
 ### `History`
 
-*class* · `src/libraries/rollout/src/rollout/harness/history.py`
+*class* · `libraries/rollout/src/rollout/harness/history.py`
 
 ```python
 class History
@@ -457,7 +457,7 @@ Read-only for agents and tasks; the loop appends to it through the run context.
 
 ### `HistoryShape`
 
-*class* · `src/libraries/rollout/src/rollout/harness/history.py`
+*class* · `libraries/rollout/src/rollout/harness/history.py`
 
 ```python
 class HistoryShape(StrEnum)
@@ -473,7 +473,7 @@ How much of the history the model should see.
 
 ### `instantiate`
 
-*function* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 def instantiate(reference: ProgramReference) -> Program
@@ -483,7 +483,7 @@ Create the program a reference names.
 
 ### `Interrupted`
 
-*class* · `src/libraries/rollout/src/rollout/harness/context.py`
+*class* · `libraries/rollout/src/rollout/harness/context.py`
 
 ```python
 class Interrupted(Exception)
@@ -497,7 +497,7 @@ The reply in progress was cancelled by a message delivered with mode `INTERRUPT`
 
 ### `InvalidObservation`
 
-*class* · `src/libraries/rollout/src/rollout/harness/observation.py`
+*class* · `libraries/rollout/src/rollout/harness/observation.py`
 
 ```python
 class InvalidObservation(Exception)
@@ -507,7 +507,7 @@ A hook returned an observation that breaks the validation rules; the run fails w
 
 ### `Memory`
 
-*class* · `src/libraries/rollout/src/rollout/harness/memory.py`
+*class* · `libraries/rollout/src/rollout/harness/memory.py`
 
 ```python
 class Memory
@@ -536,7 +536,7 @@ class Memory
 
 ### `MessageRouter`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class MessageRouter(ABC)
@@ -554,7 +554,7 @@ fails before that can be retried with the same idempotency key; a retry of a del
 
 ### `Model`
 
-*class* · `src/libraries/rollout/src/rollout/harness/context.py`
+*class* · `libraries/rollout/src/rollout/harness/context.py`
 
 ```python
 class Model(Protocol)
@@ -573,7 +573,7 @@ A model slot as code sees it. Nothing here identifies the policy, weights or eng
 
 ### `ModelBinding`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class ModelBinding(ContractModel)
@@ -588,7 +588,7 @@ Exactly one of `direct` or `recorded`.
 
 ### `ModelSample`
 
-*class* · `src/libraries/rollout/src/rollout/harness/hooks.py`
+*class* · `libraries/rollout/src/rollout/harness/hooks.py`
 
 ```python
 class ModelSample
@@ -606,7 +606,7 @@ One model sample: what a slot's model was sent and what it replied.
 
 ### `ModelSlot`
 
-*class* · `src/libraries/rollout/src/rollout/harness/task.py`
+*class* · `libraries/rollout/src/rollout/harness/task.py`
 
 ```python
 class ModelSlot
@@ -621,7 +621,7 @@ sampled by the task itself.
 
 ### `Observation`
 
-*class* · `src/libraries/rollout/src/rollout/harness/observation.py`
+*class* · `libraries/rollout/src/rollout/harness/observation.py`
 
 ```python
 class Observation
@@ -645,7 +645,7 @@ canonical messages.
 
 ### `Priority`
 
-*class* · `src/libraries/rollout/src/rollout/harness/conversations.py`
+*class* · `libraries/rollout/src/rollout/harness/conversations.py`
 
 ```python
 class Priority(StrEnum)
@@ -661,7 +661,7 @@ A sender's priority; the run's `DeliveryPolicy` maps it to a delivery mode.
 
 ### `Program`
 
-*class* · `src/libraries/rollout/src/rollout/harness/program.py`
+*class* · `libraries/rollout/src/rollout/harness/program.py`
 
 ```python
 class Program
@@ -679,7 +679,7 @@ What a run executes. `AgentProgram` is the task loop; plain durable workflows ar
 
 ### `ProgramReference`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class ProgramReference(ContractModel)
@@ -694,7 +694,7 @@ What a run executes, by name, so a runner in another process can re-create it.
 
 ### `RecordedEndpoints`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RecordedEndpoints(Protocol)
@@ -708,7 +708,7 @@ Serves recorded bindings: the recorder (`rollout_train.recorder.Recorder`), as r
 
 ### `RecordedModel`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RecordedModel(ContractModel)
@@ -723,7 +723,7 @@ A channel served through the recorder.
 
 ### `register`
 
-*function* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 def register(cls: type) -> str
@@ -733,7 +733,7 @@ Make a class resolvable by name in this process, even if it cannot be imported (
 
 ### `resolve`
 
-*function* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 def resolve(name: str) -> type
@@ -743,7 +743,7 @@ The class a `module:QualifiedName` names: registered in this process, or importe
 
 ### `rollout`
 
-*function* · `src/libraries/rollout/src/rollout/harness/loop.py`
+*function* · `libraries/rollout/src/rollout/harness/loop.py`
 
 ```python
 async def rollout(task: Task, agent: Agent, run: RunContext) -> None
@@ -753,7 +753,7 @@ Run one episode of `task` with `agent`. Raises `InvalidObservation` or whatever 
 
 ### `RunBinding`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RunBinding(ContractModel)
@@ -767,7 +767,7 @@ class RunBinding(ContractModel)
 
 ### `RunContext`
 
-*class* · `src/libraries/rollout/src/rollout/harness/context.py`
+*class* · `libraries/rollout/src/rollout/harness/context.py`
 
 ```python
 class RunContext(Protocol)
@@ -800,7 +800,7 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 
 ### `RunHandle`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RunHandle(Protocol)
@@ -817,7 +817,7 @@ class RunHandle(Protocol)
 
 ### `RunHooks`
 
-*class* · `src/libraries/rollout/src/rollout/harness/hooks.py`
+*class* · `libraries/rollout/src/rollout/harness/hooks.py`
 
 ```python
 class RunHooks
@@ -832,7 +832,7 @@ Subclass and override what you need; pass instances to a runner (`LocalRunner(ho
 
 ### `Runner`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class Runner(Protocol)
@@ -853,7 +853,7 @@ class Runner(Protocol)
 
 ### `RunNotLive`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RunNotLive(Exception)
@@ -863,7 +863,7 @@ A message was addressed to a run that has ended.
 
 ### `RunOutcome`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RunOutcome(ContractModel)
@@ -877,7 +877,7 @@ class RunOutcome(ContractModel)
 
 ### `RunSpecification`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RunSpecification(ContractModel)
@@ -890,7 +890,7 @@ class RunSpecification(ContractModel)
 
 ### `RunStatus`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class RunStatus(StrEnum)
@@ -904,7 +904,7 @@ class RunStatus(StrEnum)
 
 ### `SamplingParameters`
 
-*class* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*class* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 class SamplingParameters(ContractModel)
@@ -920,7 +920,7 @@ Configured on bindings, never by task or agent code.
 
 ### `Task`
 
-*class* · `src/libraries/rollout/src/rollout/harness/task.py`
+*class* · `libraries/rollout/src/rollout/harness/task.py`
 
 ```python
 class Task
@@ -953,7 +953,7 @@ Subclass it and implement `start`; override the other hooks as needed. Declarati
 
 ### `tool`
 
-*function* · `src/libraries/rollout/src/rollout/harness/tools.py`
+*function* · `libraries/rollout/src/rollout/harness/tools.py`
 
 ```python
 def tool[F: Callable[..., Any]](function: F | None = None, /, *, name: str | None = None, retry_class: RetryClass = RetryClass.PURE, timeout: timedelta | None = None) -> F | Callable[[F], F]
@@ -963,7 +963,7 @@ Declare a task method as a tool: `@tool` or `@tool(name=..., retry_class=..., ti
 
 ### `ToolBinding`
 
-*class* · `src/libraries/rollout/src/rollout/harness/imports.py`
+*class* · `libraries/rollout/src/rollout/harness/imports.py`
 
 ```python
 class ToolBinding(ContractModel)
@@ -978,7 +978,7 @@ How an import is served. Exactly one kind is set.
 
 ### `Tools`
 
-*class* · `src/libraries/rollout/src/rollout/harness/imports.py`
+*class* · `libraries/rollout/src/rollout/harness/imports.py`
 
 ```python
 class Tools
@@ -994,7 +994,7 @@ The imported tools of a run (`run.tools`).
 
 ### `ToolSet`
 
-*class* · `src/libraries/rollout/src/rollout/harness/imports.py`
+*class* · `libraries/rollout/src/rollout/harness/imports.py`
 
 ```python
 class ToolSet(Protocol)
@@ -1009,7 +1009,7 @@ A provider of tools: in process, or a client of an MCP server, an HTTP service o
 
 ### `Turn`
 
-*class* · `src/libraries/rollout/src/rollout/harness/history.py`
+*class* · `libraries/rollout/src/rollout/harness/history.py`
 
 ```python
 class Turn
@@ -1027,7 +1027,7 @@ has no observation until the run resumes.
 
 ### `WaitFor`
 
-*class* · `src/libraries/rollout/src/rollout/harness/observation.py`
+*class* · `libraries/rollout/src/rollout/harness/observation.py`
 
 ```python
 class WaitFor
@@ -1043,7 +1043,7 @@ Suspend the run until a message of `kind` arrives or `timeout` passes.
 
 ### `with_row`
 
-*function* · `src/libraries/rollout/src/rollout/harness/runner.py`
+*function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
 def with_row(reference: ProgramReference, row: JsonValue) -> ProgramReference
@@ -1057,7 +1057,7 @@ Types that cross layers: canonical content, identifiers, digests, effects, event
 
 ### `address_of`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*function* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 def address_of(endpoint: ModelEndpoint, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress
@@ -1067,7 +1067,7 @@ def address_of(endpoint: ModelEndpoint, session_id: str, *, through: ModelEndpoi
 
 ### `AddressableEndpoint`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class AddressableEndpoint(ModelEndpoint, Protocol)
@@ -1082,7 +1082,7 @@ A model endpoint that also serves its slots over HTTP, to a harness that brings 
 
 ### `arguments_digest`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*function* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 def arguments_digest(arguments: JsonValue | BaseModel) -> str
@@ -1092,13 +1092,13 @@ Sent with every `effect_id`; receivers reject a known `effect_id` whose argument
 
 ### `BlobReference`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class BlobReference(ContractModel)
 ```
 
-Content kept in object storage (any block larger than 64 KiB).
+Content kept in a blob store, named by where it is and what it hashes to.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -1109,7 +1109,7 @@ Content kept in object storage (any block larger than 64 KiB).
 
 ### `Block`
 
-*type alias* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*type alias* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 type Block = Annotated[Text | Media | ToolCall | ToolResultBlock | Reasoning, Field(discriminator='type')]
@@ -1117,7 +1117,7 @@ type Block = Annotated[Text | Media | ToolCall | ToolResultBlock | Reasoning, Fi
 
 ### `canonical_json`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*function* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 def canonical_json(value: JsonValue | BaseModel) -> bytes
@@ -1127,7 +1127,7 @@ RFC 8785 canonical JSON; a model is dumped with `None` fields omitted.
 
 ### `CapabilityContract`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class CapabilityContract(ContractModel)
@@ -1142,7 +1142,7 @@ What a model slot guarantees. It must not weaken during a run.
 
 ### `Conflict`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/effects.py`
+*class* · `libraries/rollout/src/rollout/contracts/effects.py`
 
 ```python
 class Conflict(Exception)
@@ -1152,7 +1152,7 @@ A receiver that deduplicates by `effect_id` was sent a known `effect_id` with a 
 
 ### `context_digests`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*function* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 def context_digests(messages: Sequence[Message]) -> list[str]
@@ -1164,7 +1164,7 @@ The digest chain `d₀ … dₙ` of a context: `dᵢ = sha256(dᵢ₋₁ ‖ sha
 
 ### `ContextDelta`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ContextDelta(ContractModel)
@@ -1179,7 +1179,7 @@ The context of a request: its messages, and the digest that names them.
 
 ### `ContextOverflow`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ContextOverflow(ModelEndpointError)
@@ -1193,7 +1193,7 @@ The context exceeds the contract's limit; agents compact and retry.
 
 ### `ContractModel`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/base.py`
+*class* · `libraries/rollout/src/rollout/contracts/base.py`
 
 ```python
 class ContractModel(BaseModel)
@@ -1202,11 +1202,11 @@ class ContractModel(BaseModel)
 Base for every contract type: immutable, and unknown fields are kept.
 
 Keeping unknown fields lets a component read and re-write a record written by newer code without dropping
-what it does not understand (contracts evolution rule 4).
+what it does not understand.
 
 ### `ContractViolation`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ContractViolation(ModelEndpointError)
@@ -1216,7 +1216,7 @@ The request exceeds the capability contract.
 
 ### `digest`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*function* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 def digest(value: JsonValue | BaseModel) -> str
@@ -1226,7 +1226,7 @@ Lowercase hexadecimal SHA-256 of the canonical JSON.
 
 ### `effect_id`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 def effect_id(run_id: str, generation: int, ordinal: int) -> str
@@ -1234,26 +1234,9 @@ def effect_id(run_id: str, generation: int, ordinal: int) -> str
 
 `{run_id}:{generation}:{ordinal}`: the same on every re-execution, so it is the universal idempotency key.
 
-### `EffectCompletion`
-
-*class* · `src/libraries/rollout/src/rollout/contracts/effects.py`
-
-```python
-class EffectCompletion(ContractModel)
-```
-
-The first completion recorded for an `effect_id` wins; later ones are dropped.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `effect_id` | `str` | required |  |
-| `status` | `EffectStatus` | required |  |
-| `payload` | `JsonValue` | `None` |  |
-| `error_class` | `str \| None` | `None` |  |
-
 ### `EffectIdentity`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*class* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 class EffectIdentity
@@ -1273,7 +1256,7 @@ The parts of an `effect_id`: `{run_id}:{generation}:{ordinal}`.
 
 ### `EffectKind`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/effects.py`
+*class* · `libraries/rollout/src/rollout/contracts/effects.py`
 
 ```python
 class EffectKind(StrEnum)
@@ -1291,7 +1274,7 @@ The catalog of effects.
 
 ### `EffectStatus`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/effects.py`
+*class* · `libraries/rollout/src/rollout/contracts/effects.py`
 
 ```python
 class EffectStatus(StrEnum)
@@ -1307,7 +1290,7 @@ How an effect completed.
 
 ### `EMPTY_DIGEST`
 
-*constant* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*constant* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 EMPTY_DIGEST = hashlib.sha256(b'').hexdigest()
@@ -1317,7 +1300,7 @@ EMPTY_DIGEST = hashlib.sha256(b'').hexdigest()
 
 ### `FinishReason`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class FinishReason(StrEnum)
@@ -1333,7 +1316,7 @@ Why a sample stopped.
 
 ### `FrozenSequence`
 
-*type alias* · `src/libraries/rollout/src/rollout/contracts/base.py`
+*type alias* · `libraries/rollout/src/rollout/contracts/base.py`
 
 ```python
 type FrozenSequence[T] = Annotated[Sequence[T], AfterValidator(tuple)]
@@ -1343,7 +1326,7 @@ A sequence field that accepts any sequence and is stored as a tuple, so contract
 
 ### `InternalError`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class InternalError(ModelEndpointError)
@@ -1353,7 +1336,7 @@ The endpoint failed.
 
 ### `Media`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class Media(ContractModel)
@@ -1369,7 +1352,7 @@ An image, audio clip or document.
 
 ### `Message`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class Message(ContractModel)
@@ -1395,7 +1378,7 @@ TOOL messages contain only `ToolResultBlock`s, and `ToolCall`s appear only in AS
 
 ### `message_digest`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*function* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 def message_digest(message: Message) -> str
@@ -1405,7 +1388,7 @@ Covers what the model can see: `meta` is excluded.
 
 ### `ModelAddress`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ModelAddress(ContractModel)
@@ -1422,7 +1405,7 @@ answers there is the slot's model; the harness only sets its base URL and key.
 
 ### `ModelEndpoint`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ModelEndpoint(Protocol)
@@ -1439,7 +1422,7 @@ over HTTP is an `AddressableEndpoint`.
 
 ### `ModelEndpointError`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ModelEndpointError(Exception)
@@ -1449,7 +1432,7 @@ Errors an endpoint raises; see the table in the contract for how the core handle
 
 ### `NamedToolChoice`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class NamedToolChoice(ContractModel)
@@ -1463,7 +1446,7 @@ The model must call this tool.
 
 ### `new_message_id`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 def new_message_id() -> str
@@ -1473,7 +1456,7 @@ def new_message_id() -> str
 
 ### `new_run_id`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 def new_run_id() -> str
@@ -1483,7 +1466,7 @@ def new_run_id() -> str
 
 ### `new_ulid`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 def new_ulid() -> str
@@ -1495,7 +1478,7 @@ Minted by runners and services, never by task code (which has no ambient randomn
 
 ### `OutcomeUnknown`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/effects.py`
+*class* · `libraries/rollout/src/rollout/contracts/effects.py`
 
 ```python
 class OutcomeUnknown(Exception)
@@ -1509,7 +1492,7 @@ A guarded effect was interrupted by a crash in an earlier attempt: it may or may
 
 ### `Overloaded`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class Overloaded(ModelEndpointError)
@@ -1523,7 +1506,7 @@ Admission control: retry after `retry_after` seconds.
 
 ### `Reasoning`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class Reasoning(ContractModel)
@@ -1539,7 +1522,7 @@ The model's reasoning.
 
 ### `ReasoningScope`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class ReasoningScope(StrEnum)
@@ -1553,7 +1536,7 @@ Who can consume a reasoning block.
 
 ### `ResultBlock`
 
-*type alias* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*type alias* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 type ResultBlock = Annotated[Text | Media, Field(discriminator='type')]
@@ -1561,7 +1544,7 @@ type ResultBlock = Annotated[Text | Media, Field(discriminator='type')]
 
 ### `RetryClass`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class RetryClass(StrEnum)
@@ -1578,7 +1561,7 @@ What a durable runner may do with a tool call after a crash (docs/architecture/o
 
 ### `Role`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class Role(StrEnum)
@@ -1595,7 +1578,7 @@ Who a message is from. Observations contain only USER and TOOL messages.
 
 ### `RUN_EVENT_SCHEMA_VERSION`
 
-*constant* · `src/libraries/rollout/src/rollout/contracts/events.py`
+*constant* · `libraries/rollout/src/rollout/contracts/events.py`
 
 ```python
 RUN_EVENT_SCHEMA_VERSION = 1
@@ -1603,7 +1586,7 @@ RUN_EVENT_SCHEMA_VERSION = 1
 
 ### `RunEvent`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/events.py`
+*class* · `libraries/rollout/src/rollout/contracts/events.py`
 
 ```python
 class RunEvent(ContractModel)
@@ -1618,11 +1601,11 @@ One entry in a run's event stream.
 | `type` | `RunEventType` | required |  |
 | `schema_version` | `int` | `RUN_EVENT_SCHEMA_VERSION` |  |
 | `recorded_at` | `datetime` | required | Exposed to code as `run.now()` for inputs. |
-| `payload` | `JsonValue` | `None` | Type-specific; see docs/contracts/run-events.md. |
+| `payload` | `JsonValue` | `None` | Type-specific; see docs/libraries/rollout/contracts/run-events.md. |
 
 ### `RunEventType`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/events.py`
+*class* · `libraries/rollout/src/rollout/contracts/events.py`
 
 ```python
 class RunEventType(StrEnum)
@@ -1650,7 +1633,7 @@ The closed catalog of run events.
 
 ### `RunFailureClass`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/events.py`
+*class* · `libraries/rollout/src/rollout/contracts/events.py`
 
 ```python
 class RunFailureClass(StrEnum)
@@ -1665,7 +1648,7 @@ Why a run failed (the `class` of a `run.failed` event).
 
 ### `SampleRequest`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class SampleRequest(ContractModel)
@@ -1685,7 +1668,7 @@ A request for one reply. Sampling parameters are not here: they belong to the po
 
 ### `SampleResult`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class SampleResult(ContractModel)
@@ -1701,7 +1684,7 @@ Nothing here identifies the policy, weights version or engine.
 
 ### `session_id`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 def session_id(run_id: str, model_slot: str) -> str
@@ -1711,13 +1694,13 @@ def session_id(run_id: str, model_slot: str) -> str
 
 ### `SessionIdentity`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/identifiers.py`
+*class* · `libraries/rollout/src/rollout/contracts/identifiers.py`
 
 ```python
 class SessionIdentity
 ```
 
-The parts of a `session_id`: `{run_id}/{model_slot}` for runs, `u_{ulid}/{model_slot}` when unmanaged.
+The parts of a `session_id`: `{run_id}/{model_slot}`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -1730,7 +1713,7 @@ The parts of a `session_id`: `{run_id}/{model_slot}` for runs, `u_{ulid}/{model_
 
 ### `spec_hash`
 
-*function* · `src/libraries/rollout/src/rollout/contracts/digests.py`
+*function* · `libraries/rollout/src/rollout/contracts/digests.py`
 
 ```python
 def spec_hash(specification: ToolSpecification) -> str
@@ -1740,7 +1723,7 @@ Covers only the model-visible fields of a tool specification.
 
 ### `TERMINAL_EVENT_TYPES`
 
-*constant* · `src/libraries/rollout/src/rollout/contracts/events.py`
+*constant* · `libraries/rollout/src/rollout/contracts/events.py`
 
 ```python
 TERMINAL_EVENT_TYPES = frozenset({RunEventType.RUN_COMPLETED, RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED})
@@ -1748,7 +1731,7 @@ TERMINAL_EVENT_TYPES = frozenset({RunEventType.RUN_COMPLETED, RunEventType.RUN_F
 
 ### `Text`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class Text(ContractModel)
@@ -1763,7 +1746,7 @@ Plain text.
 
 ### `ToolCall`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class ToolCall(ContractModel)
@@ -1780,7 +1763,7 @@ A request by the model to call a tool. Appears only in ASSISTANT messages.
 
 ### `ToolChoice`
 
-*type alias* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*type alias* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 type ToolChoice = ToolChoiceMode | NamedToolChoice
@@ -1788,7 +1771,7 @@ type ToolChoice = ToolChoiceMode | NamedToolChoice
 
 ### `ToolChoiceMode`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class ToolChoiceMode(StrEnum)
@@ -1804,7 +1787,7 @@ Whether the model may, must not, or must call a tool.
 
 ### `ToolResult`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class ToolResult(ContractModel)
@@ -1821,7 +1804,7 @@ What a tool produces. Platform failures are exceptions, not results.
 
 ### `ToolResultBlock`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class ToolResultBlock(ContractModel)
@@ -1837,7 +1820,7 @@ A tool's result as it appears in a TOOL message, answering the `ToolCall` with t
 
 ### `ToolSpecification`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/content.py`
+*class* · `libraries/rollout/src/rollout/contracts/content.py`
 
 ```python
 class ToolSpecification(ContractModel)
@@ -1858,7 +1841,7 @@ What the model sees about a tool, plus an extension that is never model-visible.
 
 ### `Usage`
 
-*class* · `src/libraries/rollout/src/rollout/contracts/model_endpoint.py`
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
 class Usage(ContractModel)
@@ -1879,7 +1862,7 @@ What an environment offers to be trained on.
 
 ### `binding_for`
 
-*function* · `src/libraries/rollout/src/rollout/catalog.py`
+*function* · `libraries/rollout/src/rollout/catalog.py`
 
 ```python
 def binding_for(catalog: Catalog, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding
@@ -1891,7 +1874,7 @@ it is given a row: the catalog's first.)
 
 ### `Catalog`
 
-*class* · `src/libraries/rollout/src/rollout/catalog.py`
+*class* · `libraries/rollout/src/rollout/catalog.py`
 
 ```python
 class Catalog(Protocol)
@@ -1908,7 +1891,7 @@ class Catalog(Protocol)
 
 ### `Row`
 
-*class* · `src/libraries/rollout/src/rollout/catalog.py`
+*class* · `libraries/rollout/src/rollout/catalog.py`
 
 ```python
 class Row
@@ -1926,7 +1909,7 @@ The runner in this process.
 
 ### `EndpointFactory`
 
-*type alias* · `src/libraries/rollout/src/rollout/local/runner.py`
+*type alias* · `libraries/rollout/src/rollout/local/runner.py`
 
 ```python
 type EndpointFactory = Callable[[DirectModel], ModelEndpoint]
@@ -1936,7 +1919,7 @@ Creates the endpoint for a direct model binding; registered with the runner by p
 
 ### `LocalRunContext`
 
-*class* · `src/libraries/rollout/src/rollout/local/context.py`
+*class* · `libraries/rollout/src/rollout/local/context.py`
 
 ```python
 class LocalRunContext
@@ -1968,13 +1951,13 @@ Implements `RunContext` and `Effects` in process.
 - `async def take_steering_messages(self) -> list[Envelope]`
 - `async def interruptible[T](self, reply: Awaitable[T]) -> T`
 - `def take_undelivered(self) -> list[Envelope]` — Messages the run never consumed; the runner hands them to the conversation's next run.
-- `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/core/harness/conversations.md#priority-and-delivery-mode).
+- `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/guide/conversations.md#priority-and-delivery-mode).
 - `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue], guard: bool = False) -> T`
 - `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent`
 
 ### `LocalRunHandle`
 
-*class* · `src/libraries/rollout/src/rollout/local/runner.py`
+*class* · `libraries/rollout/src/rollout/local/runner.py`
 
 ```python
 class LocalRunHandle
@@ -1998,7 +1981,7 @@ A run started by a `LocalRunner`. Its context is available for inspection in tes
 
 ### `LocalRunner`
 
-*class* · `src/libraries/rollout/src/rollout/local/runner.py`
+*class* · `libraries/rollout/src/rollout/local/runner.py`
 
 ```python
 class LocalRunner(MessageRouter)
@@ -2025,7 +2008,7 @@ time, and messages a run never consumed start the conversation's next run.
 
 ### `RewardAssignment`
 
-*class* · `src/libraries/rollout/src/rollout/local/context.py`
+*class* · `libraries/rollout/src/rollout/local/context.py`
 
 ```python
 class RewardAssignment
@@ -2043,7 +2026,7 @@ Test doubles: a scripted model endpoint and helpers.
 
 ### `events_of`
 
-*function* · `src/libraries/rollout/src/rollout/testing.py`
+*function* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 def events_of(run: LocalRunContext, event_type: RunEventType) -> list[RunEvent]
@@ -2053,7 +2036,7 @@ The run's events of one type, in order.
 
 ### `LedgerEndpoint`
 
-*class* · `src/libraries/rollout/src/rollout/testing.py`
+*class* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 class LedgerEndpoint
@@ -2071,7 +2054,7 @@ Wraps a model endpoint and appends every sample's `effect_id` to a file: to coun
 
 ### `LedgerEnvironments`
 
-*class* · `src/libraries/rollout/src/rollout/testing.py`
+*class* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 class LedgerEnvironments
@@ -2090,7 +2073,7 @@ Wraps an environment service and appends every command it starts to a file, with
 
 ### `local_run`
 
-*function* · `src/libraries/rollout/src/rollout/testing.py`
+*function* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 def local_run(task: Task, replies: Iterable[ScriptedReply] = ()) -> tuple[LocalRunContext, ScriptedModelEndpoint]
@@ -2100,7 +2083,7 @@ A local run context for `task` whose model slots all reply from one script.
 
 ### `payload`
 
-*function* · `src/libraries/rollout/src/rollout/testing.py`
+*function* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 def payload(event: RunEvent) -> dict[str, JsonValue]
@@ -2110,7 +2093,7 @@ An event's payload as a JSON object.
 
 ### `read_ledger`
 
-*function* · `src/libraries/rollout/src/rollout/testing.py`
+*function* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 def read_ledger(ledger: Path) -> list[dict[str, str]]
@@ -2118,7 +2101,7 @@ def read_ledger(ledger: Path) -> list[dict[str, str]]
 
 ### `ScriptedModelEndpoint`
 
-*class* · `src/libraries/rollout/src/rollout/testing.py`
+*class* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 class ScriptedModelEndpoint
@@ -2135,7 +2118,7 @@ Replies with the scripted entries in order and records every request and cancell
 
 ### `ScriptedReply`
 
-*type alias* · `src/libraries/rollout/src/rollout/testing.py`
+*type alias* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 type ScriptedReply = Message | str | Callable[[SampleRequest], Message | Awaitable[Message]]
@@ -2145,7 +2128,7 @@ A reply, its text, or a function of the request (which may await, e.g. to hold a
 
 ### `tool_call_reply`
 
-*function* · `src/libraries/rollout/src/rollout/testing.py`
+*function* · `libraries/rollout/src/rollout/testing.py`
 
 ```python
 def tool_call_reply(*calls: ToolCall, text: str = '') -> Message
@@ -2159,7 +2142,7 @@ Rollout jobs: rows in, episodes out, weights published.
 
 ### `Episode`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
 ```python
 class Episode
@@ -2191,7 +2174,7 @@ class Episode
 
 ### `Job`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class Job(Protocol)
@@ -2212,7 +2195,7 @@ class Job(Protocol)
 
 ### `JobHooks`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class JobHooks
@@ -2226,7 +2209,7 @@ Watch a job at the level its caller thinks at: tickets, episodes, published weig
 
 ### `Jobs`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class Jobs(Protocol)
@@ -2241,7 +2224,7 @@ served elsewhere.
 
 ### `Outcome`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
 ```python
 class Outcome(StrEnum)
@@ -2255,7 +2238,7 @@ class Outcome(StrEnum)
 
 ### `Recorded`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class Recorded(Protocol)
@@ -2271,7 +2254,7 @@ What a job needs of the recorder: each run's sequences, and somewhere to publish
 
 ### `Refused`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class Refused(Exception)
@@ -2281,7 +2264,7 @@ A job would not run a ticket: its guard refused (a machine out of memory, say), 
 
 ### `RolloutJob`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class RolloutJob
@@ -2304,7 +2287,7 @@ A job over a runner. Created by `RolloutJobs.start`.
 
 ### `RolloutJobs`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class RolloutJobs
@@ -2325,7 +2308,7 @@ caller that stops can go on from its cursor; `guard` is called before runs are a
 
 ### `RolloutTicket`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class RolloutTicket
@@ -2349,7 +2332,7 @@ A ticket of a `RolloutJob`. The job keeps it until its episodes are acknowledged
 
 ### `Status`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class Status
@@ -2364,7 +2347,7 @@ class Status
 
 ### `Ticket`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/jobs.py`
 
 ```python
 class Ticket(Protocol)
@@ -2381,7 +2364,7 @@ class Ticket(Protocol)
 
 ### `Trace`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
+*class* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
 ```python
 class Trace
@@ -2404,7 +2387,7 @@ The training loop, the group algorithm, the curriculum, and what they ask of a t
 
 ### `Algorithm`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/algorithm.py`
+*class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
 class Algorithm(Protocol)
@@ -2419,7 +2402,7 @@ What the training loop asks of an algorithm.
 
 ### `Batch`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/algorithm.py`
+*class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
 class Batch
@@ -2435,7 +2418,7 @@ What an algorithm makes of a group of episodes.
 
 ### `Budget`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/trainer.py`
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
 
 ```python
 class Budget
@@ -2448,7 +2431,7 @@ class Budget
 
 ### `Colocated`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/colocated.py`
+*class* · `libraries/rollout-train/src/rollout_train/colocated.py`
 
 ```python
 class Colocated
@@ -2466,7 +2449,7 @@ start (too little memory, say).
 
 ### `complete_groups`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/algorithm.py`
+*function* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
 async def complete_groups(episodes: AsyncIterator[Episode], *, by: str = 'group', size: int) -> AsyncIterator[list[Episode]]
@@ -2477,7 +2460,7 @@ ended (whatever their outcome).
 
 ### `Curriculum`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/curriculum.py`
+*class* · `libraries/rollout-train/src/rollout_train/curriculum.py`
 
 ```python
 class Curriculum
@@ -2509,7 +2492,7 @@ class Curriculum
 
 ### `Directory`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/record.py`
+*class* · `libraries/rollout-train/src/rollout_train/record.py`
 
 ```python
 class Directory
@@ -2529,7 +2512,7 @@ A `Store` in a directory.
 
 ### `group_advantages`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/algorithm.py`
+*function* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
 def group_advantages(scores: Sequence[float]) -> list[float] | None
@@ -2539,7 +2522,7 @@ Each score minus the group's mean; None when all are equal (no signal).
 
 ### `Grpo`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/algorithm.py`
+*class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
 class Grpo
@@ -2557,7 +2540,7 @@ class Grpo
 
 ### `Iteration`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/record.py`
+*class* · `libraries/rollout-train/src/rollout_train/record.py`
 
 ```python
 class Iteration
@@ -2593,7 +2576,7 @@ class Iteration
 
 ### `iterations`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/record.py`
+*function* · `libraries/rollout-train/src/rollout_train/record.py`
 
 ```python
 def iterations(store: Store) -> list[Iteration]
@@ -2603,7 +2586,7 @@ The groups a run has logged, in the order they were logged.
 
 ### `Step`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/trainer.py`
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
 
 ```python
 class Step
@@ -2617,7 +2600,7 @@ class Step
 
 ### `StepFailed`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/trainer.py`
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
 
 ```python
 class StepFailed(Exception)
@@ -2627,7 +2610,7 @@ A step did not produce weights: the policy is as it was, and a later step may su
 
 ### `Store`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/record.py`
+*class* · `libraries/rollout-train/src/rollout_train/record.py`
 
 ```python
 class Store(Protocol)
@@ -2643,7 +2626,7 @@ Where a training run keeps its small state: a directory, or anything else that h
 
 ### `train`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/loop.py`
+*function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
 async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, store: Store, *, channel: str, algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None) -> None
@@ -2656,7 +2639,7 @@ from the tool set of its own name).
 
 ### `Trainer`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/trainer.py`
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
 
 ```python
 class Trainer(Protocol)
@@ -2673,7 +2656,7 @@ class Trainer(Protocol)
 
 ### `Weighted`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/trainer.py`
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
 
 ```python
 class Weighted
@@ -2692,7 +2675,7 @@ Channels: policies being served, and what they ask of an engine.
 
 ### `Channel`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/inference/channel.py`
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
 
 ```python
 class Channel
@@ -2725,7 +2708,7 @@ class Channel
 
 ### `Engine`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/inference/channel.py`
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
 
 ```python
 class Engine(Protocol)
@@ -2749,7 +2732,7 @@ One replica serving a model: in this process, or a client of a server elsewhere.
 
 ### `Generation`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/inference/channel.py`
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
 
 ```python
 class Generation
@@ -2763,7 +2746,7 @@ class Generation
 
 ### `Limits`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/inference/channel.py`
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
 
 ```python
 class Limits
@@ -2784,7 +2767,7 @@ The model endpoint for trainable channels: token-exact recording.
 
 ### `ChatTemplateRenderer`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
 ```python
 class ChatTemplateRenderer
@@ -2803,7 +2786,7 @@ Renders with the tokenizer's chat template; parses with a family's tool-call and
 
 ### `Epoch`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
 
 ```python
 class Epoch
@@ -2823,7 +2806,7 @@ One token sequence of a session, as the policy saw and continued it.
 
 ### `JsonToolCalls`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
 ```python
 class JsonToolCalls
@@ -2841,7 +2824,7 @@ class JsonToolCalls
 
 ### `RecordedEndpoint`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
 
 ```python
 class RecordedEndpoint
@@ -2860,7 +2843,7 @@ Implements `ModelEndpoint` for one channel.
 
 ### `Recorder`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
 
 ```python
 class Recorder
@@ -2882,7 +2865,7 @@ class Recorder
 
 ### `Renderer`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
 ```python
 class Renderer(Protocol)
@@ -2903,7 +2886,7 @@ class Renderer(Protocol)
 
 ### `Span`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
 
 ```python
 class Span
@@ -2919,7 +2902,7 @@ Tokens `start` to `end` (exclusive) of an epoch were sampled by the policy, at w
 
 ### `ThinkingFormat`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
 ```python
 class ThinkingFormat
@@ -2936,7 +2919,7 @@ How a family delimits thinking. Its generation prompt may already open the block
 
 ### `ToolCallFormat`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
 ```python
 class ToolCallFormat(Protocol)
@@ -2950,7 +2933,7 @@ How a family writes tool calls in its output.
 
 ### `XmlFunctionCalls`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
 ```python
 class XmlFunctionCalls
@@ -2973,7 +2956,7 @@ A deployment, described and opened.
 
 ### `ChannelSpec`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/profile.py`
 
 ```python
 class ChannelSpec
@@ -2990,7 +2973,7 @@ class ChannelSpec
 
 ### `NotEnoughMemory`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/profile.py`
 
 ```python
 class NotEnoughMemory(Exception)
@@ -3000,7 +2983,7 @@ Stopping is better than exhausting the machine (a host may shut down rather than
 
 ### `Platform`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/profile.py`
 
 ```python
 class Platform
@@ -3015,7 +2998,7 @@ An open profile: `jobs` to run episodes with, a `trainer` to step, and a `store`
 
 ### `Profile`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/profile.py`
 
 ```python
 class Profile
@@ -3042,7 +3025,7 @@ class Profile
 
 ### `TrainerSpec`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/profile.py`
 
 ```python
 class TrainerSpec
@@ -3061,7 +3044,7 @@ A live web page over a job and its runs.
 
 ### `FeedReader`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/monitor/feed.py`
+*class* · `libraries/rollout-train/src/rollout_train/monitor/feed.py`
 
 ```python
 class FeedReader
@@ -3080,7 +3063,7 @@ Reads a feed directory incrementally: each call picks up what was appended since
 
 ### `plain`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/monitor/feed.py`
+*function* · `libraries/rollout-train/src/rollout_train/monitor/feed.py`
 
 ```python
 def plain(message: Message) -> dict[str, JsonValue]
@@ -3090,7 +3073,7 @@ A message as the page shows it: its text, its reasoning, the tools it called and
 
 ### `RunFeed`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/monitor/feed.py`
+*class* · `libraries/rollout-train/src/rollout_train/monitor/feed.py`
 
 ```python
 class RunFeed(RunHooks, JobHooks)
@@ -3117,7 +3100,7 @@ Test doubles: a scripted engine and a readable token format.
 
 ### `Characters`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*class* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 class Characters
@@ -3132,7 +3115,7 @@ A tokenizer of one token per character.
 
 ### `plain_channel`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 def plain_channel(script: Sequence[tuple[str, str]] = (), *, name: str = 'policy', **options: Any) -> Channel
@@ -3142,7 +3125,7 @@ A channel over a scripted engine in the plain format; `always=` repeats a script
 
 ### `plain_renderer`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 def plain_renderer(model: str) -> Renderer
@@ -3150,7 +3133,7 @@ def plain_renderer(model: str) -> Renderer
 
 ### `PlainRenderer`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*class* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 class PlainRenderer
@@ -3175,7 +3158,7 @@ one sequence.
 
 ### `sample_request`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 def sample_request(messages: list[Message], effect_id: str = 'r_1:0:0', *, session_id: str = 'r_1/ada', tools: Sequence[ToolSpecification] = ()) -> SampleRequest
@@ -3183,7 +3166,7 @@ def sample_request(messages: list[Message], effect_id: str = 'r_1:0:0', *, sessi
 
 ### `scripted_engine`
 
-*function* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 def scripted_engine(model: str, **options: Any) -> ScriptedEngine
@@ -3193,7 +3176,7 @@ An engine whose policy says yes and no in turn; `fails=true` makes one that cann
 
 ### `ScriptedEngine`
 
-*class* · `src/libraries/rollout-train/src/rollout_train/testing.py`
+*class* · `libraries/rollout-train/src/rollout_train/testing.py`
 
 ```python
 class ScriptedEngine
@@ -3223,7 +3206,7 @@ A runner whose runs survive their process, on DBOS.
 
 ### `DurableRunContext`
 
-*class* · `src/implementations/rollout-durable/src/rollout_durable/context.py`
+*class* · `implementations/rollout-durable/src/rollout_durable/context.py`
 
 ```python
 class DurableRunContext(LocalRunContext)
@@ -3240,7 +3223,7 @@ class DurableRunContext(LocalRunContext)
 
 ### `DurableRunHandle`
 
-*class* · `src/implementations/rollout-durable/src/rollout_durable/runner.py`
+*class* · `implementations/rollout-durable/src/rollout_durable/runner.py`
 
 ```python
 class DurableRunHandle
@@ -3260,7 +3243,7 @@ A durable run, read from the store: valid across processes and restarts.
 
 ### `DurableRunner`
 
-*class* · `src/implementations/rollout-durable/src/rollout_durable/runner.py`
+*class* · `implementations/rollout-durable/src/rollout_durable/runner.py`
 
 ```python
 class DurableRunner(MessageRouter)
@@ -3271,7 +3254,8 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 **Methods**
 
 - `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0, database: str | Database | None = None, runner_id: str | None = None, heartbeat_interval: float = 2.0, takeover_after: timedelta = timedelta(seconds=15)) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
-  `eviction_interval`: how often, in seconds, to look for runs to evict or wake (docs/durability/eviction.md).
+  `eviction_interval`: how often, in seconds, to look for runs to evict or wake
+  (docs/implementations/rollout-durable/eviction.md).
   
     `database`: a Postgres URL (or `Database`) shared with other runners; without it, state is SQLite in
   `directory` and this runner is the only one. `runner_id` names this runner among them: a runner restarted
@@ -3291,7 +3275,7 @@ Implements `Runner` on DBOS. Call `await launch()` before use and `await close()
 
 ### `RunCancelled`
 
-*class* · `src/implementations/rollout-durable/src/rollout_durable/context.py`
+*class* · `implementations/rollout-durable/src/rollout_durable/context.py`
 
 ```python
 class RunCancelled(Exception)
@@ -3305,7 +3289,7 @@ A cancellation request reached the run; the program unwinds and `teardown` runs.
 
 ### `RunStore`
 
-*class* · `src/implementations/rollout-durable/src/rollout_durable/store.py`
+*class* · `implementations/rollout-durable/src/rollout_durable/store.py`
 
 ```python
 class RunStore
@@ -3346,7 +3330,7 @@ An engine on vLLM.
 
 ### `VllmEngine`
 
-*class* · `src/implementations/rollout-vllm/src/rollout_vllm/engine.py`
+*class* · `implementations/rollout-vllm/src/rollout_vllm/engine.py`
 
 ```python
 class VllmEngine
@@ -3369,7 +3353,7 @@ A trainer for 4-bit checkpoints with LoRA.
 
 ### `LoraSettings`
 
-*class* · `src/implementations/rollout-lora/src/rollout_lora/settings.py`
+*class* · `implementations/rollout-lora/src/rollout_lora/settings.py`
 
 ```python
 class LoraSettings
@@ -3393,7 +3377,7 @@ class LoraSettings
 
 ### `LoraTrainer`
 
-*class* · `src/implementations/rollout-lora/src/rollout_lora/trainer.py`
+*class* · `implementations/rollout-lora/src/rollout_lora/trainer.py`
 
 ```python
 class LoraTrainer
@@ -3416,7 +3400,7 @@ Renderers for the Qwen model families.
 
 ### `qwen3`
 
-*function* · `src/implementations/rollout-qwen/src/rollout_qwen/__init__.py`
+*function* · `implementations/rollout-qwen/src/rollout_qwen/__init__.py`
 
 ```python
 def qwen3(model: str | Tokenizer) -> Renderer
@@ -3426,7 +3410,7 @@ Qwen3: JSON tool calls, and thinking the model opens. `model` is a checkpoint's 
 
 ### `qwen35`
 
-*function* · `src/implementations/rollout-qwen/src/rollout_qwen/__init__.py`
+*function* · `implementations/rollout-qwen/src/rollout_qwen/__init__.py`
 
 ```python
 def qwen35(model: str | Tokenizer) -> Renderer
@@ -3436,7 +3420,7 @@ Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpo
 
 ### `tokenizer_of`
 
-*function* · `src/implementations/rollout-qwen/src/rollout_qwen/__init__.py`
+*function* · `implementations/rollout-qwen/src/rollout_qwen/__init__.py`
 
 ```python
 def tokenizer_of(model: str) -> Tokenizer
@@ -3450,7 +3434,7 @@ Environment backends: services that give runs computers.
 
 ### `ImageStore`
 
-*class* · `src/implementations/rollout-computers/src/rollout_computers/images.py`
+*class* · `implementations/rollout-computers/src/rollout_computers/images.py`
 
 ```python
 class ImageStore
@@ -3465,7 +3449,7 @@ Resolves image names (`alpine`, `alpine:3.24.2`) to verified, cached root filesy
 
 ### `LocalEnvironments`
 
-*class* · `src/implementations/rollout-computers/src/rollout_computers/local.py`
+*class* · `implementations/rollout-computers/src/rollout_computers/local.py`
 
 ```python
 class LocalEnvironments
@@ -3485,7 +3469,7 @@ Implements `EnvironmentService`.
 
 ### `NamespaceEnvironments`
 
-*class* · `src/implementations/rollout-computers/src/rollout_computers/namespaces.py`
+*class* · `implementations/rollout-computers/src/rollout_computers/namespaces.py`
 
 ```python
 class NamespaceEnvironments
@@ -3509,7 +3493,7 @@ Tools for agents that work on a computer: shell, files, edits and images.
 
 ### `apply_edits`
 
-*function* · `src/implementations/rollout-computers/src/rollout_computers/tools.py`
+*function* · `implementations/rollout-computers/src/rollout_computers/tools.py`
 
 ```python
 def apply_edits(original: str, edits: list[tuple[str, str]], path: str = 'the file') -> str
@@ -3520,7 +3504,7 @@ matching ignores the difference between CRLF and LF.
 
 ### `ComputerTools`
 
-*class* · `src/implementations/rollout-computers/src/rollout_computers/tools.py`
+*class* · `implementations/rollout-computers/src/rollout_computers/tools.py`
 
 ```python
 class ComputerTools
@@ -3551,7 +3535,7 @@ class ComputerTools
 
 ### `page_text`
 
-*function* · `src/implementations/rollout-computers/src/rollout_computers/tools.py`
+*function* · `implementations/rollout-computers/src/rollout_computers/tools.py`
 
 ```python
 def page_text(text: str, path: str, offset: int, limit: int | None) -> str
@@ -3561,7 +3545,7 @@ Up to `MAX_READ_LINES` lines or `MAX_READ_BYTES` bytes of `text` from line `offs
 
 ### `prepare_image`
 
-*function* · `src/implementations/rollout-computers/src/rollout_computers/tools.py`
+*function* · `implementations/rollout-computers/src/rollout_computers/tools.py`
 
 ```python
 def prepare_image(data: bytes) -> tuple[bytes, str, str]
@@ -3572,7 +3556,7 @@ scaled down to fit. Returns the bytes, their media type and a description.
 
 ### `Replacement`
 
-*class* · `src/implementations/rollout-computers/src/rollout_computers/tools.py`
+*class* · `implementations/rollout-computers/src/rollout_computers/tools.py`
 
 ```python
 class Replacement(BaseModel)
@@ -3589,7 +3573,7 @@ A model endpoint for the OpenAI Responses API, on an API key or a Codex login.
 
 ### `ApiKey`
 
-*class* · `src/implementations/rollout-openai/src/rollout_openai/responses.py`
+*class* · `implementations/rollout-openai/src/rollout_openai/responses.py`
 
 ```python
 class ApiKey
@@ -3610,7 +3594,7 @@ An OpenAI API key against the public Responses API.
 
 ### `codex_provider`
 
-*function* · `src/implementations/rollout-openai/src/rollout_openai/responses.py`
+*function* · `implementations/rollout-openai/src/rollout_openai/responses.py`
 
 ```python
 def codex_provider(contract: ResponsesContract | None = None, *, blobs: Blobs | None = None) -> Callable[[DirectModel], ResponsesEndpoint]
@@ -3620,7 +3604,7 @@ An endpoint factory for `LocalRunner(providers={"codex": codex_provider()})`, us
 
 ### `CodexLogin`
 
-*class* · `src/implementations/rollout-openai/src/rollout_openai/responses.py`
+*class* · `implementations/rollout-openai/src/rollout_openai/responses.py`
 
 ```python
 class CodexLogin
@@ -3641,7 +3625,7 @@ ChatGPT account tokens from a local Codex login.
 
 ### `Credentials`
 
-*class* · `src/implementations/rollout-openai/src/rollout_openai/responses.py`
+*class* · `implementations/rollout-openai/src/rollout_openai/responses.py`
 
 ```python
 class Credentials(Protocol)
@@ -3657,7 +3641,7 @@ Where requests go and how they authenticate.
 
 ### `ResponsesContract`
 
-*class* · `src/implementations/rollout-openai/src/rollout_openai/responses.py`
+*class* · `implementations/rollout-openai/src/rollout_openai/responses.py`
 
 ```python
 class ResponsesContract
@@ -3672,7 +3656,7 @@ The capability contract the endpoint advertises; the provider does not report it
 
 ### `ResponsesEndpoint`
 
-*class* · `src/implementations/rollout-openai/src/rollout_openai/responses.py`
+*class* · `implementations/rollout-openai/src/rollout_openai/responses.py`
 
 ```python
 class ResponsesEndpoint
@@ -3695,7 +3679,7 @@ Blobs in S3 or any S3-compatible object store.
 
 ### `S3BlobStore`
 
-*class* · `src/implementations/rollout-s3/src/rollout_s3/store.py`
+*class* · `implementations/rollout-s3/src/rollout_s3/store.py`
 
 ```python
 class S3BlobStore

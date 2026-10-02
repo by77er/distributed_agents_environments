@@ -1,4 +1,4 @@
-"""Imported tools: tool sets outside task code, bound per run (docs/core/harness/task.md#tools).
+"""Imported tools: tool sets outside task code, bound per run (docs/guide/tools.md#imported-tools).
 
 Calling an imported tool is a `tool.call` effect. Its `effect_id` and arguments digest reach the tool set, so a tool
 set that deduplicates performs each call at most once, however often a durable runner re-executes it.
@@ -29,7 +29,7 @@ class ToolSet(Protocol):
 class DeduplicatingToolSet(ToolSet, Protocol):
     """A tool set that says whether it performs each `effect_id` at most once (a `deduplicates = True` attribute, on
     a class). The side-effecting tools of one that does are re-executed after a crash rather than guarded
-    (docs/contracts/effects.md)."""
+    (docs/libraries/rollout/contracts/effects.md)."""
 
     @property
     def deduplicates(self) -> bool: ...

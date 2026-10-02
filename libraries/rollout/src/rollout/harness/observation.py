@@ -1,4 +1,4 @@
-"""What task hooks return: `Observation`, `End` and `WaitFor` (docs/core/harness/task.md)."""
+"""What task hooks return: `Observation`, `End` and `WaitFor` (docs/guide/tasks.md)."""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field

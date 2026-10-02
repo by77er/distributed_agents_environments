@@ -1,4 +1,4 @@
-"""Programs: what a run executes (docs/core/harness/README.md#program)."""
+"""Programs: what a run executes (docs/libraries/rollout/README.md#program)."""
 
 from collections.abc import Mapping
 

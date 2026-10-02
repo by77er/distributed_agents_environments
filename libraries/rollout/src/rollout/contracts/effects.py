@@ -1,10 +1,6 @@
-"""Effects: operations that reach outside task, agent or program code (docs/contracts/effects.md)."""
+"""Effects: operations that reach outside task, agent or program code (docs/libraries/rollout/contracts/effects.md)."""
 
 from enum import StrEnum
-
-from pydantic import JsonValue
-
-from rollout.contracts.base import ContractModel
 
 
 class EffectKind(StrEnum):
@@ -36,12 +32,3 @@ class OutcomeUnknown(Exception):
 
 class Conflict(Exception):
     """A receiver that deduplicates by `effect_id` was sent a known `effect_id` with a different arguments digest."""
-
-
-class EffectCompletion(ContractModel):
-    """The first completion recorded for an `effect_id` wins; later ones are dropped."""
-
-    effect_id: str
-    status: EffectStatus
-    payload: JsonValue = None
-    error_class: str | None = None

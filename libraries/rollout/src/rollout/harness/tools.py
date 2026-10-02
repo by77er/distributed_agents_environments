@@ -1,4 +1,4 @@
-"""`@tool` methods: the action space a task declares (docs/core/harness/task.md#tools).
+"""`@tool` methods: the action space a task declares (docs/guide/tools.md).
 
 A tool's specification comes from its signature (type hints → JSON Schema, via pydantic) and its docstring. Tool
 bodies are task code, not effects; exceptions they raise are returned to the model as error results.

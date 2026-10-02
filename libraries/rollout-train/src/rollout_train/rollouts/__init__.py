@@ -1,4 +1,5 @@
-"""Rollouts: run a task's rows at scale and read the finished episodes as a stream (docs/core/rollouts)."""
+"""Rollouts: run a task's rows at scale and read the finished episodes as a stream
+(docs/libraries/rollout-train/rollouts.md)."""
 
 from rollout_train.rollouts.episodes import Episode, Outcome, Trace
 from rollout_train.rollouts.jobs import (

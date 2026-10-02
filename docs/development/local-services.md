@@ -1,6 +1,6 @@
 # Local services
 
-Status: **Working** (2026-10-02) · Code: `deploy/local`
+Code: `deploy/local`
 
 Runners that share state need two services: Postgres (DBOS's journal and the run and coordination stores) and object
 storage for blobs. `deploy/local/compose.yaml` runs both:
@@ -42,9 +42,9 @@ uv run pytest
 uv run agents serve --database "$ROLLOUT_DATABASE" --blobs "$ROLLOUT_BLOBS" --runner-id server-0 --state /shared
 ```
 
-Running several such servers is described in [several runners](../durability/runners.md).
+Running several such servers is described in [several runners](../implementations/rollout-durable/runners.md).
 
-`--blobs s3://bucket/prefix` keeps images in object storage through `rollout_s3.S3BlobStore`, which needs
-the `s3` extra. Each blob is one object named by its SHA-256 under the prefix. The endpoint and credentials come from
-the usual `AWS_*` variables, so the same flag works on AWS S3 and on S3-compatible services. Environments stay
-directories under `--state`.
+`--blobs s3://bucket/prefix` keeps images in object storage through `rollout_s3.S3BlobStore`
+([content](../guide/content.md#media-and-blobs)). Each blob is one object named by its SHA-256 under the prefix. The
+endpoint and credentials come from the usual `AWS_*` variables, so the same flag works on AWS S3 and on S3-compatible
+services. Environments stay directories under `--state`.

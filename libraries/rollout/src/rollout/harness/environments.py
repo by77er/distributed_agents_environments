@@ -1,4 +1,4 @@
-"""Environments: computers that task code creates and acts on (docs/core/harness/task.md#environments-optional).
+"""Environments: computers that task code creates and acts on (docs/guide/tasks.md#environments).
 
 Task code sees `run.environments` and `Environment` handles. Every operation is an effect, performed by an
 `EnvironmentService`: the backend a runner is given (e.g. `rollout_computers.namespaces`). Creation derives the

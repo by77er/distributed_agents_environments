@@ -3,16 +3,17 @@
 Three people use this system, and each has one surface. They meet in two places only: the **session** (how anything
 gets a model) and the **episode** (the labelled trace that comes out).
 
-| You are | You write | You are given | You never see |
-|---|---|---|---|
-| Building an environment | A world and its rulebook: a catalog of situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs |
-| Designing training | What to run, how to group it, what each episode counts for | Jobs to submit rows to, a stream of finished episodes, somewhere to publish weights | Worlds, servers, which machine ran what |
-| Deploying | A profile: channels and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms |
+| You are | You write | You are given | You never see | You import |
+|---|---|---|---|---|
+| Building an environment | A world and its rulebook: a catalog of situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs | `rollout` |
+| Designing training | What to run, how to group it, what each episode counts for | Jobs to submit rows to, a stream of finished episodes, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
+| Deploying | A profile: channels and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms | Nothing: a profile names implementations |
 
 ## Building an environment
 
 An environment says how a situation is set up, what a player perceives, what it can do, how the world moves, and how
-it went. It chooses how much of the platform's loop to use:
+it went. It is a package that depends on `rollout` and on nothing above it (`tests/test_layers.py` checks that), as
+[`environments/minecraft`](../products/minecraft-swarm.md) does. It chooses how much of the platform's loop to use:
 
 | Depth | You write | The platform provides |
 |---|---|---|
@@ -74,10 +75,11 @@ The same code holds `RolloutJobs` (runs in this process) or `RolloutClient(url)`
 ## Deploying
 
 A profile is a TOML file that names each of these: the channels (a model, its token format, what serves it, one
-entry per replica), the trainer and the channel it trains, the runner, and where each tool set lives.
+entry per replica), the trainer and the channel it trains, the runner, and where each tool set lives. Engines,
+renderers and trainers are packages of their own, named in the file as `module:name`.
 
 ```bash
-rollout train profile.toml minecraft_swarm.catalog:catalog
+uv run rollout train profile.toml minecraft_swarm.catalog:catalog
 ```
 
 The trainer's limits become its channel's limits; the channel's limits reach environments as "your memory is full".

@@ -1,4 +1,4 @@
-"""The run context: everything task and agent code can reach (docs/core/harness/task.md#runcontext).
+"""The run context: everything task and agent code can reach (docs/guide/tasks.md#the-run-context).
 
 Runners implement `RunContext`. Its first group of members is for task and agent code; the second is used only
 by the loop.

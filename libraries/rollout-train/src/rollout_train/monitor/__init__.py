@@ -1,4 +1,4 @@
-"""A monitor for runs: watch each run, and each model in it, as it happens (docs/core/monitor.md).
+"""A monitor for runs: watch each run, and each model in it, as it happens (docs/libraries/rollout-train/monitor.md).
 
 - `RunFeed`: hooks for a runner and for rollout jobs that write every run's events and model samples, and what the
   job did, to a directory.

@@ -6,8 +6,6 @@ from pydantic import ValidationError
 from rollout.contracts import (
     CapabilityContract,
     ContextDelta,
-    EffectCompletion,
-    EffectStatus,
     FinishReason,
     Message,
     NamedToolChoice,
@@ -22,11 +20,6 @@ from rollout.contracts import (
 )
 
 NOW = datetime(2026, 9, 28, tzinfo=UTC)
-
-
-def test_effect_completions_round_trip() -> None:
-    completion = EffectCompletion(effect_id="r_x:0:3", status=EffectStatus.OUTCOME_UNKNOWN)
-    assert EffectCompletion.model_validate_json(completion.model_dump_json()) == completion
 
 
 def test_run_event_round_trip() -> None:

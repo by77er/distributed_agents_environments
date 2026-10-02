@@ -3,8 +3,9 @@
 How to build with `rollout`: write tasks, tools and agents, run episodes, test them, and train on them. The
 [documentation index](../README.md) lists everything else.
 
-Every Python example in this guide runs as part of the test suite (`tests/test_docs.py`), and the
-[API reference](reference.md) is generated from the source, so both match the code.
+Every block tagged exactly `python` in this guide runs as part of the test suite (`tests/test_docs.py`). A block
+tagged `python fragment` shows a shape and is not run. Every profile in a `toml` block is loaded by the tests. The
+[API reference](reference.md) is generated from the source, and a test fails when it is out of date.
 
 ## What you can use
 
@@ -13,8 +14,10 @@ Every Python example in this guide runs as part of the test suite (`tests/test_d
 | Building an environment, training on one, or deploying both | [Three ways in](perspectives.md) |
 | Tasks, agents, `@tool` methods, imported tools, observations, rewards | [Getting started](getting-started.md) |
 | Runs: start, send, cancel, event streams, conversations, message delivery by mode | [Runs and events](runs-and-events.md) |
-| Runs that survive their process | [durability](../durability/README.md) |
-| Trainable models: recorded channels, engines, rollout jobs, episodes, the training loop | [recorder](../core/recorder/README.md), [rollouts](../core/rollouts/README.md), [training](../core/training.md) |
+| Runs that survive their process | [Durable runner](../implementations/rollout-durable/README.md) |
+| Computers for tasks: shell and file tools on an environment | [Computers](../implementations/rollout-computers.md) |
+| Trainable models: recorded channels, rollout jobs, episodes, the training loop | [recorder](../libraries/rollout-train/recorder.md), [channels](../libraries/rollout-train/channels.md), [rollouts](../libraries/rollout-train/rollouts.md), [training](../libraries/rollout-train/training.md) |
+| What stands behind a deployment: an engine, a trainer, a model family's renderer | [Deploying](deploying.md), [vLLM engine](../implementations/rollout-vllm.md), [LoRA trainer](../implementations/rollout-lora.md), [Qwen renderers](../implementations/rollout-qwen.md) |
 | Third-party models through the Responses API; a scripted endpoint for tests | [Models](models.md), [Testing](testing.md) |
 
 ## Pages
@@ -54,16 +57,27 @@ Every Python example in this guide runs as part of the test suite (`tests/test_d
 
 ## Where things live
 
-| Import from | For |
-|---|---|
-| `rollout.harness` | `Task`, `Agent`, `tool`, `Observation`, `End`, `WaitFor`, `RunContext`, `rollout`, conversation types |
-| `rollout.contracts` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
-| `rollout.local` | `LocalRunContext`: runs an episode in process |
-| `rollout.testing` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
-| `rollout_train.rollouts` | `Jobs`, `Job`, `Ticket`, `Episode`, `Catalog`, `Row`, `RolloutJobs`; `RolloutClient` in `rollout_train.rollouts.service` |
-| `rollout_train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `LoraTrainer`, `Colocated` |
-| `rollout_train.inference`, `rollout_train.recorder` | `Channel`, `Engine`, `Limits`; `Recorder`, `Epoch`, renderers |
-| `rollout_train.profile` | `Profile`, `Platform` |
+Each row is a module of one package; the [documentation index](../README.md#packages) lists the packages.
+
+| Import from | Package | For |
+|---|---|---|
+| `rollout.harness` | `rollout` | `Task`, `Agent`, `tool`, `Observation`, `End`, `WaitFor`, `RunContext`, `rollout`, `Program`, `Memory`, conversation types |
+| `rollout.contracts` | `rollout` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
+| `rollout.local` | `rollout` | `LocalRunner`, `LocalRunContext`: runs in this process |
+| `rollout.catalog` | `rollout` | `Catalog`, `Row`, `binding_for` |
+| `rollout.testing` | `rollout` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
+| `rollout_train.rollouts` | `rollout-train` | `Jobs`, `Job`, `Ticket`, `Episode`, `RolloutJobs`; `RolloutClient` in `rollout_train.rollouts.service` |
+| `rollout_train` | `rollout-train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `Colocated` |
+| `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Epoch`, `Renderer` |
+| `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
+| `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |
+| `rollout_durable` | `rollout-durable` | `DurableRunner` |
+| `rollout_computers`, `rollout_computers.tools` | `rollout-computers` | `NamespaceEnvironments`, `LocalEnvironments`; `ComputerTools` |
+| `rollout_openai` | `rollout-openai` | `ResponsesEndpoint`, `codex_provider`, `ApiKey` |
+| `rollout_s3` | `rollout-s3` | `S3BlobStore` |
+| `rollout_vllm` | `rollout-vllm` | `VllmEngine` |
+| `rollout_lora` | `rollout-lora` | `LoraTrainer`, `LoraSettings` |
+| `rollout_qwen` | `rollout-qwen` | `qwen35`, `qwen3` |
 
 ## Conventions
 

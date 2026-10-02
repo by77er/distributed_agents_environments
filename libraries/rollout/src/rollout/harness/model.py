@@ -1,4 +1,4 @@
-"""`Model.sample` as an effect on a `ModelEndpoint` (docs/contracts/model-endpoint.md)."""
+"""`Model.sample` as an effect on a `ModelEndpoint` (docs/libraries/rollout/contracts/model-endpoint.md)."""
 
 import asyncio
 import contextlib

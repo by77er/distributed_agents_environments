@@ -4,12 +4,15 @@ Write a task, run one episode against a scripted model, and read what happened.
 
 ## Install
 
-`rollout` needs Python 3.13 and [uv](https://docs.astral.sh/uv/). From the repository root:
+The repository is a [uv](https://docs.astral.sh/uv/) workspace and needs Python 3.13. From its root:
 
 ```bash
-uv sync                 # the core library and development tools; no GPU needed
-uv run pytest           # tests, including every example in this guide
+uv sync                 # every package that needs no GPU, and the development tools
+uv sync --all-extras    # also the engine, the trainer and the renderer (Linux, NVIDIA GPU)
+uv run pytest           # the tests, including every runnable example in this guide
 ```
+
+This page needs only the package `rollout`, which the first command installs.
 
 ## A first task
 

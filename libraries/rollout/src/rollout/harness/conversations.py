@@ -1,4 +1,4 @@
-"""Addressing, envelopes, priorities and delivery modes (docs/core/harness/conversations.md)."""
+"""Addressing, envelopes, priorities and delivery modes (docs/guide/conversations.md)."""
 
 from collections.abc import Mapping
 from enum import StrEnum

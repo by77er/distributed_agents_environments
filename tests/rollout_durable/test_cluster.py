@@ -1,5 +1,5 @@
 """Several runners, each its own process, share one Postgres: messages through any of them reach the right run, and
-runs survive their runner being killed, evicted and woken anywhere (docs/durability/runners.md)."""
+runs survive their runner being killed, evicted and woken anywhere (docs/implementations/rollout-durable/runners.md)."""
 
 import asyncio
 import random

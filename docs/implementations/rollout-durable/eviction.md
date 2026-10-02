@@ -1,16 +1,16 @@
 # Evicting idle runs
 
-Status: **Working** (2026-10-02) · Code: `rollout_durable.runner`
+Code: `rollout_durable.runner`
 
 A run that waits for a message is a DBOS workflow blocked in a receive. It holds its coroutine chain (program, task,
 agent, history) in memory, and on SQLite DBOS polls the database once per second for every waiting receive. The
-`DurableRunner` therefore unloads runs that have waited long enough, and loads them again when they have something to
-do. An evicted run has not ended: `teardown` does not run and its environment stays.
+[`DurableRunner`](README.md) therefore unloads runs that have waited long enough, and loads them again when they have
+something to do. An evicted run has not ended: `teardown` does not run and its environment stays.
 
-| Parameter of `DurableRunner` | Default | Meaning |
-|---|---|---|
-| `evict_after` | `timedelta(minutes=5)` | how long a run waits before it is unloaded; `None` keeps every run resident |
-| `eviction_interval` | `5.0` | seconds between looks for runs to evict or wake |
+| Parameter of `DurableRunner` | Meaning |
+|---|---|
+| `evict_after` | How long a run waits before it is unloaded; `None` keeps every run resident |
+| `eviction_interval` | Seconds between looks for runs to evict or wake |
 
 ## Mechanism
 
@@ -31,8 +31,8 @@ and the run then takes the message or the timeout.
 
 Three details keep this safe:
 
-- **Unloading.** The asyncio task is cancelled with the message `rollout: unload`. The episode loop skips `teardown`
-  for that cancellation.
+- **Unloading.** The asyncio task is cancelled with the message `UNLOAD` of `rollout.harness.loop`. The episode loop
+  skips `teardown` for that cancellation.
 - **Races.** Evicting, delivering and waking a run all hold a lock on that run. Under the lock the runner checks again
   that the `run.suspended` event is still the run's latest and that the run was not messaged or woken since.
 - **Runs just woken.** A woken run's latest event is still its old `run.suspended` until it has processed the message
@@ -57,7 +57,7 @@ Waking a run with 10 or with 200 recorded steps executed none of them again.
 
 ## Tests
 
-`tests/rollout_durable/test_eviction.py` evicts a run and wakes it by a message (no model call on replay, gapless events),
-wakes a run at its wait's deadline, and cancels an evicted run. The agent sessions fault evaluation kills servers
-while every session is evicted and again while they wake
-([agent sessions](../products/agent-sessions.md#durability-under-faults)).
+`tests/rollout_durable/test_eviction.py` evicts a run and wakes it by a message (no model call on replay, gapless
+events), wakes a run at its wait's deadline, and cancels an evicted run. The agent sessions fault evaluation kills
+servers while every session is evicted and again while they wake
+([agent sessions](../../products/agent-sessions.md#durability-under-faults)).
