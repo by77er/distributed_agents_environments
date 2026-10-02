@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from minecraft_swarm.tasks import CHAINS, EARLY, Kit, Objective, Task
+from minecraft_swarm.tasks import CHAINS, EARLY, Hazards, Kit, Objective, Task
 from rollout.core.contracts import ToolSpecification
 
 TEAM = ["ada", "ben", "cy", "dee"]
@@ -18,7 +18,7 @@ GOALS = {
     ),
     Objective.PROGRESS: (
         "Goal: get as far toward beating the game as you can, together. What counts, in order: mining stone, a stone "
-        "pickaxe, smelting iron, an iron pickaxe, mining diamonds, forming obsidian, entering the nether, finding a "
+        "pickaxe, smelting iron, an iron pickaxe, mining diamonds, getting obsidian, entering the nether, finding a "
         "fortress, getting a blaze rod, following eyes of ender into a stronghold, entering the end, and killing the "
         "ender dragon, which counts most; hurting the dragon without killing it counts for a little. A step counts "
         "once, whoever does it, and only if it is done in this game: what you start with does not count."
@@ -26,7 +26,7 @@ GOALS = {
 }
 CRAFT_GOAL = (
     "Goal: together, make {item}. You start with nothing: everything it takes must be gathered and crafted. Getting "
-    "there counts step by step, each step once, whoever does it: {steps}."
+    "there counts step by step, each step once, whoever does it: {steps}. The game is over when it is made."
 )
 """What each objective asks, in the words agents read. They state what is scored and nothing about how: the same
 text serves every task of an objective, from diamonds lying in a lit room to ore under a bare surface."""
@@ -37,14 +37,15 @@ you are.
 {goal}
 
 How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
-one tool (only your first call counts); then the world runs for about five seconds while the actions happen (longer \
-only to let a block finish breaking), and freezes again. Long actions (walking far, digging through rock, fighting) \
-may be cut off: the result says where you got to.
+one tool (only your first call counts); then the world runs until all four actions have finished, and freezes again. \
+An action that takes more than twenty seconds (a long walk, digging far through rock, a long fight) is cut off there: \
+the result says where you got to.
 
 What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
-you, and lists notable things in sight farther off. Coordinates are absolute, (x, y, z): +x is east, +y is up, +z is \
-south. Walking digs through what is in the way and picks up items it passes over. If you die you start again where \
-the game began. Your memory is limited: you see your recent turns without their maps, and anything older only as \
+you, names the blocks that touch you, and lists notable things in sight farther off. Coordinates are absolute, \
+(x, y, z): +x is east, +y is up, +z is south. Walking picks up items it passes over. If you die you start again \
+where the game began, {death}. Your memory is limited: you see your recent turns without their maps, and anything \
+older only as \
 a summary that you write yourself when asked. Chat reaches teammates at their next turn; every observation shows \
 the team's last {chat_lines} messages and how old each is. Use chat to split up the work and to share what you find. \
 Think briefly, then act."""
@@ -65,7 +66,8 @@ def system_prompt(task: Task) -> str:
     training, not of the game, and a policy told the clock learns to play the clock. Doing more before the episode is
     cut off is rewarded all the same. The same goes for the limit on thinking: it is set wide enough to be met
     rarely, and agents are not told of it."""
-    return SYSTEM.format(team=", ".join(TEAM), goal=goal(task), chat_lines=CHAT_LINES)
+    death = "with what you carried" if task.hazards is Hazards.SAFE else "and what you carried lies where you died"
+    return SYSTEM.format(team=", ".join(TEAM), goal=goal(task), chat_lines=CHAT_LINES, death=death)
 
 
 def goal(task: Task) -> str:
@@ -101,11 +103,16 @@ INTEGER: dict[str, JsonValue] = {"type": "integer"}
 XYZ: dict[str, JsonValue] = {"x": INTEGER, "y": INTEGER, "z": INTEGER}
 AT = ["x", "y", "z"]
 
+WALKING = (
+    "Walking digs through what is in the way if your tools break it within five seconds a block, and bridges or "
+    "pillars with dirt, cobblestone, cobbled_deepslate or netherrack you carry where there is no other way."
+)
+
 ACTIONS = [
-    _action("move_to", "Walk to a place you have seen, digging through what is in the way.", XYZ, AT),
+    _action("move_to", f"Walk to a place you have seen. {WALKING}", XYZ, AT),
     _action(
         "move",
-        "Walk up to 32 blocks in a direction, digging through what is in the way.",
+        f"Walk up to 32 blocks in a direction. {WALKING}",
         {"direction": DIRECTION, "blocks": COUNT},
         ["direction"],
     ),
@@ -131,7 +138,8 @@ ACTIONS = [
     ),
     _action(
         "smelt",
-        "Put items and fuel into a furnace within reach; each item takes 10 seconds.",
+        "Put items into a furnace within reach, with the fuel for them (the best you carry, unless you name one: "
+        "coal, charcoal, planks, logs, sticks); each item takes 10 seconds.",
         {"item": STRING, "fuel": STRING, "count": COUNT},
         ["item"],
     ),
@@ -140,13 +148,14 @@ ACTIONS = [
     _action("store", "Put items into a chest within reach.", {**XYZ, "item": STRING, "count": COUNT}, [*AT, "item"]),
     _action(
         "toss",
-        "Throw items toward a position: a teammate standing there picks them up.",
+        "Throw items (one, unless you give a count) toward a position within three blocks: whoever stands there "
+        "picks them up.",
         {"item": STRING, "count": COUNT, **XYZ},
         ["item"],
     ),
     _action(
         "equip",
-        "Hold an item, or wear armor (slot: head, torso, legs, feet).",
+        "Hold an item, or put armor on (it goes where it is worn; `slot` is for the off-hand).",
         {"item": STRING, "slot": SLOT},
         ["item"],
     ),
@@ -168,7 +177,7 @@ ACTIONS = [
         {"message": STRING},
         ["message"],
     ),
-    _action("wait", "Do nothing while the world runs for up to five seconds.", {}, []),
+    _action("wait", "Do nothing for five seconds.", {}, []),
 ]
 """The actions, as tools the model calls (one per turn): motor control; strategy is the agents'. What an agent
 remembers is what its context holds: its last turns, the map and the team's chat."""
@@ -183,10 +192,10 @@ def describe(
     chat: Sequence[tuple[int, str, str]] = (),
     recalled: bool = False,
 ) -> str:
-    """An observation as text: who and where you are, the map of what you have seen, what is in sight, and what the
-    team has said lately. `chat` holds (age in turns, speaker, message), oldest first. `recalled` is the form in which
-    a turn stays in memory: everything but the map and the chat. (How the last action went is not in it: the action's
-    own result says that.)"""
+    """An observation as text: who and where you are, the map of what you have seen, the blocks that touch you,
+    what is in sight, and what the team has said lately. `chat` holds (age in turns, speaker, message), oldest first.
+    `recalled` is the form in which a turn stays in memory: everything but the map, the blocks beside the agent and
+    the chat. (How the last action went is not in it: the action's own result says that.)"""
     me = observation["self"]
     position = me["position"]
     world: Mapping[str, Any] = observation.get("world") or {}
@@ -203,15 +212,14 @@ def describe(
     holding = f" Holding {me['holding']}." if me.get("holding") else ""
     wearing = f" Wearing {', '.join(me['wearing'].values())}." if me.get("wearing") else ""
     lines = [
-        f"You are {me['name']}, at {where} ({', '.join(place)}); "
-        f"health {me['health']}/20, "
-        f"food {me['food']}/20, light {world.get('light', '?')}.",
+        f"You are {me['name']}, at {where} ({', '.join(place)}); health {me['health']}/20, food {me['food']}/20.",
         f"Inventory: {_items(me['inventory'])}.{holding}{wearing}",
     ]
     if observation.get("died"):
         lines.append("You died since your last turn and respawned.")
     if observation.get("map") and not recalled:
         lines.append(render_map(observation))
+        lines.append(beside(observation))
     if observation["notable"]:
         lines.append("Notable in sight: " + "; ".join(_notable(kind) for kind in observation["notable"]) + ".")
     if observation["items"]:
@@ -277,7 +285,7 @@ ORES = {
     "quartz": "q",
 }
 SUFFIXES = {"_log": "w", "_leaves": "v", "_bed": "b"}
-ITEM, HOSTILE, ANIMAL = "*", "!", "&"
+ITEM, HOSTILE, ANIMAL, TEAMMATE = "*", "!", "&", "+"
 HEIGHTS = {2: "above your head", 1: "your head", 0: "your feet", -1: "the floor under you", -2: "below the floor"}
 
 
@@ -310,9 +318,9 @@ def render_map(observation: Mapping[str, Any]) -> str:
             legend.setdefault(character, set()).add(name)
 
     marks: dict[tuple[int, int, int], str] = {(int(center["x"]), int(center["y"]), int(center["z"])): SELF}
-    for mate in observation.get("teammates", []):
-        marks[(mate["x"], mate["y"], mate["z"])] = str(mate["name"])[:1].upper()
-        legend.setdefault(str(mate["name"])[:1].upper(), set()).add(str(mate["name"]))
+    for mate in observation.get("teammates", []):  # (not their initials: D for dee was read as diamonds)
+        marks[(mate["x"], mate["y"], mate["z"])] = TEAMMATE
+        legend.setdefault(TEAMMATE, set()).add("a teammate")
     for kind, character, meaning in (
         ("items", ITEM, "a dropped item"),
         ("mobs", HOSTILE, "a hostile creature"),
@@ -355,6 +363,44 @@ def render_map(observation: Mapping[str, Any]) -> str:
     ]
     if meanings:
         lines.append("On the map: " + "; ".join(meanings) + ".")
+    return "\n".join(lines)
+
+
+SIDES = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
+
+
+def beside(observation: Mapping[str, Any]) -> str:
+    """The ten blocks that touch the agent, each with its coordinates and what the map knows of it: on every side at
+    head and at foot height, over the head and under the feet. They are on the map too; here nothing has to be
+    counted out along a row. (Agents shown the map alone aimed more than half their `mine` calls at empty blocks
+    next to them.)"""
+    local: Mapping[str, Any] = observation["map"]
+    center, radius = local["center"], int(local["radius"])
+    side = 2 * radius + 1
+    x0, y0, z0 = int(center["x"]), int(center["y"]), int(center["z"])
+    layers = {int(layer["y"]): layer["cells"] for layer in local["layers"]}
+    standing = {
+        (int(mate["x"]), int(mate["y"]) + up, int(mate["z"])): str(mate["name"])
+        for mate in observation.get("teammates", [])
+        for up in (0, 1)
+    }
+
+    def at(x: int, y: int, z: int) -> str:
+        where = f"({x}, {y}, {z})"
+        if (x, y, z) in standing:
+            return f"{where} {standing[(x, y, z)]}"
+        cells = layers.get(y)
+        index = -1 if cells is None else int(cells[(z - z0 + radius) * side + (x - x0 + radius)])
+        if index < 0:
+            return f"{where} not seen"
+        name = str(local["palette"][index]["name"])
+        return f"{where} {'empty' if name == 'air' else name}"
+
+    lines = ["Next to you, at head height and at foot height:"]
+    lines.extend(
+        f"- {name}: {at(x0 + dx, y0 + 1, z0 + dz)}, {at(x0 + dx, y0, z0 + dz)}" for name, (dx, dz) in SIDES.items()
+    )
+    lines.append(f"- over your head: {at(x0, y0 + 2, z0)}; under your feet: {at(x0, y0 - 1, z0)}")
     return "\n".join(lines)
 
 

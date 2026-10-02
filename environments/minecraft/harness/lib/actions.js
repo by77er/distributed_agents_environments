@@ -11,7 +11,11 @@ const { goals } = require('mineflayer-pathfinder')
 const { lineOfSight, firstHit, eyes, DIRECTIONS } = require('./observe')
 
 const REACH = 4.5
-const MAX_DIG_SECONDS = 20 // a window of game time runs on this long, at most, to let a block finish breaking
+const MAX_DIG_SECONDS = 15 // a block must break well within a window of game time (twenty seconds)
+const WAIT_TICKS = 100
+const SMELT_TICKS = 200 // to smelt one item
+const BURN_TICKS = { coal: 1600, charcoal: 1600, coal_block: 16000, blaze_rod: 2400, lava_bucket: 20000, stick: 100, dried_kelp_block: 4000 }
+const WORN = { head: /_helmet$|^carved_pumpkin$|_skull$|_head$/, torso: /_chestplate$|^elytra$/, legs: /_leggings$/, feet: /_boots$/ }
 
 class ActionError extends Error {}
 
@@ -37,7 +41,10 @@ const ACTIONS = {
   },
 
   async mine (bot, { x, y, z }, context) {
-    const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
+    const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')), true)
+    if (block.diggable === false || block.name === 'water' || block.name === 'lava') {
+      throw new ActionError(`${block.name} cannot be mined`)
+    }
     await equipBestTool(bot, block)
     if (!block.canHarvest(bot.heldItem ? bot.heldItem.type : null)) {
       throw new ActionError(`${block.name} drops nothing without a better tool`)
@@ -49,7 +56,12 @@ const ACTIONS = {
     }
     const before = inventoryCounts(bot)
     await dig(bot, block, context)
-    await collectNearby(bot, context, 4)
+    try {
+      await collectNearby(bot, context, 4)
+    } catch (error) { // the block is broken all the same: say so, whatever cut the pickup short
+      if (!(error instanceof Interrupted)) throw error
+      return { mined: name, gained: gained(before, bot), note: 'the world froze before the drops were picked up' }
+    }
     return { mined: name, gained: gained(before, bot) }
   },
 
@@ -58,37 +70,68 @@ const ACTIONS = {
     const table = stationInReach(bot, 'crafting_table')
     const recipes = bot.recipesFor(wanted.id, null, 1, table)
     if (recipes.length === 0) {
-      const needsTable = bot.recipesAll(wanted.id, null, true).length > 0 && table === null
-      throw new ActionError(needsTable
-        ? `${item} needs a crafting table within reach; place one first`
-        : `you do not have the ingredients for ${item}`)
+      const every = bot.recipesAll(wanted.id, null, true)
+      if (every.length === 0) throw new ActionError(`${item} is not made by crafting`)
+      if (table === null && bot.recipesFor(wanted.id, null, 1, true).length > 0) {
+        throw new ActionError(`${item} needs a crafting table within reach; place one first`)
+      }
+      const needs = ingredients(bot, nearest(bot, every)).map(([name, amount]) => `${amount} ${name}`).join(', ')
+      throw new ActionError(`you do not have the ingredients for ${item}: it takes ${needs}` +
+        (table === null && every.every(recipe => recipe.requiresTable) ? ', at a crafting table' : ''))
     }
     const recipe = recipes[0]
-    const times = Math.max(1, Math.ceil(Math.max(1, int(count ?? 1, 'count')) / recipe.result.count))
+    const asked = Math.max(1, Math.ceil(Math.max(1, int(count ?? 1, 'count')) / recipe.result.count))
+    const afford = Math.min(...ingredients(bot, recipe).map(([name, amount]) => Math.floor(countOf(bot, name) / amount)))
     const before = countOf(bot, wanted.name)
-    await bot.craft(recipe, times, table ?? undefined)
-    return { crafted: wanted.name, made: countOf(bot, wanted.name) - before }
+    await bot.craft(recipe, Math.max(1, Math.min(asked, afford)), table ?? undefined)
+    const made = countOf(bot, wanted.name) - before
+    return asked > afford ? { crafted: wanted.name, made, note: 'that is all your ingredients make' } : { crafted: wanted.name, made }
   },
 
   async smelt (bot, { item, fuel, count }, context) {
     const block = stationInReach(bot, 'furnace')
     if (block === null) throw new ActionError('there is no furnace within reach; craft and place one')
-    const input = itemNamed(bot, item); const burn = itemNamed(bot, fuel ?? 'coal')
-    const furnace = await bot.openFurnace(block)
+    const input = itemNamed(bot, item)
+    const burn = fuel == null ? bestFuel(bot) : itemNamed(bot, fuel)
+    if (burn !== null && burnTicks(burn.name) === 0) {
+      throw new ActionError(`${burn.name} does not burn; coal, charcoal, planks, logs and sticks do`)
+    }
+    const furnace = await opened(bot.openFurnace(block), 'furnace')
     try {
-      const amount = Math.max(1, Math.min(int(count ?? 1, 'count'), countOf(bot, input.name)))
-      if (countOf(bot, input.name) === 0) throw new ActionError(`you have no ${input.name}`)
-      if (countOf(bot, burn.name) === 0 && !furnace.fuelItem()) throw new ActionError(`you have no ${burn.name} for fuel`)
-      if (countOf(bot, burn.name) > 0) await furnace.putFuel(burn.id, null, Math.min(countOf(bot, burn.name), Math.ceil(amount / 8)))
-      await furnace.putInput(input.id, null, amount)
-      return { smelting: input.name, count: amount, note: 'each item takes 10 seconds; come back and use take_smelted' }
+      const inside = furnace.inputItem()
+      if (inside && inside.type !== input.id) {
+        throw new ActionError(`the furnace still holds ${inside.count} ${inside.name}; wait for it, or mine the furnace to get it back`)
+      }
+      const have = countOf(bot, input.name)
+      if (have === 0 && !inside) throw new ActionError(`you have no ${input.name}`)
+      const amount = Math.max(0, Math.min(int(count ?? 1, 'count'), have))
+      if (amount > 0) await furnace.putInput(input.id, null, amount)
+      // Fuel for everything now in the furnace: an item takes 200 ticks, and what is in the fuel slot counts.
+      const waiting = (inside?.count ?? 0) + amount
+      const stoked = furnace.fuelItem()
+      const lit = stoked ? stoked.count * burnTicks(stoked.name) : 0
+      let added = 0
+      if (burn !== null && (!stoked || stoked.type === burn.id)) {
+        added = Math.min(countOf(bot, burn.name), Math.max(0, Math.ceil((waiting * SMELT_TICKS - lit) / burnTicks(burn.name))))
+        if (added > 0) await furnace.putFuel(burn.id, null, added)
+      }
+      const fuelled = furnace.fuelItem()
+      if (!fuelled && !(furnace.fuel > 0)) {
+        return { smelting: null, in_furnace: { [input.name]: waiting }, note: `it has no fuel: smelt again with fuel (coal, charcoal, planks, logs or sticks) in your inventory` }
+      }
+      return {
+        smelting: input.name,
+        count: waiting,
+        fuel: fuelled ? { [fuelled.name]: fuelled.count } : 'burning',
+        note: 'each item takes 10 seconds; come back and use take_smelted'
+      }
     } finally { furnace.close() }
   },
 
   async take_smelted (bot, args, context) {
     const block = stationInReach(bot, 'furnace')
     if (block === null) throw new ActionError('there is no furnace within reach')
-    const furnace = await bot.openFurnace(block)
+    const furnace = await opened(bot.openFurnace(block), 'furnace')
     try {
       const output = furnace.outputItem()
       if (!output) return { taken: null, still_smelting: furnace.inputItem()?.name ?? null }
@@ -99,7 +142,7 @@ const ACTIONS = {
 
   async take (bot, { x, y, z, item, count }, context) {
     const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
-    const container = await bot.openContainer(block)
+    const container = await opened(bot.openContainer(block), block.name)
     try {
       const wanted = itemNamed(bot, item)
       const available = container.containerItems().filter(stack => stack.type === wanted.id).reduce((total, stack) => total + stack.count, 0)
@@ -112,7 +155,7 @@ const ACTIONS = {
 
   async store (bot, { x, y, z, item, count }, context) {
     const block = visibleInReach(bot, new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z')))
-    const container = await bot.openContainer(block)
+    const container = await opened(bot.openContainer(block), block.name)
     try {
       const wanted = itemNamed(bot, item)
       const amount = Math.min(countOf(bot, wanted.name), int(count ?? countOf(bot, wanted.name), 'count'))
@@ -127,7 +170,7 @@ const ACTIONS = {
     const wanted = itemNamed(bot, item)
     const amount = Math.min(countOf(bot, wanted.name), int(count ?? 1, 'count'))
     if (amount === 0) throw new ActionError(`you have no ${item}`)
-    if (x !== undefined) {
+    if (x != null && y != null && z != null) {
       await bot.lookAt(new Vec3(int(x, 'x') + 0.5, int(y, 'y') + 1.2, int(z, 'z') + 0.5), true)
       await sleep(150) // the server learns where the bot looks with its next movement packet
     }
@@ -138,10 +181,12 @@ const ACTIONS = {
   async equip (bot, { item, slot }, context) {
     const held = bot.inventory.items().find(stack => stack.name === item)
     if (!held) throw new ActionError(`you have no ${item}`)
-    const destination = slot ?? 'hand'
-    if (!['hand', 'off-hand', 'head', 'torso', 'legs', 'feet'].includes(destination)) {
+    const worn = Object.keys(WORN).find(place => WORN[place].test(item)) ?? null
+    const destination = slot ?? worn ?? 'hand'
+    if (!['hand', 'off-hand', ...Object.keys(WORN)].includes(destination)) {
       throw new ActionError('slot must be hand, off-hand, head, torso, legs or feet')
     }
+    if (destination in WORN && destination !== worn) throw new ActionError(`${item} cannot be worn on the ${destination}`)
     await bot.equip(held, destination)
     return { equipped: item, slot: destination }
   },
@@ -198,6 +243,7 @@ const ACTIONS = {
       const before = entity.position.clone()
       await sleep(300) // 1.1 seconds: a full draw
       await bot.lookAt(aim(entity.position.minus(before).scaled(1 / 0.3)), true)
+      await sleep(60) // the server learns where the bot looks with its next movement packet
       bot.deactivateItem()
       shots++
       await sleep(300)
@@ -216,7 +262,7 @@ const ACTIONS = {
       await bot.equip(stack, 'hand')
     }
     const name = bot.heldItem?.name ?? 'your hand'
-    if (x === undefined) {
+    if (x == null || y == null || z == null) {
       if (name === 'ender_eye') return throwEye(bot)
       if (bot.registry.foodsByName?.[name]) { // eating takes as long as it takes
         await bot.consume()
@@ -234,7 +280,7 @@ const ACTIONS = {
     const blocking = whatHides(bot, block)
     if (blocking !== null) throw new ActionError(`you cannot see it from here: ${blocking} is in the way`)
     if (/chest$|^barrel$/.test(block.name)) {
-      const container = await bot.openContainer(block)
+      const container = await opened(bot.openContainer(block), block.name)
       try {
         return { opened: block.name, contents: summarize(container.containerItems()) }
       } finally { container.close() }
@@ -254,6 +300,7 @@ const ACTIONS = {
     await bot.lookAt(position.offset(0.5, 0.5, 0.5), true)
     await bot.activateBlock(block)
     await sleep(300)
+    if (bot.currentWindow) bot.closeWindow(bot.currentWindow) // a table or furnace opened: left open, later clicks would land in it
     return { used: name, on: block.name, at: { x: position.x, y: position.y, z: position.z }, spent: spent(before, bot) }
   },
 
@@ -290,10 +337,20 @@ const ACTIONS = {
     return {}
   },
 
+  // Five seconds of game time, counted by the world's age (the server reports it once a second), so that a window
+  // other players' actions keep open does not make a wait any longer.
   async wait (bot, args, context) {
+    const until = bot.time.age + WAIT_TICKS
     await new Promise((resolve) => {
+      const done = () => {
+        bot.removeListener('time', check)
+        context.signal.removeEventListener('abort', done)
+        resolve()
+      }
+      const check = () => { if (bot.time.age >= until) done() }
       if (context.signal.aborted) return resolve()
-      context.signal.addEventListener('abort', resolve, { once: true })
+      bot.on('time', check)
+      context.signal.addEventListener('abort', done, { once: true })
     })
     return { waited: true }
   }
@@ -301,18 +358,46 @@ const ACTIONS = {
 
 // Helpers
 
+// Walk to a goal. The pathfinder searches for a path for two seconds at most; a far goal, or one behind rock, takes
+// longer than that to find. It then gives the best start it has: the bot walks that, and the search begins again
+// from where it ends, for as long as each leg gets the bot somewhere.
 async function travel (bot, goal, context) {
-  const abort = () => bot.pathfinder.stop()
-  context.signal.addEventListener('abort', abort, { once: true })
-  try {
-    bot.pathfinder.setGoal(null) // clears a stop left over from the last freeze, which would end this path at once
-    await bot.pathfinder.goto(goal)
-  } catch (error) {
+  for (;;) {
     if (context.signal.aborted) throw new Interrupted()
-    throw new ActionError(`could not get there: ${error.message}`)
-  } finally {
-    context.signal.removeEventListener('abort', abort)
+    const from = bot.entity.position.clone()
+    if (await leg(bot, goal, context)) return
+    if (bot.entity.position.distanceTo(from) < 0.9) throw new ActionError('could not get there: no way found')
   }
+}
+
+// One search and the walk along what it found. Resolves true at the goal, false where a partial path ended.
+function leg (bot, goal, context) {
+  return new Promise((resolve, reject) => {
+    let partial = false
+    const finish = (error, value) => {
+      bot.removeListener('goal_reached', reached)
+      bot.removeListener('path_update', update)
+      bot.removeListener('physicsTick', tick)
+      context.signal.removeEventListener('abort', aborted)
+      bot.pathfinder.setGoal(null) // stops the walk here, and whatever it was digging
+      setTimeout(() => error ? reject(error) : resolve(value), 0) // (the pathfinder finishes its own tick first)
+    }
+    const reached = () => finish(null, true)
+    const update = (results) => {
+      if (results.status === 'noPath') finish(new ActionError('could not get there: there is no way'))
+      else if (results.status === 'timeout') partial = true
+    }
+    const tick = () => {
+      const pathfinder = bot.pathfinder
+      if (partial && !pathfinder.isMoving() && !pathfinder.isMining() && !pathfinder.isBuilding()) finish(null, false)
+    }
+    const aborted = () => finish(new Interrupted())
+    bot.on('goal_reached', reached)
+    bot.on('path_update', update)
+    bot.on('physicsTick', tick)
+    context.signal.addEventListener('abort', aborted, { once: true })
+    bot.pathfinder.setGoal(goal)
+  })
 }
 
 async function dig (bot, block, context) {
@@ -348,7 +433,7 @@ async function collectNearby (bot, context, radius) {
     } catch (error) {
       if (error instanceof Interrupted) throw error
     } finally {
-      bot.pathfinder.stop()
+      bot.pathfinder.setGoal(null)
     }
   }
   await sleep(200)
@@ -425,8 +510,11 @@ async function equipBestTool (bot, block) {
 
 function visibleInReach (bot, position, anyShape = false) {
   const block = bot.blockAt(position)
-  if (!block || (!anyShape && block.boundingBox !== 'block') || block.name.endsWith('air')) {
-    throw new ActionError(`there is no solid block at (${position.x}, ${position.y}, ${position.z})`)
+  if (!block || block.name.endsWith('air')) {
+    throw new ActionError(`there is nothing at (${position.x}, ${position.y}, ${position.z}): it is empty`)
+  }
+  if (!anyShape && block.boundingBox !== 'block') {
+    throw new ActionError(`there is no solid block at (${position.x}, ${position.y}, ${position.z}): it is ${block.name}`)
   }
   const center = position.offset(0.5, 0.5, 0.5)
   const origin = eyes(bot)
@@ -466,7 +554,9 @@ function seesCell (bot, position) {
   return [center, ...Object.values(DIRECTIONS).map(direction => center.plus(direction.scaled(0.4)))].some(point => {
     const offset = point.minus(origin)
     const distance = offset.norm()
-    return distance < 1e-6 || firstHit(bot, origin, offset.scaled(1 / distance), distance) === null
+    if (distance < 1e-6) return true
+    const hit = firstHit(bot, origin, offset.scaled(1 / distance), distance)
+    return hit === null || hit.position.equals(position) // (what fills the cell itself, lava or a plant, hides nothing)
   })
 }
 
@@ -487,6 +577,44 @@ function stationInReach (bot, name) {
     if (center.distanceTo(origin) <= REACH && lineOfSight(bot, origin, center)) return bot.blockAt(position)
   }
   return null
+}
+
+// The window of a chest or furnace, or an error if it does not open in a few seconds (a chest under a solid block
+// never does, and mineflayer would wait twenty seconds for it).
+function opened (opening, name) {
+  let timer = null
+  const late = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new ActionError(`the ${name} does not open (is a block on top of it?)`)), 4000)
+  })
+  opening.then(window => { if (timer === null) window.close() }, () => {}) // one that opens too late is closed again
+  return Promise.race([opening, late]).finally(() => { clearTimeout(timer); timer = null })
+}
+
+// What a recipe uses up, as [[item, count]].
+function ingredients (bot, recipe) {
+  return recipe.delta.filter(change => change.count < 0).map(change => [bot.registry.items[change.id].name, -change.count])
+}
+
+// Of an item's recipes (one per kind of wood, say), the one the inventory comes nearest to.
+function nearest (bot, recipes) {
+  const held = recipe => ingredients(bot, recipe).reduce((total, [name, amount]) => total + Math.min(amount, countOf(bot, name)), 0)
+  return recipes.reduce((best, recipe) => held(recipe) > held(best) ? recipe : best)
+}
+
+// How long an item burns in a furnace, in ticks (0: it does not burn).
+function burnTicks (name) {
+  if (name in BURN_TICKS) return BURN_TICKS[name]
+  if (/_planks$|_log$|_wood$|_stem$|_hyphae$/.test(name)) return 300
+  if (/^wooden_/.test(name)) return 200
+  return 0
+}
+
+// The fuel to use when none is named: the longest-burning kind in the inventory that is not a tool.
+function bestFuel (bot) {
+  const burning = bot.inventory.items().filter(stack => burnTicks(stack.name) > 0 && !/^wooden_/.test(stack.name))
+  if (burning.length === 0) return null
+  const best = burning.reduce((a, b) => burnTicks(b.name) > burnTicks(a.name) ? b : a)
+  return bot.registry.itemsByName[best.name]
 }
 
 function known (memory, target) {
@@ -534,4 +662,4 @@ function sleep (ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
 
 class Interrupted extends Error {}
 
-module.exports = { ACTIONS, ActionError, Interrupted }
+module.exports = { ACTIONS, ActionError, Interrupted, burnTicks, opened, WORN }

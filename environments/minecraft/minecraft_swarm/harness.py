@@ -56,12 +56,14 @@ class Harness:
         """Start an action; whether it started (an unknown action is reported in the next observation)."""
         return bool((await self.request("act", bot=bot, action=action))["started"])
 
-    async def busy(self) -> list[str]:
-        return list((await self.request("busy"))["acting"])
+    async def busy(self) -> tuple[list[str], list[str]]:
+        """The bots that are still acting, and those that have been hurt since the thaw."""
+        status = await self.request("busy")
+        return list(status["acting"]), list(status.get("hurt") or [])
 
-    async def digging(self) -> dict[str, str]:
-        """The block each bot is in the middle of breaking (as "x,y,z"), for those that are."""
-        return dict((await self.request("busy")).get("digging") or {})
+    async def unloaded(self) -> list[str]:
+        """The bots that do not yet hold the chunks around them."""
+        return list((await self.request("unloaded"))["unloaded"])
 
     async def freeze(self) -> None:
         await self.request("freeze")

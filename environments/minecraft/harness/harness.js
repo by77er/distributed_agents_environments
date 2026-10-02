@@ -4,7 +4,8 @@
 //   {"id": 1, "op": "connect", "host": "127.0.0.1", "port": 25565, "team": ["ada", "ben", "cy", "dee"]}
 //   {"id": 2, "op": "observe", "bot": "ada"}         what ada sees, her messages, her last action's result
 //   {"id": 3, "op": "act", "bot": "ada", "action": {"name": "mine", "x": 1, "y": -58, "z": 4}}
-//   {"id": 4, "op": "busy"}                           which bots are still acting
+//   {"id": 4, "op": "busy"}                           which bots are still acting, and which were hurt since the thaw
+//   {"id": 4, "op": "unloaded"}                       which bots do not yet hold the chunks around them
 //   {"id": 4, "op": "status"}                         for diagnosis: each bot's connection, position and physics
 //   {"id": 5, "op": "freeze"}                         stop every action (results are kept) and pause physics
 //   {"id": 6, "op": "thaw"}                           resume physics, before actions start
@@ -15,6 +16,7 @@
 // them.
 
 const readline = require('node:readline')
+const { Vec3 } = require('vec3')
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements } = require('mineflayer-pathfinder')
 const { observe } = require('./lib/observe')
@@ -23,6 +25,9 @@ const { fixMaterials } = require('./lib/data')
 
 const VERSION = '1.21.11'
 const MAX_MESSAGES = 20
+const SCAFFOLDING = ['dirt', 'cobblestone', 'cobbled_deepslate', 'netherrack']
+const MAX_WALK_DIG_MS = 5000
+const RESTFUL = new Set(['wait', 'idle', 'chat'])
 
 const bots = new Map() // name → { bot, memory, air, inbox, action, result }
 let team = new Set()
@@ -36,7 +41,7 @@ async function connect ({ host, port, team: names }) {
 function join (host, port, name) {
   return new Promise((resolve, reject) => {
     const bot = mineflayer.createBot({ host, port, username: name, version: VERSION, auth: 'offline', hideErrors: true })
-    const state = { bot, memory: new Map(), air: new Set(), inbox: [], action: null, result: null, kicked: null }
+    const state = { bot, memory: new Map(), air: new Set(), inbox: [], action: null, result: null, kicked: null, health: null, hurt: false }
     bots.set(name, state)
     bot.loadPlugin(pathfinder)
     bot.once('spawn', () => {
@@ -49,6 +54,19 @@ function join (host, port, name) {
       movements.canDig = true
       movements.allowParkour = false
       movements.allowSprinting = true
+      // What walking may put under the bot or ahead of it when there is no other way (the `move` tools say so).
+      movements.scafoldingBlocks = SCAFFOLDING.map(item => bot.registry.itemsByName[item]?.id).filter(id => id !== undefined)
+      // Walking digs only what `mine` would: not what takes the bot's tools too long (stone by hand is 7.5 seconds a
+      // block), and not what would drop nothing (ore under too weak a pickaxe is destroyed).
+      const slow = new Map() // block type → whether walking may not dig it, with the tools held now
+      bot.inventory.on('updateSlot', () => slow.clear())
+      movements.exclusionAreasBreak.push((block) => {
+        if (!slow.has(block.type)) {
+          const tool = bot.pathfinder.bestHarvestTool(block)?.type ?? null
+          slow.set(block.type, !block.canHarvest(tool) || block.digTime(tool, false, false, false, [], []) > MAX_WALK_DIG_MS)
+        }
+        return slow.get(block.type) ? 100 : 0
+      })
       bot.pathfinder.setMovements(movements)
       bot.pathfinder.thinkTimeout = 2000
       resolve()
@@ -59,17 +77,29 @@ function join (host, port, name) {
       if (state.inbox.length > MAX_MESSAGES) state.inbox.shift()
     })
     bot.on('kicked', reason => { state.kicked = String(typeof reason === 'string' ? reason : JSON.stringify(reason)) })
+    bot.on('end', reason => { state.ended = String(reason ?? 'the connection closed') })
     bot.on('error', error => { if (!bot.entity) reject(error) })
     bot.on('death', () => { state.died = true })
+    bot.on('health', () => { // (also fires when only food changes)
+      if (state.health !== null && bot.health < state.health) state.hurt = true
+      state.health = bot.health
+    })
     bot.on('physicsTick', () => { state.physicsTicks = (state.physicsTicks ?? 0) + 1 })
     bot.on('forcedMove', () => { state.forcedMoves = (state.forcedMoves ?? 0) + 1 })
     bot.on('respawn', () => { state.memory.clear(); state.air.clear() }) // another dimension (or a new life): what was seen is elsewhere
   })
 }
 
+// A bot the server has dropped has nothing true to report and can do nothing: say so, so that the episode ends.
+function connected (name, state) {
+  const reason = state.kicked ?? state.ended
+  if (reason) throw new Error(`${name} is no longer connected: ${reason}`)
+}
+
 function observation (name) {
   const state = bots.get(name)
   if (!state) throw new Error(`no bot ${name}`)
+  connected(name, state)
   const result = observe(state.bot, team, state.memory, state.air)
   result.messages = state.inbox.splice(0)
   result.last_action = state.result
@@ -81,10 +111,11 @@ function observation (name) {
 function act (name, action) {
   const state = bots.get(name)
   if (!state) throw new Error(`no bot ${name}`)
+  connected(name, state)
   if (state.action) throw new Error(`${name} is still acting`)
   const handler = ACTIONS[action?.name]
   if (!handler) {
-    state.result = { action, ok: false, error: `unknown action ${action?.name}; choose one of ${Object.keys(ACTIONS).join(', ')}` }
+    state.result = { action, ok: false, error: `unknown action ${action?.name}; choose one of ${Object.keys(ACTIONS).filter(known => known !== 'idle').join(', ')}` }
     return { started: false }
   }
   const controller = new AbortController()
@@ -100,9 +131,10 @@ function act (name, action) {
   running.done = (async () => {
     const started = Date.now()
     try {
+      if (state.bot.isSleeping && !RESTFUL.has(actionName)) await state.bot.wake() // any deed gets a sleeper up
       finish({ action, ok: true, ...(await handler(state.bot, args, context)), seconds: (Date.now() - started) / 1000 })
     } catch (error) {
-      if (error instanceof Interrupted || controller.signal.aborted) {
+      if (error instanceof Interrupted) {
         finish(interrupted(action, state.bot))
       } else if (error instanceof ActionError) {
         finish({ action, ok: false, error: error.message })
@@ -129,7 +161,7 @@ async function freeze () {
       state.result = interrupted(state.action.action, state.bot)
       state.action = null
     }
-    state.bot.pathfinder.stop()
+    state.bot.pathfinder.setGoal(null)
     state.bot.stopDigging?.()
     state.bot.clearControlStates()
     state.bot.physicsEnabled = false // nothing moves while the agents think
@@ -145,8 +177,29 @@ function interrupted (action, bot) {
 }
 
 function thaw () {
-  for (const state of bots.values()) state.bot.physicsEnabled = true
+  for (const state of bots.values()) {
+    state.bot.physicsEnabled = true
+    state.hurt = false
+  }
   return { thawed: true }
+}
+
+// The bots that do not yet hold the chunks around them (five by five: all that sight reaches). An observation taken
+// before they arrive shows a world with holes in it.
+function unloaded () {
+  const waiting = []
+  for (const [name, state] of bots) {
+    connected(name, state)
+    const position = state.bot.entity?.position
+    let missing = !position
+    for (let dx = -2; dx <= 2 && !missing; dx++) {
+      for (let dz = -2; dz <= 2 && !missing; dz++) {
+        missing = !state.bot.world.getColumnAt(new Vec3((Math.floor(position.x) >> 4 << 4) + 16 * dx, 0, (Math.floor(position.z) >> 4 << 4) + 16 * dz))
+      }
+    }
+    if (missing) waiting.push(name)
+  }
+  return { unloaded: waiting }
 }
 
 // For diagnosis: is each bot connected, where, and is its physics running?
@@ -174,16 +227,10 @@ function status () {
   return result
 }
 
-// Who is still acting, and which block each of them is in the middle of breaking (breaking cannot be paused:
-// stopped, it starts over).
+// Who is still acting, and who has been hurt since the thaw.
 function busy () {
-  const acting = [...bots.entries()].filter(([, state]) => state.action)
-  const digging = {}
-  for (const [name, state] of acting) {
-    const block = state.bot.targetDigBlock
-    if (block) digging[name] = `${block.position.x},${block.position.y},${block.position.z}`
-  }
-  return { acting: acting.map(([name]) => name), digging }
+  const names = filter => [...bots.entries()].filter(([, state]) => filter(state)).map(([name]) => name)
+  return { acting: names(state => state.action), hurt: names(state => state.hurt) }
 }
 
 async function handle (request) {
@@ -193,6 +240,7 @@ async function handle (request) {
     case 'act': return act(request.bot, request.action)
     case 'busy': return busy()
     case 'status': return status()
+    case 'unloaded': return unloaded()
     case 'freeze': return freeze()
     case 'thaw': return thaw()
     case 'quit':

@@ -33,9 +33,11 @@ def main() -> None:
         default=1,
         help="start the next group when at most this many episodes of earlier groups are still running",
     )
-    training.add_argument("--update-turns", type=int, default=384, help="turns trained on per update (sampled)")
+    training.add_argument(
+        "--update-turns", type=int, default=384, help="the most turns an update trains on (spread over the group)"
+    )
     training.add_argument("--thinking-budget", type=int, default=1024, help="tokens of thinking per turn")
-    training.add_argument("--learning-rate", type=float, default=2e-5)
+    training.add_argument("--learning-rate", type=float, default=5e-5)
     training.add_argument("--seed", type=int, default=0)
     training.add_argument("--tasks", help="comma-separated task ids to train on (default: the whole curriculum)")
     training.add_argument("--exercise-updates", action="store_true", help=argparse.SUPPRESS)

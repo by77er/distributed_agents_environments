@@ -21,7 +21,8 @@ const SEE_THROUGH = new Set(['air', 'cave_air', 'void_air', 'water', 'glass', 'g
 const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom', 'goat'])
 const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'cave_spider', 'enderman', 'witch', 'slime',
   'drowned', 'husk', 'stray', 'silverfish', 'bogged', 'zombie_villager', 'phantom', 'blaze', 'ghast',
-  'wither_skeleton', 'magma_cube', 'piglin_brute', 'hoglin', 'zoglin', 'endermite', 'shulker', 'ender_dragon',
+  'wither_skeleton', 'magma_cube', 'piglin', 'piglin_brute', 'zombified_piglin', 'hoglin', 'zoglin', 'endermite',
+  'shulker', 'ender_dragon', 'vex', 'warden', 'wither', 'creaking', 'parched',
   'end_crystal', // not a creature, but a target: it heals the dragon and explodes when hit
   'pillager', 'vindicator', 'evoker', 'ravager', 'guardian', 'elder_guardian', 'breeze'])
 const DIRECTIONS = {
@@ -56,9 +57,9 @@ function firstHit (bot, origin, direction, range, visit) {
   let x = Math.floor(origin.x); let y = Math.floor(origin.y); let z = Math.floor(origin.z)
   const step = [Math.sign(direction.x), Math.sign(direction.y), Math.sign(direction.z)]
   const delta = [Math.abs(1 / direction.x), Math.abs(1 / direction.y), Math.abs(1 / direction.z)]
-  const boundary = (position, cell, sign) => sign > 0 ? cell + 1 - position : position - cell
-  const max = [boundary(origin.x, x, step[0]) * delta[0], boundary(origin.y, y, step[1]) * delta[1],
-    boundary(origin.z, z, step[2]) * delta[2]]
+  // How far along the ray the next cell boundary on an axis is (never, on an axis the ray does not move along).
+  const first = (position, cell, sign, each) => sign === 0 ? Infinity : (sign > 0 ? cell + 1 - position : position - cell) * each
+  const max = [first(origin.x, x, step[0], delta[0]), first(origin.y, y, step[1], delta[1]), first(origin.z, z, step[2], delta[2])]
   let travelled = 0
   while (travelled <= range) {
     if (max[0] < max[1] && max[0] < max[2]) { x += step[0]; travelled = max[0]; max[0] += delta[0] } else if (max[1] < max[2]) { y += step[1]; travelled = max[1]; max[1] += delta[1] } else { z += step[2]; travelled = max[2]; max[2] += delta[2] }
@@ -173,9 +174,15 @@ function observe (bot, team, memory, air = new Set()) {
     notable: notable.slice(0, MAX_KINDS),
     teammates,
     items,
-    mobs: mobs.slice(0, 10),
-    animals: animals.slice(0, 10)
+    mobs: nearestFirst(mobs).slice(0, 10),
+    animals: nearestFirst(animals).slice(0, 10)
   }
+}
+
+// Nearest first, after the dragon: a list is cut where it gets long, and what is cut should be what matters least.
+function nearestFirst (entities) {
+  const rank = entity => entity.mob === 'ender_dragon' ? -1 : entity.distance
+  return entities.sort((a, b) => rank(a) - rank(b))
 }
 
 // Worn armor, by slot (inventory slots 5 to 8 are head, torso, legs and feet).

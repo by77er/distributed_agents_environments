@@ -445,9 +445,15 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
         return float(state["team_diamonds"])
     if task.objective is Objective.CRAFT:
         steps = CHAINS[str(task.goal)]
+        if str(task.goal) in state.get(
+            "team_obtained", {}
+        ):  # however it was made (a furnace needs no stone pickaxe), nothing is left to earn
+            return float(sum(weight for _, _, weight in steps))
         made = set(done(steps, state.get("team_obtained", {})))
         return float(sum(weight for name, _, weight in steps if name in made))
     earned = set(state.get("team_advancements", []))
+    if state.get("dragon_killed"):  # (the advancement goes to a player; the dragon may die with no one credited)
+        earned.add("end/kill_dragon")
     reward = float(sum(weight for key, weight in MILESTONES.items() if key in earned))
     if task.kit is Kit.NOTHING:  # from nothing, the steps before the first advancement count too
         made = set(done(EARLY, state.get("team_obtained", {})))
@@ -457,18 +463,30 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
     return reward
 
 
-def solved(task: Task, state: Mapping[str, Any]) -> bool:
-    """Whether the team did what the task is about: holds a diamond, made the task's item, or earned its milestone."""
+SOLVED_DIAMONDS = 4
+"""Diamonds the team must hold for a task with natural ore to count as solved: one each."""
+
+
+def solved(task: Task, state: Mapping[str, Any], available: int | None = None) -> bool:
+    """Whether the team did what the task is about: holds most of the diamonds that were laid out (`available`, for
+    the staged starts that count them) or one each from ore, made the task's item, or earned its milestone."""
     if task.objective is Objective.DIAMONDS:
-        return int(state["team_diamonds"]) > 0
+        held = int(state["team_diamonds"])
+        if task.start in (Start.ITEMS, Start.CHESTS) and available:
+            return 2 * held > available
+        return held >= SOLVED_DIAMONDS
     if task.objective is Objective.CRAFT:
         return str(task.goal) in state.get("team_obtained", {})
+    if task.goal == "end/kill_dragon" and state.get("dragon_killed"):
+        return True
     return task.goal in set(state.get("team_advancements", []))
 
 
 # Building a task in a live world
 
 Point = tuple[int, int, int]
+PICKUP_REACH = 2
+"""Blocks (along either axis) within which a dropped item may be picked up without a step taken, with a margin."""
 
 
 @dataclass
@@ -592,8 +610,9 @@ async def _items(task: Task, control: Control, rng: random.Random) -> Site:
         total = await _drop_piles(control, (x, y, z), rng, spread=2)
         return Site([(rx + 1, y, rz + 1) for rx, rz in rooms], total, (x, y, z))
     await control.carve(x - 4, y, z - 4, width=9, height=3, depth=9, light=light)
-    total = await _drop_piles(control, (x, y, z), rng, spread=3)
-    return Site(_spread(await _spots(control, (x, y, z), 4)), total, (x, y, z))
+    starts = _spread(await _spots(control, (x - 3, y, z - 3), 2))  # in a corner of the room, away from the piles
+    total = await _drop_piles(control, (x, y, z), rng, spread=3, clear_of=starts)
+    return Site(starts, total, (x, y, z))
 
 
 async def _chests(task: Task, control: Control, rng: random.Random) -> Site:
@@ -634,19 +653,44 @@ async def _corridor(control: Control, start: Point, direction: tuple[int, int]) 
     )
 
 
-async def _drop_piles(control: Control, center: Point, rng: random.Random, *, spread: int) -> int:
+async def _drop_piles(
+    control: Control, center: Point, rng: random.Random, *, spread: int, clear_of: Sequence[Point] = ()
+) -> int:
+    """Three to five piles of diamonds on the floor around `center`, none within pickup reach of where anyone
+    starts (`clear_of`): a diamond a bot picks up by standing there is a reward for nothing, and goes to whichever
+    bot the server happens to tick first."""
     x, y, z = center
+    cells = [
+        (x + dx, z + dz)
+        for dx in range(-spread, spread + 1)
+        for dz in range(-spread, spread + 1)
+        if all(max(abs(x + dx - sx), abs(z + dz - sz)) > PICKUP_REACH for sx, _, sz in clear_of)
+    ]
+    if not cells:
+        raise BuildError("no room for the diamonds away from where the team starts")
     total = 0
     for _ in range(rng.randint(3, 5)):
-        pile = [{"item": "diamond", "count": rng.randint(1, 4)}]
-        total += await control.drop_items(x + rng.randint(-spread, spread), y, z + rng.randint(-spread, spread), pile)
+        px, pz = rng.choice(cells)
+        total += await control.drop_items(px, y, pz, [{"item": "diamond", "count": rng.randint(1, 4)}])
     return total
+
+
+async def _iron_in_wall(control: Control, task: Task, corner: Point) -> None:
+    """For the kit of stone tools: six iron ores in the pocket's east wall, in sight. Diamonds need an iron pickaxe,
+    and a pocket carved at diamond depth has no iron within reach more often than not."""
+    if task.kit is not Kit.STONE:
+        return
+    x, y, z = corner
+    for dy in (0, 1):
+        for dz in (1, 2, 3):
+            await control.set_block(x + 5, y + dy, z + dz, "deepslate_iron_ore")
 
 
 async def _pocket(control: Control, center: Point, task: Task) -> list[Point]:
     x, y, z = center
     light = task.hazards is Hazards.SAFE
     await control.carve(x - 2, y, z - 2, width=5, height=3, depth=5, light=light, floor="deepslate")
+    await _iron_in_wall(control, task, (x - 2, y, z - 2))
     return _spread(await _spots(control, center, 2))
 
 
@@ -658,6 +702,7 @@ async def _ore_in_sight(task: Task, control: Control, rng: random.Random) -> Sit
     # A pocket whose west wall holds the ore at eye level: the ore is exposed and in sight from inside.
     light = task.hazards is Hazards.SAFE
     await control.carve(ox + 1, oy - 1, oz - 2, width=5, height=3, depth=5, light=light, floor="deepslate")
+    await _iron_in_wall(control, task, (ox + 1, oy - 1, oz - 2))
     starts = _spread(await _spots(control, (ox + 3, oy - 1, oz), 2))
     return Site(starts, await _ore_count(control, (ox, oy, oz)), (ox, oy, oz))
 
@@ -669,7 +714,7 @@ async def _ore_nearby(task: Task, control: Control, rng: random.Random) -> Site:
     target = rng.choice(ores)
     angle, distance = rng.uniform(0, 2 * math.pi), rng.uniform(5, 8)
     center = (round(target[0] + distance * math.cos(angle)), target[1], round(target[2] + distance * math.sin(angle)))
-    if min(math.dist(center, ore) for ore in ores) < 4.5:  # the pocket must not expose any ore
+    if await _ores_near(control, center, 5):  # the pocket must not expose any ore (asked around the pocket itself)
         raise BuildError("an ore would be exposed")
     return Site(await _pocket(control, center, task), await _ore_count(control, center), center)
 

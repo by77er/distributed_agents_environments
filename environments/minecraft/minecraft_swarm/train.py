@@ -2,9 +2,11 @@
 
 Each iteration the curriculum picks a task; a group of episodes runs it concurrently from identical starts (same
 world seed, same layout seed), with the four agents of every episode sampling from one recorded channel. Each
-episode's reward is its task's objective, scored from ground truth. When every episode of a group has finished, and
-if their rewards differ, the engine sleeps, a trainer process takes one step on a sample of the group's turns and
-exits, and the new LoRA adapter is loaded into the engine once it is awake again.
+episode's reward is its task's objective, scored from ground truth; of the episodes that reached everything their
+task has to give, the fastest scores a point more (`speed_bonus`). When every episode of a group has finished, and
+if their scores differ, the engine sleeps, a trainer process takes one step on the group's turns (all of them, up to
+`update_turns` spread evenly over the episodes) and exits, and the new LoRA adapter is loaded into the engine once
+it is awake again.
 
 Groups overlap, so that one slow episode does not hold the GPU idle: the next group starts when at most
 `stragglers` episodes of earlier groups are still running. No episode is left out: a group is trained on only when
@@ -13,11 +15,12 @@ straggler plays on under the newer adapter; the update is PPO's clipped ratio ag
 each token was sampled, which is what corrects for that. During an update every running episode waits, its world
 frozen between turns.
 
-A run that is started again in the same directory goes on from its latest adapter, its curriculum and its count of
-iterations.
+A run that is started again in the same directory goes on from its latest adapter, its curriculum and the iteration
+after the last one logged, on worlds and layouts drawn anew.
 
 Memory is checked before each group and each update: the run stops with `NotEnoughMemory` rather than exhaust the
-machine.
+machine. An update that fails otherwise is logged and the run goes on under the adapter it had; three in a row stop
+it.
 
 Outputs (in `directory`): `metrics.jsonl` (one line per iteration), `episodes.jsonl` (each episode's ground truth),
 `transcripts/` (one agent's turns per iteration), `adapters/step-N/` (PEFT adapters), `trainer/` (the optimizer's
@@ -30,6 +33,7 @@ import json
 import math
 import random
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -37,7 +41,8 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from minecraft_swarm.curriculum import Curriculum
-from minecraft_swarm.episode import SwarmEpisode
+from minecraft_swarm.episode import SATURATED, SwarmEpisode
+from minecraft_swarm.paper import sweep
 from minecraft_swarm.prompts import TEAM
 from minecraft_swarm.tasks import Task, catalog
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
@@ -88,9 +93,9 @@ class TrainingSettings:
     answer_tokens: int = 400
     """Room for an answer after the thinking: a tool call takes about 40 tokens, a summary of old turns up to this."""
     temperature: float = 1.0
-    learning_rate: float = 2e-5
+    learning_rate: float = 5e-5
     lora_rank: int = 32
-    window_ticks: int = 100
+    window_ticks: int = 400
     gpu_memory_utilization: float = 0.78
     """The engine's share of the GPU while it is awake (the trainer runs only while it sleeps, its memory freed).
     What the weights leave is the engine's cache: at 0.72 it held 63,000 tokens, less than sixteen agents' contexts.
@@ -120,7 +125,9 @@ async def train(settings: TrainingSettings) -> None:
     (directory / "transcripts").mkdir(parents=True, exist_ok=True)
     (directory / "adapters").mkdir(exist_ok=True)
     (directory / "settings.json").write_text(json.dumps(asdict(settings), default=str, indent=1))
-    rng = random.Random(settings.seed)
+    metrics = directory / "metrics.jsonl"
+    done = last_iteration(metrics)
+    rng = random.Random(f"{settings.seed}-{done}")  # a run that is started again draws new worlds, not the same ones
     world_seeds = [
         random.Random(f"world-{settings.seed}-{index}").randrange(1 << 31) for index in range(settings.worlds)
     ]
@@ -142,6 +149,7 @@ async def train(settings: TrainingSettings) -> None:
     )
     recorder = Recorder({"policy": channel})
     worlds = MinecraftWorlds(window_ticks=settings.window_ticks, logs=directory / "logs")
+    sweep(worlds.installation)  # servers a stopped run left behind
     (directory / "logs").mkdir(exist_ok=True)
     feed = RunFeed(directory / "feed", keep=settings.feed_runs)
     runner = LocalRunner(recorder=recorder, tool_sets={"minecraft": MinecraftTools(worlds)}, hooks=[feed])
@@ -156,13 +164,15 @@ async def train(settings: TrainingSettings) -> None:
     )
     learner = Learner(settings, engine, metered, channel)
     await learner.resume()
-    metrics = directory / "metrics.jsonl"
-    done = len(metrics.read_text().splitlines()) if metrics.exists() else 0
     flight = Flight()
     finishing = asyncio.Lock()  # groups are scored, trained on and logged one at a time
 
+    pending: list[str] = []  # the tasks of the groups that are running or being trained on
+    failed_updates: list[int] = []  # the iterations whose updates failed since the last one that worked
+
     async def start(iteration: int) -> Group:
-        task = curriculum.sample()
+        task = curriculum.sample(pending)
+        pending.append(task.id)
         world_seed, layout_seed = rng.choice(world_seeds), rng.randrange(1 << 30)
         minutes = task.minutes if settings.max_minutes is None else min(task.minutes, settings.max_minutes)
         parameters: dict[str, JsonValue] = {
@@ -224,23 +234,34 @@ async def train(settings: TrainingSettings) -> None:
                 "sampled_under": sorted({turn.adapter_version for turn, _ in turns}),
                 "overlapped": group.overlapped,
                 "rollout_seconds": round(waited, 1),
-                "inference": metered.take(),
+                "inference": metered.take(),  # of every episode running since the line before, not this group's
                 "memory_available_gib": round(available_memory_gib(), 1),
             }
             if rewards:
                 curriculum.update(task, rewards, [bool(result.get("solved")) for result in results])
-            advantages = group_advantages(rewards) if len(rewards) >= 2 else None
+            else:
+                curriculum.failed(task)
+            bonus = speed_bonus(results)
+            if any(bonus):
+                line["speed_bonus"] = bonus
+            scores = [reward + extra for reward, extra in zip(rewards, bonus, strict=True)]
+            advantages = group_advantages(scores) if len(scores) >= 2 else None
             if advantages is None and settings.exercise_updates and len(rewards) >= 2:
                 advantages = [0.1 * (index - (len(rewards) - 1) / 2) for index in range(len(rewards))]  # smoke tests
             if advantages is None:
-                line["update"] = "skipped: every episode scored the same"
+                line["update"] = (
+                    "skipped: every episode scored the same"
+                    if len(scores) >= 2
+                    else f"skipped: {len(scores)} of {len(handles)} episodes completed"
+                )
             else:
                 advantage_of = {
                     handle.run_id: advantage for handle, advantage in zip(completed, advantages, strict=True)
                 }
                 line["turns_recorded"] = len(turns)
-                if len(turns) > settings.update_turns:  # an even sample: every episode and agent keeps its share
-                    turns = random.Random(iteration).sample(turns, settings.update_turns)
+                turns = [(turn, handle) for turn, handle in turns if advantage_of[handle.run_id] != 0.0]
+                turns = spread(turns, settings.update_turns, random.Random(iteration))
+                line["turns_trained"] = len(turns)
                 sequences = [  # built only for the turns trained on: a long episode records tens of thousands
                     TrainingSequence(
                         tokens=[*turn.prompt, *turn.completion],
@@ -250,7 +271,17 @@ async def train(settings: TrainingSettings) -> None:
                     )
                     for turn, handle in turns
                 ]
-                line["update"] = await learner.update(sequences, seed=iteration)
+                try:
+                    line["update"] = await learner.update(sequences, seed=iteration)
+                    failed_updates.clear()
+                except NotEnoughMemory:
+                    raise
+                except RuntimeError as error:  # the trainer failed: the adapter stays, and the run goes on
+                    failed_updates.append(iteration)
+                    line["update"] = f"failed: {str(error).strip().splitlines()[-1][:300]}"
+                    print(f"the update of iteration {iteration} failed:\n{error}", flush=True)
+                    if len(failed_updates) >= MAX_FAILED_UPDATES:
+                        raise
                 line["adapter_step"] = learner.step
             for handle in handles:
                 recorder.forget(handle.run_id)
@@ -258,15 +289,23 @@ async def train(settings: TrainingSettings) -> None:
             line["unlocked"] = len(curriculum.unlocked())
             _append(metrics, line)
             curriculum.save(directory / "curriculum.json")
+            pending.remove(task.id)
             print(json.dumps(line), flush=True)
 
     finishers: list[asyncio.Task[None]] = []
     try:
         for iteration in range(done + 1, done + settings.iterations + 1):
-            await flight.at_most(settings.stragglers)
-            for finisher in finishers:  # a group that failed to finish (no memory, a trainer error) ends the run
-                if finisher.done() and finisher.exception() is not None:
-                    raise cast(BaseException, finisher.exception())
+            # Wait for room for another group; a group that fails to finish (no memory, a trainer error) ends the
+            # run then and there, not when the episodes still running are done.
+            room = asyncio.create_task(flight.at_most(settings.stragglers))
+            while True:
+                failed = [f for f in finishers if f.done() and not f.cancelled() and f.exception() is not None]
+                if failed:
+                    room.cancel()
+                    raise cast(BaseException, failed[0].exception())
+                if room.done():
+                    break
+                await asyncio.wait([room, *(f for f in finishers if not f.done())], return_when=asyncio.FIRST_COMPLETED)
             require_memory(settings.group_memory_gib, "to run a group of episodes")
             finishers.append(asyncio.create_task(finish(await start(iteration))))
         await asyncio.gather(*finishers)
@@ -276,6 +315,43 @@ async def train(settings: TrainingSettings) -> None:
         await worlds.close()
         engine.close()
         feed.close()
+
+
+MAX_FAILED_UPDATES = 3
+"""Updates that may fail in a row (each is logged, and the adapter stays as it was) before the run stops."""
+
+
+def last_iteration(metrics: Path) -> int:
+    """The highest iteration a run has logged (groups overlap, so lines are not always in order); 0 for a new run."""
+    if not metrics.exists():
+        return 0
+    return max((int(json.loads(line)["iteration"]) for line in metrics.read_text().splitlines() if line), default=0)
+
+
+def speed_bonus(results: Sequence[Mapping[str, Any]]) -> list[float]:
+    """An extra point for the fastest of the episodes that saturated their task, when more than one did: they earned
+    the same, and the one that took less game time (then fewer turns) played better. Episodes that tie for fastest
+    all get it. It goes into what the group's advantages are computed from, not into the reward that is reported and
+    that the curriculum sees."""
+    took = {
+        index: (float(result.get("game_minutes", 0.0)), int(result.get("turns", 0)))
+        for index, result in enumerate(results)
+        if result.get("ended") == SATURATED
+    }
+    if len(took) < 2:
+        return [0.0] * len(results)
+    fastest = min(took.values())
+    return [1.0 if took.get(index) == fastest else 0.0 for index in range(len(results))]
+
+
+def spread[Item](items: Sequence[Item], limit: int, rng: random.Random) -> list[Item]:
+    """At most `limit` of the items, taken at even steps through them from a random start: of turns listed episode
+    by episode and agent by agent, each episode and agent keeps its share, spread over the whole of its game."""
+    if len(items) <= limit:
+        return list(items)
+    step = len(items) / limit
+    start = rng.random() * step
+    return [items[int(start + index * step)] for index in range(limit)]
 
 
 @dataclass

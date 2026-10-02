@@ -35,6 +35,14 @@ class Control:
         """Run `ticks` game ticks of the frozen game; returns once they have run."""
         return await self._request("POST", "/tick", {"action": "step", "ticks": ticks})
 
+    async def run(self, ticks: int) -> dict[str, Any]:
+        """Start `ticks` game ticks of the frozen game and return at once; `stop` ends them."""
+        return await self._request("POST", "/tick", {"action": "run", "ticks": ticks})
+
+    async def stop(self) -> int:
+        """End a `run`; returns the game ticks that ran since it started."""
+        return int((await self._request("POST", "/tick", {"action": "stop"}))["stepped"])
+
     async def ticks(self) -> dict[str, Any]:
         return await self._request("GET", "/tick")
 

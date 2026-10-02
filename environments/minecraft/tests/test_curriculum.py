@@ -1,6 +1,7 @@
-"""The curriculum unlocks harder tasks as easier ones are solved, and favors tasks solved about half the time."""
+"""The curriculum unlocks harder tasks as easier ones are solved, and favors tasks whose groups differ."""
 
 import random
+from pathlib import Path
 
 from minecraft_swarm.curriculum import Curriculum
 from minecraft_swarm.tasks import Tier, catalog
@@ -24,16 +25,39 @@ def test_every_task_can_be_reached() -> None:
     assert curriculum.unlocked()[-1].tier is Tier.GAME
 
 
-def test_learning_progress_favors_tasks_solved_half_the_time() -> None:
+def test_tasks_whose_episodes_differ_are_trained_on_most() -> None:
     tasks = catalog()
     curriculum = Curriculum(tasks, random.Random(0))
-    easy, middling, hopeless = tasks[0], tasks[1], tasks[2]
-    curriculum.update(easy, [5, 5, 5, 5], [True] * 4)
-    curriculum.update(middling, [0, 2, 0, 1], [False, True, False, True])
+    saturated, uneven, hopeless, unbuildable = tasks[0], tasks[1], tasks[2], tasks[3]
+    curriculum.update(saturated, [5, 5, 5, 5], [True] * 4)
+    curriculum.update(uneven, [9, 9, 20, 9], [True] * 4)  # all "solved", and yet a group with much to teach
     curriculum.update(hopeless, [0, 0, 0, 0], [False] * 4)
-    assert curriculum.weight(middling) > curriculum.weight(easy) > 0
-    assert curriculum.weight(middling) > curriculum.weight(hopeless) > 0
-    assert curriculum.weight(tasks[3]) == 1.0  # untried
+    curriculum.failed(unbuildable)
+    assert curriculum.weight(uneven) == 1.05
+    assert curriculum.weight(saturated) == curriculum.weight(hopeless) == curriculum.weight(unbuildable) == 0.05
+    assert curriculum.weight(tasks[4]) == 1.0  # untried
+    curriculum.update(uneven, [9, 9, 9, 9], [True] * 4)  # a moving average: one even group halves it
+    assert curriculum.weight(uneven) == 0.55
+
+
+def test_a_task_whose_group_is_still_running_is_not_chosen_again() -> None:
+    tasks = catalog()
+    curriculum = Curriculum(tasks, random.Random(0))
+    for _ in range(50):
+        assert curriculum.sample(pending=[tasks[0].id, tasks[2].id]) is tasks[1]
+    assert curriculum.sample(pending=[task.id for task in tasks[:3]]) in tasks[:3]  # unless nothing else is unlocked
+
+
+def test_records_are_kept_by_title_so_that_a_changed_catalog_does_not_move_them(tmp_path: Path) -> None:
+    tasks = catalog()
+    curriculum = Curriculum(tasks, random.Random(0))
+    curriculum.update(tasks[4], [1, 2], [True, False])
+    curriculum.save(tmp_path / "curriculum.json")
+    shifted = [task.model_copy(update={"id": f"x{index}"}) for index, task in enumerate(tasks[2:])]  # two tasks gone
+    again = Curriculum(shifted, random.Random(0))
+    again.load(tmp_path / "curriculum.json")
+    assert again.record(shifted[2]).attempts == 1 and again.record(shifted[2]).reward == 1.5
+    assert [task_id for task_id, record in again.records.items() if record.attempts] == ["x2"]
 
 
 def test_a_progress_task_counts_as_solved_only_by_its_own_milestone() -> None:

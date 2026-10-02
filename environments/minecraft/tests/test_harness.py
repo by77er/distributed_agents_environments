@@ -54,9 +54,9 @@ async def world(tmp_path_factory: pytest.TempPathFactory) -> AsyncIterator[World
     await server.stop()
 
 
-async def run_window(world: World, ticks: int = 100) -> int:
+async def run_window(world: World, ticks: int = 400) -> int:
     """A window of game time, as an episode runs one; returns the ticks that ran."""
-    return await worlds.run_window(world.control, world.harness, ticks=ticks, settle=0.3, dig_ticks=400)
+    return await worlds.run_window(world.control, world.harness, ticks=ticks, settle=0.3)
 
 
 async def settle(world: World) -> None:
@@ -139,7 +139,7 @@ async def test_the_map_shows_the_room_and_nothing_behind_its_walls(world: World)
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=11)  # a 5 by 5 pocket; ore hidden nearby
     local = observation["map"]
     assert local["center"] == observation["self"]["position"]
-    assert cell(local, 0, 0, 0) == "air" and cell(local, 0, -1, 0) == "deepslate"  # where it stands, and the floor
+    assert cell(local, 0, 0, 0) == "air" and cell(local, 0, -1, 0) in ("deepslate", "bedrock")  # it stands on rock
     known = [index for layer in local["layers"] for index in layer["cells"] if index >= 0]
     unknown = [index for layer in local["layers"] for index in layer["cells"] if index < 0]
     assert len(unknown) > len(known)  # most of the 13 by 13 by 5 around a small pocket is rock it cannot see into
@@ -152,22 +152,14 @@ async def test_the_map_shows_the_room_and_nothing_behind_its_walls(world: World)
 async def test_walking_digs_through_rock_and_items_are_tossed_eaten_and_found_in_chests(world: World) -> None:
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=13)
     here = observation["self"]["position"]
-    # The pocket's wall is two blocks away; the rest is rock. Each window digs a few blocks and is cut off, and says
-    # how far the agent got; the agent asks for what is left.
-    at: int = here["x"]
-    progress: list[int] = []
-    for _ in range(8):
-        left = at - (here["x"] - 8)
-        if left <= 0:
-            break
-        await world.harness.thaw()
-        await world.harness.act("ada", {"name": "move", "direction": "west", "blocks": left})
-        await run_window(world)
-        result = (await world.harness.observe("ada"))["last_action"]
-        at = int((result.get("now_at") or result.get("arrived_at"))["x"])
-        progress.append(at)
-    assert at == here["x"] - 8, progress
-    assert 1 < len(progress) <= 8, progress  # more than one window of digging
+    # The pocket's wall is two blocks away; the rest is rock: six blocks of tunnel, two high. The window stays open
+    # until the walk is done (well past the five seconds an instant action's window takes).
+    await world.harness.thaw()
+    await world.harness.act("ada", {"name": "move", "direction": "west", "blocks": 8})
+    ran = await run_window(world)
+    result = (await world.harness.observe("ada"))["last_action"]
+    assert result["ok"] and result["arrived_at"]["x"] == here["x"] - 8, result
+    assert 110 < ran <= 410, ran
     local = (await world.harness.observe("ada"))["map"]
     assert all(cell(local, dx, dy, 0) == "air" for dx in range(1, 6) for dy in (0, 1))  # the tunnel behind it
     assert cell(local, 0, 2, 0) is not None and cell(local, 0, 2, 0) != "air"  # two high, no more
@@ -313,7 +305,7 @@ async def test_agents_fight_with_sword_and_bow_and_ground_truth_counts_the_hits(
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_a_block_that_takes_longer_than_a_window_can_still_be_mined(world: World) -> None:
+async def test_a_slow_block_is_mined_in_one_action_and_a_hopeless_one_is_refused(world: World) -> None:
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=17)
     here = observation["self"]["position"]
     await world.control.drop_items(here["x"], here["y"], here["z"], [{"item": "diamond_pickaxe"}])
@@ -326,10 +318,10 @@ async def test_a_block_that_takes_longer_than_a_window_can_still_be_mined(world:
     )
     await world.harness.thaw()
     await world.harness.act(holder, {"name": "mine", "x": here["x"] + 2, "y": here["y"], "z": here["z"]})
-    ran = await run_window(world)  # obsidian takes 9.4 seconds with a diamond pickaxe; a window is five
+    ran = await run_window(world)  # obsidian takes 9.4 seconds with a diamond pickaxe
     result = (await world.harness.observe(holder))["last_action"]
     assert result["ok"] and result["mined"] == "obsidian" and result["gained"] == {"obsidian": 1}, result
-    assert 120 < ran <= 260, ran  # well past the 110 ticks of an ordinary window
+    assert 120 < ran <= 260, ran  # the window lasts as long as the action does
     # With a bare hand it would take minutes: refused at once, with the reason.
     other = next(name for name in TEAM if name != holder)
     await world.control.set_block(here["x"] - 2, here["y"], here["z"], "obsidian")
@@ -376,6 +368,28 @@ async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(wor
     assert solved(chosen, state)
     crafted = [event["item"] for event in await world.control.events() if event["kind"] == "crafted"]
     assert crafted == [f"{kind}_planks", "crafting_table"]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_frozen_game_holds_players_as_they_were_and_nobody_starts_on_the_diamonds(world: World) -> None:
+    _, observation = await begin(world, Start.ITEMS, Kit.NONE, seed=5)
+    assert (await world.control.state())["team_diamonds"] == 0  # the piles are out of reach of where anyone starts
+    assert not [name for name in await world.harness.unloaded()]  # and every bot holds the world around it
+
+    # Fire under ada: while the game runs it burns her; while it is frozen she is held as she was, however long.
+    here = observation["self"]["position"]
+    await world.control.set_block(here["x"], here["y"], here["z"], "fire")
+    await run_window(world, 40)
+
+    async def health() -> float:
+        return next(p["health"] for p in (await world.control.state())["players"] if p["name"] == "ada")
+
+    burned = await health()
+    assert burned < 20, burned
+    await asyncio.sleep(4.0)  # frozen: four seconds of standing in fire, were players not held
+    assert await health() == burned
+    await world.control.set_block(here["x"], here["y"], here["z"], "air")
+    await run_window(world, 20)
 
 
 def test_the_harness_lives_in_the_environment() -> None:

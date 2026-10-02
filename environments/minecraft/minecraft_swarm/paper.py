@@ -7,8 +7,12 @@ Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may b
 - `bootstrap/`: one server started once, for the libraries and the patched jar every server shares;
 - `jdk/`: a JDK, only to compile the plugin (a Java runtime is enough to run Paper);
 - `plugin/`: the plugin jar, rebuilt when its sources change;
-- `templates/seed-N-CONFIG/`: a configured server whose world was generated from seed N (with config/'s digest);
-- `servers/`: temporary servers, copies of a template, deleted when stopped.
+- `templates/seed-N-KEY/`: a configured server whose world was generated from seed N, the overworld around the
+  origin included (`GENERATED_CHUNKS`): servers copied from it hold the same chunks, where servers that each
+  generated their own differed in details (a tree here, two ores there). KEY covers config/, the Paper build and
+  the generated area;
+- `servers/`: temporary servers, copies of a template, deleted when stopped. A server ends with the process that
+  started it, and what such a process left behind is removed by the next one (`sweep`).
 
 Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEULA) for a local, offline server.
 """
@@ -44,6 +48,9 @@ ENVIRONMENT = Path(__file__).resolve().parents[1]
 """environments/minecraft: the plugin's sources, the server configuration and this package."""
 PLUGIN_SOURCES = ENVIRONMENT / "plugin"
 CONFIG = ENVIRONMENT / "config"
+GENERATED_CHUNKS = 19
+"""A template's overworld is generated this many chunks out from the origin (304 blocks): staged tasks are built
+within 240 blocks of it and reach 40 further."""
 SHARED = ("libraries", "versions", "cache")
 """Directories every server shares with the bootstrap server, so none downloads or patches anything."""
 
@@ -174,7 +181,8 @@ class Installation:
             return self._template(seed)
 
     def _template(self, seed: int) -> Path:
-        directory = self.root / "templates" / f"seed-{seed}-{configuration_digest()}"
+        key = f"{configuration_digest()}-{self.version}-{self.build}-g{GENERATED_CHUNKS}"
+        directory = self.root / "templates" / f"seed-{seed}-{key}"
         if (directory / "ready").exists():
             return directory
         shutil.rmtree(directory, ignore_errors=True)
@@ -185,18 +193,27 @@ class Installation:
         (directory / "eula.txt").write_text("eula=true\n")
         _write_properties(directory, {**server_properties(), "level-seed": str(seed), "server-port": str(free_port())})
         _configure(bootstrap, directory)
-        process = subprocess.Popen(
-            [self.java, "-Xmx2G", "-jar", str(self.paper_jar()), "--nogui"],
+        (directory / "plugins").mkdir(exist_ok=True)
+        shutil.copy2(self.plugin_jar(), directory / "plugins" / "rollout-ground-truth.jar")
+        control = free_port()
+        process = subprocess.Popen(  # (the plugin is there to generate the play area)
+            [self.java, "-Xmx2G", f"-Drollout.control.port={control}", "-jar", str(self.paper_jar()), "--nogui"],
             cwd=directory,
             stdin=subprocess.PIPE,
             stdout=(directory / "generate.log").open("w"),
             stderr=subprocess.STDOUT,
+            preexec_fn=_end_with_parent,
         )
         try:
             _wait_for_line(directory / "generate.log", "Done (", process, seconds=600)
+            generated = httpx.post(
+                f"http://127.0.0.1:{control}/setup/generate", json={"radius": GENERATED_CHUNKS}, timeout=900
+            )
+            generated.raise_for_status()
         finally:
             _stop_process(process)
-        for name in ("logs", "generate.log", "usercache.json"):
+            release_port(control)
+        for name in ("logs", "generate.log", "usercache.json", "plugins"):
             path = directory / name
             if path.is_dir():
                 shutil.rmtree(path)
@@ -230,42 +247,54 @@ class PaperServer:
         return f"http://127.0.0.1:{self.control_port}"
 
     async def start(self, *, seconds: float = 120, attempts: int = 2) -> None:
-        """Copy the template and start Java; a start that fails is tried again with other ports."""
-        template = await asyncio.to_thread(self.installation.template, self.seed)
-        plugin = await asyncio.to_thread(self.installation.plugin_jar)
-        await asyncio.to_thread(_copy_template, template, self.directory)
-        (self.directory / "plugins").mkdir(exist_ok=True)
-        shutil.copy2(plugin, self.directory / "plugins" / "rollout-ground-truth.jar")
-        (self.directory / "ops.json").write_text(json.dumps(operator_entries(operators()), indent=1))
-        for attempt in range(1, attempts + 1):
-            try:
-                await self._launch(seconds)
-                return
-            except (RuntimeError, TimeoutError):
-                await self._terminate()
-                if attempt == attempts:
-                    await asyncio.to_thread(shutil.rmtree, self.directory, True)
-                    raise
+        """Copy the template and start Java; a start that fails is tried again with other ports. A start that is
+        cancelled, or fails for good, leaves no process and no directory."""
+        try:
+            template = await asyncio.to_thread(self.installation.template, self.seed)
+            plugin = await asyncio.to_thread(self.installation.plugin_jar)
+            await asyncio.to_thread(_copy_template, template, self.directory)
+            (self.directory / "plugins").mkdir(exist_ok=True)
+            shutil.copy2(plugin, self.directory / "plugins" / "rollout-ground-truth.jar")
+            (self.directory / "ops.json").write_text(json.dumps(operator_entries(operators()), indent=1))
+            (self.directory / OWNER).write_text(str(os.getpid()))
+            for attempt in range(1, attempts + 1):
+                try:
+                    await self._launch(seconds)
+                    return
+                except (RuntimeError, TimeoutError):
+                    await self._terminate()
+                    if attempt == attempts:
+                        raise
+        except BaseException:
+            await self._terminate()
+            await asyncio.to_thread(shutil.rmtree, self.directory, True)
+            raise
 
     async def _launch(self, seconds: float) -> None:
         # IPv4 only: Java otherwise listens on an IPv6 socket with a mapped address (::ffff:127.0.0.1), which WSL does
         # not forward to Windows' localhost, so a client on the Windows side could not join to watch.
+        self._release_ports()
         self.port, self.control_port = free_port(), free_port()
         _write_properties(self.directory, {"server-port": str(self.port)})
         log = (self.directory / "server.log").open("w")
         self.process = await asyncio.create_subprocess_exec(
             self.installation.java, f"-Xmx{self.heap}", f"-Drollout.control.port={self.control_port}",
+            f"-Drollout.server.name={self.name}",
             "-XX:+UseG1GC", "-Djava.net.preferIPv4Stack=true",  # see below
             "-jar", str(self.installation.paper_jar()), "--nogui",
             cwd=self.directory, stdin=asyncio.subprocess.PIPE, stdout=log, stderr=asyncio.subprocess.STDOUT,
+            preexec_fn=_end_with_parent,
         )  # fmt: skip
         deadline = time.monotonic() + seconds
         async with httpx.AsyncClient(timeout=2) as client:
             while time.monotonic() < deadline:
                 if self.process.returncode is not None:
                     raise RuntimeError(f"the server exited while starting; its log ends:\n{self._log_tail()}")
-                with contextlib.suppress(httpx.HTTPError):
-                    if (await client.get(f"{self.control_url}/health")).status_code == 200:
+                with contextlib.suppress(httpx.HTTPError, ValueError):
+                    health = await client.get(f"{self.control_url}/health")
+                    if health.status_code == 200:
+                        if health.json().get("server") != self.name:  # another server answers on this port
+                            raise RuntimeError(f"port {self.control_port} belongs to another server")
                         return
                 await asyncio.sleep(0.25)
         raise TimeoutError(f"the server did not start in {seconds} seconds; its log ends:\n{self._log_tail()}")
@@ -278,6 +307,12 @@ class PaperServer:
         if process is not None and process.returncode is None:
             process.kill()
             await process.wait()
+        self._release_ports()
+
+    def _release_ports(self) -> None:
+        for port in (self.port, self.control_port):
+            release_port(port)
+        self.port = self.control_port = 0
 
     async def stop(self, *, keep: bool = False) -> None:
         """Stop the server and delete its directory (unless `keep`, e.g. to inspect a failure)."""
@@ -293,20 +328,67 @@ class PaperServer:
             except TimeoutError:
                 process.kill()
                 await process.wait()
+        self._release_ports()
         if not keep:
             await asyncio.to_thread(shutil.rmtree, self.directory, True)
 
 
+OWNER = "owner.pid"
+"""In a server's directory: the process that started it."""
+_handed_out: set[int] = set()
+
+
+def sweep(installation: Installation) -> list[str]:
+    """Remove the servers that processes which are gone left behind (their Java processes ended with them); returns
+    their names. Called when a process that will start servers begins."""
+    removed: list[str] = []
+    for directory in (installation.root / "servers").glob("s-*"):
+        try:
+            owner = int((directory / OWNER).read_text())
+        except (OSError, ValueError):  # no owner written: a copy still being made, unless it is old
+            if time.time() - directory.stat().st_mtime < 600:
+                continue
+            owner = None
+        if owner is not None:
+            try:
+                os.kill(owner, 0)
+                continue  # its process is alive
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                continue
+        shutil.rmtree(directory, ignore_errors=True)
+        removed.append(directory.name)
+    return removed
+
+
+def _end_with_parent() -> None:
+    """In a child, before it becomes Java: have the kernel end it when the process that started it dies (Linux). A
+    trainer that is killed would otherwise leave its servers running, 1.5 GB each."""
+    import ctypes
+
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+
+
+def release_port(port: int) -> None:
+    _handed_out.discard(port)
+
+
 def free_port() -> int:
     """A free port to listen on, outside the range the system gives outgoing connections (a port from that range can
-    be taken by a client's connection between choosing it and listening on it)."""
+    be taken by a client's connection between choosing it and listening on it), and not one this process has given
+    to a server that has yet to listen on it (Java binds ten seconds after it starts)."""
     for _ in range(200):
         port = random.randint(20000, 29999)
+        if port in _handed_out:
+            continue
         with socket.socket() as probe:
             try:
                 probe.bind(("127.0.0.1", port))
             except OSError:
                 continue
+            _handed_out.add(port)
             return port
     raise RuntimeError("no free port between 20000 and 29999")
 
@@ -351,7 +433,7 @@ def server_properties() -> dict[str, str]:
 def _configure(bootstrap: Path, directory: Path) -> None:
     """Paper's own configuration with config/'s overrides merged in (anti-xray, no end dimension)."""
     (directory / "config").mkdir(exist_ok=True)
-    for relative in ("config/paper-world-defaults.yml", "bukkit.yml"):
+    for relative in ("config/paper-world-defaults.yml", "bukkit.yml", "spigot.yml"):
         defaults: dict[str, Any] = yaml.safe_load((bootstrap / relative).read_text())
         overrides: dict[str, Any] = yaml.safe_load((CONFIG / Path(relative).name).read_text())
         (directory / relative).write_text(yaml.safe_dump(merge_configuration(defaults, overrides), sort_keys=False))

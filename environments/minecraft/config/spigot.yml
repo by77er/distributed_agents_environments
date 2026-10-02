@@ -1,0 +1,7 @@
+# Merged into Paper's spigot.yml.
+# End crystals fall under "other": they are tracked as far as the dragon is seen (the harness shows both out to 96
+# blocks).
+world-settings:
+  default:
+    entity-tracking-range:
+      other: 96

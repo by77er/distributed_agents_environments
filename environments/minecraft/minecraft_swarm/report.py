@@ -99,7 +99,7 @@ def summary(directory: Path, iterations: Sequence[Mapping[str, Any]], tasks: Seq
         lines.append(
             f"**Inference:** {inference.get('tokens_per_second', 0):g} tokens/s while generating "
             f"(mean {inference.get('mean_concurrency', 0):g} agents at once), "
-            f"{inference.get('generated_tokens', 0):,} tokens this group"
+            f"{inference.get('generated_tokens', 0):,} tokens since the iteration before"
         )
     text = "\n".join(lines)
     return text if len(text) <= MAX_MESSAGE else text[: MAX_MESSAGE - 1] + "…"
@@ -114,8 +114,9 @@ def _statistics(rewards: Sequence[float]) -> str:
 
 def _update(update: Mapping[str, Any]) -> str:
     parts = [f"{update.get('sequences', 0):g} turns, {update.get('tokens', 0):g} sampled tokens"]
-    if "approx_kl" in update:
-        parts.append(f"KL to the sampling policy ≈ {update['approx_kl']:.4f}")
+    if "kl_moved" in update:
+        parts.append(f"moved the policy by KL ≈ {update['kl_moved']:.4f} (floor {update.get('kl_floor', 0.0):.4f})")
+        parts.append(f"{update.get('optimizer_steps', 0):g} steps")
     parts.append(f"clipped {float(update.get('clip_fraction', 0.0)):.1%}")
     parts.append(f"mean ratio {float(update.get('mean_ratio', 1.0)):.4f}")
     if "gradient_norm" in update:
@@ -171,13 +172,13 @@ def chart(iterations: Sequence[Mapping[str, Any]], tasks: Sequence[Task] | None 
     trainings = [(at, update) for at, line in zip(when, iterations, strict=True) if (update := update_of(line))]
     if trainings:
         times = [at for at, _ in trainings]
-        if any("approx_kl" in update for _, update in trainings):
+        if any("kl_moved" in update for _, update in trainings):
             training.plot(
                 times,
-                [update.get("approx_kl", float("nan")) for _, update in trainings],
+                [update.get("kl_moved", float("nan")) for _, update in trainings],
                 marker="o",
                 color="#00798c",
-                label="approximate KL",
+                label="KL the update moved the policy",
             )
         training.plot(
             times,

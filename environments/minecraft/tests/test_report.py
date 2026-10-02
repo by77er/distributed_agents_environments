@@ -12,7 +12,15 @@ from minecraft_swarm.tasks import catalog
 
 
 def iterations() -> list[dict[str, Any]]:
-    update = {"loss": -0.002, "clip_fraction": 0.004, "mean_ratio": 1.0002, "approx_kl": 0.0123, "tokens": 6800.0}
+    update = {
+        "loss": -0.002,
+        "clip_fraction": 0.004,
+        "mean_ratio": 1.0002,
+        "kl_moved": 0.0123,
+        "kl_floor": 0.0009,
+        "optimizer_steps": 9.0,
+        "tokens": 6800.0,
+    }
     return [
         {"iteration": 1, "task": "t001", "rewards": [9.0, 9.0], "solved": [True, True], "failed": 0, "seconds": 1800,
          "unlocked": 7, "adapter_step": 0, "update": "skipped: every episode scored the same"},
@@ -42,7 +50,8 @@ def test_the_summary_gives_the_latest_group_the_task_set_and_the_trainers_statis
     text = summary(directory, lines)
     assert "iteration 2, 1.0 h in, 1 updates (adapter step 1)" in text
     assert "rewards 0 / 2 / 10 / 11 (mean 5.75, sd 4.82); solved 3/4" in text
-    assert "KL to the sampling policy ≈ 0.0123" in text and "clipped 0.4%" in text and "96 turns" in text
+    assert "moved the policy by KL ≈ 0.0123 (floor 0.0009), 9 steps" in text
+    assert "clipped 0.4%" in text and "96 turns" in text
     assert "**Task set:** 7 of 59 unlocked" in text
     assert "`t001` skills, diamonds, items, kit none — 1 groups, solved 100%, mean reward 9.0" in text
     assert "`t003` skills, diamonds, chests, kit none — 1 groups, solved 75%, mean reward 5.8" in text

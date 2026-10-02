@@ -72,6 +72,12 @@ def test_diamond_tasks_reward_the_diamonds_the_team_holds() -> None:
     assert score(task, {"team_diamonds": 0}) == 0.0 and not solved(task, {"team_diamonds": 0})
 
 
+def test_a_diamond_task_is_solved_by_most_of_what_was_laid_out_or_by_one_diamond_each() -> None:
+    staged, ore = find(Start.CHESTS, Kit.NONE), find(Start.ORE_IN_SIGHT, Kit.IRON)
+    assert not solved(staged, {"team_diamonds": 6}, available=12) and solved(staged, {"team_diamonds": 7}, available=12)
+    assert not solved(ore, {"team_diamonds": 3}, available=274) and solved(ore, {"team_diamonds": 4}, available=274)
+
+
 def test_progress_tasks_reward_milestones_once_and_are_solved_by_their_own() -> None:
     task = find(Start.FORTRESS, Kit.FORTRESS_READY)
     assert task.goal == "nether/obtain_blaze_rod"
@@ -91,6 +97,9 @@ def test_hurting_the_dragon_counts_and_killing_it_counts_most() -> None:
     killed: dict[str, Any] = {"team_diamonds": 0, "team_advancements": ["end/kill_dragon"], "dragon_damage": 1.0}
     assert 0 < score(task, hurt) < score(task, killed) == MILESTONES["end/kill_dragon"]
     assert not solved(task, hurt) and solved(task, killed)
+    # A dragon that died with no player credited for it (the advancement goes to a player) is as dead.
+    uncredited: dict[str, Any] = {"team_advancements": [], "dragon_damage": 1.0, "dragon_killed": True}
+    assert score(task, uncredited) == score(task, killed) and solved(task, uncredited)
     whole_game = catalog()[-1]
     assert score(whole_game, {"team_advancements": list(MILESTONES)}) == sum(MILESTONES.values())
 
@@ -119,9 +128,19 @@ def test_crafting_tasks_reward_each_step_of_the_chain_once_and_are_solved_by_the
         )
     }
     assert score(task, whole) == sum(weight for _, _, weight in CHAINS["stone_pickaxe"]) == 13 and solved(task, whole)
+    # The item made is the whole chain, however it was made: a furnace takes cobblestone, not a stone pickaxe.
+    furnace = next(t for t in catalog() if t.goal == "furnace")
+    obtained: dict[str, int] = dict.fromkeys(("oak_log", "oak_planks", "stick", "wooden_pickaxe", "cobblestone"), 1)
+    direct = {"team_obtained": obtained}
+    assert score(furnace, direct) == 8 and not solved(furnace, direct)  # no table, no stone pickaxe, no furnace
+    obtained["furnace"] = 1
+    assert score(furnace, direct) == sum(weight for _, _, weight in CHAINS["furnace"]) and solved(furnace, direct)
     text = goal(task)
     assert text.startswith("Goal: together, make a stone pickaxe. You start with nothing")
-    assert text.endswith("logs, planks, a crafting table, sticks, a wooden pickaxe, cobblestone, a stone pickaxe.")
+    assert text.endswith(
+        "logs, planks, a crafting table, sticks, a wooden pickaxe, cobblestone, a stone pickaxe. "
+        "The game is over when it is made."
+    )
     assert next(t.goal for t in catalog() if t.objective is Objective.CRAFT) == "crafting_table"  # the shortest first
 
 
@@ -174,3 +193,59 @@ def test_gear_is_dealt_by_coordination() -> None:
 
     nothing = kits(find(Start.SURFACE, Kit.NOTHING, tier=Tier.GAME), TEAM, random.Random(1))
     assert all(inventory == [] for inventory in nothing.values())
+
+
+class Site:
+    """Stands in for the plugin's setup API: remembers what a builder asked for."""
+
+    def __init__(self) -> None:
+        self.piles: list[tuple[int, int, int]] = []
+        self.blocks: dict[tuple[int, int, int], str] = {}
+        self.carved: list[tuple[int, int, int, int, int, int]] = []
+
+    async def carve(self, x: int, y: int, z: int, *, width: int, height: int, depth: int, **_: Any) -> None:
+        self.carved.append((x, y, z, width, height, depth))
+
+    async def standing_spots(
+        self, x: int, y: int, z: int, *, radius: int, limit: int, world: str
+    ) -> list[dict[str, int]]:
+        cells = [(x + dx, y, z + dz) for dx in range(-radius, radius + 1) for dz in range(-radius, radius + 1)]
+        cells.sort(key=lambda cell: (cell[0] - x) ** 2 + (cell[2] - z) ** 2)
+        return [{"x": cx, "y": cy, "z": cz} for cx, cy, cz in cells[:limit]]
+
+    async def drop_items(self, x: int, y: int, z: int, items: list[dict[str, Any]]) -> int:
+        self.piles.append((x, y, z))
+        return sum(int(item["count"]) for item in items)
+
+    async def set_block(self, x: int, y: int, z: int, block: str) -> None:
+        self.blocks[(x, y, z)] = block
+
+    async def ores(self, x: int, y: int, z: int, *, radius: int = 32, exposed: bool = False) -> list[dict[str, int]]:
+        return [{"x": 10, "y": -55, "z": 10}] if radius >= 24 else []
+
+
+async def test_no_one_starts_within_reach_of_the_diamonds_on_the_floor() -> None:
+    from minecraft_swarm.tasks import _items  # pyright: ignore[reportPrivateUsage]
+
+    task = find(Start.ITEMS, Kit.NONE)
+    for seed in range(40):
+        control = Site()
+        site = await _items(task, control, random.Random(seed))  # type: ignore[arg-type]
+        assert len(site.starts) == 4 and len(set(site.starts)) == 4 and 3 <= len(control.piles) <= 5
+        for px, _, pz in control.piles:
+            assert all(max(abs(px - sx), abs(pz - sz)) > 2 for sx, _, sz in site.starts), (seed, site.starts)
+        (x, _, z, width, _, depth) = control.carved[0]
+        assert all(x <= px < x + width and z <= pz < z + depth for px, _, pz in control.piles)  # in the room
+
+
+async def test_the_stone_kit_finds_iron_in_the_wall_of_its_pocket() -> None:
+    from minecraft_swarm.tasks import _ore_in_sight  # pyright: ignore[reportPrivateUsage]
+
+    control = Site()
+    await _ore_in_sight(find(Start.ORE_IN_SIGHT, Kit.STONE), control, random.Random(1))  # type: ignore[arg-type]
+    (x, y, z, width, _, depth) = control.carved[0]
+    assert len(control.blocks) == 6 and set(control.blocks.values()) == {"deepslate_iron_ore"}
+    assert all(bx == x + width and y <= by <= y + 1 and z < bz < z + depth - 1 for bx, by, bz in control.blocks)
+    with_iron = Site()
+    await _ore_in_sight(find(Start.ORE_IN_SIGHT, Kit.IRON), with_iron, random.Random(1))  # type: ignore[arg-type]
+    assert not with_iron.blocks  # who has an iron pickaxe is given no iron

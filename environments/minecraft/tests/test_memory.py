@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from minecraft_swarm.episode import TURN_GROWTH, SwarmEpisode
+from minecraft_swarm.episode import NO_CALL, ONE_CALL, SUMMARY_TOKENS, TURN_GROWTH, Memory, SwarmEpisode, action, answer
 from minecraft_swarm.prompts import COMPACT, TEAM
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
 from pydantic import JsonValue
@@ -114,12 +114,14 @@ class Remembering:
     """Waits every turn; asked what to remember, answers with a numbered summary. Keeps every request it gets.
 
     It reports 100 tokens of input per message, as an endpoint reports the tokens a prompt took; or, with `overflow`,
-    reports nothing and refuses any acting context of more than that many messages."""
+    reports nothing and refuses any acting context of more than that many messages. The prompts of the agent named
+    `wordy` take 600 tokens more than the others'."""
 
-    def __init__(self, overflow: int | None = None) -> None:
+    def __init__(self, overflow: int | None = None, wordy: str | None = None) -> None:
         self.requests: list[SampleRequest] = []
         self.summaries: dict[str, int] = {}
         self.overflow = overflow
+        self.wordy = wordy
 
     def describe(self, session_id: str) -> CapabilityContract:
         return CapabilityContract(context_limit=LIMIT, max_output_tokens=OUTPUT)
@@ -133,10 +135,10 @@ class Remembering:
         if self.overflow is not None and not compacting and messages > self.overflow:
             raise ContextOverflow(LIMIT)
         self.requests.append(request)
-        tokens = None if self.overflow is not None else 100 * messages
+        agent = request.session_id.rsplit("/", 1)[-1]
+        tokens = None if self.overflow is not None else 100 * messages + (600 if agent == self.wordy else 0)
         usage = Usage(context_used=tokens or 1, context_limit=LIMIT, input_tokens=tokens)
         if compacting:
-            agent = request.session_id.rsplit("/", 1)[-1]
             self.summaries[agent] = self.summaries.get(agent, 0) + 1
             summary = Message.assistant(f"SUMMARY {self.summaries[agent]} for {agent}")
             return SampleResult(message=summary, finish_reason=FinishReason.STOP, usage=usage)
@@ -227,6 +229,24 @@ async def test_a_crowded_context_is_compacted_into_a_summary_and_stays_bounded(
     assert texts(acting[-1])[1].endswith("SUMMARY 2 for ada")
 
 
+async def test_the_team_compacts_in_the_same_turn_and_a_compaction_has_room_for_the_summary_only() -> None:
+    model = Remembering(wordy="cy")  # cy's context is crowded two turns before the others' would be
+    runner = LocalRunner(providers={"scripted": lambda _: model}, tool_sets={"minecraft": MadeUpWorld()})
+    handle = await runner.start(specification())
+    assert (await handle.result()).status is RunStatus.COMPLETED
+    when: dict[str, list[int]] = {name: [] for name in TEAM}  # the turn each compaction came before
+    turn = dict.fromkeys(TEAM, 0)
+    for request in model.requests:
+        agent = request.session_id.rsplit("/", 1)[-1]
+        if texts(request)[-1] == COMPACT:
+            when[agent].append(turn[agent] + 1)
+            assert request.max_output_tokens == SUMMARY_TOKENS and not request.tools
+        else:
+            turn[agent] += 1
+    assert when["cy"] and when["cy"][0] == 10  # (the others alone would compact before turn 12)
+    assert all(turns == when["cy"] for turns in when.values()), when
+
+
 async def test_an_episode_ends_when_its_turns_are_spent_however_little_game_time_they_took() -> None:
     def spec() -> RunSpecification:
         binding = RunBinding(
@@ -263,3 +283,28 @@ async def test_a_context_that_overflows_is_compacted_and_tried_again() -> None:
     assert len(acting) == 12 and compactions
     assert max(len(request.context.append) for request in acting) <= 20
     assert texts(acting[-1])[1].startswith("What you remember from earlier in this game")
+
+
+def test_every_reply_is_answered_whatever_it_called() -> None:
+    from rollout.core.contracts import Message, Role, ToolResultBlock
+
+    seen = Message.user("You are ada.")
+    done = {"last_action": {"action": {"name": "mine"}, "ok": True, "mined": "stone"}}
+
+    silent = Memory(turns=[[seen, Message.assistant("I wonder.")]])
+    answer(silent, done)
+    assert silent.turns[0][-1].role is Role.USER and silent.turns[0][-1].text == NO_CALL
+
+    first = ToolCall(call_id="c1", name="mine", arguments={"x": 1, "y": 2, "z": 3})
+    second = ToolCall(call_id="c2", name="move", arguments={"direction": "north"})
+    eager = Memory(turns=[[seen, tool_call_reply(first).model_copy(update={"content": [first, second]})]])
+    answer(eager, done)
+    results = [block for block in eager.turns[0][-1].content if isinstance(block, ToolResultBlock)]
+    assert [block.call_id for block in results] == ["c1", "c2"]  # each call has its answer
+    assert results[0].result.content[0].text == "mined: stone"  # type: ignore[union-attr]
+    assert results[1].result.content[0].text == ONE_CALL  # type: ignore[union-attr]
+
+
+def test_an_argument_called_name_does_not_rename_the_action() -> None:
+    call = ToolCall(call_id="c1", name="craft", arguments={"name": "oak_planks", "count": 4})
+    assert action(call) == {"name": "craft", "count": 4}

@@ -11,12 +11,14 @@ shows the last few messages an agent has heard or said, each with its age in tur
 
 What an agent remembers is what its context holds (`Memory`): the current observation in full, with the map; its
 recent turns without their maps (what was in sight, what it did, how that went); and, of everything older, a summary
-it wrote itself. When the context is nearly full (by the tokens its last prompt actually took, which the model
-endpoint reports), the agent is shown its oldest turns once more, with its earlier summary, and asked what to
-remember (`prompts.COMPACT`); its answer replaces them. That is a sample like any other, on the agent's own slot:
-it costs no game time, it is recorded, and it is trained with the episode's advantage, since what an agent chooses
-to remember is part of how it plays. An episode of any length thus keeps a context that fits; should a prompt
-overflow all the same, the agent compacts and tries again.
+it wrote itself. When an agent's context is nearly full (by the tokens its last prompt actually took, which the
+model endpoint reports), every agent with turns to spare is shown its oldest turns once more, with its earlier
+summary, and asked what to remember (`prompts.COMPACT`); its answer replaces them. The team compacts in the same
+turn because a turn takes as long as its slowest agent: four compactions in one turn cost what one does, and in four
+turns four times that. A compaction is a sample like any other, on the agent's own slot, with room for the summary
+and none for thinking it over: it costs no game time, it is recorded, and it is trained with the episode's
+advantage, since what an agent chooses to remember is part of how it plays. An episode of any length thus keeps a
+context that fits; should a prompt overflow all the same, the agent compacts and tries again.
 """
 
 from collections.abc import Mapping
@@ -38,7 +40,15 @@ KEEP_CHARACTERS = 3500
 or five turns), and never more than half of them."""
 MAX_SUMMARY = 2400
 """Characters of summary kept (the engine's limit on an answer is the tighter one)."""
+NO_CALL = "You called no tool, so you did nothing that turn."
+ONE_CALL = "Not done: only your first call of a turn counts."
+SUMMARY_TOKENS = 400
+"""Output a compaction may take: the summary, written straight out."""
+SPARE_TURNS = 4
+"""An agent compacts along with a crowded teammate if it remembers at least this many turns."""
 TICKS_PER_MINUTE = 1200
+SATURATED = "nothing left to earn"
+"""How a result says its episode ended when the team reached everything the task has to give."""
 
 
 @dataclass
@@ -96,6 +106,16 @@ class SwarmEpisode(Program):
                 observations = await run.gather(
                     *(self._call(run, "observe", {"episode": episode, "agent": name}) for name in TEAM)
                 )
+                for name, observation in zip(TEAM, observations, strict=True):
+                    answer(memories[name], observation)
+                if any(crowded(run.models[name]) for name in TEAM):
+                    await run.gather(
+                        *(
+                            self._compact(run, name, memories[name])
+                            for name in TEAM
+                            if crowded(run.models[name]) or len(memories[name].turns) >= SPARE_TURNS
+                        )
+                    )
                 actions = await run.gather(
                     *(
                         self._think(run, name, turn, observation, memories[name])
@@ -120,7 +140,7 @@ class SwarmEpisode(Program):
         for name in TEAM:  # the swarm is rewarded equally
             run.reward(reward, slot=name)
         compactions = max(memory.compactions for memory in memories.values())
-        ended = "nothing left to earn" if done else "game time" if spent >= budget else "turns"
+        ended = SATURATED if done else "game time" if spent >= budget else "turns"
         result = {
             "task": self.task.id,
             "turns": turn,
@@ -134,20 +154,10 @@ class SwarmEpisode(Program):
         self, run: RunContext, name: str, turn: int, observation: Mapping[str, Any], memory: Memory
     ) -> dict[str, JsonValue]:
         """One agent's turn: its context, one sample, and the action it chose (`idle` if it chose none)."""
-        if memory.turns:  # answer the previous call with how it went
-            last = memory.turns[-1]
-            previous = last[-1].tool_calls
-            result = describe_result(observation.get("last_action"))
-            if previous:
-                answered = ToolResultBlock(call_id=previous[0].call_id, result=ToolResult(content=[Text(text=result)]))
-                last.append(Message(role=Role.TOOL, content=[answered]))
-            else:
-                last.append(Message.user(result))
         model = run.models[name]
-        if crowded(model):
-            await self._compact(run, name, memory)
         heard = self.chat[name]
-        heard.extend((turn, str(said["from"]), str(said["message"])) for said in observation.get("messages", []))
+        # (What a teammate said reached this agent after the turn it was said in: the turn before this one.)
+        heard.extend((turn - 1, str(said["from"]), str(said["message"])) for said in observation.get("messages", []))
         del heard[:-CHAT_LINES]
         chat = [(turn - at, who, message) for at, who, message in heard]
         seen = Message.user(describe(observation, chat=chat))
@@ -165,9 +175,10 @@ class SwarmEpisode(Program):
         if not calls:
             return {"name": "idle"}
         call: ToolCall = calls[0]  # one action per turn
-        if call.name == "chat":  # an agent sees what it said among what it heard
-            heard.append((turn, name, " ".join(str(call.arguments.get("message", "")).split())[:240]))
-        return {"name": call.name, **dict(call.arguments)}
+        said = " ".join(str(call.arguments.get("message", "")).split())[:240]
+        if call.name == "chat" and said:  # an agent sees what it said among what it heard
+            heard.append((turn, name, said))
+        return action(call)
 
     async def _compact(self, run: RunContext, name: str, memory: Memory, keep: int | None = None) -> None:
         """Replace the agent's oldest turns with what it says it needs to remember of them. `keep` turns stay as they
@@ -189,8 +200,11 @@ class SwarmEpisode(Program):
             *Memory(memory.summary, old).messages(),
             Message.user(COMPACT),
         ]
+        model = run.models[name]
         try:
-            reply = await run.models[name].sample(context)
+            reply = await model.sample(
+                context, max_output_tokens=min(SUMMARY_TOKENS, model.capabilities.max_output_tokens)
+            )
             summary = reply.text.strip()
         except ContextOverflow:  # too much even to reread: it is forgotten unsummarized
             summary = ""
@@ -205,6 +219,28 @@ class SwarmEpisode(Program):
             detail = "".join(part.text for part in result.content if isinstance(part, Text))
             raise RuntimeError(f"minecraft.{operation} failed: {detail}")
         return result.structured
+
+
+def action(call: ToolCall) -> dict[str, JsonValue]:
+    """A tool call as the harness takes an action: its arguments, and its name (whatever an argument is called)."""
+    return {**dict(call.arguments), "name": call.name}
+
+
+def answer(memory: Memory, observation: Mapping[str, Any]) -> None:
+    """Close the agent's last remembered turn with how its action went (the observation that follows says)."""
+    if not memory.turns:
+        return
+    last = memory.turns[-1]
+    previous = last[-1].tool_calls
+    if not previous:
+        last.append(Message.user(NO_CALL))
+        return
+    results = [describe_result(observation.get("last_action")), *[ONE_CALL] * (len(previous) - 1)]
+    answered = [
+        ToolResultBlock(call_id=call.call_id, result=ToolResult(content=[Text(text=result)]))
+        for call, result in zip(previous, results, strict=True)
+    ]
+    last.append(Message(role=Role.TOOL, content=answered))
 
 
 def crowded(model: Model) -> bool:

@@ -36,7 +36,16 @@ cd "$(dirname "$0")/../../.." || exit 1
 uv run rollout-monitor "$run/feed" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
 trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
-uv run minecraft-swarm train "$run" "$@" >> "$run/train.log" 2>&1  # (a run started again goes on in the same log)
-status=$?
+uv run minecraft-swarm train "$run" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
+trainer=$!
+# A signal to this script goes on to the trainer, and the script waits for it to end: otherwise the trainer would
+# run on alone, with nothing logging its memory.
+trap 'kill -INT "$trainer" 2>/dev/null' INT
+trap 'kill -TERM "$trainer" 2>/dev/null' TERM HUP
+status=0
+while kill -0 "$trainer" 2>/dev/null; do
+  wait "$trainer"
+  status=$?
+done
 echo "exit $status" >> "$run/train.log"
 exit "$status"

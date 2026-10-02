@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_the_harness_builds_the_map_from_line_of_sight_only_and_times_digs_as_the_game_does() -> None:
     ran = subprocess.run(
-        ["node", "--test", "test/map.test.js", "test/data.test.js"],
+        ["node", "--test", "test/map.test.js", "test/data.test.js", "test/actions.test.js"],
         cwd=HARNESS,
         capture_output=True,
         text=True,
@@ -42,7 +42,7 @@ def test_the_map_is_drawn_one_grid_per_height_with_absolute_coordinates() -> Non
     feet = lines.index("y=64 (your feet):")
     grid = lines[feet + 1 : feet + 14]
     assert grid[6] == "0 ? ? # . . . @ . . . . . ."  # the corridor runs east from the agent's row
-    assert grid[4] == "-2 ? ? # . . . . . B . # ? ?"  # ben
+    assert grid[4] == "-2 ? ? # . . . . . + . # ? ?"  # ben
     assert grid[8] == "2 ? ? # * . . . . ~ . # ? ?"  # dropped diamonds, and water
     assert grid[10] == "4 ? ? ? # # # # # # # ? ? ?"  # the south wall; behind it, nothing is known
     assert grid[12] == "6 ? ? ? ? ? ? ? ? ? ? ? ? ?"
@@ -50,7 +50,7 @@ def test_the_map_is_drawn_one_grid_per_height_with_absolute_coordinates() -> Non
     assert lines[head + 7] == "0 ? ? d . . . . . . . . . ."  # ore in the west wall
     assert "y=63 (the floor under you): all # where seen" in lines
     assert "y=62 (below the floor): not seen" in lines
-    assert lines[-1] == "On the map: * a dropped item; B ben; d deepslate_diamond_ore; ~ water."
+    assert lines[-1] == "On the map: * a dropped item; + a teammate; d deepslate_diamond_ore; ~ water."
     assert "h" not in "".join(grid)  # no chest
 
 
@@ -63,6 +63,12 @@ def test_an_observation_carries_the_map_and_exact_coordinates_and_earlier_turns_
     assert "Map of what you have seen within 6 blocks" in text
     assert "Notable in sight: deepslate_diamond_ore at (-4, 65, 0), 4.3 away." in text
     assert "Dropped items: 3 diamond at (-3, 64, 2)." in text
+    # The blocks that touch the agent are spelled out with their coordinates: nothing to count along a row.
+    beside = text[text.index("Next to you") : text.index("Notable in sight")].splitlines()
+    assert beside[0] == "Next to you, at head height and at foot height:"
+    assert beside[1] == "- north: (0, 65, -1) empty, (0, 64, -1) empty"
+    assert beside[3] == "- east: (1, 65, 0) empty, (1, 64, 0) empty"
+    assert beside[5] == "- over your head: (0, 66, 0) empty; under your feet: (0, 63, 0) stone"
     assert "notes" not in text  # agents keep no notes: what they remember is what their context holds
     assert text.endswith(
         "Team chat, oldest first:\n- ben, 3 turns ago: I go east\n- you, this turn: ore in the west wall"
@@ -71,7 +77,7 @@ def test_an_observation_carries_the_map_and_exact_coordinates_and_earlier_turns_
     assert "Open space" not in text and "You see mostly" not in text  # the map shows it
     recalled = describe(seen, chat=chat, recalled=True)  # how the turn stays in memory: no map, no chat
     assert recalled.splitlines()[:2] == text.splitlines()[:2]
-    assert "Map of what you have seen" not in recalled and "Team chat" not in recalled
+    assert "Map of what you have seen" not in recalled and "Team chat" not in recalled and "Next to" not in recalled
     assert "Notable in sight: deepslate_diamond_ore at (-4, 65, 0), 4.3 away." in recalled
     assert "Dropped items: 3 diamond at (-3, 64, 2)." in recalled
 

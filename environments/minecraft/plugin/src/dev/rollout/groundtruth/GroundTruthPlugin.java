@@ -64,8 +64,11 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>GET /state: every player's position, health, food, inventory and diamonds; the team's total diamonds, the
  *       advancements it earned since the baseline, what it got hold of since then (picked up, crafted, smelted), and
  *       the most the dragon was hurt.</li>
- *   <li>GET /tick, POST /tick {"action": "freeze" | "unfreeze" | "step", "ticks": n}: a step runs n ticks of a
- *       frozen game and answers when they have run.</li>
+ *   <li>GET /tick, POST /tick {"action": "freeze" | "unfreeze" | "step" | "run" | "stop", "ticks": n}: a step runs n
+ *       ticks of a frozen game and answers when they have run; a run starts n ticks and answers at once, and a stop
+ *       ends it early and says how many ran. While the game is frozen and not stepping, team members are held as
+ *       they were: the game itself does not freeze players, whose hunger, air, fire and health would run on in
+ *       real time while agents think.</li>
  *   <li>POST /episode: set up the team (one scoreboard team without friendly fire; clear, kit with armor worn,
  *       teleport to any dimension, respawn there, game mode) and the worlds (difficulty, time, rules).</li>
  *   <li>GET /ores?x&amp;y&amp;z&amp;radius&amp;exposed: diamond ores near a point, for choosing starts (never agents).</li>
@@ -73,9 +76,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *       creatures, moves the server refused, the dragon's death).</li>
  *   <li>POST /baseline: remember each team member's advancements now; /state then reports only newer ones (a kit can
  *       itself grant advancements, which an episode should not be rewarded for).</li>
- *   <li>Setup, for building tasks: POST /setup/carve (a lit, empty box with a floor), /setup/items (dropped items),
- *       /setup/chest (a chest with contents), /setup/block (one block), /setup/spawn (a creature), /setup/time,
- *       /setup/food (a player's hunger);
+ *   <li>Setup, for building tasks: POST /setup/carve (a lit, empty box with a floor, sealed against liquids and
+ *       falling blocks), /setup/items (dropped items), /setup/chest (a chest with contents), /setup/block (one
+ *       block), /setup/spawn (a creature), /setup/time, /setup/food (a player's hunger), /setup/generate (generate
+ *       the overworld's chunks around the origin and save them, for a server template);
  *       GET /setup/stand (safe places to stand), /setup/surface (the ground's height), /setup/locate (the nearest
  *       structure), /setup/blocks (blocks of one type near a point).</li>
  * </ul>
@@ -93,6 +97,8 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
     private final Set<String> teamEarned = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> teamObtained = new ConcurrentHashMap<>();
     private final Map<String, Long> lastFailedMove = new ConcurrentHashMap<>();
+    private final Map<java.util.UUID, Held> held = new HashMap<>();
+    private long runStarted = 0;
     private volatile boolean dragonKilled = false;
     private volatile double dragonDamage = 0.0;
     private final ConcurrentLinkedDeque<JsonObject> events = new ConcurrentLinkedDeque<>();
@@ -135,7 +141,9 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         route("/setup/spawn", this::spawnEntity);
         route("/setup/time", this::setTime);
         route("/setup/food", this::setFood);
+        route("/setup/generate", this::generate);
         getServer().getPluginManager().registerEvents(this, this);
+        Bukkit.getScheduler().runTaskTimer(this, this::holdPlayers, 1L, 1L);  // (the scheduler runs while frozen)
         http.start();
         getLogger().info("control API on 127.0.0.1:" + port);
     }
@@ -154,6 +162,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             JsonObject result = new JsonObject();
             result.addProperty("ready", true);
             result.addProperty("version", Bukkit.getMinecraftVersion());
+            result.addProperty("server", System.getProperty("rollout.server.name", ""));
             JsonArray online = new JsonArray();
             for (Player player : Bukkit.getOnlinePlayers()) {
                 online.add(player.getName());
@@ -227,6 +236,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     if (!ticks.isFrozen()) {
                         ticks.setFrozen(true);
                     }
+                    releasePlayers();
                     return ticks.stepGameIfFrozen(count);
                 });
                 if (!started) {
@@ -243,9 +253,157 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                 result.addProperty("stepped", onMainThread(() -> overworld().getGameTime()) - before);
                 return result;
             }
-            default -> throw new IllegalArgumentException("action must be freeze, unfreeze or step");
+            case "run" -> {  // start the ticks and answer at once: whoever asked watches the bots and stops it
+                int count = body.get("ticks").getAsInt();
+                if (count < 1 || count > 20 * 60 * 10) {
+                    throw new IllegalArgumentException("ticks must be between 1 and 12000");
+                }
+                boolean started = onMainThread(() -> {
+                    if (!ticks.isFrozen()) {
+                        ticks.setFrozen(true);
+                    }
+                    releasePlayers();
+                    runStarted = overworld().getGameTime();
+                    return ticks.stepGameIfFrozen(count);
+                });
+                if (!started) {
+                    throw new IllegalStateException("the game could not step");
+                }
+            }
+            case "stop" -> {
+                return onMainThread(() -> {
+                    ticks.stopStepping();
+                    JsonObject result = tickState();
+                    result.addProperty("stepped", overworld().getGameTime() - runStarted);
+                    return result;
+                });
+            }
+            default -> throw new IllegalArgumentException("action must be freeze, unfreeze, step, run or stop");
         }
         return onMainThread(this::tickState);
+    }
+
+    // Players while the game is frozen. A tick freeze stops the world and its creatures, not players: they would
+    // go hungry, heal, drown and burn in real time while the agents think (half a minute a turn, a quarter of an
+    // hour during an update). So when the stepping ends each team member is noted as it is, and held so until the
+    // game steps again.
+
+    private record Held(int air, int fire, int food, float saturation, float exhaustion,
+            java.util.Collection<org.bukkit.potion.PotionEffect> effects) {}
+
+    private static boolean paused() {
+        ServerTickManager ticks = Bukkit.getServerTickManager();
+        return ticks.isFrozen() && !ticks.isStepping();
+    }
+
+    private boolean heldStill(org.bukkit.entity.Entity entity) {
+        return entity instanceof Player player && paused() && team.contains(player.getName().toLowerCase(Locale.ROOT));
+    }
+
+    /** Every server heartbeat: note the team when the game stops stepping, and keep it as noted while it is paused. */
+    private void holdPlayers() {
+        if (!paused()) {
+            held.clear();
+            return;
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (!team.contains(player.getName().toLowerCase(Locale.ROOT)) || player.isDead()) {
+                continue;
+            }
+            Held was = held.get(player.getUniqueId());
+            if (was == null) {
+                held.put(player.getUniqueId(), new Held(player.getRemainingAir(), player.getFireTicks(),
+                        player.getFoodLevel(), player.getSaturation(), player.getExhaustion(),
+                        new java.util.ArrayList<>(player.getActivePotionEffects())));
+                continue;
+            }
+            player.setRemainingAir(was.air());
+            player.setFireTicks(was.fire());
+            player.setFoodLevel(was.food());
+            player.setSaturation(was.saturation());
+            player.setExhaustion(was.exhaustion());
+        }
+    }
+
+    /** As the game is about to step: effects get back the time they had when it stopped. */
+    private void releasePlayers() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            Held was = held.remove(player.getUniqueId());
+            if (was == null || player.isDead()) {
+                continue;
+            }
+            for (org.bukkit.potion.PotionEffect effect : was.effects()) {
+                player.addPotionEffect(effect, true);
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onDamageWhilePaused(org.bukkit.event.entity.EntityDamageEvent event) {
+        if (heldStill(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onHealingWhilePaused(org.bukkit.event.entity.EntityRegainHealthEvent event) {
+        if (heldStill(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onHungerWhilePaused(org.bukkit.event.entity.FoodLevelChangeEvent event) {
+        if (heldStill(event.getEntity()) && event.getItem() == null) {  // (eating is an action, and has ended)
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onExhaustionWhilePaused(org.bukkit.event.entity.EntityExhaustionEvent event) {
+        if (heldStill(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onAirWhilePaused(org.bukkit.event.entity.EntityAirChangeEvent event) {
+        if (heldStill(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Generate the overworld's chunks within `radius` chunks of the origin, and save them (for a server template:
+     * servers copied from it then hold the same chunks, where each generating its own gave slightly different
+     * worlds from one seed). */
+    private JsonElement generate(String method, Map<String, String> query, JsonObject body) throws Exception {
+        int radius = body.get("radius").getAsInt();
+        if (radius < 0 || radius > 40) {
+            throw new IllegalArgumentException("radius is in chunks, at most 40");
+        }
+        World world = overworld();
+        java.util.List<java.util.concurrent.CompletableFuture<Void>> pending = new java.util.ArrayList<>();
+        int chunks = 0;
+        for (int cx = -radius; cx <= radius; cx++) {
+            for (int cz = -radius; cz <= radius; cz++) {
+                java.util.concurrent.CompletableFuture<Void> done = new java.util.concurrent.CompletableFuture<>();
+                int x = cx, z = cz;
+                Bukkit.getScheduler().runTask(this, () -> world.getChunkAtAsync(x, z, true, chunk -> done.complete(null)));
+                pending.add(done);
+                chunks++;
+                if (pending.size() >= 256) {  // a row or so at a time, so that memory holds
+                    java.util.concurrent.CompletableFuture.allOf(pending.toArray(new java.util.concurrent.CompletableFuture[0]))
+                            .get(300, TimeUnit.SECONDS);
+                    pending.clear();
+                }
+            }
+        }
+        java.util.concurrent.CompletableFuture.allOf(pending.toArray(new java.util.concurrent.CompletableFuture[0]))
+                .get(300, TimeUnit.SECONDS);
+        onMainThread(() -> { world.save(); return null; });
+        JsonObject result = new JsonObject();
+        result.addProperty("chunks", chunks);
+        return result;
     }
 
     private JsonElement episode(String method, Map<String, String> query, JsonObject body) throws Exception {
@@ -253,6 +411,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             throw new IllegalArgumentException("POST an episode");
         }
         return onMainThread(() -> {
+            held.clear();  // what is held while the game is frozen is the team as set up here
             team.clear();
             lastKnownDiamonds.clear();
             for (JsonElement name : body.getAsJsonArray("team")) {
@@ -411,11 +570,31 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             for (int dx = 0; dx < width; dx++) {
                 for (int dz = 0; dz < depth; dz++) {
                     Block below = world.getBlockAt(x0 + dx, y0 - 1, z0 + dz);
-                    if (!below.getType().isSolid() || below.getType() == Material.MAGMA_BLOCK) {
+                    if (!below.getType().isSolid() || below.getType().hasGravity() || below.getType() == Material.MAGMA_BLOCK) {
                         below.setType(floor == null ? Material.STONE : floor, false);
                     }
                     for (int dy = 0; dy < height; dy++) {
                         world.getBlockAt(x0 + dx, y0 + dy, z0 + dz).setType(Material.AIR, false);
+                    }
+                }
+            }
+            // The box's shell: what would flow or fall into the room (water, lava, gravel, sand) becomes the floor's
+            // material. A room carved beside water with a gravel floor once drowned a team in a "safe" task.
+            Material wall = floor == null ? Material.STONE : floor;
+            for (int dx = -1; dx <= width; dx++) {
+                for (int dy = -1; dy <= height; dy++) {
+                    for (int dz = -1; dz <= depth; dz++) {
+                        boolean inside = dx >= 0 && dx < width && dy >= 0 && dy < height && dz >= 0 && dz < depth;
+                        if (inside) {
+                            continue;
+                        }
+                        Block shell = world.getBlockAt(x0 + dx, y0 + dy, z0 + dz);
+                        Material type = shell.getType();
+                        boolean waterlogged = shell.getBlockData() instanceof org.bukkit.block.data.Waterlogged logged
+                                && logged.isWaterlogged();
+                        if (shell.isLiquid() || waterlogged || type.hasGravity() || type == Material.MAGMA_BLOCK) {
+                            shell.setType(wall, false);
+                        }
                     }
                 }
             }
@@ -497,6 +676,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             }
             player.setFoodLevel(body.get("food").getAsInt());
             player.setSaturation(0f);
+            held.clear();  // what is held while the game is frozen is the player as set up
             return new JsonObject();
         });
     }
@@ -631,11 +811,19 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
 
     private static boolean safeToStand(World world, int x, int y, int z) {
         Material floor = world.getBlockAt(x, y - 1, z).getType();
-        if (!floor.isSolid() || floor == Material.MAGMA_BLOCK || floor == Material.POWDER_SNOW) {
+        if (!floor.isSolid() || floor == Material.MAGMA_BLOCK || floor == Material.POWDER_SNOW
+                || floor == Material.CACTUS || floor.name().endsWith("CAMPFIRE")
+                || org.bukkit.Tag.LEAVES.isTagged(floor)) {  // (a canopy is not the ground the team stands on)
             return false;
         }
         if (!world.getBlockAt(x, y, z).isPassable() || !world.getBlockAt(x, y + 1, z).isPassable()) {
             return false;
+        }
+        for (int dy = 0; dy <= 1; dy++) {
+            Material in = world.getBlockAt(x, y + dy, z).getType();
+            if (HARMFUL.contains(in)) {
+                return false;
+            }
         }
         if (world.getBlockAt(x, y, z).isLiquid() || world.getBlockAt(x, y + 1, z).isLiquid()) {
             return false;
@@ -651,6 +839,9 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         }
         return true;
     }
+
+    private static final Set<Material> HARMFUL = Set.of(Material.FIRE, Material.SOUL_FIRE, Material.COBWEB,
+            Material.SWEET_BERRY_BUSH, Material.WITHER_ROSE, Material.NETHER_PORTAL, Material.END_PORTAL);
 
     private static World world(JsonObject body) {
         World world = Bukkit.getWorld(body.has("world") ? body.get("world").getAsString() : "world");
