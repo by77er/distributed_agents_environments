@@ -1,0 +1,24 @@
+# One machine with one 16 GB GPU: a single engine, and a trainer that shares its card (the engine sleeps while it
+# steps). `rollout train environments/minecraft/profiles/one-gpu.toml minecraft_swarm.catalog:catalog`
+directory = "~/.cache/rollout/runs/swarm"
+
+[channels.policy]
+model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
+renderer = "qwen3.5"
+thinking_tokens = 1024           # thoughts here run to a median of 530 tokens and a 95th percentile of 820
+answer_tokens = 400              # a tool call takes about 40; a summary of old turns up to this
+engines = [{ gpu_share = 0.78, max_model_len = 8192, concurrency = 20 }]   # at 0.85 the card was full
+
+[trainer]
+rank = 32
+learning_rate = 5e-5
+sequence_tokens = 8000           # peak 12.4 GiB at 8,000 tokens; past the card's memory a step crawls
+sequences_per_step = 384         # 4 to 8 s each: about half an hour a step
+colocated = true
+
+[tools]
+minecraft = "minecraft_swarm.worlds:tools"
+
+[memory]
+runs_gib = 6                     # each episode runs a Paper server
+training_gib = 4

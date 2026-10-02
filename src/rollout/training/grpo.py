@@ -1,20 +1,15 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # (torch's annotations leave parts of autograd untyped.)
-"""Group-relative policy optimization for recorded turns.
+"""The clipped policy-gradient step over weighted sequences.
 
-- **Advantages** (Dr. GRPO): an episode's reward minus its group's mean, without dividing by the group's standard
-  deviation (which favors groups that are nearly solved or nearly hopeless). Every sampled turn of the episode gets
-  it: in a swarm, every agent's turns, so the swarm is rewarded equally.
-- **Dynamic sampling** (DAPO): a group whose rewards are all equal carries no signal and is skipped.
-- **Update**: PPO's clipped objective against the behavior policy, the logprobs the engine recorded while sampling
-  (as asynchronous RL does): one pass both corrects the engine/trainer mismatch and bounds each update. The clip is
-  asymmetric (DAPO's clip-higher: 1 - 0.2 to 1 + 0.28) and the loss is a token-level mean over each minibatch.
-  No KL penalty; the pass stops early if the policy has moved further from the behavior policy than `max_kl`.
-  Tokens the recorder forced (closing an over-budget thought) are never trained on.
+PPO's clipped objective against the behavior policy, the logprobs the engine recorded while sampling (as asynchronous
+RL does): one pass both corrects the engine/trainer mismatch and bounds each update. The clip is asymmetric (DAPO's
+clip-higher: 1 - 0.2 to 1 + 0.28) and the loss is a token-level mean over each minibatch. No KL penalty; the pass
+stops early if the policy has moved further from the behavior policy than `max_kl`. Only tokens the policy sampled
+are trained on. Which sequences, and with what advantages, is the algorithm's business (`rollout.training.algorithm`).
 """
 
 import random
-import statistics
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -22,6 +17,8 @@ from typing import Protocol
 
 import torch
 from torch import nn
+
+from rollout.training.trainer import Weighted
 
 
 class TrainablePolicy(Protocol):
@@ -32,24 +29,6 @@ class TrainablePolicy(Protocol):
     def parameters(self) -> list[nn.Parameter]: ...
 
     def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor: ...
-
-
-@dataclass(frozen=True)
-class TrainingSequence:
-    tokens: list[int]
-    loss_mask: list[bool]
-    """True for tokens the policy sampled (the prompt and forced tokens are False)."""
-    behavior_logprobs: list[float]
-    """Per token (NaN where `loss_mask` is False)."""
-    advantage: float
-
-
-def group_advantages(rewards: Sequence[float]) -> list[float] | None:
-    """Each reward minus the group's mean; None when all are equal (no signal)."""
-    if len(rewards) < 2 or max(rewards) == min(rewards):
-        return None
-    mean = statistics.fmean(rewards)
-    return [reward - mean for reward in rewards]
 
 
 @dataclass
@@ -74,25 +53,13 @@ class GroupRelativeTrainer:
     def __post_init__(self) -> None:
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=self.learning_rate, weight_decay=0.0)
 
-    def to(self, device: str) -> None:
-        """Move the policy and the optimizer's state (between steps, to share the GPU with an engine)."""
-        self.policy.model.to(device)
-        for state in self.optimizer.state.values():
-            for key, value in state.items():
-                if isinstance(value, torch.Tensor):
-                    state[key] = value.to(device)
-        if device != "cpu":
-            torch.cuda.synchronize()
-        else:
-            torch.cuda.empty_cache()
-
-    def step(self, sequences: Sequence[TrainingSequence], *, seed: int = 0) -> dict[str, float]:
+    def step(self, sequences: Sequence[Weighted], *, seed: int = 0) -> dict[str, float]:
         """One pass over the sequences, in shuffled minibatches of about `tokens_per_step` sampled tokens."""
         started = time.monotonic()
         order = [
             sequence
             for sequence in sequences
-            if self.max_sequence_tokens is None or len(sequence.tokens) <= self.max_sequence_tokens
+            if self.max_sequence_tokens is None or len(sequence.epoch.tokens) <= self.max_sequence_tokens
         ]
         too_long = len(sequences) - len(order)
         random.Random(seed).shuffle(order)
@@ -104,16 +71,17 @@ class GroupRelativeTrainer:
         out_of_memory = 0
         stopped = False
         for batch in batches:
-            batch_tokens = sum(sum(sequence.loss_mask) for sequence in batch)
+            batch_tokens = sum(sequence.epoch.sampled for sequence in batch)
             sums = dict.fromkeys(totals, 0.0)
             divergence = 0.0
             try:
                 for sequence in batch:
-                    positions = [index for index, sampled in enumerate(sequence.loss_mask) if sampled and index > 0]
+                    epoch = sequence.epoch
+                    positions = [position for span in epoch.spans for position in range(span.start, span.end)]
                     if not positions:
                         continue
-                    logprobs = self.policy.logprobs(sequence.tokens, positions)
-                    behavior = torch.tensor([sequence.behavior_logprobs[i] for i in positions], device=logprobs.device)
+                    logprobs = self.policy.logprobs(epoch.tokens, positions)
+                    behavior = torch.tensor(epoch.logprobs, device=logprobs.device)
                     if not bool(torch.isfinite(behavior).all()):  # (one NaN would make every weight NaN)
                         raise ValueError("a sampled token has no behavior logprob")
                     ratio = torch.exp(logprobs - behavior)
@@ -164,7 +132,7 @@ class GroupRelativeTrainer:
             "sequences": totals["sequences"],
             "sequences_given": float(len(sequences)),
             "sequences_too_long": float(too_long),
-            "longest_sequence_tokens": float(max((len(sequence.tokens) for sequence in order), default=0)),
+            "longest_sequence_tokens": float(max((len(sequence.epoch.tokens) for sequence in order), default=0)),
             "optimizer_steps": float(len(gradient_norms)),
             "stopped_at_max_kl": float(stopped),
             "minibatches_out_of_memory": float(out_of_memory),
@@ -172,18 +140,18 @@ class GroupRelativeTrainer:
         }
 
 
-def minibatches(sequences: Sequence[TrainingSequence], tokens_per_step: int) -> list[list[TrainingSequence]]:
+def minibatches(sequences: Sequence[Weighted], tokens_per_step: int) -> list[list[Weighted]]:
     """The sequences in order, cut where a minibatch has reached `tokens_per_step` sampled tokens. A last minibatch
     of less than half that joins the one before: Adam's step is as large for a handful of tokens as for a full
     minibatch."""
-    batches: list[list[TrainingSequence]] = [[]]
+    batches: list[list[Weighted]] = [[]]
     counted = 0
     for sequence in sequences:
         if counted >= tokens_per_step:
             batches.append([])
             counted = 0
         batches[-1].append(sequence)
-        counted += sum(sequence.loss_mask)
+        counted += sequence.epoch.sampled
     if len(batches) > 1 and counted < tokens_per_step / 2:
         batches[-2].extend(batches.pop())
     return [batch for batch in batches if batch]

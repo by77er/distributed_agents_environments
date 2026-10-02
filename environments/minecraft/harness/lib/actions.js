@@ -19,7 +19,7 @@ const WORN = { head: /_helmet$|^carved_pumpkin$|_skull$|_head$/, torso: /_chestp
 
 class ActionError extends Error {}
 
-// Each action: (bot, args, context) → result object. context: { signal, memory, team, harness }.
+// Each action: (bot, args, context) → result object. context: { signal, memory }.
 const ACTIONS = {
   async move_to (bot, { x, y, z }, context) {
     const target = new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z'))

@@ -182,6 +182,22 @@ def agent_program(
     )
 
 
+def bind(reference: ProgramReference, channel: str, *, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding:
+    """A binding that serves every model slot of a program from one recorded channel, and each of its imports from
+    the tool set registered under the import's own name (or as `tools` says)."""
+    program = instantiate(reference)
+    recorded = ModelBinding(recorded=RecordedModel(channel=channel))
+    imports = {name: (tools or {}).get(name) or ToolBinding(local=name) for name in program.imports()}
+    return RunBinding(models=dict.fromkeys(program.model_slots(), recorded), imports=imports)
+
+
+def with_row(reference: ProgramReference, row: JsonValue) -> ProgramReference:
+    """The same program for another row of parameters (for the task loop: the task's parameters)."""
+    if reference.program == qualified_name(AgentProgram) and isinstance(reference.parameters, dict):
+        return reference.model_copy(update={"parameters": {**reference.parameters, "task_parameters": row}})
+    return reference.model_copy(update={"parameters": row})
+
+
 def instantiate(reference: ProgramReference) -> Program:
     """Create the program a reference names."""
     cls = resolve(reference.program)

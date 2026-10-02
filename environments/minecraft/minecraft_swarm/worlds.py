@@ -5,6 +5,8 @@ time while actions happen, and reports the score from the plugin's ground truth.
 its own server from the same world seed and layout seed, so they start identically.
 
 `MinecraftTools` exposes it to programs as the imported tool set `minecraft`: every operation is a recorded effect.
+It is served in the process that runs the episodes (`tools`), or from a machine of its own
+(`rollout tools minecraft_swarm.worlds:tools`), and an episode cannot tell which.
 """
 
 import asyncio
@@ -22,7 +24,7 @@ from pydantic import JsonValue
 
 from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
-from minecraft_swarm.paper import Installation, PaperServer
+from minecraft_swarm.paper import Installation, PaperServer, sweep
 from minecraft_swarm.prompts import TEAM
 from minecraft_swarm.tasks import Built, Objective, Start, Task, build, catalog, score, solved
 from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
@@ -200,11 +202,23 @@ def _object(properties: dict[str, JsonValue], required: list[str]) -> dict[str, 
     return {"type": "object", "properties": properties, "required": list[JsonValue](required)}
 
 
+def tools(directory: Path) -> "MinecraftTools":
+    """The `minecraft` tool set for a deployment whose state is under `directory` (a profile's `[tools]` names this
+    function): worlds on this machine, their logs kept there. Servers a stopped process left behind are removed."""
+    worlds = MinecraftWorlds(logs=directory / "logs")
+    (directory / "logs").mkdir(parents=True, exist_ok=True)
+    sweep(worlds.installation)
+    return MinecraftTools(worlds)
+
+
 class MinecraftTools:
     """The `minecraft` tool set: the world operations an episode program performs, each a recorded effect."""
 
     def __init__(self, worlds: MinecraftWorlds) -> None:
         self.worlds = worlds
+
+    async def close(self) -> None:
+        await self.worlds.close()
 
     def specifications(self) -> Sequence[ToolSpecification]:
         string: JsonValue = {"type": "string"}

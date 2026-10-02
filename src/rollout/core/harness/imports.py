@@ -30,10 +30,13 @@ class ToolSet(Protocol):
 
 
 class ToolBinding(ContractModel):
-    """How an import is served. Exactly one kind is set; more kinds (MCP, HTTP, agent, human) come later."""
+    """How an import is served. Exactly one kind is set."""
 
     local: str | None = None
     """The name of a tool set registered with the runner, in process."""
+    url: str | None = None
+    """A tool set served over HTTP (`rollout.core.harness.remote`): an environment's own infrastructure, wherever it
+    runs."""
 
 
 class Tools:

@@ -2,8 +2,9 @@
 
 > Durable, scalable agents and environments for agent products and reinforcement learning. A Python 3.13 library
 > (`rollout`, managed with uv): tasks define environments and tools, agents decide what the model sees, and a
-> framework-owned loop runs episodes. Status: milestone M0 (the core loop, no GPU). The developer guide describes
-> the code as built; the design docs describe the whole system, including parts not built yet.
+> framework-owned loop runs episodes; rollout jobs turn finished runs into labelled episodes with token traces, a
+> training loop steps a trainer on them, and a deployment profile says which engines and machines stand behind it.
+> The developer guide describes the code as built.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
 are frozen pydantic models; type names are never abbreviated. Every Python example in the guide runs in the test
@@ -11,7 +12,9 @@ suite, and the API reference is generated from the source.
 
 ## Developer guide
 
-- [Guide index](docs/guide/README.md): what is available now, concepts, where each name lives
+- [Guide index](docs/guide/README.md): what is available, concepts, where each name lives
+- [Three ways in](docs/guide/perspectives.md): the surface for building an environment, for designing training,
+  and for deploying
 - [Getting started](docs/guide/getting-started.md): install, a first task, one episode against a scripted model
 - [Tasks](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, extra model slots
 - [Tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as observations
@@ -21,11 +24,21 @@ suite, and the API reference is generated from the source.
 - [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, failures
 - [Models](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
 - [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
+- [Deploying](docs/guide/deploying.md): the profile (channels, engines, trainer, runner, tool sets) and the `rollout` CLI
+
+## Training
+
+- [Rollouts](docs/core/rollouts/README.md): jobs, tickets, the stream of episodes, publishing weights
+- [Episodes](docs/core/trajectories/README.md): what a finished run carries for training
+- [Training](docs/core/training.md): the loop, group-relative advantages, the curriculum, the trainer protocol
+- [Recorder](docs/core/recorder/README.md) and [inference](docs/inference/README.md): channels, engines, token
+  recording, the OpenAI-compatible endpoint for harnesses
+- [Memory](docs/core/harness/memory.md): a context that fits any model, for long episodes
+- [Monitor](docs/core/monitor.md): a live page over a job and its runs
 
 ## Reference
 
-- [API reference](docs/guide/reference.md): every public name in `rollout.core.harness`, `rollout.core.contracts`,
-  `rollout.core.local` and `rollout.core.testing`, with signatures, fields and docstrings
+- [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
 
 ## Design
 

@@ -9,7 +9,6 @@ import httpx
 import pytest
 from minecraft_swarm.episode import SwarmEpisode
 from minecraft_swarm.prompts import TEAM
-from minecraft_swarm.service import RemoteMinecraftTools, create_app
 from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
 
 from rollout.core.contracts import (
@@ -32,6 +31,7 @@ from rollout.core.harness import (
     ToolSet,
     register,
 )
+from rollout.core.harness.remote import RemoteToolSet, serve
 from rollout.core.local import LocalRunner
 from rollout.core.testing import payload, tool_call_reply
 
@@ -70,13 +70,14 @@ def binding() -> RunBinding:
 
 
 @pytest.mark.skipif(shutil.which("java") is None or shutil.which("node") is None, reason="Java and Node are needed")
-@pytest.mark.parametrize("through", ["in-process", "service"])
+@pytest.mark.parametrize("through", ["in process", "over HTTP"])
 async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through: str) -> None:
     worlds = MinecraftWorlds()
     tools: ToolSet = MinecraftTools(worlds)
-    if through == "service":  # the world service over HTTP, served in process
-        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(worlds)), timeout=300)
-        tools = RemoteMinecraftTools("http://worlds", client=client)
+    if through == "over HTTP":  # the worlds served as a tool set, as from a machine of their own
+        transport = httpx.ASGITransport(app=serve(tools))
+        client = httpx.AsyncClient(transport=transport, base_url="http://worlds", timeout=300)
+        tools = RemoteToolSet("http://worlds", client=client, specifications=tools.specifications())
     runner = LocalRunner(providers={"scripted": lambda model: WalkToDiamonds()}, tool_sets={"minecraft": tools})
     parameters: Mapping[str, object] = {"task": "t001", "world_seed": 12345, "layout_seed": 3, "turns": 4}
     specification = RunSpecification(
@@ -100,7 +101,8 @@ async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through:
     turns = result["turns"]
     assert isinstance(turns, int) and 1 <= turns <= 4  # it ends early once every diamond is held
     assert (turns < 4) == (diamonds == result["available_diamonds"])
-    assert isinstance(result["game_minutes"], float) and 0 < result["game_minutes"] <= 3
+    assert isinstance(result["duration"], float) and 0 < result["duration"] <= 3
+    assert result["saturated"] == (diamonds == result["available_diamonds"])
     world_operations = [
         e for e in events if e.type is RunEventType.EFFECT_REQUESTED and payload(e).get("kind") == "tool.call"
     ]

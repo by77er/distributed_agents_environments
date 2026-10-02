@@ -1,106 +1,55 @@
 # Rollouts
 
-Status: **Proposed** · Layer: core · See [ADR-0015](../../decisions/0015-rollout-interface.md), [ADR-0022](../../decisions/0022-rl-interface-extensions.md)
+Status: **Working** (2026-10-02) · Code: `rollout.rollouts` · See [episodes](../trajectories/README.md), [training](../training.md)
 
-## Purpose
+Runs a task's rows at scale and delivers the finished runs as one stream of episodes per job. The caller, typically
+whoever trains, decides what to run, how often and how to group it: a job knows no algorithm.
 
-Runs task rows at scale for training or evaluation and delivers one stream of `Sample`s per job. The caller —
-typically a trainer — decides what to run, how many times, how to group the results and how stale it tolerates
-data. The rollout side knows no algorithm concepts: no group sizes, no advantages, no staleness policy beyond a
-bounded buffer.
+```python
+job = await jobs.start(program=program, binding=binding, in_flight=5, name="train")
+ticket = await job.run({"word": "yes"}, labels={"group": "0001"}, count=4)
+episodes = await ticket.episodes()                 # the ticket's four, once all have ended
+async for episode in job.episodes(cursor):         # or the whole stream, while runs are still going
+    ...
+await job.acknowledge(episode.cursor)
+version = await job.publish("policy", "step-3", "/adapters/step-3")
+```
 
-`RolloutJobs` is a Python protocol. `LocalRolloutJobs` implements it in process on a `LocalRunner` (the local
-profile); a rollout service implements it over the network on a `DurableRunner`.
-
-## Owns / does not own
-
-| Owns | Does not own |
+| | |
 |---|---|
-| Rollout jobs: queued rows, created runs, acknowledged position | What to sample, how to group it, staleness policy (caller) |
-| Admission under the buffer bound (backpressure) | Rewards (task code) |
-| Creating and cancelling runs; resampling infrastructure failures | Tokens and versions (recorder) |
-| Publishing weights for the job's trainable channels | Sample assembly ([trajectories](../trajectories/README.md)) |
+| `Jobs.start(program, binding, in_flight, name)` | A job that runs `program` (each ticket's row as its parameters) under `binding`, at most `in_flight` runs at a time. A named job finds its log again in a later process. |
+| `Job.run(parameters, labels, count)` | Queues `count` runs of one row. They start together, when there is room for all of them; the labels go to the runs and their episodes. |
+| `Job.episodes(cursor)` | Every episode after a cursor, then new ones as runs end. Episodes are numbered from 1 in the order they ended. |
+| `Ticket.episodes()` | A ticket's episodes, once every one of its runs has ended. |
+| `Job.acknowledge(cursor)` | The caller has consumed everything through the cursor: it need not be kept. |
+| `Job.publish(channel, adapter, path)` | Serves new weights on a channel; returns its new version. |
+| `Job.note(kind, payload)` | Puts something of the caller's (an update's statistics) where whoever watches the job sees it. |
+| `Job.status()` | Runs queued and running, episodes finished, the cursor acknowledged. |
 
-## Interface
+## Guarantees
 
-```python
-class RolloutJobs(Protocol):
-    def start(self, *, program: ProgramReference, binding: RunBinding, buffer_samples: int,
-              trainable_channels: Mapping[str, str] = {},     # model slot → channel (several policies per job)
-              mode: JobMode = JobMode.TRAIN, attach_transcripts: bool = False,
-              enrichments: Sequence[EnrichmentSpecification] = ()) -> RolloutJob: ...
+- **Every run is an episode**, whatever its outcome: completed, failed (the program raised, or could not start),
+  cancelled. Counts stay exact, and a group is complete when its count is.
+- **Admission.** A ticket's runs start together or not at all, while runs in flight plus the ticket's count fit
+  `in_flight`. With `in_flight` one more than a group, the next group starts when one episode of the group before is
+  still running. A `guard` given to `RolloutJobs` is called before runs are admitted and raises to refuse them.
+- **Asynchronous training** is reading the stream while runs are in flight. Nothing waits for a batch: each sampled
+  token carries the weights version it was sampled at, and the caller decides how stale it tolerates data.
+- **Identical starts** for the runs of a ticket come from the row: they are given the same parameters.
+- **A caller that stops** goes on from its cursor: with a `log` directory, unacknowledged episodes are kept on disk.
 
-class RolloutJob(Protocol):
-    job_id: str
-    def run(self, parameters: Any, *, labels: Mapping[str, str] = {}, count: int = 1,
-            priority: int = 0, admit_together: bool = False) -> Ticket: ...
-    def cancel(self, *, run_ids: Sequence[str] = (), label_selector: Mapping[str, str] | None = None) -> None: ...
-    def samples(self, cursor: int = 0, *, label_selector: Mapping[str, str] | None = None,
-                include_masked: bool = False) -> AsyncIterator[Sample]: ...
-    def acknowledge(self, cursor: int) -> None: ...            # consumed through cursor; frees buffer space
-    async def publish(self, channel: str, weights: WeightsSource, *,
-                      phase: PublishPhase = PublishPhase.STAGE_AND_COMMIT) -> WeightsVersion: ...
+## Where it runs
 
-class Ticket(Protocol):
-    run_ids: list[str]
-    def samples(self) -> AsyncIterator[Sample]: ...            # only this ticket's samples
+`RolloutJobs(runner, recorder)` runs jobs on any `Runner`: one that runs programs in this process, or a durable one
+over a database. `rollout.rollouts.service.create_app(jobs)` serves them over HTTP and `RolloutClient(url)` is the same
+`Jobs` for a caller on another machine. The training loop is tested under both.
 
-@dataclass(frozen=True)
-class WeightsSource:                                           # exactly one of:
-    tensors: Mapping[str, Tensor] | None = None               # in process (local profile, CUDA IPC)
-    checkpoint_uri: str | None = None                          # full checkpoint in object storage
-    delta: Delta | None = None                                 # {parent_version, uri}
-    lora: LoraAdapter | None = None                            # {base_version, uri}
-    distributed: DistributedTransfer | None = None             # {backend: NCCL | NIXL | …, rendezvous}; trainer participates
+## Catalog
 
-class PublishPhase(Enum):
-    STAGE = "stage"                     # move bytes to engines while the old version serves
-    COMMIT = "commit"                   # pause → abort in flight → swap → resume
-    STAGE_AND_COMMIT = "stage_and_commit"
-```
+What an environment offers to be trained on (`rollout.rollouts.Catalog`): the program, its rows (easiest first), and
+how one start of a row is drawn. See [three ways in](../../guide/perspectives.md).
 
-Example (local profile, GRPO-style groups formed by the caller):
+## Watching
 
-```python
-job = jobs.start(program=AgentProgramReference(Wordle, DefaultAgent), binding=binding, buffer_samples=512,
-                 trainable_channels={"policy": "exp/latest"})
-for row in rows:
-    job.run(row, labels={"group": row["id"]}, count=8, admit_together=True)
-async for group in complete_groups(job.samples(), by="group", size=8):
-    trainer.step(group)
-    await job.publish("exp/latest", WeightsSource(tensors=trainer.state_dict()))
-```
-
-## Semantics and guarantees
-
-- **Admission**: runs are created while `runs in flight + unacknowledged samples < buffer_samples`. Otherwise
-  `run` requests wait in the job's queue (strict priority, then arrival). `admit_together` admits all `count` runs of a
-  ticket at once or none; it is an admission rule, not grouping semantics.
-- **Runs** receive the row as program parameters and the labels, which propagate to the run, its recorder sessions
-  and its samples. `count` creates independent runs.
-- **Cancellation** stops admission or cancels running runs by identifier or label (oversampling, dynamic sampling,
-  over-stale work). Cancelled runs still yield a `Sample` with `outcome = CANCELLED`, so counts stay exact.
-- **Identical start states** for runs of the same row come from the task and, when it uses one, its environment
-  template — not from the rollout side.
-- **Staleness** is bounded by the buffer and the task's `max_turns`; in-flight weight updates reach running episodes
-  through the channel. Adaptive staleness control is the caller's admission rule (e.g. AReaL-style), not the
-  system's.
-- **Child runs** spawned inside a job's runs inherit the job and its labels (plus `root_run`), so swarm members'
-  samples appear in the same log ([trajectories](../trajectories/README.md#swarm-rewards)).
-- **Resampling**: infrastructure failures are re-run with the same labels (new `run_id`), up to a retry limit; task
-  errors are not. The crash rate by episode length is monitored for sampling bias.
-- **Publish** requires the slot's binding to be a trainable recorded channel and runs the
-  [weight transition protocol](../recorder/engine-adapter.md#weight-transition-protocol). `EVALUATE` jobs cannot
-  publish. `distributed` transfer means the trainer joins a collective with the engines, so both need a shared
-  RDMA/NCCL fabric (same region and zone).
-- **Trainable channels sample with temperature only**, so the learner can reproduce the behavior distribution.
-
-## State
-
-Local profile: in memory, with the sample log in a local directory. Service form: job state in a small database;
-samples in the durable sample log, so a caller that crashes resumes from its last acknowledged cursor.
-
-## Open questions
-
-- A cursor per consumer when several trainers share one job (one cursor per job until then).
-- Samples from runs outside jobs (e.g. production conversations): a policy question first.
+`JobHooks.on_job(event)` receives what a job did at the level its caller thinks at: `ticket`, `admitted`, `episode`,
+`published`, and the caller's notes. The [monitor](../monitor.md)'s feed is one.

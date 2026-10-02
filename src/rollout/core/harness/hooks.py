@@ -14,8 +14,16 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 
-from rollout.core.contracts import CapabilityContract, ModelEndpoint, RunEvent, SampleRequest, SampleResult
+from rollout.core.contracts import (
+    CapabilityContract,
+    ModelAddress,
+    ModelEndpoint,
+    RunEvent,
+    SampleRequest,
+    SampleResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +80,12 @@ class _ObservedEndpoint:
 
     def describe(self, session_id: str) -> CapabilityContract:
         return self._endpoint.describe(session_id)
+
+    def address(self, session_id: str) -> ModelAddress:
+        serve = getattr(self._endpoint, "address", None)
+        if serve is None:
+            raise RuntimeError("this model slot is not served over HTTP: a harness cannot be given an address")
+        return cast(ModelAddress, serve(session_id, through=self))  # (what a harness samples reaches the hooks too)
 
     async def cancel(self, effect_id: str) -> None:
         await self._endpoint.cancel(effect_id)

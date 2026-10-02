@@ -22,6 +22,7 @@ from rollout.core.harness.history import ContextHints, History, HistoryShape, Tu
 from rollout.core.harness.hooks import ModelSample, RunHooks
 from rollout.core.harness.imports import ToolBinding, Tools, ToolSet
 from rollout.core.harness.loop import rollout
+from rollout.core.harness.memory import CompactingAgent, Memory
 from rollout.core.harness.model import Effects, EndpointModel
 from rollout.core.harness.observation import End, Ending, InvalidObservation, Observation, WaitFor
 from rollout.core.harness.program import AgentProgram, Program
@@ -40,9 +41,11 @@ from rollout.core.harness.runner import (
     RunStatus,
     SamplingParameters,
     agent_program,
+    bind,
     instantiate,
     register,
     resolve,
+    with_row,
 )
 from rollout.core.harness.task import ModelSlot, Task
 from rollout.core.harness.tools import tool
@@ -52,6 +55,7 @@ __all__ = [
     "Agent",
     "AgentProgram",
     "Blobs",
+    "CompactingAgent",
     "ContextHints",
     "ConversationKey",
     "DeliveryMode",
@@ -73,6 +77,7 @@ __all__ = [
     "HistoryShape",
     "Interrupted",
     "InvalidObservation",
+    "Memory",
     "Model",
     "ModelBinding",
     "ModelSample",
@@ -99,9 +104,11 @@ __all__ = [
     "Turn",
     "WaitFor",
     "agent_program",
+    "bind",
     "instantiate",
     "register",
     "resolve",
     "rollout",
     "tool",
+    "with_row",
 ]

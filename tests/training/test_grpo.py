@@ -1,5 +1,6 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""Group-relative updates: advantages, skipped groups, and the direction of an update (on a toy policy)."""
+"""The clipped policy-gradient step, on a toy policy: the direction of an update, what is never trained on, and
+when a pass stops."""
 
 from collections.abc import Sequence
 
@@ -7,13 +8,9 @@ import pytest
 import torch
 from torch import nn
 
-from rollout.training.grpo import GroupRelativeTrainer, TrainingSequence, group_advantages, minibatches
-
-
-def test_advantages_are_centered_but_not_scaled() -> None:
-    assert group_advantages([0, 0, 3, 1]) == [-1.0, -1.0, 2.0, 0.0]
-    assert group_advantages([2, 2, 2, 2]) is None  # no signal: skipped
-    assert group_advantages([5]) is None
+from rollout.recorder import Epoch, Span
+from rollout.training import Weighted
+from rollout.training.grpo import GroupRelativeTrainer, minibatches
 
 
 class ToyPolicy:
@@ -32,11 +29,11 @@ class ToyPolicy:
         return torch.log_softmax(logits, -1).gather(-1, ids[list(positions)].unsqueeze(-1)).squeeze(-1)
 
 
-def sequence(policy: ToyPolicy, tokens: list[int], advantage: float) -> TrainingSequence:
-    mask = [False, *([True] * (len(tokens) - 1))]
+def sequence(policy: ToyPolicy, tokens: list[int], advantage: float) -> Weighted:
+    """Every token after the first was sampled, at the logprobs the policy gives them now."""
     with torch.no_grad():
         behavior = policy.logprobs(tokens, range(1, len(tokens))).tolist()
-    return TrainingSequence(tokens, mask, [float("nan"), *behavior], advantage)
+    return Weighted(Epoch(tokens, [Span(1, len(tokens), 0)], behavior), advantage)
 
 
 def test_a_positive_advantage_makes_its_tokens_likelier_and_a_negative_one_rarer() -> None:
@@ -53,7 +50,7 @@ def test_a_positive_advantage_makes_its_tokens_likelier_and_a_negative_one_rarer
 def test_forced_tokens_are_never_trained_on() -> None:
     policy = ToyPolicy()
     tokens = [1, 2, 3]
-    forced = TrainingSequence(tokens, [False, False, False], [float("nan")] * 3, 1.0)
+    forced = Weighted(Epoch(tokens, [], []), 1.0)
     trainer = GroupRelativeTrainer(policy, learning_rate=0.05)  # type: ignore[arg-type]
     weights = [parameter.detach().clone() for parameter in policy.parameters()]
     metrics = trainer.step([forced])
@@ -98,7 +95,7 @@ def test_the_pass_stops_once_the_policy_has_moved_as_far_as_allowed() -> None:
 
 def test_a_sampled_token_without_a_logprob_is_refused() -> None:
     policy = ToyPolicy()
-    broken = TrainingSequence([1, 2, 3], [False, True, True], [float("nan"), -0.5, float("nan")], 1.0)
+    broken = Weighted(Epoch([1, 2, 3], [Span(1, 3, 0)], [-0.5, float("nan")]), 1.0)
     weights = [parameter.detach().clone() for parameter in policy.parameters()]
     with pytest.raises(ValueError, match="no behavior logprob"):
         GroupRelativeTrainer(policy).step([broken])  # type: ignore[arg-type]

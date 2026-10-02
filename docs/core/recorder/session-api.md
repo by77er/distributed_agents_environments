@@ -1,67 +1,32 @@
-# Recorder session API
+# The recorder over HTTP
 
-Status: **Proposed** · Layer: core (service form)
+Status: **Working** (2026-10-02) · Code: `rollout.recorder.compat`
 
-The network form of the recorder: the same operations the in-process `Recorder` offers, plus
-OpenAI/Anthropic-compatible endpoints for unmanaged harnesses.
+For a harness that brings its own loop: a coding agent running inside an environment, or any program that already
+knows how to talk to a model. It needs no agent loop from this library. The program that launches it asks its model
+slot for an address and hands over a base URL and a key:
 
-## Session management
-
-```proto
-service RecorderSessions {
-  rpc Open(OpenSessionRequest)   returns (Session);   // idempotent on session_id
-  rpc Close(CloseSessionRequest) returns (Empty);     // {session_id, final: bool}
-  rpc Get(SessionReference)            returns (Session);
-}
-
-message OpenSessionRequest {
-  string session_id = 1;            // {run_id}/{slot} (managed) or minted by Control API (unmanaged)
-  string run_id     = 2;            // empty for unmanaged
-  string channel    = 3;            // resolved per request via Policy Registry
-  Mode   mode       = 4;            // ACTIVE | PASSIVE
-  SamplingParameters sampling = 5;      // from the RunBinding; validated against the channel contract
-  ClientSamplingPolicy client_sampling = 6;  // REJECT_MISMATCH | OVERRIDE (compat endpoints only)
-  FlushMode flush   = 7;            // TURN | BATCH
-  map<string,string> labels = 8;    // from the run (job_id and caller labels such as "group"); copied into exports
-}
-
-message Session {
-  string session_id = 1; SessionStatus status = 2;   // OPEN | CLOSED | ABANDONED
-  CapabilityContract contract = 3;
-  string base_url = 4;              // compat endpoint root for unmanaged harnesses
-  string credential = 5;            // scoped to this session
-}
+```python
+address = run.model.address()          # ModelAddress(base_url, api_key, model)
+# launch the harness with OPENAI_BASE_URL=address.base_url and OPENAI_API_KEY=address.api_key
 ```
 
-- Runs: the runner opens a session per recorded model slot at run start and closes it when the run ends
-  events with `final = true`.
-- Unmanaged harnesses: the caller (in the platform layer, the Control API) opens the session and hands `base_url` + `credential` to whoever launches
-  the foreign harness. Configuration is only "set your base URL"; no code changes (R6).
+What the harness samples there is recorded for the run's slot like any other sample, reaches the runner's hooks, and
+ends up in the episode's trace.
 
-## Native endpoint (managed runs)
-
-Implements the [model endpoint contract](../../contracts/model-endpoint.md) exactly, at
-`/sessions/{session_id}` — `Describe`, `Sample` (accepts `ContextDelta`), `Cancel`.
-
-## Compatibility endpoints (unmanaged harnesses)
-
-| Path | Protocol |
+| Path | |
 |---|---|
-| `{base_url}/v1/chat/completions` | OpenAI Chat Completions (streaming and non-streaming) |
-| `{base_url}/v1/messages` | Anthropic Messages (streaming and non-streaming) |
+| `POST {base_url}/chat/completions` | OpenAI's Chat Completions: one reply, or the same as a stream of server-sent events |
+| `GET {base_url}/models` | The one model there is |
 
-Mapping rules:
-- Requests are converted to canonical content; tool definitions to `ToolSpecification`; responses back to the protocol's
-  format. The full message list is matched against the session tree (compat clients send full context).
-- **Idempotency**: an `Idempotency-Key` header is honored as the effect id. Without one, every request is a new
-  sample; client retries become sibling branches in the tree (harmless; excluded from the final path).
-- **Sampling parameters** in the request (temperature, top_p, …): `OVERRIDE` (default for unmanaged) ignores them
-  and uses the session's, recording what the client asked for; `REJECT_MISMATCH` returns 400 when they differ.
-- Model name in the request is ignored; the session's channel decides.
-- Responses never include logprobs or token ids, even if requested, unless the session was opened with a
-  debug flag by an operator.
+- **The key names the session.** It is valid for one run's slot, until the run is forgotten.
+- **The model name and sampling parameters a client sends are ignored**: a trainable channel samples as its binding
+  says, so that the trainer can reproduce the distribution.
+- **`Idempotency-Key`** is honoured as the sample's effect id; without one, a repeated request is a new sample that
+  replaces the earlier one in what the session exports.
+- **A context too long** is refused with `context_length_exceeded`, which harnesses compact on.
+- **A stream** carries the whole message in one chunk: the reply is sampled before the first event is sent, so a
+  recorded turn is kept whole or not at all.
 
-## Errors
-
-As in the model endpoint contract, mapped to protocol-native status codes: `OVERLOADED` → 429 with
-`retry-after`, `CONTEXT_OVERFLOW` → 400 with the protocol's context-length error shape, `CONTRACT_VIOLATION` → 400.
+A recorder is served when it has a `base_url` (a [profile](../../guide/perspectives.md#deploying)'s `serve`);
+`Model.address()` raises otherwise.

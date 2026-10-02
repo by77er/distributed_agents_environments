@@ -16,6 +16,7 @@ from pydantic import JsonValue
 
 from rollout.core.contracts import Message, Reasoning, RunEvent, RunEventType, Text, ToolCall, ToolResultBlock
 from rollout.core.harness.hooks import ModelSample, RunHooks
+from rollout.rollouts import JobHooks
 
 ENDED = (RunEventType.RUN_COMPLETED, RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED)
 
@@ -46,8 +47,13 @@ def plain(message: Message) -> dict[str, JsonValue]:
     }
 
 
-class RunFeed(RunHooks):
-    """Writes every run's events and samples under `directory`, one file per run, as they happen.
+JOB = "_job"
+"""The feed file of what jobs did (tickets, episodes, published weights, the caller's notes), beside the runs'."""
+
+
+class RunFeed(RunHooks, JobHooks):
+    """Writes every run's events and samples under `directory`, one file per run, as they happen; and what a
+    rollout job did, at the level its caller thinks at, in one file more.
 
     `keep` bounds the directory: when more runs than that have files, the oldest are deleted. A directory has one
     writer at a time: runs that an earlier writer left without an end (its process was stopped) are marked cancelled
@@ -60,7 +66,7 @@ class RunFeed(RunHooks):
         directory.mkdir(parents=True, exist_ok=True)
         self._files: dict[str, IO[str]] = {}
         for path in directory.glob("*.jsonl"):
-            if not _ended(path):
+            if path.stem != JOB and not _ended(path):
                 written = path.stat()
                 line = {"kind": "event", "seq": -1, "type": RunEventType.RUN_CANCELLED.value, "at": written.st_mtime}
                 with path.open("a") as file:
@@ -78,6 +84,9 @@ class RunFeed(RunHooks):
         self._write(event.run_id, line)
         if event.type in ENDED:
             self._close(event.run_id)
+
+    def on_job(self, event: Mapping[str, JsonValue]) -> None:
+        self._write(JOB, event)
 
     def on_sample(self, sample: ModelSample) -> None:
         line: dict[str, JsonValue] = {
@@ -113,7 +122,7 @@ class RunFeed(RunHooks):
     def _prune(self) -> None:
         files = sorted(self.directory.glob("*.jsonl"), key=lambda path: path.stat().st_mtime)
         for path in files[: max(0, len(files) - self.keep)]:
-            if path.stem not in self._files:
+            if path.stem not in self._files and path.stem != JOB:
                 path.unlink(missing_ok=True)
 
 
@@ -164,8 +173,13 @@ class FeedReader:
     def runs(self) -> list[dict[str, Any]]:
         """Every run in the feed, newest first: its labels, state, rewards and how much it has done."""
         self.refresh()
-        summaries = [summary(run_id, lines) for run_id, lines in self._lines.items()]
+        summaries = [summary(run_id, lines) for run_id, lines in self._lines.items() if run_id != JOB]
         return sorted(summaries, key=lambda run: run["started"], reverse=True)
+
+    def job(self, after: int = 0) -> list[dict[str, Any]]:
+        """What the rollout job did, from index `after` on: tickets, episodes, published weights, the trainer's
+        iterations, the engines' throughput."""
+        return self.lines(JOB, after)
 
     def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         """A run's lines from index `after` on."""

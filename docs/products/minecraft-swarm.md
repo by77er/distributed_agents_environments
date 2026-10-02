@@ -1,6 +1,6 @@
 # Minecraft swarm
 
-Status: **Working** (2026-10-02) · Code: `environments/minecraft/` · See [recorder](../core/recorder/README.md)
+Status: **Working** (2026-10-02) · Code: `environments/minecraft/` · See [three ways in](../guide/perspectives.md), [training](../core/training.md)
 
 Four agents share a Minecraft world, offline. They are trained with reinforcement learning on a curriculum that runs
 from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays all
@@ -8,13 +8,19 @@ four, and every agent is rewarded equally with the team's score.
 
 ```bash
 uv sync --all-extras
-uv run minecraft-swarm train ~/.cache/rollout/runs/first    # curriculum, groups of episodes, LoRA updates on one GPU
+PROFILE=environments/minecraft/profiles/one-gpu.toml         # one 16 GB GPU: an engine, and a trainer that shares it
+uv run rollout train $PROFILE minecraft_swarm.catalog:catalog --directory ~/.cache/rollout/runs/first
+scripts/train-with-memory-log.sh RUN $PROFILE minecraft_swarm.catalog:catalog   # the same, with a memory log and the monitor
 uv run minecraft-swarm server --seed 12345                   # a temporary server to look at (join with any client)
-environments/minecraft/scripts/train-with-memory-log.sh RUN  # the same, with a memory log and the monitor
 ```
 
-While it trains, http://localhost:8765 shows every episode of every group and, for each agent, what it sees (the
-map included), what it thinks, what it does and what comes back (the [monitor](../core/monitor.md)).
+While it trains, http://localhost:8765 shows the groups and updates as they happen, every episode of every group and,
+for each agent, what it sees (the map included), what it thinks, what it does and what comes back (the
+[monitor](../core/monitor.md)).
+
+The environment is a [catalog](../guide/perspectives.md#building-an-environment) of tasks, a program that plays one
+episode, and a tool set that owns the servers. It knows nothing of the model, the trainer or where anything runs: the
+[profile](../guide/deploying.md) says that, and the [training loop](../core/training.md) is the library's.
 
 ## The pieces
 
@@ -25,11 +31,9 @@ map included), what it thinks, what it does and what comes back (the [monitor](.
 | Paper servers | `minecraft_swarm/paper.py` | Builds the plugin with `javac`, generates a template server per world seed and configuration (the overworld within 304 blocks of the origin included), and starts temporary servers as copies of it. A server ends with the process that started it. |
 | Harness (Node) | `harness/` | One mineflayer bot per agent: filtered observations, a vocabulary of actions, the chat filter, and pausing while ticks are frozen. |
 | Tasks | `minecraft_swarm/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective. |
-| Episode | `minecraft_swarm/episode.py` | The lockstep loop: four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. |
-| World service | `minecraft_swarm/worlds.py`, `service.py` | Temporary worlds and ground-truth scores in process, or over HTTP for rollout workers elsewhere. |
-| Curriculum | `minecraft_swarm/curriculum.py` | Which task next: the unlocked tasks whose groups of episodes differ most often. |
-| Training | `minecraft_swarm/train.py`, `rollout.training`, `rollout.recorder` | Groups of episodes, group-relative updates, adapters hot-loaded into vLLM. |
-| Watching | `rollout.monitor`, `minecraft_swarm/report.py` | The live monitor (through the runner's [hooks](../core/harness/hooks.md)), and a chart of progress that can be posted to Discord. |
+| Episode | `minecraft_swarm/episode.py` | The program: four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot and a [`Memory`](../core/harness/memory.md). |
+| Worlds | `minecraft_swarm/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_swarm.worlds:tools`), or on a machine of its own (`rollout tools minecraft_swarm.worlds:tools`, and its URL in the profile). |
+| Catalog | `minecraft_swarm/catalog.py` | The tasks as rows, and a start of one: a world seed and a layout seed, which every episode of a group is given. |
 
 ## No cheating by construction
 
@@ -118,36 +122,22 @@ An action cut off at twenty seconds reports where the agent got to. A refusal sa
 at the place instead. A reply that calls no tool is answered with that; of several calls, the first counts and the
 others are answered as not done. A bot the server has dropped ends its episode, which counts as failed.
 
-**What an agent remembers is what its context holds:**
-
-| Part | Tokens | |
-|---|---|---|
-| System prompt and tools | 2,100 | The same for all four agents: the engine caches it as a shared prefix |
-| Summary | up to 400 | Of everything older than the recent turns, in the agent's own words |
-| Recent turns | 200 to 350 each | What was in sight (without the map), the reply, how it went |
-| Current observation | 1,000 to 1,850 | In full, with the map (750 to 1,600), the blocks beside the agent (150) and the team's chat |
-
-When an agent's context is nearly full, the team's older turns are **compacted**: each agent with turns to spare is
-shown its own once more, with its earlier summary, and asked what it needs to remember; its answer replaces them,
-and the newest four or five turns stay as they are. "Nearly full" is measured, not estimated: the model endpoint
-reports the tokens each prompt took, and memory is compacted when one more turn would leave less than the full room
-to think and answer. A prompt that overflows all the same is compacted and tried again; it does not end the episode.
-
-The team compacts in the same turn because a turn takes as long as its slowest agent: four agents compacting on
-four different turns stalled most turns, and compaction was a fifth of all model time. A compaction has room for
-the summary (400 tokens) and none to think it over, which the recorder arranges by closing the thinking block before
-it starts.
+**What an agent remembers** is its recent turns (what was in sight, without the map; its reply; how it went) and,
+of everything older, a summary in its own words. The current observation is shown in full. When an agent's memory is
+full ([`Memory`](../core/harness/memory.md) says when), the team's older turns are compacted: each agent with turns
+to spare is shown its own once more and asked what it needs to remember; its answer replaces them. The team compacts
+in the same turn because a turn takes as long as its slowest agent: four agents compacting on four different turns
+stalled most turns, and compaction was a fifth of all model time.
 
 Compaction is a model call like any other, on the agent's own slot, made while the world is frozen: it costs no game
 time, it is recorded, and it is trained with the episode's advantage, since what an agent chooses to remember is
-part of how it plays. An episode of any length keeps a context that fits.
+part of how it plays.
 
-Two limits of training are kept out of what agents read. They see no clock: an episode's length is a limit of
-training, and a policy shown the clock learns to play it; doing more before the cut-off is rewarded all the same.
-And the limit on thinking (1,024 tokens) is wide enough to be met rarely: on this environment's observations the
-model's thoughts run to a median of 530 tokens and a 95th percentile of 820. A turn (prompt and completion) is at
-most 8,000 tokens (forced tokens included), which is what the trainer can take on this GPU; a prompt long enough to
-threaten that leaves less room to think, so that every turn can be trained on.
+With Qwen3.5 the system prompt and tools take 2,100 tokens (the same for all four agents, so the engine caches them
+once), a remembered turn 200 to 350, and the current observation 1,000 to 1,850, of which the map is 750 to 1,600.
+
+Agents see no clock: an episode's length is a limit of training, and a policy shown the clock learns to play it;
+doing more before the cut-off is rewarded all the same.
 
 ## Tasks and curriculum
 
@@ -189,18 +179,11 @@ where they are counted) or one diamond each (from ore), makes the task's item, o
 milestone the task is about (a task that starts beside a fortress is about the blaze rod; the game is about the
 dragon, and a dragon that dies with no player credited counts as killed).
 
-The curriculum samples the tasks whose groups have something to teach. A group-relative update learns from the
-differences between a group's episodes, so a task's weight is the share of its recent groups whose rewards differed
-(a moving average): a task every episode saturates, or none scores on, falls to a small floor. Untried tasks come
-first, and a task whose group is still running is not picked again until that group is recorded. A group none of
-whose episodes completed counts as tried. Whether a task was solved decides only what unlocks: tasks unlock in the
-catalog's order, the first three, and four past the hardest one solved at least half the time. Records are kept by
-task title, so that they stay with their tasks when the catalog changes.
-
-**The fastest of the saturated.** When more than one episode of a group reaches everything its task has to give,
-they earn the same and the group would teach nothing. The one that got there in the least game time (then the
-fewest turns) is scored one point more, in the advantages only: the reward that is reported, and that the curriculum
-sees, is the task's own.
+The episode's result says so in the terms training reads: `solved`, `saturated` (the team holds everything the task
+has to give) and `duration` (game minutes). The [curriculum](../core/training.md#the-curriculum) unlocks tasks by
+`solved` and weighs them by how often their groups' rewards differ; of a group's saturated episodes, the one that
+took the least game time scores a point more in the advantages
+([the fastest of the saturated](../core/training.md#the-algorithm-grpo)).
 
 ## Model and training
 
@@ -208,30 +191,27 @@ sees, is the task's own.
 |---|---|---|
 | Policy | `cyankiwi/Qwen3.5-9B-AWQ-4bit` (compressed-tensors, int4 in groups of 32), LoRA rank 32 on every attention, linear-attention and MLP projection | 8 GiB of weights in vLLM; four agents take a turn in about 6 s |
 | Engine | vLLM 0.30 in its own process, with 78% of the GPU while awake (at 85% the card was full and a turn went from 10 s to minutes); LoRA adapters registered by name; while the trainer runs it sleeps with its weights dropped, and reads them again on waking | sleep 0.2 s, wake 3 s; 3.3 GiB of system memory asleep (11.2 GiB when the weights were parked in memory instead); 88 tokens/s for one agent, 730 tokens/s for sixteen at once on short contexts. Its cache is what limits it: at 72% of the GPU it held 63,000 tokens, less than sixteen agents' contexts, and requests queued (240 tokens/s in a real group) |
-| Recorder | Renders contexts to tokens and parses replies through a pluggable `Renderer` (Qwen3.5's XML tool calls and thinking); thinking has a budget, closed by forced (untrained) tokens; a request can cap its own output, down to no thinking at all; a sampled token without a logprob is refused | records prompt, sampled tokens, mask, behavior logprobs and adapter per turn |
-| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, makes one pass over the group's turns, saves and exits. It may use the GPU memory that is free when it starts and no more: a minibatch that does not fit is left out and counted, where it would otherwise spill into system memory and crawl. It ends with the driver | 6.6 GiB loaded (the vision tower is dropped and the token embeddings are read from the checkpoint file as needed); peak 10.7 GiB at 5,000 tokens, 12.4 at 8,000, whatever the share of sampled tokens: the output layer is run in checkpointed chunks; 5 to 8 s per turn; logprobs match vLLM's to a mean of 0.016, also with an adapter |
-| Algorithm | Dr. GRPO advantages (reward minus group mean, every turn of an episode), DAPO's dynamic sampling, clip-higher (0.8–1.28) and token-level loss, PPO clipping against the behavior logprobs, no KL term. One optimizer step per 4,096 sampled tokens at a learning rate of 5e-5; the pass stops if a minibatch finds the policy more than 0.02 nats a token from where the first one found it | 384 turns make about 40 steps; Adam moves a weight by at most the learning rate a step, and with 2 or 3 steps an update at 2e-5 the adapter's largest weight after five updates was 2e-4 |
+| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, makes one pass over the group's turns, saves and exits ([training](../core/training.md#the-trainer)). It may use the GPU memory that is free when it starts and no more: a minibatch that does not fit is left out and counted, where it would otherwise spill into system memory and crawl. It ends with the process that started it | 6.6 GiB loaded (the vision tower is dropped and the token embeddings are read from the checkpoint file as needed); peak 10.7 GiB at 5,000 tokens, 12.4 at 8,000, whatever the share of sampled tokens: the output layer is run in checkpointed chunks; 5 to 8 s per turn; logprobs match vLLM's to a mean of 0.016, also with an adapter |
 
-Groups overlap. The next group starts when at most one episode of earlier groups is still running, so that one slow
-episode does not leave the GPU serving four agents instead of sixteen (in one group the last episode ran alone for
-45% of the time). No episode is left out: a group is trained on when its last episode is done, with advantages over
-all of them. Its turns may then be an update or two old, and a straggler plays on under the newer adapter (the one
-before stays loaded, so a turn finishes under the adapter it started with). The update's clipped ratio against the
-logprobs recorded at sampling is what corrects for that, token by token. During an update every running episode
-waits, its world frozen between turns.
+The thinking budget (1,024 tokens) is wide enough to be met rarely: on this environment's observations the model's
+thoughts run to a median of 530 tokens and a 95th percentile of 820. A turn is at most 8,000 tokens, which is what
+the trainer can take on this GPU.
 
-A run started again in the same directory goes on from its latest adapter, its curriculum and the iteration after
-the last one logged, on worlds and layouts drawn anew. Episodes the stopped run left unfinished show as cancelled in
-the monitor, and servers it left behind are removed.
+An update of 384 turns makes about 40 optimizer steps and takes about half an hour: training a turn costs 4 to 8
+seconds, more than sampling it did (the engine caches the prompts' common beginnings; the trainer runs each prompt in
+full). Adam moves a weight by at most the learning rate a step; with 2 or 3 steps an update at 2e-5, the adapter's
+largest weight after five updates was 2e-4.
+
+Every episode of a group runs on one world seed and one layout, on a server of its own. A group's turns may be an
+update or two old when it is trained on, and a straggler plays on under newer weights; during an update every
+running episode waits, its world frozen between turns.
+
+A run started again in the same directory goes on from its latest adapter, its curriculum and the group after the
+last one logged, on worlds and layouts drawn anew. Episodes the stopped run left unfinished show as cancelled in the
+monitor, and servers it left behind are removed.
 
 Bitsandbytes was the first plan for 4-bit weights, but vLLM 0.30 no longer supports it; a pre-quantized checkpoint
 read by both sides keeps the engine's and the trainer's weights identical.
-
-An update trains on every turn of the group's episodes whose advantage is not zero, up to `--update-turns` (384 by
-default): beyond that, turns are taken at even steps through the group, so that each episode and agent keeps its
-share, spread over its whole game. Training a turn costs 4 to 8 seconds, more than sampling it did (the engine
-caches the prompts' common prefixes; the trainer runs each prompt in full), so the cap is what keeps an update near
-half an hour. Each line of `metrics.jsonl` says how many turns were recorded and how many were trained on.
 
 ## Running on a small machine
 
@@ -240,8 +220,8 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
 - **The trainer exits after every step.** A trainer parked in system memory between steps (9 GB), next to the sleeping
   engine's offloaded weights (8 GB) and four Paper servers, was the cause. Adapters are saved in float32 so that
   resuming from a file loses nothing.
-- **Memory is checked** before each group of episodes (6 GiB must be available) and before each update (4 GiB): the
-  run stops with a message instead.
+- **Memory is checked** before episodes are admitted (6 GiB must be available) and before each update (4 GiB): the
+  run stops with a message instead (`[memory]` in the profile).
 - **A run asked to stop, stops.** An interrupt, a termination or a hang-up cancels the run, which ends its servers,
   its engine and a trainer step in progress on the way out. A run that is killed outright leaves its engine's
   process id in `engine.json`; the next run in that directory ends it before starting its own.
@@ -302,16 +282,8 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
 
 ## Reporting
 
-`minecraft-swarm report RUN` writes `progress.png` and `progress.md` into the run's directory: the climb through the
-curriculum (which task each group trained on, how far the catalog has unlocked, the share of each group that solved
-its task), every group's rewards, and the trainer's statistics per update. With `--watch` it does so after every
-iteration until the run ends; with a Discord webhook (`--webhook`, or `DISCORD_WEBHOOK_URL`) it posts both there.
-Needs the `report` extra (matplotlib).
-
-The trainer reports two KL figures per update, both the mean of the sampling policy's logprob minus the current
-policy's over the sampled tokens of a minibatch, before that minibatch's step. `kl_floor` is the first minibatch's:
-the engine's and the trainer's numerical difference, and how stale the turns are. `kl_moved` is the last
-minibatch's less the floor: how far the update moved the policy. The loss itself has no KL term.
+`rollout report RUN minecraft_swarm.catalog:catalog` charts the climb through the curriculum, every group's rewards
+and what each update did ([reporting](../core/training.md#reporting)).
 
 ## Results
 

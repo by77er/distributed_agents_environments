@@ -79,7 +79,6 @@ class Policy:
     checkpoint: str
     rank: int
     alpha: float
-    wrapped: list[str]
     embedding: FileEmbedding | None = None
     """The token embeddings, if they are read from the checkpoint file rather than held on the GPU."""
 
@@ -114,13 +113,13 @@ class Policy:
         if embedding is not None:
             inner.language_model.embed_tokens = None
         torch.cuda.empty_cache()
-        wrapped = add_lora(model, TARGETS, rank=rank, alpha=alpha, within="language_model", dtype=torch.float32)
+        add_lora(model, TARGETS, rank=rank, alpha=alpha, within="language_model", dtype=torch.float32)
         if gradient_checkpointing:
             enable = cast(Any, model).gradient_checkpointing_enable
             enable(gradient_checkpointing_kwargs={"use_reentrant": False})
             if embedding is None:  # (embeddings read from the file are marked as needing gradients where used)
                 cast(Any, model).enable_input_require_grads()
-        return cls(model, checkpoint, rank, alpha, wrapped, embedding)
+        return cls(model, checkpoint, rank, alpha, embedding)
 
     def parameters(self) -> list[nn.Parameter]:
         return lora_parameters(self.model)

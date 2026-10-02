@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from rollout.recorder.engines import end_orphaned_engines, engine_processes, note_engines
+from rollout.inference.vllm import end_orphaned_engines, engine_processes, note_engines
 
 NAMED = (
     "import ctypes, sys, time; ctypes.CDLL('libc.so.6').prctl(15, sys.argv[1].encode()); "

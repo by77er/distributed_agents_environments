@@ -70,7 +70,7 @@ class DeliveryPolicy:          # part of RunBinding; deployments may override
 
 Rules:
 
-- An interrupted reply is recorded as an aborted branch in the recorder's session tree and is never trained on.
+- An interrupted reply is not recorded, so it is never trained on.
 - A sender's priority is capped by `max_priority_by_sender`, so an external system cannot interrupt when it
   should only queue.
 - Control operations (cancel) are not messages; they use `Runner.cancel`.

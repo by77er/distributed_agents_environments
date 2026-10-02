@@ -1,7 +1,7 @@
 # Design docs
 
 This tree defines the system's **boundaries and interfaces**. To build with the code as it exists, start with the
-[developer guide](guide/README.md). It is organized by layer:
+[developer guide](guide/README.md), or with [three ways in](guide/perspectives.md) for training. It is organized by layer:
 a **core library** that runs on one machine, plus **optional layers** that deploy the same protocols with durability,
 at fleet scale, or with computers for tasks ([layers and profiles](architecture/layers-and-profiles.md)).
 
@@ -24,16 +24,18 @@ docs/
 │   ├── identifiers.md  canonical-content.md  run-events.md  effects.md  model-endpoint.md
 ├── core/                              the library: Python protocols with in-process implementations
 │   ├── harness/                       loop, Program, Task, Agent, conversations, Runner, determinism rules
-│   ├── recorder/                      token-exact recording, session trees, engine adapter
-│   ├── rollouts/                      rows in, samples out, weights published
-│   └── trajectories/                  Sample and its assembly
-├── inference/                         engines, policy registry, weight transfer and transitions
+│   ├── recorder/                      token-exact recording, epochs, engines, the endpoint for harnesses
+│   ├── rollouts/                      rows in, episodes out, weights published
+│   ├── trajectories/                  Episode and its assembly
+│   ├── training.md                    the loop, the group algorithm, the curriculum, the trainer
+│   └── monitor.md                     a live page over a job and its runs
+├── inference/                         channels: engines, limits, publishing weights
 ├── environments/                      PRELIMINARY: a separate system, designed later
 ├── durability/                        optional: DurableRunner on DBOS, the pump, the task host
 ├── platform/                          optional: cells, trust tiers, Control API, tool router
 ├── development/plan.md                milestones, exit criteria, first tasks
 ├── guide/                             developer guide to the code as built; generated API reference
-├── products/                          products built on the system (the project assistant)
+├── products/                          what is built on the system: two products and the Minecraft swarm
 ├── decisions/                         ADRs: why each load-bearing choice was made
 └── research/                          investigations behind the decisions (evidence, not normative)
 ```
@@ -44,7 +46,8 @@ docs/
    [layers and profiles](architecture/layers-and-profiles.md) → [overview](architecture/overview.md)
 2. The core: [harness](core/harness/README.md) → [task](core/harness/task.md) → [agent](core/harness/agent.md) →
    [conversations](core/harness/conversations.md) → [recorder](core/recorder/README.md) →
-   [rollouts](core/rollouts/README.md) → [trajectories](core/trajectories/README.md), with
+   [rollouts](core/rollouts/README.md) → [episodes](core/trajectories/README.md) →
+   [training](core/training.md), with
    [contracts](contracts/README.md) as reference
 3. [inference](inference/README.md), then the optional layers: [durability](durability/README.md),
    [platform](platform/README.md)

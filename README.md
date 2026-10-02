@@ -3,6 +3,7 @@
 Durable, scalable agents and environments for agent products and reinforcement learning. The core is a Python library
 that runs on one machine (one GPU is enough); durability, fleet-scale execution and environments are optional layers.
 
+- Three ways in (building an environment, designing training, deploying): [docs/guide/perspectives.md](docs/guide/perspectives.md)
 - Developer guide: [docs/guide/README.md](docs/guide/README.md) (API reference: [docs/guide/reference.md](docs/guide/reference.md))
 - Design: [docs/README.md](docs/README.md)
 - Development plan: [docs/development/plan.md](docs/development/plan.md)
@@ -11,7 +12,7 @@ that runs on one machine (one GPU is enough); durability, fleet-scale execution 
 
 ```sh
 uv sync                     # base install (no GPU needed)
-uv sync --extra vllm        # local inference engine (Linux, NVIDIA GPU)
+uv sync --all-extras        # with the inference engine and the trainer (Linux, NVIDIA GPU)
 uv run pytest
 uv run ruff check && uv run ruff format --check
 uv run pyright

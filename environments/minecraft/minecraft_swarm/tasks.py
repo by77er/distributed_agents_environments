@@ -243,7 +243,7 @@ KIT_STEPS = {
     Kit.END_IRON: 2,
 }
 """Steps of the tech tree (or of preparation) a kit leaves to the team."""
-GOALS = {
+MILESTONE_AT = {
     Start.SURFACE: "story/enter_the_nether",
     Start.NETHER: "nether/find_fortress",
     Start.FORTRESS: "nether/obtain_blaze_rod",
@@ -396,7 +396,7 @@ def _task(
         + (1.0 if apart else 0.0)
     )
     if objective is Objective.PROGRESS:
-        goal = "end/kill_dragon" if tier is Tier.GAME else GOALS[start]
+        goal = "end/kill_dragon" if tier is Tier.GAME else MILESTONE_AT[start]
     parts = [tier.value, objective.value, start.value.replace("_", " "), f"kit {kit.value.replace('_', ' ')}"]
     if objective is Objective.CRAFT and goal:
         parts = [tier.value, f"craft {goal.replace('_', ' ')}", "from nothing"]
@@ -505,7 +505,6 @@ class Built:
     """A task built in a world: where everyone stands and what they start with."""
 
     task: Task
-    placements: list[dict[str, Any]]
     available_diamonds: int
     anchor: Point
     world: str
@@ -568,7 +567,7 @@ async def build(task: Task, control: Control, team: list[str], rng: random.Rando
     result = await control.episode(setup)
     if result["missing"]:
         raise BuildError(f"not online: {result['missing']}")
-    return Built(task, placements, site.available_diamonds, site.anchor, site.world)
+    return Built(task, site.available_diamonds, site.anchor, site.world)
 
 
 def _anchor(rng: random.Random, y: int = DIAMOND_DEPTH, spread: int = 240) -> Point:

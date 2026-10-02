@@ -122,8 +122,20 @@ class SampleResult(ContractModel):
         return self
 
 
+class ModelAddress(ContractModel):
+    """Where a harness that brings its own loop reaches a model slot: an OpenAI-compatible endpoint. Whatever
+    answers there is the slot's model; the harness only sets its base URL and key."""
+
+    base_url: str
+    api_key: str
+    """Names the session: valid for this run's slot only."""
+    model: str
+    """What to send as the model's name (the endpoint ignores it)."""
+
+
 class ModelEndpoint(Protocol):
-    """Serves model slots: implemented by the recorder and by direct adapters."""
+    """Serves model slots: implemented by the recorder and by direct adapters. An endpoint that can also be reached
+    over HTTP has `address(session_id) -> ModelAddress`."""
 
     def describe(self, session_id: str) -> CapabilityContract:
         """The capability contract of the session's model slot."""

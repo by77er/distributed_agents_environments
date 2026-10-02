@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>GET /state: every player's position, health, food, inventory and diamonds; the team's total diamonds, the
  *       advancements it earned since the baseline, what it got hold of since then (picked up, crafted, smelted), and
  *       the most the dragon was hurt.</li>
- *   <li>GET /tick, POST /tick {"action": "freeze" | "unfreeze" | "step" | "run" | "stop", "ticks": n}: a step runs n
+ *   <li>GET /tick, POST /tick {"action": "freeze" | "step" | "run" | "stop", "ticks": n}: a step runs n
  *       ticks of a frozen game and answers when they have run; a run starts n ticks and answers at once, and a stop
  *       ends it early and says how many ran. While the game is frozen and not stepping, team members are held as
  *       they were: the game itself does not freeze players, whose hunger, air, fire and health would run on in
@@ -78,7 +78,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       itself grant advancements, which an episode should not be rewarded for).</li>
  *   <li>Setup, for building tasks: POST /setup/carve (a lit, empty box with a floor, sealed against liquids and
  *       falling blocks), /setup/items (dropped items), /setup/chest (a chest with contents), /setup/block (one
- *       block), /setup/spawn (a creature), /setup/time, /setup/food (a player's hunger), /setup/generate (generate
+ *       block), /setup/spawn (a creature), /setup/food (a player's hunger), /setup/generate (generate
  *       the overworld's chunks around the origin and save them, for a server template);
  *       GET /setup/stand (safe places to stand), /setup/surface (the ground's height), /setup/locate (the nearest
  *       structure), /setup/blocks (blocks of one type near a point).</li>
@@ -139,7 +139,6 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         route("/setup/locate", this::locate);
         route("/setup/blocks", this::findBlocks);
         route("/setup/spawn", this::spawnEntity);
-        route("/setup/time", this::setTime);
         route("/setup/food", this::setFood);
         route("/setup/generate", this::generate);
         getServer().getPluginManager().registerEvents(this, this);
@@ -225,7 +224,6 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         String action = body.has("action") ? body.get("action").getAsString() : "";
         switch (action) {
             case "freeze" -> onMainThread(() -> { ticks.setFrozen(true); return null; });
-            case "unfreeze" -> onMainThread(() -> { ticks.setFrozen(false); return null; });
             case "step" -> {
                 int count = body.get("ticks").getAsInt();
                 if (count < 1 || count > 20 * 60 * 10) {
@@ -278,7 +276,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     return result;
                 });
             }
-            default -> throw new IllegalArgumentException("action must be freeze, unfreeze, step, run or stop");
+            default -> throw new IllegalArgumentException("action must be freeze, step, run or stop");
         }
         return onMainThread(this::tickState);
     }
@@ -677,13 +675,6 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             player.setFoodLevel(body.get("food").getAsInt());
             player.setSaturation(0f);
             held.clear();  // what is held while the game is frozen is the player as set up
-            return new JsonObject();
-        });
-    }
-
-    private JsonElement setTime(String method, Map<String, String> query, JsonObject body) throws Exception {
-        return onMainThread(() -> {
-            overworld().setTime(body.get("time").getAsLong());
             return new JsonObject();
         });
     }

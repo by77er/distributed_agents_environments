@@ -6,26 +6,22 @@ code as it exists; the [design docs](../README.md) describe the whole system, in
 Every Python example in this guide runs as part of the test suite (`tests/test_docs.py`), and the
 [API reference](reference.md) is generated from the source, so both match the code.
 
-## What you can use today
+## What you can use
 
-The project is in milestone M0 of the [development plan](../development/plan.md): the core loop, without a GPU. Next
-comes P1, a project assistant on a third-party model, then the durable runner (M2), then RL (M1).
-
-| Available now | Not yet |
+| For | Start with |
 |---|---|
-| Tasks, agents, `@tool` methods, imported tools, observations, rewards | MCP and HTTP tool bindings |
-| `LocalRunner`: start, send, cancel, event streams, conversations | The durable runner (M2) |
-| Message delivery by mode: queue, steer, interrupt | The recorder, rollout jobs, samples, weight updates (M1) |
-| Effect identities, argument digests, run events, `run.emit` | |
-| Real models through the Responses API; a scripted endpoint for tests | |
-
-Models are served by the Responses API adapter ([models](models.md)), a `ScriptedModelEndpoint` in tests, or any
-object that implements the `ModelEndpoint` protocol.
+| Building an environment, training on one, or deploying both | [Three ways in](perspectives.md) |
+| Tasks, agents, `@tool` methods, imported tools, observations, rewards | [Getting started](getting-started.md) |
+| Runs: start, send, cancel, event streams, conversations, message delivery by mode | [Runs and events](runs-and-events.md) |
+| Runs that survive their process | [durability](../durability/README.md) |
+| Trainable models: recorded channels, engines, rollout jobs, episodes, the training loop | [recorder](../core/recorder/README.md), [rollouts](../core/rollouts/README.md), [training](../core/training.md) |
+| Third-party models through the Responses API; a scripted endpoint for tests | [Models](models.md), [Testing](testing.md) |
 
 ## Pages
 
 | Page | Read it to |
 |---|---|
+| [Three ways in](perspectives.md) | see the system from where you stand: building an environment, designing training, deploying |
 | [Getting started](getting-started.md) | install, write a first task, run one episode |
 | [Tasks](tasks.md) | define an environment: hooks, observations, rewards, endings, extra model slots |
 | [Tools](tools.md) | give the model an action space with `@tool` methods |
@@ -35,6 +31,7 @@ object that implements the `ModelEndpoint` protocol.
 | [Runs and events](runs-and-events.md) | understand what a run records: effects, identifiers, events, failures |
 | [Models](models.md) | run against a real model through the Responses API |
 | [Testing](testing.md) | test tasks and agents with a scripted model |
+| [Deploying](deploying.md) | describe engines, the trainer, the runner and tool sets in a profile |
 | [API reference](reference.md) | look up any public name |
 
 ## Concepts in one place
@@ -49,6 +46,9 @@ object that implements the `ModelEndpoint` protocol.
 | **Turn** | One reply and the observation that answers it. `run.turn` counts replies. |
 | **Model slot** | A named model a task uses. The agent acts through `policy`; tasks may declare others. |
 | **Model endpoint** | What serves a model slot: a recorder, an API adapter, or a scripted endpoint in tests. |
+| **Channel** | A trainable policy being served, by name. A binding names one for a model slot; training publishes weights to it. |
+| **Episode** | A finished run as training sees it: labels, outcome, result, and each slot's token sequences with logprobs. |
+| **Catalog** | What an environment offers to train on: rows, easiest first, and how to draw a start of one. |
 | **Effect** | An operation that leaves task or agent code, such as a model sample. It has a stable `effect_id`. |
 | **Run event** | A typed record of something that happened in a run, in a gapless sequence. |
 
@@ -60,6 +60,10 @@ object that implements the `ModelEndpoint` protocol.
 | `rollout.core.contracts` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
 | `rollout.core.local` | `LocalRunContext`: runs an episode in process |
 | `rollout.core.testing` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
+| `rollout.rollouts` | `Jobs`, `Job`, `Ticket`, `Episode`, `Catalog`, `Row`, `RolloutJobs`; `RolloutClient` in `rollout.rollouts.service` |
+| `rollout.training` | `train`, `Grpo`, `Curriculum`, `Trainer`, `LoraTrainer`, `Colocated` |
+| `rollout.inference`, `rollout.recorder` | `Channel`, `Engine`, `Limits`; `Recorder`, `Epoch`, renderers |
+| `rollout.profile` | `Profile`, `Platform` |
 
 ## Conventions
 

@@ -1,13 +1,13 @@
 #!/bin/bash
-# Run `minecraft-swarm train` with a memory log on disk, so a machine that runs out of memory leaves evidence.
+# Run `rollout train` with a memory log on disk, so a machine that runs out of memory leaves evidence.
 #
-#   train-with-memory-log.sh RUN_DIRECTORY [train options...]
+#   train-with-memory-log.sh RUN_DIRECTORY PROFILE CATALOG [train options...]
 #
 # Writes RUN_DIRECTORY/train.log, memory.log (available system memory and GPU memory every 2 s) and, under WSL,
 # host-memory.log (every 15 s: Windows' free memory, and GPU memory spilled into system memory, which should be 0), and
 # serves the monitor (each episode and each agent, live) on http://localhost:${MONITOR_PORT:-8765} while it runs.
 set -u
-run="$1"; shift
+run="$1"; profile="$2"; catalog="$3"; shift 3
 mkdir -p "$run/feed"
 (
   while true; do
@@ -32,11 +32,11 @@ if [ -x "$windows" ]; then
 else
   host=
 fi
-cd "$(dirname "$0")/../../.." || exit 1
-uv run rollout-monitor "$run/feed" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
+cd "$(dirname "$0")/.." || exit 1
+uv run rollout monitor "$run/feed" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
 trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
-uv run minecraft-swarm train "$run" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
+uv run rollout train "$profile" "$catalog" --directory "$run" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
 trainer=$!
 # A signal to this script goes on to the trainer, and the script waits for it to end: otherwise the trainer would
 # run on alone, with nothing logging its memory.

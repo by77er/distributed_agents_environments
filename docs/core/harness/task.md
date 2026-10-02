@@ -78,9 +78,9 @@ canonical `Message`s.
 
 | Field | Consumed by | Becomes |
 |---|---|---|
-| `messages` | the agent, then the model | a context span in the recorder's session tree (loss mask 0) |
-| `reward` | the trajectory assembler | a reward at the last sampled token of the reply it answers |
-| `end` | the loop and the trainer | the sample's `ending` |
+| `messages` | the agent, then the model | context in the recorder's epochs (not trained on) |
+| `reward` | the episode's assembly | part of the policy slot's reward in the episode |
+| `end` | the loop | the run's ending |
 | `info` | people, metrics | the run's events only |
 
 **Validation** (violations fail the run with `INVALID_OBSERVATION`):

@@ -47,6 +47,7 @@ nav:
   - Home: README.md
   - Developer guide:
       - guide/README.md
+      - "Three ways in": guide/perspectives.md
       - "Getting started": guide/getting-started.md
       - "Tasks": guide/tasks.md
       - "Tools": guide/tools.md
@@ -56,6 +57,7 @@ nav:
       - "Models": guide/models.md
       - "Runs and events": guide/runs-and-events.md
       - "Testing": guide/testing.md
+      - "Deploying": guide/deploying.md
       - "API reference": guide/reference.md
   - Products:
       - "Project assistant": products/project-assistant.md
@@ -89,14 +91,16 @@ nav:
           - "Conversations and messages": core/harness/conversations.md
           - "Determinism rules for durable code": core/harness/determinism.md
           - "Hooks": core/harness/hooks.md
+          - "Memory": core/harness/memory.md
       - Recorder:
           - core/recorder/README.md
-          - "Recorder session API": core/recorder/session-api.md
-          - "Session trees": core/recorder/session-tree.md
-          - "Engine adapter": core/recorder/engine-adapter.md
+          - "The recorder over HTTP": core/recorder/session-api.md
+          - "Epochs": core/recorder/session-tree.md
+          - "Engines": core/recorder/engine-adapter.md
       - "Monitor": core/monitor.md
       - "Rollouts": core/rollouts/README.md
-      - "Trajectories": core/trajectories/README.md
+      - "Episodes": core/trajectories/README.md
+      - "Training": core/training.md
   - Inference: inference/README.md
   - Environments:
       - environments/README.md

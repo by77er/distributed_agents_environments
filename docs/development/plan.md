@@ -76,23 +76,17 @@ over the board succeeded, and the fault evaluation passes across 13 SIGKILLs
 
 ### M1 — Recorder and local RL on one GPU
 
-**Scope**
-- The recorder in active mode with `renderers` for Qwen3 / Qwen3.5: session trees, incremental rendering,
-  deduplication by `(effect_id, arguments_digest)`, turn spans.
-- The vLLM engine adapter: tokens in, processed logprobs, abort with partials, sleep / wake, in-process weight
-  updates ([engine adapter](../core/recorder/engine-adapter.md)).
-- The in-process weight update controller and policy registry.
-- `LocalRolloutJobs`, the trajectory assembler, the local sample log.
-- The minimal reference GRPO trainer, with LoRA (`peft`); the adapter is merged into the engine's weights after
-  each step.
+Status: **working**: the recorder, channels over vLLM, rollout jobs, the training loop and a LoRA trainer are built,
+and train the [Minecraft swarm](../products/minecraft-swarm.md) on one 16 GB GPU.
 
-**Exit criteria**
-- GRPO with LoRA on Qwen3-1.7B improves arithmetic and Wordle reward on the development GPU
-  ([ADR-0023](../decisions/0023-development-baseline.md#lora-spike)).
-- Recorded behavior logprobs match the trainer's recomputation at the same weights: mean absolute difference
-  within tolerance (bf16 decode and prefill disagree per token by up to ~0.15; see
-  [ADR-0023](../decisions/0023-development-baseline.md#local-engine-spike)).
-- A generation interrupted by a weight update is recorded as two spans with correct versions.
+**Scope**
+- The recorder with `renderers` for Qwen3.5: token-exact turns, epochs, deduplication by effect id, a thinking
+  budget ([recorder](../core/recorder/README.md)).
+- Channels and the vLLM engine: tokens in, logprobs of the sampled distribution out, sleep and wake, adapters
+  loaded by name ([inference](../inference/README.md)).
+- Rollout jobs and episodes, in process and over HTTP ([rollouts](../core/rollouts/README.md)).
+- The training loop, group-relative advantages, the curriculum, and a LoRA trainer for 4-bit checkpoints
+  ([training](../core/training.md)).
 
 ### M2 — Durable runner
 

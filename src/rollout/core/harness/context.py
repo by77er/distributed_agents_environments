@@ -11,7 +11,7 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
-from rollout.core.contracts import CapabilityContract, Message, ToolChoice, ToolSpecification, Usage
+from rollout.core.contracts import CapabilityContract, Message, ModelAddress, ToolChoice, ToolSpecification, Usage
 from rollout.core.harness.blobs import Blobs
 from rollout.core.harness.conversations import Address, ConversationKey, Envelope
 from rollout.core.harness.environments import Environments
@@ -39,6 +39,12 @@ class Model(Protocol):
         max_output_tokens: int | None = None,
         tool_choice: ToolChoice | None = None,
     ) -> Message: ...
+
+    def address(self) -> ModelAddress:
+        """For a harness that brings its own loop (a coding agent running inside the environment, say): where it
+        reaches this slot's model. Hand it the base URL and key; what it samples there is this slot's, recorded like
+        any other sample. Raises if the deployment does not serve models over HTTP."""
+        ...
 
 
 class Interrupted(Exception):

@@ -6,10 +6,16 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`Blobs`](#blobs), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor)
-- **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.core.harness`](#rolloutcoreharness)** — Writing tasks and agents. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Memory`](#memory), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
+- **[`rollout.core.contracts`](#rolloutcorecontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`CallContext`](#callcontext), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`DeadlineExceeded`](#deadlineexceeded), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectCompletion`](#effectcompletion), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectRequest`](#effectrequest), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`NeedFullContext`](#needfullcontext), [`new_job_id`](#new_job_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Provenance`](#provenance), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ReasoningSupport`](#reasoningsupport), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolAnnotations`](#toolannotations), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.core.local`](#rolloutcorelocal)** — In-process implementations for the local profile. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment), [`RunNotLive`](#runnotlive)
 - **[`rollout.core.testing`](#rolloutcoretesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
+- **[`rollout.rollouts`](#rolloutrollouts)** — Rollout jobs: rows in, episodes out, weights published; in process or over HTTP. [`Catalog`](#catalog), [`Episode`](#episode), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`Outcome`](#outcome), [`Recorded`](#recorded), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`Row`](#row), [`Status`](#status), [`Ticket`](#ticket), [`Trace`](#trace)
+- **[`rollout.training`](#rollouttraining)** — The training loop, the group algorithm, the curriculum and the trainer. [`Budget`](#budget), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Directory`](#directory), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`iterations`](#iterations), [`LoraTrainer`](#loratrainer), [`Step`](#step), [`Store`](#store), [`train`](#train), [`Trainer`](#trainer), [`Weighted`](#weighted)
+- **[`rollout.inference`](#rolloutinference)** — Channels: policies being served, and the engines behind them. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
+- **[`rollout.recorder`](#rolloutrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`Epoch`](#epoch), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`renderer_for`](#renderer_for), [`RENDERERS`](#renderers), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout.profile`](#rolloutprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EngineSpec`](#enginespec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
+- **[`rollout.monitor`](#rolloutmonitor)** — A live web page over a job and its runs. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed)
 - **[`rollout.durable`](#rolloutdurable)** — The durability layer: runs that survive crashes and restarts, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout.environments`](#rolloutenvironments)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
 - **[`rollout.environments.tools`](#rolloutenvironmentstools)** — Tools for agents that work on a computer: shell, files, edits and images. [`apply_edits`](#apply_edits), [`ComputerTools`](#computertools), [`page_text`](#page_text), [`prepare_image`](#prepare_image), [`Replacement`](#replacement)
@@ -88,6 +94,17 @@ The task loop: a task and an agent.
 - `def tool_specifications(self) -> list[ToolSpecification]`
 - `async def main(self, run: RunContext) -> None`
 
+### `bind`
+
+*function* · `src/rollout/core/harness/runner.py`
+
+```python
+def bind(reference: ProgramReference, channel: str, *, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding
+```
+
+A binding that serves every model slot of a program from one recorded channel, and each of its imports from
+the tool set registered under the import's own name (or as `tools` says).
+
 ### `Blobs`
 
 *class* · `src/rollout/core/harness/blobs.py`
@@ -100,6 +117,26 @@ class Blobs(Protocol)
 
 - `async def put(self, data: bytes, media_type: str) -> BlobReference` — Store bytes, or find them already stored; either way return their reference.
 - `async def read(self, reference: BlobReference) -> bytes`
+
+### `CompactingAgent`
+
+*class* · `src/rollout/core/harness/memory.py`
+
+```python
+class CompactingAgent(Agent)
+```
+
+The default agent, with a memory that fits: one sample of the policy slot per turn, over the recent turns and
+the agent's own summary of the older ones.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `compact_prompt` | `str` | `PROMPT` |  |
+
+**Methods**
+
+- `def __init__(self, configuration: object = None) -> None`
+- `async def act(self, run: RunContext, history: History, tools: list[ToolSpecification]) -> Message`
 
 ### `ContextHints`
 
@@ -255,6 +292,7 @@ A model slot bound to an endpoint. Sends the full context; context deltas come w
 - `def __init__(self, endpoint: ModelEndpoint, session_id: str, effects: Effects, *, retries: int = 3, backoff: float = 1.0) -> None`
 - `@property def capabilities(self) -> CapabilityContract`
 - `@property def usage(self) -> Usage | None`
+- `def address(self) -> ModelAddress`
 - `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None) -> Message`
 
 ### `Envelope`
@@ -442,6 +480,35 @@ class InvalidObservation(Exception)
 
 A hook returned an observation that breaks the validation rules; the run fails with `INVALID_OBSERVATION`.
 
+### `Memory`
+
+*class* · `src/rollout/core/harness/memory.py`
+
+```python
+class Memory
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `prompt` | `str` | `PROMPT` | What the agent is asked when its oldest turns are compacted into a summary. |
+| `remembered` | `str` | `REMEMBERED` | How the summary is shown to it afterwards. |
+| `summary` | `str` | `''` |  |
+| `turns` | `list[list[Message]]` | `field(default_factory=list[list[Message]])` | Its recent turns, oldest first: each a few messages (what it saw, what it replied, how that went). |
+| `compactions` | `int` | `0` |  |
+
+**Methods**
+
+- `def context(self, system: Message | None = None, current: Sequence[Message] = ()) -> list[Message]` — The system prompt, the summary, the remembered turns, and what is in front of the agent now.
+- `def remember(self, *messages: Message) -> None` — Add a turn.
+- `def answer(self, result: str, *, others: str = 'Not done: only your first call of a turn counts.') -> None` — Close the latest turn with how its reply went: the result of its first tool call (further calls are
+  answered with `others`), or, for a reply that called nothing, a note to the agent.
+- `def crowded(self, model: Model) -> bool` — Whether one more turn might leave the model less than its full room to reply (by what its last prompt
+  took, which the model reports, and by how much a turn has been seen to add).
+- `async def compact(self, model: Model, system: Message | None = None, *, keep: int | None = None) -> None` — Replace the oldest turns with what the agent says it needs to remember of them. The newest `keep` stay as
+  they are (by default the newest third).
+- `async def sample(self, model: Model, *, system: Message | None = None, current: Sequence[Message] = (), tools: Sequence[ToolSpecification] = (), keep: int = 0) -> Message` — One reply to the context. If the model refuses the context as too long, memory is compacted and the reply
+  asked for again (the newest `keep` turns are never compacted).
+
 ### `Model`
 
 *class* · `src/rollout/core/harness/context.py`
@@ -457,6 +524,9 @@ A model slot as code sees it. Nothing here identifies the policy, weights or eng
 - `@property def capabilities(self) -> CapabilityContract`
 - `@property def usage(self) -> Usage | None` — Usage reported by the latest sample, if any: drives compaction decisions.
 - `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None) -> Message`
+- `def address(self) -> ModelAddress` — For a harness that brings its own loop (a coding agent running inside the environment, say): where it
+  reaches this slot's model. Hand it the base URL and key; what it samples there is this slot's, recorded like
+  any other sample. Raises if the deployment does not serve models over HTTP.
 
 ### `ModelBinding`
 
@@ -843,11 +913,12 @@ Declare a task method as a tool: `@tool` or `@tool(name=..., retry_class=..., ti
 class ToolBinding(ContractModel)
 ```
 
-How an import is served. Exactly one kind is set; more kinds (MCP, HTTP, agent, human) come later.
+How an import is served. Exactly one kind is set.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `local` | `str \| None` | `None` | The name of a tool set registered with the runner, in process. |
+| `url` | `str \| None` | `None` | A tool set served over HTTP (`rollout.core.harness.remote`): an environment's own infrastructure, wherever it runs. |
 
 ### `Tools`
 
@@ -916,6 +987,16 @@ Suspend the run until a message of `kind` arrives or `timeout` passes.
 | `kind` | `str` | `'message'` |  |
 | `timeout` | `timedelta \| None` | `None` |  |
 | `on_timeout` | `Observation` | `field(default_factory=lambda: End(truncated=True))` |  |
+
+### `with_row`
+
+*function* · `src/rollout/core/harness/runner.py`
+
+```python
+def with_row(reference: ProgramReference, row: JsonValue) -> ProgramReference
+```
+
+The same program for another row of parameters (for the task loop: the task's parameters).
 
 ## `rollout.core.contracts`
 
@@ -1307,6 +1388,23 @@ def message_digest(message: Message) -> str
 
 Covers what the model can see: `meta` is excluded.
 
+### `ModelAddress`
+
+*class* · `src/rollout/core/contracts/model_endpoint.py`
+
+```python
+class ModelAddress(ContractModel)
+```
+
+Where a harness that brings its own loop reaches a model slot: an OpenAI-compatible endpoint. Whatever
+answers there is the slot's model; the harness only sets its base URL and key.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `base_url` | `str` | required |  |
+| `api_key` | `str` | required | Names the session: valid for this run's slot only. |
+| `model` | `str` | required | What to send as the model's name (the endpoint ignores it). |
+
 ### `ModelEndpoint`
 
 *class* · `src/rollout/core/contracts/model_endpoint.py`
@@ -1315,7 +1413,8 @@ Covers what the model can see: `meta` is excluded.
 class ModelEndpoint(Protocol)
 ```
 
-Serves model slots: implemented by the recorder and by direct adapters.
+Serves model slots: implemented by the recorder and by direct adapters. An endpoint that can also be reached
+over HTTP has `address(session_id) -> ModelAddress`.
 
 **Methods**
 
@@ -2075,6 +2174,925 @@ def tool_call_reply(*calls: ToolCall, text: str = '') -> Message
 ```
 
 An assistant reply that makes tool calls.
+
+## `rollout.rollouts`
+
+Rollout jobs: rows in, episodes out, weights published; in process or over HTTP.
+
+### `Catalog`
+
+*class* · `src/rollout/rollouts/catalog.py`
+
+```python
+class Catalog(Protocol)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `program` | `ProgramReference` | required | What a run executes; its parameters are a start. |
+
+**Methods**
+
+- `def rows(self) -> Sequence[Row]` — Every situation, easiest first.
+- `def start(self, row: Row, rng: random.Random) -> JsonValue` — The parameters of one start of `row` (a seed drawn with `rng`, say): what every run of a group is given.
+
+### `Episode`
+
+*class* · `src/rollout/rollouts/episodes.py`
+
+```python
+class Episode
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `cursor` | `int` | required | Its place in the job's log: episodes are numbered from 1 in the order they ended. |
+| `job` | `str` | required |  |
+| `ticket` | `str` | required |  |
+| `run_id` | `str` | required |  |
+| `labels` | `Mapping[str, str]` | required |  |
+| `parameters` | `JsonValue` | required | The row the run was given. |
+| `outcome` | `Outcome` | required |  |
+| `detail` | `str \| None` | `None` |  |
+| `info` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the program reported as its result (`run.emit("result", {...})`). By convention `solved` and `saturated` (nothing was left to earn) are booleans and `duration` is a number in the task's own units. |
+| `excluded` | `str \| None` | `None` | Why the program asked for the run to be left out of training, if it did. |
+| `traces` | `Mapping[str, Trace]` | `field(default_factory=dict[str, Trace])` |  |
+
+**Methods**
+
+- `@property def reward(self) -> float` — The mean of the slots' rewards (a team that is rewarded together has one reward).
+- `@property def trainable(self) -> bool`
+- `def to_json(self) -> dict[str, Any]`
+- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Episode'`
+
+### `Job`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class Job(Protocol)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `str` | required |  |
+
+**Methods**
+
+- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> Ticket` — Queue `count` runs of one row. They start together, when there is room for all of them.
+- `def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]` — Every episode after `cursor`, then new ones as runs end, until the job is closed.
+- `async def acknowledge(self, cursor: int) -> None` — The caller has consumed everything through `cursor`: it need not be kept.
+- `async def publish(self, channel: str, adapter: str, path: str) -> int` — Serve new weights on a channel from now on; returns the channel's new version.
+- `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None` — Put something of the caller's own (an update's statistics, say) where whoever watches the job sees it.
+- `async def status(self) -> Status`
+
+### `JobHooks`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class JobHooks
+```
+
+Watch a job at the level its caller thinks at: tickets, episodes, published weights, the caller's own notes.
+
+**Methods**
+
+- `def on_job(self, event: Mapping[str, JsonValue]) -> None` — `event["kind"]` is `ticket`, `admitted`, `episode`, `published`, or a kind the caller noted.
+
+### `Jobs`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class Jobs(Protocol)
+```
+
+Where jobs are started: `RolloutJobs` in this process, or `rollout.rollouts.service.RolloutClient` for jobs
+served elsewhere.
+
+**Methods**
+
+- `async def start(self, *, program: ProgramReference, binding: RunBinding, in_flight: int, name: str = '') -> 'Job'`
+
+### `Outcome`
+
+*class* · `src/rollout/rollouts/episodes.py`
+
+```python
+class Outcome(StrEnum)
+```
+
+| Member | Value | Description |
+|---|---|---|
+| `COMPLETED` | `'completed'` |  |
+| `FAILED` | `'failed'` | The program raised: its `detail` says what. |
+| `CANCELLED` | `'cancelled'` |  |
+
+### `Recorded`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class Recorded(Protocol)
+```
+
+What a job needs of the recorder: each run's sequences, and somewhere to publish weights.
+
+**Methods**
+
+- `def sessions(self, run_id: str) -> dict[str, list[Epoch]]`
+- `def forget(self, run_id: str) -> None`
+- `async def publish(self, channel: str, adapter: str, path: str) -> int`
+
+### `RolloutJob`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class RolloutJob
+```
+
+A job over a runner. Created by `RolloutJobs.start`.
+
+**Methods**
+
+- `def __init__(self, job_id: str, specification: RunSpecification, runner: Runner, recorder: Recorded, *, in_flight: int, log: Path | None, hooks: Sequence[JobHooks], guard: Callable[[], None] | None) -> None`
+- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1) -> _Ticket`
+- `async def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]`
+- `def collect(self, ticket: str) -> None` — A ticket's episodes have been read: it need not be kept.
+- `def after(self, cursor: int) -> list[Episode]` — The episodes after `cursor` that are in the log now.
+- `async def acknowledge(self, cursor: int) -> None`
+- `async def publish(self, channel: str, adapter: str, path: str) -> int`
+- `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None`
+- `async def status(self) -> Status`
+- `async def close(self) -> None` — Stop admitting, cancel what is running, and end every `episodes` stream.
+
+### `RolloutJobs`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class RolloutJobs
+```
+
+Starts jobs on a runner. `log` keeps each job's unacknowledged episodes on disk (under `log/JOB`), so that a
+caller that stops can go on from its cursor; `guard` is called before runs are admitted and raises to refuse them
+(a machine out of memory, say).
+
+**Methods**
+
+- `def __init__(self, runner: Runner, recorder: Recorded, *, log: Path | None = None, hooks: Sequence[JobHooks] = (), guard: Callable[[], None] | None = None) -> None`
+- `async def start(self, *, program: ProgramReference, binding: RunBinding, in_flight: int, name: str = '') -> RolloutJob` — A job that runs `program` (with each ticket's row as its parameters) under `binding`, at most `in_flight`
+  runs at a time. A `name` makes the job's log one a later process finds again.
+- `async def close(self) -> None`
+
+### `Row`
+
+*class* · `src/rollout/rollouts/catalog.py`
+
+```python
+class Row
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `key` | `str` | required | Its name among the catalog's rows. |
+| `title` | `str` | required | What it is, for people. |
+| `parameters` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+
+### `Status`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class Status
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `queued` | `int` | required | Runs waiting for room. |
+| `running` | `int` | required |  |
+| `finished` | `int` | required | Episodes in the log, of every outcome. |
+| `acknowledged` | `int` | required | The cursor the caller has consumed through. |
+
+### `Ticket`
+
+*class* · `src/rollout/rollouts/jobs.py`
+
+```python
+class Ticket(Protocol)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `str` | required |  |
+
+**Methods**
+
+- `async def episodes(self) -> list[Episode]` — The ticket's episodes, once every one of its runs has ended (in the order they ended).
+
+### `Trace`
+
+*class* · `src/rollout/rollouts/episodes.py`
+
+```python
+class Trace
+```
+
+One model slot's part of an episode.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `epochs` | `list[Epoch]` | required |  |
+| `rewards` | `Mapping[str, float]` | required | By key; a program that assigns one reward uses the key `default`. |
+
+**Methods**
+
+- `@property def reward(self) -> float`
+
+## `rollout.training`
+
+The training loop, the group algorithm, the curriculum and the trainer.
+
+### `Budget`
+
+*class* · `src/rollout/training/trainer.py`
+
+```python
+class Budget
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `sequence_tokens` | `int \| None` | `None` | The longest sequence the trainer can train on (None: any). |
+| `sequences` | `int \| None` | `None` | How many sequences a step can afford (None: any number). |
+
+### `Colocated`
+
+*class* · `src/rollout/training/trainer.py`
+
+```python
+class Colocated
+```
+
+A trainer that shares an accelerator with the engines of some channels: requests to them are held back and
+the engines sleep while it steps. `guard` is called once they are asleep and raises if the step should not
+start (too little memory, say).
+
+**Methods**
+
+- `def __init__(self, trainer: Trainer, channels: Sequence[Channel], *, guard: Callable[[], None] | None = None) -> None`
+- `async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step`
+
+### `complete_groups`
+
+*function* · `src/rollout/training/algorithm.py`
+
+```python
+async def complete_groups(episodes: AsyncIterator[Episode], *, by: str = 'group', size: int) -> AsyncIterator[list[Episode]]
+```
+
+The episodes of a stream, gathered by the label `by`: each group is yielded when `size` of its episodes have
+ended (whatever their outcome).
+
+### `Curriculum`
+
+*class* · `src/rollout/training/curriculum.py`
+
+```python
+class Curriculum
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rows` | `Sequence[Row]` | required |  |
+| `rng` | `random.Random` | `field(default_factory=random.Random)` |  |
+| `start` | `int` | `3` | This many rows are unlocked from the beginning. |
+| `reach` | `int` | `4` | Rows unlocked past the hardest one solved. |
+| `smoothing` | `float` | `0.5` | Weight of the newest group in the moving averages. |
+| `floor` | `float` | `0.05` |  |
+| `records` | `dict[str, Record]` | `field(default_factory=dict[str, Record])` |  |
+
+**Methods**
+
+- `def unlocked(self) -> list[Row]`
+- `def sample(self, pending: Collection[str] = ()) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
+  be choosing on what was known before it, so the others come first.
+- `def weight(self, row: Row) -> float`
+- `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
+- `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
+  longer untried, and it taught nothing.
+- `def record(self, row: Row) -> Record`
+- `def saved(self) -> dict[str, dict[str, object]]` — The records, as JSON: by key, each with its row's title.
+- `def restore(self, saved: Mapping[str, Mapping[str, object]]) -> None` — Records go to the row of the same title, if they were saved with one: a key that is a place in a catalog
+  changes when rows are added.
+
+### `Directory`
+
+*class* · `src/rollout/training/loop.py`
+
+```python
+class Directory
+```
+
+A `Store` in a directory.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `path` | `Path` | required |  |
+
+**Methods**
+
+- `def read(self, name: str) -> str | None`
+- `def write(self, name: str, text: str) -> None`
+- `def append(self, name: str, line: str) -> None`
+
+### `group_advantages`
+
+*function* · `src/rollout/training/algorithm.py`
+
+```python
+def group_advantages(scores: Sequence[float]) -> list[float] | None
+```
+
+Each score minus the group's mean; None when all are equal (no signal).
+
+### `Grpo`
+
+*class* · `src/rollout/training/algorithm.py`
+
+```python
+class Grpo
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group_size` | `int` | `4` |  |
+| `tie_break` | `bool` | `True` | Whether the fastest of a group's saturated episodes scores a point more. |
+
+**Methods**
+
+- `def scores(self, group: Sequence[Episode]) -> list[float]` — What each episode of a group is compared by: its reward, and the tie-break.
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> list[Weighted] | None` — What to train on from a group of episodes (those fit to train on: completed, and not excluded), or None
+  if the group has nothing to teach.
+
+### `iterations`
+
+*function* · `src/rollout/training/loop.py`
+
+```python
+def iterations(store: Store) -> list[dict[str, Any]]
+```
+
+The groups a run has logged, in the order they were logged.
+
+### `LoraTrainer`
+
+*class* · `src/rollout/training/trainer.py`
+
+```python
+class LoraTrainer
+```
+
+Trains a LoRA adapter, one step at a time, each in a fresh process on the GPU. Adapters are kept under
+`directory/adapters/step-N`, and the optimizer's state under `directory/trainer`; a trainer made again over the
+same directory goes on from the latest step.
+
+**Methods**
+
+- `def __init__(self, checkpoint: str, directory: Path, *, rank: int = 32, learning_rate: float = 5e-05, budget: Budget | None = None) -> None`
+- `@property def latest(self) -> tuple[str, str] | None` — The newest adapter's name and path, if a step has been taken.
+- `async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step`
+
+### `Step`
+
+*class* · `src/rollout/training/trainer.py`
+
+```python
+class Step
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `adapter` | `str` | required | The name of the new weights. |
+| `path` | `str` | required | Where engines read them. |
+| `metrics` | `Mapping[str, float]` | required |  |
+
+### `Store`
+
+*class* · `src/rollout/training/loop.py`
+
+```python
+class Store(Protocol)
+```
+
+Where a training run keeps its small state: a directory, or anything else that holds named texts.
+
+**Methods**
+
+- `def read(self, name: str) -> str | None`
+- `def write(self, name: str, text: str) -> None`
+- `def append(self, name: str, line: str) -> None`
+
+### `train`
+
+*function* · `src/rollout/training/loop.py`
+
+```python
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, store: Store, *, channel: str = 'policy', algorithm: Grpo | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None) -> None
+```
+
+Train `channel`'s policy on `catalog` for `groups` more groups. `overlap`: the next group starts when at most
+this many episodes of earlier groups are still running. `binding` says how the program's model slots and imports
+are served (by default: every slot from `channel`, each import from the tool set of its own name).
+
+### `Trainer`
+
+*class* · `src/rollout/training/trainer.py`
+
+```python
+class Trainer(Protocol)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `budget` | `Budget` | required |  |
+
+**Methods**
+
+- `async def step(self, batch: Sequence[Weighted], *, seed: int) -> Step` — Train on the batch, and return the new weights.
+
+### `Weighted`
+
+*class* · `src/rollout/training/trainer.py`
+
+```python
+class Weighted
+```
+
+A sequence to train on, and its advantage: every token the policy sampled in it counts by that much.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `epoch` | `Epoch` | required |  |
+| `advantage` | `float` | required |  |
+
+## `rollout.inference`
+
+Channels: policies being served, and the engines behind them.
+
+### `Channel`
+
+*class* · `src/rollout/inference/channel.py`
+
+```python
+class Channel
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `engines` | `Sequence[Engine]` | required |  |
+| `renderer` | `'Renderer'` | required | The model family's token format. |
+| `limits` | `Limits` | `Limits()` |  |
+| `adapter` | `str \| None` | `None` | The adapter sampling now (None: the base model). |
+| `version` | `int` | `0` | How many times weights have been published; recorded with every sampled token. |
+
+**Methods**
+
+- `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '') -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
+  beginnings are cached.
+- `async def publish(self, adapter: str, path: str) -> int` — Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the new version.
+  The adapter before stays loaded, so that a turn in progress finishes under the weights it began with; the
+  one before that is dropped.
+- `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
+- `def resume(self) -> None`
+- `async def sleep(self) -> None`
+- `async def wake(self) -> None`
+- `def take(self) -> dict[str, float]` — What passed through since the last call: requests, tokens in and out, and throughput.
+  `tokens_per_second` is everything generated over the time the channel was generating.
+- `def close(self) -> None`
+
+### `Engine`
+
+*class* · `src/rollout/inference/channel.py`
+
+```python
+class Engine(Protocol)
+```
+
+One replica serving a model: in this process, or a client of a server elsewhere.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_model_len` | `int` | required | The longest sequence (prompt and completion) it accepts. |
+
+**Methods**
+
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
+- `async def load_adapter(self, name: str, path: str) -> None` — Register a LoRA adapter under `name`; requests name it to sample from it.
+- `async def remove_adapter(self, name: str) -> None`
+- `async def sleep(self) -> None` — Free the accelerator (for a trainer that shares it).
+- `async def wake(self) -> None`
+- `def close(self) -> None`
+
+### `Generation`
+
+*class* · `src/rollout/inference/channel.py`
+
+```python
+class Generation
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tokens` | `list[int]` | required |  |
+| `logprobs` | `list[float]` | required | Of each sampled token, under the distribution it was sampled from. |
+| `finish_reason` | `str` | required | `stop` (a stop token, included in `tokens`) or `length`. |
+
+### `Limits`
+
+*class* · `src/rollout/inference/channel.py`
+
+```python
+class Limits
+```
+
+What a turn may take, in tokens: the deployment's hardware decides, and code above it receives the outcome
+(a context limit in a model's capability contract, a refusal when a context is full), never these numbers.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `thinking` | `int` | `1024` | Tokens of thinking per turn before it is closed by force. |
+| `answer` | `int` | `400` | Room for the answer after the thinking. |
+| `sequence` | `int \| None` | `None` | The longest turn (prompt and completion): the smaller of what the engines accept and what the trainer can train on. A long prompt leaves less room to think, so that every turn can be trained on. |
+
+## `rollout.recorder`
+
+The model endpoint for trainable channels: token-exact recording.
+
+### `ChatTemplateRenderer`
+
+*class* · `src/rollout/recorder/renderers.py`
+
+```python
+class ChatTemplateRenderer
+```
+
+Renders with the tokenizer's chat template; parses with a family's tool-call and thinking formats.
+
+**Methods**
+
+- `def __init__(self, name: str, tokenizer: Tokenizer, tool_calls: ToolCallFormat, thinking: ThinkingFormat | None, end: str) -> None`
+- `def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]`
+- `def encode(self, text: str) -> list[int]`
+- `def stop_token_ids(self) -> list[int]`
+- `def thinking_end_token_ids(self) -> list[int]`
+- `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message`
+
+### `Epoch`
+
+*class* · `src/rollout/recorder/recorder.py`
+
+```python
+class Epoch
+```
+
+One token sequence of a session, as the policy saw and continued it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tokens` | `list[int]` | required |  |
+| `spans` | `list[Span]` | required |  |
+| `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
+
+**Methods**
+
+- `@property def sampled(self) -> int`
+
+### `JsonToolCalls`
+
+*class* · `src/rollout/recorder/renderers.py`
+
+```python
+class JsonToolCalls
+```
+
+`<tool_call>{"name": ..., "arguments": {...}}</tool_call>` (Qwen3, Hermes).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `CALL` |  | `re.compile('<tool_call>\\s*(\\{.*?\\})\\s*</tool_call>', re.DOTALL)` |  |
+
+**Methods**
+
+- `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
+
+### `RecordedEndpoint`
+
+*class* · `src/rollout/recorder/recorder.py`
+
+```python
+class RecordedEndpoint
+```
+
+Implements `ModelEndpoint` for one channel.
+
+**Methods**
+
+- `def __init__(self, recorder: Recorder, channel: Channel, sampling: SamplingParameters) -> None`
+- `def describe(self, session_id: str) -> CapabilityContract`
+- `def address(self, session_id: str, through: ModelEndpoint | None = None) -> ModelAddress` — Where a harness outside the run's own loop reaches this session, and the key that names it. Its samples
+  go `through` an endpoint wrapping this one, if one is given (a runner's, which reports them to its hooks).
+- `async def cancel(self, effect_id: str) -> None` — Nothing to do: the generation stops when the task awaiting `sample` is cancelled.
+- `async def sample(self, request: SampleRequest) -> SampleResult`
+
+### `Recorder`
+
+*class* · `src/rollout/recorder/recorder.py`
+
+```python
+class Recorder
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `channels` | `Mapping[str, Channel]` | required |  |
+| `base_url` | `str \| None` | `None` | Where `rollout.recorder.compat` serves this recorder, as harnesses reach it (None: it is not served). |
+
+**Methods**
+
+- `def endpoint(self, binding: RecordedModel) -> 'RecordedEndpoint'`
+- `def export(self, session_id: str) -> list[Epoch]` — The session's sequences, oldest first (see the module's description).
+- `def sessions(self, run_id: str) -> dict[str, list[Epoch]]` — What each model slot of a run exports, by slot.
+- `def forget(self, run_id: str) -> None`
+- `async def publish(self, channel: str, adapter: str, path: str) -> int` — Serve new weights on a channel; returns its new version.
+- `def served(self, key: str) -> tuple[str, ModelEndpoint] | None` — The session a harness's key names, and the endpoint that samples for it.
+
+### `Renderer`
+
+*class* · `src/rollout/recorder/renderers.py`
+
+```python
+class Renderer(Protocol)
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `thinking` | `ThinkingFormat \| None` | required |  |
+
+**Methods**
+
+- `def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]` — The prompt: every message, then the generation prompt for the assistant's next turn.
+- `def encode(self, text: str) -> list[int]`
+- `def stop_token_ids(self) -> list[int]` — Tokens that end an assistant turn.
+- `def thinking_end_token_ids(self) -> list[int]` — Tokens that end thinking (to stop a thinking phase on), or none if it is not a single token.
+- `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message` — A sampled turn as a canonical assistant message.
+
+### `renderer_for`
+
+*function* · `src/rollout/recorder/renderers.py`
+
+```python
+def renderer_for(name: str, tokenizer: Tokenizer) -> Renderer
+```
+
+### `RENDERERS`
+
+*constant* · `src/rollout/recorder/renderers.py`
+
+```python
+RENDERERS: dict[str, Callable[[Tokenizer], Renderer]] = {'qwen3.5': lambda tokenizer: ChatTemplateRenderer('qwen3.5', tokenizer, XmlFunctionCalls(), ThinkingFormat(open='<think>', close='</think>', prompt_opens=True, forced_close='\n</think>\n\n'), end='<|im_end|>'), 'qwen3': lambda tokenizer: ChatTemplateRenderer('qwen3', tokenizer, JsonToolCalls(), ThinkingFormat(open='<think>', close='</think>', prompt_opens=False, forced_close='\n</think>\n\n'), end='<|im_end|>')}
+```
+
+Renderers by family. Register another with `RENDERERS[name] = factory`.
+
+### `Span`
+
+*class* · `src/rollout/recorder/recorder.py`
+
+```python
+class Span
+```
+
+Tokens `start` to `end` (exclusive) of an epoch were sampled by the policy, at weights `version`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `start` | `int` | required |  |
+| `end` | `int` | required |  |
+| `version` | `int` | required |  |
+
+### `ThinkingFormat`
+
+*class* · `src/rollout/recorder/renderers.py`
+
+```python
+class ThinkingFormat
+```
+
+How a family delimits thinking. Its generation prompt may already open the block.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `open` | `str` | required |  |
+| `close` | `str` | required |  |
+| `prompt_opens` | `bool` | required | Whether the generation prompt ends inside an opened thinking block (the model only closes it). |
+| `forced_close` | `str` | required | Text appended to end thinking that ran out of budget (masked from training). |
+
+### `ToolCallFormat`
+
+*class* · `src/rollout/recorder/renderers.py`
+
+```python
+class ToolCallFormat(Protocol)
+```
+
+How a family writes tool calls in its output.
+
+**Methods**
+
+- `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]` — Split text into what precedes the calls and the calls; arguments are converted to their schema types.
+
+### `XmlFunctionCalls`
+
+*class* · `src/rollout/recorder/renderers.py`
+
+```python
+class XmlFunctionCalls
+```
+
+`<tool_call><function=name><parameter=key>value</parameter></function></tool_call>` (Qwen3.5, Qwen3-Coder).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `CALL` |  | `re.compile('<tool_call>\\s*<function=([^>\\s]+)>(.*?)</function>\\s*</tool_call>', re.DOTALL)` |  |
+| `PARAMETER` |  | `re.compile('<parameter=([^>\\s]+)>\\n?(.*?)\\n?</parameter>', re.DOTALL)` |  |
+
+**Methods**
+
+- `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
+
+## `rollout.profile`
+
+A deployment, described and opened.
+
+### `ChannelSpec`
+
+*class* · `src/rollout/profile.py`
+
+```python
+class ChannelSpec
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `model` | `str` | required |  |
+| `renderer` | `str` | required |  |
+| `thinking_tokens` | `int` | `1024` |  |
+| `answer_tokens` | `int` | `400` |  |
+| `engines` | `tuple[EngineSpec, ...]` | `(EngineSpec(),)` |  |
+
+### `EngineSpec`
+
+*class* · `src/rollout/profile.py`
+
+```python
+class EngineSpec
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `gpu_share` | `float` | `0.78` | Of its GPU's memory, while awake. The weights take what they take; the rest is its cache. |
+| `max_model_len` | `int` | `8192` |  |
+| `concurrency` | `int` | `32` | Requests it works on at once. |
+
+### `NotEnoughMemory`
+
+*class* · `src/rollout/profile.py`
+
+```python
+class NotEnoughMemory(Exception)
+```
+
+Stopping is better than exhausting the machine (a host may shut down rather than kill one process).
+
+### `Platform`
+
+*class* · `src/rollout/profile.py`
+
+```python
+class Platform
+```
+
+An open profile: `jobs` to run episodes with, a `trainer` to step, and `train` for the loop over both.
+
+**Methods**
+
+- `def __init__(self, profile: Profile) -> None`
+- `@classmethod async def start(cls, profile: Profile) -> 'Platform'`
+- `async def train(self, catalog: Catalog, *, groups: int = 100, algorithm: Grpo | None = None, seed: int = 0) -> None` — The training loop over this platform, on the first channel.
+- `async def close(self) -> None`
+
+### `Profile`
+
+*class* · `src/rollout/profile.py`
+
+```python
+class Profile
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `directory` | `Path` | required |  |
+| `channels` | `Mapping[str, ChannelSpec]` | required |  |
+| `trainer` | `TrainerSpec` | `TrainerSpec()` |  |
+| `runner` | `str` | `'local'` |  |
+| `serve` | `str \| None` | `None` |  |
+| `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` |  |
+| `runs_gib` | `float` | `0.0` |  |
+| `training_gib` | `float` | `0.0` |  |
+| `feed_runs` | `int` | `80` | Episodes kept in the monitor's feed (the oldest are deleted). |
+
+**Methods**
+
+- `@classmethod def load(cls, path: Path, *, directory: Path | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs).
+- `async def open(self) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out.
+
+### `TrainerSpec`
+
+*class* · `src/rollout/profile.py`
+
+```python
+class TrainerSpec
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rank` | `int` | `32` |  |
+| `learning_rate` | `float` | `5e-05` |  |
+| `sequence_tokens` | `int` | `8000` |  |
+| `sequences_per_step` | `int` | `384` |  |
+| `colocated` | `bool` | `True` |  |
+
+## `rollout.monitor`
+
+A live web page over a job and its runs.
+
+### `FeedReader`
+
+*class* · `src/rollout/monitor/feed.py`
+
+```python
+class FeedReader
+```
+
+Reads a feed directory incrementally: each call picks up what was appended since the last.
+
+**Methods**
+
+- `def __init__(self, directory: Path) -> None`
+- `def refresh(self) -> None`
+- `def runs(self) -> list[dict[str, Any]]` — Every run in the feed, newest first: its labels, state, rewards and how much it has done.
+- `def job(self, after: int = 0) -> list[dict[str, Any]]` — What the rollout job did, from index `after` on: tickets, episodes, published weights, the trainer's
+  iterations, the engines' throughput.
+- `def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]` — A run's lines from index `after` on.
+
+### `plain`
+
+*function* · `src/rollout/monitor/feed.py`
+
+```python
+def plain(message: Message) -> dict[str, JsonValue]
+```
+
+A message as the page shows it: its text, its reasoning, the tools it called and the results it carries.
+
+### `RunFeed`
+
+*class* · `src/rollout/monitor/feed.py`
+
+```python
+class RunFeed(RunHooks, JobHooks)
+```
+
+Writes every run's events and samples under `directory`, one file per run, as they happen; and what a
+rollout job did, at the level its caller thinks at, in one file more.
+
+`keep` bounds the directory: when more runs than that have files, the oldest are deleted. A directory has one
+writer at a time: runs that an earlier writer left without an end (its process was stopped) are marked cancelled
+when the next one starts, so that a monitor does not show them running for ever.
+
+**Methods**
+
+- `def __init__(self, directory: Path, *, keep: int = 200) -> None`
+- `def on_event(self, event: RunEvent) -> None`
+- `def on_job(self, event: Mapping[str, JsonValue]) -> None`
+- `def on_sample(self, sample: ModelSample) -> None`
+- `def close(self) -> None`
 
 ## `rollout.durable`
 

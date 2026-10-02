@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import JsonValue
 from pydantic_core import to_jsonable_python
@@ -15,6 +15,7 @@ from rollout.core.contracts import (
     EffectKind,
     InternalError,
     Message,
+    ModelAddress,
     ModelEndpoint,
     Overloaded,
     SampleRequest,
@@ -71,6 +72,12 @@ class EndpointModel:
     @property
     def usage(self) -> Usage | None:
         return self._usage
+
+    def address(self) -> ModelAddress:
+        serve = getattr(self._endpoint, "address", None)
+        if serve is None:
+            raise RuntimeError("this model slot is not served over HTTP: a harness cannot be given an address")
+        return cast(ModelAddress, serve(self._session_id))
 
     async def sample(
         self,

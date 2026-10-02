@@ -22,14 +22,8 @@ class Control:
         """Every player's position, health, food, inventory and diamonds, and `team_diamonds`: the reward."""
         return await self._request("GET", "/state")
 
-    async def team_diamonds(self) -> int:
-        return int((await self.state())["team_diamonds"])
-
     async def freeze(self) -> dict[str, Any]:
         return await self._request("POST", "/tick", {"action": "freeze"})
-
-    async def unfreeze(self) -> dict[str, Any]:
-        return await self._request("POST", "/tick", {"action": "unfreeze"})
 
     async def step(self, ticks: int) -> dict[str, Any]:
         """Run `ticks` game ticks of the frozen game; returns once they have run."""
@@ -115,10 +109,6 @@ class Control:
     async def set_food(self, name: str, food: int) -> None:
         """A player's hunger (20 is full)."""
         await self._request("POST", "/setup/food", {"name": name, "food": food})
-
-    async def set_time(self, time: int) -> None:
-        """The overworld's time of day in ticks (0 is sunrise, 13000 is night)."""
-        await self._request("POST", "/setup/time", {"time": time})
 
     async def baseline(self) -> dict[str, Any]:
         """Remember each team member's advancements now: `state` then reports only newer ones."""

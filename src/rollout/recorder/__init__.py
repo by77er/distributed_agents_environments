@@ -1,19 +1,12 @@
-"""The recorder (docs/core/recorder): serves trainable model channels and records tokens, logprobs and adapters.
+"""The recorder (docs/core/recorder): serves trainable model channels and records what trainers need.
 
 - `renderers`: model families' token formats, pluggable (`renderer_for("qwen3.5", tokenizer)`).
-- `recorder`: `Recorder`, `Channel` and the `Engine` protocol; `RecordedTurn` is what trainers read; `MeteredEngine`
-  counts an engine's tokens and throughput.
+- `recorder`: `Recorder` serves a run's recorded bindings; a session exports `Epoch`s (token sequences with the
+  spans the policy sampled, their logprobs and weights versions).
+- `compat`: the recorder over HTTP, for harnesses that bring their own loop.
 """
 
-from rollout.recorder.recorder import (
-    Channel,
-    Engine,
-    Generation,
-    MeteredEngine,
-    RecordedEndpoint,
-    RecordedTurn,
-    Recorder,
-)
+from rollout.recorder.recorder import Epoch, RecordedEndpoint, Recorder, Span
 from rollout.recorder.renderers import (
     RENDERERS,
     ChatTemplateRenderer,
@@ -27,16 +20,13 @@ from rollout.recorder.renderers import (
 
 __all__ = [
     "RENDERERS",
-    "Channel",
     "ChatTemplateRenderer",
-    "Engine",
-    "Generation",
+    "Epoch",
     "JsonToolCalls",
-    "MeteredEngine",
     "RecordedEndpoint",
-    "RecordedTurn",
     "Recorder",
     "Renderer",
+    "Span",
     "ThinkingFormat",
     "ToolCallFormat",
     "XmlFunctionCalls",

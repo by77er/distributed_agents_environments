@@ -1,11 +1,11 @@
-"""Engines for the recorder: tokens in; tokens, behavior logprobs and a finish reason out.
+"""vLLM as an engine.
 
 `VllmEngine` drives vLLM's async engine, whose engine core runs in its own process: when it sleeps, its GPU memory
 is free for a trainer. Sleeping drops the weights (they are read again from the checkpoint on waking, about 3 s from
 the file cache) rather than parking them in system memory, where 8 GiB of them sat next to the trainer.
 
-LoRA adapters are registered by name (`load_adapter`); a recorder channel names the adapter each sample uses. Entry
-points that start an engine must guard `if __name__ == "__main__":` (vLLM starts its process with `spawn`).
+LoRA adapters are registered by name (`load_adapter`); a request names the adapter it samples from. Entry points
+that start an engine must guard `if __name__ == "__main__":` (vLLM starts its process with `spawn`).
 """
 
 import contextlib
@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from rollout.recorder.recorder import Generation
+from rollout.inference.channel import Generation
 
 
 class VllmEngine:
@@ -114,21 +114,15 @@ class VllmEngine:
         if request is not None:
             await self._engine.remove_lora(request.lora_int_id)
 
-    async def sleep(self, *, keep_weights: bool = False) -> None:
-        """Free the GPU: the cache is discarded, and the weights dropped (or, with `keep_weights`, moved to system
-        memory: waking is then a second faster and costs the weights' size in memory meanwhile)."""
+    async def sleep(self) -> None:
+        """Free the GPU: the cache is discarded and the weights dropped (they are read again on waking)."""
         await self._engine.reset_prefix_cache()
-        self._dropped = not keep_weights
-        await self._engine.sleep(level=1 if keep_weights else 2)
+        await self._engine.sleep(level=2)
 
     async def wake(self) -> None:
-        if getattr(self, "_dropped", False):
-            await self._engine.wake_up(tags=["weights"])
-            await self._engine.collective_rpc("reload_weights")
-            await self._engine.wake_up(tags=["kv_cache"])
-            self._dropped = False
-        else:
-            await self._engine.wake_up()
+        await self._engine.wake_up(tags=["weights"])
+        await self._engine.collective_rpc("reload_weights")
+        await self._engine.wake_up(tags=["kv_cache"])
 
     def close(self) -> None:
         self._engine.shutdown()

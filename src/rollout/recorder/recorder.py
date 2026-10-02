@@ -1,243 +1,167 @@
-"""The recorder in the local profile: serves recorded model bindings and records what trainers need.
+"""The recorder: serves recorded model bindings and keeps what trainers need.
 
-Each `Channel` is a policy being trained: an engine (tokens in, tokens and logprobs out), a renderer (the model
-family's token format, see `renderers`) and the current LoRA adapter. A run's `RecordedModel` binding names the
-channel; the recorder's endpoint renders the context to tokens, samples, parses the result into canonical content and
-records the turn: prompt tokens, sampled tokens, a loss mask, behavior logprobs and the adapter that sampled them.
+A run's `RecordedModel` binding names a channel (`rollout.inference.Channel`). The recorder's endpoint renders the
+context to tokens, samples from the channel, parses the result into canonical content and records the turn: prompt
+tokens, sampled tokens, behavior logprobs and the weights version that sampled them.
 
 Thinking has a budget: a first phase samples until thinking closes or the budget runs out; then the close is forced
-(masked from training) and a second phase samples the answer. A request may cap its own output (`max_output_tokens`):
-the answer's room comes first and thinking gets what is left, down to none (the block is closed before it starts).
-Each turn is recorded as its own sequence, because chat templates of reasoning models drop earlier turns' thinking:
-re-rendered context differs from what was sampled.
+(not sampled, so never trained on) and a second phase samples the answer. A request may cap its own output
+(`max_output_tokens`): the answer's room comes first and thinking gets what is left, down to none (the block is closed
+before it starts).
+
+**What a session exports** (`Recorder.export`) is a list of `Epoch`s: token sequences with the spans the policy
+sampled. A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues
+that turn's sequence: an append-only conversation is one sequence, however many turns it has, and is trained in one
+pass. A turn whose context was edited (a compaction, a chat template that drops earlier thinking, an observation
+replaced by a shorter form) begins a new sequence. A turn that repeats an earlier prompt exactly (a client's retry)
+replaces it.
+
+**Harnesses that bring their own loop** reach a session over HTTP (`rollout.recorder.compat`): `address` gives the
+base URL and the key to hand to one.
 """
 
-import asyncio
 import math
-import time
+import secrets
 from array import array
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
 
 from rollout.core.contracts import (
     CapabilityContract,
     ContextOverflow,
     FinishReason,
+    ModelAddress,
+    ModelEndpoint,
     SampleRequest,
     SampleResult,
     Usage,
 )
-from rollout.core.harness.runner import RecordedModel
-from rollout.recorder.renderers import Renderer
+from rollout.core.harness.runner import RecordedModel, SamplingParameters
+from rollout.inference import Channel
 
 
 @dataclass(frozen=True)
-class Generation:
+class Span:
+    """Tokens `start` to `end` (exclusive) of an epoch were sampled by the policy, at weights `version`."""
+
+    start: int
+    end: int
+    version: int
+
+
+@dataclass(frozen=True)
+class Epoch:
+    """One token sequence of a session, as the policy saw and continued it."""
+
     tokens: list[int]
+    spans: list[Span]
     logprobs: list[float]
-    """Of each sampled token, under the distribution it was sampled from."""
-    finish_reason: str
-    """`stop` (a stop token, included in `tokens`) or `length`."""
-
-
-class Engine(Protocol):
-    async def generate(
-        self,
-        prompt: Sequence[int],
-        *,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        stop_token_ids: Sequence[int],
-        adapter: str | None,
-    ) -> Generation: ...
-
-
-DEFAULT_CONTEXT_LIMIT = 32_768
-"""For an engine that states no limit of its own."""
-
-
-@dataclass
-class MeteredEngine:
-    """An engine that counts what passes through it (tokens in and out, and for how long it was generating), and
-    that can be paused: `pause()` holds new requests back and returns once none is in flight, so that the engine
-    can be put to sleep under runs that are still going; `resume()` lets them through again."""
-
-    engine: Engine
-    requests: int = 0
-    prompt_tokens: int = 0
-    generated_tokens: int = 0
-    request_seconds: float = 0.0
-    """Summed over requests (concurrent requests each count their own time)."""
-    busy_seconds: float = 0.0
-    """Wall-clock time with at least one request in flight."""
-    _in_flight: int = 0
-    _busy_since: float = 0.0
-    _open: asyncio.Event = field(default_factory=asyncio.Event)
-    _idle: asyncio.Event = field(default_factory=asyncio.Event)
-
-    def __post_init__(self) -> None:
-        self._open.set()
-        self._idle.set()
-
-    async def pause(self) -> None:
-        """Hold new requests back, and wait for those in flight to finish."""
-        self._open.clear()
-        await self._idle.wait()
-
-    def resume(self) -> None:
-        self._open.set()
+    """Behavior logprobs of the tokens inside the spans, in order."""
 
     @property
-    def max_model_len(self) -> int | None:
-        """The metered engine's own limit, if it states one."""
-        stated = getattr(self.engine, "max_model_len", None)
-        return int(stated) if isinstance(stated, int) else None
-
-    async def generate(
-        self,
-        prompt: Sequence[int],
-        *,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        stop_token_ids: Sequence[int],
-        adapter: str | None,
-    ) -> Generation:
-        while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
-            await self._open.wait()
-        started = time.monotonic()
-        if self._in_flight == 0:
-            self._busy_since = started
-        self._in_flight += 1
-        self._idle.clear()
-        try:
-            generation = await self.engine.generate(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                stop_token_ids=stop_token_ids,
-                adapter=adapter,
-            )
-        finally:
-            finished = time.monotonic()
-            self._in_flight -= 1
-            self.request_seconds += finished - started
-            if self._in_flight == 0:
-                self.busy_seconds += finished - self._busy_since
-                self._idle.set()
-        self.requests += 1
-        self.prompt_tokens += len(prompt)
-        self.generated_tokens += len(generation.tokens)
-        return generation
-
-    def take(self) -> dict[str, float]:
-        """The counts since the last call, with throughput: `tokens_per_second` is everything the engine generated
-        over the time it was generating; `tokens_per_second_per_stream` is what one request saw."""
-        counts: dict[str, float] = {
-            "requests": self.requests,
-            "prompt_tokens": self.prompt_tokens,
-            "generated_tokens": self.generated_tokens,
-            "busy_seconds": round(self.busy_seconds, 1),
-            "tokens_per_second": round(self.generated_tokens / self.busy_seconds, 1) if self.busy_seconds else 0.0,
-            "tokens_per_second_per_stream": (
-                round(self.generated_tokens / self.request_seconds, 1) if self.request_seconds else 0.0
-            ),
-            "mean_concurrency": round(self.request_seconds / self.busy_seconds, 1) if self.busy_seconds else 0.0,
-        }
-        self.requests = self.prompt_tokens = self.generated_tokens = 0
-        self.request_seconds = self.busy_seconds = 0.0
-        return counts
-
-
-@dataclass
-class Channel:
-    engine: Engine
-    renderer: Renderer
-    adapter: str | None = None
-    """The LoRA adapter sampling now (None: the base model); trainers move it forward."""
-    adapter_version: int = 0
-    thinking_budget: int = 512
-    answer_tokens: int = 384
-    context_limit: int | None = None
-    """The longest turn (prompt and completion) the channel takes, and what it tells programs. Left unset, it is the
-    engine's own limit (its `max_model_len`, if it states one) and no more than `max_sequence_tokens`."""
-    max_sequence_tokens: int | None = None
-    """If set, no recorded turn (prompt and completion) is longer: a long prompt leaves less room for thinking. A
-    trainer with limited memory can then train on every turn, instead of leaving the long ones out."""
-
-    def __post_init__(self) -> None:
-        if self.context_limit is None:
-            stated = getattr(self.engine, "max_model_len", None)
-            limit = int(stated) if isinstance(stated, int) else DEFAULT_CONTEXT_LIMIT
-            self.context_limit = min(limit, self.max_sequence_tokens or limit)
-
-    @property
-    def limit(self) -> int:
-        assert self.context_limit is not None
-        return self.context_limit
+    def sampled(self) -> int:
+        return sum(span.end - span.start for span in self.spans)
 
 
 @dataclass(frozen=True)
-class RecordedTurn:
-    session_id: str
+class _Turn:
     effect_id: str
-    prompt: Sequence[int]
-    """Kept as a packed array: a long episode records thousands of prompts of thousands of tokens each."""
+    prompt: "array[int]"
     completion: list[int]
-    loss_mask: list[bool]
+    mask: list[bool]
     """True where the policy sampled the token; False where the recorder forced it."""
     logprobs: list[float]
-    """Behavior logprobs; NaN where `loss_mask` is False."""
-    adapter: str | None
-    adapter_version: int
-    finish_reason: FinishReason
+    version: int
 
 
 @dataclass
 class Recorder:
     channels: Mapping[str, Channel]
-    turns: defaultdict[str, list[RecordedTurn]] = field(
-        default_factory=lambda: defaultdict[str, list[RecordedTurn]](list)
-    )
-    """Recorded turns by session (`{run_id}/{slot}`), in order."""
-    _by_effect: dict[str, tuple[RecordedTurn, SampleResult]] = field(
-        default_factory=dict[str, tuple[RecordedTurn, SampleResult]]
-    )
+    base_url: str | None = None
+    """Where `rollout.recorder.compat` serves this recorder, as harnesses reach it (None: it is not served)."""
+    _turns: dict[str, list[_Turn]] = field(default_factory=dict[str, list[_Turn]])
+    _by_effect: dict[str, SampleResult] = field(default_factory=dict[str, SampleResult])
+    _keys: dict[str, tuple[str, ModelEndpoint]] = field(default_factory=dict[str, tuple[str, ModelEndpoint]])
 
     def endpoint(self, binding: RecordedModel) -> "RecordedEndpoint":
         channel = self.channels.get(binding.channel)
         if channel is None:
             raise ValueError(f"no recorded channel {binding.channel!r}")
-        return RecordedEndpoint(self, channel, binding)
+        return RecordedEndpoint(self, channel, binding.sampling)
 
-    def sessions_of(self, run_id: str) -> dict[str, list[RecordedTurn]]:
-        """The turns of each slot of a run, keyed by slot."""
+    def export(self, session_id: str) -> list[Epoch]:
+        """The session's sequences, oldest first (see the module's description)."""
+        turns = self._turns.get(session_id, [])
+        epochs: list[Epoch] = []
+        dropped: set[int] = set()  # continued by a later turn, or retried
+        for index, turn in enumerate(turns):
+            parent: Epoch | None = None
+            for earlier in range(index - 1, -1, -1):
+                if turns[earlier].prompt == turn.prompt:
+                    dropped.add(earlier)
+                held = epochs[earlier].tokens
+                size = len(held)
+                if size <= len(turn.prompt) and turn.prompt[size - 1] == held[-1] and list(turn.prompt[:size]) == held:
+                    parent = epochs[earlier]
+                    dropped.add(earlier)
+                    break
+            spans = list(parent.spans) if parent else []
+            start: int | None = None
+            for offset, sampled in enumerate([*turn.mask, False]):  # (the False closes a span that runs to the end)
+                position = len(turn.prompt) + offset
+                if sampled and start is None:
+                    start = position
+                elif not sampled and start is not None:
+                    spans.append(Span(start, position, turn.version))
+                    start = None
+            logprobs = list(parent.logprobs) if parent else []
+            logprobs += [value for value, sampled in zip(turn.logprobs, turn.mask, strict=True) if sampled]
+            epochs.append(Epoch([*turn.prompt, *turn.completion], spans, logprobs))
+        return [epoch for index, epoch in enumerate(epochs) if index not in dropped and epoch.spans]
+
+    def sessions(self, run_id: str) -> dict[str, list[Epoch]]:
+        """What each model slot of a run exports, by slot."""
         prefix = f"{run_id}/"
-        return {session[len(prefix) :]: turns for session, turns in self.turns.items() if session.startswith(prefix)}
+        return {session[len(prefix) :]: self.export(session) for session in self._turns if session.startswith(prefix)}
 
     def forget(self, run_id: str) -> None:
-        for session in [session for session in self.turns if session.startswith(f"{run_id}/")]:
-            for turn in self.turns.pop(session):
+        for session in [session for session in self._turns if session.startswith(f"{run_id}/")]:
+            for turn in self._turns.pop(session):
                 self._by_effect.pop(turn.effect_id, None)
+        for key in [key for key, (session, _) in self._keys.items() if session.startswith(f"{run_id}/")]:
+            del self._keys[key]
+
+    async def publish(self, channel: str, adapter: str, path: str) -> int:
+        """Serve new weights on a channel; returns its new version."""
+        return await self.channels[channel].publish(adapter, path)
+
+    def served(self, key: str) -> tuple[str, ModelEndpoint] | None:
+        """The session a harness's key names, and the endpoint that samples for it."""
+        return self._keys.get(key)
 
 
 class RecordedEndpoint:
     """Implements `ModelEndpoint` for one channel."""
 
-    def __init__(self, recorder: Recorder, channel: Channel, binding: RecordedModel) -> None:
+    def __init__(self, recorder: Recorder, channel: Channel, sampling: SamplingParameters) -> None:
         self._recorder = recorder
         self._channel = channel
-        self._sampling = binding.sampling
+        self._sampling = sampling
 
     def describe(self, session_id: str) -> CapabilityContract:
+        limits = self._channel.limits
         return CapabilityContract(
-            context_limit=self._channel.limit,
-            max_output_tokens=self._channel.thinking_budget + self._channel.answer_tokens,
+            context_limit=self._channel.context_limit, max_output_tokens=limits.thinking + limits.answer
         )
+
+    def address(self, session_id: str, through: ModelEndpoint | None = None) -> ModelAddress:
+        """Where a harness outside the run's own loop reaches this session, and the key that names it. Its samples
+        go `through` an endpoint wrapping this one, if one is given (a runner's, which reports them to its hooks)."""
+        if self._recorder.base_url is None:
+            raise RuntimeError("this recorder is not served over HTTP: a harness cannot be given an address")
+        key = secrets.token_urlsafe(24)
+        self._recorder._keys[key] = (session_id, through or self)  # pyright: ignore[reportPrivateUsage]
+        return ModelAddress(base_url=self._recorder.base_url, api_key=key, model=self._channel.name)
 
     async def cancel(self, effect_id: str) -> None:
         """Nothing to do: the generation stops when the task awaiting `sample` is cancelled."""
@@ -245,70 +169,56 @@ class RecordedEndpoint:
     async def sample(self, request: SampleRequest) -> SampleResult:
         recorded = self._recorder._by_effect.get(request.effect_id)  # pyright: ignore[reportPrivateUsage]
         if recorded is not None:  # a retried effect: the recorded result, not a second sample
-            return recorded[1]
-        channel, renderer = self._channel, self._channel.renderer
+            return recorded
+        channel, renderer, limits = self._channel, self._channel.renderer, self._channel.limits
         prompt = renderer.render(request.context.append, request.tools)
         thinking = renderer.thinking
-        budget, answer = channel.thinking_budget, channel.answer_tokens
+        budget, answer = limits.thinking, limits.answer
         if request.max_output_tokens is not None:  # the request's own cap: the answer first, thinking with the rest
             answer = min(answer, request.max_output_tokens)
             budget = min(budget, request.max_output_tokens - answer)
         closing = len(renderer.encode(thinking.forced_close)) if thinking is not None and thinking.prompt_opens else 0
-        if len(prompt) + closing + answer > channel.limit:  # no room left to answer: the program must compact
-            raise ContextOverflow(channel.limit)
-        if channel.max_sequence_tokens is not None:  # what the prompt leaves, after room for the answer
-            budget = max(0, min(budget, channel.max_sequence_tokens - len(prompt) - answer - closing))
-        temperature, top_p = self._sampling.temperature, self._sampling.top_p
+        if len(prompt) + closing + answer > channel.context_limit:  # no room left to answer: the caller must compact
+            raise ContextOverflow(channel.context_limit)
+        if limits.sequence is not None:  # what the prompt leaves, after room for the answer
+            budget = max(0, min(budget, limits.sequence - len(prompt) - answer - closing))
         stops = renderer.stop_token_ids()
         completion: list[int] = []
         mask: list[bool] = []
         logprobs: list[float] = []
-        adapter, version = channel.adapter, channel.adapter_version
+        adapter, version = channel.adapter, channel.version
+
+        async def generate(context: Sequence[int], room: int, stop: Sequence[int]) -> str:
+            generation = await channel.generate(
+                context,
+                max_tokens=room,
+                temperature=self._sampling.temperature,
+                top_p=self._sampling.top_p,
+                stop_token_ids=stop,
+                adapter=adapter,
+                session=request.session_id,
+            )
+            completion.extend(generation.tokens)
+            mask.extend([True] * len(generation.tokens))
+            logprobs.extend(generation.logprobs)
+            return generation.finish_reason
+
         if thinking is not None and thinking.prompt_opens:
-            ended, spent = False, budget == 0  # with no room to think, the block the prompt opened is closed at once
+            spent = budget == 0  # with no room to think, the block the prompt opened is closed at once
             if budget > 0:
-                first = await channel.engine.generate(
-                    prompt, max_tokens=budget, temperature=temperature, top_p=top_p,
-                    stop_token_ids=[*renderer.thinking_end_token_ids(), *stops], adapter=adapter,
-                )  # fmt: skip
-                completion += first.tokens
-                mask += [True] * len(first.tokens)
-                logprobs += first.logprobs
-                ended = bool(first.tokens) and first.tokens[-1] in stops
-                spent = first.finish_reason == "length"
+                spent = await generate(prompt, budget, [*renderer.thinking_end_token_ids(), *stops]) == "length"
             if spent:  # out of budget: close the thinking, unsampled
                 forced = renderer.encode(thinking.forced_close)
                 completion += forced
                 mask += [False] * len(forced)
                 logprobs += [math.nan] * len(forced)
-            if not ended:
-                second = await channel.engine.generate(
-                    [*prompt, *completion], max_tokens=answer, temperature=temperature,
-                    top_p=top_p, stop_token_ids=stops, adapter=adapter,
-                )  # fmt: skip
-                completion += second.tokens
-                mask += [True] * len(second.tokens)
-                logprobs += second.logprobs
+            if not completion or completion[-1] not in stops:
+                await generate([*prompt, *completion], answer, stops)
         else:
-            only = await channel.engine.generate(
-                prompt, max_tokens=budget + answer, temperature=temperature,
-                top_p=top_p, stop_token_ids=stops, adapter=adapter,
-            )  # fmt: skip
-            completion, mask, logprobs = list(only.tokens), [True] * len(only.tokens), list(only.logprobs)
+            await generate(prompt, budget + answer, stops)
         message = renderer.parse(completion, request.tools)
         finished = bool(completion) and completion[-1] in stops
         reason = FinishReason.TOOL_USE if message.tool_calls else FinishReason.STOP if finished else FinishReason.LENGTH
-        turn = RecordedTurn(
-            session_id=request.session_id,
-            effect_id=request.effect_id,
-            prompt=array("i", prompt),
-            completion=completion,
-            loss_mask=mask,
-            logprobs=logprobs,
-            adapter=adapter,
-            adapter_version=version,
-            finish_reason=reason,
-        )
         result = SampleResult(
             message=message,
             finish_reason=reason,
@@ -316,9 +226,10 @@ class RecordedEndpoint:
                 input_tokens=len(prompt),
                 output_tokens=len(completion),
                 context_used=len(prompt) + len(completion),
-                context_limit=channel.limit,
+                context_limit=channel.context_limit,
             ),
         )
-        self._recorder.turns[request.session_id].append(turn)
-        self._recorder._by_effect[request.effect_id] = (turn, result)  # pyright: ignore[reportPrivateUsage]
+        turn = _Turn(request.effect_id, array("i", prompt), completion, mask, logprobs, version)
+        self._recorder._turns.setdefault(request.session_id, []).append(turn)  # pyright: ignore[reportPrivateUsage]
+        self._recorder._by_effect[request.effect_id] = result  # pyright: ignore[reportPrivateUsage]
         return result

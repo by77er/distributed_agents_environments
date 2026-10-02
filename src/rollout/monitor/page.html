@@ -21,6 +21,11 @@
   nav { width: 290px; flex: none; border-right: 1px solid var(--line); overflow-y: auto; background: var(--panel); }
   nav h1 { font-size: 14px; margin: 0; padding: 14px 16px 10px; letter-spacing: .02em; }
   nav h1 small { display: block; font-weight: 400; color: var(--quiet); font-size: 12px; margin-top: 2px; }
+  #job { border-top: 1px solid var(--line); padding: 8px 16px 10px; font-size: 12px; color: var(--quiet); }
+  #job:empty { display: none; }
+  #job b { color: var(--ink); font-weight: 600; }
+  #job .line { padding: 2px 0; overflow-wrap: anywhere; }
+  #job .moved { color: var(--good); } #job .still { color: var(--faint); } #job .bad { color: var(--bad); }
   .group { border-top: 1px solid var(--line); padding: 10px 0 6px; }
   .group > header { padding: 0 16px 4px; font-weight: 600; font-size: 13px; }
   .group > header span { display: block; font-weight: 400; color: var(--quiet); font-size: 12px; }
@@ -83,12 +88,13 @@
 <body>
 <nav>
   <h1>Runs monitor <small id="status">connecting…</small></h1>
+  <div id="job"></div>
   <div id="groups"></div>
 </nav>
 <main id="main"><p class="empty">Choose a run on the left.</p></main>
 <script>
 "use strict";
-const state = { runs: [], selected: null, lines: [], turn: 0, follow: true, full: false };
+const state = { runs: [], job: [], selected: null, lines: [], turn: 0, follow: true, full: false };
 const $ = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attributes)) {
@@ -130,6 +136,32 @@ function drawRuns() {
   }
   document.getElementById("status").textContent = state.runs.length
     ? `${state.runs.filter(run => run.state === "running").length} running · ${state.runs.length} in the feed` : "no runs yet";
+}
+
+// What the rollout job did, at the level of whoever trains: its newest groups and what each update did, the weights
+// being served, the engines' throughput, and how much is waiting.
+function drawJob() {
+  const root = document.getElementById("job");
+  root.replaceChildren();
+  const of = kind => state.job.filter(line => line.kind === kind);
+  const tickets = of("ticket").length, admitted = of("admitted").length, episodes = of("episode");
+  if (!state.job.length) return;
+  const published = of("published").at(-1), inference = of("inference").at(-1);
+  root.append($("div", { class: "line" }, $("b", {}, `${episodes.length}`), " episodes ended · ",
+    $("b", {}, `${tickets - admitted}`), " groups waiting",
+    published ? ` · serving ${published.adapter} (version ${published.version})` : " · serving the base model"));
+  if (inference) root.append($("div", { class: "line" }, $("b", {}, `${inference.tokens_per_second}`), " tokens/s, ",
+    `${inference.mean_concurrency} at once, ${inference.tokens_per_second_per_stream} each`));
+  for (const line of of("iteration").slice(-6).reverse()) {
+    const update = line.update;
+    const rewards = (line.rewards ?? []).map(value => Number(value).toFixed(Number.isInteger(value) ? 0 : 1)).join(" ");
+    const what = typeof update === "string"
+      ? $("span", { class: update.startsWith("failed") ? "bad" : "still" }, update)
+      : $("span", { class: "moved" }, `trained ${line.sequences_trained} of ${line.sequences_recorded}, ` +
+          `${update.optimizer_steps ?? "?"} steps, moved ${Number(update.kl_moved ?? 0).toFixed(4)}`);
+    root.append($("div", { class: "line" }, $("b", {}, `#${line.iteration} ${line.task}`), ` ${rewards || "no episode"}`,
+      line.failed ? ` (${line.failed} failed)` : "", " · ", what));
+  }
 }
 
 async function select(runId) {
@@ -266,6 +298,8 @@ async function pull() {
   try {
     state.runs = await (await fetch("api/runs")).json();
     drawRuns();
+    const job = await (await fetch(`api/job?after=${state.job.length}`)).json();
+    if (job.lines.length) { state.job.push(...job.lines); drawJob(); }
     if (state.selected) {
       const run = state.runs.find(each => each.run_id === state.selected);
       if (run && run.lines > state.lines.length) {

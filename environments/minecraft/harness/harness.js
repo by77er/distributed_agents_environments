@@ -6,7 +6,6 @@
 //   {"id": 3, "op": "act", "bot": "ada", "action": {"name": "mine", "x": 1, "y": -58, "z": 4}}
 //   {"id": 4, "op": "busy"}                           which bots are still acting, and which were hurt since the thaw
 //   {"id": 4, "op": "unloaded"}                       which bots do not yet hold the chunks around them
-//   {"id": 4, "op": "status"}                         for diagnosis: each bot's connection, position and physics
 //   {"id": 5, "op": "freeze"}                         stop every action (results are kept) and pause physics
 //   {"id": 6, "op": "thaw"}                           resume physics, before actions start
 //   {"id": 7, "op": "quit"}
@@ -84,8 +83,6 @@ function join (host, port, name) {
       if (state.health !== null && bot.health < state.health) state.hurt = true
       state.health = bot.health
     })
-    bot.on('physicsTick', () => { state.physicsTicks = (state.physicsTicks ?? 0) + 1 })
-    bot.on('forcedMove', () => { state.forcedMoves = (state.forcedMoves ?? 0) + 1 })
     bot.on('respawn', () => { state.memory.clear(); state.air.clear() }) // another dimension (or a new life): what was seen is elsewhere
   })
 }
@@ -120,7 +117,7 @@ function act (name, action) {
   }
   const controller = new AbortController()
   const { name: actionName, ...args } = action
-  const context = { signal: controller.signal, memory: state.memory, team }
+  const context = { signal: controller.signal, memory: state.memory }
   state.result = null
   const running = { controller, action, done: null }
   const finish = result => { // an action abandoned at a freeze reports nothing when it finally ends
@@ -202,31 +199,6 @@ function unloaded () {
   return { unloaded: waiting }
 }
 
-// For diagnosis: is each bot connected, where, and is its physics running?
-function status () {
-  const result = {}
-  for (const [name, state] of bots) {
-    const entity = state.bot.entity
-    result[name] = {
-      kicked: state.kicked,
-      acting: state.action !== null,
-      dimension: state.bot.game?.dimension ?? null,
-      position: entity ? { x: entity.position.x, y: entity.position.y, z: entity.position.z } : null,
-      on_ground: entity?.onGround ?? null,
-      chunk_loaded: entity ? state.bot.blockAt(entity.position) !== null : false,
-      physics_ticks: state.physicsTicks ?? 0,
-      forced_moves: state.forcedMoves ?? 0,
-      controls: ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'].filter(control => state.bot.getControlState(control)),
-      velocity: entity ? { x: entity.velocity.x, y: entity.velocity.y, z: entity.velocity.z } : null,
-      digging: state.bot.targetDigBlock ? state.bot.targetDigBlock.name : null,
-      pathing: { moving: state.bot.pathfinder.isMoving(), mining: state.bot.pathfinder.isMining(), building: state.bot.pathfinder.isBuilding() },
-      feet: entity ? state.bot.blockAt(entity.position)?.name : null,
-      below: entity ? state.bot.blockAt(entity.position.offset(0, -1, 0))?.name : null
-    }
-  }
-  return result
-}
-
 // Who is still acting, and who has been hurt since the thaw.
 function busy () {
   const names = filter => [...bots.entries()].filter(([, state]) => filter(state)).map(([name]) => name)
@@ -239,7 +211,6 @@ async function handle (request) {
     case 'observe': return observation(request.bot)
     case 'act': return act(request.bot, request.action)
     case 'busy': return busy()
-    case 'status': return status()
     case 'unloaded': return unloaded()
     case 'freeze': return freeze()
     case 'thaw': return thaw()

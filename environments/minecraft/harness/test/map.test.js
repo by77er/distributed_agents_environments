@@ -4,7 +4,7 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const { Vec3 } = require('vec3')
-const { observe } = require(process.env.OBSERVE ?? '../lib/observe')
+const { observe } = require('../lib/observe')
 
 const { scene, botIn } = require('./world')
 

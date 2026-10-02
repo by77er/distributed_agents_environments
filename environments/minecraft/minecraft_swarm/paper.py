@@ -41,6 +41,8 @@ from typing import Any
 import httpx
 import yaml
 
+from rollout.processes import end_with_parent
+
 PAPER_VERSION = "1.21.11"
 PAPER_BUILD = 132
 CACHE = Path.home() / ".cache" / "rollout" / "minecraft"
@@ -202,7 +204,7 @@ class Installation:
             stdin=subprocess.PIPE,
             stdout=(directory / "generate.log").open("w"),
             stderr=subprocess.STDOUT,
-            preexec_fn=_end_with_parent,
+            preexec_fn=end_with_parent,
         )
         try:
             _wait_for_line(directory / "generate.log", "Done (", process, seconds=600)
@@ -283,7 +285,7 @@ class PaperServer:
             "-XX:+UseG1GC", "-Djava.net.preferIPv4Stack=true",  # see below
             "-jar", str(self.installation.paper_jar()), "--nogui",
             cwd=self.directory, stdin=asyncio.subprocess.PIPE, stdout=log, stderr=asyncio.subprocess.STDOUT,
-            preexec_fn=_end_with_parent,
+            preexec_fn=end_with_parent,
         )  # fmt: skip
         deadline = time.monotonic() + seconds
         async with httpx.AsyncClient(timeout=2) as client:
@@ -360,15 +362,6 @@ def sweep(installation: Installation) -> list[str]:
         shutil.rmtree(directory, ignore_errors=True)
         removed.append(directory.name)
     return removed
-
-
-def _end_with_parent() -> None:
-    """In a child, before it becomes Java: have the kernel end it when the process that started it dies (Linux). A
-    trainer that is killed would otherwise leave its servers running, 1.5 GB each."""
-    import ctypes
-
-    with contextlib.suppress(OSError, AttributeError):
-        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
 
 
 def release_port(port: int) -> None:

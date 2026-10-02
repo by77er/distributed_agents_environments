@@ -12,7 +12,6 @@ counted and left out (`minibatches_out_of_memory`). The process ends with the pr
 """
 
 import asyncio
-import contextlib
 import multiprocessing
 import traceback
 from collections.abc import Sequence
@@ -22,7 +21,8 @@ from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any
 
-from rollout.training.grpo import TrainingSequence
+from rollout.processes import end_with_parent
+from rollout.training.trainer import Weighted
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class TrainerProcess:
         self._process: BaseProcess | None = None
 
     async def step(
-        self, sequences: Sequence[TrainingSequence], *, seed: int, adapter: Path, previous: Path | None
+        self, sequences: Sequence[Weighted], *, seed: int, adapter: Path, previous: Path | None
     ) -> dict[str, float]:
         """Train one step on the GPU (the engine must have freed it) from the `previous` adapter, and save `adapter`."""
         async with self._lock:
@@ -55,9 +55,7 @@ class TrainerProcess:
                     self._process.terminate()
                 raise
 
-    def _run(
-        self, sequences: list[TrainingSequence], seed: int, adapter: Path, previous: Path | None
-    ) -> dict[str, float]:
+    def _run(self, sequences: list[Weighted], seed: int, adapter: Path, previous: Path | None) -> dict[str, float]:
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe()
         process = context.Process(
@@ -81,20 +79,10 @@ MEMORY_MARGIN = 256 * 2**20
 """GPU memory left free of what was free when a step started (other programs' use moves a little)."""
 
 
-def _end_with_parent() -> None:
-    """Have the kernel end this process when the one that started it dies (Linux), so that a driver killed during a
-    step does not leave a trainer holding the GPU and writing an adapter nobody is waiting for."""
-    import ctypes
-    import signal
-
-    with contextlib.suppress(OSError, AttributeError):
-        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
-
-
 def _step(
     connection: Connection,
     settings: TrainerSettings,
-    sequences: list[TrainingSequence],
+    sequences: list[Weighted],
     seed: int,
     adapter: Path,
     previous: Path | None,
@@ -102,7 +90,7 @@ def _step(
     try:
         import os
 
-        _end_with_parent()
+        end_with_parent()
         # Reserve close to what is used: fragmentation would otherwise cost about 0.7 GiB at the peak.
         os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         import torch

@@ -22,6 +22,7 @@ from rollout.core.harness.hooks import RunHooks, observed, publish
 from rollout.core.harness.imports import ToolSet
 from rollout.core.harness.observation import InvalidObservation
 from rollout.core.harness.program import Program
+from rollout.core.harness.remote import remote_tool_set
 from rollout.core.harness.runner import (
     Deployment,
     DirectModel,
@@ -356,6 +357,9 @@ def resolve_tool_sets(program: Program, binding: RunBinding, tool_sets: Mapping[
     resolved: dict[str, ToolSet] = {}
     for name in program.imports():
         tool_binding = binding.imports.get(name)
+        if tool_binding is not None and tool_binding.url is not None:
+            resolved[name] = remote_tool_set(tool_binding.url)
+            continue
         if tool_binding is None or tool_binding.local is None:
             raise ValueError(f"the binding does not say how to serve the import {name!r}")
         tool_set = tool_sets.get(tool_binding.local)

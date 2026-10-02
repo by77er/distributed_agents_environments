@@ -18,8 +18,8 @@ task.respond(reply) ──▶ run_tools ──▶ @tool bash ──▶ environme
 ## Under the `LocalRunner` (local profile)
 
 Every arrow is a Python call in one process. The recorder calls a local engine; `environment.execute` calls a local
-environment driver, if the task uses one. Nothing is persisted except the recorder's session trees and the sample
-log. A crash loses in-flight runs; a rollout job resamples them.
+environment driver, if the task uses one. Nothing is persisted except the rollout job's log of
+episodes. A crash loses in-flight runs; a rollout job resamples them.
 
 ## Under the `DurableRunner`
 

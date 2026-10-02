@@ -32,17 +32,17 @@ Status: **Proposed**
 | **Imported tool / ToolBinding** | An external tool set (MCP server, HTTP service, another agent, a human) declared by a task and bound per run. |
 | **Canonical content** | Model-agnostic messages and content blocks; the only content form code, run events and tool bindings use. |
 | **Model endpoint** | Anything implementing the [model endpoint contract](../contracts/model-endpoint.md): the recorder or a direct adapter. |
-| **Recorder** | The model endpoint that owns tokenization for recorded channels and records session trees. |
-| **Session / session tree** | The recorder's record of one model slot of one run; a prefix tree of token spans whose paths are trajectories. |
-| **Renderer / renderer epoch** | Chat template + tokenizer + parser for one model family / a stretch of a session extended incrementally with one renderer. |
+| **Recorder** | The model endpoint that owns tokenization for recorded channels and records what was sampled. |
+| **Session / epoch** | The recorder's record of one model slot of one run / one token sequence of it: a context that only grew, with the spans the policy sampled. |
+| **Renderer** | Chat template + tokenizer + parser for one model family. |
 | **Behavior logprob** | Log-probability of a sampled token under the distribution it was actually sampled from. |
 | **Routed experts** | For mixture-of-experts policies, the experts selected at each position; recorded for routing replay in training. |
-| **Channel** | A named, movable pointer to a policy version, with a capability contract. |
+| **Channel** | A policy being served, by name: its engines, its limits, and the weights version it samples from. |
 | **Policy / weights version** | Whatever produces tokens (a weights version + renderer + sampling configuration, or an API model) / a monotonic version within a policy lineage. |
-| **Weight update controller** | Moves engines to new weights: stage while serving, then pause, abort in-flight requests, swap, resume. |
-| **WeightsSource** | How new weights are provided: in-process tensors, a checkpoint, a delta, a LoRA adapter, or a distributed transfer the trainer joins. |
-| **Rollout job** | Runs task rows submitted by a caller and delivers their `Sample`s through one ordered log. Knows no algorithm concepts. |
-| **Sample** | Training record for one run and trainable slot: token sequences, loss mask, behavior logprobs, per-token weights versions, turn spans, routed experts, rewards at token positions, ending, outcome, labels. |
+| **Rollout job** | Runs task rows submitted by a caller and delivers their `Episode`s through one ordered log. Knows no algorithm concepts. |
+| **Episode** | A finished run as training sees it: labels, outcome, result, and for each trainable slot its epochs with behavior logprobs, per-span weights versions and rewards. |
+| **Catalog** | What an environment offers to train on: rows, easiest first, and how to draw a start of one. |
+| **Profile** | A deployment, described: channels and engines, the trainer, the runner, where tool sets live. |
 | **Environment** | A computer a task can create through the `Environments` protocol; provided by the separately designed [environment system](../environments/README.md). |
 | **Cell** | Fleet profile only: a self-contained slice (cluster, Postgres, executors); the unit of scale and failure. |
 | **Unmanaged harness** | A third-party agent that uses the recorder's compatible endpoints (and optionally the tool router's MCP facade) directly: trainable, not durable. |

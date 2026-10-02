@@ -1,8 +1,10 @@
-"""A swarm of four agents in Minecraft, trained with RL to hold as many diamonds as possible together.
+"""Four agents in a shared Minecraft world, as an environment: what an episode is, and what there is to train on.
 
-- `paper`: Paper servers from templates, with the ground-truth plugin (minecraft/plugin).
-- `control`: the plugin's control API: tick freezing and stepping, episode setup, ground truth.
-- `service`: an HTTP service that creates and destroys temporary servers and reports rewards.
-- `harness`: the bridge to the mineflayer bots (minecraft/harness), with filtered observations.
-- `episode`: the lockstep episode program; `curriculum`: where episodes start.
+- `catalog`: the tasks as rows, and how a start is drawn (`rollout train PROFILE minecraft_swarm.catalog:catalog`).
+- `episode`: the episode program: four model slots, lockstep turns, one shared reward.
+- `prompts`: what agents read and call: the system prompt, observations as text, the actions as tools.
+- `tasks`: the task catalog, kits, scoring, and how each task is built in a live world.
+- `worlds`: temporary worlds as the tool set `minecraft` (in this process, or served from another machine).
+- `paper`, `control`, `harness`: Paper servers from templates, the ground-truth plugin's control API, and the bridge
+  to the mineflayer bots.
 """

@@ -63,4 +63,4 @@ function trim (bot, air) {
   }
 }
 
-module.exports = { localMap, remember, trim, AIR, RADIUS, HEIGHTS }
+module.exports = { localMap, remember, trim }
