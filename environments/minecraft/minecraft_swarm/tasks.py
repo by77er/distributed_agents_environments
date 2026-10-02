@@ -754,11 +754,19 @@ async def _surface(task: Task, control: Control, rng: random.Random) -> Site:
 
 
 async def _woodland(task: Task, control: Control, rng: random.Random) -> Site:
+    """On the surface, at the foot of the tree nearest a random spot (within 48 blocks of it): a trunk is within
+    reach from where the team stands."""
     site = await _surface(task, control, rng)
-    logs = await control.find_blocks("#logs", *site.anchor, radius=10, limit=64)
-    if not any(abs(log["y"] - site.anchor[1]) <= 2 for log in logs):  # a trunk within reach from the ground
-        raise BuildError("no trees here")
-    return site
+    ax, _, az = site.anchor
+    foot: dict[tuple[int, int], int] = {}  # each trunk's column, and its lowest log
+    for log in await control.find_blocks("#logs", *site.anchor, radius=48, limit=4096):
+        column = (log["x"], log["z"])
+        foot[column] = min(foot.get(column, log["y"]), log["y"])
+    for (x, z), y in sorted(foot.items(), key=lambda trunk: math.hypot(trunk[0][0] - ax, trunk[0][1] - az)):
+        starts = _spread([spot for spot in await _spots(control, (x, y, z), 4) if abs(spot[1] - y) <= 1])
+        if len(starts) >= 4:
+            return Site(starts, site.available_diamonds, (x, y, z))
+    raise BuildError("no trees here")
 
 
 async def _nether(task: Task, control: Control, rng: random.Random) -> Site:

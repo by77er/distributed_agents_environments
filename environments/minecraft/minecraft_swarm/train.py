@@ -169,11 +169,13 @@ async def train(settings: TrainingSettings) -> None:
 
     pending: list[str] = []  # the tasks of the groups that are running or being trained on
     failed_updates: list[int] = []  # the iterations whose updates failed since the last one that worked
+    unbuildable: dict[str, set[int]] = {}  # by task, the worlds that could not host it
 
     async def start(iteration: int) -> Group:
         task = curriculum.sample(pending)
         pending.append(task.id)
-        world_seed, layout_seed = rng.choice(world_seeds), rng.randrange(1 << 30)
+        hosts = [seed for seed in world_seeds if seed not in unbuildable.get(task.id, set())] or world_seeds
+        world_seed, layout_seed = rng.choice(hosts), rng.randrange(1 << 30)
         minutes = task.minutes if settings.max_minutes is None else min(task.minutes, settings.max_minutes)
         parameters: dict[str, JsonValue] = {
             "task": task.id,
@@ -239,6 +241,13 @@ async def train(settings: TrainingSettings) -> None:
             }
             if rewards:
                 curriculum.update(task, rewards, [bool(result.get("solved")) for result in results])
+            elif all("BuildError" in str(handle.outcome.detail if handle.outcome else "") for handle in handles):
+                # This world cannot host the task (no trees, no ore): another world is tried next time, and the
+                # task counts as tried only once several worlds have refused it.
+                refused = unbuildable.setdefault(task.id, set())
+                refused.add(group.world_seed)
+                if len(refused) >= UNBUILDABLE_WORLDS:
+                    curriculum.failed(task)
             else:
                 curriculum.failed(task)
             bonus = speed_bonus(results)
@@ -317,6 +326,8 @@ async def train(settings: TrainingSettings) -> None:
         feed.close()
 
 
+UNBUILDABLE_WORLDS = 3
+"""Worlds that may refuse a task (it cannot be built there) before the curriculum counts the task as tried."""
 MAX_FAILED_UPDATES = 3
 """Updates that may fail in a row (each is logged, and the adapter stays as it was) before the run stops."""
 

@@ -4,6 +4,7 @@ gets."""
 import random
 from typing import Any
 
+import pytest
 from minecraft_swarm.prompts import goal
 from minecraft_swarm.tasks import (
     CHAINS,
@@ -223,6 +224,14 @@ class Site:
     async def ores(self, x: int, y: int, z: int, *, radius: int = 32, exposed: bool = False) -> list[dict[str, int]]:
         return [{"x": 10, "y": -55, "z": 10}] if radius >= 24 else []
 
+    async def surface(self, x: int, z: int, world: str = "world") -> int:
+        return 70
+
+    async def find_blocks(self, block: str, x: int, y: int, z: int, **_: Any) -> list[dict[str, int]]:
+        return [{"x": tx, "y": ty, "z": tz} for tx, tz in self.trees for ty in range(71, 76)]
+
+    trees: tuple[tuple[int, int], ...] = ()
+
 
 async def test_no_one_starts_within_reach_of_the_diamonds_on_the_floor() -> None:
     from minecraft_swarm.tasks import _items  # pyright: ignore[reportPrivateUsage]
@@ -249,3 +258,16 @@ async def test_the_stone_kit_finds_iron_in_the_wall_of_its_pocket() -> None:
     with_iron = Site()
     await _ore_in_sight(find(Start.ORE_IN_SIGHT, Kit.IRON), with_iron, random.Random(1))  # type: ignore[arg-type]
     assert not with_iron.blocks  # who has an iron pickaxe is given no iron
+
+
+async def test_a_woodland_start_is_at_the_foot_of_the_nearest_tree_or_nowhere() -> None:
+    from minecraft_swarm.tasks import BuildError, _woodland  # pyright: ignore[reportPrivateUsage]
+
+    task = next(t for t in catalog() if t.goal == "wooden_pickaxe")
+    control = Site()
+    with pytest.raises(BuildError, match="no trees here"):  # (the driver then tries another world)
+        await _woodland(task, control, random.Random(3))  # type: ignore[arg-type]
+    control.trees = ((500, 500), (40, -30))
+    site = await _woodland(task, control, random.Random(3))  # type: ignore[arg-type]
+    assert site.anchor == (40, 71, -30)  # the nearer trunk's lowest log
+    assert len(site.starts) == 4 and all(abs(x - 40) <= 4 and abs(z + 30) <= 4 and y == 71 for x, y, z in site.starts)
