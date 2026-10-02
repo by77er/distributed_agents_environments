@@ -62,7 +62,7 @@ from rollout.core.local import LocalRunner
 from rollout.core.local.runner import LocalRunHandle
 from rollout.monitor import RunFeed
 from rollout.recorder import Channel, MeteredEngine, Recorder, renderer_for
-from rollout.recorder.engines import VllmEngine
+from rollout.recorder.engines import VllmEngine, end_orphaned_engines, note_engines
 from rollout.recorder.renderers import Tokenizer
 
 
@@ -133,12 +133,16 @@ async def train(settings: TrainingSettings) -> None:
     ]
     tokenizer = cast(Tokenizer, AutoTokenizer.from_pretrained(settings.model))  # pyright: ignore[reportUnknownMemberType]
     renderer = renderer_for(settings.renderer, tokenizer)
+    ended = end_orphaned_engines(directory / "engine.json")  # one a killed run left behind holds the GPU
+    if ended:
+        print(f"ended the engine a stopped run left behind (process {ended})", flush=True)
     engine = VllmEngine(
         settings.model,
         gpu_memory_utilization=settings.gpu_memory_utilization,
         max_num_seqs=len(TEAM) * (settings.group_size + settings.stragglers),
         max_lora_rank=settings.lora_rank,
     )
+    note_engines(directory / "engine.json")
     metered = MeteredEngine(engine)
     channel = Channel(
         metered,

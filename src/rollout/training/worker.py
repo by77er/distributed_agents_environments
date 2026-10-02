@@ -18,6 +18,7 @@ import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any
 
@@ -40,13 +41,19 @@ class TrainerProcess:
     def __init__(self, settings: TrainerSettings) -> None:
         self.settings = settings
         self._lock = asyncio.Lock()
+        self._process: BaseProcess | None = None
 
     async def step(
         self, sequences: Sequence[TrainingSequence], *, seed: int, adapter: Path, previous: Path | None
     ) -> dict[str, float]:
         """Train one step on the GPU (the engine must have freed it) from the `previous` adapter, and save `adapter`."""
         async with self._lock:
-            return await asyncio.to_thread(self._run, list(sequences), seed, adapter, previous)
+            try:
+                return await asyncio.to_thread(self._run, list(sequences), seed, adapter, previous)
+            except asyncio.CancelledError:  # whoever waited is gone: the step is not left running for nobody
+                if self._process is not None and self._process.is_alive():
+                    self._process.terminate()
+                raise
 
     def _run(
         self, sequences: list[TrainingSequence], seed: int, adapter: Path, previous: Path | None
@@ -57,6 +64,7 @@ class TrainerProcess:
             target=_step, args=(child, self.settings, sequences, seed, adapter, previous), name="trainer"
         )
         process.start()
+        self._process = process
         child.close()
         try:
             kind, payload = parent.recv()

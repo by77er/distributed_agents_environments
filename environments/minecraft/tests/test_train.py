@@ -68,3 +68,27 @@ def test_a_run_goes_on_after_the_last_iteration_it_logged(tmp_path: Path) -> Non
     assert last_iteration(metrics) == 0
     metrics.write_text('{"iteration": 1}\n{"iteration": 3}\n{"iteration": 2}\n')  # groups overlap: 3 ended before 2
     assert last_iteration(metrics) == 3
+
+
+async def test_a_signal_cancels_the_run_so_that_it_cleans_up_on_the_way_out() -> None:
+    import os
+    import signal
+
+    from minecraft_swarm.cli import _until_signalled  # pyright: ignore[reportPrivateUsage]
+
+    cleaned: list[str] = []
+
+    async def run() -> None:
+        try:
+            await asyncio.sleep(30)
+        finally:
+            cleaned.append("servers, engine and trainer")
+
+    asyncio.get_running_loop().call_later(0.05, os.kill, os.getpid(), signal.SIGTERM)
+    assert await _until_signalled(run()) == 128 + signal.SIGTERM
+    assert cleaned == ["servers, engine and trainer"]
+
+    async def done() -> None:
+        return None
+
+    assert await _until_signalled(done()) == 0

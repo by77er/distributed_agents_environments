@@ -8,9 +8,13 @@ LoRA adapters are registered by name (`load_adapter`); a recorder channel names 
 points that start an engine must guard `if __name__ == "__main__":` (vLLM starts its process with `spawn`).
 """
 
+import contextlib
 import itertools
+import json
 import os
+import signal
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from rollout.recorder.recorder import Generation
@@ -128,3 +132,50 @@ class VllmEngine:
 
     def close(self) -> None:
         self._engine.shutdown()
+
+
+ENGINE_PROCESS = "VLLM::Engine"
+"""How an engine core's process is named (the start of it: the kernel keeps fifteen characters)."""
+
+
+def engine_processes(parent: int | None = None) -> list[int]:
+    """The engine core processes started by `parent` (this process, by default)."""
+    parent = os.getpid() if parent is None else parent
+    found: list[int] = []
+    for status in Path("/proc").glob("[0-9]*/status"):
+        try:
+            fields = dict(line.split(":\t", 1) for line in status.read_text().splitlines() if ":\t" in line)
+        except OSError:
+            continue  # it ended meanwhile
+        if fields.get("Name", "").startswith(ENGINE_PROCESS) and int(fields.get("PPid", "0")) == parent:
+            found.append(int(status.parent.name))
+    return sorted(found)
+
+
+def note_engines(record: Path) -> None:
+    """Write down this process's engine cores, so that a later process can end them if this one dies without doing
+    so (a killed process cannot shut its engine down, and an engine left behind holds the GPU)."""
+    record.write_text(json.dumps({"owner": os.getpid(), "engines": engine_processes()}))
+
+
+def end_orphaned_engines(record: Path) -> list[int]:
+    """End the engine cores an earlier process noted in `record`, if that process is gone and they are not; returns
+    the ones ended."""
+    try:
+        noted = json.loads(record.read_text())
+        owner, engines = int(noted["owner"]), [int(pid) for pid in noted["engines"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    if owner == os.getpid() or Path(f"/proc/{owner}").exists():
+        return []
+    ended: list[int] = []
+    for pid in engines:
+        try:
+            name = Path(f"/proc/{pid}/comm").read_text().strip()
+        except OSError:
+            continue
+        if name.startswith(ENGINE_PROCESS):  # (a process id may have been given to something else since)
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGKILL)
+                ended.append(pid)
+    return ended

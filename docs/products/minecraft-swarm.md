@@ -242,6 +242,9 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
   resuming from a file loses nothing.
 - **Memory is checked** before each group of episodes (6 GiB must be available) and before each update (4 GiB): the
   run stops with a message instead.
+- **A run asked to stop, stops.** An interrupt, a termination or a hang-up cancels the run, which ends its servers,
+  its engine and a trainer step in progress on the way out. A run that is killed outright leaves its engine's
+  process id in `engine.json`; the next run in that directory ends it before starting its own.
 - **A failed update does not end the run.** It is logged in the iteration's line, the adapter stays as it was, and
   the next group runs; three failures in a row stop the run.
 - **Runtime data is on disk** (`~/.cache/rollout`), not in `/tmp`, which is memory on WSL.

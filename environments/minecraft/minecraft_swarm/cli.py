@@ -10,7 +10,11 @@ import asyncio
 import contextlib
 import json
 import os
+import signal
+import sys
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any
 
 from minecraft_swarm.paper import Installation, PaperServer
 
@@ -68,10 +72,34 @@ def main() -> None:
             tasks=arguments.tasks.split(",") if arguments.tasks else None,
             exercise_updates=arguments.exercise_updates,
         )
-        asyncio.run(train(settings))
+        sys.exit(asyncio.run(_until_signalled(train(settings))))
     if arguments.command == "server":
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(_server(arguments.seed, keep=arguments.keep))
+
+
+async def _until_signalled(work: Coroutine[Any, Any, None]) -> int:
+    """Run `work`, and cancel it on an interrupt, a termination or a hang-up, so that it stops its servers, its
+    engine and its trainer on the way out; returns the exit status. (A process started in the background of a
+    script inherits "ignore" for interrupts, and Python then installs no handler of its own: asked to stop, the
+    trainer did nothing, and was killed with its engine left running.)"""
+    task = asyncio.ensure_future(work)
+    received: list[int] = []
+
+    def stop(number: int) -> None:
+        received.append(number)
+        task.cancel()
+
+    loop = asyncio.get_running_loop()
+    for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        loop.add_signal_handler(number, stop, number)
+    try:
+        await task
+    except asyncio.CancelledError:
+        if not received:
+            raise
+        return 128 + received[0]
+    return 0
 
 
 async def _server(seed: int, *, keep: bool) -> None:
