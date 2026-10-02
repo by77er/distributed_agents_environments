@@ -64,22 +64,27 @@ class TrainingSettings:
     """Caps each task's budget of game time (None: the task's own)."""
     max_turns: int | None = None
     """Caps each episode's turns (for smoke tests)."""
-    max_sequence_tokens: int = 5400
+    max_sequence_tokens: int = 8000
     """No turn is longer (prompt and completion): the recorder gives a long prompt less room to think, so that the
-    trainer can train on every turn. The trainer's peak on the GPU grows with length (13.4 GiB at 5,000 tokens, 13.7
-    at 5,500, 14.3 reserved); past the card's memory, Windows spills into system memory and the step crawls."""
+    trainer can train on every turn. The trainer's peak on the GPU grows with length (10.7 GiB at 5,000 tokens, 12.4
+    at 8,000, 13.7 at 10,000); past the card's memory, Windows spills into system memory and the step crawls (a
+    10,000-token turn took 74 s instead of 9)."""
     update_turns: int = 384
     """At most this many agent turns per update, sampled evenly from the group's (long episodes have thousands)."""
     thinking_budget: int = 1024
     """Tokens of thinking per turn before it is closed by force. Wide on purpose: on this environment's
     observations the model's thoughts run to a median of 530 tokens and a 95th percentile of 820, and a thought cut
     off in the middle decides nothing."""
-    answer_tokens: int = 256
+    answer_tokens: int = 400
+    """Room for an answer after the thinking: a tool call takes about 40 tokens, a summary of old turns up to this."""
     temperature: float = 1.0
     learning_rate: float = 2e-5
     lora_rank: int = 32
     window_ticks: int = 100
-    gpu_memory_utilization: float = 0.72
+    gpu_memory_utilization: float = 0.85
+    """The engine's share of the GPU while it is awake (the trainer runs only while it sleeps, its memory freed).
+    What the weights leave is the engine's cache: at 0.72 it held 63,000 tokens, less than sixteen agents' contexts,
+    and requests queued for it."""
     seed: int = 0
     tasks: list[str] | None = None
     """Restrict the curriculum to these task ids (all tasks when None)."""

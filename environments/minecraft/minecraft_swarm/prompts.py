@@ -1,7 +1,7 @@
 """What agents read and call: the system prompt, observations as text, and the actions as tools."""
 
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any
 
 from pydantic import JsonValue
 
@@ -40,9 +40,18 @@ got to.
 What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
 you, and lists notable things in sight farther off. Coordinates are absolute, (x, y, z): +x is east, +y is up, +z is \
 south. Walking digs through what is in the way and picks up items it passes over. If you die you start again where \
-the game began. You see your last few turns only in brief: where you were, what you did and how it went. Chat \
-reaches teammates at their next turn; every observation shows the team's last {chat_lines} messages and how old each \
-is. Use chat to split up the work and to share what you find. Think briefly, then act."""
+the game began. Your memory is limited: you see your recent turns without their maps, and anything older only as \
+a summary that you write yourself when asked. Chat reaches teammates at their next turn; every observation shows \
+the team's last {chat_lines} messages and how old each is. Use chat to split up the work and to share what you find. \
+Think briefly, then act."""
+
+COMPACT = """The turns above are about to leave your memory. Write what you need to remember from them, and from \
+your earlier summary if there is one, to keep playing well: what you have learned about the world (places and things, \
+with their coordinates), what you and your teammates have done and agreed, and what you intend to do next. Be \
+specific and brief, and leave out what no longer matters. Reply with the summary only."""
+"""What an agent is asked when its oldest turns are compacted into a summary."""
+
+REMEMBERED = "What you remember from earlier in this game (your own summary):\n{summary}"
 
 
 def system_prompt(task: Task) -> str:
@@ -94,9 +103,8 @@ ACTIONS = [
     ),
     _action(
         "use",
-        "Use an item (the one you hold, or `item`). Without a position: eat food, or throw an eye of ender. On a block "
-        "you see within reach: flint and steel on obsidian, a bucket on water or lava, an eye of ender on a portal "
-        "frame; on a chest it shows what is inside; on a bed you sleep.",
+        "Use the item you hold (or `item`). With no position: eat it, or throw an eye of ender. On a block within "
+        "reach: apply it (flint and steel, a bucket, an eye of ender on a frame), look into a chest, sleep in a bed.",
         {"item": STRING, **XYZ},
         [],
     ),
@@ -117,8 +125,7 @@ ACTIONS = [
     _action("store", "Put items into a chest within reach.", {**XYZ, "item": STRING, "count": COUNT}, [*AT, "item"]),
     _action(
         "toss",
-        "Throw items from your inventory, toward a position if given: a teammate standing there picks them up (you "
-        "cannot pick them back up for five seconds).",
+        "Throw items toward a position: a teammate standing there picks them up.",
         {"item": STRING, "count": COUNT, **XYZ},
         ["item"],
     ),
@@ -130,23 +137,23 @@ ACTIONS = [
     ),
     _action(
         "attack",
-        "Attack a creature you can see (by its id from the observation) until it dies or time runs out.",
-        {"target": _integer("the creature's id")},
+        "Attack a creature you can see, by its id, until it dies or time runs out.",
+        {"target": INTEGER},
         ["target"],
     ),
     _action(
         "shoot",
-        "Shoot arrows at a creature or an end crystal you can see (by its id); needs a bow and arrows.",
-        {"target": _integer("the creature's id")},
+        "Shoot arrows at a creature or end crystal you can see, by its id (needs a bow and arrows).",
+        {"target": INTEGER},
         ["target"],
     ),
     _action(
         "chat",
-        "Say something to your teammates: they see it from their next turn, while it is among the last few messages.",
+        "Say something to your teammates.",
         {"message": STRING},
         ["message"],
     ),
-    _action("wait", "Do nothing while the world runs (up to five seconds of game time pass).", {}, []),
+    _action("wait", "Do nothing while the world runs for up to five seconds.", {}, []),
 ]
 """The actions, as tools the model calls (one per turn): motor control; strategy is the agents'. What an agent
 remembers is what its context holds: its last turns, the map and the team's chat."""
@@ -159,11 +166,12 @@ def describe(
     observation: Mapping[str, Any],
     *,
     chat: Sequence[tuple[int, str, str]] = (),
-    brief: bool = False,
+    recalled: bool = False,
 ) -> str:
-    """An observation as text: who and where you are, the map of what you have seen, what is in sight, what happened,
-    and what the team has said lately. `chat` holds (age in turns, speaker, message), oldest first.
-    `brief` keeps only where you were and what you held (how earlier turns are kept)."""
+    """An observation as text: who and where you are, the map of what you have seen, what is in sight, and what the
+    team has said lately. `chat` holds (age in turns, speaker, message), oldest first. `recalled` is the form in which
+    a turn stays in memory: everything but the map and the chat. (How the last action went is not in it: the action's
+    own result says that.)"""
     me = observation["self"]
     position = me["position"]
     world: Mapping[str, Any] = observation.get("world") or {}
@@ -185,14 +193,9 @@ def describe(
         f"food {me['food']}/20, light {world.get('light', '?')}.",
         f"Inventory: {_items(me['inventory'])}.{holding}{wearing}",
     ]
-    if brief:
-        return "\n".join(lines)
     if observation.get("died"):
         lines.append("You died since your last turn and respawned.")
-    result = observation.get("last_action")
-    if result:
-        lines.append(f"Your last action: {_result(result)}")
-    if observation.get("map"):
+    if observation.get("map") and not recalled:
         lines.append(render_map(observation))
     if observation["notable"]:
         lines.append("Notable in sight: " + "; ".join(_notable(kind) for kind in observation["notable"]) + ".")
@@ -210,6 +213,8 @@ def describe(
     if observation.get("animals"):
         animals = "; ".join(f"{a['animal']} (id {a['id']}) {a['distance']} away" for a in observation["animals"][:6])
         lines.append(f"Animals: {animals}.")
+    if recalled:
+        return "\n".join(lines)
     if chat:
         lines.append("Team chat, oldest first:")
         lines.extend(f"- {'you' if who == me['name'] else who}, {_age(age)}: {message}" for age, who, message in chat)
@@ -342,13 +347,6 @@ def _age(turns: int) -> str:
     return "this turn" if turns <= 0 else "1 turn ago" if turns == 1 else f"{turns} turns ago"
 
 
-def _position(position: Any) -> str:
-    if not isinstance(position, Mapping):
-        return "where you are now"
-    place = cast(Mapping[str, Any], position)
-    return f"({place.get('x')}, {place.get('y')}, {place.get('z')})"
-
-
 def _notable(kind: Mapping[str, Any]) -> str:
     """One kind of block in sight: the nearest, how many, and where the next few are."""
     count = int(kind.get("count", 1))
@@ -361,14 +359,3 @@ def _notable(kind: Mapping[str, Any]) -> str:
 
 def _items(inventory: Mapping[str, int]) -> str:
     return ", ".join(f"{count} {name}" for name, count in sorted(inventory.items())) or "empty"
-
-
-def _result(result: Mapping[str, Any]) -> str:
-    action: Mapping[str, Any] = result.get("action") or {}
-    name = str(action.get("name", "?"))
-    if result.get("ok"):
-        details = {key: value for key, value in result.items() if key not in ("action", "ok")}
-        return f"{name} succeeded: {details}" if details else f"{name} succeeded."
-    if result.get("interrupted"):
-        return f"{name} was cut off when the world froze; you got to {_position(result.get('now_at'))}."
-    return f"{name} failed: {result.get('error', 'unknown error')}"

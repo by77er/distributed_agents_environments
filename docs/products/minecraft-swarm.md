@@ -101,14 +101,27 @@ On the map: * a dropped item; B ben; d deepslate_diamond_ore; ~ water.
 
 An action cut off by the freeze reports where the agent got to.
 
-**What an agent's context holds** is all it remembers: the system prompt and tools (the same for all four agents,
-about 2,000 tokens the engine caches as a shared prefix), its last four turns in brief (position, inventory, action,
-result), and the current observation in full: about 3,000 tokens at the first turn, of which the map is 750.
+**What an agent remembers is what its context holds:**
+
+| Part | Tokens | |
+|---|---|---|
+| System prompt and tools | 2,000 | The same for all four agents: the engine caches it as a shared prefix |
+| Summary | up to 400 | Of everything older than the recent turns, in the agent's own words |
+| Recent turns | 220 each, 7 to 13 of them | What was in sight (without the map), the action, how it went |
+| Current observation | 900 to 1,250 | In full, with the map (750) and the team's chat |
+
+When an agent holds 14 recent turns, the oldest 7 are **compacted**: it is shown them once more, with its earlier
+summary, and asked what it needs to remember; its answer replaces them. This is a model call like any other, on
+the agent's own slot, made while the world is frozen: it costs no game time, it is recorded, and it is trained with
+the episode's advantage, since what an agent chooses to remember is part of how it plays. An episode of any length
+keeps a context of bounded size.
 
 Two limits of training are kept out of what agents read. They see no clock: an episode's length is a limit of
 training, and a policy shown the clock learns to play it; doing more before the cut-off is rewarded all the same.
 And the limit on thinking (1,024 tokens) is wide enough to be met rarely: on this environment's observations the
-model's thoughts run to a median of 530 tokens and a 95th percentile of 820.
+model's thoughts run to a median of 530 tokens and a 95th percentile of 820. A turn (prompt and completion) is at
+most 8,000 tokens, which is what the trainer can take on this GPU; a prompt long enough to threaten that leaves less
+room to think, so that every turn can be trained on.
 
 ## Tasks and curriculum
 
@@ -145,9 +158,9 @@ catalog's order: the first three, and four past the hardest one solved at least 
 | Part | Choice | Measured on the RTX 5080 (16 GB) |
 |---|---|---|
 | Policy | `cyankiwi/Qwen3.5-9B-AWQ-4bit` (compressed-tensors, int4 in groups of 32), LoRA rank 32 on every attention, linear-attention and MLP projection | 8 GiB of weights in vLLM; four agents take a turn in about 6 s |
-| Engine | vLLM 0.30 in its own process; LoRA adapters registered by name; while the trainer runs it sleeps with its weights dropped, and reads them again on waking | sleep 0.2 s, wake 3 s; 3.3 GiB of system memory asleep (11.2 GiB when the weights were parked in memory instead); 88 tokens/s for one agent, 730 tokens/s for sixteen at once |
+| Engine | vLLM 0.30 in its own process, with 85% of the GPU while awake; LoRA adapters registered by name; while the trainer runs it sleeps with its weights dropped, and reads them again on waking | sleep 0.2 s, wake 3 s; 3.3 GiB of system memory asleep (11.2 GiB when the weights were parked in memory instead); 88 tokens/s for one agent, 730 tokens/s for sixteen at once on short contexts. Its cache is what limits it: at 72% of the GPU it held 63,000 tokens, less than sixteen agents' contexts, and requests queued (240 tokens/s in a real group) |
 | Recorder | Renders contexts to tokens and parses replies through a pluggable `Renderer` (Qwen3.5's XML tool calls and thinking); thinking has a budget, closed by forced (untrained) tokens | records prompt, sampled tokens, mask, behavior logprobs and adapter per turn |
-| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | peak 12.8 GiB at 4,000 tokens, 13.4 at 5,000, 13.7 at 5,500 (14.3 reserved), whatever the share of sampled tokens: the output layer is run in checkpointed chunks; 3 to 5 s per turn; logprobs match vLLM's to a mean of 0.018, also with an adapter |
+| Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | 6.6 GiB loaded (the vision tower is dropped and the token embeddings are read from the checkpoint file as needed); peak 10.7 GiB at 5,000 tokens, 12.4 at 8,000, whatever the share of sampled tokens: the output layer is run in checkpointed chunks; 5 to 8 s per turn; logprobs match vLLM's to a mean of 0.016, also with an adapter |
 | Algorithm | Dr. GRPO advantages (reward minus group mean, every turn of an episode), DAPO's dynamic sampling, clip-higher (0.8–1.28) and token-level loss, PPO clipping against the behavior logprobs, no KL | |
 
 Bitsandbytes was the first plan for 4-bit weights, but vLLM 0.30 no longer supports it; a pre-quantized checkpoint
@@ -172,8 +185,8 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
 
 - **A sequence too long for the GPU thrashes instead of failing.** Under Windows, memory past the card's 16 GB spills
   into system memory: a step of 96 turns ran for 13 minutes without finishing and took the host to 0.6 GB free. No
-  turn may now be longer than 5,400 tokens, and that is settled when the turn is sampled (a long prompt leaves less
-  room to think) so that every turn can be trained on; prompts were shortened to make the limit a rare one.
+  turn may now be longer than 8,000 tokens, and that is settled when the turn is sampled (a long prompt leaves less
+  room to think) so that every turn can be trained on.
 - **The engine drops its weights when it sleeps.** Parked in system memory they were 8 GiB that the host did not have.
 
 ## Lessons from the live world

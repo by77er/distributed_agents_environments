@@ -65,8 +65,11 @@ def test_an_observation_carries_the_map_and_exact_coordinates_and_earlier_turns_
     )
     assert describe(seen).endswith("Team chat: (nothing yet)")
     assert "Open space" not in text and "You see mostly" not in text  # the map shows it
-    brief = describe(seen, brief=True)
-    assert brief.splitlines() == [text.splitlines()[0], "Inventory: empty."]
+    recalled = describe(seen, chat=chat, recalled=True)  # how the turn stays in memory: no map, no chat
+    assert recalled.splitlines()[:2] == text.splitlines()[:2]
+    assert "Map of what you have seen" not in recalled and "Team chat" not in recalled
+    assert "Notable in sight: deepslate_diamond_ore at (-4, 65, 0), 4.3 away." in recalled
+    assert "Dropped items: 3 diamond at (-3, 64, 2)." in recalled
 
 
 def test_blocks_have_their_own_symbols_or_fall_back_to_solid_and_passable() -> None:
