@@ -31,7 +31,11 @@ def load(directory: Path) -> list[dict[str, Any]]:
 
 
 def hours(iterations: Sequence[Mapping[str, Any]]) -> list[float]:
-    """When each iteration ended, in hours since the run began (from its recorded time, or summed durations)."""
+    """When each iteration ended, in hours since the run began: from the times they recorded (groups overlap, so
+    their durations do not add up), or, for a run that recorded none, from summed durations."""
+    if iterations and all("time" in line for line in iterations):
+        began = float(iterations[0]["time"]) - float(iterations[0].get("seconds", 0.0))
+        return [(float(line["time"]) - began) / 3600 for line in iterations]
     elapsed: list[float] = []
     total = 0.0
     for line in iterations:

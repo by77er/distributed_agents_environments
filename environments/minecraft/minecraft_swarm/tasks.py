@@ -3,9 +3,11 @@
 Every task is a starting state, a budget of game time and an objective scored from ground truth. The swarm shares the
 reward. Three tiers:
 
-- **Skills** (staged): the plugin builds the situation from ground truth: diamonds lying in a lit room, chests around
-  corners, natural ore exposed in a pocket's wall or hidden nearby. Kits remove steps of the tech tree. Objective:
-  the diamonds the team holds at the end.
+- **Skills** (staged or safe): the plugin builds the situation from ground truth: diamonds lying in a lit room, chests
+  around corners, natural ore exposed in a pocket's wall or hidden nearby. Kits remove steps of the tech tree.
+  Objective: the diamonds the team holds at the end. Also here, the **crafting** tasks: among trees on a peaceful
+  surface with nothing at all, make an item whose recipe is several steps deep, gathering every material (a crafting
+  table; a stone pickaxe; a furnace; torches; an iron pickaxe). Objective: the steps of the chain the team got done.
 - **Survival** (natural): a natural world, a real day and night, mobs and no kept inventory. Nothing is staged; only
   the start (a cave, the surface, the nether, beside a fortress or a stronghold, the end) and the kit decide where
   along the game the task begins. Objectives: diamonds held, or progress toward the dragon.
@@ -60,6 +62,9 @@ class Objective(StrEnum):
     """The diamonds the team holds at the end (a diamond block counts 9)."""
     PROGRESS = "progress"
     """The weights of the milestones the team earned."""
+    CRAFT = "craft"
+    """The weights of the steps toward the task's item that the team got done: each thing gathered, crafted or
+    smelted along the way, once."""
 
 
 class Start(StrEnum):
@@ -77,6 +82,8 @@ class Start(StrEnum):
     """Natural: standing in a natural cave underground."""
     SURFACE = "surface"
     """Natural: on the surface."""
+    WOODLAND = "woodland"
+    """Natural: on the surface, with trees a few steps away."""
     NETHER = "nether"
     """Natural: in the nether, as if just through a portal."""
     FORTRESS = "fortress"
@@ -151,7 +158,8 @@ class Task(BaseModel):
     minutes: float
     """Budget of game time (it passes only while actions happen)."""
     goal: str | None = None
-    """Progress tasks: the milestone the task is about. Earning it is what counts as solving the task."""
+    """What counts as solving the task: for a progress task the milestone it is about, for a crafting task the item
+    to make."""
     difficulty: float
     """Estimated, for ordering; the curriculum measures it."""
 
@@ -202,6 +210,7 @@ START_DIFFICULTY = {
     Start.ORE_FAR: 4,
     Start.CAVE: 6,
     Start.SURFACE: 7,
+    Start.WOODLAND: 1,
     Start.FORTRESS: 10,
     Start.PORTAL_ROOM: 11,
     Start.NETHER: 12,
@@ -236,6 +245,54 @@ GOALS = {
 TIER_ORDER = {Tier.SKILLS: 0, Tier.SURVIVAL: 1, Tier.GAME: 2}
 
 
+Step = tuple[str, tuple[str, ...], float]
+"""A step toward an item: its name, the items that show it was done (any of them; a trailing `*` matches any
+beginning, as in `*_log`), and its weight."""
+
+WOOD: list[Step] = [("logs", ("*_log",), 1), ("planks", ("*_planks",), 1)]
+TABLE: list[Step] = [*WOOD, ("a crafting table", ("crafting_table",), 2)]
+WOODEN_PICKAXE: list[Step] = [*TABLE, ("sticks", ("stick",), 1), ("a wooden pickaxe", ("wooden_pickaxe",), 3)]
+STONE_PICKAXE: list[Step] = [
+    *WOODEN_PICKAXE,
+    ("cobblestone", ("cobblestone", "cobbled_deepslate"), 2),
+    ("a stone pickaxe", ("stone_pickaxe",), 3),
+]
+FURNACE: list[Step] = [*STONE_PICKAXE, ("a furnace", ("furnace",), 3)]
+IRON: list[Step] = [*FURNACE, ("raw iron", ("raw_iron",), 4), ("an iron ingot", ("iron_ingot",), 5)]
+CHAINS: dict[str, list[Step]] = {
+    "crafting_table": TABLE,
+    "wooden_pickaxe": WOODEN_PICKAXE,
+    "stone_pickaxe": STONE_PICKAXE,
+    "furnace": FURNACE,
+    "torch": [*FURNACE, ("coal or charcoal", ("coal", "charcoal"), 3), ("torches", ("torch",), 3)],
+    "iron_pickaxe": [*IRON, ("an iron pickaxe", ("iron_pickaxe",), 6)],
+    "bucket": [*IRON, ("a bucket", ("bucket",), 6)],
+    "shield": [*IRON, ("a shield", ("shield",), 6)],
+}
+"""Crafting tasks: for each item to make, the steps from nothing that lead to it. Everything must be gathered."""
+CRAFT_MINUTES = {
+    "crafting_table": 6,
+    "wooden_pickaxe": 8,
+    "stone_pickaxe": 12,
+    "furnace": 14,
+    "torch": 20,
+    "iron_pickaxe": 35,
+    "bucket": 35,
+    "shield": 35,
+}
+
+
+def done(steps: Sequence[Step], obtained: Mapping[str, Any]) -> list[str]:
+    """The names of the steps that `obtained` (what the team got hold of, by item) shows were done."""
+
+    def matches(pattern: str) -> bool:
+        if pattern.startswith("*"):
+            return any(item.endswith(pattern[1:]) for item in obtained)
+        return pattern in obtained
+
+    return [name for name, items, _ in steps if any(matches(item) for item in items)]
+
+
 def catalog() -> list[Task]:
     """Every task, ordered by estimated difficulty."""
     specifications: list[dict[str, Any]] = []
@@ -262,6 +319,10 @@ def catalog() -> list[Task]:
     add(skills, diamonds, Start.ORE_NEARBY, Kit.IRON, 8, coordination=Coordination.ONE_KIT)
     for kit in (Kit.IRON, Kit.STONE):
         add(skills, diamonds, Start.ORE_FAR, kit, 10 + 2 * KIT_STEPS[kit])
+
+    # Crafting: nothing given, a peaceful surface among trees; the item's whole chain is to be gathered and made.
+    for item, minutes in CRAFT_MINUTES.items():
+        add(skills, Objective.CRAFT, Start.WOODLAND, Kit.NOTHING, minutes, goal=item)
 
     # Survival: natural worlds; nothing is staged.
     for hazards in (Hazards.EASY, Hazards.NORMAL):
@@ -300,18 +361,21 @@ def _task(
     coordination: Coordination = Coordination.KITTED,
     hazards: Hazards = Hazards.SAFE,
     apart: bool = False,
+    goal: str | None = None,
 ) -> Task:
+    steps = len(CHAINS[goal]) / 2 if objective is Objective.CRAFT and goal else KIT_STEPS[kit]
     difficulty = (
         START_DIFFICULTY[start]
-        + KIT_STEPS[kit]
+        + steps
         + 0.75 * hazards
         + {Coordination.KITTED: 0.0, Coordination.ONE_KIT: 0.75, Coordination.SPLIT: 1.0}[coordination]
         + (1.0 if apart else 0.0)
     )
-    goal = None
     if objective is Objective.PROGRESS:
         goal = "end/kill_dragon" if tier is Tier.GAME else GOALS[start]
     parts = [tier.value, objective.value, start.value.replace("_", " "), f"kit {kit.value.replace('_', ' ')}"]
+    if objective is Objective.CRAFT and goal:
+        parts = [tier.value, f"craft {goal.replace('_', ' ')}", "from nothing"]
     if coordination is not Coordination.KITTED:
         parts.append(coordination.value.replace("_", " "))
     if hazards is not Hazards.SAFE:
@@ -355,6 +419,10 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
     """The episode's reward from the plugin's ground truth (`Control.state()`)."""
     if task.objective is Objective.DIAMONDS:
         return float(state["team_diamonds"])
+    if task.objective is Objective.CRAFT:
+        steps = CHAINS[str(task.goal)]
+        made = set(done(steps, state.get("team_obtained", {})))
+        return float(sum(weight for name, _, weight in steps if name in made))
     earned = set(state.get("team_advancements", []))
     reward = float(sum(weight for key, weight in MILESTONES.items() if key in earned))
     if "end/kill_dragon" not in earned:  # hurting the dragon counts for something
@@ -363,9 +431,11 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
 
 
 def solved(task: Task, state: Mapping[str, Any]) -> bool:
-    """Whether the team did what the task is about: holds a diamond, or earned the task's milestone."""
+    """Whether the team did what the task is about: holds a diamond, made the task's item, or earned its milestone."""
     if task.objective is Objective.DIAMONDS:
         return int(state["team_diamonds"]) > 0
+    if task.objective is Objective.CRAFT:
+        return str(task.goal) in state.get("team_obtained", {})
     return task.goal in set(state.get("team_advancements", []))
 
 
@@ -413,6 +483,7 @@ async def build(task: Task, control: Control, team: list[str], rng: random.Rando
         Start.ORE_FAR: _ore_far,
         Start.CAVE: _cave,
         Start.SURFACE: _surface,
+        Start.WOODLAND: _woodland,
         Start.NETHER: _nether,
         Start.FORTRESS: _fortress,
         Start.STRONGHOLD_AREA: _stronghold_area,
@@ -608,6 +679,14 @@ async def _surface(task: Task, control: Control, rng: random.Random) -> Site:
     if y < 63:
         raise BuildError("under water")
     return Site(_spread(await _spots(control, (x, y, z), 6)), await _ore_count(control, (x, y, z)), (x, y, z))
+
+
+async def _woodland(task: Task, control: Control, rng: random.Random) -> Site:
+    site = await _surface(task, control, rng)
+    logs = await control.find_blocks("#logs", *site.anchor, radius=10, limit=64)
+    if not any(abs(log["y"] - site.anchor[1]) <= 2 for log in logs):  # a trunk within reach from the ground
+        raise BuildError("no trees here")
+    return site
 
 
 async def _nether(task: Task, control: Control, rng: random.Random) -> Site:

@@ -27,6 +27,12 @@ def main() -> None:
     training.add_argument("--group-size", type=int, default=4)
     training.add_argument("--max-minutes", type=float, help="cap each task's budget of game time")
     training.add_argument("--max-turns", type=int, help="cap each episode's turns (for smoke tests)")
+    training.add_argument(
+        "--stragglers",
+        type=int,
+        default=1,
+        help="start the next group when at most this many episodes of earlier groups are still running",
+    )
     training.add_argument("--update-turns", type=int, default=384, help="turns trained on per update (sampled)")
     training.add_argument("--thinking-budget", type=int, default=1024, help="tokens of thinking per turn")
     training.add_argument("--learning-rate", type=float, default=2e-5)
@@ -52,6 +58,7 @@ def main() -> None:
             group_size=arguments.group_size,
             max_minutes=arguments.max_minutes,
             max_turns=arguments.max_turns,
+            stragglers=arguments.stragglers,
             update_turns=arguments.update_turns,
             thinking_budget=arguments.thinking_budget,
             learning_rate=arguments.learning_rate,

@@ -36,7 +36,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 uv run rollout-monitor "$run/feed" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
 trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
-uv run minecraft-swarm train "$run" "$@" > "$run/train.log" 2>&1
+uv run minecraft-swarm train "$run" "$@" >> "$run/train.log" 2>&1  # (a run started again goes on in the same log)
 status=$?
 echo "exit $status" >> "$run/train.log"
 exit "$status"

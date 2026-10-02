@@ -13,11 +13,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from minecraft_swarm import worlds
 from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
 from minecraft_swarm.paper import Installation, PaperServer
 from minecraft_swarm.prompts import describe
-from minecraft_swarm.tasks import Coordination, Kit, Start, Task, build, catalog, score, solved
+from minecraft_swarm.tasks import CHAINS, Coordination, Kit, Objective, Start, Task, build, catalog, score, solved
 
 TEAM = ["ada", "ben", "cy", "dee"]
 
@@ -53,18 +54,9 @@ async def world(tmp_path_factory: pytest.TempPathFactory) -> AsyncIterator[World
     await server.stop()
 
 
-async def run_window(world: World, ticks: int = 100) -> None:
-    """Thaw, step until no bot is acting (or `ticks` ran), settle, freeze."""
-    await world.harness.thaw()
-    ran = 0
-    while ran < ticks:
-        await world.control.step(10)
-        ran += 10
-        if not await world.harness.busy():
-            break
-    await world.control.step(10)  # pickups land
-    await asyncio.sleep(0.3)
-    await world.harness.freeze()
+async def run_window(world: World, ticks: int = 100) -> int:
+    """A window of game time, as an episode runs one; returns the ticks that ran."""
+    return await worlds.run_window(world.control, world.harness, ticks=ticks, settle=0.3, dig_ticks=400)
 
 
 async def settle(world: World) -> None:
@@ -318,6 +310,72 @@ async def test_agents_fight_with_sword_and_bow_and_ground_truth_counts_the_hits(
     assert ("husk", "arrow") in {(hit["entity"], hit["with"]) for hit in hits}
     assert {hit["entity"] for hit in hits} == {"husk", "zombie"}  # (the zombie may walk into the arrows first)
     assert not [event for event in await world.control.events() if event["kind"] == "died"]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_block_that_takes_longer_than_a_window_can_still_be_mined(world: World) -> None:
+    _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=17)
+    here = observation["self"]["position"]
+    await world.control.drop_items(here["x"], here["y"], here["z"], [{"item": "diamond_pickaxe"}])
+    await world.control.set_block(here["x"] + 2, here["y"], here["z"], "obsidian")
+    await settle(world)
+    holder = next(
+        player["name"]
+        for player in (await world.control.state())["players"]
+        if "diamond_pickaxe" in player["inventory"]
+    )
+    await world.harness.thaw()
+    await world.harness.act(holder, {"name": "mine", "x": here["x"] + 2, "y": here["y"], "z": here["z"]})
+    ran = await run_window(world)  # obsidian takes 9.4 seconds with a diamond pickaxe; a window is five
+    result = (await world.harness.observe(holder))["last_action"]
+    assert result["ok"] and result["mined"] == "obsidian" and result["gained"] == {"obsidian": 1}, result
+    assert 120 < ran <= 260, ran  # well past the 110 ticks of an ordinary window
+    # With a bare hand it would take minutes: refused at once, with the reason.
+    other = next(name for name in TEAM if name != holder)
+    await world.control.set_block(here["x"] - 2, here["y"], here["z"], "obsidian")
+    await settle(world)
+    await world.harness.thaw()
+    await world.harness.act(other, {"name": "mine", "x": here["x"] - 2, "y": here["y"], "z": here["z"]})
+    await run_window(world, 20)
+    refused = (await world.harness.observe(other))["last_action"]
+    assert not refused["ok"], refused
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(world: World) -> None:
+    chosen = next(t for t in catalog() if t.objective is Objective.CRAFT and t.goal == "crafting_table")
+    await build(chosen, world.control, TEAM, random.Random(23))  # (not where another test cleared the ground)
+    await settle(world)
+    await world.control.baseline()
+    assert (await world.harness.observe("ada"))["self"]["inventory"] == {}  # nothing given
+    kind = ""
+    trail: list[Any] = []  # what was tried, for the failure message
+    for _ in range(10):  # walk to the nearest log in sight and break it by hand
+        observation = await world.harness.observe("ada")
+        logs = [entry for entry in observation["notable"] if entry["block"].endswith("_log")]
+        assert logs, observation["notable"]
+        log = min(logs, key=lambda entry: (abs(entry["dy"]) > 2, entry["distance"]))  # a trunk, not a crown
+        if log["distance"] > 3.5:
+            moved = await do(world, {"name": "move_to", "x": log["x"], "y": log["y"], "z": log["z"]})
+            trail.append(("move_to", log["block"], log["distance"], moved.get("error") or moved.get("arrived_at")))
+            continue
+        mined = await do(world, {"name": "mine", "x": log["x"], "y": log["y"], "z": log["z"]})
+        trail.append(("mine", log["block"], log["distance"], mined.get("error") or mined.get("gained")))
+        gathered = [item for item in (await world.harness.observe("ada"))["self"]["inventory"] if item.endswith("_log")]
+        if gathered:
+            kind = gathered[0].removesuffix("_log")
+            break
+    assert kind, trail
+    planks = await do(world, {"name": "craft", "item": f"{kind}_planks"})
+    assert planks["ok"] and planks["made"] == 4, planks
+    table = await do(world, {"name": "craft", "item": "crafting_table"})
+    assert table["ok"], table
+    state = await world.control.state()
+    assert {f"{kind}_log", f"{kind}_planks", "crafting_table"} <= set(state["team_obtained"]), state["team_obtained"]
+    assert score(chosen, state) == sum(weight for _, _, weight in CHAINS["crafting_table"]) == 4
+    assert solved(chosen, state)
+    crafted = [event["item"] for event in await world.control.events() if event["kind"] == "crafted"]
+    assert crafted == [f"{kind}_planks", "crafting_table"]
 
 
 def test_the_harness_lives_in_the_environment() -> None:

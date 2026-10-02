@@ -62,7 +62,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * <ul>
  *   <li>GET /health: ready, and who is online.</li>
  *   <li>GET /state: every player's position, health, food, inventory and diamonds; the team's total diamonds, the
- *       advancements it earned since the baseline, and the most the dragon was hurt.</li>
+ *       advancements it earned since the baseline, what it got hold of since then (picked up, crafted, smelted), and
+ *       the most the dragon was hurt.</li>
  *   <li>GET /tick, POST /tick {"action": "freeze" | "unfreeze" | "step", "ticks": n}: a step runs n ticks of a
  *       frozen game and answers when they have run.</li>
  *   <li>POST /episode: set up the team (one scoreboard team without friendly fire; clear, kit with armor worn,
@@ -90,6 +91,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
     private final Map<String, Integer> lastKnownDiamonds = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> baselines = new ConcurrentHashMap<>();
     private final Set<String> teamEarned = ConcurrentHashMap.newKeySet();
+    private final Map<String, Integer> teamObtained = new ConcurrentHashMap<>();
     private final Map<String, Long> lastFailedMove = new ConcurrentHashMap<>();
     private volatile boolean dragonKilled = false;
     private volatile double dragonDamage = 0.0;
@@ -194,6 +196,9 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             JsonArray advancements = new JsonArray();
             teamAdvancements.forEach(advancements::add);
             result.add("team_advancements", advancements);
+            JsonObject obtained = new JsonObject();
+            new java.util.TreeMap<>(teamObtained).forEach(obtained::addProperty);
+            result.add("team_obtained", obtained);
             result.addProperty("dragon_killed", dragonKilled);
             result.addProperty("dragon_damage", dragonKilled ? 1.0 : dragonDamage);
             JsonArray members = new JsonArray();
@@ -574,7 +579,8 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
     /** Blocks of one type near a point (e.g. end portal frames, to start beside the stronghold's portal). */
     private JsonElement findBlocks(String method, Map<String, String> query, JsonObject body) throws Exception {
         String worldName = query.getOrDefault("world", "world");
-        Material material = Material.matchMaterial(query.get("block"));
+        boolean logs = "#logs".equals(query.get("block"));  // any kind of log
+        Material material = logs ? Material.OAK_LOG : Material.matchMaterial(query.get("block"));
         int radius = Math.min(Integer.parseInt(query.getOrDefault("radius", "32")), MAX_ORE_RADIUS);
         int cx = Integer.parseInt(query.get("x")), cy = Integer.parseInt(query.get("y")), cz = Integer.parseInt(query.get("z"));
         int limit = Integer.parseInt(query.getOrDefault("limit", "64"));
@@ -591,7 +597,8 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             for (int x = cx - radius; x <= cx + radius && found.size() < limit; x++) {
                 for (int z = cz - radius; z <= cz + radius && found.size() < limit; z++) {
                     for (int y = minY; y <= maxY && found.size() < limit; y++) {
-                        if (world.getBlockAt(x, y, z).getType() == material) {
+                        Material here = world.getBlockAt(x, y, z).getType();
+                        if (logs ? org.bukkit.Tag.LOGS.isTagged(here) : here == material) {
                             JsonObject block = new JsonObject();
                             block.addProperty("x", x);
                             block.addProperty("y", y);
@@ -697,6 +704,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         return onMainThread(() -> {
             baselines.clear();
             teamEarned.clear();
+            teamObtained.clear();
             dragonKilled = false;
             dragonDamage = 0.0;
             JsonObject result = new JsonObject();
@@ -842,10 +850,39 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         }
     }
 
+    /** What the team has got hold of since the baseline: picked up, crafted, or taken from a furnace. */
+    private void obtained(Player player, Material item, int count) {
+        String name = player.getName().toLowerCase(Locale.ROOT);
+        if (team.contains(name) && baselines.containsKey(name)) {
+            teamObtained.merge(item.name().toLowerCase(Locale.ROOT), count, Integer::sum);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onCraft(org.bukkit.event.inventory.CraftItemEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            ItemStack made = event.getRecipe().getResult();
+            obtained(player, made.getType(), made.getAmount());
+            JsonObject data = new JsonObject();
+            data.addProperty("item", made.getType().name().toLowerCase(Locale.ROOT));
+            record("crafted", player, data);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onSmelted(org.bukkit.event.inventory.FurnaceExtractEvent event) {
+        obtained(event.getPlayer(), event.getItemType(), event.getItemAmount());
+        JsonObject data = new JsonObject();
+        data.addProperty("item", event.getItemType().name().toLowerCase(Locale.ROOT));
+        data.addProperty("count", event.getItemAmount());
+        record("smelted", event.getPlayer(), data);
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent event) {
         if (event.getEntity() instanceof Player player) {
             Item item = event.getItem();
+            obtained(player, item.getItemStack().getType(), item.getItemStack().getAmount());
             JsonObject data = new JsonObject();
             data.addProperty("item", item.getItemStack().getType().name().toLowerCase(Locale.ROOT));
             data.addProperty("count", item.getItemStack().getAmount());

@@ -11,6 +11,7 @@ const { goals } = require('mineflayer-pathfinder')
 const { lineOfSight, firstHit, eyes, DIRECTIONS } = require('./observe')
 
 const REACH = 4.5
+const MAX_DIG_SECONDS = 20 // a window of game time runs on this long, at most, to let a block finish breaking
 
 class ActionError extends Error {}
 
@@ -42,6 +43,10 @@ const ACTIONS = {
       throw new ActionError(`${block.name} drops nothing without a better tool`)
     }
     const name = block.name
+    const seconds = block.digTime(bot.heldItem ? bot.heldItem.type : null, false, false, false, [], []) / 1000
+    if (seconds > MAX_DIG_SECONDS) {
+      throw new ActionError(`${name} would take ${Math.round(seconds)} seconds to break with ${bot.heldItem?.name ?? 'your hand'}: too long`)
+    }
     const before = inventoryCounts(bot)
     await dig(bot, block, context)
     await collectNearby(bot, context, 4)

@@ -241,3 +241,30 @@ async def test_a_channel_tells_programs_the_engines_own_limit_and_refuses_what_i
     tight = Channel(engine, renderer, answer_tokens=16, context_limit=len(renderer.render(messages, [MINE])) + 15)
     with pytest.raises(ContextOverflow):  # what tells a program to compact and try again
         await Recorder({"policy": tight}).endpoint(RecordedModel(channel="policy")).sample(request(messages))
+
+
+async def test_a_paused_engine_finishes_what_is_in_flight_and_holds_the_rest_back() -> None:
+    import asyncio
+
+    from rollout.recorder import MeteredEngine
+
+    started: list[int] = []
+
+    class Slow:
+        async def generate(self, prompt: Sequence[int], **options: Any) -> Generation:
+            started.append(prompt[0])
+            await asyncio.sleep(0.1)
+            return Generation(tokens=[1], logprobs=[0.0], finish_reason="stop")
+
+    metered = MeteredEngine(Slow())
+    options: dict[str, Any] = {"max_tokens": 1, "temperature": 1.0, "top_p": 1.0, "stop_token_ids": [], "adapter": None}
+    first = asyncio.create_task(metered.generate([1], **options))
+    await asyncio.sleep(0.02)
+    await metered.pause()  # returns once the request in flight is done
+    assert first.done() and started == [1]
+    second = asyncio.create_task(metered.generate([2], **options))
+    await asyncio.sleep(0.05)
+    assert started == [1] and not second.done()  # held back: the engine may sleep now
+    metered.resume()
+    await second
+    assert started == [1, 2]

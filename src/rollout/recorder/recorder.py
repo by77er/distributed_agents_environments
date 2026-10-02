@@ -10,6 +10,7 @@ Thinking has a budget: a first phase samples until thinking closes or the budget
 chat templates of reasoning models drop earlier turns' thinking: re-rendered context differs from what was sampled.
 """
 
+import asyncio
 import math
 import time
 from array import array
@@ -58,7 +59,9 @@ DEFAULT_CONTEXT_LIMIT = 32_768
 
 @dataclass
 class MeteredEngine:
-    """An engine that counts what passes through it: tokens in and out, and for how long it was generating."""
+    """An engine that counts what passes through it (tokens in and out, and for how long it was generating), and
+    that can be paused: `pause()` holds new requests back and returns once none is in flight, so that the engine
+    can be put to sleep under runs that are still going; `resume()` lets them through again."""
 
     engine: Engine
     requests: int = 0
@@ -70,6 +73,20 @@ class MeteredEngine:
     """Wall-clock time with at least one request in flight."""
     _in_flight: int = 0
     _busy_since: float = 0.0
+    _open: asyncio.Event = field(default_factory=asyncio.Event)
+    _idle: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def __post_init__(self) -> None:
+        self._open.set()
+        self._idle.set()
+
+    async def pause(self) -> None:
+        """Hold new requests back, and wait for those in flight to finish."""
+        self._open.clear()
+        await self._idle.wait()
+
+    def resume(self) -> None:
+        self._open.set()
 
     @property
     def max_model_len(self) -> int | None:
@@ -87,10 +104,12 @@ class MeteredEngine:
         stop_token_ids: Sequence[int],
         adapter: str | None,
     ) -> Generation:
+        await self._open.wait()
         started = time.monotonic()
         if self._in_flight == 0:
             self._busy_since = started
         self._in_flight += 1
+        self._idle.clear()
         try:
             generation = await self.engine.generate(
                 prompt,
@@ -106,6 +125,7 @@ class MeteredEngine:
             self.request_seconds += finished - started
             if self._in_flight == 0:
                 self.busy_seconds += finished - self._busy_since
+                self._idle.set()
         self.requests += 1
         self.prompt_tokens += len(prompt)
         self.generated_tokens += len(generation.tokens)

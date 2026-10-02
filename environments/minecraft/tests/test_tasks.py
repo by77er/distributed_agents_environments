@@ -4,7 +4,9 @@ gets."""
 import random
 from typing import Any
 
+from minecraft_swarm.prompts import goal
 from minecraft_swarm.tasks import (
+    CHAINS,
     KITS,
     MILESTONES,
     Coordination,
@@ -15,6 +17,7 @@ from minecraft_swarm.tasks import (
     Task,
     Tier,
     catalog,
+    done,
     kits,
     score,
     solved,
@@ -48,8 +51,14 @@ def test_the_catalog_runs_from_staged_skills_to_the_whole_game() -> None:
     first, last = tasks[0], tasks[-1]
     assert first.start is Start.ITEMS and first.hazards is Hazards.SAFE and first.minutes <= 5
     assert last.tier is Tier.GAME and last.kit is Kit.NOTHING and last.hazards is Hazards.HARD and last.minutes >= 120
-    # Skills are staged and safe or easy and reward diamonds; nothing after them keeps a peaceful world.
-    assert all(task.objective is Objective.DIAMONDS for task in tasks if task.tier is Tier.SKILLS)
+    # Skills reward diamonds or, starting from nothing among trees, the making of an item; nothing after them keeps
+    # a peaceful world.
+    assert {task.objective for task in tasks if task.tier is Tier.SKILLS} == {Objective.DIAMONDS, Objective.CRAFT}
+    assert all(
+        task.start is Start.WOODLAND and task.kit is Kit.NOTHING and task.goal in CHAINS
+        for task in tasks
+        if task.objective is Objective.CRAFT
+    )
     assert all(task.hazards is not Hazards.SAFE for task in tasks if task.tier is not Tier.SKILLS)
     # A progress task is about one milestone; the game is about the dragon.
     assert all((task.goal in MILESTONES) == (task.objective is Objective.PROGRESS) for task in tasks)
@@ -84,6 +93,36 @@ def test_hurting_the_dragon_counts_and_killing_it_counts_most() -> None:
     assert not solved(task, hurt) and solved(task, killed)
     whole_game = catalog()[-1]
     assert score(whole_game, {"team_advancements": list(MILESTONES)}) == sum(MILESTONES.values())
+
+
+def test_crafting_tasks_reward_each_step_of_the_chain_once_and_are_solved_by_the_item() -> None:
+    task = next(t for t in catalog() if t.goal == "stone_pickaxe")
+    assert [name for name, _, _ in CHAINS["stone_pickaxe"]][-2:] == ["cobblestone", "a stone pickaxe"]
+    nothing: dict[str, Any] = {"team_diamonds": 0, "team_obtained": {}}
+    assert score(task, nothing) == 0 and not solved(task, nothing)
+    # Any log and any planks count; forty logs count as one step; things off the chain count for nothing.
+    halfway: dict[str, Any] = {"team_obtained": {"birch_log": 40, "birch_planks": 8, "stick": 4, "dirt": 9}}
+    assert done(CHAINS["stone_pickaxe"], halfway["team_obtained"]) == ["logs", "planks", "sticks"]
+    assert score(task, halfway) == 3 and not solved(task, halfway)
+    whole = {
+        "team_obtained": dict.fromkeys(
+            (
+                "oak_log",
+                "oak_planks",
+                "crafting_table",
+                "stick",
+                "wooden_pickaxe",
+                "cobbled_deepslate",
+                "stone_pickaxe",
+            ),
+            1,
+        )
+    }
+    assert score(task, whole) == sum(weight for _, _, weight in CHAINS["stone_pickaxe"]) == 13 and solved(task, whole)
+    text = goal(task)
+    assert text.startswith("Goal: together, make a stone pickaxe. You start with nothing")
+    assert text.endswith("logs, planks, a crafting table, sticks, a wooden pickaxe, cobblestone, a stone pickaxe.")
+    assert next(t.goal for t in catalog() if t.objective is Objective.CRAFT) == "crafting_table"  # the shortest first
 
 
 def test_gear_is_dealt_by_coordination() -> None:

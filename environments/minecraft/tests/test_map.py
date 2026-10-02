@@ -17,9 +17,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_the_harness_builds_the_map_from_line_of_sight_only() -> None:
+def test_the_harness_builds_the_map_from_line_of_sight_only_and_times_digs_as_the_game_does() -> None:
     ran = subprocess.run(
-        ["node", "--test", "test/map.test.js"], cwd=HARNESS, capture_output=True, text=True, check=False
+        ["node", "--test", "test/map.test.js", "test/data.test.js"],
+        cwd=HARNESS,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert ran.returncode == 0, ran.stdout + ran.stderr
 

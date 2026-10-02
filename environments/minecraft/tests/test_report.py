@@ -43,7 +43,7 @@ def test_the_summary_gives_the_latest_group_the_task_set_and_the_trainers_statis
     assert "iteration 2, 1.0 h in, 1 updates (adapter step 1)" in text
     assert "rewards 0 / 2 / 10 / 11 (mean 5.75, sd 4.82); solved 3/4" in text
     assert "KL to the sampling policy ≈ 0.0123" in text and "clipped 0.4%" in text and "96 turns" in text
-    assert "**Task set:** 7 of 49 unlocked" in text
+    assert "**Task set:** 7 of 57 unlocked" in text
     assert "`t001` skills, diamonds, items, kit none — 1 groups, solved 100%, mean reward 9.0" in text
     assert "`t003` skills, diamonds, chests, kit none — 1 groups, solved 75%, mean reward 5.8" in text
     assert "`t002` skills, diamonds, items, kit none, easy — not tried yet" in text

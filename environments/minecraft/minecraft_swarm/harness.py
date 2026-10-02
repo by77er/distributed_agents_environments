@@ -59,6 +59,10 @@ class Harness:
     async def busy(self) -> list[str]:
         return list((await self.request("busy"))["acting"])
 
+    async def digging(self) -> dict[str, str]:
+        """The block each bot is in the middle of breaking (as "x,y,z"), for those that are."""
+        return dict((await self.request("busy")).get("digging") or {})
+
     async def freeze(self) -> None:
         await self.request("freeze")
 

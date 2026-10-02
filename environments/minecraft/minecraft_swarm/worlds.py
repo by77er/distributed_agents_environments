@@ -23,7 +23,7 @@ from minecraft_swarm.control import Control
 from minecraft_swarm.harness import Harness
 from minecraft_swarm.paper import Installation, PaperServer
 from minecraft_swarm.prompts import TEAM
-from minecraft_swarm.tasks import Built, Start, Task, build, catalog, score, solved
+from minecraft_swarm.tasks import Built, Objective, Start, Task, build, catalog, score, solved
 from rollout.core.contracts import RetryClass, Text, ToolResult, ToolSpecification
 
 
@@ -43,7 +43,10 @@ class EpisodeWorld:
 class MinecraftWorlds:
     installation: Installation = field(default_factory=Installation)
     window_ticks: int = 100
-    """At most this many game ticks per window (100 = five seconds)."""
+    """Game ticks per window (100 = five seconds), unless a block is being broken when they are up."""
+    dig_ticks: int = 400
+    """A window runs on, up to this many ticks, while a bot is in the middle of breaking a block: breaking cannot be
+    paused (stopped, it starts over), and obsidian takes 9.4 seconds with a diamond pickaxe."""
     logs: Path | None = None
     tasks: dict[str, Task] = field(default_factory=lambda: {task.id: task for task in catalog()})
     _episodes: dict[str, EpisodeWorld] = field(default_factory=dict[str, EpisodeWorld])
@@ -90,12 +93,14 @@ class MinecraftWorlds:
         """Run game time until every action has finished or the window is over; then freeze. `done` says there is
         nothing left to earn: every staged diamond is held, or the dragon is dead."""
         world = self._world(episode)
-        ran = await self._run(world, ticks=self.window_ticks, settle=0.3)
+        ran = await self._run(world, ticks=self.window_ticks, settle=0.3, dig_ticks=self.dig_ticks)
         world.windows += 1
         state = await world.control.state()
         staged = world.task.start in (Start.ITEMS, Start.CHESTS)  # the only starts whose diamonds are counted exactly
-        done = bool(state.get("dragon_killed")) or (
-            staged and int(state["team_diamonds"]) >= world.built.available_diamonds
+        done = (
+            bool(state.get("dragon_killed"))
+            or (staged and int(state["team_diamonds"]) >= world.built.available_diamonds)
+            or (world.task.objective is Objective.CRAFT and solved(world.task, state))  # the item is made
         )
         return {
             "ticks": ran,
@@ -118,6 +123,7 @@ class MinecraftWorlds:
             "objective": world.task.objective.value,
             "team_diamonds": int(state["team_diamonds"]),
             "team_advancements": list(state.get("team_advancements", [])),
+            "team_obtained": dict(state.get("team_obtained", {})),
             "dragon_killed": bool(state.get("dragon_killed", False)),
             "dragon_damage": float(state.get("dragon_damage", 0.0)),
             "players": {p["name"]: p["diamonds"] for p in state["players"] if p["name"] in world.team},
@@ -137,25 +143,39 @@ class MinecraftWorlds:
     async def close(self) -> None:
         await asyncio.gather(*(self.end(episode) for episode in list(self._episodes)), return_exceptions=True)
 
-    async def _run(self, world: EpisodeWorld, *, ticks: int, settle: float) -> int:
-        await world.harness.thaw()
-        ran = 0
-        while ran < ticks:
-            await world.control.step(10)
-            ran += 10
-            if not await world.harness.busy():
-                break
-        await world.control.step(10)  # drops land and are picked up
-        ran += 10
-        await asyncio.sleep(settle)
-        await world.harness.freeze()
-        return ran
+    async def _run(self, world: EpisodeWorld, *, ticks: int, settle: float, dig_ticks: int = 0) -> int:
+        return await run_window(world.control, world.harness, ticks=ticks, settle=settle, dig_ticks=dig_ticks)
 
     def _world(self, episode: str) -> EpisodeWorld:
         world = self._episodes.get(episode)
         if world is None:
             raise KeyError(f"no episode {episode}")
         return world
+
+
+async def run_window(control: Control, harness: Harness, *, ticks: int, settle: float, dig_ticks: int = 0) -> int:
+    """Run game time while the bots act: until every action has finished or `ticks` have run; then, if a bot is in
+    the middle of breaking a block, on until that block breaks (up to `dig_ticks` in all); then freeze. Returns the
+    ticks that ran."""
+    await harness.thaw()
+    ran = 0
+    while ran < ticks:
+        await control.step(10)
+        ran += 10
+        if not await harness.busy():
+            break
+    # A block that is being broken when the window is up is allowed to finish (that block, not the next one).
+    breaking = await harness.digging() if ran >= ticks and dig_ticks > ran else {}
+    while breaking and ran < dig_ticks:
+        await control.step(10)
+        ran += 10
+        now = await harness.digging()
+        breaking = {name: block for name, block in breaking.items() if now.get(name) == block}
+    await control.step(10)  # drops land and are picked up
+    ran += 10
+    await asyncio.sleep(settle)
+    await harness.freeze()
+    return ran
 
 
 def _object(properties: dict[str, JsonValue], required: list[str]) -> dict[str, JsonValue]:

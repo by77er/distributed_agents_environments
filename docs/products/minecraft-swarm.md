@@ -24,7 +24,7 @@ map included), what it thinks, what it does and what comes back (the [monitor](.
 | Server configuration | `config/` | Paper 1.21.11 (checked by SHA-256), offline mode, anti-xray, nether and end enabled; merged into Paper's defaults. |
 | Paper servers | `minecraft_swarm/paper.py` | Builds the plugin with `javac`, generates a template server per world seed and configuration, and starts temporary servers as copies of it (about 8 s). |
 | Harness (Node) | `harness/` | One mineflayer bot per agent: filtered observations, a vocabulary of actions, the chat filter, and pausing while ticks are frozen. |
-| Tasks | `minecraft_swarm/tasks.py` | 49 tasks in three tiers, each built in a live world from ground truth and scored by its own objective. |
+| Tasks | `minecraft_swarm/tasks.py` | 57 tasks in three tiers, each built in a live world from ground truth and scored by its own objective. |
 | Episode | `minecraft_swarm/episode.py` | The lockstep loop: four agents act, the world runs, repeat, until the task's budget of game time is spent; the team's score is every agent's reward. |
 | World service | `minecraft_swarm/worlds.py`, `service.py` | Temporary worlds and ground-truth scores in process, or over HTTP for rollout workers elsewhere. |
 | Curriculum | `minecraft_swarm/curriculum.py` | Which task next: learning progress over the unlocked tasks. |
@@ -51,7 +51,9 @@ map included), what it thinks, what it does and what comes back (the [monitor](.
 
 The plugin freezes the game (Paper's `ServerTickManager`). A turn: every agent observes and thinks while nothing moves;
 each calls one action; the world then steps in chunks of ten ticks until every action has finished or 100 ticks (five
-seconds) have run, plus ten to let drops land; then it freezes again. The bots' physics is paused while frozen, and
+seconds) have run, plus ten to let drops land; then it freezes again. A block that is being broken when the five
+seconds are up is allowed to finish breaking (up to 20 seconds in all): breaking cannot be paused, and obsidian takes
+9.4 seconds with a diamond pickaxe. The bots' physics is paused while frozen, and
 unfinished actions are stopped and reported as cut off ("repeat it to continue"). Players are not frozen by the game
 itself, so the harness's pause is what keeps them still. An episode's budget is game time: it is spent only by the
 ticks that run.
@@ -134,6 +136,7 @@ A task is a starting state, a budget of game time and an objective scored from g
 | Tier | Tasks | What is given | Objective |
 |---|---|---|---|
 | Skills (staged) | 21, 3 to 16 minutes | The plugin builds the situation: diamonds on the floor of a lit room, chests around corners, natural ore exposed in a pocket's wall or hidden 4 to 24 blocks away. Kits remove steps of the tech tree (iron pickaxe → ingots → raw iron → stone tools); kits are given to everyone, to one agent, or dealt in parts. | Diamonds the team holds at the end |
+| Skills (crafting) | 8, 6 to 35 minutes | Nothing at all, on a peaceful surface with a tree trunk within reach. The task names an item several recipes deep, and everything for it must be gathered: a crafting table, a wooden pickaxe, a stone pickaxe, a furnace, torches, an iron pickaxe, a bucket, a shield. | The steps of the item's chain the team got done |
 | Survival (natural) | 25, 15 to 66 minutes | Nothing is staged: a natural cave, the surface, the nether, beside a fortress, near or inside a stronghold, or the end; a real day and night, mobs, and inventory lost on death. Kits run from iron tools down to nothing, or prepare one stage of the game (obsidian and flint for a portal, a bow for blazes, eyes of ender, armor for the dragon). | Diamonds held, or progress |
 | Game | 3, 240 minutes | A bare spawn on the surface, nothing given; easy, normal and hard. | Progress |
 
@@ -149,9 +152,17 @@ start or the kit granted do not count), each once:
 | Mine a diamond | 4 | Enter the end | 12 |
 | Form obsidian | 3 | Kill the dragon | 40 |
 
-A dragon left alive still counts for 20 times the most it was hurt, as a share of its health. A task is **solved**
-when the team holds a diamond, or, for a progress task, earns the milestone the task is about (a task that starts
-beside a fortress is about the blaze rod; the game is about the dragon).
+A dragon left alive still counts for 20 times the most it was hurt, as a share of its health.
+
+**Crafting** is scored from what the team got hold of after the episode began: every item a member picked up, crafted
+or took from a furnace. Each step of the chain to the task's item counts once, with a weight that grows along the
+chain. For a stone pickaxe: logs 1, planks 1, a crafting table 2, sticks 1, a wooden pickaxe 3, cobblestone 2, the
+stone pickaxe 3. Any kind of log or planks counts; forty logs count as one step. The episode ends when the item is
+made.
+
+A task is **solved** when the team holds a diamond, makes the task's item, or, for a progress task, earns the
+milestone the task is about (a task that starts beside a fortress is about the blaze rod; the game is about the
+dragon).
 
 The curriculum samples by learning progress: a task's weight is p(1 − p) on its recent rate of being solved (a group
 that always or never succeeds teaches group-relative methods nothing), untried tasks first. Tasks unlock in the
@@ -166,6 +177,16 @@ catalog's order: the first three, and four past the hardest one solved at least 
 | Recorder | Renders contexts to tokens and parses replies through a pluggable `Renderer` (Qwen3.5's XML tool calls and thinking); thinking has a budget, closed by forced (untrained) tokens | records prompt, sampled tokens, mask, behavior logprobs and adapter per turn |
 | Trainer | The same 4-bit weights, dequantized inside each matrix multiply (`Int4Linear`); only the sampled positions go through the output layer. Each update is a fresh process that loads the previous adapter and optimizer state, takes one step, saves and exits | 6.6 GiB loaded (the vision tower is dropped and the token embeddings are read from the checkpoint file as needed); peak 10.7 GiB at 5,000 tokens, 12.4 at 8,000, whatever the share of sampled tokens: the output layer is run in checkpointed chunks; 5 to 8 s per turn; logprobs match vLLM's to a mean of 0.016, also with an adapter |
 | Algorithm | Dr. GRPO advantages (reward minus group mean, every turn of an episode), DAPO's dynamic sampling, clip-higher (0.8–1.28) and token-level loss, PPO clipping against the behavior logprobs, no KL | |
+
+Groups overlap. The next group starts when at most one episode of earlier groups is still running, so that one slow
+episode does not leave the GPU serving four agents instead of sixteen (in one group the last episode ran alone for
+45% of the time). No episode is left out: a group is trained on when its last episode is done, with advantages over
+all of them. Its turns may then be an update or two old, and a straggler plays on under the newer adapter (the one
+before stays loaded, so a turn finishes under the adapter it started with). The update's clipped ratio against the
+logprobs recorded at sampling is what corrects for that, token by token. During an update every running episode
+waits, its world frozen between turns.
+
+A run started again in the same directory goes on from its latest adapter, its curriculum and its iteration count.
 
 Bitsandbytes was the first plan for 4-bit weights, but vLLM 0.30 no longer supports it; a pre-quantized checkpoint
 read by both sides keeps the engine's and the trainer's weights identical.
@@ -207,6 +228,9 @@ The first training runs exhausted a 23 GB machine (WSL shut down). What changed:
 - **Count tokens, not turns.** Compaction every so many turns assumed a turn's size; agents that wrote long replies
   outgrew the budget, and a 7,669-token prompt ended an episode. Losing episodes that way removes exactly the
   talkative ones from the group's baseline. Memory is now compacted by the tokens a prompt actually took.
+- **The bots' game data slowed every good pickaxe.** Blocks that need better than a wooden pickaxe (most ores,
+  obsidian) had no tool speeds in the data the bots run on: a bot took 6.75 seconds over diamond ore with an iron
+  pickaxe instead of 1.15, and 75 over obsidian instead of 9.4. The harness corrects the data when a bot joins.
 - **Friendly fire.** Teammates standing in the line of fire took the arrows until the team became a scoreboard team.
 - **A throw needs a moment.** The server learns where a bot looks with its next movement packet: an item tossed at
   once flew the old way. And whoever throws an item cannot pick it back up for five seconds, so that a toss toward

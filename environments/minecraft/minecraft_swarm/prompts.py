@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from minecraft_swarm.tasks import Objective, Task
+from minecraft_swarm.tasks import CHAINS, Objective, Task
 from rollout.core.contracts import ToolSpecification
 
 TEAM = ["ada", "ben", "cy", "dee"]
@@ -24,6 +24,10 @@ GOALS = {
         "once, whoever does it, and only if it is done in this game: what you start with does not count."
     ),
 }
+CRAFT_GOAL = (
+    "Goal: together, make {item}. You start with nothing: everything it takes must be gathered and crafted. Getting "
+    "there counts step by step, each step once, whoever does it: {steps}."
+)
 """What each objective asks, in the words agents read. They state what is scored and nothing about how: the same
 text serves every task of an objective, from diamonds lying in a lit room to ore under a bare surface."""
 
@@ -33,9 +37,9 @@ you are.
 {goal}
 
 How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
-one tool (only your first call counts); then the world runs for up to five seconds while the actions happen, and \
-freezes again. Long actions (walking far, digging through rock, fighting) may be cut off: the result says where you \
-got to.
+one tool (only your first call counts); then the world runs for about five seconds while the actions happen (longer \
+only to let a block finish breaking), and freezes again. Long actions (walking far, digging through rock, fighting) \
+may be cut off: the result says where you got to.
 
 What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
 you, and lists notable things in sight farther off. Coordinates are absolute, (x, y, z): +x is east, +y is up, +z is \
@@ -61,7 +65,15 @@ def system_prompt(task: Task) -> str:
     training, not of the game, and a policy told the clock learns to play the clock. Doing more before the episode is
     cut off is rewarded all the same. The same goes for the limit on thinking: it is set wide enough to be met
     rarely, and agents are not told of it."""
-    return SYSTEM.format(team=", ".join(TEAM), goal=GOALS[task.objective], chat_lines=CHAT_LINES)
+    return SYSTEM.format(team=", ".join(TEAM), goal=goal(task), chat_lines=CHAT_LINES)
+
+
+def goal(task: Task) -> str:
+    """What the task asks, as agents read it."""
+    if task.objective is not Objective.CRAFT:
+        return GOALS[task.objective]
+    steps = [name for name, _, _ in CHAINS[str(task.goal)]]
+    return CRAFT_GOAL.format(item=steps[-1], steps=", ".join(steps))
 
 
 def _integer(description: str) -> dict[str, JsonValue]:

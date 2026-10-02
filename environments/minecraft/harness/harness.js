@@ -19,6 +19,7 @@ const mineflayer = require('mineflayer')
 const { pathfinder, Movements } = require('mineflayer-pathfinder')
 const { observe } = require('./lib/observe')
 const { ACTIONS, ActionError, Interrupted } = require('./lib/actions')
+const { fixMaterials } = require('./lib/data')
 
 const VERSION = '1.21.11'
 const MAX_MESSAGES = 20
@@ -43,6 +44,7 @@ function join (host, port, name) {
       // 0.3: a bot resting against a wall would be inside it by the server's reckoning, and Paper refuses such
       // moves ("clipped into block"), putting the bot back every tick.
       bot.physics.playerHalfWidth = Math.fround(0.3)
+      fixMaterials(bot.registry)
       const movements = new Movements(bot)
       movements.canDig = true
       movements.allowParkour = false
@@ -172,8 +174,16 @@ function status () {
   return result
 }
 
+// Who is still acting, and which block each of them is in the middle of breaking (breaking cannot be paused:
+// stopped, it starts over).
 function busy () {
-  return { acting: [...bots.entries()].filter(([, state]) => state.action).map(([name]) => name) }
+  const acting = [...bots.entries()].filter(([, state]) => state.action)
+  const digging = {}
+  for (const [name, state] of acting) {
+    const block = state.bot.targetDigBlock
+    if (block) digging[name] = `${block.position.x},${block.position.y},${block.position.z}`
+  }
+  return { acting: acting.map(([name]) => name), digging }
 }
 
 async function handle (request) {
