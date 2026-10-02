@@ -52,6 +52,9 @@
   .node.top { color: var(--ink); font-weight: 600; font-size: 14px; }
   .node .tag { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .children { margin-left: 14px; border-left: 1px solid var(--line); padding-left: 6px; }
+  .children .node { display: grid; grid-template-columns: 34px minmax(0, 1fr) 52px 54px; gap: 8px; }
+  .children .node .dots { justify-content: flex-start; overflow: hidden; }
+  .children .node .tag { text-align: right; }
   .dots { display: flex; gap: 3px; flex: none; }
   .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
   .dots i.solved { background: var(--good); } .dots i.unsolved { background: var(--faint); } .dots i.failed { background: var(--bad); }
