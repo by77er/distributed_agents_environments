@@ -20,6 +20,7 @@ from typing import Protocol
 
 from rollout.core.contracts import (
     CapabilityContract,
+    ContractViolation,
     FinishReason,
     SampleRequest,
     SampleResult,
@@ -51,6 +52,10 @@ class Engine(Protocol):
     ) -> Generation: ...
 
 
+DEFAULT_CONTEXT_LIMIT = 32_768
+"""For an engine that states no limit of its own."""
+
+
 @dataclass
 class MeteredEngine:
     """An engine that counts what passes through it: tokens in and out, and for how long it was generating."""
@@ -65,6 +70,12 @@ class MeteredEngine:
     """Wall-clock time with at least one request in flight."""
     _in_flight: int = 0
     _busy_since: float = 0.0
+
+    @property
+    def max_model_len(self) -> int | None:
+        """The metered engine's own limit, if it states one."""
+        stated = getattr(self.engine, "max_model_len", None)
+        return int(stated) if isinstance(stated, int) else None
 
     async def generate(
         self,
@@ -128,10 +139,23 @@ class Channel:
     adapter_version: int = 0
     thinking_budget: int = 512
     answer_tokens: int = 384
-    context_limit: int = 32_768
+    context_limit: int | None = None
+    """The longest turn (prompt and completion) the channel takes, and what it tells programs. Left unset, it is the
+    engine's own limit (its `max_model_len`, if it states one) and no more than `max_sequence_tokens`."""
     max_sequence_tokens: int | None = None
     """If set, no recorded turn (prompt and completion) is longer: a long prompt leaves less room for thinking. A
     trainer with limited memory can then train on every turn, instead of leaving the long ones out."""
+
+    def __post_init__(self) -> None:
+        if self.context_limit is None:
+            stated = getattr(self.engine, "max_model_len", None)
+            limit = int(stated) if isinstance(stated, int) else DEFAULT_CONTEXT_LIMIT
+            self.context_limit = min(limit, self.max_sequence_tokens or limit)
+
+    @property
+    def limit(self) -> int:
+        assert self.context_limit is not None
+        return self.context_limit
 
 
 @dataclass(frozen=True)
@@ -188,7 +212,7 @@ class RecordedEndpoint:
 
     def describe(self, session_id: str) -> CapabilityContract:
         return CapabilityContract(
-            context_limit=self._channel.context_limit,
+            context_limit=self._channel.limit,
             max_output_tokens=self._channel.thinking_budget + self._channel.answer_tokens,
         )
 
@@ -201,6 +225,11 @@ class RecordedEndpoint:
             return recorded[1]
         channel, renderer = self._channel, self._channel.renderer
         prompt = renderer.render(request.context.append, request.tools)
+        if len(prompt) + channel.answer_tokens > channel.limit:
+            raise ContractViolation(
+                f"the prompt is {len(prompt)} tokens; with {channel.answer_tokens} for the answer it is over the "
+                f"channel's limit of {channel.limit}"
+            )
         temperature, top_p = self._sampling.temperature, self._sampling.top_p
         stops = renderer.stop_token_ids()
         completion: list[int] = []
@@ -260,7 +289,7 @@ class RecordedEndpoint:
                 input_tokens=len(prompt),
                 output_tokens=len(completion),
                 context_used=len(prompt) + len(completion),
-                context_limit=channel.context_limit,
+                context_limit=channel.limit,
             ),
         )
         self._recorder.turns[request.session_id].append(turn)

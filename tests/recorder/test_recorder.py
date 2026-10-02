@@ -224,3 +224,20 @@ async def test_a_long_prompt_leaves_less_room_to_think_so_that_no_turn_is_too_lo
     assert 0 < room < 64 and engine.budgets[0] == room  # not the channel's 64
     (turn,) = recorder.turns["r_1/ada"]
     assert len(turn.prompt) + sum(turn.loss_mask) <= limit
+
+
+async def test_a_channel_tells_programs_the_engines_own_limit_and_refuses_what_is_over_it(tokenizer: Tokenizer) -> None:
+    from rollout.core.contracts import ContractViolation
+
+    renderer = renderer_for("qwen3.5", tokenizer)
+    engine = ScriptedEngine(tokenizer, [("ok</think>", "stop"), ("\n\nhi<|im_end|>", "stop")])
+    engine.max_model_len = 8192  # pyright: ignore[reportAttributeAccessIssue]
+    channel = Channel(engine, renderer)
+    endpoint = Recorder({"policy": channel}).endpoint(RecordedModel(channel="policy"))
+    assert endpoint.describe("r_1/ada").context_limit == 8192  # the engine's, not a number of the channel's own
+    assert Channel(engine, renderer, max_sequence_tokens=5400).limit == 5400  # or the trainer's, if that is less
+
+    messages = [Message.user("Say hi.")]
+    tight = Channel(engine, renderer, answer_tokens=16, context_limit=len(renderer.render(messages, [MINE])) + 15)
+    with pytest.raises(ContractViolation, match="over the channel's limit"):
+        await Recorder({"policy": tight}).endpoint(RecordedModel(channel="policy")).sample(request(messages))
