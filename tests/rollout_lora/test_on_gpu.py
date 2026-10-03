@@ -36,7 +36,9 @@ def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_samp
         behavior = (exact + 0.05 * torch.randn(exact.shape)).tolist()
         segments.append(Weighted(Segment(tokens, spans, behavior), 1.0 if index % 2 else -1.0))
 
-    # Without a gradient and with one, the trainer gives a token the same logprob: the ratio starts at 1.
+    # Without a gradient and with one, the trainer gives a token the same logprob: the ratio starts at 1. (In
+    # training mode, as a step is: gradient checkpointing is on only then.)
+    policy.model.train()
     first = segments[0]
     with torch.no_grad():
         quiet = policy.logprobs(first.segment.tokens, sampled(first))
