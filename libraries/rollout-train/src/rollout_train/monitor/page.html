@@ -54,11 +54,15 @@
   .twist svg { transition: transform .15s; } .twist.open svg { transform: rotate(90deg); }
   .twist.none { visibility: hidden; }
   .children { margin-left: 15px; border-left: 1px solid var(--line); padding-left: 4px; }
-  .children .node { display: grid; grid-template-columns: 16px 32px minmax(0, 1fr) 52px 50px; gap: 6px; }
+  .children { margin-left: 12px; }
+  /* (laid out by what a row is, wherever it nests: a step, a group, an episode, a rollout) */
+  .node.step, .node.group, .node.episode, .node.rollout { display: grid; gap: 6px; }
+  .node.step { grid-template-columns: 16px 36px minmax(0, 1fr) auto; }
+  .node.group { grid-template-columns: 16px 30px minmax(0, 1fr) 52px 44px; }
+  .node.episode { grid-template-columns: 16px 26px 10px minmax(0, 1fr) 40px; }
+  .node.rollout { grid-template-columns: 20px minmax(0, 1fr); }
   .children .node .dots { justify-content: flex-start; overflow: hidden; }
   .children .node .tag { text-align: right; }
-  .children .children .node { grid-template-columns: 16px 26px 10px minmax(0, 1fr) 40px; }
-  .children .children .children .node { grid-template-columns: 20px minmax(0, 1fr); }
   .dots { display: flex; gap: 3px; flex: none; }
   .dots i { width: 7px; height: 7px; border-radius: 1px; background: var(--line-strong); }
   .dots i.solved { background: var(--good); } .dots i.unsolved { background: var(--faint); } .dots i.failed { background: var(--bad); }

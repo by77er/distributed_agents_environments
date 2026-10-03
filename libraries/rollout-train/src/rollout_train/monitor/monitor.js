@@ -1,8 +1,8 @@
 "use strict";
-// The monitor's page, organised as a run is: the training run; its groups (a task, a start, a number of episodes
-// and a step); each episode (one run of the program) and its rollouts, one per agent, each of which becomes a
-// trajectory to train on; and beside them
-// the policy and the machine.
+// The monitor's page, organised as a run is: the training run; its steps (each one update of the policy, over the
+// groups it covers); each group (a task, a start, a number of episodes); each episode (one run of the program) and
+// its rollouts, one per agent, each of which becomes a trajectory to train on; and beside them the policy and the
+// machine.
 
 const h = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -43,11 +43,13 @@ const go = place => { location.hash = place; };
 const link = (place, attributes, ...children) => h("a", { href: place, ...attributes }, ...children);
 const runPlace = run => `#/run/${encodeURIComponent(run)}`;
 const groupPlace = (run, number) => `${runPlace(run)}/group/${number}`;
+const stepPlace = (run, number) => `${runPlace(run)}/step/${number}`;
 const episodePlace = (id, slot) => `#/episode/${encodeURIComponent(id)}${slot ? `/${encodeURIComponent(slot)}` : ""}`;
 const policyPlace = name => `#/policy/${encodeURIComponent(name)}`;
 function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   if (parts[0] === "run" && parts[2] === "group") return { kind: "group", run: parts[1], number: Number(parts[3]) };
+  if (parts[0] === "run" && parts[2] === "step") return { kind: "step", run: parts[1], number: Number(parts[3]) };
   if (parts[0] === "run") return { kind: "run", run: parts[1] };
   if (parts[0] === "episode") return { kind: "episode", id: parts[1], slot: parts[2] || null };
   if (parts[0] === "policy") return { kind: "policy", name: parts[1] };
@@ -63,7 +65,7 @@ const spec = (key, value, kind = "") => h("span", { class: `spec ${kind}` }, h("
 const specs = (...items) => h("div", { class: "specs" }, items.filter(Boolean));
 // A state: a square in its color, then its name.
 const mark = (state, text) => h("span", { class: `mark ${stateKind(state)}` }, h("i"), text ?? state);
-const kpi = (label, value, note) => h("div", { class: "kpi" }, h("span", {}, label), h("b", { title: String(value) }, value), note ? h("small", {}, note) : null);
+const kpi = (label, value, note) => h("div", { class: "kpi" }, h("span", {}, label), h("b", { title: typeof value === "string" ? value : null }, value), note ? h("small", {}, note) : null);
 const card = (title, note, ...body) => h("section", { class: "card" }, h("header", {}, h("h2", {}, title), note ? h("span", {}, note) : null), h("div", { class: "body" }, ...body));
 const table = (heads, rows, onRow) => h("div", { class: "table" }, h("table", {},
   h("tr", {}, heads.map(([name, kind]) => h("th", kind ? { class: kind } : {}, name))),
@@ -93,7 +95,14 @@ const outcomeOf = line => line.update
   : { kind: line.failed && !line.rewards.length ? "bad" : "still", text: line.skipped ?? "" };
 const dotsOf = line => h("span", { class: "dots" }, [...line.rewards.map((_, index) => h("i", { class: line.solved[index] ? "solved" : "unsolved" })),
   ...Array.from({ length: line.failed }, () => h("i", { class: "failed" }))]);
-const stateKind = name => ({ running: "accent", completed: "good", done: "good", failed: "bad", cancelled: "bad", playing: "accent", queued: "warm", stepping: "violet" })[name] ?? "";
+// A run's groups by number (those in flight and those done with), and the step a group went into.
+const groupsOf = run => new Map([...run.done.map(line => [line.group, { number: line.group, task: line.task, title: line.title, line, episodes: line.episodes ?? [] }]),
+  ...run.open.map(group => [group.number, { number: group.number, task: group.task, title: group.title, open: group, episodes: group.episodes }])]);
+const stepOf = (run, number) => run.steps.find(step => step.groups.includes(number) || step.skipped.includes(number));
+const versionNamed = name => state.system.policies.flatMap(policy => policy.versions).find(version => version.name === name);
+const range = numbers => numbers.length ? (numbers.length > 1 && numbers.at(-1) - numbers[0] === numbers.length - 1
+  ? `#${numbers[0]}–${numbers.at(-1)}` : numbers.map(number => `#${number}`).join(" ")) : "no group";
+const stateKind = name => ({ running: "accent", completed: "good", done: "good", failed: "bad", cancelled: "bad", playing: "accent", queued: "warm", stepping: "violet", committed: "good" })[name] ?? "";
 
 // A group's episodes as a strip of cells: each with its state as a bar along its top, and its reward (or, while
 // it plays, how many samples its agents have taken).
@@ -116,9 +125,13 @@ function spark(values, kind, width, height, fill) {
 }
 
 // Every group the run is done with: each episode's reward as a dot, the group's mean as a rule, and under the axis
-// what was done with the group. A column opens its group.
+// what was done with the group; groups stand in the order of their steps, and a rule parts one step's from the next.
+// A column opens its group.
 function rewardsChart(run, width) {
-  const lines = run.iterations, left = 32, top = 10, plot = 120, band = top + plot + 10, height = band + 28;
+  // (in the order of the steps they went into, and within a step by number: a group may finish, and be trained on,
+  // before one decided earlier; those toward the next step come last)
+  const order = line => { const step = stepOf(run, line.group); return step ? run.steps.indexOf(step) : run.steps.length; };
+  const lines = [...run.done].sort((a, b) => order(a) - order(b) || a.group - b.group), left = 32, top = 10, plot = 120, band = top + plot + 10, height = band + 28;
   const count = Math.max(lines.length, 12), column = (width - left - 6) / count;
   const most = Math.max(1, ...lines.flatMap(line => line.rewards));
   const power = 10 ** Math.floor(Math.log10(most)), ceiling = Math.ceil(most / power) * power;
@@ -132,15 +145,17 @@ function rewardsChart(run, width) {
   lines.forEach((line, index) => {
     const x = left + (index + 0.5) * column;
     drawing.append(svg("rect", { x: x - column / 2, y: top - 4, width: column, height: height - top, class: "f-none column",
-      onclick: () => go(groupPlace(run.run, line.iteration)) },
-    svg("title", {}, `#${line.iteration} ${line.task} · ${line.title}\n${line.rewards.map(figure).join(" ") || "no episode"}${line.failed ? ` (${line.failed} failed)` : ""}\n${outcomeOf(line).text}`)));
-    drawing.lastChild.addEventListener("click", () => go(groupPlace(run.run, line.iteration)));
+      onclick: () => go(groupPlace(run.run, line.group)) },
+    svg("title", {}, `#${line.group} ${line.task} · ${line.title}\n${line.rewards.map(figure).join(" ") || "no episode"}${line.failed ? ` (${line.failed} failed)` : ""}\n${outcomeOf(line).text}`)));
+    drawing.lastChild.addEventListener("click", () => go(groupPlace(run.run, line.group)));
+    const step = stepOf(run, line.group), before = index ? stepOf(run, lines[index - 1].group) : step;
+    if (step !== before) drawing.append(svg("line", { x1: x - column / 2, x2: x - column / 2, y1: top - 4, y2: height, class: "s-grid", "pointer-events": "none" }));
     line.rewards.forEach((value, place) => drawing.append(svg("circle", { cx: x + (place - (line.rewards.length - 1) / 2) * spread, cy: y(value),
       r: Math.min(3.2, Math.max(1.6, column / 5)), class: line.solved[place] ? "f-good" : "f-quiet", "pointer-events": "none" })));
     if (line.rewards.length) drawing.append(svg("line", { x1: x - column * 0.34, x2: x + column * 0.34, y1: y(mean(line.rewards)), y2: y(mean(line.rewards)), class: "s-ink", "pointer-events": "none" }));
     const did = line.update ? "f-accent" : line.error || (line.failed && !line.rewards.length) ? "f-bad" : "f-hollow";
     drawing.append(svg("rect", { x: x - mark / 2, y: band, width: mark, height: mark, rx: 2, class: did, "pointer-events": "none" }));
-    if (line.iteration % every === 0) drawing.append(svg("text", { x, y: band + 23, "text-anchor": "middle" }, String(line.iteration)));
+    if (index % every === 0) drawing.append(svg("text", { x, y: band + 23, "text-anchor": "middle" }, String(line.group)));
   });
   return drawing;
 }
@@ -173,6 +188,8 @@ const twist = (key, open, has = true) => h("button", {
 }, svg("svg", { width: 10, height: 10, viewBox: "0 0 10 10" }, svg("path", { d: "M3 1.5 L7 5 L3 8.5", fill: "none", stroke: "currentColor", "stroke-width": 1.6 })));
 const node = (place, current, ...children) => h("div", { class: `node${current ? " current" : ""}`, role: "link", tabindex: 0,
   onclick: () => go(place), onkeydown: event => { if (event.key === "Enter") go(place); } }, ...children);
+// A node that says what it is, for its layout: a step, a group, an episode or a rollout.
+const kindOf = (kind, element) => { element.classList.add(kind); return element; };
 function episodeClass(each) {
   if (each.interrupted) return "";
   const ended = each.outcome ?? (each.state && each.state !== "running" ? each.state : null);
@@ -190,35 +207,53 @@ function drawTree() {
     nodes.push(h("div", { class: "label" }, "Training run"));
     nodes.push(node(runPlace(run.run), here.kind === "run" && here.run === run.run, twist(runKey, runOpen),
       h("span", { class: `dot ${system.processes?.alive ? "alive" : ""}` }), h("span", { class: "name" }, run.run),
-      h("span", { class: "tag" }, `${run.iterations.length} done`)));
+      h("span", { class: "tag" }, `${run.steps.length} steps`)));
     if (!runOpen) continue;
-    const groups = [
-      ...[...run.open].reverse().map(group => ({ number: group.number, task: group.task, tag: group.stage, episodes: group.episodes })),
-      ...[...run.iterations].reverse().map(line => ({ number: line.iteration, task: line.task, line, episodes: line.episodes ?? [],
-        tag: line.adapter ? versionOf(line.adapter) : line.error ? "failed" : "–" })),
-    ];
-    const children = [];
-    for (const group of groups) {
-      const key = `group:${run.run}:${group.number}`;
-      const inside = (here.kind === "group" && here.number === group.number) || (showing?.job === run.run && Number(showing?.iteration) === group.number);
-      const open = folds[key] ?? inside;
-      children.push(node(groupPlace(run.run, group.number), here.kind === "group" && here.number === group.number,
-        twist(key, open, group.episodes.length > 0), h("span", { class: "num" }, `#${group.number}`), h("span", { class: "name" }, group.task),
+    const groups = groupsOf(run), children = [];
+    const inGroup = number => (here.kind === "group" && here.run === run.run && here.number === number)
+      || (showing?.job === run.run && Number(showing?.iteration) === number);
+    const groupRows = (number, skipped) => {
+      const group = groups.get(number);
+      if (!group) return [];
+      const key = `group:${run.run}:${number}`, open = folds[key] ?? inGroup(number);
+      const tag = group.open ? group.open.stage : skipped ? "skipped" : group.line.rewards.length
+        ? `${group.line.solved.filter(Boolean).length}/${group.line.rewards.length}` : "failed";
+      const rows = [kindOf("group", node(groupPlace(run.run, number), here.kind === "group" && here.number === number,
+        twist(key, open, group.episodes.length > 0), h("span", { class: "num" }, `#${number}`), h("span", { class: "name" }, group.task),
         group.line && !group.episodes.length ? dotsOf(group.line) : h("span", { class: "dots" }, group.episodes.map(each => h("i", { class: episodeClass(each) }))),
-        h("span", { class: "tag" }, group.tag)));
+        h("span", { class: "tag" }, tag)))];
       const byNumber = [...group.episodes].sort((a, b) => String(a.episode).localeCompare(String(b.episode), undefined, { numeric: true }));
-      if (open && byNumber.length) children.push(h("div", { class: "children" }, byNumber.flatMap(each => {
+      if (open && byNumber.length) rows.push(h("div", { class: "children" }, byNumber.flatMap(each => {
         const episodeKey = `episode:${each.run_id}`, slots = each.slots ?? [];
         const episodeOpen = folds[episodeKey] ?? (here.kind === "episode" && here.id === each.run_id && Boolean(here.slot));
-        const row = node(episodePlace(each.run_id), here.kind === "episode" && here.id === each.run_id && !here.slot,
+        const row = kindOf("episode", node(episodePlace(each.run_id), here.kind === "episode" && here.id === each.run_id && !here.slot,
           twist(episodeKey, episodeOpen, slots.length > 0), h("span", { class: "num" }, `E${each.episode ?? "?"}`),
           h("span", { class: "dots" }, h("i", { class: episodeClass(each) })),
           h("span", { class: "name" }, each.interrupted ? "interrupted" : each.outcome ?? (each.state === "running" ? `${each.samples ?? 0} samples` : each.state)),
-          h("span", { class: "tag" }, each.outcome || each.state === "completed" ? figure(each.reward) : ""));
+          h("span", { class: "tag" }, each.outcome || each.state === "completed" ? figure(each.reward) : "")));
         if (!episodeOpen || !slots.length) return [row];
-        return [row, h("div", { class: "children" }, slots.map(slot => node(episodePlace(each.run_id, slot),
-          here.kind === "episode" && here.id === each.run_id && here.slot === slot, avatar(slot), h("span", { class: "name" }, `rollout ${slot}`))))];
+        return [row, h("div", { class: "children" }, slots.map(slot => kindOf("rollout", node(episodePlace(each.run_id, slot),
+          here.kind === "episode" && here.id === each.run_id && here.slot === slot, avatar(slot), h("span", { class: "name" }, `rollout ${slot}`)))))];
       })));
+      return rows;
+    };
+    // The groups the next step will cover, then every step, newest first, each with the groups that went into it.
+    if (run.next.length) {
+      const key = `next:${run.run}`, open = folds[key] ?? true;
+      children.push(kindOf("step", node(runPlace(run.run), false, twist(key, open), h("span", { class: "num" }, "next"), h("span", { class: "name" }, "toward a step"),
+        h("span", { class: "tag" }, `${run.next.length} group${run.next.length === 1 ? "" : "s"}`))));
+      if (open) children.push(h("div", { class: "children" }, [...run.next].reverse().flatMap(number => groupRows(number, false))));
+    }
+    const newest = run.steps.at(-1)?.step;
+    for (const step of [...run.steps].reverse()) {
+      const key = `step:${run.run}:${step.step}`, members = [...step.groups, ...step.skipped];
+      const open = folds[key] ?? (step.step === newest || members.some(inGroup) || (here.kind === "step" && here.run === run.run && here.number === step.step));
+      children.push(kindOf("step", node(stepPlace(run.run, step.step), here.kind === "step" && here.run === run.run && here.number === step.step,
+        twist(key, open, members.length > 0), h("span", { class: "num" }, `S${step.step}`),
+        h("span", { class: "name" }, step.state === "committed" ? versionOf(step.makes) : `${versionOf(step.makes)} ${step.state}`),
+        h("span", { class: "tag" }, range(step.groups)))));
+      if (open) children.push(h("div", { class: "children" }, [...step.groups].reverse().flatMap(number => groupRows(number, false)),
+        [...step.skipped].reverse().flatMap(number => groupRows(number, true))));
     }
     nodes.push(h("div", { class: "children" }, children));
   }
@@ -250,15 +285,16 @@ function drawRun(name) {
   const system = state.system, run = system.runs.find(each => each.run === name);
   if (!run) return [h("div", { class: "empty" }, `There is no run ${name}.`)];
   const policy = system.policies[0], channel = system.channels.find(each => each.adapter) ?? system.channels[0];
-  const trained = run.iterations.filter(line => line.update).length, last = run.iterations.at(-1);
+  const trained = run.done.filter(line => line.update).length, last = run.done.at(-1);
+  const committed = run.steps.filter(step => step.state === "committed").length;
   const throughput = channel?.throughput.at(-1);
   const width = Math.max(300, document.getElementById("main").clientWidth - 100);
   const head = h("div", { class: "head" }, h("h1", {}, `Run ${run.run}`),
     specs(policy ? spec("trains", policy.policy, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
       spec("fence", run.fence ?? "–"), spec("directory", system.directory)));
   const kpis = h("div", { class: "kpis" },
-    kpi("Groups done", `${run.iterations.length}`, `${run.decided} decided`),
-    kpi("Trained on", `${trained}`, `${run.iterations.length - trained} skipped or failed`),
+    kpi("Steps", `${run.steps.length}`, `${committed} committed · ${run.next.length} groups toward the next`),
+    kpi("Groups done", `${run.done.length}`, `${trained} trained on, of ${run.decided} decided`),
     kpi("Rows unlocked", last ? `${last.unlocked}` : "–", "of the catalog"),
     kpi("Policy head", policy ? versionOf(policy.head) : "–", policy ? `${policy.versions.length} versions` : ""),
     kpi("Inference", throughput ? `${figure(throughput.tokens_per_second)} tok/s` : "–", throughput ? `${figure(throughput.mean_concurrency)} requests at once` : "no measurement yet"),
@@ -269,9 +305,9 @@ function drawRun(name) {
     stages(group),
     group.episodes.length ? cells(group.episodes) : null)))
     : h("div", { class: "empty" }, "No group is in flight.");
-  const recent = [...run.iterations].reverse().slice(0, 10);
+  const recent = [...run.steps].reverse().slice(0, 10), groups = groupsOf(run);
   const tasks = new Map();
-  for (const line of run.iterations) {
+  for (const line of run.done) {
     const task = tasks.get(line.task) ?? { title: line.title, groups: 0, trained: 0 };
     task.groups += 1; task.trained += line.update ? 1 : 0; task.last = line; tasks.set(line.task, task);
   }
@@ -279,19 +315,57 @@ function drawRun(name) {
   return [head, kpis,
     h("div", { class: "section-title" }, h("h2", {}, "In flight"), h("span", {}, `${run.open.length} groups`)), flight,
     card("Rewards by group", "each dot an episode; rewards are each task's own",
-      run.iterations.length ? [rewardsChart(run, width), h("div", { class: "legend" },
+      run.done.length ? [rewardsChart(run, width), h("div", { class: "legend" },
         h("span", {}, h("i", { style: "background:var(--good)" }), "solved"), h("span", {}, h("i", { style: "background:var(--faint)" }), "not solved"),
         h("span", {}, h("i", { class: "rule" }), "mean"), h("span", {}, h("i", { class: "square", style: "background:var(--accent)" }), "trained on"),
         h("span", {}, h("i", { class: "square hollow" }), "skipped"), h("span", {}, h("i", { class: "square", style: "background:var(--bad)" }), "no episode, or the step failed"))]
         : h("div", { class: "empty" }, "No group is done with yet.")),
     h("div", { class: "cols" },
-      card("Latest groups", "newest first", table([["group"], ["task"], ["rewards"], ["what was done"], ["took", "n"]],
-        recent.map(line => [{ text: `#${line.iteration}`, kind: "key" }, line.task, line.rewards.map(figure).join(" ") || `${line.failed} failed`, outcomeOf(line), span(line.seconds)]),
-        recent.map(line => () => go(groupPlace(run.run, line.iteration))))),
+      card("Steps", "newest first", table([["step"], ["made"], ["groups"], ["solved"], ["segments", "n"], ["moved", "n"], ["took", "n"]],
+        recent.map(step => {
+          const version = versionNamed(step.makes), lines = step.groups.map(number => groups.get(number)?.line).filter(Boolean);
+          const solved = lines.flatMap(line => line.solved);
+          return [{ text: `S${step.step}`, kind: "key" }, step.state === "committed" ? versionOf(step.makes) : { text: step.state, kind: stateKind(step.state) },
+            { node: h("span", {}, range(step.groups), step.skipped.length ? h("span", { class: "faint" }, ` + ${step.skipped.length} skipped`) : null) },
+            solved.length ? `${solved.filter(Boolean).length}/${solved.length}` : "–", figure(step.segments),
+            version?.metrics.kl_moved?.toFixed(4) ?? "–", span(version?.metrics.update_seconds ?? version?.metrics.seconds)];
+        }),
+        recent.map(step => () => go(stepPlace(run.run, step.step))))),
       card("Tasks played", `${played.length} rows`, table([["task"], ["groups", "n"], ["trained", "n"], ["last rewards"], ["solved", "n"]],
         played.map(([key, task]) => [{ text: key, kind: "key" }, task.groups, task.trained, task.last.rewards.map(figure).join(" ") || "–",
           `${task.last.solved.filter(Boolean).length}/${task.last.rewards.length}`]),
-        played.map(([, task]) => () => go(groupPlace(run.run, task.last.iteration))))))];
+        played.map(([, task]) => () => go(groupPlace(run.run, task.last.group))))))];
+}
+
+// A step: one update of the policy, over the groups it covers
+function drawStep(here) {
+  const run = state.system.runs.find(each => each.run === here.run), step = run?.steps.find(each => each.step === here.number);
+  if (!step) return [h("div", { class: "empty" }, `There is no step ${here.number}.`)];
+  const version = versionNamed(step.makes), metrics = version?.metrics, groups = groupsOf(run);
+  const lines = step.groups.map(number => groups.get(number)?.line).filter(Boolean), solved = lines.flatMap(line => line.solved);
+  const head = h("div", { class: "head" }, h("h1", {}, `Step ${step.step}`),
+    specs(spec("makes", step.makes ? link(policyPlace(step.makes.split("@")[0]), {}, step.makes) : "–", "violet"),
+      spec("from", step.parent ?? "the base model"), spec("state", step.state, stateKind(step.state)), spec("decided", clock(step.decided) || "–")));
+  const kpis = h("div", { class: "kpis" },
+    kpi("Groups", `${step.groups.length}`, `${range(step.groups)}${step.skipped.length ? ` · ${step.skipped.length} gave nothing to train on` : ""}`),
+    kpi("Solved", solved.length ? `${solved.filter(Boolean).length} of ${solved.length}` : "–", "episodes of its groups"),
+    kpi("Segments", figure(step.segments), "trained on"),
+    kpi("Moved", metrics?.kl_moved != null ? metrics.kl_moved.toFixed(4) : "–", "KL from its parent"),
+    kpi("Took", metrics ? span(metrics.update_seconds ?? metrics.seconds) : step.state === "stepping" ? span(state.system.at - step.decided) : "–",
+      step.state === "stepping" ? "so far" : ""));
+  const tiles = h("div", { class: "tiles" }, [...step.groups, ...step.skipped].map(number => {
+    const group = groups.get(number), line = group?.line, skipped = step.skipped.includes(number);
+    return link(groupPlace(run.run, number), { class: `tile rail ${skipped ? "" : line?.rewards.length ? "good" : "bad"}` },
+      h("header", {}, h("b", {}, `#${number}`), h("span", { class: "what" }, `${group?.task ?? ""} · ${group?.title ?? ""}`)),
+      h("div", { class: "big" }, line?.rewards.length ? figure(mean(line.rewards)) : h("span", { class: "faint" }, "–")),
+      h("div", { class: "facts" }, line ? dotsOf(line) : null, line?.rewards.length ? h("span", {}, line.rewards.map(figure).join(" ")) : null,
+        skipped ? h("span", {}, line?.skipped ?? "nothing to train on") : line ? h("span", {}, h("b", {}, line.segments ?? "–"), " segments") : null));
+  }));
+  const what = card("The update", version ? `${version.name}, from ${version.parent ?? "the base model"}` : step.state === "failed" ? "the step failed" : "being taken",
+    metrics ? pairs([...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
+      .filter(key => metrics[key] !== undefined).map(key => [key.replaceAll("_", " "), figure(metrics[key])]), ["took", span(metrics.update_seconds ?? metrics.seconds)]])
+      : step.error ? h("p", { class: "error-text" }, step.error) : h("p", { class: "muted" }, "The trainer is working on it."));
+  return [head, kpis, h("div", { class: "section-title" }, h("h2", {}, "Groups"), h("span", {}, "what went into the step")), tiles, what];
 }
 
 // A group
@@ -308,8 +382,12 @@ function drawGroup(here) {
     kpi("Solved", result ? `${result.solved.filter(Boolean).length} of ${result.solved.length}` : `${group.episodes.filter(each => each.solved).length} of ${group.count ?? "?"}`, result?.failed ? `${result.failed} failed` : ""),
     kpi("Played for", result ? span(result.rollout_seconds) : group.decided ? span(state.system.at - group.decided) : "–", group.decided ? `decided ${clock(group.decided)}` : ""),
     kpi("To train on", result ? `${result.segments}` : "–", result ? `of ${result.segments_recorded} segments` : ""),
-    kpi("Made", version ? versionOf(version.name) : group.step ? `${versionOf(group.step.makes)}…` : "–",
-      group.step ? `step ${group.step.step}, over ${group.step.groups.map(number => `#${number}`).join(" ")}` : ""));
+    (() => {
+      const run = state.system.runs.find(each => each.run === group.run), step = run && stepOf(run, group.number);
+      const kept = step && !step.groups.includes(group.number);
+      return kpi("Step", step ? link(stepPlace(group.run, step.step), {}, `S${step.step} → ${versionOf(step.makes)}`) : "–",
+        step ? (kept ? "decided after it; nothing of it trained" : `over ${range(step.groups)}`) : run?.next.includes(group.number) ? "toward the next step" : "");
+    })());
   const episodes = group.episodes.length ? h("div", { class: "tiles" }, group.episodes.map(episode => {
     const info = episode.info ?? {};
     return link(episodePlace(episode.run_id), { class: `tile rail ${episode.interrupted ? "" : stateKind(episode.state)}` },
@@ -497,7 +575,7 @@ function drawPolicy(name) {
   const system = state.system, policy = system.policies.find(each => each.policy === name);
   if (!policy) return [h("div", { class: "empty" }, `There is no policy ${name}.`)];
   const versions = policy.versions, width = Math.max(300, document.getElementById("main").clientWidth - 100);
-  const madeBy = new Map(system.runs.flatMap(run => run.iterations.filter(line => line.adapter).map(line => [line.adapter, [run.run, line.iteration]])));
+  const madeBy = new Map(system.runs.flatMap(run => run.steps.filter(step => step.makes).map(step => [step.makes, [run.run, step.step]])));
   const size = versions.reduce((sum, version) => sum + version.weights.bytes + (version.state?.bytes ?? 0), 0);
   const serving = system.channels.find(channel => channel.adapter?.startsWith(`${name}@`));
   const newest = [...versions].reverse();
@@ -508,13 +586,13 @@ function drawPolicy(name) {
     kpi("Kept", bytes(size), "weights and trainer state"),
     kpi("Last step moved", versions.length ? figure(versions.at(-1).metrics.kl_moved) : "–", "KL from its parent")),
   card("How far each step moved the policy", "KL between a version and its parent", barChart(versions.map(version => version.metrics.kl_moved ?? 0),
-    versions.map(version => versionOf(version.name)), width, 150, index => { const made = madeBy.get(versions[index].name); if (made) go(groupPlace(...made)); })),
+    versions.map(version => versionOf(version.name)), width, 150, index => { const made = madeBy.get(versions[index].name); if (made) go(stepPlace(...made)); })),
   card("Versions", "newest first", table([["version"], ["from"], ["made"], ["by"], ["segments", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["state"], ["size", "n"]],
     newest.map(version => [{ text: versionOf(version.name), kind: "key" }, versionOf(version.parent), clock(version.made),
-      madeBy.has(version.name) ? `group #${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.segments), figure(version.metrics.optimizer_steps),
+      madeBy.has(version.name) ? `step ${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.segments), figure(version.metrics.optimizer_steps),
       version.metrics.kl_moved?.toFixed(4), version.metrics.loss?.toFixed(3), span(version.metrics.update_seconds ?? version.metrics.seconds),
       version.state ? "kept" : version.released ? { text: "released", kind: "still" } : "–", bytes(version.weights.bytes + (version.state?.bytes ?? 0))]),
-    newest.map(version => madeBy.has(version.name) ? () => go(groupPlace(...madeBy.get(version.name))) : null)))];
+    newest.map(version => madeBy.has(version.name) ? () => go(stepPlace(...madeBy.get(version.name))) : null)))];
 }
 
 // The machine, the engines, the jobs and the ledger
@@ -558,16 +636,22 @@ function drawOthers() {
 }
 
 // Drawing and reading
+const stepCrumb = (name, number) => {
+  const run = state.system?.runs.find(each => each.run === name), step = run && stepOf(run, number);
+  return step ? [[`Step ${step.step}`, stepPlace(name, step.step)]] : [];
+};
 function redraw() {
   const here = route(), system = state.system, main = document.getElementById("main");
   drawTree();
   let crumbs = [[system?.directory?.split("/").at(-1) ?? "…", "#/"]], content;
   if (!system) content = [h("div", { class: "empty" }, "Reading the run…")];
   else if (here.kind === "run") { crumbs.push([`Run ${here.run}`, runPlace(here.run)]); content = drawRun(here.run); }
-  else if (here.kind === "group") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], [`Group #${here.number}`, ""]); content = drawGroup(here); }
+  else if (here.kind === "step") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], [`Step ${here.number}`, ""]); content = drawStep(here); }
+  else if (here.kind === "group") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], ...stepCrumb(here.run, here.number), [`Group #${here.number}`, ""]); content = drawGroup(here); }
   else if (here.kind === "episode") {
     const labels = state.episode?.labels ?? {};
-    if (labels.job && labels.iteration) crumbs.push([`Run ${labels.job}`, runPlace(labels.job)], [`Group #${labels.iteration}`, groupPlace(labels.job, labels.iteration)]);
+    if (labels.job && labels.iteration) crumbs.push([`Run ${labels.job}`, runPlace(labels.job)], ...stepCrumb(labels.job, Number(labels.iteration)),
+      [`Group #${labels.iteration}`, groupPlace(labels.job, labels.iteration)]);
     else crumbs.push(["Episodes outside a run", "#/episodes"]);
     crumbs.push([labels.episode ? `Episode ${labels.episode}` : "Episode", here.slot ? episodePlace(here.id) : ""]);
     if (here.slot) crumbs.push([`Rollout ${here.slot}`, ""]);

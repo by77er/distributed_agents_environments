@@ -121,7 +121,7 @@ class System:
             "run": run,
             "parameters": record.get("parameters"),
             "outcome": _done(result, record, step, made, group["error"]) if group["stage"] == DONE and result else None,
-            "result": _iteration(result) if result else None,
+            "result": _outcome(result) if result else None,
             "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
         }
 
@@ -231,7 +231,9 @@ def _run(
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """A run: its groups that are not done with, each with its stage, its episodes and its step; the ones that are,
-    each with its result and what was done with it; and its steps."""
+    each with its result and what was done with it; and its steps, each with the groups that went into it. A group
+    that gave nothing to train on is listed with the first step decided after it, and until there is one, with
+    those the next step will cover (`next`)."""
     groups: Any = tables[GROUPS]
     entries = [_group(number, groups[number], tables, versions, job, in_feed) for number in sorted(groups, key=int)]
     done: list[dict[str, Any]] = []
@@ -249,8 +251,10 @@ def _run(
     listed: list[dict[str, Any]] = [
         {
             "step": int(key),
-            "groups": intent.get("groups") or [],
+            "groups": _covers(intent),
+            "skipped": [],
             "makes": _makes(intent),
+            "parent": intent.get("parent"),
             "segments": intent.get("segments"),
             "decided": intent.get("decided"),
             "state": "failed" if key in failures else "committed" if _makes(intent) in versions else "stepping",
@@ -258,13 +262,31 @@ def _run(
         }
         for key, intent in sorted(steps.items(), key=lambda item: int(item[0]))
     ]
+    results: Any = tables[RESULTS]
+
+    def ended(number: int) -> float:
+        result: Mapping[str, Any] = results.get(str(number)) or {}
+        return float(result.get("time") or 0.0)
+
+    def decided(step: Mapping[str, Any]) -> float:  # (a step that did not say when: once its last group had ended)
+        return float(step["decided"] or max(map(ended, step["groups"]), default=0.0))
+
+    covered = {number for step in listed for number in step["groups"]}
+    upcoming: list[int] = []
+    for entry in entries:
+        if entry["number"] in covered:
+            continue
+        after = ended(entry["number"]) if entry["stage"] == DONE else None
+        later = next((step for step in listed if after is not None and decided(step) >= after), None)
+        (later["skipped"] if later else upcoming).append(entry["number"])
     return {
         "run": run,
         "fence": fence,
         "decided": len(groups),
         "open": [entry for entry in entries if entry["stage"] != DONE],
-        "iterations": done,
+        "done": done,
         "steps": listed,
+        "next": upcoming,
     }
 
 
@@ -342,12 +364,11 @@ def _group(
 def _done(result: Any, group: Mapping[str, Any], step: Any, made: Version | None, error: str | None) -> dict[str, Any]:
     """A group that is done with, as the page shows it: its result, and what was done with it (the version its step
     made and the trainer's statistics, or why the step failed), with how long it all took."""
-    line = _iteration(result)
+    line = _outcome(result)
     ended = made.made if made else float(result.get("time") or 0.0)
     began = float(group.get("decided") or result.get("time") or 0.0)
     return {
         **line,
-        "iteration": line["group"],
         "adapter": made.name if made else None,
         "version": made.number if made else None,
         "update": dict(made.metrics) if made else None,
@@ -401,7 +422,7 @@ def _replayed(events: list[RunEvent]) -> list[dict[str, Any]]:
     return lines
 
 
-def _iteration(line: Mapping[str, Any]) -> dict[str, Any]:
+def _outcome(line: Mapping[str, Any]) -> dict[str, Any]:
     """A group's outcome as it is logged, with its failures said once each and briefly."""
     said: list[Any] = line.get("failures") or []
     failures = list(dict.fromkeys(str(failure)[:300] for failure in said))

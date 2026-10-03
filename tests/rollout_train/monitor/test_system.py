@@ -48,7 +48,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
         assert "monitor.js" in (await client.get("/")).text and (await client.get("/monitor.js")).status_code == 200
         assert (await client.get("/api/groups/train/9")).status_code == 404
         episode = (await client.get(f"/api/episodes/{group['episodes'][0]['run_id']}")).json()
-    assert group["number"] == 1 and group["stage"] == "done" and group["outcome"]["iteration"] == 1
+    assert group["number"] == 1 and group["stage"] == "done" and group["outcome"]["group"] == 1
     assert len(group["episodes"]) == 4 and all(
         each["state"] == "completed" and "info" in each for each in group["episodes"]
     )
@@ -68,9 +68,13 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     ]
     (run,) = system["runs"]
     assert run["run"] == "train" and run["fence"] == 1 and run["decided"] == 3 and run["open"] == []
-    assert [line["iteration"] for line in run["iterations"]] == [1, 2, 3]
-    trained = [line for line in run["iterations"] if line["update"]]
+    assert [line["group"] for line in run["done"]] == [1, 2, 3]
+    trained = [line for line in run["done"] if line["update"]]
     assert trained  # (the policy says yes and no in turn: some group has something to compare)
+    # Each group is listed with one step: the one it went into, or, if it gave nothing to train on, the next decided.
+    members = sorted(number for step in run["steps"] for number in [*step["groups"], *step["skipped"]])
+    assert members == [1, 2, 3] and run["next"] == []
+    assert all(step["groups"] == [line["group"]] for step, line in zip(run["steps"], trained, strict=True))
 
     (policy,) = system["policies"]
     assert policy["policy"] == "words" and policy["fence"] == 1 and policy["head"] == trained[-1]["adapter"]
@@ -168,9 +172,9 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     weights.write_text("weights")
     await policies.add(writer, "miner", 1, weights=weights)  # the step's version: the group is done with
     (run,) = (await system.snapshot())["runs"]
-    (done,) = run["iterations"]
-    assert run["open"] == [] and {key: done[key] for key in ("iteration", "task", "failures", "adapter")} == {
-        "iteration": 1,
+    (done,) = run["done"]
+    assert run["open"] == [] and {key: done[key] for key in ("group", "task", "failures", "adapter")} == {
+        "group": 1,
         "task": "t003",
         "failures": ["x"],
         "adapter": "miner@1",
