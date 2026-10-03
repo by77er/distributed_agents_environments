@@ -195,6 +195,9 @@ class Task(BaseModel):
     goal: str | None = None
     """What counts as solving the task: for a progress task the milestone it is about, for a crafting task the item
     to make."""
+    guided: bool = True
+    """Whether the system prompt gives the way to the goal step by step (`prompts.way`). A task with a way has an
+    unguided variant too: the same situation without it, and harder by `UNGUIDED`."""
     difficulty: float
     """Estimated, for ordering; the curriculum measures it."""
 
@@ -397,7 +400,31 @@ def catalog() -> list[Task]:
 
     tasks = [_task(**specification) for specification in specifications]
     tasks.sort(key=lambda task: (TIER_ORDER[task.tier], task.difficulty, task.start, task.kit, task.coordination))
-    return [task.model_copy(update={"id": f"t{index:03d}"}) for index, task in enumerate(tasks, start=1)]
+    guided = [task.model_copy(update={"id": f"t{index:03d}"}) for index, task in enumerate(tasks, start=1)]
+    unguided = [
+        task.model_copy(
+            update={
+                "id": f"{task.id}u",
+                "title": f"{task.title}, unguided",
+                "guided": False,
+                "difficulty": task.difficulty + UNGUIDED,
+            }
+        )
+        for task in guided
+        if laddered(task)
+    ]
+    return sorted([*guided, *unguided], key=lambda task: (TIER_ORDER[task.tier], task.difficulty, task.id))
+
+
+UNGUIDED = 2.0
+"""How much harder a task is without its way to the goal: about two steps of the tech tree. The curriculum unlocks
+an unguided variant once the rows before it are solved, so guidance fades task by task as the team learns."""
+
+
+def laddered(task: Task) -> bool:
+    """Whether a task's goal is reached by one ladder of steps from its kit, which the system prompt can give: a
+    crafting task, or a diamond task with a kit to make tools from (diamonds laid out need none)."""
+    return task.objective is Objective.CRAFT or (task.objective is Objective.DIAMONDS and task.kit is not Kit.NONE)
 
 
 def _task(

@@ -167,7 +167,10 @@ def goal(task: Task) -> str:
 
 def way(task: Task) -> str:
     """How to get to the goal, step by step, from what the team starts with: who carries what, every recipe and rule
-    on the way, in order. Empty for a task whose way is not one ladder (the progress tasks)."""
+    on the way, in order. Empty for a task whose way is not one ladder (the progress tasks), and for an unguided
+    variant of one that is."""
+    if not task.guided:
+        return ""
     if task.objective is Objective.CRAFT:
         steps = [MAKING[name] for name, _, _ in CHAINS[str(task.goal)]]
     elif task.objective is Objective.DIAMONDS and task.kit is Kit.NONE:

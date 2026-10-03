@@ -44,7 +44,7 @@ Paths are under `environments/minecraft/`.
 | Harness (Node) | `harness/`, `minecraft_swarm/harness.py` | One mineflayer bot per agent: observations by line of sight, the actions, the chat filter, and pausing while ticks are frozen. The Python side talks to it in JSON lines |
 | Limits | `limits.json`, `minecraft_swarm/limits.py`, `harness/lib/limits.js` | The numbers an action keeps and agents are told: reach, the longest `move`, how long walking may dig at a block, what it bridges with, how long `wait` waits, smelting time and fuels, the window's length, a chat message's length. Python and Node read the one file |
 | Prompts | `minecraft_swarm/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
-| Tasks | `minecraft_swarm/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective |
+| Tasks | `minecraft_swarm/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and an unguided variant of the 41 with a way to their goal |
 | Episode | `minecraft_swarm/episode.py` | The program: four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot and a [`Memory`](../libraries/rollout/memory.md) |
 | Worlds | `minecraft_swarm/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_swarm.worlds:tools`), or on a machine of its own (`rollout tools minecraft_swarm.worlds:tools`, and its URL in the profile) |
 | Catalog | `minecraft_swarm/catalog.py` | The tasks as rows, and a start of one: a world seed and a layout seed, which every episode of a group is given |
@@ -227,7 +227,10 @@ and with a budget of game time alone four minutes of it can run to over a hundre
 The system prompt states the objective and, for every task but the progress ones, the way to it step by step from
 what the team starts with (`prompts.way`): who carries what, and each recipe and rule on the way, in order, from
 placing the crafting table to which pickaxe gets diamonds out of ore. Each step is written from the task's kit, its
-coordination and its item's chain (`CHAINS`), and names the actions that take it.
+coordination and its item's chain (`CHAINS`), and names the actions that take it. Each of these 41 tasks has an
+unguided variant as well: the same situation without the way, ranked harder by `UNGUIDED` (two steps of the tech
+tree). The curriculum unlocks it as it unlocks any harder row, once the rows before it are solved, so the guidance
+fades task by task; a guided row the team has mastered teaches nothing more and is drawn rarely.
 
 A world is generated once per seed. A template server holds the overworld around the origin (`GENERATED_CHUNKS`), and
 every server of that seed copies the same chunks, so the episodes of a group start in the same world. Servers that

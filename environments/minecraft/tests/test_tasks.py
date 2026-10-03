@@ -12,6 +12,7 @@ from minecraft_swarm.tasks import (
     KITS,
     MILESTONES,
     TEAM,
+    UNGUIDED,
     Coordination,
     Hazards,
     Kit,
@@ -22,6 +23,7 @@ from minecraft_swarm.tasks import (
     catalog,
     done,
     kits,
+    laddered,
     saturated,
     score,
     solved,
@@ -41,7 +43,25 @@ def find(start: Start, kit: Kit, coordination: Coordination = Coordination.KITTE
 
 def test_the_catalog_runs_from_staged_skills_to_the_whole_game() -> None:
     tasks = catalog()
-    assert [task.id for task in tasks] == [f"t{index:03d}" for index in range(1, len(tasks) + 1)]
+    guided = [task for task in tasks if task.guided]
+    assert [task.id for task in guided] == [f"t{index:03d}" for index in range(1, len(guided) + 1)]
+    # A task with a way to its goal has an unguided variant, the same situation a little harder.
+    assert {task.id for task in tasks if not task.guided} == {f"{task.id}u" for task in guided if laddered(task)}
+    for task in tasks:
+        if not task.guided:
+            original = next(each for each in guided if each.id == task.id.removesuffix("u"))
+            assert (
+                task.model_copy(
+                    update={
+                        "id": original.id,
+                        "title": original.title,
+                        "guided": True,
+                        "difficulty": original.difficulty,
+                    }
+                )
+                == original
+            )
+            assert task.difficulty == original.difficulty + UNGUIDED
     assert len({task.title for task in tasks}) == len(tasks)  # every task is a different situation
     assert [task.tier for task in tasks] == sorted((task.tier for task in tasks), key=list(Tier).index)
     for tier in Tier:

@@ -126,7 +126,7 @@ def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agent
     actions = {tool.name for tool in ACTIONS}
     for task in catalog():
         said = way(task)
-        if task.objective is Objective.PROGRESS:
+        if task.objective is Objective.PROGRESS or not task.guided:
             assert said == ""
             continue
         assert said and said in system_prompt(task)
