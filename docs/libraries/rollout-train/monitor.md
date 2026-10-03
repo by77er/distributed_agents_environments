@@ -36,7 +36,7 @@ lists its episodes, and an open episode its rollouts. What is folded is remember
 |---|---|---|
 | Run | `#/run/RUN` | groups done, trained on and in flight, rows unlocked, the policy's head and what is served; each group in flight with its stage and episodes; every group's rewards (a column opens its group); the latest groups; the tasks played |
 | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported), what was done with it (the step's statistics and the version it made, or why it was skipped), and its start |
-| Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts: every agent's side by side, or one, a slider over turns, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**; the program's own tool calls below |
+| Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below |
 | Policy | `#/policy/NAME` | how far each step moved the policy, and every version with the group that made it |
 | Machine, engines and ledger | `#/system` | memory, accelerators and disk, each channel's throughput, the jobs, the fences and tables |
 | Episodes outside a run | `#/episodes` | runs in the feed that no training run asked for: evaluations, tests, programs run by hand |

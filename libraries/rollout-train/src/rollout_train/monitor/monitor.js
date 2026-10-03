@@ -193,7 +193,7 @@ function drawTree() {
       h("span", { class: "tag" }, `${run.iterations.length} done`)));
     if (!runOpen) continue;
     const groups = [
-      ...run.open.map(group => ({ number: group.number, task: group.task, tag: group.stage, episodes: group.episodes })),
+      ...[...run.open].reverse().map(group => ({ number: group.number, task: group.task, tag: group.stage, episodes: group.episodes })),
       ...[...run.iterations].reverse().map(line => ({ number: line.iteration, task: line.task, line, episodes: line.episodes ?? [],
         tag: line.adapter ? versionOf(line.adapter) : line.error ? "failed" : "–" })),
     ];
@@ -379,15 +379,53 @@ function drawEpisode(here) {
   const tabs = h("div", { class: "segmented" }, h("button", { class: `seg${slot ? "" : " current"}`, onclick: () => go(episodePlace(here.id)) }, "All rollouts"),
     [...ordered.keys()].map(each => h("button", { class: `seg${slot === each ? " current" : ""}`, onclick: () => go(episodePlace(here.id, each)) }, avatar(each), each)));
   const move = delta => () => { state.turn = Math.max(0, Math.min(turns - 1, state.turn + delta)); state.follow = false; redraw(); };
-  const scrub = h("div", { class: "scrub" }, h("button", { onclick: move(-1), "aria-label": "previous turn" }, "‹"), h("button", { onclick: move(1), "aria-label": "next turn" }, "›"),
+  const modes = h("div", { class: "segmented" },
+    h("button", { class: `seg${state.whole ? "" : " current"}`, onclick: () => { state.whole = false; redraw(); } }, "Turn by turn"),
+    h("button", { class: `seg${state.whole ? " current" : ""}`, onclick: () => { state.whole = true; redraw(); } }, "Whole trajectory"));
+  const scrub = h("div", { class: "scrub" }, modes, state.whole ? h("output", {}, `${turns} turns`) : [
+    h("button", { onclick: move(-1), "aria-label": "previous turn" }, "‹"), h("button", { onclick: move(1), "aria-label": "next turn" }, "›"),
     h("output", {}, `turn ${state.turn + 1} of ${turns}`),
     h("input", { type: "range", min: 0, max: turns - 1, value: state.turn, "aria-label": "turn", oninput: event => { state.turn = Number(event.target.value); state.follow = false; redraw(); } }),
     h("label", {}, h("input", { type: "checkbox", checked: state.follow, onchange: event => { state.follow = event.target.checked; redraw(); } }), "follow"),
-    episode.source === "feed" ? h("label", {}, h("input", { type: "checkbox", checked: state.full, onchange: event => { state.full = event.target.checked; redraw(); } }), "whole context") : null);
-  const cards = h("div", { class: "turns-frame" }, h("div", { class: "turns", style: `grid-template-columns: repeat(${shown.length}, minmax(300px, 1fr))` },
+    episode.source === "feed" ? h("label", {}, h("input", { type: "checkbox", checked: state.full, onchange: event => { state.full = event.target.checked; redraw(); } }), "whole context") : null]);
+  const cards = state.whole ? timeline(shown, turns, episode) : h("div", { class: "turns-frame" }, h("div", { class: "turns", style: `grid-template-columns: repeat(${shown.length}, minmax(300px, 1fr))` },
     shown.map(([each, samples]) => turnCard(each, samples, state.turn, episode))));
   const effects = otherEffects(episode.lines);
   return [head, kpis, result, h("div", { class: "section-title" }, h("h2", {}, "Rollouts"), h("span", {}, `${ordered.size}, one per agent, each a trajectory to train on${summaries ? ` · ${summaries} memory summaries written` : ""}`)), tabs, scrub, cards, effects];
+}
+
+// Every turn of the rollouts shown, one row a turn and one column a rollout: what each agent did and what came
+// back, with what it saw and what it thought one click away (drawn when opened; what is open stays open).
+function timeline(shown, turns, episode) {
+  const opened = state.opened ??= new Set();
+  const folded = (key, label, fill) => {
+    const details = h("details", { open: opened.has(key) }, h("summary", {}, label));
+    const filled = () => { if (details.open && details.childElementCount === 1) details.append(fill()); };
+    details.addEventListener("toggle", () => { if (details.open) opened.add(key); else opened.delete(key); filled(); });
+    filled();
+    return details;
+  };
+  const grid = h("div", { class: "timeline", style: `grid-template-columns: 52px repeat(${shown.length}, minmax(300px, 1fr))` },
+    h("div", { class: "when head" }), shown.map(([slot]) => h("div", { class: "head" }, avatar(slot), h("b", {}, slot))));
+  for (let turn = 0; turn < turns; turn += 1) {
+    grid.append(h("div", { class: "when" }, String(turn + 1)));
+    for (const [slot, samples] of shown) {
+      const sample = samples[turn];
+      if (!sample) { grid.append(h("div", { class: "step" }, h("span", { class: "none" }, "–"))); continue; }
+      const result = resultOf(samples, turn, sample.reply.calls[0]?.id);
+      const key = `${episode.run_id} ${slot} ${turn}`;
+      grid.append(h("div", { class: "step" },
+        sample.reply.text.trim() ? h("p", { class: "said" }, sample.reply.text.trim()) : null,
+        sample.reply.calls.map(call => h("div", {}, h("span", { class: "call" }, `${call.name}(${Object.entries(call.arguments).map(([name, value]) => `${name}: ${JSON.stringify(value)}`).join(", ")})`))),
+        !sample.reply.calls.length && !sample.reply.text.trim() ? h("span", { class: "none" }, "nothing") : null,
+        result ? h("div", { class: `result${result.error ? " error" : ""}` }, result.text) : null,
+        h("div", { class: "folds" },
+          sample.reply.reasoning ? folded(`${key} thought`, "thought", () => h("p", { class: "thought" }, sample.reply.reasoning.trim())) : null,
+          sample.messages.length ? folded(`${key} saw`, "saw", () => h("div", { class: "sees" }, seen(sample))) : null,
+          h("span", { class: "faint small" }, `${figure(sample.seconds)} s`))));
+    }
+  }
+  return h("div", { class: "turns-frame" }, grid);
 }
 
 function turnCard(slot, samples, turn, episode) {
