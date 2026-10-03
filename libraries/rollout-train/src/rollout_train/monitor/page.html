@@ -67,6 +67,7 @@
   .dots i { width: 7px; height: 7px; border-radius: 1px; background: var(--line-strong); }
   .dots i.solved { background: var(--good); } .dots i.unsolved { background: var(--faint); } .dots i.failed { background: var(--bad); }
   .dots i.running { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  .dots i.waiting { background: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
 
   /* Content */
   .content { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
@@ -153,6 +154,8 @@
   .cell::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--faint); }
   .cell.good::before { background: var(--good); } .cell.bad::before { background: var(--bad); } .cell.violet::before { background: var(--violet); }
   .cell.accent::before { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  .cell.waiting { background: none; } .cell.waiting::before { background: var(--line); }
+  .tile.rail.waiting { box-shadow: inset 3px 0 0 var(--line); background: none; }
   .cell span { color: var(--faint); font-size: 9.5px; } .cell b { font-size: 17px; font-weight: 600; line-height: 1.2; }
   .cell small { color: var(--quiet); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

@@ -111,11 +111,24 @@ const range = numbers => numbers.length ? (numbers.length > 1 && numbers.at(-1) 
   ? `#${numbers[0]}–${numbers.at(-1)}` : numbers.map(number => `#${number}`).join(" ")) : "no group";
 const stateKind = name => ({ running: "accent", completed: "good", done: "good", failed: "bad", cancelled: "bad", playing: "accent", queued: "warm", stepping: "violet", committed: "good" })[name] ?? "";
 
+// A group's episodes, and a place held for each one asked for that has not started (they start as there is room,
+// whatever group they are of).
+function asked(group) {
+  const have = group.episodes.filter(each => !each.interrupted), numbers = new Set(have.map(each => String(each.episode)));
+  const waiting = [];
+  for (let number = 1; waiting.length < (group.count ?? 0) - have.length; number++) {
+    if (!numbers.has(String(number))) waiting.push({ episode: String(number), waiting: true });
+  }
+  return [...group.episodes, ...waiting];
+}
+
 // A group's episodes as a strip of cells: each with its state as a bar along its top, and its reward (or, while
 // it plays, how many samples its agents have taken).
-const cells = episodes => h("div", { class: "cells" }, episodes.map(episode => h("div", { class: `cell ${episode.interrupted ? "" : stateKind(episode.state)}` },
-  h("span", {}, `E${episode.episode ?? "?"}`), episode.outcome ? h("b", {}, figure(episode.reward)) : h("b", { class: "faint" }, `${episode.samples ?? 0}`),
-  h("small", {}, episode.interrupted ? "interrupted" : episode.outcome ? (episode.solved ? "solved" : episode.outcome) : "samples"))));
+const cells = episodes => h("div", { class: "cells" }, episodes.map(episode => episode.waiting
+  ? h("div", { class: "cell waiting" }, h("span", {}, `E${episode.episode}`), h("b", { class: "faint" }, "–"), h("small", {}, "not started"))
+  : h("div", { class: `cell ${episode.interrupted ? "" : stateKind(episode.state)}` },
+    h("span", {}, `E${episode.episode ?? "?"}`), episode.outcome ? h("b", {}, figure(episode.reward)) : h("b", { class: "faint" }, `${episode.samples ?? 0}`),
+    h("small", {}, episode.interrupted ? "interrupted" : episode.outcome ? (episode.solved ? "solved" : episode.outcome) : "samples"))));
 
 // Charts
 function spark(values, kind, width, height, fill) {
@@ -199,6 +212,7 @@ const node = (place, current, ...children) => h("div", { class: `node${current ?
 // A node that says what it is, for its layout: a step, a group, an episode or a rollout.
 const kindOf = (kind, element) => { element.classList.add(kind); return element; };
 function episodeClass(each) {
+  if (each.waiting) return "waiting";
   if (each.interrupted) return "";
   const ended = each.outcome ?? (each.state && each.state !== "running" ? each.state : null);
   return !ended ? "running" : each.solved ? "solved" : ended === "completed" ? "unsolved" : "failed";
@@ -228,7 +242,8 @@ function drawTree() {
         ? `${group.line.solved.filter(Boolean).length}/${group.line.rewards.length}` : "failed";
       const rows = [kindOf("group", node(groupPlace(run.run, number), here.kind === "group" && here.number === number,
         twist(key, open, group.episodes.length > 0), h("span", { class: "num" }, `#${number}`), h("span", { class: "name" }, group.task),
-        group.line && !group.episodes.length ? dotsOf(group.line) : h("span", { class: "dots" }, group.episodes.map(each => h("i", { class: episodeClass(each) }))),
+        group.line && !group.episodes.length ? dotsOf(group.line)
+          : h("span", { class: "dots" }, (group.open ? asked(group.open) : group.episodes).map(each => h("i", { class: episodeClass(each) }))),
         h("span", { class: "tag" }, tag)))];
       const byNumber = [...group.episodes].sort((a, b) => String(a.episode).localeCompare(String(b.episode), undefined, { numeric: true }));
       if (open && byNumber.length) rows.push(h("div", { class: "children" }, byNumber.flatMap(each => {
@@ -326,7 +341,7 @@ function drawRun(name) {
       h("header", {}, h("b", {}, `#${group.number}`), h("span", { class: "what" }, `${group.task} · ${group.title ?? ""}`),
         h("span", { class: "faint small" }, group.decided ? span(system.at - group.decided) : "")),
       stages(group),
-      group.episodes.length ? cells(group.episodes) : null)))
+      group.count ? cells(asked(group)) : null)))
     : h("div", { class: "empty" }, "Nothing is in flight.");
   const recent = [...run.steps].reverse().slice(0, 10);
   const tasks = new Map();
@@ -414,7 +429,11 @@ function drawGroup(here) {
       return kpi("Step", step ? link(stepPlace(group.run, step.step), {}, `S${step.step} → ${versionOf(step.makes)}`) : "–",
         step ? (kept ? "decided after it; nothing of it trained" : `over ${range(step.groups)}`) : run?.next.includes(group.number) ? "toward the next step" : "");
     })());
-  const episodes = group.episodes.length ? h("div", { class: "tiles" }, group.episodes.map(episode => {
+  const episodes = group.episodes.length || group.count ? h("div", { class: "tiles" }, asked(group).map(episode => {
+    if (episode.waiting) return h("div", { class: "tile rail waiting" },
+      h("header", {}, h("b", {}, `Episode ${episode.episode}`), h("span", { class: "what" }, ""), mark("", "not started")),
+      h("div", { class: "big" }, h("span", { class: "faint" }, "–")),
+      h("div", { class: "facts" }, h("span", {}, "waits for room: at most so many episodes run at once")));
     const info = episode.info ?? {};
     return link(episodePlace(episode.run_id), { class: `tile rail ${episode.interrupted ? "" : stateKind(episode.state)}` },
       h("header", {}, h("b", {}, `Episode ${episode.episode ?? "?"}`), h("span", { class: "what" }, ""),
