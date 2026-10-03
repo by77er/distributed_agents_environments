@@ -94,10 +94,36 @@ DIAMOND_WAYS: dict[Kit, list[str]] = {
     Kit.NOTHING: [*(MAKING[name] for name, _, _ in CHAINS["iron_pickaxe"]), FUEL, MAKING["diamonds"], MINE_DIAMONDS],
 }  # fmt: skip
 """The way to diamonds from each kit, step by step."""
-DIAMONDS_LAID_OUT = {
-    Start.ITEMS: "The diamonds here lie on the floor: walking over items picks them up.",
-    Start.CHESTS: "The diamonds here are in chests: take them out (take, at a chest within reach).",
-}
+NO_DIGGING = "You have no pickaxe, and nothing here needs digging: the rock around you drops nothing when mined."
+TAKE = "take the diamonds out (take, at a chest within reach)"
+
+
+def laid_out(task: Task, players: int) -> str:
+    """Where the diamonds of a staged start are and how to get to them: the rooms `tasks.build` carves for it (a
+    middle room, and a corridor out of each of its walls bending to a side room)."""
+    you = "You each start" if players > 1 else "You start"
+    match task.start, task.apart:
+        case Start.ITEMS, False:
+            return "The diamonds here lie on the floor of the room you start in: walk over them (move) to pick them up."
+        case Start.ITEMS, True:
+            return (
+                f"{you} in a side room; the diamonds lie on the floor of the middle room. A corridor leads out of your "
+                f"room and bends to it: walk there, and over the diamonds to pick them up (move). {NO_DIGGING}"
+            )
+        case Start.CHESTS, False:
+            return (
+                "The diamonds here are in four chests, one in each of four side rooms. A corridor leads out of each "
+                f"wall of the room you start in and bends to a side room: walk there (move), then {TAKE}. {NO_DIGGING}"
+            )
+        case Start.CHESTS, True:
+            return (
+                f"{you} in a side room, beside a chest: {TAKE}. Each of the four side rooms has a chest. A corridor "
+                f"leads out of your room and bends to a middle room, and from it to each of the others: walk there "
+                f"(move) for the rest. {NO_DIGGING}"
+            )
+        case _:
+            return ""
+
 
 SYSTEM = """{opening}
 
@@ -213,7 +239,7 @@ def way(task: Task, players: int = len(TEAM)) -> str:
     if task.objective is Objective.CRAFT:
         steps = [MAKING[name] for name, _, _ in CHAINS[str(task.goal)]]
     elif task.objective is Objective.DIAMONDS and task.kit is Kit.NONE:
-        return DIAMONDS_LAID_OUT.get(task.start, "")
+        return laid_out(task, players)
     elif task.objective is Objective.DIAMONDS:
         steps = DIAMOND_WAYS.get(task.kit, [])
     else:

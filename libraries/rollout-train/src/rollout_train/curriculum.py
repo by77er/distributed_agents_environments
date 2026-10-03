@@ -4,7 +4,8 @@ A group-relative update learns from the differences between a group's episodes: 
 the same (every one perfect, or every one nothing) teaches nothing. So a row's weight is the share of its recent
 groups whose rewards differed (a moving average), plus a little for every unlocked row so that none is forgotten;
 untried rows get full weight. Whether a row was solved decides only what unlocks: rows unlock in the catalog's
-order, the first `start` of them, and `reach` past the hardest one solved at least half the time.
+order, the first `start` of them, and `reach` past the hardest one solved at least half the time. A group counts for
+its own row and for every row that row `counts_for`.
 """
 
 import random
@@ -67,10 +68,11 @@ class Curriculum:
         row = by_title.get(line.title) or by_key.get(line.task)
         if row is None:
             return  # a row the catalog no longer has
-        if line.rewards:
-            self.update(row, line.rewards, line.solved)
-        else:
-            self.failed(row)
+        for each in [row, *(by_key[key] for key in row.counts_for if key in by_key)]:
+            if line.rewards:
+                self.update(each, line.rewards, line.solved)
+            else:
+                self.failed(each)
 
     def weight(self, row: Row) -> float:
         record = self.record(row)

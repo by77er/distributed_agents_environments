@@ -110,6 +110,8 @@ rather than tickets.
   it would be choosing on what was known before it.
 - **Unlocking.** Rows unlock in the catalog's order: the first `start` of them, and `reach` past the hardest one
   solved at least half the time. Whether a row was solved decides only what unlocks.
+- **Rows that teach about others.** A row's `counts_for` names other rows its groups are evidence about too (the
+  same situation with more help, say): a group counts for its own row and for each of them.
 - **Rows that cannot be set up.** A group none of whose episodes completed counts for nothing at first: the next
   start may be one the row can be set up from. After `FAILED_GROUPS` such groups in a row, the row counts as tried,
   and as having taught nothing.

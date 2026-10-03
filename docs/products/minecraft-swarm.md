@@ -227,10 +227,13 @@ and with a budget of game time alone four minutes of it can run to over a hundre
 The system prompt states the objective and, for every task but the progress ones, the way to it step by step from
 what the team starts with (`prompts.way`): who carries what, and each recipe and rule on the way, in order, from
 placing the crafting table to which pickaxe gets diamonds out of ore. Each step is written from the task's kit, its
-coordination and its item's chain (`CHAINS`), and names the actions that take it. Each of these 41 tasks has an
-unguided variant as well: the same situation without the way, ranked harder by `UNGUIDED` (two steps of the tech
-tree). The curriculum unlocks it as it unlocks any harder row, once the rows before it are solved, so the guidance
-fades task by task; a guided row the team has mastered teaches nothing more and is drawn rarely.
+coordination and its item's chain (`CHAINS`), and names the actions that take it. Where the diamonds are laid out
+(on a floor, in chests), the way is where they are (`prompts.laid_out`): the rooms carved for the task, the corridors
+between them, and that nothing there needs digging. Each of the 41 tasks with a way from a kit has an unguided
+variant as well: the same situation without the way, ranked harder by `UNGUIDED` (two steps of the tech tree). The
+curriculum unlocks it as it unlocks any harder row, once the rows before it are solved, so the guidance fades task by
+task; a guided row the team has mastered teaches nothing more and is drawn rarely. An unguided row's groups count for
+its guided twin as well (`Row.counts_for`): what the team can do without help, it can do with it.
 
 Who plays is drawn with each start: how many, from one to four (at least two where the kit is dealt in parts), and
 the names they play under, all different, from `tasks.NAMES`; every episode of a group has the same team. The model

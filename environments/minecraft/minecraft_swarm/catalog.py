@@ -30,7 +30,9 @@ class Swarm:
 
     def rows(self) -> Sequence[Row]:
         return [
-            Row(task.id, task.title, {"task": task.id}) for task in tasks() if not self.only or task.id in self.only
+            Row(task.id, task.title, {"task": task.id}, counts_for=() if task.guided else (task.id.removesuffix("u"),))
+            for task in tasks()
+            if not self.only or task.id in self.only
         ]
 
     def start(self, row: Row, rng: random.Random) -> JsonValue:

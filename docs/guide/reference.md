@@ -1906,6 +1906,7 @@ class Row
 | `key` | `str` | required | Its name among the catalog's rows. |
 | `title` | `str` | required | What it is, for people. |
 | `parameters` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+| `counts_for` | `tuple[str, ...]` | `()` | The keys of other rows that a group of this one is evidence about too: the same situation with more help, say. What it teaches about this row it teaches about them. |
 
 ## `rollout.local`
 

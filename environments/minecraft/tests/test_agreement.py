@@ -166,3 +166,17 @@ def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
             assert len(set(start["names"])) == len(start["names"]) and set(start["names"]) <= set(NAMES)
         split = next(each for each in catalog() if each.id == row.key).coordination.value == "split"
         assert players == ({2, 3, 4} if split else {1, 2, 3, 4}), (row.key, players)
+
+
+def test_an_unguided_row_counts_for_its_guided_twin() -> None:
+    from minecraft_swarm.catalog import catalog as swarm
+
+    rows = {row.key: row for row in swarm.rows()}
+    for row in rows.values():
+        if row.key.endswith("u"):
+            assert (
+                row.counts_for == (row.key.removesuffix("u"),)
+                and row.title == f"{rows[row.counts_for[0]].title}, unguided"
+            )
+        else:
+            assert row.counts_for == ()

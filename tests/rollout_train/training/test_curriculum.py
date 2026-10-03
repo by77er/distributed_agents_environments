@@ -70,3 +70,13 @@ def test_a_curriculum_is_the_fold_of_a_runs_results_by_title_whatever_the_catalo
         same.recorded(line)
     assert same.record(ROWS[4]).attempts == 1 and same.record(ROWS[0]).failures == 1
     assert same.sample(rng=random.Random(5)) == same.sample(rng=random.Random(5))  # a choice can be made again
+
+
+def test_a_group_counts_for_the_rows_its_row_counts_for_as_well() -> None:
+    guided, alone = Row("t1", "a task"), Row("t1u", "a task, unguided", counts_for=("t1", "gone"))
+    curriculum = Curriculum([guided, alone], random.Random(0))
+    curriculum.recorded(Result(1, 0.0, "t1u", alone.title, rewards=[2.0, 2.0], solved=[True, True]))
+    assert curriculum.record(alone).success == curriculum.record(guided).success == 1.0
+    assert curriculum.record(alone).signal == curriculum.record(guided).signal == 0.0  # all alike: nothing to teach
+    curriculum.recorded(Result(2, 0.0, "t1", guided.title, rewards=[1.0, 0.0], solved=[True, False]))
+    assert curriculum.record(guided).attempts == 2 and curriculum.record(alone).attempts == 1  # not the other way
