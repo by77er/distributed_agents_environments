@@ -22,6 +22,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#tokenizer_of)
+- **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#tokenizer_of)
 - **[`rollout_computers`](#rollout_computers)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
 - **[`rollout_computers.tools`](#rollout_computerstools)** — Tools for agents that work on a computer: shell, files, edits and images. [`apply_edits`](#apply_edits), [`ComputerTools`](#computertools), [`page_text`](#page_text), [`prepare_image`](#prepare_image), [`Replacement`](#replacement)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
@@ -2949,9 +2950,14 @@ class ChatTemplateRenderer
 
 Renders with the tokenizer's chat template; parses with a family's tool-call and thinking formats.
 
+`end` ends an assistant turn, and so do `stops` (a family whose model stops to wait for a tool's response, say).
+`options` are passed to the chat template (`enable_thinking`, say). `opens` is appended to every generation
+prompt: for a family whose template leaves the thinking block for the model to open, a renderer whose
+`ThinkingFormat` says the prompt opens it opens it here.
+
 **Methods**
 
-- `def __init__(self, name: str, tokenizer: Tokenizer, tool_calls: ToolCallFormat, thinking: ThinkingFormat | None, end: str) -> None`
+- `def __init__(self, name: str, tokenizer: Tokenizer, tool_calls: ToolCallFormat, thinking: ThinkingFormat | None, end: str, *, stops: Sequence[str] = (), options: Mapping[str, Any] | None = None, opens: str = '') -> None`
 - `def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]`
 - `def encode(self, text: str) -> list[int]`
 - `def decode(self, tokens: Sequence[int]) -> str`
@@ -3623,6 +3629,57 @@ Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpo
 ### `tokenizer_of`
 
 *function* · `implementations/rollout-qwen/src/rollout_qwen/__init__.py`
+
+```python
+def tokenizer_of(model: str) -> Tokenizer
+```
+
+The tokenizer of a checkpoint, by its name or path.
+
+## `rollout_gemma`
+
+Renderers for the Gemma model families.
+
+### `arguments`
+
+*function* · `implementations/rollout-gemma/src/rollout_gemma/__init__.py`
+
+```python
+def arguments(text: str) -> dict[str, JsonValue]
+```
+
+A call's arguments (what is between its braces) as values: strings quoted with `<|"|>`, numbers, `true`,
+`false`, `null`, objects in braces and lists in brackets; keys are bare (or quoted).
+
+### `gemma4`
+
+*function* · `implementations/rollout-gemma/src/rollout_gemma/__init__.py`
+
+```python
+def gemma4(model: str | Tokenizer) -> Renderer
+```
+
+Gemma 4, thinking: the template is asked for thinking, and the generation prompt opens the thought channel
+(as Gemma's template itself does after a tool's response), so that a thinking budget can close it. `model` is a
+checkpoint's name, or its tokenizer.
+
+### `GemmaFunctionCalls`
+
+*class* · `implementations/rollout-gemma/src/rollout_gemma/__init__.py`
+
+```python
+class GemmaFunctionCalls
+```
+
+`<|tool_call>call:name{key:<|"|>text<|"|>,count:3,flag:true,nested:{...},items:[...]}<tool_call|>`.
+
+**Methods**
+
+- `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
+
+### `tokenizer_of`
+
+*function* · `implementations/rollout-gemma/src/rollout_gemma/__init__.py`
 
 ```python
 def tokenizer_of(model: str) -> Tokenizer

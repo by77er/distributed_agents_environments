@@ -48,6 +48,7 @@ Each implements one interface a library defines.
 | [vLLM engine](implementations/rollout-vllm.md) | Options, sleep and wake, adapters, the engine core process, measurements |
 | [LoRA trainer](implementations/rollout-lora.md) | Settings, a process per step, the memory bound, the step, metrics, measurements |
 | [Qwen renderers](implementations/rollout-qwen.md) | The token formats of Qwen3.5 and Qwen3 |
+| [Gemma renderers](implementations/rollout-gemma.md) | The token format of Gemma 4 |
 | [Computers](implementations/rollout-computers.md) | Environment backends and the tools that act on them |
 | [Models](guide/models.md), [Content](guide/content.md#media-and-blobs) | `rollout-openai` and `rollout-s3` are described in the guide |
 
@@ -75,15 +76,16 @@ Each implements one interface a library defines.
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
 | `implementations/rollout-lora` | `rollout_lora` | A trainer for 4-bit checkpoints with LoRA | `Trainer` |
 | `implementations/rollout-qwen` | `rollout_qwen` | The Qwen families' token formats | `Renderer` |
+| `implementations/rollout-gemma` | `rollout_gemma` | Gemma 4's token format | `Renderer` |
 | `implementations/rollout-computers` | `rollout_computers` | Computers for tasks, and the tools that act on them | `EnvironmentService` |
 | `implementations/rollout-openai` | `rollout_openai` | The OpenAI Responses API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
 | `products/project-assistant` | `project_assistant` | A conversational agent about one repository | |
 | `products/agent-sessions` | `agent_sessions` (and `agent_sessions.coordination`) | Agents with their own computers, and their coordination | |
-| `environments/minecraft` | `minecraft_swarm` | Four agents in a Minecraft world; depends on `rollout` only | `Catalog` |
+| `environments/minecraft` | `minecraft_swarm` | One to four agents in a Minecraft world; depends on `rollout` only | `Catalog` |
 
-`uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora` and
-`rollout-qwen`.
+`uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
+`rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone).
 
 ## Conventions
 

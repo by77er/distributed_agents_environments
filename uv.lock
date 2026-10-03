@@ -16,6 +16,7 @@ members = [
     "rollout",
     "rollout-computers",
     "rollout-durable",
+    "rollout-gemma",
     "rollout-lora",
     "rollout-openai",
     "rollout-qwen",
@@ -4405,6 +4406,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "rollout-gemma"
+version = "0.0.0"
+source = { editable = "implementations/rollout-gemma" }
+dependencies = [
+    { name = "rollout" },
+    { name = "rollout-train" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rollout", editable = "libraries/rollout" },
+    { name = "rollout-train", editable = "libraries/rollout-train" },
+    { name = "transformers", specifier = ">=5.10" },
+]
+
+[[package]]
 name = "rollout-lora"
 version = "0.0.0"
 source = { editable = "implementations/rollout-lora" }
@@ -4540,6 +4558,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+gemma = [
+    { name = "rollout-gemma" },
+]
 gpu = [
     { name = "rollout-lora" },
     { name = "rollout-qwen" },
@@ -4569,6 +4590,7 @@ requires-dist = [
     { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
     { name = "rollout-computers", editable = "implementations/rollout-computers" },
     { name = "rollout-durable", editable = "implementations/rollout-durable" },
+    { name = "rollout-gemma", marker = "extra == 'gemma'", editable = "implementations/rollout-gemma" },
     { name = "rollout-lora", marker = "extra == 'gpu'", editable = "implementations/rollout-lora" },
     { name = "rollout-openai", editable = "implementations/rollout-openai" },
     { name = "rollout-qwen", marker = "extra == 'gpu'", editable = "implementations/rollout-qwen" },
@@ -4576,7 +4598,7 @@ requires-dist = [
     { name = "rollout-train", extras = ["http", "report"], editable = "libraries/rollout-train" },
     { name = "rollout-vllm", marker = "extra == 'gpu'", editable = "implementations/rollout-vllm" },
 ]
-provides-extras = ["gpu"]
+provides-extras = ["gpu", "gemma"]
 
 [package.metadata.requires-dev]
 dev = [

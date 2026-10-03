@@ -1,6 +1,6 @@
 # The workspace: interface libraries, implementations of what they define, products, and environments.
 #   uv sync                 everything that needs no GPU
-#   uv sync --all-extras    with the engine, the trainer and the model family's renderer (Linux, NVIDIA GPU)
+#   uv sync --all-extras    with the engine, the trainer and the model families' renderers (Linux, NVIDIA GPU)
 [project]
 name = "rollout-workspace"
 version = "0.0.0"
@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["rollout-vllm", "rollout-lora", "rollout-qwen"]
+gemma = ["rollout-gemma"]
 
 [tool.uv.workspace]
 members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft"]
@@ -32,6 +33,7 @@ rollout-durable = { workspace = true }
 rollout-vllm = { workspace = true }
 rollout-lora = { workspace = true }
 rollout-qwen = { workspace = true }
+rollout-gemma = { workspace = true }
 rollout-computers = { workspace = true }
 rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
@@ -75,6 +77,7 @@ extraPaths = [
     "implementations/rollout-vllm/src",
     "implementations/rollout-lora/src",
     "implementations/rollout-qwen/src",
+    "implementations/rollout-gemma/src",
     "implementations/rollout-computers/src",
     "implementations/rollout-openai/src",
     "implementations/rollout-s3/src",

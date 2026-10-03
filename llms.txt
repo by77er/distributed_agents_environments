@@ -51,7 +51,8 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 
 - [Durable runner](docs/implementations/rollout-durable/README.md): runs that survive their process
 - [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
-  [Qwen renderers](docs/implementations/rollout-qwen.md): what a profile names
+  [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md):
+  what a profile names
 - [Computers](docs/implementations/rollout-computers.md): environment backends and shell and file tools
 
 ## Products and environments

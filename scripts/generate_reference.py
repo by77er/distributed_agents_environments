@@ -38,6 +38,7 @@ PUBLIC_MODULES = [
     ("rollout_vllm", "An engine on vLLM."),
     ("rollout_lora", "A trainer for 4-bit checkpoints with LoRA."),
     ("rollout_qwen", "Renderers for the Qwen model families."),
+    ("rollout_gemma", "Renderers for the Gemma model families."),
     ("rollout_computers", "Environment backends: services that give runs computers."),
     ("rollout_computers.tools", "Tools for agents that work on a computer: shell, files, edits and images."),
     ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),

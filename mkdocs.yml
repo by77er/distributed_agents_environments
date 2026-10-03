@@ -93,6 +93,7 @@ nav:
       - "vLLM engine": implementations/rollout-vllm.md
       - "LoRA trainer": implementations/rollout-lora.md
       - "Qwen renderers": implementations/rollout-qwen.md
+      - "Gemma renderers": implementations/rollout-gemma.md
       - "Computers": implementations/rollout-computers.md
   - Products and environments:
       - "Project assistant": products/project-assistant.md

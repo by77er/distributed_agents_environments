@@ -131,16 +131,33 @@ class JsonToolCalls:
 
 
 class ChatTemplateRenderer:
-    """Renders with the tokenizer's chat template; parses with a family's tool-call and thinking formats."""
+    """Renders with the tokenizer's chat template; parses with a family's tool-call and thinking formats.
+
+    `end` ends an assistant turn, and so do `stops` (a family whose model stops to wait for a tool's response, say).
+    `options` are passed to the chat template (`enable_thinking`, say). `opens` is appended to every generation
+    prompt: for a family whose template leaves the thinking block for the model to open, a renderer whose
+    `ThinkingFormat` says the prompt opens it opens it here."""
 
     def __init__(
-        self, name: str, tokenizer: Tokenizer, tool_calls: ToolCallFormat, thinking: ThinkingFormat | None, end: str
+        self,
+        name: str,
+        tokenizer: Tokenizer,
+        tool_calls: ToolCallFormat,
+        thinking: ThinkingFormat | None,
+        end: str,
+        *,
+        stops: Sequence[str] = (),
+        options: Mapping[str, Any] | None = None,
+        opens: str = "",
     ) -> None:
         self.name = name
         self.tokenizer = tokenizer
         self.tool_calls = tool_calls
         self.thinking = thinking
         self._end = end
+        self._stops = [end, *stops]
+        self._options = dict(options or {})
+        self._opens = opens
 
     def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]:
         conversation = [_template_message(message) for message in messages]
@@ -149,8 +166,9 @@ class ChatTemplateRenderer:
             tools=[_template_tool(tool) for tool in tools] or None,
             add_generation_prompt=True,
             tokenize=False,
+            **self._options,
         )
-        return self.encode(str(rendered))
+        return self.encode(str(rendered) + self._opens)
 
     def encode(self, text: str) -> list[int]:
         return list(self.tokenizer.encode(text, add_special_tokens=False))
@@ -159,7 +177,7 @@ class ChatTemplateRenderer:
         return self.tokenizer.decode(list(tokens), skip_special_tokens=False)
 
     def stop_token_ids(self) -> list[int]:
-        return [int(self.tokenizer.convert_tokens_to_ids(self._end))]
+        return [int(self.tokenizer.convert_tokens_to_ids(stop)) for stop in self._stops]
 
     def thinking_end_token_ids(self) -> list[int]:
         if self.thinking is None:
@@ -169,7 +187,8 @@ class ChatTemplateRenderer:
 
     def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message:
         text = self.tokenizer.decode(list(completion), skip_special_tokens=False)
-        text = text.split(self._end)[0]
+        for stop in self._stops:
+            text = text.split(stop)[0]
         blocks: list[Reasoning | Text | ToolCall] = []
         if self.thinking is not None and self.thinking.close in text:
             # The last close ends the thinking: a model whose thinking was closed for it may go on thinking, and
