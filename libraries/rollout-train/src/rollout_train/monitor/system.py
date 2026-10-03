@@ -121,10 +121,10 @@ class System:
             "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
         }
 
-    async def rollout(self, run_id: str, after: int = 0) -> dict[str, Any]:
-        """One rollout: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
-        replies and tool calls from the events the job kept), what its episode reported when it ended, and where it
-        sits: its job, its group and its labels."""
+    async def episode(self, run_id: str, after: int = 0) -> dict[str, Any]:
+        """One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
+        replies and tool calls from the events the job kept), from which its rollouts (one per model slot) are
+        drawn; what it reported when it ended; and where it sits: its job, its group and its labels."""
         ended, summary = await asyncio.to_thread(self._found, run_id)
         if summary is not None:
             source, lines = "feed", await asyncio.to_thread(self.feed.lines, run_id, after)
@@ -232,16 +232,17 @@ def _run(
         _group(number, groups[number], tables, made, job, in_feed)
         for number in sorted((number for number in groups if number not in done), key=int)
     ]
-    iterations = [_iteration(done[number]) | {"rollouts": _rollouts(number, job)} for number in sorted(done, key=int)]
+    iterations = [_iteration(done[number]) | {"episodes": _episodes(number, job)} for number in sorted(done, key=int)]
     return {"run": run, "fence": fence, "decided": len(groups), "open": open_groups, "iterations": iterations}
 
 
-def _rollouts(number: str, job: "_JobLog | None") -> list[dict[str, Any]]:
-    """A finished group's rollouts, briefly: which run each was, how it ended and what it scored."""
+def _episodes(number: str, job: "_JobLog | None") -> list[dict[str, Any]]:
+    """A finished group's episodes, briefly: which run each was, how it ended, what it scored, and its rollouts (the
+    model slots it sampled)."""
     ticket = job.asked(number) if job else None
     if job is None or ticket is None:
         return []
-    shown = ("run_id", "episode", "state", "reward", "solved", "interrupted")
+    shown = ("run_id", "episode", "state", "reward", "solved", "interrupted", "slots")
     return [{key: each[key] for key in shown} for each in job.of(ticket["id"])]
 
 
@@ -266,6 +267,7 @@ def _group(
                 "episode": each["labels"].get("episode"),
                 "state": each["state"],
                 "samples": each["samples"],
+                "slots": sorted(each["slots"]),
                 "reward": next(iter(each["rewards"].values()), None),
                 "updated": each["updated"],
                 "in_feed": True,
@@ -438,6 +440,7 @@ class _JobLog:
                     "solved": episode.solved,
                     "sampled": sum(record.sampled.values()),
                     "labels": dict(episode.labels),
+                    "slots": sorted(episode.traces),
                     "info": dict(episode.info),
                     "events": record.events.model_dump(mode="json") if record.events else None,
                 }

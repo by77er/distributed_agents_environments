@@ -106,12 +106,12 @@ class Grpo:
         its episode's advantage."""
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
-            return Batch(skipped=f"{len(good)} of {len(group)} rollouts completed")
+            return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
         bonus = fastest_of_the_saturated(good) if self.tie_break else [0.0] * len(good)
         notes: dict[str, JsonValue] = {"speed_bonus": list(bonus)} if any(bonus) else {}
         advantages = group_advantages([episode.reward + extra for episode, extra in zip(good, bonus, strict=True)])
         if advantages is None:
-            return Batch(skipped="every rollout scored the same", notes=notes)
+            return Batch(skipped="every episode scored the same", notes=notes)
         weighted = [
             Weighted(epoch, advantage, f"{episode.cursor}/{slot}/{index}")
             for episode, advantage in zip(good, advantages, strict=True)

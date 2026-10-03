@@ -47,24 +47,24 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
         group = (await client.get("/api/groups/train/1")).json()
         assert "monitor.js" in (await client.get("/")).text and (await client.get("/monitor.js")).status_code == 200
         assert (await client.get("/api/groups/train/9")).status_code == 404
-        rollout = (await client.get(f"/api/rollouts/{group['episodes'][0]['run_id']}")).json()
+        episode = (await client.get(f"/api/episodes/{group['episodes'][0]['run_id']}")).json()
     assert group["number"] == 1 and group["stage"] == "done" and group["outcome"]["iteration"] == 1
     assert len(group["episodes"]) == 4 and all(
         each["state"] == "completed" and "info" in each for each in group["episodes"]
     )
     assert (
-        rollout["source"] == "feed"
-        and rollout["labels"]["iteration"] == "1"
-        and rollout["ended"]["state"] == "completed"
+        episode["source"] == "feed"
+        and episode["labels"]["iteration"] == "1"
+        and episode["ended"]["state"] == "completed"
     )
-    assert any(line["kind"] == "sample" and line["messages"] for line in rollout["lines"])
+    assert any(line["kind"] == "sample" and line["messages"] for line in episode["lines"])
 
-    # Once the feed has let a rollout go, its replies and tool calls are read back from the events the job kept.
-    kept = await System(tmp_path, FeedReader(tmp_path / "elsewhere")).rollout(rollout["run_id"])
+    # Once the feed has let an episode go, its replies and tool calls are read back from the events the job kept.
+    kept = await System(tmp_path, FeedReader(tmp_path / "elsewhere")).episode(episode["run_id"])
     samples = [line for line in kept["lines"] if line["kind"] == "sample"]
     assert kept["source"] == "archive" and samples and all(not each["messages"] and each["reply"] for each in samples)
     assert [line["reply"] for line in samples] == [
-        line["reply"] for line in rollout["lines"] if line["kind"] == "sample"
+        line["reply"] for line in episode["lines"] if line["kind"] == "sample"
     ]
     (run,) = system["runs"]
     assert run["run"] == "train" and run["fence"] == 1 and run["decided"] == 3 and run["open"] == []
@@ -167,7 +167,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
         "task": "t003",
         "failures": ["x"],
     }
-    assert [(each["run_id"], each["interrupted"]) for each in done["rollouts"]] == [
+    assert [(each["run_id"], each["interrupted"]) for each in done["episodes"]] == [
         ("r_one", False),
         ("r_cut", True),
         ("r_two", False),

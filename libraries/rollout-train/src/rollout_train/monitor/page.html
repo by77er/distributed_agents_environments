@@ -57,7 +57,8 @@
   .children .node { display: grid; grid-template-columns: 16px 32px minmax(0, 1fr) 52px 50px; gap: 6px; }
   .children .node .dots { justify-content: flex-start; overflow: hidden; }
   .children .node .tag { text-align: right; }
-  .children .children .node { grid-template-columns: 26px 10px minmax(0, 1fr) 40px; }
+  .children .children .node { grid-template-columns: 16px 26px 10px minmax(0, 1fr) 40px; }
+  .children .children .children .node { grid-template-columns: 20px minmax(0, 1fr); }
   .dots { display: flex; gap: 3px; flex: none; }
   .dots i { width: 7px; height: 7px; border-radius: 1px; background: var(--line-strong); }
   .dots i.solved { background: var(--good); } .dots i.unsolved { background: var(--faint); } .dots i.failed { background: var(--bad); }
@@ -197,7 +198,9 @@
   .scrub button { border: 1px solid var(--line-strong); background: var(--raised); border-radius: 2px; padding: 2px 11px; cursor: pointer; font-family: var(--mono); }
   .scrub output { font: 600 12px var(--mono); min-width: 120px; text-transform: uppercase; letter-spacing: .04em; }
   .scrub label { color: var(--quiet); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
-  .turns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 14px; align-items: start; }
+  .page.wide { max-width: none; }
+  .turns-frame { overflow-x: auto; }
+  .turns { display: grid; gap: 14px; align-items: start; }
   .turn { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; min-width: 0; overflow: hidden; }
   .turn > header { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--line); background: var(--raised); }
   .turn > header b { font-size: 14px; } .turn > header span { margin-left: auto; color: var(--quiet); font: 11px var(--mono); }

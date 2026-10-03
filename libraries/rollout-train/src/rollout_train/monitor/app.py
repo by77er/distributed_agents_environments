@@ -22,9 +22,9 @@ def create_app(directory: Path) -> Starlette:
     """Serves the page and what it asks for, over a run's directory (`rollout_train.layout`):
 
     - `/api/system`: where the run stands (`System.snapshot`);
-    - `/api/groups/{run}/{number}`: one group, its rollouts, its step and its outcome (`System.group`);
-    - `/api/rollouts/{run_id}?after=N`: one rollout's lines from index N on, and what its episode reported
-      (`System.rollout`);
+    - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
+    - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
+      what it reported (`System.episode`);
     - `/api/runs`: every run in the feed, summarised.
 
     It only reads the directory; the runs' own process writes it."""
@@ -44,9 +44,9 @@ def create_app(directory: Path) -> Starlette:
         found = await system.group(request.path_params["run"], int(request.path_params["number"]))
         return JSONResponse(found) if found is not None else JSONResponse({"error": "no such group"}, status_code=404)
 
-    async def rollout(request: Request) -> Response:
+    async def episode(request: Request) -> Response:
         after = int(request.query_params.get("after", "0"))
-        return JSONResponse(await system.rollout(request.path_params["run_id"], after))
+        return JSONResponse(await system.episode(request.path_params["run_id"], after))
 
     async def runs(request: Request) -> Response:
         return JSONResponse(await asyncio.to_thread(reader.runs))
@@ -64,7 +64,7 @@ def create_app(directory: Path) -> Starlette:
         Route("/monitor.js", script),
         Route("/api/system", state),
         Route("/api/groups/{run}/{number:int}", group),
-        Route("/api/rollouts/{run_id}", rollout),
+        Route("/api/episodes/{run_id}", episode),
         Route("/api/runs", runs),
     ]
     return Starlette(routes=routes, lifespan=measuring)

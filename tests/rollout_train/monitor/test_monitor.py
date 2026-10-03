@@ -51,13 +51,13 @@ async def test_the_feed_holds_a_run_as_it_happened_and_the_page_can_ask_for_it(t
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         assert "Runs monitor" in (await client.get("/")).text
         assert (await client.get("/api/runs")).json()[0]["run_id"] == handle.run_id
-        lines = (await client.get(f"/api/rollouts/{handle.run_id}")).json()["lines"]
+        lines = (await client.get(f"/api/episodes/{handle.run_id}")).json()["lines"]
         (sample,) = [line for line in lines if line["kind"] == "sample"]
         assert sample["slot"] == "ada" and sample["tools"] == ["mine"]
         assert [message["text"] for message in sample["messages"]] == ["You mine.", "You see a wall."]  # what it saw
         assert sample["reply"]["calls"] == [{"id": "c1", "name": "mine", "arguments": {"x": 3}}]  # what it did
         assert next(line["type"] for line in lines if line["kind"] == "event") == "run.created"
-        later = (await client.get(f"/api/rollouts/{handle.run_id}", params={"after": len(lines)})).json()
+        later = (await client.get(f"/api/episodes/{handle.run_id}", params={"after": len(lines)})).json()
         assert later["lines"] == []  # the page asks only for what is new
 
 
