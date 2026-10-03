@@ -12,7 +12,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 from rollout.catalog import Row
-from rollout_train.record import Iteration
+from rollout_train.record import Result
 
 
 @dataclass
@@ -59,9 +59,9 @@ class Curriculum:
         weights = [self.weight(row) for row in candidates]
         return (rng or self.rng).choices(candidates, weights=weights, k=1)[0]
 
-    def recorded(self, line: Iteration) -> None:
-        """Take a logged group into account: the row of its title, or failing that of its key (a key that is a
-        place in a catalog changes when rows are added). A curriculum is the fold of a run's iterations."""
+    def recorded(self, line: Result) -> None:
+        """Take a group's result into account: the row of its title, or failing that of its key (a key that is a
+        place in a catalog changes when rows are added). A curriculum is the fold of a run's results."""
         by_title = {row.title: row for row in self.rows}
         by_key = {row.key: row for row in self.rows}
         row = by_title.get(line.title) or by_key.get(line.task)

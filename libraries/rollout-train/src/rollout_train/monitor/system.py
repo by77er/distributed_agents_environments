@@ -28,7 +28,7 @@ from rollout_train.ledger import FileLedger
 from rollout_train.monitor.feed import Appended, FeedReader, plain
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
-from rollout_train.record import GROUPS, ITERATIONS, STEPS, runs_in, table
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, runs_in, table
 from rollout_train.record import scope as run_scope
 from rollout_train.rollouts.episodes import Record
 from rollout_train.rollouts.jobs import ACKNOWLEDGED, EPISODES, INTERRUPTED, TICKETS
@@ -39,15 +39,17 @@ WAITING = "waiting"
 """Asked for; none of its episodes has started."""
 PLAYING = "playing"
 ENDED = "ended"
-"""Every episode has ended; its step is not decided (the loop is busy with a group before it, or is not running)."""
+"""Every episode has ended; its result is not written yet (a loop that starts now writes it)."""
+QUEUED = "queued"
+"""Its result is written and has something to train on; no step covers it yet."""
 STEPPING = "stepping"
-"""Its step is decided and the version it makes is not there: the trainer has it, or a loop that starts now takes
-the step again."""
-MADE = "made"
-"""The version is made; the group's outcome is not written yet."""
+"""A step covers it, and has neither made its version nor failed: the trainer has it, or a loop that starts now
+takes the step again."""
 DONE = "done"
-"""Its outcome is written."""
+"""Its result trains on nothing, or the step that covers it made its version or failed."""
 
+RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES)
+"""A run's tables, as the page reads them."""
 ARCHIVED = 8
 """Episodes read back from their events that are kept at a time."""
 SHOWN = 240
@@ -74,21 +76,23 @@ class System:
         fences: dict[str, int] = {}
         runs: list[str] = []
         policies: list[dict[str, Any]] = []
+        versions: list[Version] = []
         if await asyncio.to_thread(self._ledger.directory.exists):  # (a reader makes no ledger where none is)
             fences = await self._ledger.fences()
             tables = {name: await self._ledger.read(name) for name in await self._ledger.tables()}
             runs = await runs_in(self._ledger)
             for policy in await policies_in(self._ledger):
-                versions = await versions_in(self._ledger, policy)
-                policies.append(_policy(policy, versions, fences.get(policy_scope(policy))))
-        return await asyncio.to_thread(self._assembled, tables, fences, runs, policies)
+                kept = await versions_in(self._ledger, policy)
+                versions += kept
+                policies.append(_policy(policy, kept, fences.get(policy_scope(policy))))
+        return await asyncio.to_thread(self._assembled, tables, fences, runs, policies, versions)
 
     async def group(self, run: str, number: int) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
         its step and the version it made, and its outcome."""
         if not await asyncio.to_thread(self._ledger.directory.exists):
             return None
-        tables = {name: await self._ledger.read(table(run, name)) for name in (GROUPS, STEPS, ITERATIONS)}
+        tables = {name: await self._ledger.read(table(run, name)) for name in RUN_TABLES}
         record: Any = tables[GROUPS].get(str(number))
         if record is None:
             return None
@@ -108,16 +112,16 @@ class System:
         versions: Mapping[str, Version],
     ) -> dict[str, Any]:
         jobs = self._job_logs()
-        group = _group(number, record, tables, set(versions), jobs.get(run), self.feed.runs())
-        outcome: Any = tables[ITERATIONS].get(number)
-        adapter: Any = outcome.get("adapter") if outcome else None
+        group = _group(number, record, tables, versions, jobs.get(run), self.feed.runs())
         step: Any = group["step"]
-        made = versions.get(str(adapter)) or versions.get(str(step.get("makes") if step else None))
+        made = versions.get(str(step.get("makes"))) if step else None
+        result: Any = tables[RESULTS].get(number)
         return {
             **group,
             "run": run,
             "parameters": record.get("parameters"),
-            "outcome": _iteration(outcome) if outcome else None,
+            "outcome": _done(result, record, step, made, group["error"]) if group["stage"] == DONE and result else None,
+            "result": _iteration(result) if result else None,
             "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
         }
 
@@ -163,8 +167,9 @@ class System:
         fences: Mapping[str, int],
         runs: list[str],
         policies: list[dict[str, Any]],
+        versions: list[Version],
     ) -> dict[str, Any]:
-        made = {version["name"] for policy in policies for version in policy["versions"]}
+        made = {version.name: version for version in versions}
         blobs = {digest: size for policy in policies for digest, size in policy.pop("blobs")}  # (each kept once)
         in_feed = self.feed.runs()
         jobs = self._job_logs()
@@ -177,7 +182,7 @@ class System:
             "runs": [
                 _run(
                     run,
-                    {name: tables.get(table(run, name), {}) for name in (GROUPS, STEPS, ITERATIONS)},
+                    {name: tables.get(table(run, name), {}) for name in RUN_TABLES},
                     fences.get(run_scope(run)),
                     made,
                     jobs.get(run),
@@ -221,42 +226,60 @@ def _run(
     run: str,
     tables: Mapping[str, Mapping[str, JsonValue]],
     fence: int | None,
-    made: set[str],
+    versions: Mapping[str, Version],
     job: "_JobLog | None",
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """A run: its groups that are not done with, each with its stage and its episodes, and the ones that are."""
+    """A run: its groups that are not done with, each with its stage, its episodes and its step; the ones that are,
+    each with its result and what was done with it; and its steps."""
     groups: Any = tables[GROUPS]
-    done: Any = tables[ITERATIONS]
-    open_groups = [
-        _group(number, groups[number], tables, made, job, in_feed)
-        for number in sorted((number for number in groups if number not in done), key=int)
+    entries = [_group(number, groups[number], tables, versions, job, in_feed) for number in sorted(groups, key=int)]
+    done: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry["stage"] == DONE:
+            step: Any = entry["step"]
+            made = versions.get(str(step.get("makes"))) if step else None
+            line = _done(
+                tables[RESULTS][str(entry["number"])], groups[str(entry["number"])], step, made, entry["error"]
+            )
+            shown = ("run_id", "episode", "state", "reward", "solved", "interrupted", "slots", "outcome")
+            done.append(line | {"episodes": [{key: each.get(key) for key in shown} for each in entry["episodes"]]})
+    steps: Any = tables[STEPS]
+    failures: Any = tables[FAILURES]
+    listed: list[dict[str, Any]] = [
+        {
+            "step": int(key),
+            "groups": intent.get("groups") or [],
+            "makes": _makes(intent),
+            "segments": intent.get("segments"),
+            "decided": intent.get("decided"),
+            "state": "failed" if key in failures else "committed" if _makes(intent) in versions else "stepping",
+            "error": failures[key].get("error") if key in failures else None,
+        }
+        for key, intent in sorted(steps.items(), key=lambda item: int(item[0]))
     ]
-    iterations = [_iteration(done[number]) | {"episodes": _episodes(number, job)} for number in sorted(done, key=int)]
-    return {"run": run, "fence": fence, "decided": len(groups), "open": open_groups, "iterations": iterations}
-
-
-def _episodes(number: str, job: "_JobLog | None") -> list[dict[str, Any]]:
-    """A finished group's episodes, briefly: which run each was, how it ended, what it scored, and its rollouts (the
-    model slots it sampled)."""
-    ticket = job.asked(number) if job else None
-    if job is None or ticket is None:
-        return []
-    shown = ("run_id", "episode", "state", "reward", "solved", "interrupted", "slots")
-    return [{key: each[key] for key in shown} for each in job.of(ticket["id"])]
+    return {
+        "run": run,
+        "fence": fence,
+        "decided": len(groups),
+        "open": [entry for entry in entries if entry["stage"] != DONE],
+        "iterations": done,
+        "steps": listed,
+    }
 
 
 def _group(
     number: str,
     group: Mapping[str, Any],
     tables: Mapping[str, Mapping[str, JsonValue]],
-    made: set[str],
+    versions: Mapping[str, Version],
     job: "_JobLog | None",
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """A group: its stage, its episodes (from the feed while they run, from the job's log once they end) and its
-    step, if one is decided."""
-    steps: Any = tables[STEPS]
+    """A group: its stage, its episodes (from the feed while they run, from the job's log once they end) and the
+    step that covers it, if one does."""
+    results: Any = tables[RESULTS]
+    failures: Any = tables[FAILURES]
     ticket = job.asked(number) if job else None
     asked = ticket["id"] if ticket else None
     episodes: dict[str, dict[str, Any]] = {}
@@ -275,19 +298,32 @@ def _group(
     for ended in job.of(asked) if job and asked else []:
         episodes.setdefault(ended["run_id"], {"samples": None, "updated": None, "in_feed": False}).update(ended)
     counted = [each for each in episodes.values() if "outcome" in each and not each.get("interrupted")]
-    step = steps.get(number)
-    if number in tables[ITERATIONS]:
-        stage = DONE
-    elif step is not None:
-        stage = MADE if _makes(step) in made else STEPPING
+    key, intent = next(
+        ((key, step) for key, step in cast(Mapping[str, Any], tables[STEPS]).items() if int(number) in _covers(step)),
+        (None, None),
+    )
+    result = results.get(number)
+    if result is not None:
+        if not result.get("segments"):
+            stage = DONE
+        elif intent is None:
+            stage = QUEUED
+        elif key in failures or _makes(intent) in versions:
+            stage = DONE
+        else:
+            stage = STEPPING
     elif ticket is None:
         stage = DECIDED
     elif len(counted) >= int(ticket["count"]):
         stage = ENDED
     else:
         stage = PLAYING if episodes else WAITING
-    if step is not None:
-        step = {key: value for key, value in step.items() if key != "batch"} | {"makes": _makes(step)}
+    step = None
+    if intent is not None:
+        step = {name: value for name, value in intent.items() if name != "batch"} | {
+            "step": int(str(key)),
+            "makes": _makes(intent),
+        }
     return {
         "number": int(number),
         "task": group.get("task"),
@@ -299,7 +335,32 @@ def _group(
         "ended": len(counted),
         "episodes": sorted(episodes.values(), key=lambda each: (str(each.get("episode")), each["run_id"])),
         "step": step,
+        "error": failures[str(key)].get("error") if key is not None and str(key) in failures else None,
     }
+
+
+def _done(result: Any, group: Mapping[str, Any], step: Any, made: Version | None, error: str | None) -> dict[str, Any]:
+    """A group that is done with, as the page shows it: its result, and what was done with it (the version its step
+    made and the trainer's statistics, or why the step failed), with how long it all took."""
+    line = _iteration(result)
+    ended = made.made if made else float(result.get("time") or 0.0)
+    began = float(group.get("decided") or result.get("time") or 0.0)
+    return {
+        **line,
+        "iteration": line["group"],
+        "adapter": made.name if made else None,
+        "version": made.number if made else None,
+        "update": dict(made.metrics) if made else None,
+        "segments_trained": int(step.get("segments") or 0) if made and step else 0,
+        "error": error,
+        "seconds": round(ended - began, 1) if began else None,
+    }
+
+
+def _covers(step: Mapping[str, Any]) -> list[int]:
+    """The groups a step covers, by their numbers."""
+    listed: list[Any] = step.get("groups") or []
+    return [int(group) for group in listed]
 
 
 def _makes(step: Mapping[str, Any]) -> str | None:

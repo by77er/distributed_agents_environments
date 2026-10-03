@@ -13,8 +13,8 @@ from rollout.local import LocalRunner
 from rollout_train import FileLedger, Policies, train
 from rollout_train.layout import BLOBS, FEED, JOBS, LEDGER
 from rollout_train.monitor import FeedReader, RunFeed, System
-from rollout_train.monitor.system import DECIDED, ENDED, MADE, PLAYING, STEPPING, WAITING
-from rollout_train.record import GROUPS, ITERATIONS, STEPS, scope, table
+from rollout_train.monitor.system import DECIDED, ENDED, PLAYING, QUEUED, STEPPING, WAITING
+from rollout_train.record import GROUPS, RESULTS, STEPS, scope, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import RolloutJobs
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
@@ -36,7 +36,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     policies = Policies(FileLedger(tmp_path / LEDGER), blobs)
     await train(
         jobs, Words(), Counting(), policies, policy="words", channel="policy", directory=tmp_path / "versions",
-        groups=3, seed=1,
+        groups=3, groups_per_step=1, seed=1,
     )  # fmt: skip
     await jobs.close()
     feed.close()
@@ -142,7 +142,12 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     ended(3, "r_two")
     assert (await group())["stage"] == ENDED
 
+    result: JsonValue = {"group": 1, "time": 9.0, "task": "t003", "failures": ["x", "x"], "segments": 8}
+    await ledger.append(table("train", RESULTS), "1", result, fence)
+    assert (await group())["stage"] == QUEUED  # (something to train on, and no step covers it yet)
+
     step: dict[str, JsonValue] = {
+        "groups": [1],
         "policy": "miner",
         "parent": None,
         "number": 1,
@@ -153,22 +158,24 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     await ledger.append(table("train", STEPS), "1", step, fence)
     stepping = await group()
     assert stepping["stage"] == STEPPING
-    assert stepping["step"] == {**{key: value for key, value in step.items() if key != "batch"}, "makes": "miner@1"}
+    assert stepping["step"] == {
+        **{key: value for key, value in step.items() if key != "batch"},
+        "step": 1,
+        "makes": "miner@1",
+    }
 
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")
-    await policies.add(writer, "miner", 1, weights=weights)
-    assert (await group())["stage"] == MADE
-
-    outcome: JsonValue = {"iteration": 1, "task": "t003", "failures": ["x", "x"]}
-    await ledger.append(table("train", ITERATIONS), "1", outcome, fence)
+    await policies.add(writer, "miner", 1, weights=weights)  # the step's version: the group is done with
     (run,) = (await system.snapshot())["runs"]
     (done,) = run["iterations"]
-    assert run["open"] == [] and {key: done[key] for key in ("iteration", "task", "failures")} == {
+    assert run["open"] == [] and {key: done[key] for key in ("iteration", "task", "failures", "adapter")} == {
         "iteration": 1,
         "task": "t003",
         "failures": ["x"],
+        "adapter": "miner@1",
     }
+    assert run["steps"] == [{**run["steps"][0], "step": 1, "groups": [1], "state": "committed", "makes": "miner@1"}]
     assert [(each["run_id"], each["interrupted"]) for each in done["episodes"]] == [
         ("r_one", False),
         ("r_cut", True),

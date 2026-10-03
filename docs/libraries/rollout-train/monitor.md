@@ -57,10 +57,10 @@ A group's stage is read from the records alone, so it is what a [loop](training.
 | `decided` | the group is in the run's `groups` table and the job has no ticket for it |
 | `waiting` | the job has its ticket and none of its episodes has started |
 | `playing` | some of its episodes are in the feed or the job's log, and fewer have ended than were asked for |
-| `ended` | as many episodes have ended as were asked for (interrupted ones are run again and do not count) |
-| `stepping` | the `steps` table has its decision and the version it names is not there |
-| `made` | that version is there, and the `iterations` table has no line for the group |
-| `done` | the `iterations` table has the group's outcome |
+| `ended` | as many episodes have ended as were asked for (interrupted ones are run again and do not count), and no result is written yet |
+| `queued` | the `results` table has its result, which has something to train on, and no step covers it |
+| `stepping` | a step in the `steps` table covers it, and has neither made the version it names nor failed |
+| `done` | its result trains on nothing, or the step that covers it made its version or failed |
 
 ## The feed
 

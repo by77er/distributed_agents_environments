@@ -1,6 +1,6 @@
 """Report a training run's progress: a chart of the climb through the curriculum, and a summary in words.
 
-Reads the run's iterations from its ledger and can post both to a Discord webhook, once
+Reads the run's results, steps and versions from its ledger and can post both to a Discord webhook, once
 or after every group (`rollout report RUN CATALOG --watch`). The webhook's address comes from `--webhook` or the
 environment variable `DISCORD_WEBHOOK_URL`; it is a secret and is never written anywhere.
 """
@@ -9,7 +9,7 @@ import asyncio
 import io
 import json
 import statistics
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -19,39 +19,55 @@ from rollout.catalog import Row
 from rollout_train.curriculum import Curriculum
 from rollout_train.layout import LEDGER
 from rollout_train.ledger import FileLedger, Ledger
-from rollout_train.record import Iteration, iterations
+from rollout_train.policies import Version, policies_in, versions_in
+from rollout_train.record import Result, Trained, results, trained
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
 
 
-def hours(lines: Sequence[Iteration]) -> list[float]:
+def hours(lines: Sequence[Result]) -> list[float]:
     """When each group ended, in hours since the run began (groups overlap, so their durations do not add up)."""
     if not lines:
         return []
-    began = lines[0].time - lines[0].seconds
+    began = lines[0].time - lines[0].rollout_seconds
     return [(line.time - began) / 3600 for line in lines]
 
 
-def summary(name: str, lines: Sequence[Iteration], curriculum: Curriculum) -> str:
-    """The run in words: the latest group, what the update did, and each unlocked row's record."""
+def summary(
+    name: str,
+    lines: Sequence[Result],
+    curriculum: Curriculum,
+    steps: Mapping[int, Trained] | None = None,
+    versions: Mapping[str, Version] | None = None,
+) -> str:
+    """The run in words: the latest group, what was done with it, and each unlocked row's record. `steps` says
+    what was done with each group, and `versions` holds the versions those steps made, by name."""
     if not lines:
         return f"**{name}** — no group has finished yet."
+    steps, versions = steps or {}, versions or {}
     last = lines[-1]
     titles = {row.key: row.title for row in curriculum.rows}
-    updates = sum(1 for line in lines if line.update is not None)
-    serving = next((f" (serving {line.adapter})" for line in reversed(lines) if line.adapter), "")
-    text = [f"**{name}** — group {last.iteration}, {hours(lines)[-1]:.1f} h in, {updates} updates{serving}"]
+    names = {outcome.version for outcome in steps.values() if outcome.version}
+    made: list[str] = sorted((name for name in names if name in versions), key=lambda name: versions[name].made)
+    serving = f" (serving {made[-1]})" if made else ""
+    text = [f"**{name}** — group {last.group}, {hours(lines)[-1]:.1f} h in, {len(made)} updates{serving}"]
     text.append(
         f"**Latest group:** {last.task} ({titles.get(last.task, '?')}) — rewards "
         f"{' / '.join(f'{reward:g}' for reward in sorted(last.rewards)) or 'none'}"
         f" ({_statistics(last.rewards)}); solved {sum(last.solved)}/{len(last.solved)}"
         + (f"; {last.failed} episodes failed" if last.failed else "")
     )
-    if last.update is not None:
-        text.append("**Update:** " + _update(last))
+    outcome = steps.get(last.group)
+    version = versions.get(outcome.version or "") if outcome is not None else None
+    if version is not None:
+        text.append("**Update:** " + _update(last, version))
+    elif outcome is not None and outcome.error:
+        text.append(f"**Update:** failed: {outcome.error}")
+    elif last.segments:
+        text.append(f"**Update:** {last.segments} segments waiting for a step")
     else:
-        text.append(f"**Update:** {'failed: ' + last.error if last.error else 'skipped: ' + (last.skipped or '')}")
+        text.append(f"**Update:** skipped: {last.skipped or ''}")
     unlocked = curriculum.unlocked()
     text.append(f"**Rows:** {len(unlocked)} of {len(curriculum.rows)} unlocked")
     for row in unlocked:
@@ -74,10 +90,11 @@ def _statistics(rewards: Sequence[float]) -> str:
     return f"mean {statistics.fmean(rewards):.2f}, sd {spread:.2f}"
 
 
-def _update(line: Iteration) -> str:
-    update = line.update or {}
+def _update(line: Result, version: Version) -> str:
+    update = version.metrics
     of = f" of {line.segments_recorded}" if line.segments_recorded else ""
-    parts = [f"{line.segments_trained}{of} segments, {update.get('tokens', 0):g} sampled tokens"]
+    trained = update.get("segments", line.segments)
+    parts = [f"{version.name}, {trained:g}{of} segments, {update.get('tokens', 0):g} sampled tokens"]
     if "kl_moved" in update:
         parts.append(f"moved the policy by KL ≈ {update['kl_moved']:.4f} (floor {update.get('kl_floor', 0.0):.4f})")
         parts.append(f"{update.get('optimizer_steps', 0):g} steps")
@@ -89,9 +106,9 @@ def _update(line: Iteration) -> str:
     return ", ".join(parts)
 
 
-def chart(lines: Sequence[Iteration], rows: Sequence[Row], *, title: str = "") -> bytes:
+def chart(lines: Sequence[Result], rows: Sequence[Row], versions: Sequence[Version] = (), *, title: str = "") -> bytes:
     """The climb as a PNG: which row each group trained on and how far the curriculum has unlocked; each group's
-    rewards; and the trainer's statistics per update."""
+    rewards; and the trainer's statistics per update (each of `versions`, when it was made)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -132,7 +149,8 @@ def chart(lines: Sequence[Iteration], rows: Sequence[Row], *, title: str = "") -
         )
     reward.set_ylabel("reward per episode\n(mean in red; rows differ)")
 
-    trainings = [(at, line.update) for at, line in zip(when, lines, strict=True) if line.update is not None]
+    began = lines[0].time - lines[0].rollout_seconds if lines else 0.0
+    trainings = [((version.made - began) / 3600, version.metrics) for version in versions if version.made >= began]
     if trainings:
         times = [at for at, _ in trainings]
         if any("kl_moved" in update for _, update in trainings):
@@ -194,19 +212,22 @@ async def report(
     interval: float = 30.0,
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
-    `watch`, again after every new group, until interrupted. The run's iterations are read from `ledger` (by
-    default the one in files under the run's directory)."""
+    `watch`, again after every new group, until interrupted. The run's results, steps and versions are read from
+    `ledger` (by default the one in files under the run's directory)."""
     ledger = ledger or FileLedger(directory / LEDGER)
-    reported = -1
+    reported: tuple[int, int] = (-1, -1)
     while True:
-        lines = await iterations(ledger, run)
-        if len(lines) != reported:
-            reported = len(lines)
+        lines = await results(ledger, run)
+        steps = await trained(ledger, run)
+        versions = [version for policy in await policies_in(ledger) for version in await versions_in(ledger, policy)]
+        if (len(lines), len(versions)) != reported:
+            reported = (len(lines), len(versions))
             curriculum = Curriculum(rows)
             for line in lines:
                 curriculum.recorded(line)
-            text = summary(directory.name, lines, curriculum)
-            image = chart(lines, rows, title=f"{directory.name}: climb through the curriculum") if lines else None
+            text = summary(directory.name, lines, curriculum, steps, {version.name: version for version in versions})
+            title = f"{directory.name}: climb through the curriculum"
+            image = chart(lines, rows, versions, title=title) if lines else None
             (directory / "progress.md").write_text(text + "\n")
             if image is not None:
                 (directory / "progress.png").write_bytes(image)

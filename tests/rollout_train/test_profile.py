@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from rollout.catalog import binding_for
-from rollout_train import Budget, Checkpoint, Step, Weighted, iterations, train
+from rollout_train import Budget, Checkpoint, Step, Weighted, train
 from rollout_train import testing as support
 from rollout_train.profile import Profile
 from rollout_train.trainer import WEIGHTS
@@ -82,9 +82,9 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
             platform.jobs, words, platform.trainer, platform.policies, policy=platform.policy, channel="policy",
             directory=tmp_path / "run" / "versions", groups=2, binding=binding,
         )  # fmt: skip
-        trained = [line for line in await iterations(platform.ledger) if line.update is not None]
         versions = await platform.policies.versions("run")
-        assert trained and [version.number for version in versions] == list(range(1, len(trained) + 1))
+        steps = await platform.ledger.read("runs/train/steps")
+        assert versions and [version.number for version in versions] == list(range(1, len(steps) + 1))
         assert policy.adapter == versions[-1].name and judge.version == 0  # served on the trained channel only
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)

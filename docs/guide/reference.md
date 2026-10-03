@@ -12,7 +12,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Rollout jobs: rows in, episodes out, weights published. [`Episode`](#episode), [`events_of`](#events_of), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`loaded`](#loaded), [`Outcome`](#outcome), [`Record`](#record), [`Recorded`](#recorded), [`Refused`](#refused), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`RolloutTicket`](#rolloutticket), [`Status`](#status), [`stored`](#stored), [`Ticket`](#ticket), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Iteration`](#iteration), [`iterations`](#iterations), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Policies`](#policies), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trainer`](#trainer), [`Version`](#version), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Policies`](#policies), [`Result`](#result), [`results`](#results), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Version`](#version), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: policies being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -2557,8 +2557,8 @@ class Curriculum
 - `def unlocked(self) -> list[Row]`
 - `def sample(self, pending: Collection[str] = (), rng: random.Random | None = None) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
   be choosing on what was known before it, so the others come first.
-- `def recorded(self, line: Iteration) -> None` — Take a logged group into account: the row of its title, or failing that of its key (a key that is a
-  place in a catalog changes when rows are added). A curriculum is the fold of a run's iterations.
+- `def recorded(self, line: Result) -> None` — Take a group's result into account: the row of its title, or failing that of its key (a key that is a
+  place in a catalog changes when rows are added). A curriculum is the fold of a run's results.
 - `def weight(self, row: Row) -> float`
 - `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
 - `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
@@ -2638,52 +2638,6 @@ class Grpo
 - `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
   its episode's advantage.
 
-### `Iteration`
-
-*class* · `libraries/rollout-train/src/rollout_train/record.py`
-
-```python
-class Iteration
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `iteration` | `int` | required | The group's number in the run, from 1. |
-| `time` | `float` | required | When the line was written, in seconds since the epoch. |
-| `task` | `str` | required | The row's key. |
-| `title` | `str` | `''` |  |
-| `rollout_seconds` | `float` | `0.0` | From the group's decision to its last episode's end. |
-| `seconds` | `float` | `0.0` | From the group's decision to this line. |
-| `rewards` | `list[float]` | `field(default_factory=list[float])` | Of the episodes fit to train on, as are `solved` and `durations`. |
-| `solved` | `list[bool]` | `field(default_factory=list[bool])` |  |
-| `durations` | `list[float \| None]` | `field(default_factory=list[float \| None])` |  |
-| `failed` | `int` | `0` | Episodes that did not complete, or asked to be left out. |
-| `failures` | `list[str]` | `field(default_factory=list[str])` |  |
-| `notes` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the algorithm said of the group. |
-| `segments_recorded` | `int` | `0` |  |
-| `segments_trained` | `int` | `0` |  |
-| `update` | `Mapping[str, float] \| None` | `None` | The trainer's statistics, if the group was trained on. |
-| `skipped` | `str \| None` | `None` | Why the group was not trained on, if the algorithm found nothing to train on. |
-| `error` | `str \| None` | `None` | What went wrong, if the trainer's step failed. |
-| `adapter` | `str \| None` | `None` | The policy version the step made, by name: its record has the weights, the batch and the trainer's state. |
-| `version` | `int \| None` | `None` | That version's number. |
-| `unlocked` | `int` | `0` | Rows of the catalog unlocked after this group. |
-
-**Methods**
-
-- `def to_json(self) -> dict[str, Any]`
-- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Iteration'`
-
-### `iterations`
-
-*function* · `libraries/rollout-train/src/rollout_train/record.py`
-
-```python
-async def iterations(ledger: Ledger, run: str = 'train') -> list[Iteration]
-```
-
-The groups a run is done with, by their numbers.
-
 ### `Ledger`
 
 *class* · `libraries/rollout-train/src/rollout_train/ledger.py`
@@ -2742,6 +2696,47 @@ The versions of every policy, in a ledger, and their files in a blob store.
 - `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
   appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
+### `Result`
+
+*class* · `libraries/rollout-train/src/rollout_train/record.py`
+
+```python
+class Result
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group` | `int` | required | The group's number in the run, from 1. |
+| `time` | `float` | required | When it was written, in seconds since the epoch. |
+| `task` | `str` | required | The row's key. |
+| `title` | `str` | `''` |  |
+| `rollout_seconds` | `float` | `0.0` | From the group's decision to its last episode's end. |
+| `rewards` | `list[float]` | `field(default_factory=list[float])` | Of the episodes fit to train on, as are `solved` and `durations`. |
+| `solved` | `list[bool]` | `field(default_factory=list[bool])` |  |
+| `durations` | `list[float \| None]` | `field(default_factory=list[float \| None])` |  |
+| `failed` | `int` | `0` | Episodes that did not complete, or asked to be left out. |
+| `failures` | `list[str]` | `field(default_factory=list[str])` |  |
+| `notes` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the algorithm said of the group. |
+| `segments_recorded` | `int` | `0` |  |
+| `segments` | `int` | `0` | Segments the algorithm found to train on: none if it skipped the group. |
+| `skipped` | `str \| None` | `None` | Why the algorithm found nothing to train on, if it did not. |
+| `unlocked` | `int` | `0` | Rows of the catalog unlocked after this group. |
+
+**Methods**
+
+- `def to_json(self) -> dict[str, Any]`
+- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Result'`
+
+### `results`
+
+*function* · `libraries/rollout-train/src/rollout_train/record.py`
+
+```python
+async def results(ledger: Ledger, run: str = 'train') -> list[Result]
+```
+
+How a run's groups went, by their numbers.
+
 ### `Step`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -2769,18 +2764,45 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None) -> None
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None) -> None
 ```
 
-Train `policy` on `catalog` until `groups` more groups are done with (those a stopped loop left unfinished
-among them), serving it on `channel`. `directory` is where versions' files are kept on this machine while they
-are in use: the one being served and the one before it (a turn in progress finishes under the weights it began
-with); every version's files are in the blob store. `algorithm` is `Grpo()` unless given. `overlap`: the next
-group starts when at most this many episodes of earlier groups are still running. `binding` says how the
-program's model slots and imports are served (by default: every slot from `channel`, each import from the tool
-set of its own name). `curriculum` is one that has recorded nothing: the run's iterations are folded into it.
-`retention` says which versions keep their trainer state once a newer one is served (`Retention()` unless
-given); every version keeps its weights.
+Train `policy` on `catalog` until `groups` more groups have been played (those a stopped loop left unplayed
+among them) and every group played has been trained on, serving it on `channel`. A step is taken over the groups
+queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
+`directory` is where versions' files are kept on this machine while they are in use: the one being served and
+the one before it (a turn in progress finishes under the weights it began with); every version's files are in
+the blob store. `algorithm` is `Grpo()` unless given. `overlap`: the next group starts when at most this many
+episodes of earlier groups are still running. `binding` says how the program's model slots and imports are
+served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
+one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
+trainer state once a newer one is served (`Retention()` unless given); every version keeps its weights.
+
+### `Trained`
+
+*class* · `libraries/rollout-train/src/rollout_train/record.py`
+
+```python
+class Trained
+```
+
+What was done with a group: the step that covered it, and the version that step made or why it failed.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `step` | `int` | required |  |
+| `version` | `str \| None` | `None` | By name, once made. |
+| `error` | `str \| None` | `None` |  |
+
+### `trained`
+
+*function* · `libraries/rollout-train/src/rollout_train/record.py`
+
+```python
+async def trained(ledger: Ledger, run: str = 'train') -> dict[int, Trained]
+```
+
+For each group a step covers: that step, and its outcome if it has one.
 
 ### `Trainer`
 

@@ -1,14 +1,17 @@
-"""What a training run writes down: three tables in a ledger, by the group's number.
+"""What a training run writes down: four tables in a ledger.
 
-- `groups`: what the run decided to play (the row, and the start every episode of the group is given). Written
-  before the group is asked for.
-- `steps`: what the run decided to train on (the version it starts from, the one it will make, the batch). Written
-  before the trainer is called.
-- `iterations`: how the group went and what was done with it (an `Iteration`). Written last: a group with an
-  iteration is done with.
+- `groups`: what the run decided to play (the row, and the start every episode of the group is given), by the
+  group's number. Written before the group is asked for.
+- `results`: how each group went (a `Result`), by the group's number. Written when its last episode ends, before
+  anything is trained on it.
+- `steps`: what the run decided to train on, by the step's number: the groups it covers, the version it starts
+  from, the one it will make, the batch. Written before the trainer is called. The version it makes, in the
+  policy's table, is its outcome.
+- `failures`: the steps whose trainer failed, and why, by the step's number.
 
-A run that is started again reads them and goes on: whatever has a decision and no outcome is taken up where it
-was left. The monitor and the report read `iterations`.
+A group is done with once it has a result that trains on nothing, or a step that covers it has made its version or
+failed. A run that is started again reads the tables and goes on: whatever has a decision and no outcome is taken up
+where it was left.
 """
 
 from collections.abc import Mapping
@@ -18,21 +21,20 @@ from typing import Any
 from pydantic import JsonValue
 
 from rollout_train.ledger import Ledger, between
+from rollout_train.policies import named, versions_in
 
 
 @dataclass
-class Iteration:
-    iteration: int
+class Result:
+    group: int
     """The group's number in the run, from 1."""
     time: float
-    """When the line was written, in seconds since the epoch."""
+    """When it was written, in seconds since the epoch."""
     task: str
     """The row's key."""
     title: str = ""
     rollout_seconds: float = 0.0
     """From the group's decision to its last episode's end."""
-    seconds: float = 0.0
-    """From the group's decision to this line."""
     rewards: list[float] = field(default_factory=list[float])
     """Of the episodes fit to train on, as are `solved` and `durations`."""
     solved: list[bool] = field(default_factory=list[bool])
@@ -43,17 +45,10 @@ class Iteration:
     notes: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """What the algorithm said of the group."""
     segments_recorded: int = 0
-    segments_trained: int = 0
-    update: Mapping[str, float] | None = None
-    """The trainer's statistics, if the group was trained on."""
+    segments: int = 0
+    """Segments the algorithm found to train on: none if it skipped the group."""
     skipped: str | None = None
-    """Why the group was not trained on, if the algorithm found nothing to train on."""
-    error: str | None = None
-    """What went wrong, if the trainer's step failed."""
-    adapter: str | None = None
-    """The policy version the step made, by name: its record has the weights, the batch and the trainer's state."""
-    version: int | None = None
-    """That version's number."""
+    """Why the algorithm found nothing to train on, if it did not."""
     unlocked: int = 0
     """Rows of the catalog unlocked after this group."""
 
@@ -61,7 +56,7 @@ class Iteration:
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: Mapping[str, Any]) -> "Iteration":
+    def from_json(cls, data: Mapping[str, Any]) -> "Result":
         known = {each.name for each in fields(cls)}
         return cls(**{key: value for key, value in data.items() if key in known})
 
@@ -76,7 +71,7 @@ def table(run: str, name: str) -> str:
     return f"{scope(run)}/{name}"
 
 
-GROUPS, STEPS, ITERATIONS = "groups", "steps", "iterations"
+GROUPS, RESULTS, STEPS, FAILURES = "groups", "results", "steps", "failures"
 _RUNS = "runs/"
 
 
@@ -85,8 +80,39 @@ async def runs_in(ledger: Ledger) -> list[str]:
     return [run for each in await ledger.tables() if (run := between(each, _RUNS, f"/{GROUPS}"))]
 
 
-async def iterations(ledger: Ledger, run: str = "train") -> list[Iteration]:
-    """The groups a run is done with, by their numbers."""
-    logged = await ledger.read(table(run, ITERATIONS))
-    lines = [Iteration.from_json(record) for record in logged.values() if isinstance(record, dict)]
-    return sorted(lines, key=lambda line: line.iteration)
+async def results(ledger: Ledger, run: str = "train") -> list[Result]:
+    """How a run's groups went, by their numbers."""
+    logged = await ledger.read(table(run, RESULTS))
+    lines = [Result.from_json(record) for record in logged.values() if isinstance(record, dict)]
+    return sorted(lines, key=lambda line: line.group)
+
+
+@dataclass(frozen=True)
+class Trained:
+    """What was done with a group: the step that covered it, and the version that step made or why it failed."""
+
+    step: int
+    version: str | None = None
+    """By name, once made."""
+    error: str | None = None
+
+
+async def trained(ledger: Ledger, run: str = "train") -> dict[int, Trained]:
+    """For each group a step covers: that step, and its outcome if it has one."""
+    steps = await ledger.read(table(run, STEPS))
+    failures: Any = await ledger.read(table(run, FAILURES))
+    made: dict[str, set[str]] = {}
+    covered: dict[int, Trained] = {}
+    for key, record in steps.items():
+        intent: Any = record
+        policy = str(intent.get("policy"))
+        if policy not in made:
+            made[policy] = {version.name for version in await versions_in(ledger, policy)}
+        name = named(policy, int(intent["number"]))
+        error = failures[key].get("error") if key in failures else None
+        outcome = Trained(int(key), name if error is None and name in made[policy] else None, error)  # (a failed
+        # step made nothing: the next one makes the version it would have)
+        listed: list[Any] = intent.get("groups") or []
+        for group in listed:
+            covered[int(group)] = outcome
+    return covered

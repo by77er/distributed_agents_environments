@@ -46,7 +46,9 @@ async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
     return 0
 
 
-async def _train(profile: Path, directory: Path | None, catalog: str, groups: int, seed: int) -> None:
+async def _train(
+    profile: Path, directory: Path | None, catalog: str, groups: int, groups_per_step: int, seed: int
+) -> None:
     from rollout.catalog import binding_for
     from rollout_train import train
     from rollout_train.profile import Profile
@@ -60,7 +62,8 @@ async def _train(profile: Path, directory: Path | None, catalog: str, groups: in
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
             platform.jobs, rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
-            directory=described.directory / "versions", groups=groups, seed=seed, binding=binding,
+            directory=described.directory / "versions", groups=groups, groups_per_step=groups_per_step, seed=seed,
+            binding=binding,
         )  # fmt: skip
 
 
@@ -111,6 +114,7 @@ def main() -> None:
     training.add_argument("catalog")
     training.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
     training.add_argument("--groups", type=int, default=100)
+    training.add_argument("--groups-per-step", type=int, default=4, help="groups a step waits for (4)")
     training.add_argument("--seed", type=int, default=0)
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
@@ -134,7 +138,14 @@ def main() -> None:
     serving.add_argument("--port", type=int, default=8700)
     arguments = parser.parse_args()
     if arguments.command == "train":
-        work = _train(arguments.profile, arguments.directory, arguments.catalog, arguments.groups, arguments.seed)
+        work = _train(
+            arguments.profile,
+            arguments.directory,
+            arguments.catalog,
+            arguments.groups,
+            arguments.groups_per_step,
+            arguments.seed,
+        )
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "imitate":
         work = _imitate(arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed)

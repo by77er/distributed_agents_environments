@@ -1,5 +1,6 @@
 """The training loop is killed at every point where it writes or calls the trainer, and started again each time:
-the run ends with every group done with once, every step taken once, and nothing asked for twice."""
+the run ends with every group played and recorded once, every group with something to train on in one step, every
+step taken once, and nothing asked for twice."""
 
 import json
 from collections.abc import Sequence
@@ -11,7 +12,7 @@ from pydantic import JsonValue
 from rollout.contracts import BlobReference
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import Checkpoint, Fence, Fenced, FileLedger, Policies, Step, Weighted, iterations, train
+from rollout_train import Checkpoint, Fence, Fenced, FileLedger, Policies, Step, Weighted, results, train, trained
 from rollout_train.record import GROUPS, STEPS, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import RolloutJobs
@@ -94,11 +95,11 @@ async def attempt(directory: Path, at: int | None, steps: list[str], *, hard: bo
         LocalRunner(recorder=recorder), recorder, log=directory / "log", blobs=FileBlobStore(directory / "blobs")
     )
     policies = Policies(DyingLedger(directory / "ledger", fuse), DyingBlobs(directory / "blobs", fuse))
-    done = len(await iterations(policies.ledger))
+    done = len(await results(policies.ledger))
     try:
         await train(
             rollouts, Words(), DyingTrainer(fuse, steps), policies, policy="words", channel="policy",
-            directory=directory / "versions", groups=TOTAL - done, seed=3,
+            directory=directory / "versions", groups=TOTAL - done, groups_per_step=2, seed=3,
         )  # fmt: skip
     except Killed:
         if hard:  # nothing the dying process did after this point reaches the disk
@@ -133,13 +134,16 @@ async def test_a_loop_killed_at_any_point_and_started_again_finishes_the_run_onc
 async def check(directory: Path, steps: list[str]) -> None:
     policies = Policies(FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs"))
     ledger = policies.ledger
-    lines = await iterations(ledger)
-    assert [line.iteration for line in lines] == list(range(1, TOTAL + 1))  # every group done with, once
+    lines = await results(ledger)
+    assert [line.group for line in lines] == list(range(1, TOTAL + 1))  # every group played and recorded, once
     assert sorted(map(int, await ledger.read(table("train", GROUPS)))) == list(range(1, TOTAL + 1))
-    # Every group that was trained on made one version, each from the one before; no version is an orphan.
+    # Every group with something to train on is in one step, and every step made one version, each from the one
+    # before; no version is an orphan.
     versions = await policies.versions("words")
-    trained = sorted((line for line in lines if line.adapter), key=lambda line: line.version or 0)
-    assert [line.adapter for line in trained] == [version.name for version in versions]
+    covered = await trained(ledger)
+    assert sorted(covered) == [line.group for line in lines if line.segments]
+    assert all(outcome.version is not None for outcome in covered.values())
+    assert sorted({str(outcome.version) for outcome in covered.values()}) == [version.name for version in versions]
     assert [version.parent for version in versions] == [None, *[version.name for version in versions[:-1]]]
     intents = await ledger.read(table("train", STEPS))
     assert sorted(f"words@{intent['number']}" for intent in intents.values()) == [v.name for v in versions]  # type: ignore[index]

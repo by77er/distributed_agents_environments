@@ -38,7 +38,7 @@ training_gib = 4                              # and to start a step
 ```
 
 ```bash
-uv run rollout train profile.toml minecraft_swarm.catalog:catalog --groups 100 --directory RUN
+uv run rollout train profile.toml minecraft_swarm.catalog:catalog --groups 100 --directory RUN  # --groups-per-step 4
 uv run rollout monitor RUN                     # the web page over the run: http://localhost:8765
 uv run rollout report RUN minecraft_swarm.catalog:catalog --watch
 uv run rollout tools minecraft_swarm.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own

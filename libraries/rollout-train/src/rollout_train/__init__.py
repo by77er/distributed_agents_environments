@@ -8,7 +8,7 @@
 - `Curriculum`: which row next.
 - `Trainer`, `Weighted`, `Budget`, `Checkpoint`, `Step`, `StepFailed` (`trainer`): what a trainer is. `Colocated`:
   the wrapper for one that shares its accelerator with the engines.
-- `Iteration`, `iterations` (`record`): what a run writes down for each group.
+- `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
 """
 
 from rollout_train.algorithm import Algorithm, Batch, Grpo, complete_groups, group_advantages
@@ -17,7 +17,7 @@ from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
 from rollout_train.policies import Manifest, Policies, Version
-from rollout_train.record import Iteration, iterations
+from rollout_train.record import Result, Trained, results, trained
 from rollout_train.trainer import Budget, Checkpoint, Step, StepFailed, Trainer, Weighted
 
 __all__ = [
@@ -31,17 +31,19 @@ __all__ = [
     "Fenced",
     "FileLedger",
     "Grpo",
-    "Iteration",
     "Ledger",
     "Manifest",
     "Policies",
+    "Result",
     "Step",
     "StepFailed",
+    "Trained",
     "Trainer",
     "Version",
     "Weighted",
     "complete_groups",
     "group_advantages",
-    "iterations",
+    "results",
     "train",
+    "trained",
 ]

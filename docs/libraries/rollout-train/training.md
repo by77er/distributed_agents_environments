@@ -23,48 +23,58 @@ channel. Unless a `binding` says otherwise, every model slot of the catalog's pr
 
 - **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled `group`,
   `iteration`, `task` and `title`. The curriculum picks the row and the catalog draws the start.
-- **Nothing waits for all episodes.** `OUTSTANDING` groups are kept asked for. The job starts the next group as
-  soon as there is room beside what is left of the one before (`overlap`), and each group is trained on when its
-  last episode ends, while the next group's episodes run on. Their tokens then carry two versions, which the
-  trainer's objective corrects for.
-- **For each group**: the curriculum records it, the algorithm says what to train on, the trainer steps from the
-  policy's newest version, the new version is added to the policy and served on the channel, and the group's
-  outcome is written.
-- **A group with nothing to train on** is logged with the algorithm's reason (`skipped`), and the policy stays as
-  it was.
-- **A step that fails** (`StepFailed`) is logged with its `error`, and the policy stays as it was.
-  `FAILED_UPDATES` in a row stop the loop.
+- **Play and training go their own ways.** `OUTSTANDING` groups are kept asked for. The job starts the next group
+  as soon as there is room beside what is left of the one before (`overlap`).
+- **When a group's last episode ends**, its result is written at once: the curriculum records it, and the algorithm
+  says what in it to train on. A group with nothing to train on is done with, with the algorithm's reason
+  (`skipped`); the others join a queue.
+- **A step is taken over the queue** once at least `groups_per_step` groups are in it (4 by default, so that no
+  step leans toward one task), over every group queued by then, while play goes on; at the end of the run, over
+  whatever is left. The trainer's segment budget is spread over the groups. The step starts from the policy's
+  newest version; the version it makes is added to the policy and served on the channel. Tokens sampled under an
+  older version are corrected for by the trainer's objective. One step is taken at a time.
+- **A step that fails** (`StepFailed`) is written down with its `error`, its groups are done with, and the policy
+  stays as it was. `FAILED_UPDATES` in a row stop the loop.
 - **A ticket the job refuses** stops the loop with [`Refused`](rollouts.md#guarantees).
 
 ## Dying and starting again
 
 The loop can be killed at any moment and started again. It keeps nothing it cannot read back: what it decides and
-what happens are appended to three tables in the [ledger](policies.md#the-ledger), each under the group's number,
-and every action is one that can be taken twice.
+what happens are appended to four tables in the [ledger](policies.md#the-ledger), and every action is one that can
+be taken twice.
 
-| Table | Written | Holds |
-|---|---|---|
-| `runs/RUN/groups` | before a group is asked for | the row, and the start every episode of the group is given |
-| `runs/RUN/steps` | before the trainer is called | the policy, the version the step starts from, the number of the one it will make, the batch (a blob) and how many segments it has, the seed, when it was decided |
-| `runs/RUN/iterations` | last | how the group went and what was done with it: an [`Iteration`](../../guide/reference.md#iteration) |
+| Table | Keyed by | Written | Holds |
+|---|---|---|---|
+| `runs/RUN/groups` | group | before a group is asked for | the row, and the start every episode of the group is given |
+| `runs/RUN/results` | group | when its last episode ends | how it went: a [`Result`](../../guide/reference.md#result) |
+| `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the policy, the version it starts from, the number of the one it will make, the batch (a blob) and how many segments it has, the seed, when it was decided |
+| `runs/RUN/failures` | step | when a step's trainer fails | its error |
+
+A step's outcome is the version it makes, in the policy's table. A group is done with once its result trains on
+nothing, or the step that covers it has made its version or failed.
 
 | It died | Started again, it |
 |---|---|
 | after deciding a group | asks for that group again under the same key, and the job gives back the ticket it has |
 | while a group played | waits for the episodes the job still owes; the others are in the job's [log](rollouts.md#the-log) |
-| after a group ended | finds the group has no outcome, and takes it from there |
-| during a step | finds the step decided and no version made, and takes the step again from the same parent |
-| after the step | finds the version, serves it, and writes the group's outcome |
+| after a group ended | finds no result, and writes it |
+| with groups queued | finds results to train on that no step covers, and queues them again |
+| during a step | finds the step decided and no version made, and takes it again over the same groups, from the same parent |
+| after the step | finds the version, serves it, and goes on |
 
 - **A step that was decided is finished before another is decided.** A decision names the version it will make,
-  and only one group may make it.
+  and only one step may make it.
+- **Episodes are acknowledged once their group is done with**, so that a loop started again finds in the job every
+  episode a queued group or an unfinished step still needs. What a step trains on is the algorithm's batch of
+  those episodes, the same each time it is computed.
 - **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
   policy's table. A step that died before the append made nothing.
 - **Saves thin out.** Once a version is served, the policy is thinned to `retention` (by default the trainer state
   of the newest three versions and of every tenth; [policies](policies.md#versions)).
 - **One loop at a time.** Starting takes the run's fence and the policy's. A loop that was replaced, and does not
   know it yet, has its next write refused.
-- **`groups` counts groups done with**, those a stopped loop left unfinished among them.
+- **`groups` counts groups played**, those a stopped loop left unplayed among them; the loop ends once they are
+  played and every one with something to train on has been in a step.
 
 What is redone: a step that was in progress, and the runs that were in flight if they ran in the loop's own process
 (the job runs them again from the same start).
@@ -104,7 +114,7 @@ rather than tickets.
   start may be one the row can be set up from. After `FAILED_GROUPS` such groups in a row, the row counts as tried,
   and as having taught nothing.
 - **What it sees.** The task's own rewards, whatever the algorithm adds to them.
-- **It is a fold.** A curriculum is rebuilt from the run's iterations when the loop starts: each goes to the row of
+- **It is a fold.** A curriculum is rebuilt from the run's results when the loop starts: each goes to the row of
   its title, so records stay with their rows when a catalog changes. A choice is made with a random number
   generator seeded by the group's number, and is written down before it is acted on.
 
@@ -132,19 +142,15 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 ## The record
 
-For each group the run appends an [`Iteration`](../../guide/reference.md#iteration) to its `iterations` table. The
-same line goes to the job as an `iteration` note, where the [monitor](monitor.md) reads it; the report reads the
-table (`iterations(ledger, run)`).
+For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table as soon as its
+episodes have ended: the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
+failed and why, how many segments were recorded and how many the algorithm found to train on (`segments`; none, and
+`skipped` with its reason, if it found none), its notes, and how many rows are unlocked. The same line goes to the
+job as a `result` note; each step goes as a `step` note with the version it made and its metrics, or its error.
 
-| A group that was | Has |
-|---|---|
-| trained on | `update` (the trainer's metrics), `adapter` (the version the step made, by name) and `version` (its number) |
-| not trained on | `skipped`: the algorithm's reason |
-| given to a step that failed | `error`: the last line of what the step raised |
-
-Every line has the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
-failed and why, how many segments were recorded and how many trained on, the algorithm's notes, and how many rows
-are unlocked.
+What was done with a group is read by joining: `trained(ledger, run)` gives, for each group a step covers, that step
+and the version it made or why it failed (a [`Trained`](../../guide/reference.md#trained)); the version's record
+has the trainer's metrics. The report and the [monitor](monitor.md) read `results(ledger, run)` and that join.
 
 With the job's [log](rollouts.md#the-log) and the policy's [versions](policies.md), that is the whole run: every
 episode, what each step was trained on, and the weights and the trainer's state after it.

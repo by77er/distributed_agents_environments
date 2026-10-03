@@ -22,9 +22,11 @@ from rollout_train import (
     Step,
     StepFailed,
     Weighted,
-    iterations,
+    results,
     train,
+    trained,
 )
+from rollout_train.record import STEPS, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import JobHooks, Jobs, RolloutJobs, loaded
 from rollout_train.testing import ScriptedEngine, plain_channel
@@ -99,7 +101,7 @@ def cast_runner(runner: Any) -> Runner:
     return runner
 
 
-async def test_the_loop_trains_groups_as_they_finish_and_goes_on_where_it_stopped(
+async def test_the_loop_records_each_group_and_steps_on_what_it_played(
     wiring: tuple[Jobs, Recorder, Notes], tmp_path: Path
 ) -> None:
     jobs, recorder, notes = wiring
@@ -108,46 +110,71 @@ async def test_the_loop_trains_groups_as_they_finish_and_goes_on_where_it_stoppe
     async def more(groups: int) -> None:
         await train(
             jobs, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "versions",
-            groups=groups, seed=1,
+            groups=groups, groups_per_step=1, seed=1,
         )  # fmt: skip
 
     await more(3)
-    lines = await iterations(policies.ledger)
-    assert [line.iteration for line in lines] == [1, 2, 3]
+    lines = await results(policies.ledger)
+    assert [line.group for line in lines] == [1, 2, 3]
     assert all(len(line.rewards) == 4 and line.failed == 0 for line in lines)
     # The policy says yes and no in turn, so in most groups some episodes said the word and some did not: those
     # groups train, and the others are skipped for having nothing to compare.
-    trained = [line for line in lines if line.update is not None]
-    assert all(len(set(line.rewards)) == 1 and line.skipped for line in lines if line.update is None)
-    assert len(trained) == len(trainer.batches) >= 1
+    played = [line for line in lines if line.segments]
+    assert all(len(set(line.rewards)) == 1 and line.skipped for line in lines if not line.segments)
+    assert len(played) == len(trainer.batches) >= 1
 
-    # Every step made a version of the policy, each from the one before, and the channel serves the newest.
+    # A step over each group with something to train on (one group a step, here) made a version of the policy,
+    # each from the one before, and the channel serves the newest.
     versions = await policies.versions("words")
-    assert [version.name for version in versions] == [f"words@{n}" for n in range(1, len(trained) + 1)]
+    covered = await trained(policies.ledger)
+    assert [version.name for version in versions] == [f"words@{n}" for n in range(1, len(played) + 1)]
     assert [version.parent for version in versions] == [None, *[version.name for version in versions[:-1]]]
-    assert sorted(line.adapter for line in trained if line.adapter) == [version.name for version in versions]
+    assert sorted(covered) == [line.group for line in played]
+    assert sorted(str(outcome.version) for outcome in covered.values()) == [version.name for version in versions]
     channel = recorder.channels["policy"]
     assert (channel.adapter, channel.version) == (versions[-1].name, len(versions))
-    assert trainer.parents == [None, *[f"weights after {n} steps" for n in range(1, len(trained))]]
+    assert trainer.parents == [None, *[f"weights after {n} steps" for n in range(1, len(played))]]
     for version, batch in zip(versions, trainer.batches, strict=True):
         assert version.state is not None and list(version.state.files) == ["optimizer.bin"]
         assert version.batch is not None  # what it was trained on: each segment by its place in the job's log
         listed = json.loads(await policies.blobs.read(version.batch))
         assert listed == [[weighted.source, weighted.advantage] for weighted in batch]
-    for line, batch in zip(sorted(trained, key=lambda line: line.version or 0), trainer.batches, strict=True):
-        assert line.segments_recorded == 4 and line.segments_trained == len(batch) == 3  # the trainer's budget
+        (line,) = [line for line in played if covered[line.group].version == version.name]
+        assert line.segments_recorded == 4 and line.segments == len(batch) == 3  # the trainer's budget
         if sum(line.rewards) >= 2:  # those that said it were as fast as each other
             assert line.notes["speed_bonus"] == [1.0 if reward else 0.0 for reward in line.rewards]
         word = line.task.removeprefix("say-")
         for weighted in batch:  # whoever said the word is above the group's mean, and the others below it
             said = "".join(chr(token) for token in weighted.segment.tokens[weighted.segment.spans[0].start :]).strip()
             assert (weighted.advantage > 0) == (said == word)
-    assert notes.kinds.count("iteration") == 3 and notes.kinds.count("published") == len(trained)
-    assert notes.kinds.count("episode") == 12
+    assert notes.kinds.count("result") == 3 and notes.kinds.count("step") == notes.kinds.count("published")
+    assert notes.kinds.count("published") == len(played) and notes.kinds.count("episode") == 12
 
     await more(2)  # started again: it goes on after the last group, from the newest version
-    assert [line.iteration for line in await iterations(policies.ledger)] == [1, 2, 3, 4, 5]
-    assert trainer.parents[len(trained)] in (f"weights after {len(trained)} steps", None)
+    assert [line.group for line in await results(policies.ledger)] == [1, 2, 3, 4, 5]
+    assert trainer.parents[len(played)] in (f"weights after {len(played)} steps", None)
+
+
+async def test_a_step_waits_for_its_groups_and_takes_them_together(tmp_path: Path) -> None:
+    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
+    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder)
+    policies, trainer = policies_in(tmp_path), Counting()
+    trainer.budget = Budget(segments=100)
+    await train(
+        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v",
+        groups=6, groups_per_step=2, seed=1,
+    )  # fmt: skip
+    await rollouts.close()
+    lines = await results(policies.ledger)
+    played = sorted(line.group for line in lines if line.segments)
+    steps = await policies.ledger.read(table("train", STEPS))
+    covers = [[int(group) for group in step["groups"]] for step in steps.values()]  # type: ignore[index, union-attr]
+    # Every group with something to train on is in one step; every step but the last waited for at least two of
+    # them (and took every one queued by then, played while the step before ran).
+    assert sorted(group for groups in covers for group in groups) == played
+    assert all(len(groups) >= 2 for groups in covers[:-1]) and covers[-1]
+    assert [len(batch) for batch in trainer.batches] == [4 * len(groups) for groups in covers]
+    assert len(await policies.versions("words")) == len(covers)
 
 
 async def test_a_trainer_that_shares_the_engines_gpu_puts_them_to_sleep_around_each_step(tmp_path: Path) -> None:
@@ -163,10 +190,10 @@ async def test_a_trainer_that_shares_the_engines_gpu_puts_them_to_sleep_around_e
         rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=2
     )
     await rollouts.close()
-    steps = [line for line in await iterations(policies.ledger) if line.update is not None]
-    assert steps and engine.told[:4] == ["sleep", "wake", "load words@1", "sleep"][: len(engine.told[:4])]
+    versions = await policies.versions("words")
+    assert versions and engine.told[:4] == ["sleep", "wake", "load words@1", "sleep"][: len(engine.told[:4])]
     assert guarded and set(guarded) == {"sleep"}  # the guard runs once the engines are asleep
-    assert all("update_seconds" in (line.update or {}) for line in steps)
+    assert all("update_seconds" in version.metrics for version in versions)
 
 
 async def test_a_step_that_fails_leaves_the_weights_and_the_run_goes_on(tmp_path: Path) -> None:
@@ -174,12 +201,14 @@ async def test_a_step_that_fails_leaves_the_weights_and_the_run_goes_on(tmp_path
     rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder)
     policies, trainer = policies_in(tmp_path), Counting(fails=1)
     await train(
-        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=3
-    )
+        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=3,
+        groups_per_step=1,
+    )  # fmt: skip
     await rollouts.close()
-    first, *rest = [line for line in await iterations(policies.ledger) if line.segments_trained]
-    assert first.error == "out of memory" and first.update is None and first.version is None
-    assert rest and all(line.update is not None for line in rest)
+    covered = await trained(policies.ledger)
+    first, *rest = [covered[group] for group in sorted(covered)]
+    assert first.error == "out of memory" and first.version is None  # written down, and the weights as they were
+    assert rest and all(outcome.version is not None and outcome.error is None for outcome in rest)
     assert [version.number for version in await policies.versions("words")] == list(range(1, len(rest) + 1))
 
 
