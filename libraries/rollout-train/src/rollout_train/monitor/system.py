@@ -40,13 +40,14 @@ WAITING = "waiting"
 PLAYING = "playing"
 ENDED = "ended"
 """Every episode has ended; its result is not written yet (a loop that starts now writes it)."""
-QUEUED = "queued"
-"""Its result is written and has something to train on; no step covers it yet."""
-STEPPING = "stepping"
-"""A step covers it, and has neither made its version nor failed: the trainer has it, or a loop that starts now
-takes the step again."""
 DONE = "done"
-"""Its result trains on nothing, or the step that covers it made its version or failed."""
+"""Its result is written. What is trained on it is its step's business: a step of its own stage (`STEPPING`,
+`COMMITTED` or `FAILED`), or none yet (it waits toward the next one)."""
+STEPPING = "stepping"
+"""A step decided that has neither made its version nor failed: the trainer has it, or a loop that starts now takes
+it again."""
+COMMITTED = "committed"
+FAILED = "failed"
 
 RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES)
 """A run's tables, as the page reads them."""
@@ -257,7 +258,7 @@ def _run(
             "parent": intent.get("parent"),
             "segments": intent.get("segments"),
             "decided": intent.get("decided"),
-            "state": "failed" if key in failures else "committed" if _makes(intent) in versions else "stepping",
+            "state": _state(key, intent, failures, versions),
             "error": failures[key].get("error") if key in failures else None,
         }
         for key, intent in sorted(steps.items(), key=lambda item: int(item[0]))
@@ -326,14 +327,7 @@ def _group(
     )
     result = results.get(number)
     if result is not None:
-        if not result.get("segments"):
-            stage = DONE
-        elif intent is None:
-            stage = QUEUED
-        elif key in failures or _makes(intent) in versions:
-            stage = DONE
-        else:
-            stage = STEPPING
+        stage = DONE
     elif ticket is None:
         stage = DECIDED
     elif len(counted) >= int(ticket["count"]):
@@ -345,6 +339,7 @@ def _group(
         step = {name: value for name, value in intent.items() if name != "batch"} | {
             "step": int(str(key)),
             "makes": _makes(intent),
+            "state": _state(str(key), intent, failures, versions),
         }
     return {
         "number": int(number),
@@ -370,12 +365,19 @@ def _done(result: Any, group: Mapping[str, Any], step: Any, made: Version | None
     return {
         **line,
         "adapter": made.name if made else None,
+        "step": step.get("step") if step else None,
+        "step_state": step.get("state") if step else None,
         "version": made.number if made else None,
         "update": dict(made.metrics) if made else None,
         "segments_trained": int(step.get("segments") or 0) if made and step else 0,
         "error": error,
         "seconds": round(ended - began, 1) if began else None,
     }
+
+
+def _state(key: str, step: Mapping[str, Any], failures: Mapping[str, Any], versions: Mapping[str, Version]) -> str:
+    """Where a step stands: failed, committed (its version made), or stepping."""
+    return FAILED if key in failures else COMMITTED if _makes(step) in versions else STEPPING
 
 
 def _covers(step: Mapping[str, Any]) -> list[int]:

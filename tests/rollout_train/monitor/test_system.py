@@ -13,7 +13,7 @@ from rollout.local import LocalRunner
 from rollout_train import FileLedger, Policies, train
 from rollout_train.layout import BLOBS, FEED, JOBS, LEDGER
 from rollout_train.monitor import FeedReader, RunFeed, System
-from rollout_train.monitor.system import DECIDED, ENDED, PLAYING, QUEUED, STEPPING, WAITING
+from rollout_train.monitor.system import DECIDED, DONE, ENDED, PLAYING, WAITING
 from rollout_train.record import GROUPS, RESULTS, STEPS, scope, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import RolloutJobs
@@ -108,8 +108,12 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
     async def group() -> dict[str, Any]:
         (run,) = (await system.snapshot())["runs"]
-        (open_group,) = run["open"]
-        return open_group
+        if run["open"]:
+            (open_group,) = run["open"]
+            return open_group
+        found = await system.group("train", 1)  # (one that is done is no longer in flight)
+        assert found is not None
+        return found
 
     def ended(cursor: int, run_id: str, detail: str | None = None) -> None:
         outcome = Outcome.CANCELLED if detail else Outcome.COMPLETED
@@ -149,7 +153,10 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
     result: JsonValue = {"group": 1, "time": 9.0, "task": "t003", "failures": ["x", "x"], "segments": 8}
     await ledger.append(table("train", RESULTS), "1", result, fence)
-    assert (await group())["stage"] == QUEUED  # (something to train on, and no step covers it yet)
+    recorded = await group()
+    assert recorded["stage"] == DONE and recorded["step"] is None  # (done: it waits toward the next step)
+    (run,) = (await system.snapshot())["runs"]
+    assert run["next"] == [1] and run["open"] == [] and run["done"][0]["step_state"] is None
 
     step: dict[str, JsonValue] = {
         "groups": [1],
@@ -162,12 +169,16 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     }
     await ledger.append(table("train", STEPS), "1", step, fence)
     stepping = await group()
-    assert stepping["stage"] == STEPPING
+    assert stepping["stage"] == DONE  # the step is its own thing: the group is done, and in it
     assert stepping["step"] == {
         **{key: value for key, value in step.items() if key != "batch"},
         "step": 1,
         "makes": "miner@1",
+        "state": "stepping",
     }
+    (run,) = (await system.snapshot())["runs"]
+    assert run["next"] == [] and [(each["step"], each["state"]) for each in run["steps"]] == [(1, "stepping")]
+    assert (run["done"][0]["step"], run["done"][0]["step_state"]) == (1, "stepping")
 
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")

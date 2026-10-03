@@ -121,6 +121,14 @@
   .tile.rail { box-shadow: inset 3px 0 0 var(--faint); padding-left: 19px; }
   .tile.rail.good { box-shadow: inset 3px 0 0 var(--good); } .tile.rail.bad { box-shadow: inset 3px 0 0 var(--bad); }
   .tile.rail.accent { box-shadow: inset 3px 0 0 var(--accent); } .tile.rail.violet { box-shadow: inset 3px 0 0 var(--violet); }
+  .tile.rail.warm { box-shadow: inset 3px 0 0 var(--warm); }
+  /* a step's groups, or those toward the next one: a row each, aligned in columns */
+  .members { display: grid; gap: 2px; }
+  .member { display: grid; grid-template-columns: 40px minmax(0, 6em) auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 3px 4px;
+    border-radius: 3px; color: var(--ink); text-decoration: none; font-size: 13px; }
+  .member:hover { background: var(--raised); }
+  .member b { font: 600 12px var(--mono); } .member .what { color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .member .faint { font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   a.tile.rail:hover { box-shadow: inset 3px 0 0 var(--accent), 4px 4px 0 var(--line); }
   .tile header { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .tile header b { font-size: 15px; white-space: nowrap; }

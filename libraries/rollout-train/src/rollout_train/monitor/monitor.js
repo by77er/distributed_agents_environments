@@ -84,19 +84,21 @@ const meter = (name, used, total, says) => {
 };
 const pairs = entries => h("dl", { class: "pairs" }, entries.flatMap(([key, value]) => [h("dt", {}, key), h("dd", {}, value)]));
 
-const STAGES = ["decided", "asked", "played", "recorded", "stepped", "committed"];
-const AT = { decided: [1, "to ask"], waiting: [2, "to start"], playing: [2, ""], ended: [3, "recording"], queued: [4, "in the queue"], stepping: [4, ""], done: [6, ""] };
+// A group's stages, up to its result; what is trained on it is its step's (a step is shown as a thing of its own).
+const STAGES = ["decided", "asked", "played", "recorded"];
+const AT = { decided: [1, "to ask"], waiting: [2, "to start"], playing: [2, ""], ended: [3, "recording"], done: [4, ""] };
 function stages(group) {
   const [at, waits] = AT[group.stage];
-  const says = group.stage === "playing" ? `playing ${group.ended}/${group.count}`
-    : group.stage === "stepping" ? `step ${group.step?.step} → ${versionOf(group.step?.makes)}` : waits;
+  const says = group.stage === "playing" ? `playing ${group.ended}/${group.count}` : waits;
   return h("div", { class: "stages" }, STAGES.map((name, index) => h("div", {
-    class: index < at ? "done" : index === at ? `now${["playing", "stepping"].includes(group.stage) ? " active" : ""}` : "",
+    class: index < at ? "done" : index === at ? `now${group.stage === "playing" ? " active" : ""}` : "",
   }, h("span", {}, index === at ? says : name))));
 }
 const outcomeOf = line => line.update
-  ? { kind: "moved", text: `trained ${line.segments_trained} of ${line.segments_recorded} · ${line.update.optimizer_steps ?? "?"} steps · moved ${Number(line.update.kl_moved ?? 0).toFixed(4)}` }
-  : line.error ? { kind: "bad", text: `step failed: ${line.error}` }
+  ? { kind: "moved", text: `step ${line.step} · trained ${line.segments_trained} of ${line.segments_recorded} · moved ${Number(line.update.kl_moved ?? 0).toFixed(4)}` }
+  : line.error ? { kind: "bad", text: `step ${line.step} failed: ${line.error}` }
+  : line.step_state === "stepping" ? { kind: "violet", text: `in step ${line.step}, being taken` }
+  : line.segments ? { kind: "warm", text: "waits for the next step" }
   : { kind: line.failed && !line.rewards.length ? "bad" : "still", text: line.skipped ?? "" };
 const dotsOf = line => h("span", { class: "dots" }, [...line.rewards.map((_, index) => h("i", { class: line.solved[index] ? "solved" : "unsolved" })),
   ...Array.from({ length: line.failed }, () => h("i", { class: "failed" }))]);
@@ -158,7 +160,8 @@ function rewardsChart(run, width) {
     line.rewards.forEach((value, place) => drawing.append(svg("circle", { cx: x + (place - (line.rewards.length - 1) / 2) * spread, cy: y(value),
       r: Math.min(3.2, Math.max(1.6, column / 5)), class: line.solved[place] ? "f-good" : "f-quiet", "pointer-events": "none" })));
     if (line.rewards.length) drawing.append(svg("line", { x1: x - column * 0.34, x2: x + column * 0.34, y1: y(mean(line.rewards)), y2: y(mean(line.rewards)), class: "s-ink", "pointer-events": "none" }));
-    const did = line.update ? "f-accent" : line.error || (line.failed && !line.rewards.length) ? "f-bad" : "f-hollow";
+    const did = line.update ? "f-accent" : line.error || (line.failed && !line.rewards.length) ? "f-bad"
+      : line.step_state === "stepping" ? "f-violet" : line.segments ? "f-warm" : "f-hollow";
     drawing.append(svg("rect", { x: x - mark / 2, y: band, width: mark, height: mark, rx: 2, class: did, "pointer-events": "none" }));
     if (index % every === 0) drawing.append(svg("text", { x, y: band + 23, "text-anchor": "middle" }, String(line.group)));
   });
@@ -304,13 +307,28 @@ function drawRun(name) {
     kpi("Policy head", policy ? versionOf(policy.head) : "–", policy ? `${policy.versions.length} versions` : ""),
     kpi("Inference", throughput ? `${figure(throughput.tokens_per_second)} tok/s` : "–", throughput ? `${figure(throughput.mean_concurrency)} requests at once` : "no measurement yet"),
     kpi("Episodes ended", `${system.jobs.find(job => job.job === run.run)?.episodes ?? 0}`, `${tokens(system.jobs.find(job => job.job === run.run)?.sampled)} tokens sampled`));
-  const flight = run.open.length ? h("div", { class: "tiles" }, run.open.map(group => link(groupPlace(run.run, group.number), { class: "tile" },
-    h("header", {}, h("b", {}, `#${group.number}`), h("span", { class: "what" }, `${group.task} · ${group.title ?? ""}`),
-      h("span", { class: "faint small" }, group.decided ? span(system.at - group.decided) : "")),
-    stages(group),
-    group.episodes.length ? cells(group.episodes) : null)))
-    : h("div", { class: "empty" }, "No group is in flight.");
-  const recent = [...run.steps].reverse().slice(0, 10), groups = groupsOf(run);
+  const groups = groupsOf(run), stepping = run.steps.filter(step => step.state === "stepping");
+  const waiting = run.next.filter(number => groups.get(number)?.line);
+  const member = number => {
+    const line = groups.get(number)?.line;
+    return link(groupPlace(run.run, number), { class: "member" }, h("b", {}, `#${number}`), h("span", { class: "what" }, groups.get(number)?.task ?? ""),
+      line ? dotsOf(line) : null, h("span", { class: "faint" }, line?.rewards.length ? line.rewards.map(figure).join(" ") : ""));
+  };
+  const flight = run.open.length || stepping.length || waiting.length ? h("div", { class: "tiles" },
+    stepping.map(step => link(stepPlace(run.run, step.step), { class: "tile rail violet" },
+      h("header", {}, h("b", {}, `Step ${step.step}`), h("span", { class: "what" }, `→ ${versionOf(step.makes)} · ${step.segments ?? "?"} segments`),
+        mark("stepping", `${span(system.at - step.decided)}`)),
+      h("div", { class: "members" }, step.groups.map(member)))),
+    waiting.length ? h("div", { class: "tile rail warm" },
+      h("header", {}, h("b", {}, "Toward the next step"), h("span", { class: "what" }, `${waiting.length} recorded, waiting for a step`)),
+      h("div", { class: "members" }, waiting.map(member))) : null,
+    run.open.map(group => link(groupPlace(run.run, group.number), { class: "tile" },
+      h("header", {}, h("b", {}, `#${group.number}`), h("span", { class: "what" }, `${group.task} · ${group.title ?? ""}`),
+        h("span", { class: "faint small" }, group.decided ? span(system.at - group.decided) : "")),
+      stages(group),
+      group.episodes.length ? cells(group.episodes) : null)))
+    : h("div", { class: "empty" }, "Nothing is in flight.");
+  const recent = [...run.steps].reverse().slice(0, 10);
   const tasks = new Map();
   for (const line of run.done) {
     const task = tasks.get(line.task) ?? { title: line.title, groups: 0, trained: 0 };
@@ -318,11 +336,14 @@ function drawRun(name) {
   }
   const played = [...tasks].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
   return [head, kpis,
-    h("div", { class: "section-title" }, h("h2", {}, "In flight"), h("span", {}, `${run.open.length} groups`)), flight,
+    h("div", { class: "section-title" }, h("h2", {}, "In flight"),
+      h("span", {}, [`${run.open.length} groups playing`, stepping.length ? `step ${stepping.map(step => step.step).join(", ")} being taken` : null].filter(Boolean).join(" · "))), flight,
     card("Rewards by group", "each dot an episode; rewards are each task's own",
       run.done.length ? [rewardsChart(run, width), h("div", { class: "legend" },
         h("span", {}, h("i", { style: "background:var(--good)" }), "solved"), h("span", {}, h("i", { style: "background:var(--faint)" }), "not solved"),
         h("span", {}, h("i", { class: "rule" }), "mean"), h("span", {}, h("i", { class: "square", style: "background:var(--accent)" }), "trained on"),
+        h("span", {}, h("i", { class: "square", style: "background:var(--violet)" }), "in the step being taken"),
+        h("span", {}, h("i", { class: "square", style: "background:var(--warm)" }), "waits for a step"),
         h("span", {}, h("i", { class: "square hollow" }), "skipped"), h("span", {}, h("i", { class: "square", style: "background:var(--bad)" }), "no episode, or the step failed"))]
         : h("div", { class: "empty" }, "No group is done with yet.")),
     h("div", { class: "cols" },
@@ -407,7 +428,7 @@ function drawGroup(here) {
       episode.detail ? h("div", { class: "error-text" }, episode.detail.slice(0, 240)) : null);
   })) : h("div", { class: "empty" }, "No episode has started.");
   const metrics = version?.metrics ?? outcome?.update;
-  const what = card("What was done", outcome ? outcomeOf(outcome).text : group.step ? `step ${group.step.step} is being taken` : group.stage === "queued" ? "in the queue for the next step" : "nothing yet",
+  const what = card("What was done", outcome ? outcomeOf(outcome).text : "nothing yet",
     metrics ? [pairs([
       ["version", version ? link(policyPlace(version.name.split("@")[0]), {}, h("b", {}, version.name)) : outcome?.adapter ?? "–"],
       ["from", version?.parent ?? group.step?.parent ?? "the base model"],
