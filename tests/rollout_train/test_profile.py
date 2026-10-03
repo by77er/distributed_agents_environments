@@ -37,22 +37,22 @@ engine = "rollout_train.testing:scripted_engine"
 kind = "tests.rollout_train.test_profile:Steps"
 channel = "policy"
 colocated = true
-sequence_tokens = 900
-sequences_per_step = 3
+segment_tokens = 900
+segments_per_step = 3
 """
 
 
 class Steps:
     """A trainer that trains nothing: what a profile's `[trainer]` names."""
 
-    def __init__(self, model: str, *, sequence_tokens: int, sequences_per_step: int) -> None:
+    def __init__(self, model: str, *, segment_tokens: int, segments_per_step: int) -> None:
         self.model = model
-        self.budget = Budget(sequence_tokens, sequences_per_step)
+        self.budget = Budget(segment_tokens, segments_per_step)
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
         (into / WEIGHTS).mkdir(parents=True)
-        (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} sequences")
-        return Step({"sequences": float(len(batch))})
+        (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
+        return Step({"segments": float(len(batch))})
 
 
 def write(tmp_path: Path, text: str = PROFILE) -> Path:
@@ -64,7 +64,7 @@ def write(tmp_path: Path, text: str = PROFILE) -> Path:
 async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None:
     support.STARTED.clear()
     profile = Profile.load(write(tmp_path))
-    assert profile.trainer is not None and profile.trainer.settings == {"sequence_tokens": 900, "sequences_per_step": 3}
+    assert profile.trainer is not None and profile.trainer.settings == {"segment_tokens": 900, "segments_per_step": 3}
     async with profile.open() as platform:
         policy, judge = platform.channels["policy"], platform.channels["judge"]
         assert len(policy.engines) == 2 and len(judge.engines) == 1  # one engine per entry, each told its own
@@ -73,7 +73,7 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
             "started a-checkpoint [('device', 1)]",
             "started another-checkpoint []",
         ]
-        # The trainer's longest sequence is the longest turn of the channel it trains, and of no other.
+        # The trainer's longest segment is the longest turn of the channel it trains, and of no other.
         assert policy.limits.sequence == 900 and policy.limits.thinking == 64 and judge.limits.sequence is None
         assert platform.trainer is not None and platform.trainer.budget == Budget(900, 3)
         binding = binding_for(words, "policy", platform.tool_bindings)
@@ -90,7 +90,7 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
     assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_job.jsonl").exists()
     kept = (tmp_path / "run" / "jobs" / "train" / "episodes.jsonl").read_text().splitlines()
-    assert len(kept) == 8 and any((tmp_path / "run" / "blobs").iterdir())  # every episode, and its traces
+    assert len(kept) == 8 and any((tmp_path / "run" / "blobs").iterdir())  # every episode, and its trajectories
 
 
 async def test_a_profile_that_cannot_start_stops_what_it_started(tmp_path: Path) -> None:

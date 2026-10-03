@@ -6,15 +6,17 @@ from typing import Any
 
 from rollout_train import Budget, Grpo, complete_groups, group_advantages
 from rollout_train.algorithm import fastest_of_the_saturated, spread
-from rollout_train.recorder import Epoch, Span
-from rollout_train.rollouts import Episode, Outcome, Trace
+from rollout_train.recorder import Segment, Span
+from rollout_train.rollouts import Episode, Outcome, Trajectory
 
 
-def episode(reward: float, *, group: str = "g", sequences: int = 2, cursor: int = 0, **info: Any) -> Episode:
-    """An episode of two model slots that were rewarded together, each with `sequences` sequences."""
-    epochs = [Epoch([1, 2, 3], [Span(1, 3, 0)], [-0.5, -0.5]) for _ in range(sequences)]
-    traces = {slot: Trace(list(epochs), {"default": reward}) for slot in ("ada", "ben")}
-    return Episode(cursor, "j", "t", f"r{cursor}", {"group": group}, None, Outcome.COMPLETED, info=info, traces=traces)
+def episode(reward: float, *, group: str = "g", segments: int = 2, cursor: int = 0, **info: Any) -> Episode:
+    """An episode of two model slots that were rewarded together, each with `segments` segments."""
+    made = [Segment([1, 2, 3], [Span(1, 3, 0)], [-0.5, -0.5]) for _ in range(segments)]
+    trajectories = {slot: Trajectory(list(made), {"default": reward}) for slot in ("ada", "ben")}
+    return Episode(
+        cursor, "j", "t", f"r{cursor}", {"group": group}, None, Outcome.COMPLETED, info=info, trajectories=trajectories
+    )
 
 
 def test_advantages_are_centered_but_not_scaled() -> None:
@@ -36,21 +38,21 @@ def test_the_fastest_of_the_episodes_that_saturated_the_task_scores_a_point_more
     assert fastest_of_the_saturated([full(0.2), episode(5.0, saturated=True), full(0.3)]) == [1.0, 0.0, 0.0]
     group = [full(0.4), full(0.1), full(0.3)]
     tied = Grpo().batch(group, Budget(), random.Random(0))
-    assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.sequences) == 12
-    assert sorted({round(weighted.advantage, 3) for weighted in tied.sequences}) == [-0.333, 0.667]
+    assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.segments) == 12
+    assert sorted({round(weighted.advantage, 3) for weighted in tied.segments}) == [-0.333, 0.667]
     untied = Grpo(tie_break=False).batch(group, Budget(), random.Random(0))  # nothing to compare them by
-    assert not untied.sequences and untied.skipped == "every episode scored the same"
+    assert not untied.segments and untied.skipped == "every episode scored the same"
 
 
 def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from_the_mean() -> None:
     group = [episode(0.0), episode(0.0), episode(3.0), episode(1.0)]  # advantages -1, -1, 2, 0
     batch = Grpo().batch(group, Budget(), random.Random(0))
-    assert batch.skipped is None and [weighted.advantage for weighted in batch.sequences] == [-1.0] * 8 + [2.0] * 4
-    limited = Grpo().batch(group, Budget(sequences=6), random.Random(0))
-    assert [w.advantage for w in limited.sequences] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
+    assert batch.skipped is None and [weighted.advantage for weighted in batch.segments] == [-1.0] * 8 + [2.0] * 4
+    limited = Grpo().batch(group, Budget(segments=6), random.Random(0))
+    assert [w.advantage for w in limited.segments] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
     failed = Episode(9, "j", "t", "r9", {}, None, Outcome.FAILED, detail="it raised")
-    assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).sequences] == [
-        weighted.advantage for weighted in batch.sequences
+    assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).segments] == [
+        weighted.advantage for weighted in batch.segments
     ]  # an episode that did not complete is no part of the comparison
     assert Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped == "1 of 2 episodes completed"
 

@@ -212,7 +212,7 @@ class Platform:
                 named(spec.renderer)(spec.model),
                 Limits(
                     **{key: value for key, value in limits.items() if value is not None},
-                    sequence=trained.budget.sequence_tokens if trained is not None else None,
+                    sequence=trained.budget.segment_tokens if trained is not None else None,
                 ),
             )
         address = profile.address or (f"http://{profile.serve}" if profile.serve else None)

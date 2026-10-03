@@ -26,15 +26,18 @@
 | **Channel** | A trainable policy being served, by name: its engines, its limits, and the weights version it samples from. |
 | **Engine** | One replica serving a model: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` is one ([vLLM engine](../implementations/rollout-vllm.md)). |
 | **Recorder** | The model endpoint for channels: renders contexts to tokens, samples, and keeps what was sampled. |
-| **Session / epoch** | The recorder's record of one model slot of one run / one token sequence of it: a context that only grew, with the spans the policy sampled. |
+| **Session** | The recorder's record of one rollout: every sample of one model slot of one run. |
 | **Renderer** | The chat template, tokenizer and parser of one model family ([Qwen renderers](../implementations/rollout-qwen.md)). |
 | **Behavior logprob** | The log-probability of a sampled token under the distribution it was sampled from. |
 | **Weights version** | A channel's count of published weights; every sampled span carries the one it was sampled at. |
 | **Rollout job** | Runs rows submitted by a caller and delivers their episodes through one ordered log. It knows no algorithm. |
-| **Episode** | A finished run as training sees it: labels, outcome, result, and for each model slot its epochs with behavior logprobs, weights versions and rewards. |
+| **Episode** | One run of a program, and as training sees it once it has ended: labels, outcome, result, and a trajectory per model slot. |
+| **Rollout** | One model slot's part of an episode as it plays: every turn of one agent. Each rollout becomes a trajectory. |
+| **Trajectory** | What a rollout leaves to train on: its segments and its rewards (`Trajectory`). |
+| **Segment** | A piece of a trajectory: a token sequence that only grew, with the spans the policy sampled, their behavior logprobs and weights versions (`Segment`). An edited context (a compaction, thinking dropped) starts the next. |
 | **Catalog / row** | What an environment offers to train on, easiest first / one situation of it, of which a start is drawn for each group. |
-| **Group** | Episodes of one row from one start, compared with each other. |
-| **Trainer** | Turns weighted token sequences into new weights, within a budget it states. `LoraTrainer` is one ([LoRA trainer](../implementations/rollout-lora.md)). |
+| **Group** | Episodes of one row from one start, compared with each other; the training run's unit of work, and the step taken on it. |
+| **Trainer** | Turns weighted segments into new weights, within a budget it states. `LoraTrainer` is one ([LoRA trainer](../implementations/rollout-lora.md)). |
 | **Profile** | A deployment, described: channels and engines, the trainer, the runner, where tool sets live. See [deploying](../guide/deploying.md). |
 | **Library / implementation / product / environment** | The four kinds of package in the repository: what code is written against; one implementation of an interface a library defines; an application; something to train on. See [overview](overview.md#layers). |
 | **Environment** | A computer a task creates through `run.environments` ([computers](../implementations/rollout-computers.md)). Also, in the reinforcement-learning sense, what a task is; the packages under `environments/` are environments in that sense. |

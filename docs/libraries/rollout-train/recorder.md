@@ -1,7 +1,7 @@
 # Recorder
 
 Code: `rollout_train.recorder` · See [`Recorder`](../../guide/reference.md#recorder),
-[`Epoch`](../../guide/reference.md#epoch), [channels](channels.md), [episodes](episodes.md)
+[`Segment`](../../guide/reference.md#segment), [channels](channels.md), [episodes](episodes.md)
 
 The recorder serves the model slots a run binds to a trainable channel, and keeps what training needs of every
 sample: the tokens the policy was shown, the tokens it sampled, their logprobs, and the weights version that sampled
@@ -10,7 +10,7 @@ them. It is the [model endpoint](../rollout/contracts/model-endpoint.md) for rec
 ```python
 recorder = Recorder({"policy": channel})
 runner = LocalRunner(recorder=recorder)        # a run's RecordedModel(channel="policy") binding is served by it
-epochs = recorder.sessions(run_id)             # by model slot: what each exports
+segments = recorder.sessions(run_id)             # by model slot: what each exports
 ```
 
 | Member | Does |
@@ -58,28 +58,28 @@ together.
 
 ## What a session exports
 
-Training wants token sequences; a session is a series of samples. The recorder joins samples into sequences
-([`Epoch`](../../guide/reference.md#epoch)) by one rule:
+Training wants token sequences that only grew; a session is a series of samples. The recorder joins samples into segments
+([`Segment`](../../guide/reference.md#segment)) by one rule:
 
 > A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues that
-> turn's sequence.
+> turn's segment.
 
 | What happened | What is exported |
 |---|---|
-| The context only grew: each prompt is the last one, the reply, and more | One sequence for the whole conversation, with a sampled span per turn. It is trained in one pass: the prompt is run once, not once per turn. |
-| The context was edited: a compaction, an observation replaced by a shorter form, a chat template that drops earlier thinking | The edited turn begins a new sequence. |
+| The context only grew: each prompt is the last one, the reply, and more | One segment for the whole conversation, with a sampled span per turn. It is trained in one pass: the prompt is run once, not once per turn. |
+| The context was edited: a compaction, an observation replaced by a shorter form, a chat template that drops earlier thinking | The edited turn begins a new segment. |
 | A prompt was repeated exactly: a client retried | The later sample replaces the earlier one. |
 
 - **Spans** ([`Span`](../../guide/reference.md#span)) mark the tokens the policy sampled. Each carries the weights
-  version that sampled it, so a sequence that spans a weight update says so token by token.
+  version that sampled it, so a segment that spans a weight update says so token by token.
 - **Logprobs** are those of the tokens inside the spans, in order: the behaviour logprobs.
 - **Forced tokens** (the close of an over-budget thought) lie between spans. They are context, and are not trained
   on.
-- Whether a conversation is one sequence or many is decided by what its program sends and by the model family's
+- Whether a conversation is one segment or many is decided by what its program sends and by the model family's
   template. A program that only appends gets one. A program that shortens each observation once it is no longer the
-  current one gets a sequence per turn.
+  current one gets a segment per turn.
 
-A job reads `sessions(run_id)` when a run ends and puts the sequences in the run's
+A job reads `sessions(run_id)` when a run ends and puts the segments in the run's
 [episode](episodes.md#how-an-episode-is-assembled).
 
 ## Renderers

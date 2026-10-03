@@ -9,8 +9,8 @@
 - **The fastest of the saturated.** Episodes that reached everything their task has to give earned the same; the
   one that took the least (`Episode.duration`, in the task's own units) played better, and scores a point more.
   The task says what saturated means and how long it took; comparing across the group is done here.
-- **What is trained on**: every sequence of the episodes whose advantage is not zero, up to what the trainer can
-  afford in a step; beyond that, sequences are taken at even steps through the group, so that each episode and
+- **What is trained on**: every segment of the episodes whose advantage is not zero, up to what the trainer can
+  afford in a step; beyond that, segments are taken at even steps through the group, so that each episode and
   slot keeps its share, spread over its whole game.
 """
 
@@ -30,7 +30,7 @@ from rollout_train.trainer import Budget, Weighted
 class Batch:
     """What an algorithm makes of a group of episodes."""
 
-    sequences: Sequence[Weighted] = ()
+    segments: Sequence[Weighted] = ()
     """What to train on."""
     skipped: str | None = None
     """Why there is nothing to train on, if there is not."""
@@ -102,7 +102,7 @@ class Grpo:
     """Whether the fastest of a group's saturated episodes scores a point more."""
 
     def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch:
-        """The sequences of the group's episodes that are fit to train on (completed, and not excluded), each with
+        """The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
         its episode's advantage."""
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
@@ -113,10 +113,10 @@ class Grpo:
         if advantages is None:
             return Batch(skipped="every episode scored the same", notes=notes)
         weighted = [
-            Weighted(epoch, advantage, f"{episode.cursor}/{slot}/{index}")
+            Weighted(segment, advantage, f"{episode.cursor}/{slot}/{index}")
             for episode, advantage in zip(good, advantages, strict=True)
             if advantage != 0.0
-            for slot, trace in episode.traces.items()
-            for index, epoch in enumerate(trace.epochs)
+            for slot, trajectory in episode.trajectories.items()
+            for index, segment in enumerate(trajectory.segments)
         ]
-        return Batch(spread(weighted, budget.sequences, rng), notes=notes)
+        return Batch(spread(weighted, budget.segments, rng), notes=notes)

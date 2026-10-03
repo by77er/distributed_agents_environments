@@ -146,13 +146,13 @@ async def train(
         steps = await ledger.read(table(run, STEPS))
         if str(number) not in steps:
             parent = await policies.head(policy)
-            trained = [[weighted.source, weighted.advantage] for weighted in batch.sequences]
+            trained = [[weighted.source, weighted.advantage] for weighted in batch.segments]
             manifest = await blobs.put(json.dumps(trained).encode(), "application/json")
             decision: dict[str, JsonValue] = {
                 "policy": policy,
                 "parent": parent.name if parent else None,
                 "number": (parent.number if parent else 0) + 1,
-                "sequences": len(trained),
+                "segments": len(trained),
                 "decided": round(time.time(), 1),
                 "batch": manifest.model_dump(mode="json"),
                 "seed": number,
@@ -169,7 +169,7 @@ async def train(
         start = await files(await policies.version(parent_name)) if parent_name else None
         into = directory / named(policy, made)
         await asyncio.to_thread(shutil.rmtree, into, ignore_errors=True)  # (what a step that died left)
-        step = await trainer.step(batch.sequences, seed=int(str(intent["seed"])), parent=start, into=into)
+        step = await trainer.step(batch.segments, seed=int(str(intent["seed"])), parent=start, into=into)
         return await policies.add(
             writer,
             policy,
@@ -202,9 +202,11 @@ async def train(
         curriculum.recorded(line)  # (the curriculum sees the task's own rewards, whatever the algorithm adds)
         batch = algorithm.batch(episodes, trainer.budget, random.Random(number))
         line.notes, line.skipped = batch.notes, batch.skipped
-        if batch.sequences:
-            line.sequences_recorded = sum(len(trace.epochs) for episode in good for trace in episode.traces.values())
-            line.sequences_trained = len(batch.sequences)
+        if batch.segments:
+            line.segments_recorded = sum(
+                len(trajectory.segments) for episode in good for trajectory in episode.trajectories.values()
+            )
+            line.segments_trained = len(batch.segments)
             try:
                 version = await stepped(number, batch)
             except StepFailed as error:  # the weights stay as they were, and the run goes on

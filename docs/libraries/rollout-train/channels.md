@@ -49,7 +49,7 @@ engine runs in this process's care, or is a client of a server elsewhere.
 for the answer after it, and the longest turn.
 
 - The deployment's hardware decides them. The longest turn is the smaller of what the engines accept and what the
-  trainer can train on (`Budget.sequence_tokens`, [the trainer](training.md#the-trainer)).
+  trainer can train on (`Budget.segment_tokens`, [the trainer](training.md#the-trainer)).
 - Code above the channel receives the outcome, never the numbers: a context limit in a model's capability contract,
   and a refusal when a context is full ([a sample](recorder.md#a-sample)).
 

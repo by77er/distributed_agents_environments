@@ -2,7 +2,7 @@
 
 > Durable, scalable agents and environments for agent products and reinforcement learning. A uv workspace of Python
 > 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (rollout jobs,
-> episodes with token traces, the training loop, channels, the recorder, deployment profiles), one package per
+> episodes with token trajectories, the training loop, channels, the recorder, deployment profiles), one package per
 > implementation (a durable runner, a vLLM engine, a LoRA trainer, Qwen renderers, computers, an OpenAI endpoint, an
 > S3 blob store), two products and one environment. The documentation describes the code as built.
 

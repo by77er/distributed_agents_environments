@@ -5,9 +5,9 @@ algorithm. It admits runs as there is room, watches them, and when one ends appe
 is read with a cursor, so a caller can train while runs are in flight, on whatever has finished (asynchronous
 reinforcement learning is this and nothing more), and can pick up where it left off.
 
-A job given somewhere to keep its log keeps every episode: one line per episode in `episodes.jsonl`, and its traces
-and its run's events in a blob store. Acknowledging says how far the caller has got; it deletes nothing, so the log
-can be read again from any cursor (to train on earlier episodes once more, say). A job with nowhere to keep them
+A job given somewhere to keep its log keeps every episode: one line per episode in `episodes.jsonl`, and its
+trajectories and its run's events in a blob store. Acknowledging says how far the caller has got; it deletes nothing, so
+the log can be read again from any cursor (to train on earlier episodes once more, say). A job with nowhere to keep them
 holds episodes in memory until they are acknowledged.
 
 `RolloutJobs` implements this over any `Runner` (one that runs programs in this process, or a durable one over a
@@ -29,14 +29,14 @@ from pydantic import JsonValue
 from rollout.contracts import RunEvent
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.harness.runner import ProgramReference, RunBinding, Runner, RunSpecification, with_row
-from rollout_train.recorder import Epoch
+from rollout_train.recorder import Segment
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, assemble, loaded, stored
 
 
 class Recorded(Protocol):
-    """What a job needs of the recorder: each run's sequences, and somewhere to publish weights."""
+    """What a job needs of the recorder: each run's segments, and somewhere to publish weights."""
 
-    def sessions(self, run_id: str) -> dict[str, list[Epoch]]: ...
+    def sessions(self, run_id: str) -> dict[str, list[Segment]]: ...
     def forget(self, run_id: str) -> None: ...
     async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int: ...
 
@@ -177,7 +177,7 @@ class RolloutJob:
         self._room = in_flight
         self._log = log
         self.blobs = blobs
-        """Where episodes' traces and events are kept, if they are kept."""
+        """Where episodes' trajectories and events are kept, if they are kept."""
         self._hooks = hooks
         self._guard = guard
         self._queue: list[RolloutTicket] = []
@@ -186,7 +186,7 @@ class RolloutJob:
         self._records: list[Record] = []
         """The log, oldest first: all of it if it is kept, and what is not acknowledged if it is not."""
         self._held: dict[int, Episode] = {}
-        """Episodes with their traces, by cursor, until they are acknowledged."""
+        """Episodes with their trajectories, by cursor, until they are acknowledged."""
         self._last = 0
         self._acknowledged = 0
         self._logging = asyncio.Lock()
@@ -268,7 +268,7 @@ class RolloutJob:
         return [record for record in self._records if record.episode.cursor > cursor]
 
     async def episode(self, record: Record) -> Episode:
-        """The episode a record of this job's log names, with its traces."""
+        """The episode a record of this job's log names, with its trajectories."""
         held = self._held.get(record.episode.cursor)
         if held is not None or self.blobs is None:
             return held or record.episode
@@ -369,16 +369,16 @@ class RolloutJob:
                 await self._runner.cancel(run_id, reason=f"job {self.id} was closed")
             raise
         finally:
-            epochs = self._recorder.sessions(run_id)
+            segments = self._recorder.sessions(run_id)
             self._recorder.forget(run_id)
-            await self._ended(ticket, run_id, events, epochs, interrupted=interrupted)
+            await self._ended(ticket, run_id, events, segments, interrupted=interrupted)
 
     async def _ended(
         self,
         ticket: RolloutTicket,
         run_id: str,
         events: Sequence[RunEvent],
-        epochs: Mapping[str, list[Epoch]],
+        segments: Mapping[str, list[Segment]],
         detail: str | None = None,
         interrupted: bool = False,
     ) -> None:
@@ -389,7 +389,7 @@ class RolloutJob:
             cursor = self._last + 1
             if events and not interrupted:
                 episode = assemble(
-                    events, epochs, cursor=cursor, job=self.id, ticket=ticket.id, parameters=ticket.parameters
+                    events, segments, cursor=cursor, job=self.id, ticket=ticket.id, parameters=ticket.parameters
                 )
             else:  # it never started, or was cut short: still an episode, so that counts are exact
                 outcome = Outcome.FAILED if detail else Outcome.CANCELLED
@@ -416,7 +416,10 @@ class RolloutJob:
             detail=episode.detail,
             reward=episode.reward,
             info=dict(episode.info),
-            sampled={slot: sum(epoch.sampled for epoch in trace.epochs) for slot, trace in episode.traces.items()},
+            sampled={
+                slot: sum(segment.sampled for segment in trajectory.segments)
+                for slot, trajectory in episode.trajectories.items()
+            },
         )
         async with self._news:
             self._news.notify_all()
@@ -450,7 +453,7 @@ TICKETS = "tickets.jsonl"
 
 class RolloutJobs:
     """Starts jobs on a runner. `log` is where each job keeps its log (under `log/JOB`), so that every episode
-    outlives the process and a caller that stops can go on from its cursor; the episodes' traces and events go to
+    outlives the process and a caller that stops can go on from its cursor; the episodes' trajectories and events go to
     `blobs` (by default a store in files under `log/blobs`). `guard` is called before runs are admitted and raises
     to refuse them (a machine out of memory, say)."""
 

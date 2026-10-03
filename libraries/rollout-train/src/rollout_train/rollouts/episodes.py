@@ -1,13 +1,13 @@
 """An episode: one finished run as whoever trains on it sees it.
 
-Its labels say which group and task it came from; its outcome and result say how it went; its traces hold, for each
-model slot, the token sequences the policy saw and continued, with the logprobs it sampled them at. Nothing else
-about the run is needed to compute a loss, and nothing here says where the run executed.
+Its labels say which group and task it came from; its outcome and result say how it went; its trajectories hold, for
+each model slot (each rollout), the segments the policy saw and continued, with the logprobs it sampled them at.
+Nothing else about the run is needed to compute a loss, and nothing here says where the run executed.
 
-An episode is kept as a `Record`: one line, small enough for a log, that names two blobs. One holds the traces; the
-other the run's events (its tool calls and their results, observations, rewards), which a span's `effect_id` joins a
-trace to. `stored` writes them and `loaded` reads them back, so an episode outlives the process that ran it for as
-long as the blob store keeps it.
+An episode is kept as a `Record`: one line, small enough for a log, that names two blobs. One holds the
+trajectories; the other the run's events (its tool calls and their results, observations, rewards), which a span's
+`effect_id` joins a trajectory to. `stored` writes them and `loaded` reads them back, so an episode outlives the
+process that ran it for as long as the blob store keeps it.
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout.contracts import BlobReference, RunEvent, RunEventType
 from rollout.harness.blobs import Blobs
-from rollout_train.recorder import Epoch
+from rollout_train.recorder import Segment
 
 POLICY = "policy"
 """The model slot an observation's reward belongs to: the one an agent acts through."""
@@ -38,10 +38,10 @@ class Outcome(StrEnum):
 
 
 @dataclass(frozen=True)
-class Trace:
-    """One model slot's part of an episode."""
+class Trajectory:
+    """What one model slot's rollout leaves to train on: its segments, and its rewards."""
 
-    epochs: list[Epoch]
+    segments: list[Segment]
     rewards: Mapping[str, float]
     """By key; a program that assigns one reward uses the key `default`."""
 
@@ -67,12 +67,16 @@ class Episode:
     read the three entries training knows about."""
     excluded: str | None = None
     """Why the program asked for the run to be left out of training, if it did."""
-    traces: Mapping[str, Trace] = field(default_factory=dict[str, Trace])
+    trajectories: Mapping[str, Trajectory] = field(default_factory=dict[str, Trajectory])
 
     @property
     def reward(self) -> float:
         """The mean of the slots' rewards (a team that is rewarded together has one reward)."""
-        return sum(trace.reward for trace in self.traces.values()) / len(self.traces) if self.traces else 0.0
+        return (
+            sum(trajectory.reward for trajectory in self.trajectories.values()) / len(self.trajectories)
+            if self.trajectories
+            else 0.0
+        )
 
     @property
     def trainable(self) -> bool:
@@ -97,11 +101,11 @@ class Episode:
 
 @dataclass(frozen=True)
 class Record:
-    """An episode as it is logged and sent: everything but its traces, and where those and its events are kept."""
+    """An episode as it is logged and sent: everything but its trajectories, and where those and its events are kept."""
 
     episode: Episode
-    """With no epochs in its traces: their rewards only."""
-    traces: BlobReference | None = None
+    """With no segments in its trajectories: their rewards only."""
+    trajectories: BlobReference | None = None
     events: BlobReference | None = None
     sampled: Mapping[str, int] = field(default_factory=dict[str, int])
     """Tokens the policy sampled, by model slot."""
@@ -115,35 +119,41 @@ class Record:
 
 
 _RECORD = TypeAdapter(Record)
-_EPOCHS = TypeAdapter(dict[str, list[Epoch]])
+_SEGMENTS = TypeAdapter(dict[str, list[Segment]])
 COMPRESSED = "application/x-xz"
-"""Blobs are JSON, compressed: an episode's sequences repeat their prompts, and shrink to a few percent."""
+"""Blobs are JSON, compressed: an episode's segments repeat their prompts, and shrink to a few percent."""
 
 
 async def stored(episode: Episode, events: Sequence[RunEvent], blobs: Blobs) -> Record:
-    """Keep an episode's traces and its run's events in `blobs`; returns the record that names them."""
-    epochs = {slot: trace.epochs for slot, trace in episode.traces.items()}
+    """Keep an episode's trajectories and its run's events in `blobs`; returns the record that names them."""
+    segments = {slot: trajectory.segments for slot, trajectory in episode.trajectories.items()}
     lines = "".join(event.model_dump_json() + "\n" for event in events).encode()
-    traces, kept = await asyncio.gather(
-        asyncio.to_thread(lzma.compress, _EPOCHS.dump_json(epochs), preset=1),
+    trajectories, kept = await asyncio.gather(
+        asyncio.to_thread(lzma.compress, _SEGMENTS.dump_json(segments), preset=1),
         asyncio.to_thread(lzma.compress, lines, preset=1),
     )
     return Record(
-        episode=_without_epochs(episode),
-        traces=await blobs.put(traces, COMPRESSED),
+        episode=_without_segments(episode),
+        trajectories=await blobs.put(trajectories, COMPRESSED),
         events=await blobs.put(kept, COMPRESSED),
-        sampled={slot: sum(epoch.sampled for epoch in trace.epochs) for slot, trace in episode.traces.items()},
+        sampled={
+            slot: sum(segment.sampled for segment in trajectory.segments)
+            for slot, trajectory in episode.trajectories.items()
+        },
     )
 
 
 async def loaded(record: Record, blobs: Blobs) -> Episode:
-    """The episode a record names, with its traces read back from `blobs`."""
-    if record.traces is None:
+    """The episode a record names, with its trajectories read back from `blobs`."""
+    if record.trajectories is None:
         return record.episode
-    packed = await blobs.read(record.traces)
-    epochs = _EPOCHS.validate_json(await asyncio.to_thread(lzma.decompress, packed))
-    traces = {slot: Trace(epochs.get(slot, []), trace.rewards) for slot, trace in record.episode.traces.items()}
-    return replace(record.episode, traces=traces)
+    packed = await blobs.read(record.trajectories)
+    segments = _SEGMENTS.validate_json(await asyncio.to_thread(lzma.decompress, packed))
+    trajectories = {
+        slot: Trajectory(segments.get(slot, []), trajectory.rewards)
+        for slot, trajectory in record.episode.trajectories.items()
+    }
+    return replace(record.episode, trajectories=trajectories)
 
 
 async def events_of(record: Record, blobs: Blobs) -> list[RunEvent]:
@@ -154,8 +164,11 @@ async def events_of(record: Record, blobs: Blobs) -> list[RunEvent]:
     return [RunEvent.model_validate(json.loads(line)) for line in lines]
 
 
-def _without_epochs(episode: Episode) -> Episode:
-    return replace(episode, traces={slot: Trace([], trace.rewards) for slot, trace in episode.traces.items()})
+def _without_segments(episode: Episode) -> Episode:
+    return replace(
+        episode,
+        trajectories={slot: Trajectory([], trajectory.rewards) for slot, trajectory in episode.trajectories.items()},
+    )
 
 
 def rewards(events: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, dict[str, float]]:
@@ -177,7 +190,7 @@ def rewards(events: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, dict[s
 
 def assemble(
     events: Sequence[RunEvent],
-    epochs: Mapping[str, list[Epoch]],
+    segments: Mapping[str, list[Segment]],
     *,
     cursor: int,
     job: str,
@@ -208,6 +221,9 @@ def assemble(
             case _:
                 pass
     assigned = rewards(payloads)
-    traces = {slot: Trace(epochs.get(slot, []), assigned.get(slot, {})) for slot in dict.fromkeys([*epochs, *assigned])}
+    trajectories = {
+        slot: Trajectory(segments.get(slot, []), assigned.get(slot, {}))
+        for slot in dict.fromkeys([*segments, *assigned])
+    }
     run_id = events[0].run_id if events else ""
-    return Episode(cursor, job, ticket, run_id, labels, parameters, outcome, detail, info, excluded, traces)
+    return Episode(cursor, job, ticket, run_id, labels, parameters, outcome, detail, info, excluded, trajectories)

@@ -16,7 +16,7 @@ class LoraTrainer:
 
     def __init__(self, model: str, **settings: Any) -> None:
         self.settings = LoraSettings(**settings)
-        self.budget = Budget(self.settings.sequence_tokens, self.settings.sequences_per_step)
+        self.budget = Budget(self.settings.segment_tokens, self.settings.segments_per_step)
         self._process = TrainerProcess(model, self.settings)
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:

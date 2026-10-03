@@ -17,7 +17,7 @@ from rollout_train.monitor.system import DECIDED, ENDED, MADE, PLAYING, STEPPING
 from rollout_train.record import GROUPS, ITERATIONS, STEPS, scope, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import RolloutJobs
-from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trace
+from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
 from rollout_train.rollouts.jobs import EPISODES, INTERRUPTED, TICKETS
 from rollout_train.testing import plain_channel
 from tests.rollout_train.rollouts.games import Words
@@ -109,8 +109,10 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     def ended(cursor: int, run_id: str, detail: str | None = None) -> None:
         outcome = Outcome.CANCELLED if detail else Outcome.COMPLETED
         labels = {"episode": str(cursor), "ticket": "t_train-0001"}
-        traces = {"ada": Trace([], {"default": float(cursor)})}
-        episode = Episode(cursor, "train", "t_train-0001", run_id, labels, None, outcome, detail, traces=traces)
+        trajectories = {"ada": Trajectory([], {"default": float(cursor)})}
+        episode = Episode(
+            cursor, "train", "t_train-0001", run_id, labels, None, outcome, detail, trajectories=trajectories
+        )
         with (log / EPISODES).open("a") as file:
             file.write(json.dumps(Record(episode, sampled={"ada": 40}).to_json()) + "\n")
 
@@ -144,7 +146,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
         "policy": "miner",
         "parent": None,
         "number": 1,
-        "sequences": 8,
+        "segments": 8,
         "batch": {"uri": "…"},
         "seed": 1,
     }

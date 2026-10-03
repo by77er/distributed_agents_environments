@@ -74,17 +74,17 @@ A job given a `log` directory keeps every episode, from the moment its run ends.
 
 | Kept | Where | What |
 |---|---|---|
-| A [`Record`](../../guide/reference.md#record) per episode | one line of `log/JOB/episodes.jsonl` | Everything about the episode but its token sequences: labels, outcome, result, rewards, tokens sampled by slot. It names two blobs |
-| The traces | a blob | Each slot's sequences, spans and logprobs |
+| A [`Record`](../../guide/reference.md#record) per episode | one line of `log/JOB/episodes.jsonl` | Everything about the episode but its trajectories' segments: labels, outcome, result, rewards, tokens sampled by slot. It names two blobs |
+| The trajectories | a blob | Each slot's segments, spans and logprobs |
 | The run's events | a blob | Its tool calls and their results, observations and rewards, as the runner recorded them |
 | What was asked for | one line of `log/JOB/tickets.jsonl` per ticket | The row, the labels and the count, as they were asked |
 | How far the caller got | `log/JOB/acknowledged` | The cursor acknowledged |
 
 - **Nothing is deleted.** Acknowledging records the caller's cursor and frees the job's memory. `job.episodes(cursor)`
-  reads the log from any cursor, traces and all, so earlier episodes can be trained on again.
+  reads the log from any cursor, trajectories and all, so earlier episodes can be trained on again.
 - **Blobs** go to the [`Blobs`](../../guide/reference.md#blobs) store the jobs are given, or to files under
   `log/blobs`. They are JSON, compressed. How long they are kept is the store's business.
-- **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trace can be
+- **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trajectory can be
   joined to what the action it sampled did. `events_of(record, blobs)` reads the events.
 - **A job started again runs what it still owes.** A ticket some of whose runs have no episode gets those runs
   again, from the same row. A run the job itself cut short by closing is in the log as a cancelled episode whose
@@ -95,7 +95,7 @@ A job given a `log` directory keeps every episode, from the moment its run ends.
 
 `RolloutClient` polls. A read of a ticket or of the stream waits on the server for news, up to a `wait` in seconds,
 and then answers with what there is. The routes are listed in `rollout_train.rollouts.service`. Episodes cross as
-their records, and the client reads their traces from the blob store, which both sides share. Jobs served over HTTP
+their records, and the client reads their trajectories from the blob store, which both sides share. Jobs served over HTTP
 therefore need a log.
 
 ## Catalog

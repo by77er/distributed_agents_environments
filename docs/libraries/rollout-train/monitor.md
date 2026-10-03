@@ -42,7 +42,7 @@ lists its episodes, and an open episode its rollouts. What is folded is remember
 | Episodes outside a run | `#/episodes` | runs in the feed that no training run asked for: evaluations, tests, programs run by hand |
 
 An episode whose feed file has been pruned is read back from the events its job kept in the blob store: its replies
-and tool calls are there, and what each model was sent is not (it is kept as tokens in the traces). A grid of single
+and tool calls are there, and what each model was sent is not (it is kept as tokens in the trajectories). A grid of single
 characters in what a model sees (a map) is drawn with its symbols colored. An episode's reward is summed as the
 trainer sums it ([rewards](episodes.md#rewards)).
 

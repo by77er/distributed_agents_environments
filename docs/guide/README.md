@@ -50,7 +50,7 @@ tagged `python fragment` shows a shape and is not run. Every profile in a `toml`
 | **Model slot** | A named model a task uses. The agent acts through `policy`; tasks may declare others. |
 | **Model endpoint** | What serves a model slot: a recorder, an API adapter, or a scripted endpoint in tests. |
 | **Channel** | A trainable policy being served, by name. A binding names one for a model slot; training publishes weights to it. |
-| **Episode** | A finished run as training sees it: labels, outcome, result, and each slot's token sequences with logprobs. |
+| **Episode** | A finished run as training sees it: labels, outcome, result, and each slot's trajectory: its segments, with logprobs. |
 | **Catalog** | What an environment offers to train on: rows, easiest first, and how to draw a start of one. |
 | **Effect** | An operation that leaves task or agent code, such as a model sample. It has a stable `effect_id`. |
 | **Run event** | A typed record of something that happened in a run, in a gapless sequence. |
@@ -68,7 +68,7 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 | `rollout.testing` | `rollout` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
 | `rollout_train.rollouts` | `rollout-train` | `Jobs`, `Job`, `Ticket`, `Episode`, `RolloutJobs`; `RolloutClient` in `rollout_train.rollouts.service` |
 | `rollout_train` | `rollout-train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `Colocated` |
-| `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Epoch`, `Renderer` |
+| `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Segment`, `Renderer` |
 | `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
 | `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |
 | `rollout_durable` | `rollout-durable` | `DurableRunner` |

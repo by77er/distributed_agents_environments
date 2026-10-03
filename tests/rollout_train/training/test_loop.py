@@ -35,7 +35,7 @@ from tests.rollout_train.rollouts.games import Words
 class Counting:
     """A trainer that trains nothing: it writes down what it was given and leaves files as a trainer would."""
 
-    budget = Budget(sequences=3)
+    budget = Budget(segments=3)
 
     def __init__(self, fails: int = 0) -> None:
         self.batches: list[list[Weighted]] = []
@@ -54,7 +54,7 @@ class Counting:
         (into / WEIGHTS / "adapter.bin").write_text(f"weights after {len(self.batches)} steps")
         (into / STATE).mkdir()
         (into / STATE / "optimizer.bin").write_text(f"moments after {len(self.batches)} steps")
-        return Step({"sequences": float(len(batch))})
+        return Step({"segments": float(len(batch))})
 
 
 class Notes(JobHooks):
@@ -131,16 +131,16 @@ async def test_the_loop_trains_groups_as_they_finish_and_goes_on_where_it_stoppe
     assert trainer.parents == [None, *[f"weights after {n} steps" for n in range(1, len(trained))]]
     for version, batch in zip(versions, trainer.batches, strict=True):
         assert version.state is not None and list(version.state.files) == ["optimizer.bin"]
-        assert version.batch is not None  # what it was trained on: each sequence by its place in the job's log
+        assert version.batch is not None  # what it was trained on: each segment by its place in the job's log
         listed = json.loads(await policies.blobs.read(version.batch))
         assert listed == [[weighted.source, weighted.advantage] for weighted in batch]
     for line, batch in zip(sorted(trained, key=lambda line: line.version or 0), trainer.batches, strict=True):
-        assert line.sequences_recorded == 4 and line.sequences_trained == len(batch) == 3  # the trainer's budget
+        assert line.segments_recorded == 4 and line.segments_trained == len(batch) == 3  # the trainer's budget
         if sum(line.rewards) >= 2:  # those that said it were as fast as each other
             assert line.notes["speed_bonus"] == [1.0 if reward else 0.0 for reward in line.rewards]
         word = line.task.removeprefix("say-")
         for weighted in batch:  # whoever said the word is above the group's mean, and the others below it
-            said = "".join(chr(token) for token in weighted.epoch.tokens[weighted.epoch.spans[0].start :]).strip()
+            said = "".join(chr(token) for token in weighted.segment.tokens[weighted.segment.spans[0].start :]).strip()
             assert (weighted.advantage > 0) == (said == word)
     assert notes.kinds.count("iteration") == 3 and notes.kinds.count("published") == len(trained)
     assert notes.kinds.count("episode") == 12
@@ -177,7 +177,7 @@ async def test_a_step_that_fails_leaves_the_weights_and_the_run_goes_on(tmp_path
         rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=3
     )
     await rollouts.close()
-    first, *rest = [line for line in await iterations(policies.ledger) if line.sequences_trained]
+    first, *rest = [line for line in await iterations(policies.ledger) if line.segments_trained]
     assert first.error == "out of memory" and first.update is None and first.version is None
     assert rest and all(line.update is not None for line in rest)
     assert [version.number for version in await policies.versions("words")] == list(range(1, len(rest) + 1))
@@ -197,5 +197,5 @@ async def test_the_job_keeps_every_episode_a_step_trained_on(tmp_path: Path) -> 
         cursor, slot, index = json.loads(await policies.blobs.read(version.batch))[0][0].split("/")
         (record,) = [record for record in job.after(0) if record.episode.cursor == int(cursor)]
         episode = await loaded(record, rollouts.blobs)  # the log still has it, long after it was acknowledged
-        assert episode.traces[slot].epochs[int(index)] == batch[0].epoch
+        assert episode.trajectories[slot].segments[int(index)] == batch[0].segment
     await rollouts.close()

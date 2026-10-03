@@ -34,22 +34,22 @@ class TrainerProcess:
         self._process: BaseProcess | None = None
 
     async def step(
-        self, sequences: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path
+        self, segments: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path
     ) -> dict[str, float]:
         """Train one step on the GPU (the engine must have freed it) from `parent`, and leave the adapter in
         `into/weights` and the optimizer's state in `into/state`."""
         async with self._lock:
             try:
-                return await asyncio.to_thread(self._run, list(sequences), seed, parent, into)
+                return await asyncio.to_thread(self._run, list(segments), seed, parent, into)
             except asyncio.CancelledError:  # whoever waited is gone: the step is not left running for nobody
                 if self._process is not None and self._process.is_alive():
                     self._process.terminate()
                 raise
 
-    def _run(self, sequences: list[Weighted], seed: int, parent: Checkpoint | None, into: Path) -> dict[str, float]:
+    def _run(self, segments: list[Weighted], seed: int, parent: Checkpoint | None, into: Path) -> dict[str, float]:
         context = multiprocessing.get_context("spawn")
         ours, child = context.Pipe()
-        arguments = (child, self.checkpoint, self.settings, sequences, seed, parent, into)
+        arguments = (child, self.checkpoint, self.settings, segments, seed, parent, into)
         process = context.Process(target=_step, args=arguments, name="trainer")
         process.start()
         self._process = process
@@ -77,7 +77,7 @@ def _step(
     connection: Connection,
     checkpoint: str,
     settings: LoraSettings,
-    sequences: list[Weighted],
+    segments: list[Weighted],
     seed: int,
     parent: Checkpoint | None,
     into: Path,
@@ -106,7 +106,7 @@ def _step(
             trainer.optimizer.load_state_dict(torch.load(parent.state / OPTIMIZER, map_location="cuda"))
             for group in trainer.optimizer.param_groups:  # (the saved state carries the rate it was saved with)
                 group["lr"] = settings.learning_rate
-        metrics: dict[str, Any] = trainer.step(sequences, seed=seed)
+        metrics: dict[str, Any] = trainer.step(segments, seed=seed)
         policy.save(into / WEIGHTS)
         (into / STATE).mkdir(parents=True, exist_ok=True)
         torch.save(trainer.optimizer.state_dict(), into / STATE / OPTIMIZER)

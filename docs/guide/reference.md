@@ -11,10 +11,10 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.catalog`](#rolloutcatalog)** — What an environment offers to be trained on. [`binding_for`](#binding_for), [`Catalog`](#catalog), [`Row`](#row)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
-- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Rollout jobs: rows in, episodes out, weights published. [`Episode`](#episode), [`events_of`](#events_of), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`loaded`](#loaded), [`Outcome`](#outcome), [`Record`](#record), [`Recorded`](#recorded), [`Refused`](#refused), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`RolloutTicket`](#rolloutticket), [`Status`](#status), [`stored`](#stored), [`Ticket`](#ticket), [`Trace`](#trace)
+- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Rollout jobs: rows in, episodes out, weights published. [`Episode`](#episode), [`events_of`](#events_of), [`Job`](#job), [`JobHooks`](#jobhooks), [`Jobs`](#jobs), [`loaded`](#loaded), [`Outcome`](#outcome), [`Record`](#record), [`Recorded`](#recorded), [`Refused`](#refused), [`RolloutJob`](#rolloutjob), [`RolloutJobs`](#rolloutjobs), [`RolloutTicket`](#rolloutticket), [`Status`](#status), [`stored`](#stored), [`Ticket`](#ticket), [`Trajectory`](#trajectory)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`complete_groups`](#complete_groups), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Iteration`](#iteration), [`iterations`](#iterations), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Policies`](#policies), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trainer`](#trainer), [`Version`](#version), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: policies being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
-- **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`Epoch`](#epoch), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over a job and its runs. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
@@ -2160,7 +2160,7 @@ class Episode
 | `detail` | `str \| None` | `None` |  |
 | `info` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the program reported as its result (`run.emit("result", {...})`). `solved`, `saturated` and `duration` read the three entries training knows about. |
 | `excluded` | `str \| None` | `None` | Why the program asked for the run to be left out of training, if it did. |
-| `traces` | `Mapping[str, Trace]` | `field(default_factory=dict[str, Trace])` |  |
+| `trajectories` | `Mapping[str, Trajectory]` | `field(default_factory=dict[str, Trajectory])` |  |
 
 **Methods**
 
@@ -2241,7 +2241,7 @@ served elsewhere.
 async def loaded(record: Record, blobs: Blobs) -> Episode
 ```
 
-The episode a record names, with its traces read back from `blobs`.
+The episode a record names, with its trajectories read back from `blobs`.
 
 ### `Outcome`
 
@@ -2265,12 +2265,12 @@ class Outcome(StrEnum)
 class Record
 ```
 
-An episode as it is logged and sent: everything but its traces, and where those and its events are kept.
+An episode as it is logged and sent: everything but its trajectories, and where those and its events are kept.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `episode` | `Episode` | required | With no epochs in its traces: their rewards only. |
-| `traces` | `BlobReference \| None` | `None` |  |
+| `episode` | `Episode` | required | With no segments in its trajectories: their rewards only. |
+| `trajectories` | `BlobReference \| None` | `None` |  |
 | `events` | `BlobReference \| None` | `None` |  |
 | `sampled` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | Tokens the policy sampled, by model slot. |
 
@@ -2287,11 +2287,11 @@ An episode as it is logged and sent: everything but its traces, and where those 
 class Recorded(Protocol)
 ```
 
-What a job needs of the recorder: each run's sequences, and somewhere to publish weights.
+What a job needs of the recorder: each run's segments, and somewhere to publish weights.
 
 **Methods**
 
-- `def sessions(self, run_id: str) -> dict[str, list[Epoch]]`
+- `def sessions(self, run_id: str) -> dict[str, list[Segment]]`
 - `def forget(self, run_id: str) -> None`
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int`
 
@@ -2323,7 +2323,7 @@ A job over a runner. Created by `RolloutJobs.start`.
 - `async def news(self, cursor: int, seconds: float) -> bool` — Wait up to `seconds` for an episode after `cursor`; False once the job is closed and none is left.
 - `def ticket(self, ticket: str) -> RolloutTicket` — A ticket by its id (for a caller that holds only the id), until its episodes are acknowledged.
 - `def after(self, cursor: int) -> list[Record]` — The records after `cursor` that are in the log now.
-- `async def episode(self, record: Record) -> Episode` — The episode a record of this job's log names, with its traces.
+- `async def episode(self, record: Record) -> Episode` — The episode a record of this job's log names, with its trajectories.
 - `async def acknowledge(self, cursor: int) -> None`
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int`
 - `async def note(self, kind: str, payload: Mapping[str, JsonValue]) -> None`
@@ -2340,7 +2340,7 @@ class RolloutJobs
 ```
 
 Starts jobs on a runner. `log` is where each job keeps its log (under `log/JOB`), so that every episode
-outlives the process and a caller that stops can go on from its cursor; the episodes' traces and events go to
+outlives the process and a caller that stops can go on from its cursor; the episodes' trajectories and events go to
 `blobs` (by default a store in files under `log/blobs`). `guard` is called before runs are admitted and raises
 to refuse them (a machine out of memory, say).
 
@@ -2401,7 +2401,7 @@ class Status
 async def stored(episode: Episode, events: Sequence[RunEvent], blobs: Blobs) -> Record
 ```
 
-Keep an episode's traces and its run's events in `blobs`; returns the record that names them.
+Keep an episode's trajectories and its run's events in `blobs`; returns the record that names them.
 
 ### `Ticket`
 
@@ -2420,19 +2420,19 @@ class Ticket(Protocol)
 - `async def episodes(self) -> list[Episode]` — The ticket's episodes, once every one of its runs has ended (in the order they ended). Raises `Refused`
   if the job would not run it.
 
-### `Trace`
+### `Trajectory`
 
 *class* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
 ```python
-class Trace
+class Trajectory
 ```
 
-One model slot's part of an episode.
+What one model slot's rollout leaves to train on: its segments, and its rewards.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `epochs` | `list[Epoch]` | required |  |
+| `segments` | `list[Segment]` | required |  |
 | `rewards` | `Mapping[str, float]` | required | By key; a program that assigns one reward uses the key `default`. |
 
 **Methods**
@@ -2470,7 +2470,7 @@ What an algorithm makes of a group of episodes.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `sequences` | `Sequence[Weighted]` | `()` | What to train on. |
+| `segments` | `Sequence[Weighted]` | `()` | What to train on. |
 | `skipped` | `str \| None` | `None` | Why there is nothing to train on, if there is not. |
 | `notes` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the algorithm wants logged with the group. |
 
@@ -2484,8 +2484,8 @@ class Budget
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `sequence_tokens` | `int \| None` | `None` | The longest sequence the trainer can train on (None: any). |
-| `sequences` | `int \| None` | `None` | How many sequences a step can afford (None: any number). |
+| `segment_tokens` | `int \| None` | `None` | The longest segment the trainer can train on (None: any). |
+| `segments` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
 
 ### `Checkpoint`
 
@@ -2631,7 +2631,7 @@ class Grpo
 
 **Methods**
 
-- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch` — The sequences of the group's episodes that are fit to train on (completed, and not excluded), each with
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
   its episode's advantage.
 
 ### `Iteration`
@@ -2656,8 +2656,8 @@ class Iteration
 | `failed` | `int` | `0` | Episodes that did not complete, or asked to be left out. |
 | `failures` | `list[str]` | `field(default_factory=list[str])` |  |
 | `notes` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the algorithm said of the group. |
-| `sequences_recorded` | `int` | `0` |  |
-| `sequences_trained` | `int` | `0` |  |
+| `segments_recorded` | `int` | `0` |  |
+| `segments_trained` | `int` | `0` |  |
 | `update` | `Mapping[str, float] \| None` | `None` | The trainer's statistics, if the group was trained on. |
 | `skipped` | `str \| None` | `None` | Why the group was not trained on, if the algorithm found nothing to train on. |
 | `error` | `str \| None` | `None` | What went wrong, if the trainer's step failed. |
@@ -2809,7 +2809,7 @@ class Version
 | `weights` | `Manifest` | required |  |
 | `parent` | `str \| None` | `None` | The version it was trained from, by name: of this policy, or of another (a fork). None: from the base. |
 | `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
-| `batch` | `BlobReference \| None` | `None` | What it was trained on: the sequences, each as its place in a job's log and its advantage. |
+| `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its place in a job's log and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 
@@ -2825,13 +2825,13 @@ class Version
 class Weighted
 ```
 
-A sequence to train on, and its advantage: every token the policy sampled in it counts by that much.
+A segment to train on, and its advantage: every token the policy sampled in it counts by that much.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `epoch` | `Epoch` | required |  |
+| `segment` | `Segment` | required |  |
 | `advantage` | `float` | required |  |
-| `source` | `str` | `''` | Where the sequence is from, for the record of what a step trained on: `cursor/slot/index` in the job's log. |
+| `source` | `str` | `''` | Where the segment is from, for the record of what a step trained on: `cursor/slot/index` in the job's log. |
 
 ## `rollout_train.inference`
 
@@ -2949,27 +2949,6 @@ Renders with the tokenizer's chat template; parses with a family's tool-call and
 - `def thinking_end_token_ids(self) -> list[int]`
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message`
 
-### `Epoch`
-
-*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
-
-```python
-class Epoch
-```
-
-One token sequence of a session, as the policy saw and continued it.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `tokens` | `list[int]` | required |  |
-| `spans` | `list[Span]` | required |  |
-| `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
-| `channel` | `str` | `''` | The channel that sampled them. Its policy's versions are what the spans' `version`s count. |
-
-**Methods**
-
-- `@property def sampled(self) -> int`
-
 ### `JsonToolCalls`
 
 *class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
@@ -3023,8 +3002,8 @@ class Recorder
 **Methods**
 
 - `def endpoint(self, binding: RecordedModel) -> 'RecordedEndpoint'`
-- `def export(self, session_id: str) -> list[Epoch]` — The session's sequences, oldest first (see the module's description).
-- `def sessions(self, run_id: str) -> dict[str, list[Epoch]]` — What each model slot of a run exports, by slot.
+- `def export(self, session_id: str) -> list[Segment]` — The session's segments, oldest first (see the module's description).
+- `def sessions(self, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run exports, by slot.
 - `def forget(self, run_id: str) -> None`
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel; returns the version they are served as.
 - `def served(self, key: str) -> tuple[str, ModelEndpoint] | None` — The session a harness's key names, and the endpoint that samples for it.
@@ -3050,6 +3029,27 @@ class Renderer(Protocol)
 - `def thinking_end_token_ids(self) -> list[int]` — Tokens that end thinking (to stop a thinking phase on), or none if it is not a single token.
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message` — A sampled turn as a canonical assistant message.
 
+### `Segment`
+
+*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+
+```python
+class Segment
+```
+
+A piece of a session's trajectory: a token sequence that only grew, as the policy saw and continued it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tokens` | `list[int]` | required |  |
+| `spans` | `list[Span]` | required |  |
+| `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
+| `channel` | `str` | `''` | The channel that sampled them. Its policy's versions are what the spans' `version`s count. |
+
+**Methods**
+
+- `@property def sampled(self) -> int`
+
 ### `Span`
 
 *class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
@@ -3058,7 +3058,7 @@ class Renderer(Protocol)
 class Span
 ```
 
-Tokens `start` to `end` (exclusive) of an epoch were sampled by the policy, at weights `version`.
+Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -3332,7 +3332,7 @@ class PlainRenderer
 
 A token format for tests: each message is `role: text` on a line, a tool call is `call NAME {json}`, and a
 turn ends with the line. A reply renders back exactly as it was sampled, so a conversation that only grows is
-one sequence.
+one segment.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -3556,11 +3556,11 @@ class LoraSettings
 | `learning_rate` | `float` | `5e-05` |  |
 | `clip_low` | `float` | `0.2` |  |
 | `clip_high` | `float` | `0.28` | The probability ratio is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher). |
-| `tokens_per_step` | `int` | `4096` | Sampled tokens per optimizer step (gradients accumulate over sequences until then). Adam moves a weight by at most the learning rate a step, so how far an update goes is set by how many steps its tokens make. |
-| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far (in nats per token, estimated on the sampled tokens) beyond where the first minibatch found it. The first minibatch's value is the floor: the engine's and the trainer's numerical difference, and how stale the sequences are. |
+| `tokens_per_step` | `int` | `4096` | Sampled tokens per optimizer step (gradients accumulate over segments until then). Adam moves a weight by at most the learning rate a step, so how far an update goes is set by how many steps its tokens make. |
+| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far (in nats per token, estimated on the sampled tokens) beyond where the first minibatch found it. The first minibatch's value is the floor: the engine's and the trainer's numerical difference, and how stale the segments are. |
 | `max_gradient_norm` | `float` | `1.0` |  |
-| `sequence_tokens` | `int \| None` | `None` | The longest sequence a step can hold on its accelerator (None: any). Longer ones are left out and counted (`sequences_too_long`): one too long would end or stall the whole step. Leaving sequences out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
-| `sequences_per_step` | `int \| None` | `None` | How many sequences a step can afford (None: any number). |
+| `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
+| `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
 
 **Methods**
 

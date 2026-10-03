@@ -13,7 +13,7 @@ address = run.model.address()          # ModelAddress(base_url, api_key, model)
 ```
 
 What the harness samples there is recorded for the run's slot like any other sample, reaches the runner's hooks, and
-ends up in the episode's trace.
+ends up in the episode's trajectory.
 
 | Path | |
 |---|---|

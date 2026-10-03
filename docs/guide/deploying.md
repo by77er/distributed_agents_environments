@@ -26,8 +26,8 @@ channel = "policy"                            # the channel that serves the poli
 colocated = true                              # it shares the engines' GPU: they sleep while it steps
 rank = 32
 learning_rate = 5e-5
-sequence_tokens = 8000                        # the longest turn it can train on: its channel takes it as its limit
-sequences_per_step = 384
+segment_tokens = 8000                        # the longest turn it can train on: its channel takes it as its limit
+segments_per_step = 384
 
 [tools]
 minecraft = "minecraft_swarm.worlds:tools"    # made in this process by `tools(directory)`; or "http://worlds:8700"
@@ -55,7 +55,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 |---|---|---|
 | `directory` | Where the run's state is kept. `rollout train --directory` replaces it: one profile, many runs | |
 | `channels` | Which model each policy is, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
-| `trainer` | What trains which channel, and its settings. The longest sequence it can train on becomes that channel's longest turn | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
+| `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the rollout service and the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listen, and the URL others reach them at | A training loop elsewhere connects with `RolloutClient(url)` |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
@@ -95,7 +95,7 @@ async with Profile.load(Path("profile.toml")).open() as platform:
 ```
 
 Opening starts, in order: the trainer; each channel's engines; the channels, the trained one with the trainer's
-longest sequence as its longest turn and the trainer's latest adapter published to it; the recorder; the monitor's
+longest segment as its longest turn and the trainer's latest adapter published to it; the recorder; the monitor's
 feed in `directory/feed`; the tool sets; the runner; the rollout jobs. A colocated trainer is wrapped in
 [`Colocated`](reference.md#colocated). With `serve`, the rollout service and the endpoint for harnesses listen there.
 Leaving the block stops all of it in reverse, also when starting fails half way.

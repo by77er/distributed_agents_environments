@@ -1,7 +1,7 @@
 """Rollouts: run a task's rows at scale and read the finished episodes as a stream
 (docs/libraries/rollout-train/rollouts.md)."""
 
-from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trace, events_of, loaded, stored
+from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory, events_of, loaded, stored
 from rollout_train.rollouts.jobs import (
     Job,
     JobHooks,
@@ -29,7 +29,7 @@ __all__ = [
     "RolloutTicket",
     "Status",
     "Ticket",
-    "Trace",
+    "Trajectory",
     "events_of",
     "loaded",
     "stored",

@@ -2,7 +2,7 @@
 
 `create_app(jobs)` serves jobs that run where the runner and the recorder are; `RolloutClient(url, blobs)` is what
 a trainer elsewhere holds. Nothing in a training loop written against `Jobs` says which one it has. Episodes cross
-as their records; their traces are read from the blob store both sides share.
+as their records; their trajectories are read from the blob store both sides share.
 
     POST /jobs                                   start a job                    → {"job": id}
     POST /jobs/{job}/runs                        queue runs of a row            → {"ticket": id}

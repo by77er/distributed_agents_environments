@@ -275,7 +275,7 @@ system memory. What each part is, and what it measures on that card, is on its o
 
 Four agents take a turn in about 6 s. The thinking budget (`thinking_tokens`) is wide enough to be met rarely: on
 this environment's observations the model's thoughts run to a median of 530 tokens and a 95th percentile of 820. A
-tool call takes about 40 tokens. No turn is longer than the trainer's `sequence_tokens`.
+tool call takes about 40 tokens. No turn is longer than the trainer's `segment_tokens`.
 
 Every episode of a group runs on one world seed and one layout, on a server of its own. A group's turns may be an
 update or two old when it is trained on, and a straggler plays on under newer weights; during an update every

@@ -76,8 +76,8 @@ def _statistics(rewards: Sequence[float]) -> str:
 
 def _update(line: Iteration) -> str:
     update = line.update or {}
-    of = f" of {line.sequences_recorded}" if line.sequences_recorded else ""
-    parts = [f"{line.sequences_trained}{of} sequences, {update.get('tokens', 0):g} sampled tokens"]
+    of = f" of {line.segments_recorded}" if line.segments_recorded else ""
+    parts = [f"{line.segments_trained}{of} segments, {update.get('tokens', 0):g} sampled tokens"]
     if "kl_moved" in update:
         parts.append(f"moved the policy by KL ≈ {update['kl_moved']:.4f} (floor {update.get('kl_floor', 0.0):.4f})")
         parts.append(f"{update.get('optimizer_steps', 0):g} steps")

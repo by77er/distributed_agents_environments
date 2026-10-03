@@ -1,7 +1,7 @@
 # Three ways in
 
 Three people use this system, and each has one surface. They meet in two places only: the **session** (how anything
-gets a model) and the **episode** (the labelled trace that comes out).
+gets a model) and the **episode** (the labelled trajectory that comes out).
 
 | You are | You write | You are given | You never see | You import |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ await job.publish("policy", step.adapter, step.path)
 - A **job** runs rows and keeps a log of finished **episodes**, read with a cursor (`job.episodes(cursor)`) or per
   ticket. Reading while runs are in flight is all asynchronous training needs: every sampled token carries the
   weights version it was sampled at.
-- An **episode** has its labels, its outcome, its result, and for each model slot the token sequences the policy saw
+- An **episode** has its labels, its outcome, its result, and for each model slot its trajectory: the segments (token sequences) the policy saw
   and continued, with the logprobs it sampled them at.
 - `rollout_train.train` is the loop most runs use: a curriculum over a catalog, groups, a step per group.
 - Watching: `job.status()`, the job's own events (tickets, episodes, published weights, your notes), and each run's

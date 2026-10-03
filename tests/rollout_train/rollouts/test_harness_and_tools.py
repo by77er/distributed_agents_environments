@@ -72,8 +72,8 @@ async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded
     job = await jobs.start(program=program, binding=binding_of(program), in_flight=4)
     won, lost = await (await job.run({"word": "yes"})).episodes(), await (await job.run({"word": "no"})).episodes()
     assert (won[0].reward, lost[0].reward) == (1.0, 0.0) and won[0].info == {"solved": True}
-    (epoch,) = won[0].traces["policy"].epochs  # what the harness sampled is the slot's trace
-    assert "".join(chr(token) for token in epoch.tokens) == "user: Say the word.\nassistant: yes\n"
+    (segment,) = won[0].trajectories["policy"].segments  # what the harness sampled is the slot's trajectory
+    assert "".join(chr(token) for token in segment.tokens) == "user: Say the word.\nassistant: yes\n"
     assert len(seen.samples) == 2 and seen.samples[0].run_id == won[0].run_id and seen.samples[0].slot == "policy"
     await jobs.close()
 

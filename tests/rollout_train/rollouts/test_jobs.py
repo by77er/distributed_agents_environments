@@ -47,9 +47,9 @@ async def test_a_ticket_yields_its_episodes_with_labels_rewards_results_and_what
     assert second.labels["group"] == "g1" and second.labels["task"] == "say-yes" and second.ticket == ticket.id
     assert second.info == {"solved": True, "saturated": True, "duration": 1} and second.parameters == {"word": "yes"}
     assert second.trainable and {first.cursor, second.cursor} == {1, 2}
-    (epoch,) = second.traces["policy"].epochs
-    text = "".join(chr(token) for token in epoch.tokens)
-    assert text == "user: Say the word.\nassistant: yes\n" and text[epoch.spans[0].start :] == "yes\n"
+    (segment,) = second.trajectories["policy"].segments
+    text = "".join(chr(token) for token in segment.tokens)
+    assert text == "user: Say the word.\nassistant: yes\n" and text[segment.spans[0].start :] == "yes\n"
     status = await job.status()
     assert (status.queued, status.running, status.finished, status.acknowledged) == (0, 0, 2, 0)
     kinds = [event["kind"] for event in seen.events]
@@ -132,7 +132,7 @@ async def test_weights_published_through_the_job_mark_what_is_sampled_afterwards
     assert await job.publish("policy", "step-1", "/adapters/step-1") == 1
     await job.note("update", {"kl_moved": 0.01})
     (after,) = await (await job.run({"word": "yes"})).episodes()
-    versions = [episode.traces["policy"].epochs[0].spans[0].version for episode in (before, after)]
+    versions = [episode.trajectories["policy"].segments[0].spans[0].version for episode in (before, after)]
     assert versions == [0, 1] and recorder.channels["policy"].adapter == "step-1"
     assert [event["kind"] for event in seen.events if event["kind"] in ("published", "update")] == [
         "published",
@@ -161,12 +161,12 @@ async def test_a_job_with_a_log_keeps_every_episode_and_can_be_read_again_from_a
     (later,) = [episode async for episode in resumed.episodes(2)]
     assert later == episodes[2]
 
-    # A record also names its run's events, which a span's effect joins its trace to.
+    # A record also names its run's events, which a span's effect joins its trajectory to.
     assert again.blobs is not None
     record = resumed.after(2)[0]
     events = await events_of(record, again.blobs)
     assert events[0].type is RunEventType.RUN_CREATED and events[-1].type is RunEventType.RUN_COMPLETED
-    (span,) = later.traces["policy"].epochs[0].spans
+    (span,) = later.trajectories["policy"].segments[0].spans
     sampled = [event for event in events if event.type is RunEventType.EFFECT_REQUESTED]
     assert span.effect_id in {str(event.payload["effect_id"]) for event in sampled}  # type: ignore[index]
     assert record.sampled == {"policy": span.end - span.start}

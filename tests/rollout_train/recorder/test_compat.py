@@ -56,9 +56,9 @@ async def test_a_harness_plays_a_whole_exchange_over_chat_completions_and_it_is_
     assert second["choices"][0]["message"] == {"role": "assistant", "content": "It was five."}
     assert second["choices"][0]["finish_reason"] == "stop"
 
-    (epoch,) = recorder.export("r_1/policy")  # the harness only ever appended: one sequence, two sampled spans
-    text = "".join(chr(token) for token in epoch.tokens)
-    assert [text[span.start : span.end] for span in epoch.spans] == ['call guess {"n": 5}\n', "It was five.\n"]
+    (segment,) = recorder.export("r_1/policy")  # the harness only ever appended: one segment, two sampled spans
+    text = "".join(chr(token) for token in segment.tokens)
+    assert [text[span.start : span.end] for span in segment.spans] == ['call guess {"n": 5}\n', "It was five.\n"]
     assert "tool: Right.\n" in text and text.startswith("tools: guess\nsystem: Guess the number.\nuser: Go.\n")
     assert (await client.get("/models")).json()["data"] == [{"id": "policy", "object": "model"}]
 

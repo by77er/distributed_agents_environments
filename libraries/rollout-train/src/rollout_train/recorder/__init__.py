@@ -2,12 +2,12 @@
 (docs/libraries/rollout-train/recorder.md).
 
 - `renderers`: what a model family's token format must provide, and the pieces most are built from.
-- `recorder`: `Recorder` serves a run's recorded bindings; a session exports `Epoch`s (token sequences with the
+- `recorder`: `Recorder` serves a run's recorded bindings; a session exports `Segment`s (token sequences with the
   spans the policy sampled, their logprobs and weights versions).
 - `compat`: the recorder over HTTP, for harnesses that bring their own loop.
 """
 
-from rollout_train.recorder.recorder import Epoch, RecordedEndpoint, Recorder, Span
+from rollout_train.recorder.recorder import RecordedEndpoint, Recorder, Segment, Span
 from rollout_train.recorder.renderers import (
     ChatTemplateRenderer,
     JsonToolCalls,
@@ -19,11 +19,11 @@ from rollout_train.recorder.renderers import (
 
 __all__ = [
     "ChatTemplateRenderer",
-    "Epoch",
     "JsonToolCalls",
     "RecordedEndpoint",
     "Recorder",
     "Renderer",
+    "Segment",
     "Span",
     "ThinkingFormat",
     "ToolCallFormat",

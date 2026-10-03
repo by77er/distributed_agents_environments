@@ -88,7 +88,7 @@ function stages(group) {
   }, h("span", {}, index === at ? says : name))));
 }
 const outcomeOf = line => line.update
-  ? { kind: "moved", text: `trained ${line.sequences_trained} of ${line.sequences_recorded} · ${line.update.optimizer_steps ?? "?"} steps · moved ${Number(line.update.kl_moved ?? 0).toFixed(4)}` }
+  ? { kind: "moved", text: `trained ${line.segments_trained} of ${line.segments_recorded} · ${line.update.optimizer_steps ?? "?"} steps · moved ${Number(line.update.kl_moved ?? 0).toFixed(4)}` }
   : line.error ? { kind: "bad", text: `step failed: ${line.error}` }
   : { kind: line.failed && !line.rewards.length ? "bad" : "still", text: line.skipped ?? "" };
 const dotsOf = line => h("span", { class: "dots" }, [...line.rewards.map((_, index) => h("i", { class: line.solved[index] ? "solved" : "unsolved" })),
@@ -307,7 +307,7 @@ function drawGroup(here) {
     kpi("Mean reward", rewards.length ? figure(mean(rewards)) : "–", rewards.length ? rewards.map(figure).join("  ") : "no episode has ended"),
     kpi("Solved", outcome ? `${outcome.solved.filter(Boolean).length} of ${outcome.solved.length}` : `${group.episodes.filter(each => each.solved).length} of ${group.count ?? "?"}`, outcome?.failed ? `${outcome.failed} failed` : ""),
     kpi("Played for", outcome ? span(outcome.rollout_seconds) : group.decided ? span(state.system.at - group.decided) : "–", group.decided ? `decided ${clock(group.decided)}` : ""),
-    kpi("Trained on", outcome?.update ? `${outcome.sequences_trained}` : "–", outcome ? `of ${outcome.sequences_recorded} sequences` : group.step ? `${group.step.sequences ?? "?"} sequences, stepping` : ""),
+    kpi("Trained on", outcome?.update ? `${outcome.segments_trained}` : "–", outcome ? `of ${outcome.segments_recorded} segments` : group.step ? `${group.step.segments ?? "?"} segments, stepping` : ""),
     kpi("Made", version ? versionOf(version.name) : group.step ? `${versionOf(group.step.makes)}…` : "–", group.step?.parent ? `from ${versionOf(group.step.parent)}` : ""));
   const episodes = group.episodes.length ? h("div", { class: "tiles" }, group.episodes.map(episode => {
     const info = episode.info ?? {};
@@ -327,10 +327,10 @@ function drawGroup(here) {
     metrics ? [pairs([
       ["version", version ? link(policyPlace(version.name.split("@")[0]), {}, h("b", {}, version.name)) : outcome?.adapter ?? "–"],
       ["from", version?.parent ?? group.step?.parent ?? "the base model"],
-      ...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "optimizer_steps", "tokens", "longest_sequence_tokens", "peak_gpu_gib"]
+      ...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
         .filter(key => metrics[key] !== undefined).map(key => [key.replaceAll("_", " "), figure(metrics[key])]),
       ["took", span(metrics.update_seconds ?? metrics.seconds)]])]
-      : group.step ? pairs([["makes", group.step.makes ?? "–"], ["from", group.step.parent ?? "the base model"], ["sequences", figure(group.step.sequences)],
+      : group.step ? pairs([["makes", group.step.makes ?? "–"], ["from", group.step.parent ?? "the base model"], ["segments", figure(group.step.segments)],
         ["decided", group.step.decided ? `${span(state.system.at - group.step.decided)} ago` : "–"]])
       : outcome?.skipped ? h("p", { class: "muted" }, outcome.skipped) : h("p", { class: "muted" }, "The group is still being played."));
   const start = card("Start", "what every episode of the group was given", pairs(Object.entries(group.parameters ?? {}).map(([key, value]) => [key, figure(value)])));
@@ -506,9 +506,9 @@ function drawPolicy(name) {
     kpi("Last step moved", versions.length ? figure(versions.at(-1).metrics.kl_moved) : "–", "KL from its parent")),
   card("How far each step moved the policy", "KL between a version and its parent", barChart(versions.map(version => version.metrics.kl_moved ?? 0),
     versions.map(version => versionOf(version.name)), width, 150, index => { const made = madeBy.get(versions[index].name); if (made) go(groupPlace(...made)); })),
-  card("Versions", "newest first", table([["version"], ["from"], ["made"], ["by"], ["sequences", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["size", "n"]],
+  card("Versions", "newest first", table([["version"], ["from"], ["made"], ["by"], ["segments", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["size", "n"]],
     newest.map(version => [{ text: versionOf(version.name), kind: "key" }, versionOf(version.parent), clock(version.made),
-      madeBy.has(version.name) ? `group #${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.sequences), figure(version.metrics.optimizer_steps),
+      madeBy.has(version.name) ? `group #${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.segments), figure(version.metrics.optimizer_steps),
       version.metrics.kl_moved?.toFixed(4), version.metrics.loss?.toFixed(3), span(version.metrics.update_seconds ?? version.metrics.seconds),
       bytes(version.weights.bytes + (version.state?.bytes ?? 0))]),
     newest.map(version => madeBy.has(version.name) ? () => go(groupPlace(...madeBy.get(version.name))) : null)))];

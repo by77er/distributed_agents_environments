@@ -45,7 +45,7 @@ and every action is one that can be taken twice.
 | Table | Written | Holds |
 |---|---|---|
 | `runs/RUN/groups` | before a group is asked for | the row, and the start every episode of the group is given |
-| `runs/RUN/steps` | before the trainer is called | the policy, the version the step starts from, the number of the one it will make, the batch (a blob) and how many sequences it has, the seed, when it was decided |
+| `runs/RUN/steps` | before the trainer is called | the policy, the version the step starts from, the number of the one it will make, the batch (a blob) and how many segments it has, the seed, when it was decided |
 | `runs/RUN/iterations` | last | how the group went and what was done with it: an [`Iteration`](../../guide/reference.md#iteration) |
 
 | It died | Started again, it |
@@ -72,7 +72,7 @@ What is redone: a step that was in progress, and the runs that were in flight if
 The loop asks two things of an [`Algorithm`](../../guide/reference.md#algorithm): how many episodes of one start it
 compares (`group_size`), and what to train on from a group's episodes (`batch`). `batch` is given the episodes of
 every outcome, the trainer's budget and a random number generator seeded by the group's number, and returns a
-[`Batch`](../../guide/reference.md#batch): the weighted sequences, or why there are none, and notes to log with the
+[`Batch`](../../guide/reference.md#batch): the weighted segments, or why there are none, and notes to log with the
 group. Another algorithm is passed as `train(..., algorithm=...)`.
 
 [`Grpo`](../../guide/reference.md#grpo), the default, is group-relative policy optimisation:
@@ -82,7 +82,7 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
 | Advantages | An episode's score minus its group's mean, with no division by the group's spread (Dr. GRPO). Every token the policy sampled in the episode gets it; with several model slots, every slot's, so a team is rewarded together. |
 | Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (DAPO). So is a group with fewer than two episodes fit to train on. |
 | The fastest of the saturated | Episodes that reached everything their task has to give earned the same; the one that took the least scores a point more, and episodes that tie for fastest all do. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. An episode that does not say its duration is not compared. `tie_break` turns this off. |
-| What is trained on | Every sequence of the episodes whose advantage is not zero, up to what the trainer can afford in a step (`Budget.sequences`). Beyond that, sequences are taken at even steps through the group, so that each episode and slot keeps its share, spread over its whole game. |
+| What is trained on | Every segment of the episodes whose advantage is not zero, up to what the trainer can afford in a step (`Budget.segments`). Beyond that, segments are taken at even steps through the group, so that each episode and slot keeps its share, spread over its whole game. |
 
 `complete_groups` gathers the episodes of a job's stream by a label, for a loop of your own that reads the stream
 rather than tickets.
@@ -111,12 +111,12 @@ rather than tickets.
 A [`Trainer`](../../guide/reference.md#trainer) takes a batch and makes new weights from given ones. It keeps
 nothing between steps that it cannot be given again, so any trainer can take any step of any policy.
 
-- **`budget`** ([`Budget`](../../guide/reference.md#budget)) is what the trainer can take: the longest sequence, and
-  how many sequences a step can afford. It comes from the trainer's hardware, and nothing above the trainer chooses
-  it. The algorithm selects within it, and a deployment makes the longest sequence its channel's longest turn
+- **`budget`** ([`Budget`](../../guide/reference.md#budget)) is what the trainer can take: the longest segment, and
+  how many segments a step can afford. It comes from the trainer's hardware, and nothing above the trainer chooses
+  it. The algorithm selects within it, and a deployment makes the longest segment its channel's longest turn
   ([limits](channels.md#limits)).
 - **`step(batch, seed=..., parent=..., into=...)`** trains on [`Weighted`](../../guide/reference.md#weighted)
-  sequences, starting from a [`Checkpoint`](../../guide/reference.md#checkpoint) (a version's files on this
+  segments, starting from a [`Checkpoint`](../../guide/reference.md#checkpoint) (a version's files on this
   machine; none means the base model). It leaves the new weights in `into/weights`, as engines load them, and what
   a later step starts from (an optimizer's state, say) in `into/state`. It returns its metrics.
 - **`StepFailed`** means the step produced no weights: the policy is as it was, and a later step may succeed.
@@ -141,7 +141,7 @@ table (`iterations(ledger, run)`).
 | given to a step that failed | `error`: the last line of what the step raised |
 
 Every line has the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
-failed and why, how many sequences were recorded and how many trained on, the algorithm's notes, and how many rows
+failed and why, how many segments were recorded and how many trained on, the algorithm's notes, and how many rows
 are unlocked.
 
 With the job's [log](rollouts.md#the-log) and the policy's [versions](policies.md), that is the whole run: every

@@ -99,7 +99,7 @@ class Characters:
 class PlainRenderer:
     """A token format for tests: each message is `role: text` on a line, a tool call is `call NAME {json}`, and a
     turn ends with the line. A reply renders back exactly as it was sampled, so a conversation that only grows is
-    one sequence."""
+    one segment."""
 
     name = "plain"
     thinking = None

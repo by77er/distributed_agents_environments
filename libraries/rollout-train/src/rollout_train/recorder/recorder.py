@@ -9,11 +9,11 @@ Thinking has a budget: a first phase samples until thinking closes or the budget
 (`max_output_tokens`): the answer's room comes first and thinking gets what is left, down to none (the block is closed
 before it starts).
 
-**What a session exports** (`Recorder.export`) is a list of `Epoch`s: token sequences with the spans the policy
+**What a session exports** (`Recorder.export`) is a list of `Segment`s: token sequences with the spans the policy
 sampled. A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues
-that turn's sequence: an append-only conversation is one sequence, however many turns it has, and is trained in one
+that turn's segment: an append-only conversation is one segment, however many turns it has, and is trained in one
 pass. A turn whose context was edited (a compaction, a chat template that drops earlier thinking, an observation
-replaced by a shorter form) begins a new sequence. A turn that repeats an earlier prompt exactly (a client's retry)
+replaced by a shorter form) begins a new segment. A turn that repeats an earlier prompt exactly (a client's retry)
 replaces it.
 
 **Harnesses that bring their own loop** reach a session over HTTP (`rollout_train.recorder.compat`): `address` gives the
@@ -46,7 +46,7 @@ SERVED_UNDER = "/v1"
 
 @dataclass(frozen=True)
 class Span:
-    """Tokens `start` to `end` (exclusive) of an epoch were sampled by the policy, at weights `version`."""
+    """Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version`."""
 
     start: int
     end: int
@@ -56,8 +56,8 @@ class Span:
 
 
 @dataclass(frozen=True)
-class Epoch:
-    """One token sequence of a session, as the policy saw and continued it."""
+class Segment:
+    """A piece of a session's trajectory: a token sequence that only grew, as the policy saw and continued it."""
 
     tokens: list[int]
     spans: list[Span]
@@ -98,20 +98,20 @@ class Recorder:
             raise ValueError(f"no recorded channel {binding.channel!r}")
         return RecordedEndpoint(self, channel, binding.sampling)
 
-    def export(self, session_id: str) -> list[Epoch]:
-        """The session's sequences, oldest first (see the module's description)."""
+    def export(self, session_id: str) -> list[Segment]:
+        """The session's segments, oldest first (see the module's description)."""
         turns = self._turns.get(session_id, [])
-        epochs: list[Epoch] = []
+        segments: list[Segment] = []
         dropped: set[int] = set()  # continued by a later turn, or retried
         for index, turn in enumerate(turns):
-            parent: Epoch | None = None
+            parent: Segment | None = None
             for earlier in range(index - 1, -1, -1):
                 if turns[earlier].prompt == turn.prompt:
                     dropped.add(earlier)
-                held = epochs[earlier].tokens
+                held = segments[earlier].tokens
                 size = len(held)
                 if size <= len(turn.prompt) and turn.prompt[size - 1] == held[-1] and list(turn.prompt[:size]) == held:
-                    parent = epochs[earlier]
+                    parent = segments[earlier]
                     dropped.add(earlier)
                     break
             spans = list(parent.spans) if parent else []
@@ -125,10 +125,10 @@ class Recorder:
                     start = None
             logprobs = list(parent.logprobs) if parent else []
             logprobs += [value for value, sampled in zip(turn.logprobs, turn.mask, strict=True) if sampled]
-            epochs.append(Epoch([*turn.prompt, *turn.completion], spans, logprobs, turn.channel))
-        return [epoch for index, epoch in enumerate(epochs) if index not in dropped and epoch.spans]
+            segments.append(Segment([*turn.prompt, *turn.completion], spans, logprobs, turn.channel))
+        return [segment for index, segment in enumerate(segments) if index not in dropped and segment.spans]
 
-    def sessions(self, run_id: str) -> dict[str, list[Epoch]]:
+    def sessions(self, run_id: str) -> dict[str, list[Segment]]:
         """What each model slot of a run exports, by slot."""
         of_run = [identity for identity in map(SessionIdentity.parse, self._turns) if identity.owner == run_id]
         return {identity.model_slot: self.export(str(identity)) for identity in of_run}

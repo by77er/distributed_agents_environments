@@ -414,7 +414,7 @@ class _JobLog:
         self.tickets: list[dict[str, Any]] = []
         self.episodes: list[dict[str, Any]] = []
         self.kept = 0
-        """Bytes of the episodes' traces and events in the blob store."""
+        """Bytes of the episodes' trajectories and events in the blob store."""
         self.sampled = 0
         self.written = 0.0
         self._tickets, self._episodes = Appended(directory / TICKETS), Appended(directory / EPISODES)
@@ -424,7 +424,7 @@ class _JobLog:
         for line in self._episodes.more():
             record = Record.from_json(line)
             episode = record.episode
-            self.kept += sum(blob.size for blob in (record.traces, record.events) if blob is not None)
+            self.kept += sum(blob.size for blob in (record.trajectories, record.events) if blob is not None)
             self.sampled += sum(record.sampled.values())
             self.episodes.append(
                 {
@@ -440,7 +440,7 @@ class _JobLog:
                     "solved": episode.solved,
                     "sampled": sum(record.sampled.values()),
                     "labels": dict(episode.labels),
-                    "slots": sorted(episode.traces),
+                    "slots": sorted(episode.trajectories),
                     "info": dict(episode.info),
                     "events": record.events.model_dump(mode="json") if record.events else None,
                 }

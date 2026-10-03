@@ -18,8 +18,8 @@ channel = "policy"
 colocated = true
 rank = 32
 learning_rate = 5e-5
-sequence_tokens = 8000           # peak 12.4 GiB at 8,000 tokens; past the card's memory a step crawls
-sequences_per_step = 384         # 4 to 8 s each: about half an hour a step
+segment_tokens = 8000           # peak 12.4 GiB at 8,000 tokens; past the card's memory a step crawls
+segments_per_step = 384         # 4 to 8 s each: about half an hour a step
 
 [tools]
 minecraft = "minecraft_swarm.worlds:tools"

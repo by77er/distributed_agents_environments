@@ -1,12 +1,12 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # (torch's annotations leave parts of autograd untyped.)
-"""The clipped policy-gradient step over weighted sequences.
+"""The clipped policy-gradient step over weighted segments.
 
 PPO's clipped objective against the behavior policy, the logprobs the engine recorded while sampling (as asynchronous
 RL does): one pass both corrects the engine/trainer mismatch and bounds each update. The clip is asymmetric (DAPO's
 clip-higher) and the loss is a token-level mean over each minibatch. No KL penalty; the pass stops early if the
 policy has moved further from the behavior policy than `max_kl`. Only tokens the policy sampled are trained on.
-The numbers are `LoraSettings`'; which sequences, and with what advantages, is the algorithm's business.
+The numbers are `LoraSettings`'; which segments, and with what advantages, is the algorithm's business.
 """
 
 import random
@@ -42,38 +42,38 @@ class ClippedPolicyGradient:
         self.minibatches: list[dict[str, float]] = []
         """What each minibatch of the last pass did, in order (`step` returns their totals)."""
 
-    def step(self, sequences: Sequence[Weighted], *, seed: int = 0) -> dict[str, float]:
-        """One pass over the sequences, in shuffled minibatches of about `tokens_per_step` sampled tokens."""
+    def step(self, segments: Sequence[Weighted], *, seed: int = 0) -> dict[str, float]:
+        """One pass over the segments, in shuffled minibatches of about `tokens_per_step` sampled tokens."""
         started = time.monotonic()
         settings = self.settings
-        longest = settings.sequence_tokens
-        order = [sequence for sequence in sequences if longest is None or len(sequence.epoch.tokens) <= longest]
-        too_long = len(sequences) - len(order)
+        longest = settings.segment_tokens
+        order = [weighted for weighted in segments if longest is None or len(weighted.segment.tokens) <= longest]
+        too_long = len(segments) - len(order)
         random.Random(seed).shuffle(order)
         batches = minibatches(order, settings.tokens_per_step)
         self.policy.model.train()
-        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0, "sequences": 0.0}
+        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0, "segments": 0.0}
         gradient_norms: list[float] = []
         divergences: list[float] = []  # of each minibatch that was stepped on, as it found the policy
         out_of_memory = 0
         stopped = False
         self.minibatches = []
         for batch in batches:
-            batch_tokens = sum(sequence.epoch.sampled for sequence in batch)
+            batch_tokens = sum(weighted.segment.sampled for weighted in batch)
             sums = dict.fromkeys(totals, 0.0)
             divergence = 0.0
             try:
-                for sequence in batch:
-                    epoch = sequence.epoch
-                    positions = [position for span in epoch.spans for position in range(span.start, span.end)]
+                for weighted in batch:
+                    segment = weighted.segment
+                    positions = [position for span in segment.spans for position in range(span.start, span.end)]
                     if not positions:
                         continue
-                    logprobs = self.policy.logprobs(epoch.tokens, positions)
-                    behavior = torch.tensor(epoch.logprobs, device=logprobs.device)
+                    logprobs = self.policy.logprobs(segment.tokens, positions)
+                    behavior = torch.tensor(segment.logprobs, device=logprobs.device)
                     if not bool(torch.isfinite(behavior).all()):  # (one NaN would make every weight NaN)
                         raise ValueError("a sampled token has no behavior logprob")
                     ratio = torch.exp(logprobs - behavior)
-                    advantage = torch.full_like(ratio, sequence.advantage)
+                    advantage = torch.full_like(ratio, weighted.advantage)
                     clipped = torch.clamp(ratio, 1 - settings.clip_low, 1 + settings.clip_high)
                     per_token = -torch.minimum(ratio * advantage, clipped * advantage)
                     (per_token.sum() / batch_tokens).backward()  # a token-level mean over the minibatch
@@ -83,9 +83,9 @@ class ClippedPolicyGradient:
                         sums["ratio"] += float(ratio.sum())
                         sums["mismatch"] += float((logprobs - behavior).abs().sum())
                         sums["tokens"] += len(positions)
-                        sums["sequences"] += 1
+                        sums["segments"] += 1
                         divergence += float((behavior - logprobs).sum())
-            except torch.OutOfMemoryError:  # a gradient with a sequence missing is not this minibatch's: drop it
+            except torch.OutOfMemoryError:  # a gradient with a segment missing is not this minibatch's: drop it
                 self.optimizer.zero_grad(set_to_none=True)
                 torch.cuda.empty_cache()
                 out_of_memory += 1
@@ -104,7 +104,7 @@ class ClippedPolicyGradient:
             gradient_norms.append(float(norm))
             self.minibatches.append(
                 {
-                    "sequences": sums["sequences"],
+                    "segments": sums["segments"],
                     "tokens": sums["tokens"],
                     "loss": sums["loss"] / sums["tokens"],
                     "clip_fraction": sums["clipped"] / sums["tokens"],
@@ -127,10 +127,10 @@ class ClippedPolicyGradient:
             "kl_moved": divergences[-1] - divergences[0] if divergences else 0.0,
             "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "tokens": totals["tokens"],
-            "sequences": totals["sequences"],
-            "sequences_given": float(len(sequences)),
-            "sequences_too_long": float(too_long),
-            "longest_sequence_tokens": float(max((len(sequence.epoch.tokens) for sequence in order), default=0)),
+            "segments": totals["segments"],
+            "segments_given": float(len(segments)),
+            "segments_too_long": float(too_long),
+            "longest_segment_tokens": float(max((len(weighted.segment.tokens) for weighted in order), default=0)),
             "optimizer_steps": float(len(gradient_norms)),
             "stopped_at_max_kl": float(stopped),
             "minibatches_out_of_memory": float(out_of_memory),
@@ -138,18 +138,18 @@ class ClippedPolicyGradient:
         }
 
 
-def minibatches(sequences: Sequence[Weighted], tokens_per_step: int) -> list[list[Weighted]]:
-    """The sequences in order, cut where a minibatch has reached `tokens_per_step` sampled tokens. A last minibatch
+def minibatches(segments: Sequence[Weighted], tokens_per_step: int) -> list[list[Weighted]]:
+    """The segments in order, cut where a minibatch has reached `tokens_per_step` sampled tokens. A last minibatch
     of less than half that joins the one before: Adam's step is as large for a handful of tokens as for a full
     minibatch."""
     batches: list[list[Weighted]] = [[]]
     counted = 0
-    for sequence in sequences:
+    for weighted in segments:
         if counted >= tokens_per_step:
             batches.append([])
             counted = 0
-        batches[-1].append(sequence)
-        counted += sequence.epoch.sampled
+        batches[-1].append(weighted)
+        counted += weighted.segment.sampled
     if len(batches) > 1 and counted < tokens_per_step / 2:
         batches[-2].extend(batches.pop())
     return [batch for batch in batches if batch]

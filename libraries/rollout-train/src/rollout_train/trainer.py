@@ -1,8 +1,8 @@
 """What training asks of a trainer, in terms that say nothing of where it runs or what it trains.
 
-An algorithm decides which sequences to train on and how much each should count (`Weighted`). A trainer takes a
+An algorithm decides which segments to train on and how much each should count (`Weighted`). A trainer takes a
 batch, moves the policy, and says where the new weights are (`Step`). It also says what it can take (`Budget`): the
-longest sequence, and how many a step can afford. Those come from its hardware, and nothing above it chooses them.
+longest segment, and how many a step can afford. Those come from its hardware, and nothing above it chooses them.
 """
 
 from collections.abc import Mapping, Sequence
@@ -10,25 +10,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from rollout_train.recorder import Epoch
+from rollout_train.recorder import Segment
 
 
 @dataclass(frozen=True)
 class Weighted:
-    """A sequence to train on, and its advantage: every token the policy sampled in it counts by that much."""
+    """A segment to train on, and its advantage: every token the policy sampled in it counts by that much."""
 
-    epoch: Epoch
+    segment: Segment
     advantage: float
     source: str = ""
-    """Where the sequence is from, for the record of what a step trained on: `cursor/slot/index` in the job's log."""
+    """Where the segment is from, for the record of what a step trained on: `cursor/slot/index` in the job's log."""
 
 
 @dataclass(frozen=True)
 class Budget:
-    sequence_tokens: int | None = None
-    """The longest sequence the trainer can train on (None: any)."""
-    sequences: int | None = None
-    """How many sequences a step can afford (None: any number)."""
+    segment_tokens: int | None = None
+    """The longest segment the trainer can train on (None: any)."""
+    segments: int | None = None
+    """How many segments a step can afford (None: any number)."""
 
 
 @dataclass(frozen=True)

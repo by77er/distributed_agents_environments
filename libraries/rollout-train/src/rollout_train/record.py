@@ -42,8 +42,8 @@ class Iteration:
     failures: list[str] = field(default_factory=list[str])
     notes: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """What the algorithm said of the group."""
-    sequences_recorded: int = 0
-    sequences_trained: int = 0
+    segments_recorded: int = 0
+    segments_trained: int = 0
     update: Mapping[str, float] | None = None
     """The trainer's statistics, if the group was trained on."""
     skipped: str | None = None
