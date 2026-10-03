@@ -10,7 +10,7 @@ that start an engine must guard `if __name__ == "__main__":` (vLLM starts its pr
 
 import itertools
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from rollout.processes import children
@@ -29,6 +29,7 @@ class VllmEngine:
         max_lora_rank: int = 32,
         max_loras: int = 2,
         language_model_only: bool = True,
+        speculative: Mapping[str, Any] | None = None,
         seed: int = 0,
     ) -> None:
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
@@ -48,6 +49,7 @@ class VllmEngine:
             enable_sleep_mode=True,
             language_model_only=language_model_only,
             logprobs_mode="processed_logprobs",  # the distribution actually sampled from (after temperature)
+            speculative_config=dict(speculative) if speculative else None,
             seed=seed,
         )
         self.model = model

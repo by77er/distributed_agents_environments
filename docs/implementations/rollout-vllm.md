@@ -30,6 +30,7 @@ Each entry of `engines` is passed to `VllmEngine(model, **entry)`. An entry may 
 | `max_lora_rank` | The highest adapter rank the engine loads; at least the trainer's `rank` |
 | `max_loras` | How many adapters one batch may mix. A channel keeps two loaded: the one it samples from and the one before it |
 | `language_model_only` | Load only the language model of a multimodal checkpoint |
+| `speculative` | vLLM's speculative decoding, as its `speculative_config`: for Qwen3.5, whose checkpoints carry a multi-token prediction layer, `{ method = "qwen3_5_mtp", num_speculative_tokens = 2 }`. The draft is not adapted with the channel's LoRA, so fewer drafted tokens are accepted as the policy moves from the base; what is sampled keeps the target model's distribution. Whether the logprobs it returns are the target model's, as the trainer needs, is to be checked before training on them. Off unless given |
 | `seed` | The engine's sampling seed |
 
 The engine always loads the model as bfloat16, with LoRA and sleep mode enabled.
