@@ -117,3 +117,25 @@ def test_large_things_are_tracked_and_sent_as_far_off_as_the_harness_shows_them(
     assert spigot["world-settings"]["default"]["entity-tracking-range"]["other"] == far
     properties = server_properties()
     assert int(properties["view-distance"]) * CHUNK >= far and int(properties["simulation-distance"]) * CHUNK >= far
+
+
+def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agents_have() -> None:
+    from minecraft_swarm.prompts import way
+    from minecraft_swarm.tasks import Kit, Objective
+
+    actions = {tool.name for tool in ACTIONS}
+    for task in catalog():
+        said = way(task)
+        if task.objective is Objective.PROGRESS:
+            assert said == ""
+            continue
+        assert said and said in system_prompt(task)
+        named = set(re.findall(r"\((\w+)(?=\)|:|, at)", said))  # "(place_at)", "(toss: ...)", "(take, at ...)"
+        assert named <= actions, (task.id, named - actions)
+        if task.kit not in (Kit.NONE, Kit.IRON):
+            assert "craft an iron_pickaxe: three iron_ingot and two sticks" in said or task.objective is Objective.CRAFT
+    ingots = next(task for task in catalog() if task.kit is Kit.INGOTS and task.coordination.value == "kitted")
+    assert way(ingots).startswith(
+        "How to get there. Each of you starts with 3 iron_ingot, 2 stick and 1 crafting_table, besides food and "
+        "torches."
+    )

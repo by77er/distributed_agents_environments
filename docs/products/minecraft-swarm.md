@@ -205,8 +205,8 @@ Compaction is a model call like any other, on the agent's own slot, made while t
 time, it is recorded, and it is trained with the episode's advantage, since what an agent chooses to remember is
 part of how it plays.
 
-With Qwen3.5 the system prompt and tools take 2,100 tokens (the same for all four agents, so the engine caches them
-once), a remembered turn 200 to 350, and the current observation 1,000 to 1,850, of which the map is 750 to 1,600.
+With Qwen3.5 the system prompt and tools take 2,100 tokens, and a task's way to its goal up to 480 more (the same
+for all four agents, so the engine caches them once), a remembered turn 200 to 350, and the current observation 1,000 to 1,850, of which the map is 750 to 1,600.
 
 Agents see no clock: an episode's length is a limit of training, and a policy shown the clock learns to play it;
 doing more before the cut-off is rewarded all the same.
@@ -223,6 +223,11 @@ and with a budget of game time alone four minutes of it can run to over a hundre
 | Skills (crafting) | 10, 6 to 70 minutes | Nothing at all, on a peaceful surface with a tree trunk within reach. The task names an item several recipes deep, and everything for it must be gathered: a crafting table, a wooden pickaxe, a stone pickaxe, a furnace, torches, an iron pickaxe, a bucket, a shield, a diamond, a diamond pickaxe (wood to diamonds, the way down included). | The steps of the item's chain the team got done |
 | Survival (natural) | 25, 15 to 66 minutes | Nothing is staged: a natural cave, the surface, the nether, beside a fortress, near or inside a stronghold, or the end; a real day and night, mobs, and inventory lost on death. Kits run from iron tools down to nothing, or prepare one stage of the game (obsidian and flint for a portal, a bow for blazes, eyes of ender, armor for the dragon). | Diamonds held, or progress |
 | Game | 3, 240 minutes | A bare spawn on the surface, nothing given; easy, normal and hard. | Progress |
+
+The system prompt states the objective and, for every task but the progress ones, the way to it step by step from
+what the team starts with (`prompts.way`): who carries what, and each recipe and rule on the way, in order, from
+placing the crafting table to which pickaxe gets diamonds out of ore. Each step is written from the task's kit, its
+coordination and its item's chain (`CHAINS`), and names the actions that take it.
 
 A world is generated once per seed. A template server holds the overworld around the origin (`GENERATED_CHUNKS`), and
 every server of that seed copies the same chunks, so the episodes of a group start in the same world. Servers that

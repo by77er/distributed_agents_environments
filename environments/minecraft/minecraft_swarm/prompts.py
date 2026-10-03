@@ -6,7 +6,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from minecraft_swarm.limits import LIMITS
-from minecraft_swarm.tasks import CHAINS, EARLY, TEAM, Objective, Task
+from minecraft_swarm.tasks import CHAINS, EARLY, KITS, TEAM, Coordination, Kit, Objective, Start, Task
 from rollout.contracts import ToolSpecification
 
 NUMBERS = [
@@ -42,13 +42,67 @@ CRAFT_GOAL = (
     "Goal: together, make {item}. You start with nothing: everything it takes must be gathered and crafted. Getting "
     "there counts step by step, each step once, whoever does it: {steps}. The game is over when it is made."
 )
-"""What each objective asks, in the words agents read. They state what is scored and nothing about how: the same
-text serves every task of an objective, from diamonds lying in a lit room to ore under a bare surface."""
+"""What each objective asks, in the words agents read: what is scored. How to get there is said apart (`way`), from
+what the team starts with."""
+
+TABLE_NEEDED = "recipes on a 3x3 grid need a crafting table within reach"
+MAKING = {
+    "logs": "Get logs: mine the trunk of a tree (any *_log); it needs no tool.",
+    "planks": "Craft planks from a log: one log makes four, named after its wood (oak_log makes oak_planks).",
+    "a crafting table": f"Craft a crafting_table from four planks and place it (place_at): {TABLE_NEEDED}.",
+    "sticks": "Craft sticks from two planks (they make four).",
+    "a wooden pickaxe": "Within reach of the table, craft a wooden_pickaxe: three planks and two sticks.",
+    "cobblestone": "Mine stone with any pickaxe: it drops cobblestone (deepslate drops cobbled_deepslate, which serves "
+    "as well). Without a pickaxe, stone drops nothing.",
+    "a stone pickaxe": "Within reach of the table, craft a stone_pickaxe: three cobblestone and two sticks.",
+    "a furnace": "Within reach of the table, craft a furnace from eight cobblestone, and place it (place_at).",
+    "raw iron": "Find iron ore (iron_ore, or deepslate_iron_ore deep down) and mine it with a stone pickaxe or better: "
+    "it drops raw_iron (to a wooden pickaxe it drops nothing). An iron pickaxe takes three.",
+    "an iron ingot": "Within reach of the placed furnace, smelt raw_iron with the count you want (one goes in "
+    f"otherwise), with fuel you carry ({listed(LIMITS.fuels, 'or')}). Each takes {LIMITS.smelt_seconds} seconds of "
+    "game time, which passes while actions happen; then take the iron_ingot out with take_smelted.",
+    "an iron pickaxe": "Within reach of the table, craft an iron_pickaxe: three iron_ingot and two sticks.",
+    "coal or charcoal": "Get coal: mine coal ore with any pickaxe (it drops coal), or smelt a log in the furnace for "
+    "charcoal.",
+    "torches": "Craft torches from coal (or charcoal) and a stick.",
+    "a bucket": "Within reach of the table, craft a bucket: three iron_ingot.",
+    "a shield": "Within reach of the table, craft a shield: six planks and one iron_ingot.",
+    "diamonds": "Find diamond ore: it occurs only deep underground, below y = 16 (as deepslate_diamond_ore below "
+    "y = 0), and only an iron pickaxe or better gets a diamond out of it.",
+    "a diamond pickaxe": "Within reach of the table, craft a diamond_pickaxe: three diamonds and two sticks.",
+}
+"""How to make each step of a crafting chain (`CHAINS`), in the words agents read. Mining takes the best tool an
+agent carries by itself, so no step says to hold one."""
+MAKING["a diamond"] = MAKING["diamonds"]
+
+PLACE_TABLE = f"Place the crafting_table (place_at): {TABLE_NEEDED}."
+PLACE_FURNACE = "Place the furnace (place_at)."
+FUEL = "Fuel for the furnace: mine coal ore with any pickaxe (it drops coal), or burn planks or logs."
+MINE_DIAMONDS = (
+    "Mine the diamond ore within reach: the diamond drops and you pick it up (mining takes the best tool you carry by "
+    "itself)."
+)
+DIAMOND_WAYS: dict[Kit, list[str]] = {
+    Kit.IRON: [MAKING["diamonds"], MINE_DIAMONDS],
+    Kit.INGOTS: [PLACE_TABLE, MAKING["an iron pickaxe"], MAKING["diamonds"], MINE_DIAMONDS],
+    Kit.RAW_IRON: [PLACE_FURNACE, MAKING["an iron ingot"], PLACE_TABLE, MAKING["an iron pickaxe"], MAKING["diamonds"],
+                   MINE_DIAMONDS],
+    Kit.STONE: [MAKING["raw iron"], PLACE_FURNACE, MAKING["an iron ingot"], PLACE_TABLE, MAKING["an iron pickaxe"],
+                MAKING["diamonds"], MINE_DIAMONDS],
+    Kit.WOODEN: [PLACE_TABLE, MAKING["cobblestone"], MAKING["a stone pickaxe"], MAKING["raw iron"], MAKING["a furnace"],
+                 FUEL, MAKING["an iron ingot"], MAKING["an iron pickaxe"], MAKING["diamonds"], MINE_DIAMONDS],
+    Kit.NOTHING: [*(MAKING[name] for name, _, _ in CHAINS["iron_pickaxe"]), FUEL, MAKING["diamonds"], MINE_DIAMONDS],
+}  # fmt: skip
+"""The way to diamonds from each kit, step by step."""
+DIAMONDS_LAID_OUT = {
+    Start.ITEMS: "The diamonds here lie on the floor: walking over items picks them up.",
+    Start.CHESTS: "The diamonds here are in chests: take them out (take, at a chest within reach).",
+}
 
 SYSTEM = """You are one of {count} players in Minecraft: {team}. You play together. Each observation says which one \
 you are.
 
-{goal}
+{goal}{way}
 
 How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
 one tool (only your first call counts); then the world runs until all {count} actions have finished, and freezes \
@@ -90,6 +144,7 @@ def system_prompt(task: Task) -> str:
         count=spelled(len(TEAM)),
         team=", ".join(TEAM),
         goal=goal(task),
+        way="".join(f"\n\n{part}" for part in [way(task)] if part),
         window=spelled(LIMITS.window_seconds),
         chat_lines=CHAT_LINES,
         death=death,
@@ -105,6 +160,38 @@ def goal(task: Task) -> str:
         return PROGRESS_GOAL.format(early="".join(f"{name}, " for name in early))
     steps = [name for name, _, _ in CHAINS[str(task.goal)]]
     return CRAFT_GOAL.format(item=steps[-1], steps=", ".join(steps))
+
+
+def way(task: Task) -> str:
+    """How to get to the goal, step by step, from what the team starts with: who carries what, every recipe and rule
+    on the way, in order. Empty for a task whose way is not one ladder (the progress tasks)."""
+    if task.objective is Objective.CRAFT:
+        steps = [MAKING[name] for name, _, _ in CHAINS[str(task.goal)]]
+    elif task.objective is Objective.DIAMONDS and task.kit is Kit.NONE:
+        return DIAMONDS_LAID_OUT.get(task.start, "")
+    elif task.objective is Objective.DIAMONDS:
+        steps = DIAMOND_WAYS.get(task.kit, [])
+    else:
+        return ""
+    if not steps:
+        return ""
+    kit = listed([_stack(stack) for stack in KITS[task.kit]], "and")
+    supplies = "" if task.kit is Kit.NOTHING else ", besides food and torches"
+    carried = {
+        Coordination.KITTED: f"Each of you starts with {kit}{supplies}." if kit else "You start with nothing.",
+        Coordination.ONE_KIT: f"One of you starts with {kit} (your inventory shows whether it is you); the others "
+        "start with food and torches. Whoever holds the parts does the crafting, or tosses them to a teammate "
+        "(toss: to a player standing within three blocks).",
+        Coordination.SPLIT: f"These are dealt among you, so no one can finish alone: {kit}. Bring the parts to one "
+        "player (toss: to a player standing within three blocks), who does the crafting.",
+    }[task.coordination]
+    numbered = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, 1))
+    return f"How to get there. {carried}\n{numbered}"
+
+
+def _stack(stack: Mapping[str, Any]) -> str:
+    """A stack as an inventory shows it: "3 iron_ingot"."""
+    return f"{stack.get('count', 1)} {stack['item']}"
 
 
 def describe_result(result: Any) -> str:
