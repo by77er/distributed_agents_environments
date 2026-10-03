@@ -173,7 +173,7 @@ One RTX 5080 (16 GB), `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32.
 | GPU memory with the policy loaded | 6.6 GiB |
 | Peak GPU memory in a step | 10.7 GiB with segments of 5,000 tokens, 12.4 GiB with 8,000 |
 | Time per segment | 4 to 8 s |
-| A step of 384 turns of the [Minecraft swarm](../products/minecraft-swarm.md) | About 40 optimizer steps, about half an hour |
+| A step of 384 turns of the [Minecraft team](../products/minecraft-team.md) | About 40 optimizer steps, about half an hour |
 | Trainer logprobs against vLLM's | A mean difference of 0.016 per token, with and without an adapter |
 | Without the memory bound, under Windows | A step of 96 turns that needed more than the card ran 13 minutes without finishing and left the host 0.6 GB of free memory |
 | Allocator | `expandable_segments` saves about 0.7 GiB at the peak |

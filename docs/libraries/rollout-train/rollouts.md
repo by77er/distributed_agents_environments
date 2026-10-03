@@ -13,7 +13,7 @@ episodes = await ticket.episodes()                 # the ticket's four, once all
 async for episode in job.episodes(cursor):         # or the whole stream, while runs are still going
     ...
 await job.acknowledge(episode.cursor)
-await job.publish("policy", "swarm@3", "/versions/swarm@3/weights", 3)
+await job.publish("policy", "miner@3", "/versions/miner@3/weights", 3)
 ```
 
 [`Jobs`](../../guide/reference.md#jobs), [`Job`](../../guide/reference.md#job) and

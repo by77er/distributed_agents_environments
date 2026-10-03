@@ -18,17 +18,17 @@ def checkpoint(directory: Path, text: str) -> Path:
 
 async def test_versions_are_added_in_order_and_name_where_their_files_are(tmp_path: Path) -> None:
     policies = Policies(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    writer = await policies.writer("swarm")
-    assert await policies.head("swarm") is None
+    writer = await policies.writer("miner")
+    assert await policies.head("miner") is None
     optimizer = tmp_path / "optimizer.pt"
     optimizer.write_text("moments 1")
-    first = await policies.add(writer, "swarm", 1, weights=checkpoint(tmp_path / "a", "weights 1"), state=optimizer)
+    first = await policies.add(writer, "miner", 1, weights=checkpoint(tmp_path / "a", "weights 1"), state=optimizer)
     second = await policies.add(
-        writer, "swarm", 2, weights=checkpoint(tmp_path / "b", "weights 2"), parent=first.name, metrics={"kl": 0.01}
+        writer, "miner", 2, weights=checkpoint(tmp_path / "b", "weights 2"), parent=first.name, metrics={"kl": 0.01}
     )
-    assert (first.name, second.name, second.parent) == ("swarm@1", "swarm@2", "swarm@1")
-    assert [version.number for version in await policies.versions("swarm")] == [1, 2]
-    assert await policies.head("swarm") == second == await policies.version("swarm@2")
+    assert (first.name, second.name, second.parent) == ("miner@1", "miner@2", "miner@1")
+    assert [version.number for version in await policies.versions("miner")] == [1, 2]
+    assert await policies.head("miner") == second == await policies.version("miner@2")
     # Each file is a blob of its own, by its path in the checkpoint: nothing is packed.
     assert sorted(first.weights.files) == ["adapter_config.json", "nested/adapter_model.safetensors"]
     assert first.state is not None and list(first.state.files) == ["optimizer.pt"]
@@ -36,23 +36,23 @@ async def test_versions_are_added_in_order_and_name_where_their_files_are(tmp_pa
 
     # Another process, another machine: the files come back whole, from the blobs.
     elsewhere = Policies(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    fetched = await elsewhere.files((await elsewhere.version("swarm@2")).weights, tmp_path / "cache" / "swarm@2")
+    fetched = await elsewhere.files((await elsewhere.version("miner@2")).weights, tmp_path / "cache" / "miner@2")
     assert (fetched / "nested" / "adapter_model.safetensors").read_text() == "weights 2"
     assert not list((tmp_path / "cache").glob(".fetching-*"))
 
 
 async def test_adding_a_version_again_changes_nothing_and_a_replaced_writer_adds_none(tmp_path: Path) -> None:
     policies = Policies(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    writer = await policies.writer("swarm")
-    first = await policies.add(writer, "swarm", 1, weights=checkpoint(tmp_path / "a", "weights 1"))
-    again = await policies.add(writer, "swarm", 1, weights=checkpoint(tmp_path / "b", "other weights"))
-    assert again == first and len(await policies.versions("swarm")) == 1  # a step redone after a crash
-    await policies.writer("swarm")  # a new reactor takes over
+    writer = await policies.writer("miner")
+    first = await policies.add(writer, "miner", 1, weights=checkpoint(tmp_path / "a", "weights 1"))
+    again = await policies.add(writer, "miner", 1, weights=checkpoint(tmp_path / "b", "other weights"))
+    assert again == first and len(await policies.versions("miner")) == 1  # a step redone after a crash
+    await policies.writer("miner")  # a new reactor takes over
     with pytest.raises(Fenced):
-        await policies.add(writer, "swarm", 2, weights=tmp_path / "a")
-    fork = await policies.writer("swarm-fork")
-    forked = await policies.add(fork, "swarm-fork", 1, weights=tmp_path / "a", parent=first.name)
-    assert forked.parent == "swarm@1" and forked.weights == first.weights  # a fork costs no new blobs
+        await policies.add(writer, "miner", 2, weights=tmp_path / "a")
+    fork = await policies.writer("miner-fork")
+    forked = await policies.add(fork, "miner-fork", 1, weights=tmp_path / "a", parent=first.name)
+    assert forked.parent == "miner@1" and forked.weights == first.weights  # a fork costs no new blobs
 
 
 async def test_names_say_the_policy_and_the_number(tmp_path: Path) -> None:

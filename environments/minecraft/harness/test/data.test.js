@@ -8,7 +8,7 @@ const path = require('node:path')
 const { fixMaterials } = require('../lib/data')
 
 // The game version the servers run: the Python side names it, and gives it to the harness when it connects.
-const paper = fs.readFileSync(path.join(__dirname, '../../minecraft_swarm/paper.py'), 'utf8')
+const paper = fs.readFileSync(path.join(__dirname, '../../minecraft_team/paper.py'), 'utf8')
 const VERSION = /^PAPER_VERSION = "([^"]+)"$/m.exec(paper)[1]
 
 test('pickaxes are as fast on ores and obsidian as in the game', () => {

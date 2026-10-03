@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any, Self
 
-from minecraft_swarm.paper import PAPER_VERSION
+from minecraft_team.paper import PAPER_VERSION
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
 

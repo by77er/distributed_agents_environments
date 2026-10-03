@@ -1,4 +1,4 @@
-"""The swarm episode on a made-up world and a scripted model (no server): what each agent's context holds as the
+"""The team episode on a made-up world and a scripted model (no server): what each agent's context holds as the
 game goes on, when the team compacts, how an episode ends and what it reports. Under the local runner and the
 durable one."""
 
@@ -12,11 +12,11 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
-from minecraft_swarm.catalog import Swarm
-from minecraft_swarm.episode import TICKS_PER_MINUTE, SwarmEpisode, action, answer
-from minecraft_swarm.prompts import COMPACT, NO_CALL, ONE_CALL
-from minecraft_swarm.tasks import TEAM, catalog
-from minecraft_swarm.worlds import DROP_TICKS, OPERATIONS, WINDOW_TICKS, MinecraftTools, MinecraftWorlds
+from minecraft_team.catalog import Teams
+from minecraft_team.episode import TICKS_PER_MINUTE, TeamEpisode, action, answer
+from minecraft_team.prompts import COMPACT, NO_CALL, ONE_CALL
+from minecraft_team.tasks import TEAM, catalog
+from minecraft_team.worlds import DROP_TICKS, OPERATIONS, WINDOW_TICKS, MinecraftTools, MinecraftWorlds
 from rollout.contracts import (
     CapabilityContract,
     FinishReason,
@@ -158,7 +158,7 @@ def specification(turns: int | None = TURNS) -> RunSpecification:
     )
     parameters: dict[str, JsonValue] = {"task": "t001", "turns": turns, "names": list[JsonValue](CREW)}
     return RunSpecification(
-        program=ProgramReference(program=register(SwarmEpisode), parameters=parameters), binding=binding
+        program=ProgramReference(program=register(TeamEpisode), parameters=parameters), binding=binding
     )
 
 
@@ -279,17 +279,17 @@ def test_every_reply_is_answered_whatever_it_called() -> None:
 
 
 def test_the_catalog_offers_every_task_and_draws_one_start_for_a_whole_group() -> None:
-    swarm = Swarm()
-    rows = swarm.rows()
+    teams = Teams()
+    rows = teams.rows()
     assert len(rows) == 100 and rows[0].key == "t001" and rows[0].parameters == {"task": "t001"}
-    assert [row.key for row in Swarm(only=("t003", "t007")).rows()] == ["t003", "t007"]
-    start = swarm.start(rows[6], random.Random(5))
+    assert [row.key for row in Teams(only=("t003", "t007")).rows()] == ["t003", "t007"]
+    start = teams.start(rows[6], random.Random(5))
     assert (
         isinstance(start, dict)
         and set(start) == {"task", "world_seed", "layout_seed", "names"}
         and start["task"] == "t007"
     )
-    starts: list[Any] = [swarm.start(rows[0], random.Random(seed)) for seed in range(200)]
+    starts: list[Any] = [teams.start(rows[0], random.Random(seed)) for seed in range(200)]
     worlds = {start["world_seed"] for start in starts}
     assert len(worlds) == 12  # a dozen worlds, each generated once
-    assert swarm.program.program.endswith("SwarmEpisode")
+    assert teams.program.program.endswith("TeamEpisode")

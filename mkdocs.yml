@@ -98,6 +98,6 @@ nav:
   - Products and environments:
       - "Project assistant": products/project-assistant.md
       - "Agent sessions": products/agent-sessions.md
-      - "Minecraft swarm": products/minecraft-swarm.md
+      - "Minecraft team": products/minecraft-team.md
   - Development:
       - "Local services": development/local-services.md

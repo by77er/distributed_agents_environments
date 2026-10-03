@@ -14,12 +14,12 @@ from typing import Any
 
 import pytest
 
-from minecraft_swarm import worlds
-from minecraft_swarm.control import Control
-from minecraft_swarm.harness import Harness
-from minecraft_swarm.paper import Installation, PaperServer
-from minecraft_swarm.prompts import describe
-from minecraft_swarm.tasks import (
+from minecraft_team import worlds
+from minecraft_team.control import Control
+from minecraft_team.harness import Harness
+from minecraft_team.paper import Installation, PaperServer
+from minecraft_team.prompts import describe
+from minecraft_team.tasks import (
     CHAINS,
     Coordination,
     Kit,

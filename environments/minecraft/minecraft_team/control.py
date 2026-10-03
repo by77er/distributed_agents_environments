@@ -1,6 +1,6 @@
 """A client for the ground-truth plugin's control API (environments/minecraft/plugin): ticks, episodes and ground
-truth. The worlds use it (`minecraft_swarm.worlds`, to build tasks, run game time and score) and so do the servers
-(`minecraft_swarm.paper`, to start and to generate templates); agents never see it."""
+truth. The worlds use it (`minecraft_team.worlds`, to build tasks, run game time and score) and so do the servers
+(`minecraft_team.paper`, to start and to generate templates); agents never see it."""
 
 from typing import Any
 

@@ -82,5 +82,5 @@ One RTX 5080 (16 GB), vLLM 0.30, `cyankiwi/Qwen3.5-9B-AWQ-4bit`.
 | `wake()`, with the checkpoint in the file cache | 3 s |
 | System memory while asleep | 3.3 GiB. With the weights parked in system memory instead, 11.2 GiB |
 | Throughput on short contexts | 88 tokens/s for one stream, 730 tokens/s for sixteen at once |
-| Cache at `gpu_memory_utilization = 0.72` | 63,000 tokens. Sixteen agents of the [Minecraft swarm](../products/minecraft-swarm.md) need more: requests queue, and a group samples 240 tokens/s |
-| `gpu_memory_utilization = 0.85` | The card is full, and a turn of the Minecraft swarm takes minutes instead of 10 s |
+| Cache at `gpu_memory_utilization = 0.72` | 63,000 tokens. Sixteen agents of the [Minecraft team](../products/minecraft-team.md) need more: requests queue, and a group samples 240 tokens/s |
+| `gpu_memory_utilization = 0.85` | The card is full, and a turn of the Minecraft team takes minutes instead of 10 s |

@@ -1,6 +1,6 @@
 'use strict'
 // The limits that the actions keep and the prompts state: ../../limits.json, which the Python side reads too
-// (minecraft_swarm/limits.py), so that what agents are told of an action is what it does.
+// (minecraft_team/limits.py), so that what agents are told of an action is what it does.
 //
 //   reach_blocks      how far from its eyes a bot mines, places and uses
 //   move_blocks       the most blocks one `move` walks

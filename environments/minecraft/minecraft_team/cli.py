@@ -1,16 +1,16 @@
-"""`minecraft-swarm server [--seed N]`: a temporary server to look at (join with any client; Ctrl-C stops and
-deletes it). Training is `rollout train PROFILE minecraft_swarm.catalog:catalog`."""
+"""`minecraft-team server [--seed N]`: a temporary server to look at (join with any client; Ctrl-C stops and
+deletes it). Training is `rollout train PROFILE minecraft_team.catalog:catalog`."""
 
 import argparse
 import asyncio
 import contextlib
 import json
 
-from minecraft_swarm.paper import Installation, PaperServer
+from minecraft_team.paper import Installation, PaperServer
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="minecraft-swarm", description="The Minecraft swarm environment.")
+    parser = argparse.ArgumentParser(prog="minecraft-team", description="The Minecraft team environment.")
     commands = parser.add_subparsers(dest="command", required=True)
     server = commands.add_parser("server", help="start a temporary server and keep it up")
     server.add_argument("--seed", type=int, default=12345)

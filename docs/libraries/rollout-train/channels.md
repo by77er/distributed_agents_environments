@@ -10,7 +10,7 @@ which engines stand behind it. An **engine** is one replica serving the channel'
 ```python
 channel = Channel("policy", engines=[engine_a, engine_b], renderer=renderer, limits=Limits(sequence=8000))
 generation = await channel.generate(prompt, max_tokens=64, ..., adapter=channel.adapter, session="r_1/ada")
-version = await channel.publish("swarm@3", "/versions/swarm@3/weights", 3)
+version = await channel.publish("miner@3", "/versions/miner@3/weights", 3)
 ```
 
 A deployment describes its channels in a profile: the model, its renderer, its limits, and one entry per engine

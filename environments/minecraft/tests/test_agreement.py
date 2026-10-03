@@ -15,12 +15,12 @@ from typing import Any
 import pytest
 import yaml
 
-from minecraft_swarm import control
-from minecraft_swarm.limits import LIMITS
-from minecraft_swarm.paper import CONFIG, PAPER_VERSION, PLUGIN_SOURCES, server_properties
-from minecraft_swarm.prompts import ACTIONS, DIRECTION, SLOT, SYMBOLS, symbol, system_prompt
-from minecraft_swarm.tasks import NAMES, catalog
-from minecraft_swarm.worlds import OPERATIONS, MinecraftTools, MinecraftWorlds
+from minecraft_team import control
+from minecraft_team.limits import LIMITS
+from minecraft_team.paper import CONFIG, PAPER_VERSION, PLUGIN_SOURCES, server_properties
+from minecraft_team.prompts import ACTIONS, DIRECTION, SLOT, SYMBOLS, symbol, system_prompt
+from minecraft_team.tasks import NAMES, catalog
+from minecraft_team.worlds import OPERATIONS, MinecraftTools, MinecraftWorlds
 from rollout.contracts import RetryClass
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
@@ -120,8 +120,8 @@ def test_large_things_are_tracked_and_sent_as_far_off_as_the_harness_shows_them(
 
 
 def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agents_have() -> None:
-    from minecraft_swarm.prompts import way
-    from minecraft_swarm.tasks import Kit, Objective
+    from minecraft_team.prompts import way
+    from minecraft_team.tasks import Kit, Objective
 
     actions = {tool.name for tool in ACTIONS}
     for task in catalog():
@@ -142,8 +142,8 @@ def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agent
 
 
 def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
-    from minecraft_swarm.catalog import catalog as swarm
-    from minecraft_swarm.prompts import guidance, way
+    from minecraft_team.catalog import catalog as teams
+    from minecraft_team.prompts import guidance, way
 
     task = next(task for task in catalog() if task.kit.value == "ingots" and task.coordination.value == "one_kit")
     alone = system_prompt(task, ["ada"])
@@ -159,8 +159,8 @@ def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
     import random
 
     rng = random.Random(0)
-    for row in swarm.rows():
-        starts: list[Any] = [swarm.start(row, rng) for _ in range(40)]
+    for row in teams.rows():
+        starts: list[Any] = [teams.start(row, rng) for _ in range(40)]
         players = {len(start["names"]) for start in starts}
         for start in starts:
             assert len(set(start["names"])) == len(start["names"]) and set(start["names"]) <= set(NAMES)
@@ -169,9 +169,9 @@ def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
 
 
 def test_an_unguided_row_counts_for_its_guided_twin() -> None:
-    from minecraft_swarm.catalog import catalog as swarm
+    from minecraft_team.catalog import catalog as teams
 
-    rows = {row.key: row for row in swarm.rows()}
+    rows = {row.key: row for row in teams.rows()}
     for row in rows.values():
         if row.key.endswith("u"):
             assert (

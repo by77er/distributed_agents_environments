@@ -5,8 +5,8 @@ import shutil
 
 import pytest
 
-from minecraft_swarm.control import Control
-from minecraft_swarm.paper import (
+from minecraft_team.control import Control
+from minecraft_team.paper import (
     PAPER_VERSION,
     Installation,
     PaperServer,

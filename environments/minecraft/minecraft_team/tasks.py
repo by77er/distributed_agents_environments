@@ -1,6 +1,6 @@
 """The task catalog: from staged skills to beating the game, in three tiers.
 
-Every task is a starting state, a budget of game time and an objective scored from ground truth. The swarm shares the
+Every task is a starting state, a budget of game time and an objective scored from ground truth. The team shares the
 reward. Three tiers:
 
 - **Skills** (staged or safe): the plugin builds the situation from ground truth: diamonds lying in a lit room, chests
@@ -28,7 +28,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from minecraft_swarm.control import Control
+from minecraft_team.control import Control
 
 TEAM = ["agent-1", "agent-2", "agent-3", "agent-4"]
 """The agents of an episode, by their model slots: the first of them play, under names drawn from `NAMES` (a slot's

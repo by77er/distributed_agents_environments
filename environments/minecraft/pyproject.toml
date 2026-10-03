@@ -1,7 +1,7 @@
 [project]
-name = "minecraft-swarm"
+name = "minecraft-team"
 version = "0.0.0"
-description = "Four agents in a Minecraft world: an environment for rollout"
+description = "One to four agents in a Minecraft world, as a team: an environment for rollout"
 requires-python = ">=3.13"
 dependencies = [
     "rollout",
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-minecraft-swarm = "minecraft_swarm.cli:main"
+minecraft-team = "minecraft_team.cli:main"
 
 [tool.uv.sources]
 rollout = { workspace = true }
@@ -19,4 +19,4 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["minecraft_swarm"]
+packages = ["minecraft_team"]

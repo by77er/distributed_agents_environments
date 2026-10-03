@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from minecraft_swarm.prompts import goal
-from minecraft_swarm.tasks import (
+from minecraft_team.prompts import goal
+from minecraft_team.tasks import (
     CHAINS,
     KITS,
     MILESTONES,
@@ -268,7 +268,7 @@ class Site:
 
 
 async def test_no_one_starts_within_reach_of_the_diamonds_on_the_floor() -> None:
-    from minecraft_swarm.tasks import _items  # pyright: ignore[reportPrivateUsage]
+    from minecraft_team.tasks import _items  # pyright: ignore[reportPrivateUsage]
 
     task = find(Start.ITEMS, Kit.NONE)
     for seed in range(40):
@@ -282,7 +282,7 @@ async def test_no_one_starts_within_reach_of_the_diamonds_on_the_floor() -> None
 
 
 async def test_the_stone_kit_finds_iron_in_the_wall_of_its_pocket() -> None:
-    from minecraft_swarm.tasks import _ore_in_sight  # pyright: ignore[reportPrivateUsage]
+    from minecraft_team.tasks import _ore_in_sight  # pyright: ignore[reportPrivateUsage]
 
     control = Site()
     await _ore_in_sight(find(Start.ORE_IN_SIGHT, Kit.STONE), control, random.Random(1))  # type: ignore[arg-type]
@@ -295,7 +295,7 @@ async def test_the_stone_kit_finds_iron_in_the_wall_of_its_pocket() -> None:
 
 
 async def test_a_woodland_start_is_at_the_foot_of_the_nearest_tree_or_nowhere() -> None:
-    from minecraft_swarm.tasks import BuildError, _woodland  # pyright: ignore[reportPrivateUsage]
+    from minecraft_team.tasks import BuildError, _woodland  # pyright: ignore[reportPrivateUsage]
 
     task = next(t for t in catalog() if t.goal == "wooden_pickaxe")
     control = Site()

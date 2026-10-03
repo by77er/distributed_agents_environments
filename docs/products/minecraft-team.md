@@ -1,4 +1,4 @@
-# Minecraft swarm
+# Minecraft team
 
 Code: `environments/minecraft`
 
@@ -6,7 +6,7 @@ One to four agents share a Minecraft world, offline. They are trained with reinf
 runs from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays
 them all, and every agent is rewarded equally with the team's score.
 
-The environment is the package `minecraft-swarm` (import `minecraft_swarm`), which depends on `rollout` alone. It is
+The environment is the package `minecraft-team` (import `minecraft_team`), which depends on `rollout` alone. It is
 a [catalog](../guide/perspectives.md#building-an-environment) of tasks, a program that plays one episode, and a tool
 set that owns the servers. It knows nothing of the model, the trainer or where anything runs: the
 [profile](../guide/deploying.md) says that, and the [training loop](../libraries/rollout-train/training.md) is the
@@ -15,10 +15,10 @@ library's.
 ```bash
 uv sync --all-extras
 PROFILE=environments/minecraft/profiles/one-gpu.toml         # one 16 GB GPU: an engine, and a trainer that shares it
-uv run rollout train $PROFILE minecraft_swarm.catalog:catalog --directory RUN
+uv run rollout train $PROFILE minecraft_team.catalog:catalog --directory RUN
 uv run rollout monitor RUN                                   # the page over the run: http://localhost:8765
-scripts/train-with-memory-log.sh RUN $PROFILE minecraft_swarm.catalog:catalog   # train, log memory, serve the monitor
-uv run minecraft-swarm server --seed 12345                   # a temporary server to look at (join with any client)
+scripts/train-with-memory-log.sh RUN $PROFILE minecraft_team.catalog:catalog   # train, log memory, serve the monitor
+uv run minecraft-team server --seed 12345                   # a temporary server to look at (join with any client)
 ```
 
 `rollout train` writes the monitor's feed to `RUN/feed`, and `rollout monitor RUN` serves the page over the run's
@@ -39,17 +39,17 @@ Paths are under `environments/minecraft/`.
 |---|---|---|
 | Ground-truth plugin (Java) | `plugin/` | A control API on 127.0.0.1 inside Paper: freeze the game, run it for a window of ticks, and hold the players still in between; set up episodes and tasks (teleports across dimensions, kits, carved rooms, chests, dropped items, creatures, places to stand, structures); report each player's diamonds, the advancements the team earned and what it got hold of since the episode began, and the damage done to the dragon; log events (blocks mined, hits, deaths, moves the server refused). Agents cannot run commands |
 | Server configuration | `config/` | Offline mode, anti-xray, nether and end enabled, and how far large things are tracked; merged into Paper's defaults. `operators.txt` names who may watch |
-| Paper servers | `minecraft_swarm/paper.py` | Downloads Paper (`PAPER_VERSION`, checked by SHA-256), builds the plugin with `javac`, generates a template server per world seed and configuration (the overworld around the origin included), and starts temporary servers as copies of it. A server ends with the process that started it |
-| Control client | `minecraft_swarm/control.py` | The Python client of the plugin's control API |
-| Harness (Node) | `harness/`, `minecraft_swarm/harness.py` | One mineflayer bot per agent: observations by line of sight, the actions, the chat filter, and pausing while ticks are frozen. The Python side talks to it in JSON lines |
-| Limits | `limits.json`, `minecraft_swarm/limits.py`, `harness/lib/limits.js` | The numbers an action keeps and agents are told: reach, the longest `move`, how long walking may dig at a block, what it bridges with, how long `wait` waits, smelting time and fuels, the window's length, a chat message's length. Python and Node read the one file |
-| Prompts | `minecraft_swarm/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
-| Tasks | `minecraft_swarm/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
-| Episode | `minecraft_swarm/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md) |
-| Worlds | `minecraft_swarm/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_swarm.worlds:tools`), or on a machine of its own (`rollout tools minecraft_swarm.worlds:tools`, and its URL in the profile) |
-| Catalog | `minecraft_swarm/catalog.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given |
+| Paper servers | `minecraft_team/paper.py` | Downloads Paper (`PAPER_VERSION`, checked by SHA-256), builds the plugin with `javac`, generates a template server per world seed and configuration (the overworld around the origin included), and starts temporary servers as copies of it. A server ends with the process that started it |
+| Control client | `minecraft_team/control.py` | The Python client of the plugin's control API |
+| Harness (Node) | `harness/`, `minecraft_team/harness.py` | One mineflayer bot per agent: observations by line of sight, the actions, the chat filter, and pausing while ticks are frozen. The Python side talks to it in JSON lines |
+| Limits | `limits.json`, `minecraft_team/limits.py`, `harness/lib/limits.js` | The numbers an action keeps and agents are told: reach, the longest `move`, how long walking may dig at a block, what it bridges with, how long `wait` waits, smelting time and fuels, the window's length, a chat message's length. Python and Node read the one file |
+| Prompts | `minecraft_team/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
+| Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
+| Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md) |
+| Worlds | `minecraft_team/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_team.worlds:tools`), or on a machine of its own (`rollout tools minecraft_team.worlds:tools`, and its URL in the profile) |
+| Catalog | `minecraft_team/catalog.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given |
 | Profile | `profiles/one-gpu.toml` | One machine with one 16 GB GPU |
-| Command | `minecraft_swarm/cli.py` | `minecraft-swarm server`: a temporary server to look at |
+| Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
 | Tests | `tests/` | The episode on a made-up world, tasks and scoring, the map, the harness and servers live, and the agreement tests below |
 
 ### One statement, two places
@@ -338,5 +338,5 @@ inside it:
 
 ## Reporting
 
-`rollout report RUN minecraft_swarm.catalog:catalog` charts the climb through the curriculum, every group's rewards
+`rollout report RUN minecraft_team.catalog:catalog` charts the climb through the curriculum, every group's rewards
 and what each step did ([reporting](../libraries/rollout-train/training.md#reporting)).

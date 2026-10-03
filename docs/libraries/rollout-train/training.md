@@ -9,7 +9,7 @@ only: the same loop runs with everything in one process and with the runs, the e
 of their own.
 
 ```python
-await train(jobs, catalog, trainer, policies, policy="swarm", channel="policy", directory=versions, groups=100)
+await train(jobs, catalog, trainer, policies, policy="miner", channel="policy", directory=versions, groups=100)
 ```
 
 `rollout train PROFILE CATALOG [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:

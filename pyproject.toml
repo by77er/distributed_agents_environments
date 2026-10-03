@@ -16,7 +16,7 @@ dependencies = [
     "rollout-s3",
     "project-assistant",
     "agent-sessions",
-    "minecraft-swarm",
+    "minecraft-team",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +39,7 @@ rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
 project-assistant = { workspace = true }
 agent-sessions = { workspace = true }
-minecraft-swarm = { workspace = true }
+minecraft-team = { workspace = true }
 
 [dependency-groups]
 dev = [

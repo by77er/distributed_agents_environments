@@ -6,7 +6,7 @@ own, and episodes given the same world seed and layout seed start identically.
 
 `MinecraftTools` exposes it to programs as the imported tool set `minecraft`: every operation is a recorded effect.
 It is served in the process that runs the episodes (`tools`), or from a machine of its own
-(`rollout tools minecraft_swarm.worlds:tools`), and an episode cannot tell which.
+(`rollout tools minecraft_team.worlds:tools`), and an episode cannot tell which.
 """
 
 import asyncio
@@ -22,11 +22,11 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from minecraft_swarm.control import Control
-from minecraft_swarm.harness import Harness
-from minecraft_swarm.limits import LIMITS, TICKS_PER_SECOND
-from minecraft_swarm.paper import Installation, PaperServer, sweep
-from minecraft_swarm.tasks import TEAM, Built, Task, build, catalog, saturated, score, solved
+from minecraft_team.control import Control
+from minecraft_team.harness import Harness
+from minecraft_team.limits import LIMITS, TICKS_PER_SECOND
+from minecraft_team.paper import Installation, PaperServer, sweep
+from minecraft_team.tasks import TEAM, Built, Task, build, catalog, saturated, score, solved
 from rollout.contracts import RetryClass, Text, ToolResult, ToolSpecification
 
 WINDOW_TICKS = LIMITS.window_seconds * TICKS_PER_SECOND

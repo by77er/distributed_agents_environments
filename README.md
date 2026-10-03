@@ -19,7 +19,7 @@ The repository is a uv workspace of Python 3.13 packages.
 | `libraries/` | `rollout`, what environments are written against, and `rollout-train`, reinforcement learning on it |
 | `implementations/` | One package per implementation of an interface the libraries define: a durable runner, a vLLM engine, a LoRA trainer, Qwen and Gemma renderers, computers for tasks, an OpenAI model endpoint, an S3 blob store |
 | `products/` | Applications: the project assistant and agent sessions |
-| `environments/` | Environments to train on: the Minecraft swarm, which depends on `rollout` only |
+| `environments/` | Environments to train on: the Minecraft team, which depends on `rollout` only |
 | `docs/`, `tests/`, `scripts/`, `deploy/` | The documentation, the tests, the reference generator and a training wrapper, local services |
 
 ## Development

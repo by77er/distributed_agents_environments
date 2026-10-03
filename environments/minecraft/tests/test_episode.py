@@ -1,4 +1,4 @@
-"""A whole swarm episode on a live server, with a scripted policy instead of a model: the lockstep loop, the tool set,
+"""A whole team episode on a live server, with a scripted policy instead of a model: the lockstep loop, the tool set,
 and the shared reward. Needs Java and Node."""
 
 import re
@@ -8,9 +8,9 @@ from collections.abc import Mapping
 import httpx
 import pytest
 
-from minecraft_swarm.episode import SwarmEpisode
-from minecraft_swarm.tasks import TEAM
-from minecraft_swarm.worlds import MinecraftTools, MinecraftWorlds
+from minecraft_team.episode import TeamEpisode
+from minecraft_team.tasks import TEAM
+from minecraft_team.worlds import MinecraftTools, MinecraftWorlds
 from rollout.contracts import (
     CapabilityContract,
     FinishReason,
@@ -71,7 +71,7 @@ def binding() -> RunBinding:
 
 @pytest.mark.skipif(shutil.which("java") is None or shutil.which("node") is None, reason="Java and Node are needed")
 @pytest.mark.parametrize("through", ["in process", "over HTTP"])
-async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through: str) -> None:
+async def test_a_scripted_team_picks_up_diamonds_and_shares_the_reward(through: str) -> None:
     worlds = MinecraftWorlds()
     tools: ToolSet = MinecraftTools(worlds)
     if through == "over HTTP":  # the worlds served as a tool set, as from a machine of their own
@@ -83,7 +83,7 @@ async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through:
     parameters: Mapping[str, object] = {"task": "t001", "world_seed": 12345, "layout_seed": 3, "turns": 4}
     parameters = {**parameters, "names": names}
     specification = RunSpecification(
-        program=ProgramReference(program=register(SwarmEpisode), parameters=dict(parameters)),  # type: ignore[arg-type]
+        program=ProgramReference(program=register(TeamEpisode), parameters=dict(parameters)),  # type: ignore[arg-type]
         binding=binding(),
     )
     try:
@@ -94,7 +94,7 @@ async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through:
     assert outcome.status is RunStatus.COMPLETED, outcome
     events = handle.recorded_events()
     rewards = {str(payload(e)["slot"]): payload(e)["value"] for e in events if e.type is RunEventType.REWARD_ASSIGNED}
-    assert set(rewards) == set(TEAM) and len(set(rewards.values())) == 1  # the swarm shares one reward
+    assert set(rewards) == set(TEAM) and len(set(rewards.values())) == 1  # the team shares one reward
     (result,) = [payload(e)["payload"] for e in events if e.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict)
     diamonds = result["team_diamonds"]

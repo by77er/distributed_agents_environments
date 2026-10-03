@@ -14,9 +14,9 @@ What is being trained has an identity of its own, apart from the run that trains
 
 ```python
 policies = Policies(FileLedger(directory / "ledger"), blobs)
-writer = await policies.writer("swarm")                              # the one that may add versions to it
-version = await policies.add(writer, "swarm", 18, weights=step / "weights", state=step / "state", parent="swarm@17")
-head = await policies.head("swarm")
+writer = await policies.writer("miner")                              # the one that may add versions to it
+version = await policies.add(writer, "miner", 18, weights=step / "weights", state=step / "state", parent="miner@17")
+head = await policies.head("miner")
 files = await policies.files(head.weights, cache / head.name)       # on any machine: read from the blob store
 ```
 

@@ -31,7 +31,7 @@ segment_tokens = 8000                        # the longest turn it can train on:
 segments_per_step = 384
 
 [tools]
-minecraft = "minecraft_swarm.worlds:tools"    # made in this process by `tools(directory)`; or "http://worlds:8700"
+minecraft = "minecraft_team.worlds:tools"    # made in this process by `tools(directory)`; or "http://worlds:8700"
 
 [memory]
 runs_gib = 6                                  # must be available to admit runs
@@ -39,11 +39,11 @@ training_gib = 4                              # and to start a step
 ```
 
 ```bash
-uv run rollout train profile.toml minecraft_swarm.catalog:catalog --groups 100 --directory RUN  # --groups-per-step 4
+uv run rollout train profile.toml minecraft_team.catalog:catalog --groups 100 --directory RUN  # --groups-per-step 4
 uv run rollout monitor RUN                     # the web page over the run: http://localhost:8765
-uv run rollout report RUN minecraft_swarm.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
+uv run rollout report RUN minecraft_team.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
-uv run rollout tools minecraft_swarm.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
+uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 ```
 
 `rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
@@ -81,7 +81,7 @@ are their own.
 | `engine` of a channel | The channel's `model`, and one entry of `engines` as keyword arguments. Once per entry | `rollout_vllm:VllmEngine` ([vLLM engine](../implementations/rollout-vllm.md)) |
 | `renderer` of a channel | The channel's `model` | `rollout_qwen:qwen35`, `rollout_qwen:qwen3` ([Qwen renderers](../implementations/rollout-qwen.md)), `rollout_gemma:gemma4` ([Gemma renderers](../implementations/rollout-gemma.md)) |
 | `kind` of the trainer | The trained channel's `model`, and every other key of `[trainer]` except `channel`, `policy` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)) |
-| An entry of `tools` | The run's directory | An environment's own, such as `minecraft_swarm.worlds:tools` ([Minecraft swarm](../products/minecraft-swarm.md)) |
+| An entry of `tools` | The run's directory | An environment's own, such as `minecraft_team.worlds:tools` ([Minecraft team](../products/minecraft-team.md)) |
 
 `rollout_train.testing` has a scripted engine and a readable renderer for profiles that need no GPU
 (`rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer`). The GPU packages are installed

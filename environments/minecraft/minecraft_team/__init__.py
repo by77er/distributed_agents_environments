@@ -1,6 +1,6 @@
 """Four agents in a shared Minecraft world, as an environment: what an episode is, and what there is to train on.
 
-- `catalog`: the tasks as rows, and how a start is drawn (`rollout train PROFILE minecraft_swarm.catalog:catalog`).
+- `catalog`: the tasks as rows, and how a start is drawn (`rollout train PROFILE minecraft_team.catalog:catalog`).
 - `episode`: the episode program: four model slots, lockstep turns, one shared reward.
 - `prompts`: what agents read and call: the system prompt, observations as text, the actions as tools.
 - `limits`: the limits the prompts state and the harness keeps (`limits.json`, which both read).

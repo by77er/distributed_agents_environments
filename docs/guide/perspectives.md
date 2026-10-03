@@ -13,7 +13,7 @@ gets a model) and the **episode** (the labelled trajectory that comes out).
 
 An environment says how a situation is set up, what a player perceives, what it can do, how the world moves, and how
 it went. It is a package that depends on `rollout` and on nothing above it (`tests/test_layers.py` checks that), as
-[`environments/minecraft`](../products/minecraft-swarm.md) does. It chooses how much of the platform's loop to use:
+[`environments/minecraft`](../products/minecraft-team.md) does. It chooses how much of the platform's loop to use:
 
 | Depth | You write | The platform provides |
 |---|---|---|
@@ -58,8 +58,8 @@ job = await jobs.start(program=catalog.program, binding=binding, in_flight=6)
 ticket = await job.run(catalog.start(row, rng), labels={"group": "0012", "task": row.key}, count=4)
 episodes = await ticket.episodes()                          # when all four have ended
 batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
-await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path("versions/swarm@3"))
-await job.publish("policy", "swarm@3", "versions/swarm@3/weights", 3)
+await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path("versions/miner@3"))
+await job.publish("policy", "miner@3", "versions/miner@3/weights", 3)
 ```
 
 - A **job** runs rows and keeps a log of finished **episodes**, read with a cursor (`job.episodes(cursor)`) or per
@@ -82,7 +82,7 @@ entry per replica), the trainer and the channel it trains, the runner, and where
 renderers and trainers are packages of their own, named in the file as `module:name`.
 
 ```bash
-uv run rollout train profile.toml minecraft_swarm.catalog:catalog
+uv run rollout train profile.toml minecraft_team.catalog:catalog
 ```
 
 The trainer's longest segment becomes its channel's longest turn, and the channel's limits reach environments only

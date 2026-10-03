@@ -446,12 +446,12 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             }
             // One scoreboard team: teammates cannot hurt each other (their arrows pass through) or push each other.
             org.bukkit.scoreboard.Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-            org.bukkit.scoreboard.Team swarm = scoreboard.getTeam("swarm");
-            if (swarm == null) {
-                swarm = scoreboard.registerNewTeam("swarm");
+            org.bukkit.scoreboard.Team team = scoreboard.getTeam("team");
+            if (team == null) {
+                team = scoreboard.registerNewTeam("team");
             }
-            swarm.setAllowFriendlyFire(false);
-            swarm.setOption(org.bukkit.scoreboard.Team.Option.COLLISION_RULE, org.bukkit.scoreboard.Team.OptionStatus.NEVER);
+            team.setAllowFriendlyFire(false);
+            team.setOption(org.bukkit.scoreboard.Team.Option.COLLISION_RULE, org.bukkit.scoreboard.Team.OptionStatus.NEVER);
             int index = 0;
             for (JsonElement entry : body.getAsJsonArray("team")) {
                 Player player = Bukkit.getPlayerExact(entry.getAsString());
@@ -459,7 +459,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                     missing.add(entry.getAsString());
                     continue;
                 }
-                swarm.addEntry(player.getName());
+                team.addEntry(player.getName());
                 JsonObject placement = placements.get(entry.getAsString().toLowerCase(Locale.ROOT));
                 player.getInventory().clear();
                 player.setItemOnCursor(null);

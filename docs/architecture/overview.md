@@ -22,7 +22,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 | | `rollout-train` | Reinforcement learning on `rollout`: rollout jobs and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; policies and the ledger; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
-| Environments | `minecraft-swarm` | An environment to train on |
+| Environments | `minecraft-team` | An environment to train on |
 
 What may depend on what is checked by `tests/test_layers.py`:
 

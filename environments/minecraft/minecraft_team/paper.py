@@ -41,7 +41,7 @@ from typing import Any
 import httpx
 import yaml
 
-from minecraft_swarm.control import Control, ControlError
+from minecraft_team.control import Control, ControlError
 from rollout.processes import end_with_parent
 
 PAPER_VERSION = "1.21.11"

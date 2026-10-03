@@ -5,8 +5,8 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
-from minecraft_swarm.limits import LIMITS
-from minecraft_swarm.tasks import CHAINS, EARLY, KITS, TEAM, Coordination, Kit, Objective, Start, Task
+from minecraft_team.limits import LIMITS
+from minecraft_team.tasks import CHAINS, EARLY, KITS, TEAM, Coordination, Kit, Objective, Start, Task
 from rollout.contracts import ToolSpecification
 
 NUMBERS = [

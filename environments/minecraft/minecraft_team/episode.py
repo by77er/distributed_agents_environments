@@ -1,9 +1,9 @@
-"""The swarm episode: one to four agents, one shared reward, the world frozen while they think.
+"""The team episode: one to four agents, one shared reward, the world frozen while they think.
 
 Each turn, every agent observes, thinks and calls one action tool, all at once while the world is frozen; then the
 world runs one window while the actions happen. The episode ends when its budget of game time or of turns is spent,
 or earlier when nothing is left to earn. Its reward, the task's objective scored from the plugin's ground truth,
-goes to every agent: the swarm is rewarded equally.
+goes to every agent: the team is rewarded equally.
 
 Each agent is a model slot of its own (`agent-1` to `agent-4`, of which the first one to four play) with its own
 context and memory, and plays under a name the start draws (`NAMES`), all different, so that the policy learns no
@@ -28,8 +28,8 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
-from minecraft_swarm.limits import LIMITS, TICKS_PER_SECOND
-from minecraft_swarm.prompts import (
+from minecraft_team.limits import LIMITS, TICKS_PER_SECOND
+from minecraft_team.prompts import (
     ACTIONS,
     CHAT_LINES,
     COMPACT,
@@ -42,7 +42,7 @@ from minecraft_swarm.prompts import (
     guidance,
     system_prompt,
 )
-from minecraft_swarm.tasks import NAMES, TEAM, TURNS_PER_MINUTE, Task, catalog
+from minecraft_team.tasks import NAMES, TEAM, TURNS_PER_MINUTE, Task, catalog
 from rollout.contracts import Message, Text, ToolCall
 from rollout.harness import Memory, ModelSlot, Program, RunContext
 
@@ -51,7 +51,7 @@ SPARE_TURNS = 4
 """An agent compacts along with a teammate whose memory is full if it remembers at least this many turns."""
 
 
-class SwarmEpisode(Program):
+class TeamEpisode(Program):
     """Parameters: `task` (an id from the catalog), `world_seed`, `layout_seed`; optionally `names` (the names the
     players play under, all different: one to four of them, played by the first that many slots of `TEAM`) or
     `players` (how many play, under names drawn from `NAMES` with the layout seed), `minutes` (a shorter budget of
@@ -140,7 +140,7 @@ class SwarmEpisode(Program):
         finally:
             await self._call(run, "end", {"episode": episode})
         reward = float(cast(float, score["reward"]))
-        for name in self.team:  # the swarm is rewarded equally
+        for name in self.team:  # the team is rewarded equally
             run.reward(reward, slot=name)
         result: dict[str, JsonValue] = {
             **score,
