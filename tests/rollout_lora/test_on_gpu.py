@@ -24,7 +24,7 @@ def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_samp
     from rollout_lora.policy import Policy
     from rollout_lora.step import PolicyStep, sampled
 
-    settings = LoraSettings(tokens_per_step=2_000)
+    settings = LoraSettings(tokens_per_step=2_000, max_kl=None)  # (an update moves random tokens' logprobs a lot)
     policy = Policy.load(MODEL, rank=settings.rank, alpha=settings.alpha)
     rng = random.Random(0)
     segments: list[Weighted] = []
