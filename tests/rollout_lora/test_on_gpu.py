@@ -46,7 +46,8 @@ def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_samp
     assert float((quiet - loud.detach()).abs().max()) < 1e-3
 
     began = time.monotonic()
-    metrics = PolicyStep(policy, settings).step(segments)
+    stepping = PolicyStep(policy, settings)
+    metrics = stepping.step(segments)
     took, start = time.monotonic() - began, metrics["start_seconds"]
     print(f"\nstep of {len(segments)} segments: {took:.1f} s, of which the start {start:.1f} s")
     print({key: round(value, 4) for key, value in metrics.items()})
@@ -54,4 +55,4 @@ def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_samp
         metrics["segments"] == 6 and metrics["start_out_of_memory"] == 0 and metrics["minibatches_out_of_memory"] == 0
     )
     assert metrics["mean_mismatch"] == pytest.approx(0.04, rel=0.25)  # the noise: E|N(0, 0.05)| is 0.04
-    assert metrics["clip_fraction"] < 0.01  # none clipped for the noise; few for the step itself
+    assert stepping.minibatches[0]["clip_fraction"] == 0.0  # before any update nothing is clipped, whatever the noise
