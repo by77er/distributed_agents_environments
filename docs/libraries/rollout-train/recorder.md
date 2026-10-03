@@ -58,8 +58,8 @@ together.
 
 ## What a session exports
 
-Training wants token sequences that only grew; a session is a series of samples. The recorder joins samples into segments
-([`Segment`](../../guide/reference.md#segment)) by one rule:
+Training wants contexts that only grew; a session is a series of samples. The recorder joins samples into segments
+([`Segment`](../../guide/reference.md#segment)), each the tokens of a context that only grew, by one rule:
 
 > A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues that
 > turn's segment.

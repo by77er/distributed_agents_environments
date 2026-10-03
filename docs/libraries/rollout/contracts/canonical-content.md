@@ -61,8 +61,9 @@ A [`ToolResult`](../../../guide/reference.md#toolresult) is what a tool produces
 ## Digests
 
 A digest is the SHA-256, in lowercase hexadecimal, of the canonical JSON of a value
-([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)). A contract model is put in canonical form with the fields whose value is `None` left
-out. A `null` inside a JSON value, such as a tool argument, is kept.
+([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)). A contract model is put in canonical form with the fields
+whose value is `None` left out, so a new optional field does not change the digest of a value that does not set it.
+A `null` inside a JSON value, such as a tool argument, is kept.
 
 | Digest | Function | Covers |
 |---|---|---|

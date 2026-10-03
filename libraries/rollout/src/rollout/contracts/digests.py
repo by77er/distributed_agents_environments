@@ -30,7 +30,8 @@ def digest(value: JsonValue | BaseModel) -> str:
 
 
 def arguments_digest(arguments: JsonValue | BaseModel) -> str:
-    """Sent with every `effect_id`; receivers reject a known `effect_id` whose arguments digest differs."""
+    """Sent with every `effect_id`; a tool set refuses a known `effect_id` whose arguments digest differs
+    (`Conflict`)."""
     return digest(arguments)
 
 

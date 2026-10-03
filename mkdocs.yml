@@ -55,8 +55,8 @@ nav:
       - "Agents": guide/agents.md
       - "Conversations": guide/conversations.md
       - "Content": guide/content.md
-      - "Models": guide/models.md
       - "Runs and events": guide/runs-and-events.md
+      - "Models": guide/models.md
       - "Testing": guide/testing.md
       - "Deploying": guide/deploying.md
       - "API reference": guide/reference.md

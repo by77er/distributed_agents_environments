@@ -8,7 +8,7 @@ The repository is a [uv](https://docs.astral.sh/uv/) workspace and needs Python 
 
 ```bash
 uv sync                 # every package that needs no GPU, and the development tools
-uv sync --all-extras    # also the engine, the trainer and the renderer (Linux, NVIDIA GPU)
+uv sync --all-extras    # also the engine, the trainer and the renderers (Linux, NVIDIA GPU)
 uv run pytest           # the tests, including every runnable example in this guide
 ```
 

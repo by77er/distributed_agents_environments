@@ -41,12 +41,16 @@ training_gib = 4                              # and to start a step
 ```bash
 uv run rollout train profile.toml minecraft_swarm.catalog:catalog --groups 100 --directory RUN  # --groups-per-step 4
 uv run rollout monitor RUN                     # the web page over the run: http://localhost:8765
-uv run rollout report RUN minecraft_swarm.catalog:catalog --watch
+uv run rollout report RUN minecraft_swarm.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
+uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
 uv run rollout tools minecraft_swarm.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 ```
 
 `rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
-profile or the command is told by name.
+profile or the command is told by name. `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
+of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)); `report` and
+`imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
+[imitation](../libraries/rollout-train/training.md#imitation).
 
 ## The file
 
@@ -75,13 +79,13 @@ are their own.
 | Key | Called with | Implementations in this repository |
 |---|---|---|
 | `engine` of a channel | The channel's `model`, and one entry of `engines` as keyword arguments. Once per entry | `rollout_vllm:VllmEngine` ([vLLM engine](../implementations/rollout-vllm.md)) |
-| `renderer` of a channel | The channel's `model` | `rollout_qwen:qwen35`, `rollout_qwen:qwen3` ([Qwen renderers](../implementations/rollout-qwen.md)) |
+| `renderer` of a channel | The channel's `model` | `rollout_qwen:qwen35`, `rollout_qwen:qwen3` ([Qwen renderers](../implementations/rollout-qwen.md)), `rollout_gemma:gemma4` ([Gemma renderers](../implementations/rollout-gemma.md)) |
 | `kind` of the trainer | The trained channel's `model`, and every other key of `[trainer]` except `channel`, `policy` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)) |
 | An entry of `tools` | The run's directory | An environment's own, such as `minecraft_swarm.worlds:tools` ([Minecraft swarm](../products/minecraft-swarm.md)) |
 
 `rollout_train.testing` has a scripted engine and a readable renderer for profiles that need no GPU
-(`rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer`). The three GPU packages are
-installed with `uv sync --all-extras`.
+(`rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer`). The GPU packages are installed
+with `uv sync --all-extras`.
 
 ## Opening a profile
 
@@ -97,10 +101,11 @@ async with Profile.load(Path("profile.toml")).open() as platform:
 ```
 
 Opening starts, in order: the trainer; each channel's engines; the channels, the trained one with the trainer's
-longest segment as its longest turn and the trainer's latest adapter published to it; the recorder; the monitor's
-feed in `directory/feed`; the tool sets; the runner; the rollout jobs. A colocated trainer is wrapped in
+longest segment as its longest turn; the recorder; the monitor's feed in `directory/feed`; the tool sets; the blob
+store and the policies; the runner; the rollout jobs. A colocated trainer is wrapped in
 [`Colocated`](reference.md#colocated). With `serve`, the rollout service and the endpoint for harnesses listen there.
-Leaving the block stops all of it in reverse, also when starting fails half way.
+Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
+policy's newest version on its channel when it starts.
 
 `rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it.
 

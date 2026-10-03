@@ -7,8 +7,9 @@ reinforcement-learning sense: it defines tools and responds to every model turn;
 sees and how it acts. Both are Python `async` code. Model samples go to a **model endpoint**: an adapter to a
 third-party model, or the **recorder**, which samples from a trainable **channel** and keeps the exact tokens,
 logprobs and weights versions. **Rollout jobs** run a catalog's rows in bulk and deliver **episodes** to a training
-loop, whose trainer's new weights are published to the channel without any task or agent noticing. A **profile**
-says which engines, trainer, runner and tool sets stand behind all of it.
+loop, which plays a row's start as a **group** of episodes and takes a **step** over several groups at a time; each
+step's new weights are published to the channel without any task or agent noticing. A **profile** says which
+engines, trainer, runner and tool sets stand behind all of it.
 
 ## Layers
 
@@ -18,8 +19,8 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the catalog |
-| | `rollout-train` | Reinforcement learning on `rollout`: rollout jobs and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the profile, the `rollout` command and the monitor |
-| Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
+| | `rollout-train` | Reinforcement learning on `rollout`: rollout jobs and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; policies and the ledger; the profile, the `rollout` command and the monitor |
+| Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-swarm` | An environment to train on |
 
@@ -40,8 +41,10 @@ profile names engines, renderers, trainers and tool sets as `module:name`, so `r
 | [`Runner`](../guide/reference.md#runner) | `rollout.harness` | callers → runs | `LocalRunner` (`rollout.local`), `DurableRunner` ([`rollout_durable`](../implementations/rollout-durable/README.md)) |
 | [`ModelEndpoint`](../libraries/rollout/contracts/model-endpoint.md) | `rollout.contracts` | runners → models | the [recorder](../libraries/rollout-train/recorder.md)'s endpoints, `ResponsesEndpoint` ([`rollout_openai`](../guide/models.md)), `ScriptedModelEndpoint` ([`rollout.testing`](../guide/testing.md)) |
 | [`Engine`](../guide/reference.md#engine) | `rollout_train.inference` | channels → replicas | `VllmEngine` ([`rollout_vllm`](../implementations/rollout-vllm.md)), `ScriptedEngine` (`rollout_train.testing`) |
-| [`Renderer`](../guide/reference.md#renderer) | `rollout_train.recorder` | the recorder → a model family's tokens | `qwen35`, `qwen3` ([`rollout_qwen`](../implementations/rollout-qwen.md)), `PlainRenderer` (`rollout_train.testing`) |
+| [`Renderer`](../guide/reference.md#renderer) | `rollout_train.recorder` | the recorder → a model family's tokens | `qwen35`, `qwen3` ([`rollout_qwen`](../implementations/rollout-qwen.md)), `gemma4` ([`rollout_gemma`](../implementations/rollout-gemma.md)), `PlainRenderer` (`rollout_train.testing`) |
 | [`Trainer`](../guide/reference.md#trainer) | `rollout_train` | training → weights | `LoraTrainer` ([`rollout_lora`](../implementations/rollout-lora.md)); `Colocated` wraps one that shares the engines' accelerator |
+| [`Algorithm`](../guide/reference.md#algorithm) | `rollout_train` | the training loop → what to train on | `Grpo` ([training](../libraries/rollout-train/training.md#the-algorithm-grpo)) |
+| [`Ledger`](../guide/reference.md#ledger) | `rollout_train` | training and policies → append-only tables | `FileLedger` ([policies](../libraries/rollout-train/policies.md#the-ledger)) |
 | [`ToolSet`](../guide/reference.md#toolset) | `rollout.harness` | runs → imported tools | a tool set in process, `RemoteToolSet` over HTTP ([tools](../guide/tools.md#imported-tools)) |
 | [`EnvironmentService`](../guide/reference.md#environmentservice) | `rollout.harness` | runs → computers | `NamespaceEnvironments`, `LocalEnvironments` ([`rollout_computers`](../implementations/rollout-computers.md)) |
 | [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
@@ -82,7 +85,7 @@ Everything that leaves task or agent code on the way is an **effect** with an id
 |---|---|---|
 | Where code runs | the caller's process | the runner's process, inside a DBOS workflow |
 | An effect | a call, recorded as run events | a durable step: its first recorded result is final |
-| After a crash | runs in flight are lost; a rollout job reports them as failed episodes | the program is run again and recorded effects return their results; what was in flight is performed again under the same identity |
+| After a crash | runs in flight are lost; a rollout job with a log, started again under its name, runs them again | the program is run again and recorded effects return their results; what was in flight is performed again under the same identity |
 | A side effect that cannot be deduplicated | performed once | guarded by an attempt marker: a possible duplicate is reported as `OUTCOME_UNKNOWN` to the model, never silently retried |
 | Messages | delivered once by `message_id`, in process | delivered once by `message_id`, through any runner sharing the database |
 

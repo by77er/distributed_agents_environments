@@ -12,9 +12,9 @@ of their own.
 await train(jobs, catalog, trainer, policies, policy="swarm", channel="policy", directory=versions, groups=100)
 ```
 
-`rollout train PROFILE CATALOG` runs this loop over what a profile describes: the profile opens into jobs, a
-trainer and the policies, and names the policy to train and the channel that serves it
-([deploying](../../guide/deploying.md)).
+`rollout train PROFILE CATALOG [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
+the profile opens into jobs, a trainer and the policies, names the policy to train and the channel that serves it,
+and sets `episodes_at_once` ([deploying](../../guide/deploying.md)).
 
 ## The loop
 
@@ -23,10 +23,10 @@ channel. Unless a `binding` says otherwise, every model slot of the catalog's pr
 
 - **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled `group`,
   `iteration`, `task` and `title`. The curriculum picks the row and the catalog draws the start.
-- **Play and training go their own ways.** At most `episodes_at_once` episodes run at once, whatever groups they
-  are of (a profile says how many: `episodes_at_once`, 6 unless it says otherwise). Enough groups are kept asked for
-  that an episode is waiting whenever one ends, so a group may begin before the one before it is done, and end
-  first.
+- **Play and training go their own ways.** At most `episodes_at_once` episodes (6 by default) run at once,
+  whatever groups they are of: it is the job's `in_flight`, and the job starts runs as room allows, the rest of one
+  ticket's and then the next's ([admission](rollouts.md#guarantees)). Enough groups are kept asked for that an
+  episode is waiting whenever one ends, so a group may begin before the one before it is done, and end first.
 - **When a group's last episode ends**, its result is written at once: the curriculum records it, and the algorithm
   says what in it to train on. A group with nothing to train on is done with, with the algorithm's reason
   (`skipped`); the others join a queue.
@@ -71,12 +71,12 @@ nothing, or the step that covers it has made its version or failed.
   those episodes, the same each time it is computed.
 - **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
   policy's table. A step that died before the append made nothing.
-- **Saves thin out.** Once a version is served, the policy is thinned to `retention` (by default the trainer state
+- **Saves thin out.** Once a version is served, the policy is thinned to `retention` (`Retention()`: the trainer state
   of the newest three versions and of every tenth; [policies](policies.md#versions)).
 - **One loop at a time.** Starting takes the run's fence and the policy's. A loop that was replaced, and does not
   know it yet, has its next write refused.
-- **`groups` counts groups played**, those a stopped loop left unplayed among them; the loop ends once they are
-  played and every one with something to train on has been in a step.
+- **`groups` is how many groups this start plays**, those a stopped loop left unplayed among them; the loop ends
+  once they are played and every one with something to train on has been in a step.
 
 What is redone: a step that was in progress, and the runs that were in flight if they ran in the loop's own process
 (the job runs them again from the same start).
@@ -108,8 +108,8 @@ rather than tickets.
 - **Weight.** A group-relative update learns from the differences between a group's episodes, so a row's weight is
   the share of its recent groups whose rewards differed (a moving average), plus a little for every unlocked row so
   that none is forgotten. Untried rows come first.
-- **Pending rows.** A row whose group is still running is not picked again until that group is recorded: choosing
-  it would be choosing on what was known before it.
+- **Pending rows.** A row whose group is still running comes after the others until that group is recorded:
+  choosing it would be choosing on what was known before it.
 - **Unlocking.** Rows unlock in the catalog's order: the first `start` of them, and `reach` past the hardest one
   solved at least half the time. Whether a row was solved decides only what unlocks.
 - **Rows that teach about others.** A row's `counts_for` names other rows its groups are evidence about too (the
@@ -146,8 +146,8 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 ## The record
 
-For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table as soon as its
-episodes have ended: the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
+For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table when its last
+episode ends: the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
 failed and why, how many segments were recorded and how many the algorithm found to train on (`segments`; none, and
 `skipped` with its reason, if it found none), its notes, and how many rows are unlocked. The same line goes to the
 job as a `result` note; each step goes as a `step` note with the version it made and its metrics, or its error.
@@ -197,7 +197,9 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   ([LoRA trainer](../../implementations/rollout-lora.md)) from the policy's newest version, and commits the next.
 
 ```bash
-rollout imitate PROFILE --without way [--limit N]    # with the run stopped: it takes the policy's writer
+rollout imitate PROFILE [--without KIND ...] [--limit N]    # with the run stopped: it takes the policy's writer
 ```
 
-Started again, the training loop serves the version imitation made and trains on from it.
+The command reads every job's log in the run's directory for guidance of the kinds given (`way` by default), steps
+the profile's trainer with `objective = "likelihood"`, and adds `imitated_episodes` to the version's metrics. Started
+again, the training loop serves the version imitation made and trains on from it.

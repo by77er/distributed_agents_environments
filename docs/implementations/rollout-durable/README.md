@@ -31,10 +31,8 @@ defaults are in the [reference](../../guide/reference.md#durablerunner).
 | `evict_after`, `eviction_interval` | Unloading runs that wait: [evicting idle runs](eviction.md) |
 | `database`, `runner_id`, `heartbeat_interval`, `takeover_after` | Sharing a Postgres database, and taking over a dead runner's runs: [several runners](runners.md) |
 
-Besides `start`, `send` and `cancel`, the runner has `deploy(deployment)`, `run(run_id)`,
-`conversation_runs(deployment, key)` and `conversation_of(run_id)`. Runs are returned as `DurableRunHandle`, which
-reads the store and so stays valid across processes and restarts: `run_id`, `outcome`, `done`, `await result()`,
-`events(from_seq=0)` (follows the run until its terminal event) and `recorded_events()`.
+Its methods and guarantees are those of the [`Runner` protocol](../../libraries/rollout/README.md#runner). Its
+handles, `DurableRunHandle`, read the store, so a handle stays valid across processes and restarts.
 
 A [profile](../../guide/deploying.md) whose `runner` is `durable` runs its episodes on one, with its state under
 `runs/` in the run's directory.
@@ -85,17 +83,9 @@ are side-effecting and do not deduplicate ([tools](../../guide/tools.md#after-a-
 
 ## Messages
 
-`send` is [`MessageRouter.send`](../../guide/reference.md#messagerouter) of the harness, the same code under both
-runners. It returns the `message_id`: the `idempotency_key` when given, otherwise a new one. Priorities and delivery
-modes are those of [conversations](../../guide/conversations.md). Under a lock on the address it sends to:
-
-1. A `message_id` already claimed is a retry; nothing more happens.
-2. The run is found: the run a run address names, or a conversation's live run, started from its deployment if none
-   is live.
-3. The message is delivered to the run by its delivery policy. A run that has ended raises `RunNotLive`.
-4. The `message_id` is claimed.
-
-The durable runner supplies the transport:
+`send` is the harness's [`MessageRouter.send`](../../libraries/rollout/README.md#sending-messages), the same code
+under both runners: under a lock on the address, a claimed `message_id` is a retry, otherwise the message is delivered
+to the run and then claimed. The durable runner supplies the transport:
 
 | Part of `send` | In the durable runner |
 |---|---|
@@ -111,18 +101,18 @@ messages. `interrupt` carries only a signal, for interrupting messages and cance
 through `DBOS.asyncio_wait`, which records which finished first.
 
 A wait records `run.suspended` and blocks in a DBOS receive with the wait's timeout; without a timeout it repeats
-receives of `LONG_WAIT_SECONDS`. When a conversation's run ends, the messages it never consumed are queued to the
-conversation's next run, which is started if none is live (`MessageRouter`'s hand-over).
+receives of `LONG_WAIT_SECONDS`. When a conversation's run ends, the process it ran in hands the messages it never
+consumed to the conversation's next run (`MessageRouter`'s hand-over).
 
 ## Cancellation
 
 Cancellation is cooperative. `cancel(run_id, reason=…)` sends a request to the run's inbox and a signal on
-`interrupt`, then waits for the run to end. The run records `run.cancel_requested`, raises `RunCancelled` at its next
+`interrupt`, wakes the run if it is [evicted](eviction.md), then waits for the run to end. The run records `run.cancel_requested`, raises `RunCancelled` at its next
 effect, wait or turn boundary, runs `teardown` and ends as `cancelled`. Cancelling a run that has ended does nothing.
 
 ## Limits
 
 - A message sent to a conversation between its run's last inbox read and the run being marked finished is claimed but
   never consumed.
-- Unconsumed messages are handed to the next run by the process the run finished in. If that process dies after the
-  workflow is recorded and before the hand-over, they are not delivered.
+- If the process a conversation's run finished in dies after the workflow is recorded and before the hand-over, the
+  messages the run never consumed are not delivered.

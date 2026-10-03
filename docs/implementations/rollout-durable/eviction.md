@@ -40,8 +40,8 @@ Three details keep this safe:
   it does not wait for stays resident until its wait ends.
 
 Waking replays the run's whole recorded history, so its cost grows with the run's length. On SQLite a wake takes
-about a second. With several runners, each evicts only the runs resident in its own process, and any of them may
-execute a woken run ([several runners](runners.md)).
+about a second. With several runners, any of them may execute a woken run
+([several runners](runners.md#where-runs-execute)).
 
 ## Measurements
 

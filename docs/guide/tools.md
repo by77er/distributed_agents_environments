@@ -230,18 +230,12 @@ still gets an answer.
 
 ### After a crash
 
-Under the durable runner, a call that a crash interrupted is handled by the tool's `retry_class`
-(`ToolSpecification` defaults to `UNKNOWN`):
-
-| Tool | The interrupted call |
-|---|---|
-| `PURE` or `IDEMPOTENT` | is made again, with the same `effect_id` |
-| `SIDE_EFFECTING` or `UNKNOWN`, in a `DeduplicatingToolSet` whose `deduplicates` is true | is made again: the tool set performs each `effect_id` at most once |
-| `SIDE_EFFECTING` or `UNKNOWN` otherwise | is not made again: the effect completes as `outcome_unknown`, and the model receives an error result saying the call may or may not have taken effect |
-
-A tool set is a `DeduplicatingToolSet` when it has a `deduplicates` attribute; one without it is treated as one that
-does not deduplicate. A tool set served over HTTP reports the attribute of the tool set behind it, so the guarantee
-holds for `ToolBinding(url=...)` too ([effects](../libraries/rollout/contracts/effects.md#receivers-that-deduplicate)).
+Under the durable runner, a call that a crash interrupted is made again, with the same `effect_id`, when the tool's
+`retry_class` is `PURE` or `IDEMPOTENT`, or when its tool set deduplicates: a `DeduplicatingToolSet` whose
+`deduplicates` is true performs each `effect_id` at most once, and a tool set served over HTTP reports the attribute
+of the one behind it. Otherwise (`SIDE_EFFECTING`, or `UNKNOWN`, which `ToolSpecification` defaults to) it is not
+made again: the effect completes as `outcome_unknown`, and the model receives an error result saying the call may or
+may not have taken effect ([effects](../libraries/rollout/contracts/effects.md#receivers-that-deduplicate)).
 
 ### Serving a tool set over HTTP
 

@@ -17,7 +17,7 @@ runner = DurableRunner(
 
 | Parameter of `DurableRunner` | Meaning |
 |---|---|
-| `database` | A Postgres URL, or a `Database`, shared with other runners. `None` is SQLite in `directory` |
+| `database` | A Postgres URL, or a `Database`, shared with other runners |
 | `runner_id` | This runner's name among them; it is also DBOS's executor id. Left out, it is `runner-` and 12 random hex digits, or `local` on SQLite |
 | `heartbeat_interval` | Seconds between heartbeats |
 | `takeover_after` | How long a heartbeat may stop before another runner recovers the runs |

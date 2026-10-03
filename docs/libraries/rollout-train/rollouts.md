@@ -85,8 +85,8 @@ A job given a `log` directory keeps every episode, from the moment its run ends.
   reads the log from any cursor, trajectories and all, so earlier episodes can be trained on again.
 - **Blobs** go to the [`Blobs`](../../guide/reference.md#blobs) store the jobs are given, or to files under
   `log/blobs`. They are JSON, compressed. How long they are kept is the store's business.
-- **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trajectory can be
-  joined to what the action it sampled did. `events_of(record, blobs)` reads the events.
+- **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trajectory
+  can be joined to what the action it sampled did. `events_of(record, blobs)` reads the events.
 - **A job started again runs what it still owes.** A ticket some of whose runs have no episode gets those runs
   again, from the same row. A run the job itself cut short by closing is in the log as a cancelled episode whose
   `detail` says so, and is not one of its ticket's episodes: it is one of the runs still owed.
@@ -96,13 +96,14 @@ A job given a `log` directory keeps every episode, from the moment its run ends.
 
 `RolloutClient` polls. A read of a ticket or of the stream waits on the server for news, up to a `wait` in seconds,
 and then answers with what there is. The routes are listed in `rollout_train.rollouts.service`. Episodes cross as
-their records, and the client reads their trajectories from the blob store, which both sides share. Jobs served over HTTP
-therefore need a log.
+their records, and the client reads their trajectories from the blob store, which both sides share. Jobs served over
+HTTP therefore need a log.
 
 ## Catalog
 
 What an environment offers to be trained on is a [`Catalog`](../../guide/reference.md#catalog): the program, its
-rows (easiest first), and how one start of a row is drawn. `Catalog`, `Row` and `binding_for` live in
+rows (easiest first), and how one start of a row is drawn. A row may name other rows its groups count for too
+(`Row.counts_for`, [the curriculum](training.md#the-curriculum)). `Catalog`, `Row` and `binding_for` live in
 `rollout.catalog`, in the core library, so an environment needs the harness and nothing above it.
 `binding_for(catalog, channel, tools)` binds every model slot of the catalog's program to one channel
 ([three ways in](../../guide/perspectives.md#building-an-environment)).
@@ -118,6 +119,6 @@ thinks at. Every event has `kind`, `job` and `at`.
 | `admitted` | a ticket's runs have started | `ticket`, `runs` |
 | `episode` | a run ended | `cursor`, `ticket`, `run`, `labels`, `outcome`, `detail`, `reward`, `info`, and `sampled`: tokens sampled by slot |
 | `published` | weights were published | `channel`, `adapter`, `version` |
-| anything else | the caller's `job.note(kind, payload)` | the payload. The training loop notes `iteration`. |
+| anything else | the caller's `job.note(kind, payload)` | the payload. The training loop notes each group's `result` and each `step` ([the record](training.md#the-record)). |
 
 The [monitor](monitor.md)'s feed is one such hook.

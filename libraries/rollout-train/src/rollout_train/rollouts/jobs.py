@@ -87,8 +87,8 @@ class Job(Protocol):
     async def run(
         self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = ""
     ) -> Ticket:
-        """Queue `count` runs of one row. They start together, when there is room for all of them. With a `key`,
-        asking again is asking for the same ticket: a caller that died after asking gets it back, with whatever
+        """Queue `count` runs of one row. They start as there is room, after the runs of tickets queued before. With a
+        `key`, asking again is asking for the same ticket: a caller that died after asking gets it back, with whatever
         episodes it has."""
         ...
 

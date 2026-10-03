@@ -57,7 +57,7 @@ class Span:
 
 @dataclass(frozen=True)
 class Segment:
-    """A piece of a session's trajectory: a token sequence that only grew, as the policy saw and continued it."""
+    """A piece of a session's trajectory: tokens that only grew, as the policy saw and continued them."""
 
     tokens: list[int]
     spans: list[Span]

@@ -27,7 +27,7 @@ curl -s localhost:8420/conversations/dev-1/transcript
 
 | Endpoint | Does |
 |---|---|
-| `POST /conversations/{key}/messages` | `{text, priority?, idempotency_key?, wait? = true, timeout_seconds? = 300}`. With `wait`, returns the reply to this message, or 504 when none came in time; without, returns 202 |
+| `POST /conversations/{key}/messages` | `{text, priority?, idempotency_key?, wait? = true, timeout_seconds? = 300}`. With `wait`, returns the reply to this message, 504 when none came in time, or 500 when the run ended without replying; without, returns 202 |
 | `GET /conversations/{key}/transcript` | user messages and assistant replies, in order |
 | `GET /conversations/{key}/events?from_seq=0` | the live run's events as server-sent events |
 | `POST /conversations/{key}/cancel` | cancels the conversation's live run |
@@ -47,8 +47,9 @@ it ([conversations](../guide/conversations.md)).
 | Follow-ups | the `schedule_follow_up` `@tool` records a due time from `run.now()`. The task's `WaitFor` times out at the next one and wakes the assistant with a follow-up observation |
 | Model | the Responses API adapter on the local Codex login ([models](../guide/models.md)) |
 
-On the `DurableRunner`, a conversation that has waited for the runner's `evict_after` is unloaded from memory and
-woken by its next message or follow-up ([evicting idle runs](../implementations/rollout-durable/eviction.md)).
+On the `DurableRunner`, a conversation that has waited five minutes (the runner's default `evict_after`) is unloaded
+from memory and woken by its next message or follow-up
+([evicting idle runs](../implementations/rollout-durable/eviction.md)).
 
 ## Evaluations
 

@@ -92,8 +92,8 @@ they work under any runner. Their limits are constants of `rollout_computers.too
 |---|---|
 | `shell(command, timeout_seconds)` | Runs a command; the timeout is kept between one second and `MAX_TIMEOUT_SECONDS`. The result starts with `exit N` or a timeout note, and is an error for a non-zero exit or a timeout. An `OutcomeUnknown` becomes an error result saying the command may or may not have run |
 | `read_file(path, offset, limit)` | Reads text from line `offset`: at most `MAX_READ_LINES` lines or `MAX_READ_BYTES` bytes, with a note on how to continue. Binary files are refused |
-| `write_file(path, content)` | Writes a text file, replacing it if it exists |
-| `edit_file(path, edits)` | Replaces exact text. Each `old_text` must occur exactly once in the original file, and edits must not overlap. Line endings and a byte-order mark are kept |
+| `write_file(path, content)` | Writes a text file, creating parent directories and replacing it if it exists |
+| `edit_file(path, edits)` | Replaces exact text. Each `old_text` must occur exactly once in the original file, edits must not overlap, and edits that change nothing are refused. Line endings and a byte-order mark are kept |
 | `read_image(path)` | Shows an image to the model as a `Media` block. PNG, JPEG, GIF and WebP go as they are; other formats become PNG. Images over `MAX_IMAGE_SIDE` pixels a side are scaled down, and the result stays under `MAX_IMAGE_BYTES`. It needs `run.blobs` ([content](../guide/content.md#media-and-blobs)) |
 
 Writes and edits to the same file run one at a time, even when the model calls several tools at once.

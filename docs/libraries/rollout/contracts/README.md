@@ -22,8 +22,6 @@ Every contract type is a [`ContractModel`](../../../guide/reference.md#contractm
   stored as tuples.
 - **Unknown fields are kept.** A component that reads a record and writes it again keeps the fields it does not
   know, so a record written by other code passes through unchanged.
-- **Digests are over canonical JSON** ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)), never over a wire
-  encoding. A field whose value is `None` is left out, so a new optional field does not change the digest of a value
-  that does not set it ([digests](canonical-content.md#digests)).
+- **Digests are over canonical JSON**, never over a wire encoding ([digests](canonical-content.md#digests)).
 - **Closed catalogs.** The kinds of effect, the types of run event and the classes of failure are enumerations. A
   new one is a change to `rollout.contracts`.

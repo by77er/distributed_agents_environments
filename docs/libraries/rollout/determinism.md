@@ -34,7 +34,7 @@ Replay records the run's events again with the same `seq` and content; the store
 | `run.now()` | the same time: that of the latest recorded input (the run's start, the last effect's completion, the last message's sending, or the end of a wait that timed out) |
 | `run.random` | the same sequence: a `random.Random` seeded from `run_id` |
 | `await run.gather(*awaitables)` | awaits concurrently and returns results in argument order, as `asyncio.gather` does |
-| Everything else: hooks, `@tool` bodies, `__init__` of the task and the agent, `run.blobs.put`, `run.reward` | runs again |
+| Everything else: task hooks, `@tool` bodies, `__init__` of the task and the agent, `run.blobs.put`, `run.reward` | runs again |
 
 Guarded effects are commands in an environment (`Environment.execute`) and calls to side-effecting imported tools
 whose tool set is not a `DeduplicatingToolSet` ([effects](contracts/effects.md#receivers-that-deduplicate)).
@@ -44,11 +44,9 @@ behave as above.
 
 ## Effect identity
 
-The effects a run requests are numbered from 0 in the order it requests them, and the k-th has
-`effect_id = {run_id}:0:{k}`. Each carries a digest of its arguments ([effects](contracts/effects.md#identity)).
-Replay requests the same effects in the same order, so every identifier is the same on every execution. Receivers
-use it to perform an effect once: the recorder returns the recorded reply for an `effect_id` it has seen, and an
-environment's id is derived from the `effect_id` of its creation, so a repeated creation finds the same environment.
+Replay requests the same effects in the same order, so each effect has the same `effect_id` on every execution: the
+k-th effect a run requests is `{run_id}:0:{k}` ([effects](contracts/effects.md#identity)). Receivers use it to
+perform an effect once ([receivers that deduplicate](contracts/effects.md#receivers-that-deduplicate)).
 
 ## Rules
 
@@ -59,5 +57,5 @@ environment's id is derived from the `effect_id` of its creation, so a repeated 
 | Keep `__init__` of tasks and agents deterministic, and keep state on `self` | Replay creates both again and rebuilds their state by running the hooks. |
 | Request effects in an order that does not depend on timing | Effects are numbered in the order they are requested. Concurrent branches that request one effect each, as the default `respond` does for a reply's tool calls, are numbered in the order the branches start. |
 | Do not let ordering depend on `hash()` or `id()`, for example by iterating a `set` of strings | They differ between processes, and replay can happen in another one. |
-| Put work that must happen once in an effect, not in a hook or a `@tool` body | Hooks and tool bodies run again. |
+| Put work that must happen once in an effect, not in a task hook or a `@tool` body | Task hooks and tool bodies run again. |
 | Change code under live runs only in ways that keep the effects each run already requested, and their order | Replay runs the code the runner has loaded, against the results recorded for the old code. |

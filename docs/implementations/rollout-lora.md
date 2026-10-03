@@ -18,8 +18,8 @@ rank = 32
 segment_tokens = 8000
 ```
 
-A [profile](../guide/deploying.md) calls `LoraTrainer(model, directory, **settings)` with the model of the channel it
-trains and the run's directory. Every key of `[trainer]` other than `kind`, `channel` and `colocated` is a setting.
+A [profile](../guide/deploying.md) calls `LoraTrainer(model, **settings)` with the model of the channel it trains.
+Every key of `[trainer]` other than `kind`, `channel`, `policy` and `colocated` is a setting.
 
 ## Settings
 
@@ -35,7 +35,7 @@ trains and the run's directory. Every key of `[trainer]` other than `kind`, `cha
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
 | `segment_tokens` | The longest segment a step can hold on its GPU (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
-| `objective` | `policy_gradient` (the clipped policy gradient against the logprobs tokens were sampled at), or `likelihood` (raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage: [imitation](../libraries/rollout-train/training.md#imitation)) |
+| `objective` | `policy_gradient` (the clipped policy gradient of [the step](#the-step)) or `likelihood` (the sampled tokens' log-likelihood, for [imitation](../libraries/rollout-train/training.md#imitation)) |
 
 `segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). An open profile
 gives `segment_tokens` to the trained channel as its longest turn, so that every sampled turn can be trained on.
@@ -74,7 +74,7 @@ The process may use the GPU memory that is free when it starts, less `MEMORY_MAR
 (`torch.cuda.set_per_process_memory_fraction`). Some drivers let a process spill past the card into system memory,
 where a step crawls instead of failing; the bound turns that into an out-of-memory error. A minibatch that runs out
 of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass goes on with
-the next. Sequences longer than `segment_tokens` are left out before the pass and counted in `segments_too_long`.
+the next. Segments longer than `segment_tokens` are left out before the pass and counted in `segments_too_long`.
 
 ## The policy
 
@@ -103,11 +103,15 @@ one's advantage, is the [algorithm's](../libraries/rollout-train/training.md) bu
    the first minibatch's. If it is more than `max_kl` beyond it, the pass stops without that step.
 5. Otherwise gradients are clipped to `max_gradient_norm` and AdamW steps, with no weight decay.
 
-A sampled token whose recorded logprob is not finite fails the step.
+A sampled token whose recorded logprob is not finite fails the step. Under `objective = "likelihood"` steps 3 and 4
+are replaced: the loss is the negative log-likelihood of each sampled token times its segment's advantage, with no
+ratio, no clip and no stop at `max_kl`, and recorded logprobs are not read.
 
 ## Metrics
 
-A step returns these. The training loop keeps them with the version the step made, and as `update` in the group's iteration.
+A step returns these. The training loop keeps them with the version the step made, and sends them to the job in its
+`step` note ([the record](../libraries/rollout-train/training.md#the-record)). Under the likelihood objective the
+ratio, clip, mismatch and KL metrics are zero.
 
 | Metric | Meaning |
 |---|---|
@@ -141,4 +145,5 @@ One RTX 5080 (16 GB), `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32.
 ## Tests
 
 `tests/rollout_lora/` needs torch and is collected only when it is installed. It covers the adapter's file format,
-the direction of the update, forced tokens, segments left out, the last minibatch, the KL stop and a missing logprob.
+the direction of the update, what each minibatch did, forced tokens, segments left out, the last minibatch, the KL
+stop, a missing logprob and the likelihood objective.

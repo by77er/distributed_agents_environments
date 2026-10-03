@@ -17,8 +17,8 @@ How to build with it. Runnable examples are part of the test suite.
 | [Getting started](guide/getting-started.md) | Install, a first task, one episode against a scripted model |
 | [Tasks](guide/tasks.md), [Tools](guide/tools.md), [Agents](guide/agents.md) | Environments, action spaces, what the model sees |
 | [Conversations](guide/conversations.md), [Content](guide/content.md) | Messages and waiting; canonical content, blobs, digests |
-| [Runs and events](guide/runs-and-events.md), [Testing](guide/testing.md) | What a run records; scripted models |
-| [Models](guide/models.md) | Third-party models through the Responses API (`rollout-openai`) |
+| [Runs and events](guide/runs-and-events.md) | What a run records: effects, identifiers, events; the local runner |
+| [Models](guide/models.md), [Testing](guide/testing.md) | Third-party models through the Responses API (`rollout-openai`); scripted models |
 | [Deploying](guide/deploying.md) | The profile file and the `rollout` command |
 | [API reference](guide/reference.md) | Every public name, generated from the source |
 
@@ -36,7 +36,7 @@ Interfaces, and what runs with no implementation beyond this process.
 | Package | Pages |
 |---|---|
 | `rollout` | [Harness](libraries/rollout/README.md): the loop, programs and runners. [Determinism](libraries/rollout/determinism.md), [hooks](libraries/rollout/hooks.md), [memory](libraries/rollout/memory.md). [Contracts](libraries/rollout/contracts/README.md): [identifiers](libraries/rollout/contracts/identifiers.md), [canonical content](libraries/rollout/contracts/canonical-content.md), [run events](libraries/rollout/contracts/run-events.md), [effects](libraries/rollout/contracts/effects.md), the [model endpoint](libraries/rollout/contracts/model-endpoint.md) |
-| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [policies, versions and the ledger](libraries/rollout-train/policies.md), [channels](libraries/rollout-train/channels.md), the [recorder](libraries/rollout-train/recorder.md) and its [endpoint for harnesses](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
+| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [policies, versions and the ledger](libraries/rollout-train/policies.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [channels](libraries/rollout-train/channels.md), the [recorder](libraries/rollout-train/recorder.md) and its [endpoint for harnesses](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
 
 ## Implementations
 
@@ -45,8 +45,8 @@ Each implements one interface a library defines.
 | Page | What it covers |
 |---|---|
 | [Durable runner](implementations/rollout-durable/README.md) | Runs that survive their process, on DBOS. [Evicting idle runs](implementations/rollout-durable/eviction.md); [several runners](implementations/rollout-durable/runners.md) on one Postgres, and the database stores use |
-| [vLLM engine](implementations/rollout-vllm.md) | Options, sleep and wake, adapters, the engine core process, measurements |
-| [LoRA trainer](implementations/rollout-lora.md) | Settings, a process per step, the memory bound, the step, metrics, measurements |
+| [vLLM engine](implementations/rollout-vllm.md) | Options (speculative decoding among them), adapters by name, sleep and wake, the engine core process, measurements |
+| [LoRA trainer](implementations/rollout-lora.md) | Settings, a fresh process per step, the memory bound, the step, metrics, measurements |
 | [Qwen renderers](implementations/rollout-qwen.md) | The token formats of Qwen3.5 and Qwen3 |
 | [Gemma renderers](implementations/rollout-gemma.md) | The token format of Gemma 4 |
 | [Computers](implementations/rollout-computers.md) | Environment backends and the tools that act on them |
@@ -58,7 +58,7 @@ Each implements one interface a library defines.
 |---|---|
 | [Project assistant](products/project-assistant.md) | A long-lived conversational agent about one code repository |
 | [Agent sessions](products/agent-sessions.md) | Independent agents with their own computers, which create and message each other |
-| [Minecraft swarm](products/minecraft-swarm.md) | Four agents in a Minecraft world: an environment to train on |
+| [Minecraft swarm](products/minecraft-swarm.md) | One to four agents in a Minecraft world: an environment to train on |
 
 ## Development
 

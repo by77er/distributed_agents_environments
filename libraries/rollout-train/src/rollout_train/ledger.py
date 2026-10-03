@@ -11,7 +11,7 @@ things make that safe.
   that carries an older fence is refused (`Fenced`), so a process that was replaced, and does not know it yet,
   cannot write over its replacement.
 
-`FileLedger` keeps tables as files of JSON lines; `rollout_durable` has one in a database, for several machines.
+`FileLedger` keeps tables as files of JSON lines.
 """
 
 import contextlib

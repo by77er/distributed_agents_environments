@@ -161,3 +161,13 @@ async def test_a_high_priority_message_interrupts_the_reply(durable: Durable) ->
     assert payload(interrupted[0])["reply_effect_id"] == endpoint.requests[0].effect_id
     assert [m.text for m in endpoint.requests[1].context.append] == ["Tour the whole repository.", "Just the currency."]
     await runner.cancel(handle.run_id, reason="done")
+
+
+async def test_a_run_whose_binding_cannot_be_served_does_not_start(durable: Durable) -> None:
+    runner, _ = durable
+    unserved = RunBinding(models={"policy": ModelBinding(direct=DirectModel(provider="nobody", model="m"))})
+    with pytest.raises(ValueError, match="nobody"):  # refused at once, as `LocalRunner` refuses it
+        await runner.start(RunSpecification(program=agent_program(Echo), binding=unserved))
+    empty = RunBinding(models={})
+    with pytest.raises(ValueError, match="policy"):
+        await runner.start(RunSpecification(program=agent_program(Echo), binding=empty))

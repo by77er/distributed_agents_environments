@@ -24,7 +24,7 @@ Each entry of `engines` is passed to `VllmEngine(model, **entry)`. An entry may 
 | Option | What it sets |
 |---|---|
 | `gpu_memory_utilization` | The share of the GPU's memory the engine takes while awake: the weights, and the rest is its cache |
-| `max_model_len` | The longest sequence, prompt and completion together, that the engine accepts. The channel reads it as `Engine.max_model_len` |
+| `max_model_len` | The most tokens, prompt and completion together, that the engine accepts. The channel reads it as `Engine.max_model_len` |
 | `max_num_seqs` | How many requests are sampled at once; further requests queue |
 | `max_num_batched_tokens` | How many tokens one scheduling step of vLLM processes |
 | `max_lora_rank` | The highest adapter rank the engine loads; at least the trainer's `rank` |
@@ -51,8 +51,8 @@ which adapters are loaded and when, as it publishes weights.
 
 ## Sleep and wake
 
-A trainer that shares the GPU needs it free while it steps. [`Colocated`](../guide/reference.md#colocated) holds
-requests back, puts the channel's engines to sleep for the step and wakes them after it.
+A trainer that shares the GPU needs it free while it steps: [`Colocated`](../guide/reference.md#colocated) puts the
+channel's engines to sleep for the step ([the trainer](../libraries/rollout-train/training.md#the-trainer)).
 
 | Call | What the engine does |
 |---|---|

@@ -35,7 +35,7 @@ Every effect has an `effect_id` and an `arguments_digest`.
 | `model.sample` | the `session_id`, the context digest, the spec hashes of the tools offered, `max_output_tokens`, `tool_choice` |
 | `tool.call` | the tool's name and the call's arguments |
 | `environment.call` | the `environment_id`, the operation, and the command with its time limit and directory, or the path. A `put` gives the SHA-256 and size of the content, not the content. |
-| `environment.lifecycle` | the operation, and for a creation the environment's specification |
+| `environment.lifecycle` | the operation, and the environment's specification for a creation or its `environment_id` for a destruction |
 | `output.emit` | `kind`, `payload`, and `to` when given |
 
 Both identifiers go to whatever performs the effect: a model endpoint receives them in the `SampleRequest`, a tool
@@ -74,10 +74,11 @@ A tool set says that it deduplicates with a `deduplicates` attribute. One that d
 does not. A tool set served over HTTP reports the attribute of the tool set behind it, so a `ToolBinding(url=...)`
 keeps the guarantee ([tools](../../../guide/tools.md#after-a-crash)).
 
-A receiver that deduplicates is sent the `arguments_digest` so that it can tell a repeat from a different call. One
-that finds a known `effect_id` with a different digest raises
-[`Conflict`](../../../guide/reference.md#conflict): the code that ran again did not request the same effect. The
-helper `rollout_durable.database.recorded` does this for a tool set that writes to a database.
+A receiver that deduplicates is sent the `arguments_digest` so that it can tell a repeat from a different call: a
+tool set that finds a known `effect_id` with a different digest raises
+[`Conflict`](../../../guide/reference.md#conflict), because the code that ran again did not request the same effect.
+The helper `rollout_durable.database.recorded` does this for a tool set that writes to a database. The recorder
+looks a sample up by its `effect_id` alone.
 
 ## Rules
 

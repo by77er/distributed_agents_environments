@@ -2,9 +2,10 @@
 
 > Durable, scalable agents and environments for agent products and reinforcement learning. A uv workspace of Python
 > 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (rollout jobs,
-> episodes with token trajectories, the training loop, channels, the recorder, deployment profiles), one package per
-> implementation (a durable runner, a vLLM engine, a LoRA trainer, Qwen renderers, computers, an OpenAI endpoint, an
-> S3 blob store), two products and one environment. The documentation describes the code as built.
+> episodes with token trajectories, the training loop, policies, channels, the recorder, deployment profiles, the
+> `rollout` command), one package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Qwen and
+> Gemma renderers, computers, an OpenAI endpoint, an S3 blob store), two products and one environment. The
+> documentation describes the code as built.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
 are frozen pydantic models; type names are never abbreviated. In the guide, a block tagged exactly `python` runs in
@@ -12,16 +13,17 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 
 ## Guide
 
-- [Guide index](docs/guide/README.md): what is available, concepts, where each name lives
+- [Guide index](docs/guide/README.md): the pages, the concepts, where each name lives
 - [Three ways in](docs/guide/perspectives.md): the surface for building an environment, for designing training,
   and for deploying
 - [Getting started](docs/guide/getting-started.md): install, a first task, one episode against a scripted model
 - [Tasks](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, more model slots
-- [Tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as observations
+- [Tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as observations, imported
+  tool sets
 - [Agents](docs/guide/agents.md): context selection, context hints, acting, the `Model` interface
 - [Conversations](docs/guide/conversations.md): `WaitFor`, message kinds, priorities, queue / steer / interrupt
 - [Content](docs/guide/content.md): messages, blocks, tool results, blobs (files or S3), digests
-- [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, failures
+- [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, the local runner
 - [Models](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
 - [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
 - [Deploying](docs/guide/deploying.md): the profile file and the `rollout` command
@@ -29,27 +31,38 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 
 ## Architecture
 
-- [Overview](docs/architecture/overview.md): layers, protocols and their implementations
-- [Glossary](docs/architecture/glossary.md)
+- [Overview](docs/architecture/overview.md): layers, protocols and their implementations, visibility, a turn
+- [Glossary](docs/architecture/glossary.md): every term, defined once
 
 ## Libraries
 
-- [Harness](docs/libraries/rollout/README.md): the loop, programs, runners
-- [Contracts](docs/libraries/rollout/contracts/README.md): the types that cross layers
+- [Harness](docs/libraries/rollout/README.md): the loop, programs, runners, message routing, failures
+- [Determinism](docs/libraries/rollout/determinism.md): what code a durable runner replays must do
+- [Hooks](docs/libraries/rollout/hooks.md): observers of every run's events and model samples
 - [Memory](docs/libraries/rollout/memory.md): a context that fits any model, for long episodes
+- [Contracts](docs/libraries/rollout/contracts/README.md): the types that cross layers:
+  [identifiers](docs/libraries/rollout/contracts/identifiers.md),
+  [canonical content](docs/libraries/rollout/contracts/canonical-content.md),
+  [run events](docs/libraries/rollout/contracts/run-events.md), [effects](docs/libraries/rollout/contracts/effects.md),
+  the [model endpoint](docs/libraries/rollout/contracts/model-endpoint.md)
 - [Rollouts](docs/libraries/rollout-train/rollouts.md): jobs, tickets, the stream of episodes, publishing weights
 - [Policies and the ledger](docs/libraries/rollout-train/policies.md): policy versions, manifests, append-only
   tables and fences
 - [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
-- [Training](docs/libraries/rollout-train/training.md): the loop, group-relative advantages, the curriculum, the
-  trainer protocol
-- [Recorder](docs/libraries/rollout-train/recorder.md) and [channels](docs/libraries/rollout-train/channels.md):
-  token recording, engines, limits, the OpenAI-compatible endpoint for harnesses
-- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a run's directory: where the system stands, and every run's turns
+- [Training](docs/libraries/rollout-train/training.md): the loop, its steps over groups, group-relative advantages,
+  the curriculum, the trainer protocol
+- [Channels](docs/libraries/rollout-train/channels.md) and the [recorder](docs/libraries/rollout-train/recorder.md):
+  engines, limits, publishing weights, token recording
+- [The recorder over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the OpenAI-compatible endpoint for
+  harnesses that bring their own loop
+- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a run's directory: its steps, groups,
+  episodes and every agent's turns
 
 ## Implementations
 
-- [Durable runner](docs/implementations/rollout-durable/README.md): runs that survive their process
+- [Durable runner](docs/implementations/rollout-durable/README.md): runs that survive their process;
+  [evicting idle runs](docs/implementations/rollout-durable/eviction.md),
+  [several runners](docs/implementations/rollout-durable/runners.md) on one Postgres
 - [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
   [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md):
   what a profile names
@@ -62,4 +75,6 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 
 ## Everything else
 
+- [Local services](docs/development/local-services.md): Postgres and an S3-compatible store for a development
+  machine
 - [Documentation index](docs/README.md): every page, and the table of packages

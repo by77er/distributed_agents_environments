@@ -1,11 +1,13 @@
 # Episodes
 
 Code: `rollout_train.rollouts.episodes` · See [`Episode`](../../guide/reference.md#episode),
-[`Trajectory`](../../guide/reference.md#trajectory), [`Segment`](../../guide/reference.md#segment), [rollouts](rollouts.md)
+[`Trajectory`](../../guide/reference.md#trajectory), [`Segment`](../../guide/reference.md#segment),
+[rollouts](rollouts.md)
 
 An episode is one finished run as whoever trains on it sees it. Its labels say which group and row it came from. Its
-outcome and result say how it went. Its trajectories hold, for each model slot, the segments (token sequences) the policy saw and
-continued, with the logprobs it sampled them at ([what a session exports](recorder.md#what-a-session-exports)).
+outcome and result say how it went. Its trajectories, one per model slot (each slot's rollout), hold the segments the
+policy saw and continued, with the logprobs it sampled them at
+([what a session exports](recorder.md#what-a-session-exports)).
 Nothing else about the run is needed to compute a loss, and nothing in an episode says where the run executed.
 
 ## How an episode is assembled
@@ -24,8 +26,8 @@ what the recorder kept of each of its model slots.
 
 A run that could not start is a failed episode whose `detail` says why, with no trajectories.
 
-A job that keeps a log stores the episode as it is assembled: a small record, and its trajectories and its run's events
-as blobs ([the log](rollouts.md#the-log)).
+A job that keeps a log stores the episode as it is assembled: a small record, and its trajectories and its run's
+events as blobs ([the log](rollouts.md#the-log)).
 
 ## Rewards
 

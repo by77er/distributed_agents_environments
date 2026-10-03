@@ -143,26 +143,13 @@ The handle's `context` is the run's `LocalRunContext`. Sending messages, cancell
 
 ## Event types
 
-| Type | When | Payload |
-|---|---|---|
-| `run.created` | a runner starts the run | `specification`, `conversation`, `labels` |
-| `tools.resolved` | the run starts with tools | `specifications`: the `@tool` methods, then the imported tools |
-| `observation.recorded` | a hook's observation is recorded | `messages`, `reward`, `end`, `reply_effect_id` (`null` for observations that answer no reply), `info`, `digest` |
-| `effect.requested` | an effect starts | `effect_id`, `kind`, `arguments_digest`, `payload` (the arguments) |
-| `effect.completed` | an effect finishes | `effect_id`, `status` (`ok`, `failed`, `outcome_unknown`), `payload`, `error_class` unless the status is `ok` |
-| `reward.assigned` | `run.reward(...)`, including `score` | `slot`, `value`, `key` |
-| `training.excluded` | `run.exclude_from_training(reason)` | `reason` |
-| `output.emitted` | `run.emit(...)`, after its effect | `kind`, `payload`, `to` when given, `effect_id` |
-| `run.suspended` | the run starts waiting for a message | `waiting_for`: `kind`, `timeout` in seconds |
-| `message.received` | a message is delivered | `envelope`, `mode` |
-| `turn.interrupted` | an interrupt cancels the agent's reply | `reply_effect_id` of the cancelled sample, if one was in flight |
-| `run.cancel_requested` | `runner.cancel(run_id, reason=...)` | `reason`, `by` |
-| `run.completed` | the program returned | `outcome` |
-| `run.failed` | the program raised | `class`, `detail` ([failures](../libraries/rollout/README.md#failures)) |
-| `run.cancelled` | the run stopped after a cancellation | |
+| Group | Types |
+|---|---|
+| Lifecycle | `run.created`, `tools.resolved`, `run.suspended`, `run.cancel_requested`, and one terminal event: `run.completed`, `run.failed` ([failures](../libraries/rollout/README.md#failures)) or `run.cancelled` |
+| Episode | `observation.recorded`, `reward.assigned` (`run.reward`, and `score`), `training.excluded`, `output.emitted` (`run.emit`) |
+| Effects | `effect.requested`, `effect.completed` with status `ok`, `failed` or `outcome_unknown` |
+| Messages | `message.received`, `turn.interrupted` |
 
-A `model.sample` effect's arguments are the `session_id`, the context digest, the spec hashes of the offered tools,
-`max_output_tokens` and `tool_choice`. Its completion payload is the `SampleResult`: message, finish reason, usage.
-Tokens and logprobs never appear in run events; they live in the recorder.
-
-The events are specified in [run events](../libraries/rollout/contracts/run-events.md).
+A sample's completion carries the canonical reply, the finish reason and the usage. Tokens and logprobs never appear
+in run events; they live in the recorder. Each type's payload and the order of events are specified in
+[run events](../libraries/rollout/contracts/run-events.md).

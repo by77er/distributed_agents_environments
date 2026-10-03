@@ -22,9 +22,10 @@ A deployment describes its channels in a profile: the model, its renderer, its l
 - **A session stays with one engine.** A session's requests go to the same replica every time, where the shared
   beginnings of its prompts are cached. Sessions spread over the replicas.
 - **`adapter` and `version`** say which weights sample now. The adapter is `None` for the base model. The version
-  counts how many times weights have been published, and is recorded with every sampled token.
-- **`context_limit`** is the longest turn the channel takes: the smaller of what its engines accept and of
-  `Limits.sequence`. It is what programs are told, in a slot's capability contract.
+  is the number the weights were published as ([publishing weights](#publishing-weights)), and is recorded with
+  every sampled token.
+- **`context_limit`** is the longest turn the channel takes ([limits](#limits)). It is what programs are told, in a
+  slot's capability contract.
 
 ## Engines
 
@@ -35,7 +36,7 @@ engine runs in this process's care, or is a client of a server elsewhere.
 - **A stop token is part of what was sampled.** A generation that ends on one has the finish reason `stop` and
   holds the token; one that ran out of room has `length`.
 - **Adapters are named.** `load_adapter` registers one, and a request names the one it samples from.
-- **`max_model_len`** is the longest sequence, prompt and completion together, that the engine accepts.
+- **`max_model_len`** is the most tokens, prompt and completion together, that the engine accepts.
 - **`sleep` and `wake`** free the accelerator and take it back, for a trainer that shares it.
 - **`processes`** are the processes the engine started on this machine. A deployment writes them down so that the
   next one can end them if this process is killed ([deploying](../../guide/deploying.md)).
@@ -48,8 +49,9 @@ engine runs in this process's care, or is a client of a server elsewhere.
 [`Limits`](../../guide/reference.md#limits) say what a turn may take, in tokens: how much thinking, how much room
 for the answer after it, and the longest turn.
 
-- The deployment's hardware decides them. The longest turn is the smaller of what the engines accept and what the
-  trainer can train on (`Budget.segment_tokens`, [the trainer](training.md#the-trainer)).
+- The deployment's hardware decides them. An open profile sets `Limits.sequence` to what the trainer can train on
+  (`Budget.segment_tokens`, [the trainer](training.md#the-trainer)), and the channel's longest turn,
+  `context_limit`, is the smaller of that and what its engines accept.
 - Code above the channel receives the outcome, never the numbers: a context limit in a model's capability contract,
   and a refusal when a context is full ([a sample](recorder.md#a-sample)).
 

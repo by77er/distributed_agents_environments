@@ -1092,7 +1092,8 @@ A model endpoint that also serves its slots over HTTP, to a harness that brings 
 def arguments_digest(arguments: JsonValue | BaseModel) -> str
 ```
 
-Sent with every `effect_id`; receivers reject a known `effect_id` whose arguments digest differs.
+Sent with every `effect_id`; a tool set refuses a known `effect_id` whose arguments digest differs
+(`Conflict`).
 
 ### `BlobReference`
 
@@ -2199,8 +2200,8 @@ class Job(Protocol)
 
 **Methods**
 
-- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = '') -> Ticket` — Queue `count` runs of one row. They start together, when there is room for all of them. With a `key`,
-  asking again is asking for the same ticket: a caller that died after asking gets it back, with whatever
+- `async def run(self, parameters: JsonValue, *, labels: Mapping[str, str] | None = None, count: int = 1, key: str = '') -> Ticket` — Queue `count` runs of one row. They start as there is room, after the runs of tickets queued before. With a
+  `key`, asking again is asking for the same ticket: a caller that died after asking gets it back, with whatever
   episodes it has.
 - `def episodes(self, cursor: int = 0) -> AsyncIterator[Episode]` — Every episode after `cursor` that the job has, then new ones as runs end, until the job is closed.
 - `async def acknowledge(self, cursor: int) -> None` — The caller has consumed everything through `cursor`: a job started again goes on from there.
@@ -3077,7 +3078,7 @@ class Renderer(Protocol)
 class Segment
 ```
 
-A piece of a session's trajectory: a token sequence that only grew, as the policy saw and continued it.
+A piece of a session's trajectory: tokens that only grew, as the policy saw and continued them.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

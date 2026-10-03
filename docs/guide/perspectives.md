@@ -54,19 +54,22 @@ looks like once it is no longer the current one, and what to ask when turns must
 ## Designing training
 
 ```python fragment
-job = await jobs.start(program=catalog.program, binding=binding, in_flight=5)
+job = await jobs.start(program=catalog.program, binding=binding, in_flight=6)
 ticket = await job.run(catalog.start(row, rng), labels={"group": "0012", "task": row.key}, count=4)
 episodes = await ticket.episodes()                          # when all four have ended
-step = await trainer.step(Grpo().batch(episodes, trainer.budget, rng), seed=12)
-await job.publish("policy", step.adapter, step.path)
+batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
+await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path("versions/swarm@3"))
+await job.publish("policy", "swarm@3", "versions/swarm@3/weights", 3)
 ```
 
 - A **job** runs rows and keeps a log of finished **episodes**, read with a cursor (`job.episodes(cursor)`) or per
   ticket. Reading while runs are in flight is all asynchronous training needs: every sampled token carries the
   weights version it was sampled at.
-- An **episode** has its labels, its outcome, its result, and for each model slot its trajectory: the segments (token sequences) the policy saw
-  and continued, with the logprobs it sampled them at.
-- `rollout_train.train` is the loop most runs use: a curriculum over a catalog, groups, a step per group.
+- An **episode** has its labels, its outcome, its result, and for each model slot its trajectory: the segments of
+  tokens the policy saw and continued, with the logprobs it sampled them at.
+- `rollout_train.train` is the loop most runs use: a curriculum over a catalog picks rows, each start is played as a
+  group of episodes, and a step is taken over several groups at a time, while play goes on
+  ([training](../libraries/rollout-train/training.md)).
 - Watching: `job.status()`, the job's own events (tickets, episodes, published weights, your notes), and each run's
   feed, on one page (`rollout monitor RUN`).
 
@@ -82,5 +85,6 @@ renderers and trainers are packages of their own, named in the file as `module:n
 uv run rollout train profile.toml minecraft_swarm.catalog:catalog
 ```
 
-The trainer's limits become its channel's limits; the channel's limits reach environments as "your memory is full".
-Scaling is a change to this file ([deploying](deploying.md)).
+The trainer's longest segment becomes its channel's longest turn, and the channel's limits reach environments only
+as outcomes, such as a full [memory](../libraries/rollout/memory.md). Scaling is a change to this file
+([deploying](deploying.md)).

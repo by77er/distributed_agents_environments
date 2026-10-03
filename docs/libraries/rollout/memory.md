@@ -21,8 +21,9 @@ the current one, and what to ask when turns must go.
 - **When memory is full** is measured: the model reports what its last prompt took, memory tracks how much a turn
   has been seen to add, and `crowded` says when one more turn might leave the model less than its full room to reply.
 - **A compaction** shows the agent its oldest turns once more, with its earlier summary, and asks what to remember.
-  Its answer replaces them, and the newest turns stay as they are (`keep`). It is a sample like any other on the
-  agent's own model slot, with room for the summary and none to think it over.
+  Its answer replaces them, and the newest turns stay as they are (`keep`, by default the newest third). It is a
+  sample like any other on the agent's own model slot, with room for the summary and none to think it over.
+  `compactions` counts them.
 - **A context the model refuses** as too long is compacted and tried again (`sample`). Turns that are too long even
   to reread are forgotten without a summary.
 - **A reply with several tool calls** is answered in full: `answer` gives the result to the first call and tells

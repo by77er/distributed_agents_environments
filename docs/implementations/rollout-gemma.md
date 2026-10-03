@@ -12,8 +12,8 @@ renderer = "rollout_gemma:gemma4"
 ```
 
 `gemma4` is called with the channel's `model` (a checkpoint's name or path, whose tokenizer it loads with
-`tokenizer_of`, or a tokenizer) and returns a [`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer) over
-the tokenizer's own chat template, which Gemma 4 ships beside its weights.
+`tokenizer_of`, or a tokenizer) and returns a [`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer)
+over the tokenizer's own chat template, which Gemma 4 ships beside its weights.
 
 ## The format
 

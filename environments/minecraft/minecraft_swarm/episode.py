@@ -1,4 +1,4 @@
-"""The swarm episode: four agents, one shared reward, the world frozen while they think.
+"""The swarm episode: one to four agents, one shared reward, the world frozen while they think.
 
 Each turn, every agent observes, thinks and calls one action tool, all at once while the world is frozen; then the
 world runs one window while the actions happen. The episode ends when its budget of game time or of turns is spent,

@@ -123,7 +123,7 @@ Fields that are `None` are left out, so adding an optional field later does not 
 from rollout.contracts import arguments_digest, context_digests, message_digest
 
 assert arguments_digest({"b": 1, "a": 2}) == arguments_digest({"a": 2, "b": 1})    # key order does not matter
-assert message_digest(question) == message_digest(question.model_copy(update={"meta": {"trace": "x"}}))
+assert message_digest(question) == message_digest(question.model_copy(update={"meta": {"note": "x"}}))
 
 chain = context_digests([question, call, answer])   # d0 … d3
 assert context_digests([question, call])[-1] == chain[2]   # a prefix is recognizable by its own digest

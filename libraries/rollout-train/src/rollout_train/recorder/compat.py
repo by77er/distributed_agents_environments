@@ -6,7 +6,7 @@ recorded for the run's slot like any other sample. The key names the session; th
 ignored, and so are its sampling parameters (a trainable channel samples as its binding says).
 
     POST {base_url}/chat/completions      one reply, or the same as a stream of server-sent events
-    GET  {base_url}/models                the one model there is                     (`base_url` ends in `/v1`)
+    GET  {base_url}/models                every channel of the recorder, as a model  (`base_url` ends in `/v1`)
 
 A context too long for the model is refused with OpenAI's `context_length_exceeded`, which harnesses compact on.
 """

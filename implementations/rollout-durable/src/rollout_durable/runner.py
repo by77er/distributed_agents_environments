@@ -268,6 +268,9 @@ class DurableRunner(MessageRouter):
         labels: Mapping[str, str] | None = None,
     ) -> DurableRunHandle:
         run_id = run_id or new_run_id()
+        program = instantiate(specification.program)  # a binding that leaves a slot or an import unserved is refused
+        resolve_endpoints(program, specification.binding, self._providers, self._recorder)  # here, as it is locally
+        resolve_tool_sets(program, specification.binding, self._tool_sets)
         specification_json = specification.model_dump(mode="json", exclude_none=True)
         conversation_json = conversation.model_dump(mode="json", exclude_none=True) if conversation else None
         address = conversation.address if conversation else None
