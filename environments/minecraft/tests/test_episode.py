@@ -79,7 +79,9 @@ async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through:
         client = httpx.AsyncClient(transport=transport, base_url="http://worlds", timeout=300)
         tools = RemoteToolSet("http://worlds", client=client, specifications=tools.specifications())
     runner = LocalRunner(providers={"scripted": lambda model: WalkToDiamonds()}, tool_sets={"minecraft": tools})
+    names = ["ada", "ben", "cy", "dee"]
     parameters: Mapping[str, object] = {"task": "t001", "world_seed": 12345, "layout_seed": 3, "turns": 4}
+    parameters = {**parameters, "names": names}
     specification = RunSpecification(
         program=ProgramReference(program=register(SwarmEpisode), parameters=dict(parameters)),  # type: ignore[arg-type]
         binding=binding(),
@@ -96,7 +98,7 @@ async def test_a_scripted_swarm_picks_up_diamonds_and_shares_the_reward(through:
     (result,) = [payload(e)["payload"] for e in events if e.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict)
     diamonds = result["team_diamonds"]
-    assert isinstance(diamonds, int) and diamonds > 0 and rewards["ada"] == diamonds, result
+    assert isinstance(diamonds, int) and diamonds > 0 and rewards[TEAM[0]] == diamonds, result
     assert result["objective"] == "diamonds" and result["solved"] is True
     turns = result["turns"]
     assert isinstance(turns, int) and 1 <= turns <= 4  # it ends early once every diamond is held

@@ -30,8 +30,21 @@ from pydantic import BaseModel, ConfigDict
 
 from minecraft_swarm.control import Control
 
-TEAM = ["ada", "ben", "cy", "dee"]
-"""The agents of an episode, by the names they play under."""
+TEAM = ["agent-1", "agent-2", "agent-3", "agent-4"]
+"""The agents of an episode, by their model slots: the first of them play, under names drawn from `NAMES` (a slot's
+own name is never shown to the model)."""
+NAMES = [
+    "abel", "adil", "aiko", "alba", "alma", "amir", "anil", "anna", "arjun", "asha", "aster", "aziz", "bela", "boris",
+    "bruno", "carla", "chen", "chidi", "clara", "dana", "dario", "dmitri", "edda", "elif", "elio", "emeka", "enzo",
+    "esme", "ezra", "farah", "femi", "finn", "freya", "gaia", "goran", "greta", "hana", "hugo", "idris", "ilse",
+    "imani", "ines", "ivo", "jalen", "jonas", "juno", "kai", "kalani", "kenji", "kiri", "lars", "leila", "lena",
+    "levi", "liam", "lina", "luca", "maeve", "mala", "marek", "maya", "mehmet", "mila", "milo", "mira", "nadia",
+    "nala", "nico", "nils", "noor", "odile", "olga", "omar", "otto", "paolo", "petra", "priya", "quinn", "rafael",
+    "rania", "ravi", "reza", "rhea", "rosa", "ruth", "sami", "sana", "selim", "silas", "sofia", "soren", "tariq",
+    "tess", "theo", "tomas", "uma", "vera", "viktor", "wren", "yara", "yusuf", "zara", "zeno", "zofia",
+]  # fmt: skip
+"""Names the agents play under: each start draws one for each player, all different (so that a policy does not
+learn to play a name). Valid player names, and none a word of the game."""
 
 DIAMOND_DEPTH = -58
 TURNS_PER_MINUTE = 12

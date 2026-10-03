@@ -214,7 +214,8 @@ class Operation:
 
 
 async def _begin(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
-    team = TEAM[: _int(arguments["players"])]
+    names: Any = arguments["names"]
+    team = [str(name) for name in names]
     return await worlds.begin(
         str(arguments["task"]), _int(arguments["world_seed"]), _int(arguments["layout_seed"]), team
     )
@@ -249,7 +250,7 @@ EPISODE: Mapping[str, JsonValue] = {"episode": STRING}
 OPERATIONS: dict[str, Operation] = {
     "begin": Operation(
         "Start a world for an episode.",
-        {"task": STRING, "world_seed": INTEGER, "layout_seed": INTEGER, "players": INTEGER},
+        {"task": STRING, "world_seed": INTEGER, "layout_seed": INTEGER, "names": {"type": "array", "items": STRING}},
         RetryClass.SIDE_EFFECTING,
         _begin,
     ),

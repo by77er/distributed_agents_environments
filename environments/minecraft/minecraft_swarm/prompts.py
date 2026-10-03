@@ -150,15 +150,16 @@ ONE_CALL = "Not done: only your first call of a turn counts."
 """What every call of a turn after the first is answered with."""
 
 
-def system_prompt(task: Task, players: int = len(TEAM)) -> str:
-    """The same for every agent of the team: nothing in it says which of them reads it (each observation does). A
-    team of `players` (the first of `TEAM`); a player on their own is told so, and nothing of chat or teammates.
+def system_prompt(task: Task, team: Sequence[str]) -> str:
+    """The same for every agent of the team: nothing in it says which of them reads it (each observation does). The
+    team plays under the names in `team`; a player on their own is told so, and nothing of chat or teammates.
 
     It says nothing of how long the game lasts, and neither do observations: how long an episode lasts is no rule of
     the game, and an agent told the clock plays the clock. Doing more before the episode is cut off is rewarded all
     the same."""
     death = "with what you carried" if task.keeps_inventory else "and what you carried lies where you died"
-    team, told = TEAM[:players], guidance(task, players)
+    players = len(team)
+    told = guidance(task, players)
     return SYSTEM.format(
         opening=TEAM_OPENING.format(count=spelled(players), team=", ".join(team)) if players > 1
         else ALONE_OPENING.format(name=team[0]),
@@ -498,7 +499,7 @@ def render_map(observation: Mapping[str, Any]) -> str:
             legend.setdefault(character, set()).add(name)
 
     marks: dict[tuple[int, int, int], str] = {(int(center["x"]), int(center["y"]), int(center["z"])): SELF}
-    for mate in observation.get("teammates", []):  # (not their initials: D for dee was read as diamonds)
+    for mate in observation.get("teammates", []):  # (not their initials: a teammate's D was read as diamonds)
         marks[(mate["x"], mate["y"], mate["z"])] = TEAMMATE
         legend.setdefault(TEAMMATE, set()).add("a teammate")
     unlisted: Mapping[str, Any] = observation.get("unlisted") or {}

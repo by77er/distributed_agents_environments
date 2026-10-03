@@ -232,11 +232,13 @@ unguided variant as well: the same situation without the way, ranked harder by `
 tree). The curriculum unlocks it as it unlocks any harder row, once the rows before it are solved, so the guidance
 fades task by task; a guided row the team has mastered teaches nothing more and is drawn rarely.
 
-How many play is drawn with each start, from one to four (at least two where the kit is dealt in parts), so every
-episode of a group has the same team. The prompt is written for that many: a player on their own is told so and
+Who plays is drawn with each start: how many, from one to four (at least two where the kit is dealt in parts), and
+the names they play under, all different, from `tasks.NAMES`; every episode of a group has the same team. The model
+slots are `agent-1` to `agent-4` (`tasks.TEAM`), and a model never sees them: it knows itself and its teammates only by
+the names of that start, so it cannot come to rely on any one name. The prompt is written for that many: a player on their own is told so and
 offered no chat; a team is told how to play as one (`prompts.TEAMWORK`: say what you carry and what you will do,
 split the work, hand teammates what they need, say what you find). A task with natural ore is solved by one diamond
-per player. An episode reports its team size and the guidance its prompt carried, word for word and by kind (`way`,
+per player. An episode reports its team (the names, slot by slot) and the guidance its prompt carried, word for word and by kind (`way`,
 `teamwork`), so that a learner can take it back out of the prompts.
 
 A world is generated once per seed. A template server holds the overworld around the origin (`GENERATED_CHUNKS`), and

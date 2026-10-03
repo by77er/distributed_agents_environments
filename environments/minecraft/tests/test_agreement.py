@@ -19,7 +19,7 @@ from minecraft_swarm import control
 from minecraft_swarm.limits import LIMITS
 from minecraft_swarm.paper import CONFIG, PAPER_VERSION, PLUGIN_SOURCES, server_properties
 from minecraft_swarm.prompts import ACTIONS, DIRECTION, SLOT, SYMBOLS, symbol, system_prompt
-from minecraft_swarm.tasks import catalog
+from minecraft_swarm.tasks import NAMES, catalog
 from minecraft_swarm.worlds import OPERATIONS, MinecraftTools, MinecraftWorlds
 from rollout.contracts import RetryClass
 
@@ -73,7 +73,7 @@ def test_the_prompts_state_the_limits_in_these_words() -> None:
     assert described["smelt"].endswith(
         "unless you name one: coal, charcoal, planks, logs, sticks); each item takes 10 seconds."
     )
-    system = system_prompt(catalog()[0])
+    system = system_prompt(catalog()[0], ["ada", "ben", "cy", "dee"])
     assert system.startswith("You are one of four players in Minecraft: ada, ben, cy, dee. You play together.")
     assert "then the world runs until all four actions have finished, and freezes again." in system
     assert "An action that takes more than twenty seconds (a long walk" in system
@@ -129,7 +129,7 @@ def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agent
         if task.objective is Objective.PROGRESS or not task.guided:
             assert said == ""
             continue
-        assert said and said in system_prompt(task)
+        assert said and said in system_prompt(task, ["ada", "ben"])
         named = set(re.findall(r"\((\w+)(?=\)|:|, at)", said))  # "(place_at)", "(toss: ...)", "(take, at ...)"
         assert named <= actions, (task.id, named - actions)
         if task.kit not in (Kit.NONE, Kit.IRON):
@@ -146,20 +146,23 @@ def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
     from minecraft_swarm.prompts import guidance, way
 
     task = next(task for task in catalog() if task.kit.value == "ingots" and task.coordination.value == "one_kit")
-    alone = system_prompt(task, 1)
+    alone = system_prompt(task, ["ada"])
     assert alone.startswith("You are ada, playing Minecraft on your own.")
     for team_word in ("together", "teammate", "chat", "Each of you", "One of you", "players"):
         assert team_word not in alone, team_word
     assert way(task, 1).startswith("How to get there. You start with 3 iron_ingot")  # one player holds the whole kit
     assert "teamwork" not in guidance(task, 1) and set(guidance(task, 3)) == {"way", "teamwork"}
-    three = system_prompt(task, 3)
+    three = system_prompt(task, ["ada", "ben", "cy"])
     assert three.startswith("You are one of three players in Minecraft: ada, ben, cy.")
     assert "until all three actions have finished" in three and guidance(task, 3)["teamwork"] in three
-    # A start says how many play: one to four, and at least two where the kit is dealt in parts.
+    # A start names who plays, all differently: one to four, and at least two where the kit is dealt in parts.
     import random
 
     rng = random.Random(0)
     for row in swarm.rows():
-        players = {swarm.start(row, rng)["players"] for _ in range(40)}  # type: ignore[index]
+        starts: list[Any] = [swarm.start(row, rng) for _ in range(40)]
+        players = {len(start["names"]) for start in starts}
+        for start in starts:
+            assert len(set(start["names"])) == len(start["names"]) and set(start["names"]) <= set(NAMES)
         split = next(each for each in catalog() if each.id == row.key).coordination.value == "split"
         assert players == ({2, 3, 4} if split else {1, 2, 3, 4}), (row.key, players)

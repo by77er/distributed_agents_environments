@@ -1,7 +1,7 @@
 """The catalog of the Minecraft swarm: what there is to train on, as rows (`rollout_train.rollouts.Catalog`).
 
-A row is a task; a start of it is a world, a layout and a team size drawn at random: episodes given the same start
-begin identically.
+A row is a task; a start of it is a world, a layout and the names of a team of one to four, drawn at random: episodes
+given the same start begin identically.
 """
 
 import random
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pydantic import JsonValue
 
 from minecraft_swarm.episode import SwarmEpisode
-from minecraft_swarm.tasks import TEAM, Coordination
+from minecraft_swarm.tasks import NAMES, TEAM, Coordination
 from minecraft_swarm.tasks import catalog as tasks
 from rollout.catalog import Row
 from rollout.harness import ProgramReference, register
@@ -34,12 +34,13 @@ class Swarm:
         ]
 
     def start(self, row: Row, rng: random.Random) -> JsonValue:
-        """A world seed of the `worlds`, a layout, and how many play: one to all of the team, but at least two where
-        the kit is dealt in parts (no one can finish alone)."""
+        """A world seed of the `worlds`, a layout, and who plays: a name from `NAMES` for each of one to four players
+        (at least two where the kit is dealt in parts: no one can finish alone), all different."""
         seeds = [random.Random(f"world-{self.seed}-{index}").randrange(1 << 31) for index in range(self.worlds)]
         fewest = 2 if TASKS[str(row.parameters["task"])].coordination is Coordination.SPLIT else 1
         world, layout = rng.choice(seeds), rng.randrange(1 << 30)
-        return {**row.parameters, "world_seed": world, "layout_seed": layout, "players": rng.randint(fewest, len(TEAM))}
+        players = rng.randint(fewest, len(TEAM))
+        return {**row.parameters, "world_seed": world, "layout_seed": layout, "names": rng.sample(NAMES, players)}
 
 
 catalog = Swarm()

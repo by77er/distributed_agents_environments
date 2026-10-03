@@ -45,6 +45,8 @@ from rollout.harness import (
 from rollout.local import LocalRunner
 from rollout.testing import payload, tool_call_reply
 
+CREW = ["ada", "ben", "cy", "dee"]
+"""The names the episodes here play under."""
 LIMIT, OUTPUT = 5_000, 1_400
 """The scripted model's context limit and the room it may use to answer. It counts 100 tokens a message."""
 TURNS = 19
@@ -60,7 +62,7 @@ class MadeUpWorld:
     deduplicates = False
 
     def __init__(self, ticks: int = SHORT_WINDOW) -> None:
-        self.observed: dict[str, int] = dict.fromkeys(TEAM, 0)
+        self.observed: dict[str, int] = dict.fromkeys(CREW, 0)
         self.ticks = ticks
         """Game time each window takes."""
 
@@ -154,7 +156,7 @@ def specification(turns: int | None = TURNS) -> RunSpecification:
         models={name: ModelBinding(direct=DirectModel(provider="scripted", model="m")) for name in TEAM},
         imports={"minecraft": ToolBinding(local="minecraft")},
     )
-    parameters: dict[str, JsonValue] = {"task": "t001", "turns": turns}
+    parameters: dict[str, JsonValue] = {"task": "t001", "turns": turns, "names": list[JsonValue](CREW)}
     return RunSpecification(
         program=ProgramReference(program=register(SwarmEpisode), parameters=parameters), binding=binding
     )
@@ -202,7 +204,7 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
     assert result["solved"] is True and result["saturated"] is False and result["ended"] == "turns"
     assert result["duration"] == pytest.approx(TURNS * SHORT_WINDOW / TICKS_PER_MINUTE)
 
-    acting, compactions = of(model, "ada")
+    acting, compactions = of(model, "agent-1")  # (ada's slot)
     assert len(acting) == TURNS and len(compactions) == result["compactions"]
     assert max(100 * len(request.context.append) for request in acting) <= LIMIT - OUTPUT  # always room to reply
 
@@ -215,12 +217,12 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
     # A compaction shows the older turns once more, with no tools; from then on its summary stands for them.
     first = compactions[0]
     assert not first.tools and "You are ada, at (1, 64, 0)" in texts(first)[1]
-    after = next(request for request in acting if "SUMMARY 1 for ada" in texts(request)[1])
+    after = next(request for request in acting if "SUMMARY 1 for agent-1" in texts(request)[1])
     assert "your own summary" in texts(after)[1] and not any("at (1, 64, 0)" in text for text in texts(after))
 
 
 async def test_the_team_compacts_in_the_same_turn() -> None:
-    model = Remembering(wordy="cy")  # cy's memory fills two turns before the others' would
+    model = Remembering(wordy="agent-3")  # cy's memory fills two turns before the others' would
     runner = LocalRunner(providers={"scripted": lambda _: model}, tool_sets={"minecraft": MadeUpWorld()})
     handle = await runner.start(specification())
     assert (await handle.result()).status is RunStatus.COMPLETED
@@ -232,7 +234,7 @@ async def test_the_team_compacts_in_the_same_turn() -> None:
             when[agent].append(turn[agent] + 1)
         else:
             turn[agent] += 1
-    assert when["cy"] and all(turns == when["cy"] for turns in when.values()), when
+    assert when["agent-3"] and all(turns == when["agent-3"] for turns in when.values()), when
 
 
 async def test_an_episode_ends_when_its_turns_are_spent_however_little_game_time_they_took() -> None:
@@ -284,7 +286,7 @@ def test_the_catalog_offers_every_task_and_draws_one_start_for_a_whole_group() -
     start = swarm.start(rows[6], random.Random(5))
     assert (
         isinstance(start, dict)
-        and set(start) == {"task", "world_seed", "layout_seed", "players"}
+        and set(start) == {"task", "world_seed", "layout_seed", "names"}
         and start["task"] == "t007"
     )
     starts: list[Any] = [swarm.start(rows[0], random.Random(seed)) for seed in range(200)]

@@ -21,7 +21,6 @@ from minecraft_swarm.paper import Installation, PaperServer
 from minecraft_swarm.prompts import describe
 from minecraft_swarm.tasks import (
     CHAINS,
-    TEAM,
     Coordination,
     Kit,
     Objective,
@@ -32,6 +31,9 @@ from minecraft_swarm.tasks import (
     score,
     solved,
 )
+
+CREW = ["ada", "ben", "cy", "dee"]
+"""The bots the tests here connect, under names a server accepts."""
 
 
 @dataclass
@@ -57,7 +59,7 @@ async def world(tmp_path_factory: pytest.TempPathFactory) -> AsyncIterator[World
     await server.start()
     control = Control(server.control_url)
     harness = await Harness.start(log=tmp_path_factory.mktemp("harness") / "harness.log")
-    await harness.connect("127.0.0.1", server.port, TEAM)
+    await harness.connect("127.0.0.1", server.port, CREW)
     await control.freeze()
     yield World(server, control, harness)
     await harness.close()
@@ -93,7 +95,7 @@ async def do(world: World, action: dict[str, Any], agent: str = "ada", windows: 
 async def begin(world: World, start: Start, kit: Kit, seed: int = 7) -> tuple[Task, dict[str, Any]]:
     """Build a task as an episode does; returns it and what ada sees."""
     chosen = task(start, kit)
-    await build(chosen, world.control, TEAM, random.Random(seed))
+    await build(chosen, world.control, CREW, random.Random(seed))
     await settle(world)
     await world.control.baseline()
     return chosen, await world.harness.observe("ada")
@@ -101,12 +103,12 @@ async def begin(world: World, start: Start, kit: Kit, seed: int = 7) -> tuple[Ta
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_ore_in_sight_is_seen_and_hidden_ore_is_not(world: World) -> None:
-    await build(task(Start.ORE_IN_SIGHT, Kit.IRON), world.control, TEAM, random.Random(3))
+    await build(task(Start.ORE_IN_SIGHT, Kit.IRON), world.control, CREW, random.Random(3))
     await settle(world)
     seen = [n for n in (await world.harness.observe("ada"))["notable"] if "diamond" in n["block"]]
     assert seen, "the ore in the pocket's wall should be in sight"
 
-    built = await build(task(Start.ORE_NEARBY, Kit.IRON), world.control, TEAM, random.Random(3))
+    built = await build(task(Start.ORE_NEARBY, Kit.IRON), world.control, CREW, random.Random(3))
     await settle(world)
     observation = await world.harness.observe("ada")
     assert not [n for n in observation["notable"] if "diamond" in n["block"]]
@@ -117,7 +119,7 @@ async def test_ore_in_sight_is_seen_and_hidden_ore_is_not(world: World) -> None:
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_an_agent_mines_ore_it_sees_and_the_team_holds_a_diamond(world: World) -> None:
-    await build(task(Start.ORE_IN_SIGHT, Kit.IRON), world.control, TEAM, random.Random(5))
+    await build(task(Start.ORE_IN_SIGHT, Kit.IRON), world.control, CREW, random.Random(5))
     await settle(world)
     for _ in range(4):  # walk up to the ore, then mine it
         observation = await world.harness.observe("ada")
@@ -222,7 +224,7 @@ async def test_only_teammates_messages_reach_agents(world: World) -> None:
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_unseen_or_unknown_targets_are_refused(world: World) -> None:
-    await build(task(Start.ORE_NEARBY, Kit.IRON), world.control, TEAM, random.Random(9))
+    await build(task(Start.ORE_NEARBY, Kit.IRON), world.control, CREW, random.Random(9))
     await settle(world)
     here = (await world.harness.observe("dee"))["self"]["position"]
     await world.harness.act(
@@ -334,7 +336,7 @@ async def test_a_slow_block_is_mined_in_one_action_and_a_hopeless_one_is_refused
     assert result["ok"] and result["mined"] == "obsidian" and result["gained"] == {"obsidian": 1}, result
     assert 120 < ran <= 260, ran  # the window lasts as long as the action does
     # With a bare hand it would take minutes: refused at once, with the reason.
-    other = next(name for name in TEAM if name != holder)
+    other = next(name for name in CREW if name != holder)
     await world.control.set_block(here["x"] - 2, here["y"], here["z"], "obsidian")
     await settle(world)
     await world.harness.thaw()
@@ -347,7 +349,7 @@ async def test_a_slow_block_is_mined_in_one_action_and_a_hopeless_one_is_refused
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(world: World) -> None:
     chosen = next(t for t in catalog() if t.objective is Objective.CRAFT and t.goal == "crafting_table")
-    await build(chosen, world.control, TEAM, random.Random(23))  # (not where another test cleared the ground)
+    await build(chosen, world.control, CREW, random.Random(23))  # (not where another test cleared the ground)
     await settle(world)
     await world.control.baseline()
     assert (await world.harness.observe("ada"))["self"]["inventory"] == {}  # nothing given

@@ -5,7 +5,9 @@ world runs one window while the actions happen. The episode ends when its budget
 or earlier when nothing is left to earn. Its reward, the task's objective scored from the plugin's ground truth,
 goes to every agent: the swarm is rewarded equally.
 
-Each agent is a model slot of its own (`ada`, `ben`, `cy`, `dee`): its own context and its own memory. What plays
+Each agent is a model slot of its own (`agent-1` to `agent-4`, of which the first one to four play) with its own
+context and memory, and plays under a name the start draws (`NAMES`), all different, so that the policy learns no
+name's part. What plays
 them is not this program's business: it sends each slot's model messages and tools and gets a message back. The team
 talks through the game's chat: an observation shows the last few messages an agent has heard or said, each with
 its age in turns.
@@ -20,6 +22,7 @@ The episode's result says how it went, in the game's terms: `solved`, `saturated
 `duration` (game minutes), `turns`, and the ground truth the reward was scored from.
 """
 
+import random
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -39,7 +42,7 @@ from minecraft_swarm.prompts import (
     guidance,
     system_prompt,
 )
-from minecraft_swarm.tasks import TEAM, TURNS_PER_MINUTE, Task, catalog
+from minecraft_swarm.tasks import NAMES, TEAM, TURNS_PER_MINUTE, Task, catalog
 from rollout.contracts import Message, Text, ToolCall
 from rollout.harness import Memory, ModelSlot, Program, RunContext
 
@@ -49,9 +52,10 @@ SPARE_TURNS = 4
 
 
 class SwarmEpisode(Program):
-    """Parameters: `task` (an id from the catalog), `world_seed`, `layout_seed`; optionally `players` (how many of
-    `TEAM` play, from one to all of them; all, if not given), `minutes` (a shorter budget of game time) and `turns` (a
-    lower cap on turns than the task's own)."""
+    """Parameters: `task` (an id from the catalog), `world_seed`, `layout_seed`; optionally `names` (the names the
+    players play under, all different: one to four of them, played by the first that many slots of `TEAM`) or
+    `players` (how many play, under names drawn from `NAMES` with the layout seed), `minutes` (a shorter budget of
+    game time) and `turns` (a lower cap on turns than the task's own)."""
 
     def __init__(self, parameters: Mapping[str, JsonValue] | None = None) -> None:
         parameters = parameters or {}
@@ -63,14 +67,20 @@ class SwarmEpisode(Program):
         turns = parameters.get("turns")
         budget = round(self.minutes * TURNS_PER_MINUTE)  # the task's budget of turns, for the game time it is given
         self.max_turns = budget if turns is None else min(budget, int(cast(int, turns)))
-        players = int(cast(int, parameters.get("players", len(TEAM))))
-        if not 1 <= players <= len(TEAM):
-            raise ValueError(f"players must be from 1 to {len(TEAM)}, not {players}")
-        self.team = TEAM[:players]
-        """Who plays: the first `players` of `TEAM` (every model slot is declared; the others take no turn)."""
-        self.system = Message.system(system_prompt(self.task, players))
-        self.tools = ACTIONS if players > 1 else [tool for tool in ACTIONS if tool.name != "chat"]
-        self.chat: dict[str, list[tuple[int, str, str]]] = {name: [] for name in self.team}
+        given = parameters.get("names")
+        names = [str(name) for name in cast(list[object], given)] if isinstance(given, list) else []
+        if not names:  # (a start that names nobody: names drawn from its layout)
+            players = int(cast(int, parameters.get("players", len(TEAM))))
+            names = random.Random(self.layout_seed).sample(NAMES, min(max(players, 1), len(TEAM)))
+        if not 1 <= len(names) <= len(TEAM) or len(set(names)) != len(names):
+            raise ValueError(f"from one to {len(TEAM)} players, all named differently: not {names}")
+        self.team = TEAM[: len(names)]
+        """The model slots that play: the first of `TEAM` (every slot is declared; the others take no turn)."""
+        self.names = dict(zip(self.team, names, strict=True))
+        """The name each slot plays under."""
+        self.system = Message.system(system_prompt(self.task, names))
+        self.tools = ACTIONS if len(names) > 1 else [tool for tool in ACTIONS if tool.name != "chat"]
+        self.chat: dict[str, list[tuple[int, str, str]]] = {slot: [] for slot in self.team}
         """What each agent has heard and said lately: (turn, speaker, message), oldest first."""
 
     def model_slots(self) -> Mapping[str, ModelSlot]:
@@ -87,7 +97,7 @@ class SwarmEpisode(Program):
                 "task": self.task.id,
                 "world_seed": self.world_seed,
                 "layout_seed": self.layout_seed,
-                "players": len(self.team),
+                "names": [self.names[slot] for slot in self.team],
             },
         )
         episode = str(begun["episode"])
@@ -101,7 +111,7 @@ class SwarmEpisode(Program):
             while spent < budget and turn < self.max_turns:
                 turn += 1
                 observations = await run.gather(
-                    *(self._call(run, "observe", {"episode": episode, "agent": name}) for name in self.team)
+                    *(self._call(run, "observe", {"episode": episode, "agent": self.names[slot]}) for slot in self.team)
                 )
                 for name, observation in zip(self.team, observations, strict=True):
                     answer(memories[name], observation)
@@ -117,7 +127,7 @@ class SwarmEpisode(Program):
                 )
                 await run.gather(
                     *(
-                        self._call(run, "act", {"episode": episode, "agent": name, "action": action})
+                        self._call(run, "act", {"episode": episode, "agent": self.names[name], "action": action})
                         for name, action in zip(self.team, actions, strict=True)
                     )
                 )
@@ -140,7 +150,7 @@ class SwarmEpisode(Program):
             "saturated": saturated,
             "ended": "nothing left to earn" if saturated else "game time" if spent >= budget else "turns",
             "compactions": max(memory.compactions for memory in memories.values()),
-            "team": len(self.team),
+            "team": [self.names[slot] for slot in self.team],
             "guidance": {kind: text for kind, text in guidance(self.task, len(self.team)).items()},
         }
         await run.emit("result", result)
@@ -163,7 +173,7 @@ class SwarmEpisode(Program):
         call: ToolCall = calls[0]  # one action per turn
         said = " ".join(str(call.arguments.get("message", "")).split())[: LIMITS.chat_characters]
         if call.name == "chat" and said:  # an agent sees what it said among what it heard, as the harness says it
-            heard.append((turn, name, said))
+            heard.append((turn, self.names[name], said))
         return action(call)
 
     async def _call(self, run: RunContext, operation: str, arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
