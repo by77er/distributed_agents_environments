@@ -58,8 +58,6 @@ class Episode:
     ticket: str
     run_id: str
     labels: Mapping[str, str]
-    parameters: JsonValue
-    """The row the run was given."""
     outcome: Outcome
     detail: str | None = None
     info: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
@@ -195,7 +193,6 @@ def assemble(
     cursor: int,
     job: str,
     ticket: str,
-    parameters: JsonValue,
 ) -> Episode:
     """An episode from a run's events (its labels, rewards, result and ending) and what the recorder kept of each
     of its model slots."""
@@ -226,4 +223,4 @@ def assemble(
         for slot in dict.fromkeys([*segments, *assigned])
     }
     run_id = events[0].run_id if events else ""
-    return Episode(cursor, job, ticket, run_id, labels, parameters, outcome, detail, info, excluded, trajectories)
+    return Episode(cursor, job, ticket, run_id, labels, outcome, detail, info, excluded, trajectories)

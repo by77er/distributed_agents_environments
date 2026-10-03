@@ -17,8 +17,7 @@ what the recorder kept of each of its model slots.
 
 | Part of the episode | Comes from |
 |---|---|
-| `labels` | the run's `run.created` event |
-| `parameters` | the ticket's row |
+| `labels` | the run's `run.created` event (its start is there too, and in the ticket) |
 | `outcome`, `detail` | the terminal event: `completed`; `failed` with what the program raised; `cancelled`, also for a run whose events have no ending |
 | `info` | the payload of the run's `output.emitted` event of kind `result`: what the program reported with `run.emit("result", {...})` |
 | `excluded` | the reason of a `training.excluded` event |

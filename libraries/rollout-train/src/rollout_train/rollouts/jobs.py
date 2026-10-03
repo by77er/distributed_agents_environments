@@ -388,13 +388,11 @@ class RolloutJob:
         async with self._logging:  # the log is in the order of its cursors, whichever episode is stored first
             cursor = self._last + 1
             if events and not interrupted:
-                episode = assemble(
-                    events, segments, cursor=cursor, job=self.id, ticket=ticket.id, parameters=ticket.parameters
-                )
+                episode = assemble(events, segments, cursor=cursor, job=self.id, ticket=ticket.id)
             else:  # it never started, or was cut short: still an episode, so that counts are exact
                 outcome = Outcome.FAILED if detail else Outcome.CANCELLED
                 why = INTERRUPTED if interrupted else detail
-                episode = Episode(cursor, self.id, ticket.id, run_id, ticket.labels, ticket.parameters, outcome, why)
+                episode = Episode(cursor, self.id, ticket.id, run_id, ticket.labels, outcome, why)
             record = Record(episode) if self.blobs is None else await stored(episode, events, self.blobs)
             self._held[cursor] = episode
             self._records.append(record)

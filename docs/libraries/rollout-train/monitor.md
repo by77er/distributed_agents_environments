@@ -29,12 +29,12 @@ The process that trains writes it, and need not be running: the page shows a sto
 
 ## The page
 
-The hierarchy is on the left: the run; the groups toward its next step (in flight, or recorded and waiting for a step); then its
-steps, newest first, each with the groups that went into it (a square for each episode); the policies; and the
-machine. A step's groups need not be consecutive. A group that gave nothing to train on is listed with the step
-decided after it, marked skipped. Runs, steps, groups and
-episodes fold open and closed: an open step lists its groups, an open group its episodes, and an open episode its
-rollouts. What is folded is remembered in the browser. The address names what is shown, so a reload stays there.
+The hierarchy is on the left: the run; the groups toward its next step (in flight, or recorded and waiting for a
+step); then its steps, newest first, each with the groups that went into it (a square for each episode); the policies;
+and the machine. A step's groups need not be consecutive. A group that gave nothing to train on is listed with the
+step decided after it, marked skipped. Runs, steps, groups and episodes fold open and closed: an open step lists its
+groups, an open group its episodes, and an open episode its rollouts. What is folded is remembered in the browser. The
+address names what is shown, so a reload stays there.
 
 | View | Address | Shows |
 |---|---|---|

@@ -10,7 +10,7 @@ from pydantic import JsonValue
 from rollout.catalog import Row
 from rollout.harness.blobs import FileBlobStore
 from rollout_train import Curriculum, FileLedger, Policies, Result, Trained, Version, results, trained
-from rollout_train.record import RESULTS, STEPS, table
+from rollout_train.record import GROUPS, RESULTS, STEPS, table
 from rollout_train.report import chart, hours, post, report, summary
 
 ROWS = [Row(f"r{number}", f"row {number}") for number in range(1, 8)]
@@ -44,7 +44,14 @@ async def run(tmp_path: Path) -> tuple[Path, list[Result], Curriculum, dict[int,
     ledger = FileLedger(directory / "ledger")
     fence = await ledger.take("runs/train")
     for line in reversed(groups()):  # (groups do not always end in the order they were started in)
-        await ledger.append(table("train", RESULTS), str(line["group"]), line, fence)
+        key, decided = str(line["group"]), {"task": line["task"], "title": line["title"]}
+        await ledger.append(
+            table("train", GROUPS), key, {**decided, "decided": line["time"] - line["rollout_seconds"]}, fence
+        )
+        kept = {
+            name: value for name, value in line.items() if name not in ("group", "task", "title", "rollout_seconds")
+        }
+        await ledger.append(table("train", RESULTS), key, kept, fence)
     step: JsonValue = {"groups": [2], "policy": "run-1", "parent": None, "number": 1, "segments": 384, "seed": 1}
     await ledger.append(table("train", STEPS), "1", step, fence)
     policies = Policies(ledger, FileBlobStore(directory / "blobs"))

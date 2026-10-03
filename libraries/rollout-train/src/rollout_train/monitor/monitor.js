@@ -219,7 +219,7 @@ function drawTree() {
     if (!runOpen) continue;
     const groups = groupsOf(run), children = [];
     const inGroup = number => (here.kind === "group" && here.run === run.run && here.number === number)
-      || (showing?.job === run.run && Number(showing?.iteration) === number);
+      || (showing?.job === run.run && Number(showing?.group) === number);
     const groupRows = (number, skipped) => {
       const group = groups.get(number);
       if (!group) return [];
@@ -461,10 +461,14 @@ function drawEpisode(here) {
     slots.get(line.slot).push(line);
   }
   const ordered = new Map([...slots].sort(([a], [b]) => a.localeCompare(b)));
+  // An episode of a training run is of a group, whose record says its task; another says it in its labels, if at all.
+  const run = labels.job ? state.system.runs.find(each => each.run === labels.job) : null;
+  const group = run && labels.group ? groupsOf(run).get(Number(labels.group)) : null;
+  const task = group?.task ?? labels.task, title = group?.title ?? labels.title;
   const head = h("div", { class: "head" }, h("h1", {}, labels.episode ? `Episode ${labels.episode}` : episode.run_id.slice(-8)),
     specs(spec("state", episode.state ?? "running", stateKind(episode.state)),
       episode.ended ? spec("reward", figure(episode.ended.reward), episode.ended.solved ? "good" : "") : null,
-      labels.task ? spec("task", labels.title ? `${labels.task} · ${labels.title}` : labels.task) : null, spec("run", episode.run_id),
+      task ? spec("task", title ? `${task} · ${title}` : task) : null, spec("run", episode.run_id),
       episode.source === "archive" ? spec("read from", "its kept events: replies only", "warm") : null));
   const scalars = Object.entries(info).filter(([, value]) => value === null || typeof value !== "object");
   const nested = Object.entries(info).filter(([, value]) => value !== null && typeof value === "object");
@@ -676,8 +680,8 @@ function redraw() {
   else if (here.kind === "group") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], ...stepCrumb(here.run, here.number), [`Group #${here.number}`, ""]); content = drawGroup(here); }
   else if (here.kind === "episode") {
     const labels = state.episode?.labels ?? {};
-    if (labels.job && labels.iteration) crumbs.push([`Run ${labels.job}`, runPlace(labels.job)], ...stepCrumb(labels.job, Number(labels.iteration)),
-      [`Group #${labels.iteration}`, groupPlace(labels.job, labels.iteration)]);
+    if (labels.job && labels.group) crumbs.push([`Run ${labels.job}`, runPlace(labels.job)], ...stepCrumb(labels.job, Number(labels.group)),
+      [`Group #${Number(labels.group)}`, groupPlace(labels.job, Number(labels.group))]);
     else crumbs.push(["Episodes outside a run", "#/episodes"]);
     crumbs.push([labels.episode ? `Episode ${labels.episode}` : "Episode", here.slot ? episodePlace(here.id) : ""]);
     if (here.slot) crumbs.push([`Rollout ${here.slot}`, ""]);

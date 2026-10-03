@@ -16,7 +16,7 @@ where it was left.
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any
+from typing import Any, cast
 
 from pydantic import JsonValue
 
@@ -34,7 +34,7 @@ class Result:
     """The row's key."""
     title: str = ""
     rollout_seconds: float = 0.0
-    """From the group's decision to its last episode's end."""
+    """From the group's decision to its last episode's end (when its result was written)."""
     rewards: list[float] = field(default_factory=list[float])
     """Of the episodes fit to train on, as are `solved` and `durations`."""
     solved: list[bool] = field(default_factory=list[bool])
@@ -53,12 +53,27 @@ class Result:
     """Rows of the catalog unlocked after this group."""
 
     def to_json(self) -> dict[str, Any]:
-        return asdict(self)
+        """The record as the `results` table keeps it: without what the group's own record and key say (`JOINED`)."""
+        return {key: value for key, value in asdict(self).items() if key not in JOINED}
 
     @classmethod
-    def from_json(cls, data: Mapping[str, Any]) -> "Result":
-        known = {each.name for each in fields(cls)}
-        return cls(**{key: value for key, value in data.items() if key in known})
+    def from_json(cls, data: Mapping[str, Any], number: int, group: Mapping[str, Any]) -> "Result":
+        """A result as it is kept, with what its group's record (`group`, under `number`) says."""
+        known = {each.name for each in fields(cls)} - set(JOINED)
+        kept = {key: value for key, value in data.items() if key in known}
+        written = float(kept.get("time") or 0.0)
+        decided = group.get("decided")
+        return cls(
+            **kept,
+            group=number,
+            task=str(group.get("task", "")),
+            title=str(group.get("title", "")),
+            rollout_seconds=round(written - float(decided), 1) if isinstance(decided, int | float) else 0.0,
+        )
+
+
+JOINED = ("group", "task", "title", "rollout_seconds")
+"""What a result is read with from its group (its key, and its record in the `groups` table), not kept twice."""
 
 
 def scope(run: str) -> str:
@@ -82,8 +97,12 @@ async def runs_in(ledger: Ledger) -> list[str]:
 
 async def results(ledger: Ledger, run: str = "train") -> list[Result]:
     """How a run's groups went, by their numbers."""
-    logged = await ledger.read(table(run, RESULTS))
-    lines = [Result.from_json(record) for record in logged.values() if isinstance(record, dict)]
+    logged, decided = await ledger.read(table(run, RESULTS)), await ledger.read(table(run, GROUPS))
+    lines = [
+        Result.from_json(cast(Mapping[str, Any], record), int(key), cast(Mapping[str, Any], decided.get(key) or {}))
+        for key, record in logged.items()
+        if isinstance(record, dict)
+    ]
     return sorted(lines, key=lambda line: line.group)
 
 

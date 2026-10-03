@@ -2161,7 +2161,6 @@ class Episode
 | `ticket` | `str` | required |  |
 | `run_id` | `str` | required |  |
 | `labels` | `Mapping[str, str]` | required |  |
-| `parameters` | `JsonValue` | required | The row the run was given. |
 | `outcome` | `Outcome` | required |  |
 | `detail` | `str \| None` | `None` |  |
 | `info` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the program reported as its result (`run.emit("result", {...})`). `solved`, `saturated` and `duration` read the three entries training knows about. |
@@ -2712,7 +2711,7 @@ class Result
 | `time` | `float` | required | When it was written, in seconds since the epoch. |
 | `task` | `str` | required | The row's key. |
 | `title` | `str` | `''` |  |
-| `rollout_seconds` | `float` | `0.0` | From the group's decision to its last episode's end. |
+| `rollout_seconds` | `float` | `0.0` | From the group's decision to its last episode's end (when its result was written). |
 | `rewards` | `list[float]` | `field(default_factory=list[float])` | Of the episodes fit to train on, as are `solved` and `durations`. |
 | `solved` | `list[bool]` | `field(default_factory=list[bool])` |  |
 | `durations` | `list[float \| None]` | `field(default_factory=list[float \| None])` |  |
@@ -2726,8 +2725,8 @@ class Result
 
 **Methods**
 
-- `def to_json(self) -> dict[str, Any]`
-- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Result'`
+- `def to_json(self) -> dict[str, Any]` — The record as the `results` table keeps it: without what the group's own record and key say (`JOINED`).
+- `@classmethod def from_json(cls, data: Mapping[str, Any], number: int, group: Mapping[str, Any]) -> 'Result'` — A result as it is kept, with what its group's record (`group`, under `number`) says.
 
 ### `results`
 
@@ -3271,8 +3270,8 @@ several threads at once.
 - `def __init__(self, directory: Path) -> None`
 - `def refresh(self) -> None`
 - `def runs(self) -> list[dict[str, Any]]` — Every run in the feed, newest first: its labels, state, rewards and how much it has done.
-- `def job(self, after: int = 0) -> list[dict[str, Any]]` — What the rollout job did, from index `after` on: tickets, episodes, published weights, the trainer's
-  iterations, the engines' throughput.
+- `def job(self, after: int = 0) -> list[dict[str, Any]]` — What the rollout job did, from index `after` on: tickets, episodes, published weights, the loop's results
+  and steps, the engines' throughput.
 - `def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]` — A run's lines from index `after` on.
 
 ### `plain`

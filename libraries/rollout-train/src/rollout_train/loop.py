@@ -91,7 +91,8 @@ async def train(
     writer = await policies.writer(policy)
     decided = {int(number): _mapping(group) for number, group in (await ledger.read(table(run, GROUPS))).items()}
     recorded = {
-        int(key): Result.from_json(_mapping(line)) for key, line in (await ledger.read(table(run, RESULTS))).items()
+        int(key): Result.from_json(_mapping(line), int(key), decided.get(int(key), {}))
+        for key, line in (await ledger.read(table(run, RESULTS))).items()
     }
     steps = {int(key): _mapping(step) for key, step in (await ledger.read(table(run, STEPS))).items()}
     failures = {int(key) for key in await ledger.read(table(run, FAILURES))}
@@ -142,12 +143,7 @@ async def train(
 
     async def episodes_of(number: int) -> list[Episode]:
         group = decided[number]
-        labels = {
-            "group": f"{number:04d}",
-            "iteration": str(number),
-            "task": str(group["task"]),
-            "title": str(group["title"]),
-        }
+        labels = {"group": str(number)}  # (the rest of the group is in its record)
         ticket = await job.run(
             group["parameters"], labels=labels, count=algorithm.group_size, key=f"{run}-{number:04d}"
         )
@@ -205,7 +201,7 @@ async def train(
         line.unlocked = len(curriculum.unlocked())
         await ledger.append(table(run, RESULTS), str(number), line.to_json(), fence)  # before anything trains on it
         recorded[number] = line
-        await job.note("result", line.to_json())
+        await job.note("result", {"group": number, **line.to_json()})
         segments[number] = held(number, episodes)
         if segments[number]:
             queue.append(number)

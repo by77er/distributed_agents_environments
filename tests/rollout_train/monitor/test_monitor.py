@@ -96,12 +96,12 @@ def test_runs_a_stopped_writer_left_open_are_marked_cancelled_by_the_next(tmp_pa
 def test_what_a_job_did_is_in_the_feed_beside_its_runs(tmp_path: Path) -> None:
     feed = RunFeed(tmp_path / "feed", keep=1)
     feed.on_job({"kind": "ticket", "job": "train", "ticket": "t_1", "count": 4})
-    feed.on_job({"kind": "iteration", "job": "train", "iteration": 1, "task": "say-yes", "rewards": [1.0, 0.0]})
+    feed.on_job({"kind": "result", "job": "train", "group": 1, "rewards": [1.0, 0.0]})
     feed.close()
     reader = FeedReader(tmp_path / "feed")
-    assert reader.runs() == [] and [line["kind"] for line in reader.job()] == ["ticket", "iteration"]
+    assert reader.runs() == [] and [line["kind"] for line in reader.job()] == ["ticket", "result"]
     RunFeed(tmp_path / "feed")  # the next writer leaves the job's file as it is (it is not a run that was cut off)
-    assert [line["kind"] for line in FeedReader(tmp_path / "feed").job()] == ["ticket", "iteration"]
+    assert [line["kind"] for line in FeedReader(tmp_path / "feed").job()] == ["ticket", "result"]
 
 
 def test_readers_in_several_threads_read_each_line_once(tmp_path: Path) -> None:

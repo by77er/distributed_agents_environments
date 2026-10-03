@@ -39,7 +39,7 @@ of segments.
 | **Catalog / row** | What an environment offers to train on, easiest first / one situation of it, of which a start is drawn for each group. See [three ways in](../guide/perspectives.md#building-an-environment). |
 | **Training run** | One training loop (`rollout_train.train`, `rollout train`) over a catalog, kept in one directory and in the ledger: its groups, their results and its steps. See [training](../libraries/rollout-train/training.md). |
 | **Step** | One call of the trainer, over the groups queued with something to train on (at least `groups_per_step` of them, except at the end of the run); it makes one version of the policy. |
-| **Group** | One start of one row, played as several episodes (one ticket of `group_size` runs) that are compared with each other. Its episodes carry the labels `group` and `iteration` (its number). |
+| **Group** | One start of one row, played as several episodes (one ticket of `group_size` runs) that are compared with each other. Its episodes carry the label `group` (its number); the rest of it is in its record. |
 | **Episode** | One run of a program, as training sees it once it has ended: labels, outcome, result, and a trajectory per model slot. See [episodes](../libraries/rollout-train/episodes.md). |
 | **Rollout** | One model slot's part of an episode as it plays: every turn of one agent. Each rollout becomes a trajectory. |
 | **Session** | The recorder's record of one rollout: every sample of one model slot of one run. |

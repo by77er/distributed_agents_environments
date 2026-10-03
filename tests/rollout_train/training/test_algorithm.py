@@ -15,7 +15,7 @@ def episode(reward: float, *, group: str = "g", segments: int = 2, cursor: int =
     made = [Segment([1, 2, 3], [Span(1, 3, 0)], [-0.5, -0.5]) for _ in range(segments)]
     trajectories = {slot: Trajectory(list(made), {"default": reward}) for slot in ("ada", "ben")}
     return Episode(
-        cursor, "j", "t", f"r{cursor}", {"group": group}, None, Outcome.COMPLETED, info=info, trajectories=trajectories
+        cursor, "j", "t", f"r{cursor}", {"group": group}, Outcome.COMPLETED, info=info, trajectories=trajectories
     )
 
 
@@ -50,7 +50,7 @@ def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from
     assert batch.skipped is None and [weighted.advantage for weighted in batch.segments] == [-1.0] * 8 + [2.0] * 4
     limited = Grpo().batch(group, Budget(segments=6), random.Random(0))
     assert [w.advantage for w in limited.segments] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
-    failed = Episode(9, "j", "t", "r9", {}, None, Outcome.FAILED, detail="it raised")
+    failed = Episode(9, "j", "t", "r9", {}, Outcome.FAILED, detail="it raised")
     assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).segments] == [
         weighted.advantage for weighted in batch.segments
     ]  # an episode that did not complete is no part of the comparison

@@ -45,7 +45,7 @@ async def test_a_ticket_yields_its_episodes_with_labels_rewards_results_and_what
     first, second = sorted(await ticket.episodes(), key=lambda episode: episode.reward)
     assert (first.reward, second.reward) == (0.0, 1.0) and first.outcome is second.outcome is Outcome.COMPLETED
     assert second.labels["group"] == "g1" and second.labels["task"] == "say-yes" and second.ticket == ticket.id
-    assert second.info == {"solved": True, "saturated": True, "duration": 1} and second.parameters == {"word": "yes"}
+    assert second.info == {"solved": True, "saturated": True, "duration": 1}
     assert second.trainable and {first.cursor, second.cursor} == {1, 2}
     (segment,) = second.trajectories["policy"].segments
     text = "".join(chr(token) for token in segment.tokens)

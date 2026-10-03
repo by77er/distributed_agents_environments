@@ -21,8 +21,9 @@ and sets `episodes_at_once` ([deploying](../../guide/deploying.md)).
 [`train`](../../guide/reference.md#train) trains one [policy](policies.md) on a catalog and serves it on one
 channel. Unless a `binding` says otherwise, every model slot of the catalog's program is served from that channel.
 
-- **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled `group`,
-  `iteration`, `task` and `title`. The curriculum picks the row and the catalog draws the start.
+- **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled with its number
+  (`group`). The curriculum picks the row and the catalog draws the start; the run's `groups` table keeps both, with
+  when it was decided.
 - **Play and training go their own ways.** At most `episodes_at_once` episodes (6 by default) run at once,
   whatever groups they are of: it is the job's `in_flight`, and the job starts runs as room allows, the rest of one
   ticket's and then the next's ([admission](rollouts.md#guarantees)). Enough groups are kept asked for that an
@@ -147,10 +148,12 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 ## The record
 
 For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table when its last
-episode ends: the row, the rewards, `solved` and durations of the episodes fit to train on, how many episodes
-failed and why, how many segments were recorded and how many the algorithm found to train on (`segments`; none, and
-`skipped` with its reason, if it found none), its notes, and how many rows are unlocked. The same line goes to the
-job as a `result` note; each step goes as a `step` note with the version it made and its metrics, or its error.
+episode ends: the rewards, `solved` and durations of the episodes fit to train on, how many episodes failed and why,
+how many segments were recorded and how many the algorithm found to train on (`segments`; none, and `skipped` with
+its reason, if it found none), its notes, and how many rows are unlocked. What the group's own record says is not
+kept again: `results(ledger, run)` reads each result with its group's number, row (`task`, `title`) and the time from
+its decision to its result (`rollout_seconds`). The result goes to the job as a `result` note with the group's
+number; each step goes as a `step` note with the version it made and its metrics, or its error.
 
 What was done with a group is read by joining: `trained(ledger, run)` gives, for each group a step covers, that step
 and the version it made or why it failed (a [`Trained`](../../guide/reference.md#trained)); the version's record

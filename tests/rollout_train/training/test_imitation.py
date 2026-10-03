@@ -43,7 +43,7 @@ async def test_the_solved_guided_episodes_are_examples_and_a_step_on_them_makes_
     for cursor, (solved, told) in enumerate([(True, {"way": WAY}), (False, {"way": WAY}), (True, {})], start=1):
         trajectory = Trajectory([segment(f"system: Goal.\n\n{WAY}\nassistant: ", "craft")], {"default": 1.0})
         info: dict[str, JsonValue] = {"solved": solved, GUIDANCE: dict(told)}
-        episode = Episode(cursor, "train", "t", f"r{cursor}", {}, None, Outcome.COMPLETED, info=info,
+        episode = Episode(cursor, "train", "t", f"r{cursor}", {}, Outcome.COMPLETED, info=info,
                           trajectories={"ada": trajectory})  # fmt: skip
         lines.append(json.dumps((await stored(episode, [], blobs)).to_json()))
     (log / EPISODES).write_text("".join(line + "\n" for line in lines))

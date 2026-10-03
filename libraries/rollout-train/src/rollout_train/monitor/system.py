@@ -16,6 +16,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Mapping
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
 
@@ -28,7 +29,7 @@ from rollout_train.ledger import FileLedger
 from rollout_train.monitor.feed import Appended, FeedReader, plain
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, runs_in, table
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, runs_in, table
 from rollout_train.record import scope as run_scope
 from rollout_train.rollouts.episodes import Record
 from rollout_train.rollouts.jobs import ACKNOWLEDGED, EPISODES, INTERRUPTED, TICKETS
@@ -121,8 +122,10 @@ class System:
             **group,
             "run": run,
             "parameters": record.get("parameters"),
-            "outcome": _done(result, record, step, made, group["error"]) if group["stage"] == DONE and result else None,
-            "result": _outcome(result) if result else None,
+            "outcome": _done(number, result, record, step, made, group["error"])
+            if group["stage"] == DONE and result
+            else None,
+            "result": _outcome(number, record, result) if result else None,
             "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
         }
 
@@ -242,9 +245,8 @@ def _run(
         if entry["stage"] == DONE:
             step: Any = entry["step"]
             made = versions.get(str(step.get("makes"))) if step else None
-            line = _done(
-                tables[RESULTS][str(entry["number"])], groups[str(entry["number"])], step, made, entry["error"]
-            )
+            key = str(entry["number"])
+            line = _done(key, tables[RESULTS][key], groups[key], step, made, entry["error"])
             shown = ("run_id", "episode", "state", "reward", "solved", "interrupted", "slots", "outcome")
             done.append(line | {"episodes": [{key: each.get(key) for key in shown} for each in entry["episodes"]]})
     steps: Any = tables[STEPS]
@@ -356,10 +358,12 @@ def _group(
     }
 
 
-def _done(result: Any, group: Mapping[str, Any], step: Any, made: Version | None, error: str | None) -> dict[str, Any]:
+def _done(
+    number: str, result: Any, group: Mapping[str, Any], step: Any, made: Version | None, error: str | None
+) -> dict[str, Any]:
     """A group that is done with, as the page shows it: its result, and what was done with it (the version its step
     made and the trainer's statistics, or why the step failed), with how long it all took."""
-    line = _outcome(result)
+    line = _outcome(number, group, result)
     ended = made.made if made else float(result.get("time") or 0.0)
     began = float(group.get("decided") or result.get("time") or 0.0)
     return {
@@ -373,6 +377,11 @@ def _done(result: Any, group: Mapping[str, Any], step: Any, made: Version | None
         "error": error,
         "seconds": round(ended - began, 1) if began else None,
     }
+
+
+def _number(label: Any) -> int | None:
+    """A group's number from its label (written `39` or `0039`)."""
+    return int(label) if isinstance(label, str) and label.isdigit() else None
 
 
 def _state(key: str, step: Mapping[str, Any], failures: Mapping[str, Any], versions: Mapping[str, Version]) -> str:
@@ -424,11 +433,11 @@ def _replayed(events: list[RunEvent]) -> list[dict[str, Any]]:
     return lines
 
 
-def _outcome(line: Mapping[str, Any]) -> dict[str, Any]:
-    """A group's outcome as it is logged, with its failures said once each and briefly."""
-    said: list[Any] = line.get("failures") or []
-    failures = list(dict.fromkeys(str(failure)[:300] for failure in said))
-    return {**line, "failures": failures}
+def _outcome(number: str, group: Mapping[str, Any], line: Mapping[str, Any]) -> dict[str, Any]:
+    """A group's result as it is read (with what its record says), its failures said once each and briefly."""
+    joined = asdict(Result.from_json(line, int(number), group))
+    failures = list(dict.fromkeys(str(failure)[:300] for failure in joined["failures"]))
+    return {**joined, "failures": failures}
 
 
 def _policy(policy: str, versions: list[Version], fence: int | None) -> dict[str, Any]:
@@ -534,8 +543,8 @@ class _JobLog:
         self.written = max((path.stat().st_mtime for path in logs), default=0.0)
 
     def asked(self, number: str) -> dict[str, Any] | None:
-        """The ticket a group was asked for under, by the group's number (the label `iteration`)."""
-        asked = [ticket for ticket in self.tickets if ticket["labels"].get("iteration") == number]
+        """The ticket a group was asked for under, by the group's number (the label `group`)."""
+        asked = [ticket for ticket in self.tickets if _number(ticket["labels"].get("group")) == int(number)]
         return asked[-1] if asked else None
 
     def of(self, ticket: str) -> list[dict[str, Any]]:

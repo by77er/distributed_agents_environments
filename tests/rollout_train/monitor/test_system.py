@@ -53,9 +53,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
         each["state"] == "completed" and "info" in each for each in group["episodes"]
     )
     assert (
-        episode["source"] == "feed"
-        and episode["labels"]["iteration"] == "1"
-        and episode["ended"]["state"] == "completed"
+        episode["source"] == "feed" and episode["labels"]["group"] == "1" and episode["ended"]["state"] == "completed"
     )
     assert any(line["kind"] == "sample" and line["messages"] for line in episode["lines"])
 
@@ -119,16 +117,14 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
         outcome = Outcome.CANCELLED if detail else Outcome.COMPLETED
         labels = {"episode": str(cursor), "ticket": "t_train-0001"}
         trajectories = {"ada": Trajectory([], {"default": float(cursor)})}
-        episode = Episode(
-            cursor, "train", "t_train-0001", run_id, labels, None, outcome, detail, trajectories=trajectories
-        )
+        episode = Episode(cursor, "train", "t_train-0001", run_id, labels, outcome, detail, trajectories=trajectories)
         with (log / EPISODES).open("a") as file:
             file.write(json.dumps(Record(episode, sampled={"ada": 40}).to_json()) + "\n")
 
     await ledger.append(table("train", GROUPS), "1", {"task": "t003", "title": "chests", "decided": 5.0}, fence)
     assert (await group()) == {**(await group()), "number": 1, "task": "t003", "stage": DECIDED, "ticket": None}
 
-    ticket = {"id": "t_train-0001", "parameters": None, "labels": {"iteration": "1"}, "count": 2}
+    ticket = {"id": "t_train-0001", "parameters": None, "labels": {"group": "1"}, "count": 2}
     (log / TICKETS).write_text(json.dumps(ticket) + "\n")
     assert (await group())["stage"] == WAITING
 

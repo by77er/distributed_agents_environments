@@ -233,8 +233,8 @@ class FeedReader:
         return sorted(summaries, key=lambda run: run["started"], reverse=True)
 
     def job(self, after: int = 0) -> list[dict[str, Any]]:
-        """What the rollout job did, from index `after` on: tickets, episodes, published weights, the trainer's
-        iterations, the engines' throughput."""
+        """What the rollout job did, from index `after` on: tickets, episodes, published weights, the loop's results
+        and steps, the engines' throughput."""
         self.refresh()
         return self._job_lines[after:]
 
