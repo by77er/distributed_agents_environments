@@ -117,6 +117,9 @@ class PlainRenderer:
     def encode(self, text: str) -> list[int]:
         return Characters().encode(text)
 
+    def decode(self, tokens: Sequence[int]) -> str:
+        return Characters().decode(tokens)
+
     def stop_token_ids(self) -> list[int]:
         return [ord("\n")]
 

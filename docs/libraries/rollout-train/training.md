@@ -169,3 +169,24 @@ with no model and no accelerator.
 
 `tests/rollout_train/test_profile.py` opens a profile made of these, with a trainer that trains nothing, and runs
 the loop over it. For tasks and agents alone, see [guide: testing](../../guide/testing.md).
+
+## Imitation
+
+`rollout_train.imitation` trains a policy to do, without being told how, what it did when it was told. An
+environment that guides its agents reports, in each episode's result, the guidance its prompts carried, word for
+word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
+
+- **`without(segment, texts, renderer)`** cuts guidance out of a segment: the tokens before its first sampled token
+  are decoded, the texts taken out, and the rest encoded again; the sampled tokens stay as they were, and their
+  spans move with them. A prompt that does not encode back to its own tokens is left out, since cutting it could
+  not be exact.
+- **`examples(log, blobs, renderer, kinds=...)`** reads a job's log for the episodes that carried guidance of those
+  kinds and solved their task, and gives their segments, cut, each weighted 1.
+- **`imitate(policies, trainer, examples, ...)`** takes one step of a trainer whose objective is likelihood
+  ([LoRA trainer](../../implementations/rollout-lora.md)) from the policy's newest version, and commits the next.
+
+```bash
+rollout imitate PROFILE --without way [--limit N]    # with the run stopped: it takes the policy's writer
+```
+
+Started again, the training loop serves the version imitation made and trains on from it.

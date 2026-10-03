@@ -69,6 +69,14 @@ class ClippedPolicyGradient:
                     if not positions:
                         continue
                     logprobs = self.policy.logprobs(segment.tokens, positions)
+                    if settings.objective == "likelihood":
+                        per_token = -logprobs * weighted.advantage
+                        (per_token.sum() / batch_tokens).backward()
+                        with torch.no_grad():
+                            sums["loss"] += float(per_token.sum())
+                            sums["tokens"] += len(positions)
+                            sums["segments"] += 1
+                        continue
                     behavior = torch.tensor(segment.logprobs, device=logprobs.device)
                     if not bool(torch.isfinite(behavior).all()):  # (one NaN would make every weight NaN)
                         raise ValueError("a sampled token has no behavior logprob")

@@ -111,3 +111,18 @@ def test_a_sampled_token_without_a_logprob_is_refused() -> None:
     with pytest.raises(ValueError, match="no behavior logprob"):
         ClippedPolicyGradient(policy).step([broken])  # type: ignore[arg-type]
     assert all(torch.equal(a, b) for a, b in zip(weights, policy.parameters(), strict=True))
+
+
+def test_the_likelihood_objective_makes_what_was_sampled_likelier_whatever_it_was_sampled_at() -> None:
+    policy = ToyPolicy()
+    shown = [1, 2, 3, 4]
+    before = float(policy.logprobs(shown, range(1, 4)).sum())
+    # Recorded logprobs from another prompt (the guidance taken out): the objective does not read them.
+    taught = Weighted(Segment(shown, [Span(1, 4, 0)], [-9.0, -9.0, -9.0]), 1.0)
+    settings = LoraSettings(learning_rate=0.05, tokens_per_step=100, objective="likelihood")
+    trainer = ClippedPolicyGradient(policy, settings)  # type: ignore[arg-type]
+    metrics = [trainer.step([taught], seed=step) for step in range(5)]
+    assert float(policy.logprobs(shown, range(1, 4)).sum()) > before
+    assert metrics[-1]["loss"] < metrics[0]["loss"] and metrics[0]["clip_fraction"] == 0.0
+    with pytest.raises(ValueError, match="objective"):
+        LoraSettings(objective="something else")

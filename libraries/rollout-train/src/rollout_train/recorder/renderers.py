@@ -67,6 +67,10 @@ class Renderer(Protocol):
 
     def encode(self, text: str) -> list[int]: ...
 
+    def decode(self, tokens: Sequence[int]) -> str:
+        """The text of tokens, special tokens and all: what `encode` reads back."""
+        ...
+
     def stop_token_ids(self) -> list[int]:
         """Tokens that end an assistant turn."""
         ...
@@ -150,6 +154,9 @@ class ChatTemplateRenderer:
 
     def encode(self, text: str) -> list[int]:
         return list(self.tokenizer.encode(text, add_special_tokens=False))
+
+    def decode(self, tokens: Sequence[int]) -> str:
+        return self.tokenizer.decode(list(tokens), skip_special_tokens=False)
 
     def stop_token_ids(self) -> list[int]:
         return [int(self.tokenizer.convert_tokens_to_ids(self._end))]

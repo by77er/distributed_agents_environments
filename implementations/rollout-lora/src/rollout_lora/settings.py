@@ -25,7 +25,19 @@ class LoraSettings:
     so whoever serves the policy takes this as the longest turn to sample; the count says whether that held."""
     segments_per_step: int | None = None
     """How many segments a step can afford (None: any number)."""
+    objective: str = "policy_gradient"
+    """`policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's
+    advantage, against the logprobs they were sampled at. `likelihood`: raise the log-likelihood of the sampled tokens,
+    each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, clip or
+    stop at `max_kl`."""
+
+    def __post_init__(self) -> None:
+        if self.objective not in OBJECTIVES:
+            raise ValueError(f"objective is one of {', '.join(OBJECTIVES)}, not {self.objective!r}")
 
     @property
     def alpha(self) -> float:
         return 2.0 * self.rank
+
+
+OBJECTIVES = ("policy_gradient", "likelihood")

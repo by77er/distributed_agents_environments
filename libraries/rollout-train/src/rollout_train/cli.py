@@ -3,6 +3,7 @@
 rollout train PROFILE CATALOG    the training loop: PROFILE is a TOML file (`rollout_train.profile`), CATALOG names an
                                  environment's catalog as `module:name`
 rollout report RUN CATALOG       chart a run's progress and summarise it; post both to a Discord webhook
+rollout imitate PROFILE          a supervised step on the solved episodes of the run's log, without their guidance
 rollout monitor RUN              the web page over a run's directory: where it stands, and every episode
 rollout tools FACTORY            serve an environment's tool set over HTTP: FACTORY is `module:name`
 
@@ -11,6 +12,7 @@ rollout tools FACTORY            serve an environment's tool set over HTTP: FACT
 
 import argparse
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -62,6 +64,45 @@ async def _train(profile: Path, directory: Path | None, catalog: str, groups: in
         )  # fmt: skip
 
 
+async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
+    from rollout.harness.blobs import FileBlobStore
+    from rollout_train.imitation import examples, imitate
+    from rollout_train.layout import BLOBS, JOBS, LEDGER
+    from rollout_train.ledger import FileLedger
+    from rollout_train.policies import Policies
+    from rollout_train.profile import Profile
+
+    described = Profile.load(profile, directory=directory)
+    if described.trainer is None:
+        raise SystemExit(f"{profile} describes no trainer")
+    spec = described.channels[described.trainer.channel]
+    renderer = named(spec.renderer)(spec.model)
+    store = dict(described.blobs)
+    blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
+    policies = Policies(FileLedger(described.ledger or described.directory / LEDGER), blobs)
+    policy = described.trainer.policy or described.directory.name
+    taught = None
+    for log in sorted((described.directory / JOBS).iterdir()):
+        found = await examples(log, blobs, renderer, kinds=kinds)
+        if taught is None:
+            taught = found
+        else:
+            taught.segments += found.segments
+            taught.episodes += found.episodes
+            taught.left_out += found.left_out
+    if taught is None or not taught.segments:
+        raise SystemExit("no solved episode in the run's log carried that guidance")
+    print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out)", flush=True)
+    settings = {**described.trainer.settings, "objective": "likelihood"}
+    trainer = named(described.trainer.kind)(spec.model, **settings)
+    writer = await policies.writer(policy)
+    version = await imitate(
+        policies, trainer, taught, fence=writer, policy=policy, directory=described.directory / "versions",
+        limit=limit, seed=seed,
+    )  # fmt: skip
+    print(f"made {version.name}: {json.dumps({key: round(value, 4) for key, value in version.metrics.items()})}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="rollout", description="Train on a catalog under a deployment profile.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -76,6 +117,12 @@ def main() -> None:
     reporting.add_argument("catalog")
     reporting.add_argument("--watch", action="store_true", help="report again after every group, until interrupted")
     reporting.add_argument("--webhook", help="a Discord webhook (default: the environment's DISCORD_WEBHOOK_URL)")
+    imitating = commands.add_parser("imitate", help="a supervised step on solved episodes, without their guidance")
+    imitating.add_argument("profile", type=Path)
+    imitating.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
+    imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
+    imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
+    imitating.add_argument("--seed", type=int, default=0)
     monitoring = commands.add_parser("monitor", help="serve the monitor's page over a run's directory")
     monitoring.add_argument("directory", type=Path)
     monitoring.add_argument("--host", default="127.0.0.1")
@@ -88,6 +135,9 @@ def main() -> None:
     arguments = parser.parse_args()
     if arguments.command == "train":
         work = _train(arguments.profile, arguments.directory, arguments.catalog, arguments.groups, arguments.seed)
+        sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command == "imitate":
+        work = _imitate(arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed)
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "report":
         from rollout_train.report import report

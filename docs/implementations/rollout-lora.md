@@ -35,6 +35,7 @@ trains and the run's directory. Every key of `[trainer]` other than `kind`, `cha
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
 | `segment_tokens` | The longest segment a step can hold on its GPU (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
+| `objective` | `policy_gradient` (the clipped policy gradient against the logprobs tokens were sampled at), or `likelihood` (raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage: [imitation](../libraries/rollout-train/training.md#imitation)) |
 
 `segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). An open profile
 gives `segment_tokens` to the trained channel as its longest turn, so that every sampled turn can be trained on.

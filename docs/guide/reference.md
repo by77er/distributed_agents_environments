@@ -2954,6 +2954,7 @@ Renders with the tokenizer's chat template; parses with a family's tool-call and
 - `def __init__(self, name: str, tokenizer: Tokenizer, tool_calls: ToolCallFormat, thinking: ThinkingFormat | None, end: str) -> None`
 - `def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]`
 - `def encode(self, text: str) -> list[int]`
+- `def decode(self, tokens: Sequence[int]) -> str`
 - `def stop_token_ids(self) -> list[int]`
 - `def thinking_end_token_ids(self) -> list[int]`
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message`
@@ -3034,6 +3035,7 @@ class Renderer(Protocol)
 
 - `def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]` — The prompt: every message, then the generation prompt for the assistant's next turn.
 - `def encode(self, text: str) -> list[int]`
+- `def decode(self, tokens: Sequence[int]) -> str` — The text of tokens, special tokens and all: what `encode` reads back.
 - `def stop_token_ids(self) -> list[int]` — Tokens that end an assistant turn.
 - `def thinking_end_token_ids(self) -> list[int]` — Tokens that end thinking (to stop a thinking phase on), or none if it is not a single token.
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message` — A sampled turn as a canonical assistant message.
@@ -3352,6 +3354,7 @@ one segment.
 
 - `def render(self, messages: Sequence[Message], tools: Sequence[ToolSpecification]) -> list[int]`
 - `def encode(self, text: str) -> list[int]`
+- `def decode(self, tokens: Sequence[int]) -> str`
 - `def stop_token_ids(self) -> list[int]`
 - `def thinking_end_token_ids(self) -> list[int]`
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message`
@@ -3570,6 +3573,7 @@ class LoraSettings
 | `max_gradient_norm` | `float` | `1.0` |  |
 | `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
+| `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, against the logprobs they were sampled at. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, clip or stop at `max_kl`. |
 
 **Methods**
 
