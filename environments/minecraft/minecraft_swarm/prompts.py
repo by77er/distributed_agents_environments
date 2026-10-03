@@ -115,8 +115,11 @@ you, names the blocks that touch you, and lists notable things in sight farther 
 where the game began, {death}. Your memory is limited: you see your recent turns without their maps, and anything \
 older only as \
 a summary that you write yourself when asked. Chat reaches teammates at their next turn; every observation shows \
-the team's last {chat_lines} messages and how old each is. Use chat to split up the work and to share what you find. \
-Think briefly, then act."""
+the team's last {chat_lines} messages and how old each is. Use chat to split up the work and to share what you find.
+
+When an action fails, or you are getting no closer to the goal, stop and think: what does the goal need that you do \
+not have yet? Plan how to get those things, one step at a time, and act on the first. Do not try what already failed \
+again unless something has changed. Otherwise, think briefly, then act."""
 
 COMPACT = """The turns above are about to leave your memory. Write what you need to remember from them, and from \
 your earlier summary if there is one, to keep playing well: what you have learned about the world (places and things, \
