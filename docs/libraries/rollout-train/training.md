@@ -72,7 +72,7 @@ nothing, or the step that covers it has made its version or failed.
 - **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
   policy's table. A step that died before the append made nothing.
 - **Saves thin out.** Once a version is served, the policy is thinned to `retention` (`Retention()`: the trainer state
-  of the newest three versions and of every tenth; [policies](policies.md#versions)).
+  of the newest two versions and of every twentieth; [policies](policies.md#versions)).
 - **One loop at a time.** Starting takes the run's fence and the policy's. A loop that was replaced, and does not
   know it yet, has its next write refused.
 - **`groups` is how many groups this start plays**, those a stopped loop left unplayed among them; the loop ends

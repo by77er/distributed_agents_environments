@@ -187,8 +187,8 @@ class Retention:
     """Which versions keep their trainer state (what a step can go on from): the newest `recent`, and every
     `every`-th by number, so that saves thin out with age. Weights are kept for every version."""
 
-    recent: int = 3
-    every: int = 10
+    recent: int = 2
+    every: int = 20
 
     def kept(self, numbers: list[int]) -> set[int]:
         newest = sorted(numbers)[-self.recent :] if self.recent > 0 else []
