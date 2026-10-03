@@ -12,6 +12,7 @@ import json
 import lzma
 import shutil
 import subprocess
+import threading
 import time
 from collections import deque
 from collections.abc import Mapping
@@ -60,6 +61,8 @@ class System:
         self.machine = Machine(directory)
         self._ledger = FileLedger(directory / LEDGER)
         self._jobs: dict[str, _JobLog] = {}
+        self._reading = threading.Lock()
+        """Held while the jobs' logs are read: requests are answered in threads, and two must not read at once."""
         self._blobs = FileBlobStore(directory / BLOBS)
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
@@ -194,6 +197,10 @@ class System:
         }
 
     def _job_logs(self) -> dict[str, "_JobLog"]:
+        with self._reading:
+            return self._refreshed()
+
+    def _refreshed(self) -> dict[str, "_JobLog"]:
         directory = self.directory / JOBS
         for path in sorted(directory.iterdir()) if directory.is_dir() else []:
             if path.is_dir() and path.name not in self._jobs:
@@ -225,8 +232,17 @@ def _run(
         _group(number, groups[number], tables, made, job, in_feed)
         for number in sorted((number for number in groups if number not in done), key=int)
     ]
-    iterations = [_iteration(done[number]) for number in sorted(done, key=int)]
+    iterations = [_iteration(done[number]) | {"rollouts": _rollouts(number, job)} for number in sorted(done, key=int)]
     return {"run": run, "fence": fence, "decided": len(groups), "open": open_groups, "iterations": iterations}
+
+
+def _rollouts(number: str, job: "_JobLog | None") -> list[dict[str, Any]]:
+    """A finished group's rollouts, briefly: which run each was, how it ended and what it scored."""
+    ticket = job.asked(number) if job else None
+    if job is None or ticket is None:
+        return []
+    shown = ("run_id", "episode", "state", "reward", "solved", "interrupted")
+    return [{key: each[key] for key in shown} for each in job.of(ticket["id"])]
 
 
 def _group(

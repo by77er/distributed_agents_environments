@@ -28,7 +28,8 @@ The process that trains writes it, and need not be running: the page shows a sto
 ## The page
 
 The hierarchy is on the left: the run, its groups in flight and then every group it is done with (newest first, a
-dot for each rollout), the policies, and the machine. The address names what is shown, so a reload stays there.
+square for each rollout), the policies, and the machine. Runs and groups fold open and closed, and an open group lists
+its rollouts; what is folded is remembered in the browser. The address names what is shown, so a reload stays there.
 
 | View | Address | Shows |
 |---|---|---|

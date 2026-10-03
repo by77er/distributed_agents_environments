@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import JsonValue
 
 from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, ToolCall, ToolResult, ToolResultBlock
 from rollout.local import LocalRunner
@@ -101,3 +102,19 @@ def test_what_a_job_did_is_in_the_feed_beside_its_runs(tmp_path: Path) -> None:
     assert reader.runs() == [] and [line["kind"] for line in reader.job()] == ["ticket", "iteration"]
     RunFeed(tmp_path / "feed")  # the next writer leaves the job's file as it is (it is not a run that was cut off)
     assert [line["kind"] for line in FeedReader(tmp_path / "feed").job()] == ["ticket", "iteration"]
+
+
+def test_readers_in_several_threads_read_each_line_once(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    feed = RunFeed(tmp_path / "feed")
+    created: JsonValue = {"labels": {"group": "0001"}}
+    feed._write("r_one", {"kind": "event", "seq": 0, "type": "run.created", "at": 1.0, "payload": created})  # pyright: ignore[reportPrivateUsage]
+    for turn in range(2000):
+        feed._write("r_one", {"kind": "sample", "slot": "ada", "at": 2.0 + turn})  # pyright: ignore[reportPrivateUsage]
+    reader = FeedReader(tmp_path / "feed")
+    with ThreadPoolExecutor(8) as threads:
+        list(threads.map(lambda _turn: reader.runs(), range(16)))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    (run,) = reader.runs()
+    assert run["samples"] == 2000 and len(reader.lines("r_one")) == 2001
+    feed.close()

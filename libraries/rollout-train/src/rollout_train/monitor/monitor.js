@@ -57,7 +57,11 @@ function route() {
 }
 
 // Shared pieces
-const pill = (text, kind = "", dot) => h("span", { class: `pill ${kind}` }, dot ? h("span", { class: `dot ${dot}` }) : null, text);
+// A fact about the thing shown, as a datasheet gives it: a label and a value, set side by side under the title.
+const spec = (key, value, kind = "") => h("span", { class: `spec ${kind}` }, h("span", { class: "k" }, key), h("span", { class: "v" }, value));
+const specs = (...items) => h("div", { class: "specs" }, items.filter(Boolean));
+// A state: a square in its color, then its name.
+const mark = (state, text) => h("span", { class: `mark ${stateKind(state)}` }, h("i"), text ?? state);
 const kpi = (label, value, note) => h("div", { class: "kpi" }, h("span", {}, label), h("b", { title: String(value) }, value), note ? h("small", {}, note) : null);
 const card = (title, note, ...body) => h("section", { class: "card" }, h("header", {}, h("h2", {}, title), note ? h("span", {}, note) : null), h("div", { class: "body" }, ...body));
 const table = (heads, rows, onRow) => h("div", { class: "table" }, h("table", {},
@@ -72,12 +76,12 @@ const meter = (name, used, total, says) => {
 };
 const pairs = entries => h("dl", { class: "pairs" }, entries.flatMap(([key, value]) => [h("dt", {}, key), h("dd", {}, value)]));
 
-const STAGES = ["decided", "asked for", "played", "stepped", "version made", "outcome written"];
-const AT = { decided: [1, "to be asked for"], waiting: [2, "queued"], playing: [2, ""], ended: [3, "awaiting its step"], stepping: [3, ""], made: [5, "writing outcome"], done: [6, ""] };
+const STAGES = ["decided", "asked", "played", "stepped", "made", "logged"];
+const AT = { decided: [1, "to ask"], waiting: [2, "queued"], playing: [2, ""], ended: [3, "to step"], stepping: [3, ""], made: [5, "logging"], done: [6, ""] };
 function stages(group) {
   const [at, waits] = AT[group.stage];
   const says = group.stage === "playing" ? `playing ${group.ended}/${group.count}`
-    : group.stage === "stepping" ? `stepping → ${versionOf(group.step?.makes)}` : waits;
+    : group.stage === "stepping" ? `→ ${versionOf(group.step?.makes)}` : waits;
   return h("div", { class: "stages" }, STAGES.map((name, index) => h("div", {
     class: index < at ? "done" : index === at ? `now${["playing", "stepping"].includes(group.stage) ? " active" : ""}` : "",
   }, h("span", {}, index === at ? says : name))));
@@ -89,6 +93,12 @@ const outcomeOf = line => line.update
 const dotsOf = line => h("span", { class: "dots" }, [...line.rewards.map((_, index) => h("i", { class: line.solved[index] ? "solved" : "unsolved" })),
   ...Array.from({ length: line.failed }, () => h("i", { class: "failed" }))]);
 const stateKind = name => ({ running: "accent", completed: "good", done: "good", failed: "bad", cancelled: "bad", playing: "accent", stepping: "violet", made: "violet" })[name] ?? "";
+
+// A group's rollouts as a strip of cells: each with its state as a bar along its top, and its reward (or, while
+// it plays, how many samples its agents have taken).
+const cells = episodes => h("div", { class: "cells" }, episodes.map(episode => h("div", { class: `cell ${episode.interrupted ? "" : stateKind(episode.state)}` },
+  h("span", {}, `R${episode.episode ?? "?"}`), episode.outcome ? h("b", {}, figure(episode.reward)) : h("b", { class: "faint" }, `${episode.samples ?? 0}`),
+  h("small", {}, episode.interrupted ? "interrupted" : episode.outcome ? (episode.solved ? "solved" : episode.outcome) : "samples"))));
 
 // Charts
 function spark(values, kind, width, height, fill) {
@@ -149,26 +159,59 @@ function barChart(values, labels, width, height, onBar) {
   return drawing;
 }
 
-// The hierarchy, on the left
+// The hierarchy, on the left. Runs and groups fold; what is folded is remembered in this browser.
+const folds = (() => { try { return JSON.parse(localStorage.getItem("monitor.folds") ?? "{}"); } catch { return {}; } })();
+function fold(key, open) {
+  folds[key] = open;
+  try { localStorage.setItem("monitor.folds", JSON.stringify(folds)); } catch { /* (a browser that keeps nothing) */ }
+  drawTree();
+}
+const twist = (key, open, has = true) => h("button", {
+  class: `twist${open ? " open" : ""}${has ? "" : " none"}`, "aria-label": open ? "collapse" : "expand", "aria-expanded": String(open),
+  onclick: event => { event.stopPropagation(); fold(key, !open); },
+}, svg("svg", { width: 10, height: 10, viewBox: "0 0 10 10" }, svg("path", { d: "M3 1.5 L7 5 L3 8.5", fill: "none", stroke: "currentColor", "stroke-width": 1.6 })));
+const node = (place, current, ...children) => h("div", { class: `node${current ? " current" : ""}`, role: "link", tabindex: 0,
+  onclick: () => go(place), onkeydown: event => { if (event.key === "Enter") go(place); } }, ...children);
+function rolloutClass(each) {
+  if (each.interrupted) return "";
+  const ended = each.outcome ?? (each.state && each.state !== "running" ? each.state : null);
+  return !ended ? "running" : each.solved ? "solved" : ended === "completed" ? "unsolved" : "failed";
+}
+
 function drawTree() {
   const system = state.system, here = route(), tree = document.getElementById("tree");
   if (!system) return;
   document.getElementById("where").textContent = system.directory;
+  const showing = here.kind === "rollout" ? state.episode?.labels : null;
   const nodes = [];
-  const node = (place, current, ...children) => link(place, { class: `node${current ? " current" : ""}` }, ...children);
   for (const run of system.runs) {
-    const running = system.processes?.alive;
+    const runKey = `run:${run.run}`, runOpen = folds[runKey] ?? true;
     nodes.push(h("div", { class: "label" }, "Training run"));
-    nodes.push(node(runPlace(run.run), here.kind === "run" && here.run === run.run, h("span", { class: `dot ${running ? "alive" : ""}` }),
-      h("span", { class: "name" }, run.run), h("span", { class: "tag" }, `${run.iterations.length} done`)));
+    nodes.push(node(runPlace(run.run), here.kind === "run" && here.run === run.run, twist(runKey, runOpen),
+      h("span", { class: `dot ${system.processes?.alive ? "alive" : ""}` }), h("span", { class: "name" }, run.run),
+      h("span", { class: "tag" }, `${run.iterations.length} done`)));
+    if (!runOpen) continue;
+    const groups = [
+      ...run.open.map(group => ({ number: group.number, task: group.task, tag: group.stage, rollouts: group.episodes })),
+      ...[...run.iterations].reverse().map(line => ({ number: line.iteration, task: line.task, line, rollouts: line.rollouts ?? [],
+        tag: line.adapter ? versionOf(line.adapter) : line.error ? "failed" : "–" })),
+    ];
     const children = [];
-    for (const group of run.open) children.push(node(groupPlace(run.run, group.number), here.kind === "group" && here.number === group.number,
-      h("span", { class: "num" }, `#${group.number}`), h("span", { class: "name" }, group.task),
-      h("span", { class: "dots" }, group.episodes.map(each => h("i", { class: each.outcome ? (each.solved ? "solved" : each.outcome === "completed" ? "unsolved" : "failed") : "running" }))),
-      h("span", { class: "tag" }, group.stage)));
-    for (const line of [...run.iterations].reverse()) children.push(node(groupPlace(run.run, line.iteration), here.kind === "group" && here.number === line.iteration,
-      h("span", { class: "num" }, `#${line.iteration}`), h("span", { class: "name" }, line.task), dotsOf(line),
-      h("span", { class: "tag" }, line.adapter ? versionOf(line.adapter) : line.error ? "failed" : "–")));
+    for (const group of groups) {
+      const key = `group:${run.run}:${group.number}`;
+      const inside = (here.kind === "group" && here.number === group.number) || (showing?.job === run.run && Number(showing?.iteration) === group.number);
+      const open = folds[key] ?? inside;
+      children.push(node(groupPlace(run.run, group.number), here.kind === "group" && here.number === group.number,
+        twist(key, open, group.rollouts.length > 0), h("span", { class: "num" }, `#${group.number}`), h("span", { class: "name" }, group.task),
+        group.line && !group.rollouts.length ? dotsOf(group.line) : h("span", { class: "dots" }, group.rollouts.map(each => h("i", { class: rolloutClass(each) }))),
+        h("span", { class: "tag" }, group.tag)));
+      const byNumber = [...group.rollouts].sort((a, b) => String(a.episode).localeCompare(String(b.episode), undefined, { numeric: true }));
+      if (open && byNumber.length) children.push(h("div", { class: "children" }, byNumber.map(each => node(rolloutPlace(each.run_id),
+        here.kind === "rollout" && here.id === each.run_id, h("span", { class: "num" }, `R${each.episode ?? "?"}`),
+        h("span", { class: "dots" }, h("i", { class: rolloutClass(each) })),
+        h("span", { class: "name" }, each.interrupted ? "interrupted" : each.outcome ?? (each.state === "running" ? `${each.samples ?? 0} samples` : each.state)),
+        h("span", { class: "tag" }, each.outcome || each.state === "completed" ? figure(each.reward) : "")))));
+    }
     nodes.push(h("div", { class: "children" }, children));
   }
   if (system.policies.length) nodes.push(h("div", { class: "label" }, "Policies"));
@@ -178,7 +221,9 @@ function drawTree() {
   nodes.push(node("#/system", here.kind === "system", h("span", { class: "name" }, "Machine, engines and ledger")));
   const others = state.runs.filter(run => !run.labels.job);
   if (others.length) nodes.push(node("#/rollouts", here.kind === "outside", h("span", { class: "name" }, "Rollouts outside a run"), h("span", { class: "tag" }, String(others.length))));
+  const scroll = tree.scrollTop;
   tree.replaceChildren(...nodes);
+  tree.scrollTop = scroll;
 }
 
 function drawBar(crumbs) {
@@ -201,9 +246,8 @@ function drawRun(name) {
   const throughput = channel?.throughput.at(-1);
   const width = Math.max(300, document.getElementById("main").clientWidth - 100);
   const head = h("div", { class: "head" }, h("h1", {}, `Run ${run.run}`),
-    h("div", { class: "pills" }, policy ? pill(h("span", {}, "trains ", h("b", {}, policy.policy)), "violet") : null,
-      channel?.adapter ? pill(h("span", {}, "serving ", h("b", {}, channel.adapter)), "accent") : null, pill(`fence ${run.fence ?? "–"}`)),
-    h("div", { class: "sub" }, system.directory));
+    specs(policy ? spec("trains", policy.policy, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
+      spec("fence", run.fence ?? "–"), spec("directory", system.directory)));
   const kpis = h("div", { class: "kpis" },
     kpi("Groups done", `${run.iterations.length}`, `${run.decided} decided`),
     kpi("Trained on", `${trained}`, `${run.iterations.length - trained} skipped or failed`),
@@ -215,9 +259,7 @@ function drawRun(name) {
     h("header", {}, h("b", {}, `#${group.number}`), h("span", { class: "what" }, `${group.task} · ${group.title ?? ""}`),
       h("span", { class: "faint small" }, group.decided ? span(system.at - group.decided) : "")),
     stages(group),
-    group.episodes.length ? h("div", { class: "pips" }, group.episodes.map(episode => h("span", { class: "pip" },
-      h("span", { class: `dot ${episode.interrupted ? "" : episode.state}` }), `${episode.episode ?? "?"}`,
-      episode.outcome ? h("b", {}, figure(episode.reward)) : h("span", { class: "faint" }, `${episode.samples ?? 0} turns`)))) : null)))
+    group.episodes.length ? cells(group.episodes) : null)))
     : h("div", { class: "empty" }, "No group is in flight.");
   const recent = [...run.iterations].reverse().slice(0, 10);
   const tasks = new Map();
@@ -251,8 +293,8 @@ function drawGroup(here) {
   const outcome = group.outcome, version = group.version;
   const rewards = outcome?.rewards ?? group.episodes.filter(each => each.outcome === "completed").map(each => each.reward);
   const head = h("div", { class: "head" }, h("h1", {}, `Group #${group.number}`),
-    h("div", { class: "pills" }, pill(group.stage, stateKind(group.stage)), outcome ? pill(outcomeOf(outcome).text.split(" · ")[0], outcome.update ? "good" : outcome.error ? "bad" : "") : null),
-    h("div", { class: "sub" }, `${group.task} · ${group.title ?? ""}`));
+    specs(spec("task", group.task), spec("row", group.title ?? ""), spec("stage", group.stage, stateKind(group.stage)),
+      outcome ? spec("outcome", outcomeOf(outcome).text.split(" · ")[0], outcome.update ? "good" : outcome.error ? "bad" : "") : null));
   const kpis = h("div", { class: "kpis" },
     kpi("Mean reward", rewards.length ? figure(mean(rewards)) : "–", rewards.length ? rewards.map(figure).join("  ") : "no rollout has ended"),
     kpi("Solved", outcome ? `${outcome.solved.filter(Boolean).length} of ${outcome.solved.length}` : `${group.episodes.filter(each => each.solved).length} of ${group.count ?? "?"}`, outcome?.failed ? `${outcome.failed} failed` : ""),
@@ -261,9 +303,9 @@ function drawGroup(here) {
     kpi("Made", version ? versionOf(version.name) : group.step ? `${versionOf(group.step.makes)}…` : "–", group.step?.parent ? `from ${versionOf(group.step.parent)}` : ""));
   const episodes = group.episodes.length ? h("div", { class: "tiles" }, group.episodes.map(episode => {
     const info = episode.info ?? {};
-    return link(rolloutPlace(episode.run_id), { class: "tile" },
+    return link(rolloutPlace(episode.run_id), { class: `tile rail ${episode.interrupted ? "" : stateKind(episode.state)}` },
       h("header", {}, h("b", {}, `Rollout ${episode.episode ?? "?"}`), h("span", { class: "what" }, ""),
-        pill(episode.interrupted ? "interrupted" : episode.state ?? "running", stateKind(episode.state), episode.interrupted ? "" : episode.state)),
+        mark(episode.interrupted ? "" : episode.state ?? "running", episode.interrupted ? "interrupted" : episode.state ?? "running")),
       h("div", { class: "big" }, episode.outcome ? figure(episode.reward) : h("span", { class: "faint" }, "…")),
       h("div", { class: "facts" }, info.turns != null ? h("span", {}, h("b", {}, info.turns), " turns") : episode.samples != null ? h("span", {}, h("b", {}, episode.samples), " samples") : null,
         info.duration != null ? h("span", {}, h("b", {}, figure(info.duration)), " game min") : null,
@@ -305,10 +347,10 @@ function drawRollout(here) {
   }
   const ordered = new Map([...slots].sort(([a], [b]) => a.localeCompare(b)));
   const head = h("div", { class: "head" }, h("h1", {}, labels.episode ? `Rollout ${labels.episode}` : episode.run_id.slice(-8)),
-    h("div", { class: "pills" }, pill(episode.state ?? "running", stateKind(episode.state), episode.state),
-      episode.ended ? pill(h("span", {}, "reward ", h("b", {}, figure(episode.ended.reward))), episode.ended.solved ? "good" : "") : null,
-      episode.source === "archive" ? pill("replayed from its kept events: replies only", "warm") : null),
-    h("div", { class: "sub" }, [labels.task, labels.title, episode.run_id].filter(Boolean).join(" · ")));
+    specs(spec("state", episode.state ?? "running", stateKind(episode.state)),
+      episode.ended ? spec("reward", figure(episode.ended.reward), episode.ended.solved ? "good" : "") : null,
+      labels.task ? spec("task", labels.title ? `${labels.task} · ${labels.title}` : labels.task) : null, spec("run", episode.run_id),
+      episode.source === "archive" ? spec("read from", "its kept events: replies only", "warm") : null));
   const scalars = Object.entries(info).filter(([, value]) => value === null || typeof value !== "object");
   const nested = Object.entries(info).filter(([, value]) => value !== null && typeof value === "object");
   const kpis = h("div", { class: "kpis" }, ["reward", "turns", "duration", "ended"].filter(key => info[key] !== undefined).map(key => kpi(key, figure(info[key]))),
@@ -326,8 +368,8 @@ function drawRollout(here) {
   const turns = Math.max(...shown.map(([, samples]) => samples.length));
   if (state.follow) state.turn = turns - 1;
   state.turn = Math.max(0, Math.min(state.turn, turns - 1));
-  const tabs = h("div", { class: "agents" }, h("button", { class: `agent-tab all${state.slot ? "" : " current"}`, onclick: () => { state.slot = null; redraw(); } }, "All trajectories"),
-    [...ordered.keys()].map(slot => h("button", { class: `agent-tab${state.slot === slot ? " current" : ""}`, onclick: () => { state.slot = slot; redraw(); } }, avatar(slot), slot)));
+  const tabs = h("div", { class: "segmented" }, h("button", { class: `seg${state.slot ? "" : " current"}`, onclick: () => { state.slot = null; redraw(); } }, "All trajectories"),
+    [...ordered.keys()].map(slot => h("button", { class: `seg${state.slot === slot ? " current" : ""}`, onclick: () => { state.slot = slot; redraw(); } }, avatar(slot), slot)));
   const move = delta => () => { state.turn = Math.max(0, Math.min(turns - 1, state.turn + delta)); state.follow = false; redraw(); };
   const scrub = h("div", { class: "scrub" }, h("button", { onclick: move(-1), "aria-label": "previous turn" }, "‹"), h("button", { onclick: move(1), "aria-label": "next turn" }, "›"),
     h("output", {}, `turn ${state.turn + 1} of ${turns}`),
@@ -410,8 +452,8 @@ function drawPolicy(name) {
   const serving = system.channels.find(channel => channel.adapter?.startsWith(`${name}@`));
   const newest = [...versions].reverse();
   return [h("div", { class: "head" }, h("h1", {}, `Policy ${policy.policy}`),
-    h("div", { class: "pills" }, serving ? pill(h("span", {}, "served on ", h("b", {}, serving.channel)), "accent") : null, pill(`fence ${policy.fence ?? "–"}`)),
-    h("div", { class: "sub" }, "Each version is the commit of one step: its weights and the trainer's state are files in the blob store.")),
+    specs(serving ? spec("served on", serving.channel, "accent") : null, spec("fence", policy.fence ?? "–"),
+      spec("a version is", "the commit of one step: its weights and the trainer's state, as files in the blob store"))),
   h("div", { class: "kpis" }, kpi("Head", versionOf(policy.head), policy.head ?? ""), kpi("Versions", `${versions.length}`),
     kpi("Kept", bytes(size), "weights and trainer state"),
     kpi("Last step moved", versions.length ? figure(versions.at(-1).metrics.kl_moved) : "–", "KL from its parent")),
@@ -458,8 +500,8 @@ function drawSystem() {
 function drawOthers() {
   const others = state.runs.filter(run => !run.labels.job);
   return [h("div", { class: "head" }, h("h1", {}, "Rollouts outside a run"), h("div", { class: "sub" }, "Rollouts in the feed that no training run asked for: evaluations, tests, programs run by hand.")),
-    others.length ? h("div", { class: "tiles" }, others.map(run => link(rolloutPlace(run.run_id), { class: "tile" },
-      h("header", {}, h("b", {}, run.labels.title ?? run.labels.task ?? run.run_id.slice(-8)), h("span", { class: "what" }, ""), pill(run.state, stateKind(run.state), run.state)),
+    others.length ? h("div", { class: "tiles" }, others.map(run => link(rolloutPlace(run.run_id), { class: `tile rail ${stateKind(run.state)}` },
+      h("header", {}, h("b", {}, run.labels.title ?? run.labels.task ?? run.run_id.slice(-8)), h("span", { class: "what" }, ""), mark(run.state)),
       h("div", { class: "big" }, Object.values(run.rewards).length ? figure(Object.values(run.rewards)[0]) : h("span", { class: "faint" }, "…")),
       h("div", { class: "facts" }, h("span", {}, h("b", {}, run.samples), " samples"), h("span", {}, h("b", {}, run.slots.length), " slots"), h("span", {}, clock(run.started))))))
       : h("div", { class: "empty" }, "None.")];
@@ -502,6 +544,8 @@ async function read(path) {
 }
 
 async function pull() {
+  if (state.pulling) return;  // (one read at a time: two would both ask for the same new lines)
+  state.pulling = true;
   try {
     const [system, runs] = await Promise.all([read("api/system"), read("api/runs")]);
     state.system = system; state.runs = runs;
@@ -518,6 +562,8 @@ async function pull() {
     if (drawn !== state.drawn) { state.drawn = drawn; state.drawnAt = system.at; redraw(); }
   } catch (error) {
     document.getElementById("live").replaceChildren(h("span", { class: "dot gone" }), "cannot reach the monitor");
+  } finally {
+    state.pulling = false;
   }
 }
 

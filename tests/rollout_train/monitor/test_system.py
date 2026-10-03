@@ -161,7 +161,17 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     outcome: JsonValue = {"iteration": 1, "task": "t003", "failures": ["x", "x"]}
     await ledger.append(table("train", ITERATIONS), "1", outcome, fence)
     (run,) = (await system.snapshot())["runs"]
-    assert run["open"] == [] and run["iterations"] == [{"iteration": 1, "task": "t003", "failures": ["x"]}]
+    (done,) = run["iterations"]
+    assert run["open"] == [] and {key: done[key] for key in ("iteration", "task", "failures")} == {
+        "iteration": 1,
+        "task": "t003",
+        "failures": ["x"],
+    }
+    assert [(each["run_id"], each["interrupted"]) for each in done["rollouts"]] == [
+        ("r_one", False),
+        ("r_cut", True),
+        ("r_two", False),
+    ]
     feed.close()
 
 

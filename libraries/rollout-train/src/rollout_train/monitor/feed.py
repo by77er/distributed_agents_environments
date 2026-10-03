@@ -7,6 +7,7 @@ reply with its reasoning. `FeedReader` turns a directory of such files into what
 
 import json
 import os
+import threading
 import time
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -198,15 +199,21 @@ def _parsed(data: bytes) -> Iterator[tuple[int, dict[str, Any]]]:
 
 class FeedReader:
     """Reads a feed directory incrementally: each call picks up what was appended since the last. Of a run it
-    keeps a summary; the run's lines are read from its file when they are asked for."""
+    keeps a summary; the run's lines are read from its file when they are asked for. Its methods may be called from
+    several threads at once."""
 
     def __init__(self, directory: Path) -> None:
         self.directory = directory
+        self._reading = threading.Lock()
         self._runs: dict[str, tuple[Appended, _Summary]] = {}
         self._job = Appended(directory / f"{JOB}.jsonl")
         self._job_lines: list[dict[str, Any]] = []
 
     def refresh(self) -> None:
+        with self._reading:
+            self._refresh()
+
+    def _refresh(self) -> None:
         here: set[str] = set()
         for path in self.directory.glob("*.jsonl"):
             if path.stem == JOB:
@@ -234,7 +241,8 @@ class FeedReader:
     def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         """A run's lines from index `after` on."""
         self.refresh()
-        return self._runs[run_id][0].after(after) if run_id in self._runs else []
+        with self._reading:
+            return self._runs[run_id][0].after(after) if run_id in self._runs else []
 
 
 class _Summary:

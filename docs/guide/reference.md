@@ -3221,7 +3221,8 @@ class FeedReader
 ```
 
 Reads a feed directory incrementally: each call picks up what was appended since the last. Of a run it
-keeps a summary; the run's lines are read from its file when they are asked for.
+keeps a summary; the run's lines are read from its file when they are asked for. Its methods may be called from
+several threads at once.
 
 **Methods**
 
