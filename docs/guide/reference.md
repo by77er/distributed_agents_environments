@@ -2765,7 +2765,7 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None) -> None
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None) -> None
 ```
 
 Train `policy` on `catalog` until `groups` more groups have been played (those a stopped loop left unplayed
@@ -2773,8 +2773,8 @@ among them) and every group played has been trained on, serving it on `channel`.
 queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
 `directory` is where versions' files are kept on this machine while they are in use: the one being served and
 the one before it (a turn in progress finishes under the weights it began with); every version's files are in
-the blob store. `algorithm` is `Grpo()` unless given. `overlap`: the next group starts when at most this many
-episodes of earlier groups are still running. `binding` says how the program's model slots and imports are
+the blob store. `algorithm` is `Grpo()` unless given. `episodes_at_once` caps the episodes running at once,
+whatever groups they are of. `binding` says how the program's model slots and imports are
 served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
 one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
 trainer state once a newer one is served (`Retention()` unless given); every version keeps its weights.
@@ -3224,6 +3224,7 @@ class Profile
 | `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
 | `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
+| `episodes_at_once` | `int` | `6` | The most episodes a run plays at once (whatever groups they are of): what the machine's engines and its memory for the programs' worlds can take. |
 | `feed_runs` | `int \| None` | `None` | Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are deleted). |
 
 **Methods**

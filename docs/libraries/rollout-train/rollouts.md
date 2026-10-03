@@ -44,10 +44,11 @@ own process or jobs served elsewhere, and cannot tell which.
 
 - **Every run is an episode**, whatever its outcome: completed, failed (the program raised, or the run could not
   start), cancelled. Counts stay exact, and a ticket is complete when its count is.
-- **Admission.** Tickets are admitted in the order they were queued. A ticket's runs start together or not at all,
-  when runs in flight plus the ticket's count fit `in_flight`, or when nothing is in flight. With `in_flight` one
-  more than a group, the next group starts when one episode of the group before is still running.
-- **Refusal.** A `guard` given to `RolloutJobs` is called before a ticket is admitted and raises to refuse it. A
+- **Admission.** Runs start in the order their tickets were queued, as many at a time as `in_flight` leaves room
+  for: the rest of a ticket's runs start as runs end, and then the next ticket's. With `in_flight` six and groups of
+  four, a group and half the next run at once.
+- **Refusal.** A `guard` given to `RolloutJobs` is called before runs are started and raises to refuse them: a
+  ticket none of whose runs has started is refused, and the rest of one that has begun wait until runs end. A
   ticket that was queued when its job closed is refused too. `ticket.episodes()` then raises
   [`Refused`](../../guide/reference.md#refused), in this process and over HTTP alike. `RolloutTicket.refused`
   holds the reason.

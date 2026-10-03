@@ -36,7 +36,12 @@ const tokens = count => count >= 1e6 ? `${(count / 1e6).toFixed(1)} M` : count >
 const versionOf = name => name ? `@${name.split("@").at(-1)}` : "base";
 const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const hue = name => [...name].reduce((sum, letter) => (sum * 31 + letter.charCodeAt(0)) % 360, 7);
-const avatar = name => h("span", { class: "avatar", style: `background:hsl(${hue(name)} 55% 46%)` }, name.slice(0, 1));
+// An agent's badge: its slot's number (`agent-2` → 2) in a color of its own, or, for a slot with no number, its initial.
+const avatar = name => {
+  const number = name.match(/(\d+)$/)?.[1];
+  const color = number ? (Number(number) * 97 + 160) % 360 : hue(name);
+  return h("span", { class: "avatar", style: `background:hsl(${color} 55% 46%)` }, number ?? name.slice(0, 1));
+};
 
 // Places
 const go = place => { location.hash = place; };

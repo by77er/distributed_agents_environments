@@ -71,9 +71,10 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     assert [line["group"] for line in run["done"]] == [1, 2, 3]
     trained = [line for line in run["done"] if line["update"]]
     assert trained  # (the policy says yes and no in turn: some group has something to compare)
-    # Each group is listed with one step: the one it went into, or, if it gave nothing to train on, the next decided.
-    members = sorted(number for step in run["steps"] for number in [*step["groups"], *step["skipped"]])
-    assert members == [1, 2, 3] and run["next"] == []
+    # Each group is listed once: with the step it went into, or, if it gave nothing to train on, with the step decided
+    # after it (or toward the next one, when none was).
+    members = [number for step in run["steps"] for number in [*step["groups"], *step["skipped"]]]
+    assert sorted([*members, *run["next"]]) == [1, 2, 3]
     assert all(step["groups"] == [line["group"]] for step, line in zip(run["steps"], trained, strict=True))
 
     (policy,) = system["policies"]

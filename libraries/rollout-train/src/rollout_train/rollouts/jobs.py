@@ -321,27 +321,29 @@ class RolloutJob:
         task.add_done_callback(self._tasks.discard)
 
     async def _admit(self) -> None:
-        """Start the tickets at the head of the queue that there is room for (all the runs a ticket is owed, or
-        none)."""
-        while self._queue and not self._closed:
+        """Start runs of the tickets at the head of the queue while there is room: as many of the first ticket's as
+        fit, then the next ticket's."""
+        while self._queue and not self._closed and self._running < self._room:
             ticket = self._queue[0]
-            owed = ticket.owed
-            if self._running and self._running + owed > self._room:
-                return
-            self._queue.pop(0)
             if self._guard is not None:
                 try:
                     self._guard()
-                except Exception as error:  # refused (no memory, say): the ticket's caller is told
+                except Exception as error:  # refused (no memory, say)
+                    if ticket._started or ticket.ended:  # pyright: ignore[reportPrivateUsage]
+                        return  # (it has begun: the rest are started when there is memory again, as runs end)
+                    self._queue.pop(0)  # the ticket's caller is told
                     ticket.refused = f"{type(error).__name__}: {error}"
                     ticket._done.set()  # pyright: ignore[reportPrivateUsage]
                     continue
-            self._running += owed
-            first = len(ticket.ended) + 1
-            ticket._started += owed  # pyright: ignore[reportPrivateUsage]
+            starting = min(ticket.owed, self._room - self._running)
+            if starting == ticket.owed:
+                self._queue.pop(0)
+            first = len(ticket.ended) + ticket._started + 1  # pyright: ignore[reportPrivateUsage]
+            self._running += starting
+            ticket._started += starting  # pyright: ignore[reportPrivateUsage]
             labels = {**ticket.labels, "job": self.id, "ticket": ticket.id}
             started: list[str] = []
-            for number in range(first, first + owed):
+            for number in range(first, first + starting):
                 try:
                     handle = await self._runner.start(
                         self._specification_for(ticket), labels={**labels, "episode": str(number)}
@@ -383,8 +385,6 @@ class RolloutJob:
         interrupted: bool = False,
     ) -> None:
         """A run is over, however it ended: its episode goes into the log, and whoever waits is told."""
-        self._running -= 1
-        ticket._started -= 1  # pyright: ignore[reportPrivateUsage]
         async with self._logging:  # the log is in the order of its cursors, whichever episode is stored first
             cursor = self._last + 1
             if events and not interrupted:
@@ -402,6 +402,9 @@ class RolloutJob:
                 with (self._log / EPISODES).open("a") as file:
                     file.write(json.dumps(record.to_json()) + "\n")
             self._last = cursor
+        # (no longer running, and ended, at once: a ticket that seemed owed one more meanwhile would get it)
+        self._running -= 1
+        ticket._started -= 1  # pyright: ignore[reportPrivateUsage]
         if not interrupted:
             ticket.ended.append(record)
             if len(ticket.ended) == ticket.count:

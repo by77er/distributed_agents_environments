@@ -3,12 +3,12 @@
 It is written against `Jobs`, `Trainer`, `Algorithm` and `Policies` only: the same loop runs with everything in one
 process and with the runs, the engines and the trainer on machines of their own.
 
-**Play and training go their own ways.** `OUTSTANDING` groups are kept asked for; the job starts the next as soon
-as there is room beside what is left of the one before. When a group's last episode ends its result is written down
-at once, and what the algorithm finds to train on in it joins a queue. A step is taken over every group queued once
-there are at least `groups_per_step` (so that no step leans toward one task), while play goes on; at the end of the
-run, over whatever is left. Tokens sampled under an older version than the one a step starts from are corrected
-for by the trainer's objective. One step is taken at a time, each from the version the one before made.
+**Play and training go their own ways.** At most `episodes_at_once` episodes run at once, of whichever groups are asked
+for; enough groups are kept asked for that an episode is waiting whenever one ends. When a group's last episode ends its
+result is written down at once, and what the algorithm finds to train on in it joins a queue. A step is taken over every
+group queued once there are at least `groups_per_step` (so that no step leans toward one task), while play goes on; at
+the end of the run, over whatever is left. Tokens sampled under an older version than the one a step starts from are
+corrected for by the trainer's objective. One step is taken at a time, each from the version the one before made.
 
 **It can die at any moment and be started again.** It keeps nothing it cannot read back: what it decides and what
 happens are appended to the run's tables in the ledger (`rollout_train.record`), and every action is one that can be
@@ -51,8 +51,6 @@ from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, scope
 from rollout_train.rollouts import Episode, Jobs
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Trainer, Weighted
 
-OUTSTANDING = 2
-"""Groups kept asked for: one playing, and one that starts as the first one's last episodes end."""
 FAILED_UPDATES = 3
 """Steps that may fail in a row (each is written down, and the weights stay as they were) before the loop stops."""
 
@@ -70,7 +68,7 @@ async def train(
     algorithm: Algorithm | None = None,
     groups: int = 100,
     groups_per_step: int = 4,
-    overlap: int = 1,
+    episodes_at_once: int = 6,
     seed: int = 0,
     binding: RunBinding | None = None,
     curriculum: Curriculum | None = None,
@@ -81,8 +79,8 @@ async def train(
     queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
     `directory` is where versions' files are kept on this machine while they are in use: the one being served and
     the one before it (a turn in progress finishes under the weights it began with); every version's files are in
-    the blob store. `algorithm` is `Grpo()` unless given. `overlap`: the next group starts when at most this many
-    episodes of earlier groups are still running. `binding` says how the program's model slots and imports are
+    the blob store. `algorithm` is `Grpo()` unless given. `episodes_at_once` caps the episodes running at once,
+    whatever groups they are of. `binding` says how the program's model slots and imports are
     served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
     one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
     trainer state once a newer one is served (`Retention()` unless given); every version keeps its weights."""
@@ -103,9 +101,12 @@ async def train(
     job = await jobs.start(
         program=catalog.program,
         binding=binding or binding_for(catalog, channel),
-        in_flight=algorithm.group_size + overlap,
+        in_flight=episodes_at_once,
         name=run,
     )
+    asking = -(-(episodes_at_once + algorithm.group_size - 1) // algorithm.group_size)
+    """Groups kept asked for: when one of the episodes running ends, another is waiting (a group is decided only once
+    the last of one before it has ended)."""
 
     async def files(version: Version) -> Checkpoint:
         """A version's files on this machine, read from the blob store if they are not here."""
@@ -303,7 +304,7 @@ async def train(
             await take(key, _groups(steps[key]))
         owed = groups - len(outstanding)
         while outstanding or owed > 0 or queue or stepping is not None:
-            while len(outstanding) < OUTSTANDING and owed > 0:
+            while len(outstanding) < asking and owed > 0:
                 await decide()
                 owed -= 1
             last = not outstanding and owed <= 0

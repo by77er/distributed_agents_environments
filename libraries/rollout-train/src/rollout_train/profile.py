@@ -106,6 +106,9 @@ class Profile:
     """System memory that must be available to admit runs."""
     training_gib: float = 0.0
     """And to start a step of a colocated trainer."""
+    episodes_at_once: int = 6
+    """The most episodes a run plays at once (whatever groups they are of): what the machine's engines and its memory
+    for the programs' worlds can take."""
     feed_runs: int | None = None
     """Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are
     deleted)."""
@@ -124,7 +127,7 @@ class Profile:
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
-        known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs")
+        known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs", "episodes_at_once")
         top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
         if "ledger" in top:

@@ -11,6 +11,7 @@ runner = "local"                              # or "durable": runs survive this 
 serve = "0.0.0.0:8900"                        # optional: rollout jobs and the model endpoint for harnesses, over HTTP
 address = "http://trainer-1:8900"             # what others reach it at, if not http://{serve}
 feed_runs = 80                                # optional: episodes kept in the monitor's feed
+episodes_at_once = 6                          # optional: the most episodes a run plays at once
 
 [channels.policy]
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
@@ -63,6 +64,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before runs are admitted (`runs_gib`) and before a colocated step starts (`training_gib`); short of it the run stops with `NotEnoughMemory` rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
+| `episodes_at_once` | The most episodes a run plays at once, whatever groups they are of (6 unless it says otherwise): what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
 
 ## What a profile names
 

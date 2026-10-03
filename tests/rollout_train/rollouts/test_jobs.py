@@ -87,20 +87,21 @@ async def _until_closed(job: RolloutJob, rollouts: RolloutJobs, cursor: int = 0)
         yield episode
 
 
-async def test_a_ticket_starts_when_there_is_room_for_all_of_it() -> None:
+async def test_runs_start_as_there_is_room_whatever_ticket_they_are_of() -> None:
     rollouts, _, seen = jobs("yes")
-    job = await start(rollouts, Gated, in_flight=5)
+    job = await start(rollouts, Gated, in_flight=6)
     one = await job.run({"word": "yes", "gate": "a"}, labels={"group": "1"}, count=4)
     two = await job.run({"word": "yes", "gate": "b"}, labels={"group": "2"}, count=4)
     await asyncio.sleep(0.05)
-    assert [(s.queued, s.running) for s in [await job.status()]] == [(4, 4)]  # the second group waits, whole
+    assert [(s.queued, s.running) for s in [await job.status()]] == [(2, 6)]  # the first group, and half the second
     GATES.setdefault("a", asyncio.Event()).set()
-    assert len(await one.episodes()) == 4  # and starts once the first has ended (three done would do: 1 + 4 <= 5)
+    assert len(await one.episodes()) == 4  # as the first group's runs end, the rest of the second start
     await asyncio.sleep(0.05)
-    assert (await job.status()).running == 4
+    assert [(s.queued, s.running) for s in [await job.status()]] == [(0, 4)]
     GATES.setdefault("b", asyncio.Event()).set()
-    assert len(await two.episodes()) == 4
-    assert [event["kind"] for event in seen.events].count("admitted") == 2
+    episodes = await two.episodes()
+    assert sorted(episode.labels["episode"] for episode in episodes) == ["1", "2", "3", "4"]  # numbered in its ticket
+    assert [event["kind"] for event in seen.events].count("episode") == 8
     await rollouts.close()
 
 

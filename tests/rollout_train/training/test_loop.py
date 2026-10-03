@@ -1,10 +1,11 @@
 """The training loop under two wirings: everything in this process, and a durable runner with the rollout jobs
 behind HTTP. The loop's code is the same; so is what it does."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -175,6 +176,46 @@ async def test_a_step_waits_for_its_groups_and_takes_them_together(tmp_path: Pat
     assert all(len(groups) >= 2 for groups in covers[:-1]) and covers[-1]
     assert [len(batch) for batch in trainer.batches] == [4 * len(groups) for groups in covers]
     assert len(await policies.versions("words")) == len(covers)
+
+
+class Running(JobHooks):
+    """Counts the episodes running, and the groups they are of, as the job tells of them."""
+
+    def __init__(self) -> None:
+        self.running: dict[str, str] = {}
+        """Each episode running: its ticket."""
+        self.most = 0
+        self.groups_at_once = 0
+
+    def on_job(self, event: Mapping[str, JsonValue]) -> None:
+        if event["kind"] == "admitted":
+            self.running.update(dict.fromkeys(cast(list[str], event["runs"]), str(event["ticket"])))
+        elif event["kind"] == "episode":
+            self.running.pop(str(event["run"]), None)
+        self.most = max(self.most, len(self.running))
+        self.groups_at_once = max(self.groups_at_once, len(set(self.running.values())))
+
+
+async def test_episodes_of_any_groups_run_at_once_up_to_a_cap(tmp_path: Path) -> None:
+    channel = plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])
+    engine = cast(ScriptedEngine, channel.engines[0])
+    answer = engine.generate
+
+    async def slowly(*arguments: Any, **options: Any) -> Any:  # (long enough that the next group starts meanwhile)
+        await asyncio.sleep(0.05)
+        return await answer(*arguments, **options)
+
+    engine.generate = slowly
+    recorder = Recorder({"policy": channel})
+    running = Running()
+    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder, hooks=[running])
+    await train(
+        rollouts, Words(), Counting(), policies_in(tmp_path), policy="words", channel="policy",
+        directory=tmp_path / "v", groups=5, groups_per_step=2, episodes_at_once=6, seed=1,
+    )  # fmt: skip
+    await rollouts.close()
+    # Four episodes a group: six at once are a group and half the next.
+    assert running.most == 6 and running.groups_at_once >= 2
 
 
 async def test_a_trainer_that_shares_the_engines_gpu_puts_them_to_sleep_around_each_step(tmp_path: Path) -> None:

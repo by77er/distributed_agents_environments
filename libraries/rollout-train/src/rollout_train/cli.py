@@ -63,7 +63,7 @@ async def _train(
         await train(
             platform.jobs, rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
             directory=described.directory / "versions", groups=groups, groups_per_step=groups_per_step, seed=seed,
-            binding=binding,
+            episodes_at_once=described.episodes_at_once, binding=binding,
         )  # fmt: skip
 
 

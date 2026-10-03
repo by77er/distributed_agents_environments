@@ -23,8 +23,10 @@ channel. Unless a `binding` says otherwise, every model slot of the catalog's pr
 
 - **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled `group`,
   `iteration`, `task` and `title`. The curriculum picks the row and the catalog draws the start.
-- **Play and training go their own ways.** `OUTSTANDING` groups are kept asked for. The job starts the next group
-  as soon as there is room beside what is left of the one before (`overlap`).
+- **Play and training go their own ways.** At most `episodes_at_once` episodes run at once, whatever groups they
+  are of (a profile says how many: `episodes_at_once`, 6 unless it says otherwise). Enough groups are kept asked for
+  that an episode is waiting whenever one ends, so a group may begin before the one before it is done, and end
+  first.
 - **When a group's last episode ends**, its result is written at once: the curriculum records it, and the algorithm
   says what in it to train on. A group with nothing to train on is done with, with the algorithm's reason
   (`skipped`); the others join a queue.
