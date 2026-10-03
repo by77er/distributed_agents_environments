@@ -121,6 +121,8 @@ class Blobs(Protocol)
 
 - `async def put(self, data: bytes, media_type: str) -> BlobReference` — Store bytes, or find them already stored; either way return their reference.
 - `async def read(self, reference: BlobReference) -> bytes`
+- `async def delete(self, reference: BlobReference) -> None` — Remove a blob if it is there. Whoever stored the same bytes holds the same blob: delete only what nothing
+  else names.
 
 ### `CompactingAgent`
 
@@ -437,6 +439,7 @@ Implements `Blobs` in a directory: one file per blob, named by its SHA-256.
 - `def __init__(self, directory: Path) -> None`
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
+- `async def delete(self, reference: BlobReference) -> None`
 
 ### `History`
 
@@ -2732,6 +2735,9 @@ The versions of every policy, in a ledger, and their files in a blob store.
 - `async def add(self, fence: Fence, policy: str, number: int, *, weights: Path, state: Path | None = None, parent: str | None = None, batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Version` — Keep a checkpoint's files and append the version that names them. The append is what makes the version
   exist: a writer that dies before it has made nothing, and one that repeats it (the same number) gets the
   version that is there.
+- `async def thin(self, fence: Fence, policy: str, retention: 'Retention') -> list[str]` — Let go of the trainer state of the versions `retention` does not keep, and return their names. Weights are
+  kept for every version. A release is appended to the ledger before its blobs are deleted, and a blob is
+  deleted only if no version still names it, so this may be repeated after a crash at any point.
 - `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
   appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
@@ -2762,7 +2768,7 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None) -> None
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, overlap: int = 1, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None) -> None
 ```
 
 Train `policy` on `catalog` until `groups` more groups are done with (those a stopped loop left unfinished
@@ -2772,6 +2778,8 @@ with); every version's files are in the blob store. `algorithm` is `Grpo()` unle
 group starts when at most this many episodes of earlier groups are still running. `binding` says how the
 program's model slots and imports are served (by default: every slot from `channel`, each import from the tool
 set of its own name). `curriculum` is one that has recorded nothing: the run's iterations are folded into it.
+`retention` says which versions keep their trainer state once a newer one is served (`Retention()` unless
+given); every version keeps its weights.
 
 ### `Trainer`
 
@@ -2812,6 +2820,7 @@ class Version
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its place in a job's log and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
+| `released` | `float \| None` | `None` | When its trainer state was let go (`Policies.thin`), if it was: `state` is then None. |
 
 **Methods**
 
@@ -3882,3 +3891,4 @@ Implements `Blobs` in an S3 bucket.
 - `@classmethod def from_url(cls, url: str, **options: Any) -> 'S3BlobStore'` — A store for `s3://bucket/prefix`.
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
+- `async def delete(self, reference: BlobReference) -> None`

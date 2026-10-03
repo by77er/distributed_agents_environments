@@ -62,3 +62,33 @@ async def test_names_say_the_policy_and_the_number(tmp_path: Path) -> None:
     single = tmp_path / "weights.bin"
     single.write_text("w")
     assert list((await kept(single, FileBlobStore(tmp_path / "blobs"))).files) == ["weights.bin"]
+
+
+async def test_saves_thin_out_with_age_and_weights_stay(tmp_path: Path) -> None:
+    from rollout_train.policies import Retention
+
+    blobs = FileBlobStore(tmp_path / "blobs")
+    policies = Policies(FileLedger(tmp_path / "ledger"), blobs)
+    writer = await policies.writer("miner")
+    for number in range(1, 13):
+        here = tmp_path / f"v{number}"
+        (here / "weights").mkdir(parents=True)
+        (here / "weights" / "adapter.bin").write_text(f"weights {number}")
+        (here / "weights" / "config.json").write_text("{}")  # the same bytes in every version: one blob
+        (here / "state").mkdir()
+        (here / "state" / "optimizer.bin").write_text(f"moments {number}")
+        await policies.add(writer, "miner", number, weights=here / "weights", state=here / "state")
+
+    released = await policies.thin(writer, "miner", Retention(recent=3, every=5))
+    assert released == [f"miner@{number}" for number in (1, 2, 3, 4, 6, 7, 8, 9)]
+    versions = await policies.versions("miner")
+    assert [version.number for version in versions if version.state is not None] == [5, 10, 11, 12]
+    gone = next(version for version in versions if version.number == 1)
+    assert gone.state is None and gone.released is not None and (await policies.version("miner@1")).state is None
+    stored = {path.name for path in (tmp_path / "blobs").rglob("*") if path.is_file()}
+    for version in versions:  # every version's weights are kept, and only the kept versions' state
+        assert {blob.sha256 for blob in version.weights.files.values()} <= stored
+        if version.state is not None:
+            assert {blob.sha256 for blob in version.state.files.values()} <= stored
+    assert len(stored) == 12 + 1 + 4
+    assert await policies.thin(writer, "miner", Retention(recent=3, every=5)) == []  # (and again changes nothing)

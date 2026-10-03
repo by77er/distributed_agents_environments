@@ -60,6 +60,8 @@ and every action is one that can be taken twice.
   and only one group may make it.
 - **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
   policy's table. A step that died before the append made nothing.
+- **Saves thin out.** Once a version is served, the policy is thinned to `retention` (by default the trainer state
+  of the newest three versions and of every tenth; [policies](policies.md#versions)).
 - **One loop at a time.** Starting takes the run's fence and the policy's. A loop that was replaced, and does not
   know it yet, has its next write refused.
 - **`groups` counts groups done with**, those a stopped loop left unfinished among them.

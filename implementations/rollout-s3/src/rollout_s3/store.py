@@ -59,6 +59,9 @@ class S3BlobStore:
     async def read(self, reference: BlobReference) -> bytes:
         return verified(await asyncio.to_thread(self._get, self._key(reference.sha256)), reference)
 
+    async def delete(self, reference: BlobReference) -> None:
+        await asyncio.to_thread(self.client.delete_object, Bucket=self.bucket, Key=self._key(reference.sha256))
+
     def _key(self, digest: str) -> str:
         return f"{self.prefix}{digest[:2]}/{digest}"
 

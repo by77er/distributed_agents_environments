@@ -30,6 +30,11 @@ files = await policies.files(head.weights, cache / head.name)       # on any mac
 - **Several policies can be served at once**, each on its own channel: a student that follows its newest version,
   and teachers that stay at the versions they were given.
 - **One writer.** `writer(policy)` takes the policy's fence. Whoever held it before can add no more versions.
+- **Saves thin out with age.** `thin(fence, policy, Retention(recent=3, every=10))` lets go of the trainer state of
+  every version but the newest `recent` and every `every`-th by number; weights are kept for every version, so any
+  version can still be served, compared or forked, and the kept ones can be trained on from where they were. A
+  release is appended to the table `policies/NAME/released` before its blobs are deleted, and a blob is deleted only
+  if no version still names it. A released version reads with no `state` and the time it was `released`.
 
 ## Manifests
 

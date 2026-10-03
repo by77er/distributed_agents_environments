@@ -506,11 +506,11 @@ function drawPolicy(name) {
     kpi("Last step moved", versions.length ? figure(versions.at(-1).metrics.kl_moved) : "–", "KL from its parent")),
   card("How far each step moved the policy", "KL between a version and its parent", barChart(versions.map(version => version.metrics.kl_moved ?? 0),
     versions.map(version => versionOf(version.name)), width, 150, index => { const made = madeBy.get(versions[index].name); if (made) go(groupPlace(...made)); })),
-  card("Versions", "newest first", table([["version"], ["from"], ["made"], ["by"], ["segments", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["size", "n"]],
+  card("Versions", "newest first", table([["version"], ["from"], ["made"], ["by"], ["segments", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["state"], ["size", "n"]],
     newest.map(version => [{ text: versionOf(version.name), kind: "key" }, versionOf(version.parent), clock(version.made),
       madeBy.has(version.name) ? `group #${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.segments), figure(version.metrics.optimizer_steps),
       version.metrics.kl_moved?.toFixed(4), version.metrics.loss?.toFixed(3), span(version.metrics.update_seconds ?? version.metrics.seconds),
-      bytes(version.weights.bytes + (version.state?.bytes ?? 0))]),
+      version.state ? "kept" : version.released ? { text: "released", kind: "still" } : "–", bytes(version.weights.bytes + (version.state?.bytes ?? 0))]),
     newest.map(version => madeBy.has(version.name) ? () => go(groupPlace(...madeBy.get(version.name))) : null)))];
 }
 

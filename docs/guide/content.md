@@ -96,7 +96,7 @@ asyncio.run(store_an_image())
 | `FileBlobStore(directory)` | one file per blob, named by its SHA-256 |
 | `rollout_s3.S3BlobStore` | one object per blob, in S3 or an S3-compatible store |
 
-Both implement `Blobs` (`put`, `read`). A runner takes one as `blobs=`. Blobs are read by hash, so stores are
+Both implement `Blobs` (`put`, `read`, `delete`). A runner takes one as `blobs=`. Blobs are read by hash, so stores are
 interchangeable.
 
 ## Immutability and JSON

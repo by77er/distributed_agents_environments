@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,8 @@ class Version:
     metrics: Mapping[str, float] = field(default_factory=dict[str, float])
     made: float = 0.0
     """When, in seconds since the epoch."""
+    released: float | None = None
+    """When its trainer state was let go (`Policies.thin`), if it was: `state` is then None."""
 
     @property
     def name(self) -> str:
@@ -100,7 +102,7 @@ class Policies:
         record = (await self.ledger.read(_table(policy))).get(str(number))
         if record is None:
             raise KeyError(f"there is no version {name}")
-        return _VERSION.validate_python(record)
+        return _as_released(_VERSION.validate_python(record), await self.ledger.read(_released(policy)))
 
     async def add(
         self,
@@ -132,6 +134,31 @@ class Policies:
             return await self.version(named(policy, number))
         return version
 
+    async def thin(self, fence: Fence, policy: str, retention: "Retention") -> list[str]:
+        """Let go of the trainer state of the versions `retention` does not keep, and return their names. Weights are
+        kept for every version. A release is appended to the ledger before its blobs are deleted, and a blob is
+        deleted only if no version still names it, so this may be repeated after a crash at any point."""
+        versions = await self.versions(policy)
+        kept = retention.kept([version.number for version in versions if version.state is not None])
+        released: list[str] = []
+        for version in versions:
+            if version.state is not None and version.number not in kept:
+                record: JsonValue = {"at": round(time.time(), 1)}
+                await self.ledger.append(_released(policy), str(version.number), record, fence)
+                released.append(version.name)
+        records = await self.ledger.read(_table(policy))
+        remaining = await self.versions(policy)
+        named = {blob.sha256 for version in remaining for manifest in (version.weights, version.state) if manifest
+                 for blob in manifest.files.values()}  # fmt: skip
+        for number in await self.ledger.read(_released(policy)):
+            record = records.get(number)
+            state = _VERSION.validate_python(record).state if record is not None else None
+            files: Mapping[str, BlobReference] = state.files if state else {}
+            for reference in files.values():
+                if reference.sha256 not in named:
+                    await self.blobs.delete(reference)
+        return released
+
     async def files(self, manifest: Manifest, directory: Path) -> Path:
         """A manifest's files under `directory`, read from the blob store if they are not there. The directory
         appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint."""
@@ -155,6 +182,19 @@ def _written(contents: Mapping[str, bytes], directory: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
+@dataclass(frozen=True)
+class Retention:
+    """Which versions keep their trainer state (what a step can go on from): the newest `recent`, and every
+    `every`-th by number, so that saves thin out with age. Weights are kept for every version."""
+
+    recent: int = 3
+    every: int = 10
+
+    def kept(self, numbers: list[int]) -> set[int]:
+        newest = sorted(numbers)[-self.recent :] if self.recent > 0 else []
+        return {*newest, *(number for number in numbers if self.every > 0 and number % self.every == 0)}
+
+
 def scope(policy: str) -> str:
     """The scope whose fence a policy's writer holds."""
     return _POLICIES + policy
@@ -164,13 +204,24 @@ def _table(policy: str) -> str:
     return scope(policy) + _VERSIONS
 
 
+def _released(policy: str) -> str:
+    return scope(policy) + "/released"
+
+
 _POLICIES, _VERSIONS = "policies/", "/versions"
 
 
 async def versions_in(ledger: Ledger, policy: str) -> list[Version]:
     """A policy's versions as a ledger has them, oldest first (for a reader that has no use for their files)."""
     records = await ledger.read(_table(policy))
-    return [_VERSION.validate_python(record) for record in records.values()]
+    released = await ledger.read(_released(policy))
+    return [_as_released(_VERSION.validate_python(record), released) for record in records.values()]
+
+
+def _as_released(version: Version, released: Mapping[str, JsonValue]) -> Version:
+    """A version as it is once its trainer state was let go, if it was."""
+    record: Any = released.get(str(version.number))
+    return replace(version, state=None, released=float(record["at"])) if record is not None else version
 
 
 async def policies_in(ledger: Ledger) -> list[str]:

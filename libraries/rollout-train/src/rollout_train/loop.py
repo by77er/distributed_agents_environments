@@ -39,7 +39,7 @@ from rollout.contracts import BlobReference
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Batch, Grpo
 from rollout_train.curriculum import Curriculum
-from rollout_train.policies import Policies, Version, named
+from rollout_train.policies import Policies, Retention, Version, named
 from rollout_train.record import GROUPS, ITERATIONS, STEPS, Iteration, scope, table
 from rollout_train.rollouts import Episode, Jobs
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Trainer
@@ -66,6 +66,7 @@ async def train(
     seed: int = 0,
     binding: RunBinding | None = None,
     curriculum: Curriculum | None = None,
+    retention: Retention | None = None,
 ) -> None:
     """Train `policy` on `catalog` until `groups` more groups are done with (those a stopped loop left unfinished
     among them), serving it on `channel`. `directory` is where versions' files are kept on this machine while they
@@ -73,8 +74,11 @@ async def train(
     with); every version's files are in the blob store. `algorithm` is `Grpo()` unless given. `overlap`: the next
     group starts when at most this many episodes of earlier groups are still running. `binding` says how the
     program's model slots and imports are served (by default: every slot from `channel`, each import from the tool
-    set of its own name). `curriculum` is one that has recorded nothing: the run's iterations are folded into it."""
+    set of its own name). `curriculum` is one that has recorded nothing: the run's iterations are folded into it.
+    `retention` says which versions keep their trainer state once a newer one is served (`Retention()` unless
+    given); every version keeps its weights."""
     algorithm = algorithm if algorithm is not None else Grpo()
+    retention = retention if retention is not None else Retention()
     ledger, blobs = policies.ledger, policies.blobs
     fence = await ledger.take(scope(run))  # whoever ran this before can no longer write
     writer = await policies.writer(policy)
@@ -217,6 +221,7 @@ async def train(
             else:
                 failed_updates = 0
                 await serve(version)
+                await policies.thin(writer, policy, retention)
                 line.adapter, line.version = version.name, version.number
                 line.update = {key: round(value, 5) for key, value in version.metrics.items()}
         line.time = round(time.time(), 1)

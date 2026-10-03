@@ -22,6 +22,11 @@ class Blobs(Protocol):
 
     async def read(self, reference: BlobReference) -> bytes: ...
 
+    async def delete(self, reference: BlobReference) -> None:
+        """Remove a blob if it is there. Whoever stored the same bytes holds the same blob: delete only what nothing
+        else names."""
+        ...
+
 
 def blob_digest(data: bytes) -> str:
     """The SHA-256 that names a blob, in lowercase hexadecimal."""
@@ -49,6 +54,9 @@ class FileBlobStore:
 
     async def read(self, reference: BlobReference) -> bytes:
         return verified(await asyncio.to_thread(self._path(reference.sha256).read_bytes), reference)
+
+    async def delete(self, reference: BlobReference) -> None:
+        await asyncio.to_thread(self._path(reference.sha256).unlink, missing_ok=True)
 
     def _path(self, digest: str) -> Path:
         return self.directory / digest[:2] / digest
