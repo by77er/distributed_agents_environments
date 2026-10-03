@@ -139,3 +139,27 @@ def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agent
         "How to get there. Each of you starts with 3 iron_ingot, 2 stick and 1 crafting_table, besides food and "
         "torches."
     )
+
+
+def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
+    from minecraft_swarm.catalog import catalog as swarm
+    from minecraft_swarm.prompts import guidance, way
+
+    task = next(task for task in catalog() if task.kit.value == "ingots" and task.coordination.value == "one_kit")
+    alone = system_prompt(task, 1)
+    assert alone.startswith("You are ada, playing Minecraft on your own.")
+    for team_word in ("together", "teammate", "chat", "Each of you", "One of you", "players"):
+        assert team_word not in alone, team_word
+    assert way(task, 1).startswith("How to get there. You start with 3 iron_ingot")  # one player holds the whole kit
+    assert "teamwork" not in guidance(task, 1) and set(guidance(task, 3)) == {"way", "teamwork"}
+    three = system_prompt(task, 3)
+    assert three.startswith("You are one of three players in Minecraft: ada, ben, cy.")
+    assert "until all three actions have finished" in three and guidance(task, 3)["teamwork"] in three
+    # A start says how many play: one to four, and at least two where the kit is dealt in parts.
+    import random
+
+    rng = random.Random(0)
+    for row in swarm.rows():
+        players = {swarm.start(row, rng)["players"] for _ in range(40)}  # type: ignore[index]
+        split = next(each for each in catalog() if each.id == row.key).coordination.value == "split"
+        assert players == ({2, 3, 4} if split else {1, 2, 3, 4}), (row.key, players)

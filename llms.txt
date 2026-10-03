@@ -57,7 +57,7 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 ## Products and environments
 
 - [Project assistant](docs/products/project-assistant.md), [agent sessions](docs/products/agent-sessions.md)
-- [Minecraft swarm](docs/products/minecraft-swarm.md): four agents in a Minecraft world, trained on a curriculum
+- [Minecraft swarm](docs/products/minecraft-swarm.md): one to four agents in a Minecraft world, trained on a curriculum
 
 ## Everything else
 

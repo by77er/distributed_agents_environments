@@ -99,32 +99,46 @@ DIAMONDS_LAID_OUT = {
     Start.CHESTS: "The diamonds here are in chests: take them out (take, at a chest within reach).",
 }
 
-SYSTEM = """You are one of {count} players in Minecraft: {team}. You play together. Each observation says which one \
-you are.
+SYSTEM = """{opening}
 
 {goal}{way}
 
-How the game runs: the world is frozen while you think. Each turn every player chooses exactly one action by calling \
-one tool (only your first call counts); then the world runs until all {count} actions have finished, and freezes \
-again. An action that takes more than {window} seconds (a long walk, digging far through rock, a long fight) is cut \
-off there: the result says where you got to.
+How the game runs: the world is frozen while you think. {turns} An action that takes more than {window} seconds (a \
+long walk, digging far through rock, a long fight) is cut off there: the result says where you got to.
 
 What you know: only what you have seen with your own eyes. Each turn shows a map of what you have seen close around \
 you, names the blocks that touch you, and lists notable things in sight farther off. Coordinates are absolute, \
 (x, y, z): +x is east, +y is up, +z is south. Walking picks up items it passes over. If you die you start again \
 where the game began, {death}. Your memory is limited: you see your recent turns without their maps, and anything \
-older only as \
-a summary that you write yourself when asked. Chat reaches teammates at their next turn; every observation shows \
-the team's last {chat_lines} messages and how old each is. Use chat to split up the work and to share what you find.
+older only as a summary that you write yourself when asked.{chat}{teamwork}
 
 When an action fails, or you are getting no closer to the goal, stop and think: what does the goal need that you do \
 not have yet? Plan how to get those things, one step at a time, and act on the first. Do not try what already failed \
 again unless something has changed. Otherwise, think briefly, then act."""
 
+TEAM_OPENING = (
+    "You are one of {count} players in Minecraft: {team}. You play together. Each observation says which one \
+you are."
+)
+ALONE_OPENING = "You are {name}, playing Minecraft on your own."
+TEAM_TURNS = "Each turn every player chooses exactly one action by calling one tool (only your first call counts); \
+then the world runs until all {count} actions have finished, and freezes again."
+ALONE_TURNS = "Each turn you choose exactly one action by calling one tool (only your first call counts); then the \
+world runs until it has finished, and freezes again."
+CHAT = " Chat reaches teammates at their next turn; every observation shows the team's last {chat_lines} messages and \
+how old each is."
+TEAMWORK = (
+    "Work as a team: together you get further than apart. Talk in chat: early on, say what you carry and what you "
+    "will do; split the work so that no two of you do the same thing; hand teammates what they need (toss); say what "
+    "you find, and where; and answer when you are asked."
+)
+"""What a team is told about playing as one: guidance (`guidance`), as the way to the goal is."""
+
 COMPACT = """The turns above are about to leave your memory. Write what you need to remember from them, and from \
 your earlier summary if there is one, to keep playing well: what you have learned about the world (places and things, \
 with their coordinates), what you and your teammates have done and agreed, and what you intend to do next. Be \
 specific and brief, and leave out what no longer matters. Reply with the summary only."""
+COMPACT_ALONE = COMPACT.replace("what you and your teammates have done and agreed", "what you have done")
 """What an agent is asked when its oldest turns are compacted into a summary."""
 
 REMEMBERED = "What you remember from earlier in this game (your own summary):\n{summary}"
@@ -136,36 +150,60 @@ ONE_CALL = "Not done: only your first call of a turn counts."
 """What every call of a turn after the first is answered with."""
 
 
-def system_prompt(task: Task) -> str:
-    """The same for every agent of the team: nothing in it says which of them reads it (each observation does).
+def system_prompt(task: Task, players: int = len(TEAM)) -> str:
+    """The same for every agent of the team: nothing in it says which of them reads it (each observation does). A
+    team of `players` (the first of `TEAM`); a player on their own is told so, and nothing of chat or teammates.
 
     It says nothing of how long the game lasts, and neither do observations: how long an episode lasts is no rule of
     the game, and an agent told the clock plays the clock. Doing more before the episode is cut off is rewarded all
     the same."""
     death = "with what you carried" if task.keeps_inventory else "and what you carried lies where you died"
+    team, told = TEAM[:players], guidance(task, players)
     return SYSTEM.format(
-        count=spelled(len(TEAM)),
-        team=", ".join(TEAM),
-        goal=goal(task),
-        way="".join(f"\n\n{part}" for part in [way(task)] if part),
+        opening=TEAM_OPENING.format(count=spelled(players), team=", ".join(team)) if players > 1
+        else ALONE_OPENING.format(name=team[0]),
+        goal=goal(task, players),
+        way="".join(f"\n\n{told['way']}" for _ in [0] if "way" in told),
+        turns=TEAM_TURNS.format(count=spelled(players)) if players > 1 else ALONE_TURNS,
         window=spelled(LIMITS.window_seconds),
-        chat_lines=CHAT_LINES,
+        chat=CHAT.format(chat_lines=CHAT_LINES) if players > 1 else "",
+        teamwork=f" {told['teamwork']}" if "teamwork" in told else "",
         death=death,
-    )
+    )  # fmt: skip
 
 
-def goal(task: Task) -> str:
-    """What the task asks, as agents read it."""
+def guidance(task: Task, players: int = len(TEAM)) -> dict[str, str]:
+    """The guidance in a task's system prompt, by kind, word for word: the way to the goal (`way`), and for a team
+    how to play as one (`teamwork`). An episode reports it, so that a learner can take it out of the prompts again."""
+    told = {"way": way(task, players), "teamwork": TEAMWORK if players > 1 else ""}
+    return {kind: text for kind, text in told.items() if text}
+
+
+def goal(task: Task, players: int = len(TEAM)) -> str:
+    """What the task asks, as agents read it (for one player, as one player reads it)."""
     if task.objective is Objective.DIAMONDS:
-        return DIAMONDS_GOAL
-    if task.objective is Objective.PROGRESS:
+        text = DIAMONDS_GOAL
+    elif task.objective is Objective.PROGRESS:
         early = [name for name, _, _ in EARLY] if task.counts_early_steps else []
-        return PROGRESS_GOAL.format(early="".join(f"{name}, " for name in early))
-    steps = [name for name, _, _ in CHAINS[str(task.goal)]]
-    return CRAFT_GOAL.format(item=steps[-1], steps=", ".join(steps))
+        text = PROGRESS_GOAL.format(early="".join(f"{name}, " for name in early))
+    else:
+        steps = [name for name, _, _ in CHAINS[str(task.goal)]]
+        text = CRAFT_GOAL.format(item=steps[-1], steps=", ".join(steps))
+    if players > 1:
+        return text
+    for team, alone in ALONE_GOAL:
+        text = text.replace(team, alone)
+    return text
 
 
-def way(task: Task) -> str:
+ALONE_GOAL = [
+    ("Goal: together, ", "Goal: "), ("in your inventories", "in your inventory"), (", whoever does it", ""),
+    ("A step counts once, whoever does it,", "A step counts once,"), (", together.", "."),
+]  # fmt: skip
+"""What the goals say of a team, and what they say instead to a player on their own."""
+
+
+def way(task: Task, players: int = len(TEAM)) -> str:
     """How to get to the goal, step by step, from what the team starts with: who carries what, every recipe and rule
     on the way, in order. Empty for a task whose way is not one ladder (the progress tasks), and for an unguided
     variant of one that is."""
@@ -183,14 +221,16 @@ def way(task: Task) -> str:
         return ""
     kit = listed([_stack(stack) for stack in KITS[task.kit]], "and")
     supplies = "" if task.kit is Kit.NOTHING else ", besides food and torches"
+    coordination = task.coordination if players > 1 else Coordination.KITTED  # (one player holds the whole kit)
+    you = "Each of you starts" if players > 1 else "You start"
     carried = {
-        Coordination.KITTED: f"Each of you starts with {kit}{supplies}." if kit else "You start with nothing.",
+        Coordination.KITTED: f"{you} with {kit}{supplies}." if kit else "You start with nothing.",
         Coordination.ONE_KIT: f"One of you starts with {kit} (your inventory shows whether it is you); the others "
         "start with food and torches. Whoever holds the parts does the crafting, or tosses them to a teammate "
         "(toss: to a player standing within three blocks).",
         Coordination.SPLIT: f"These are dealt among you, so no one can finish alone: {kit}. Bring the parts to one "
         "player (toss: to a player standing within three blocks), who does the crafting.",
-    }[task.coordination]
+    }[coordination]
     numbered = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, 1))
     return f"How to get there. {carried}\n{numbered}"
 
@@ -328,7 +368,7 @@ CHAT_LINES = 6
 def describe(
     observation: Mapping[str, Any],
     *,
-    chat: Sequence[tuple[int, str, str]] = (),
+    chat: Sequence[tuple[int, str, str]] | None = (),
     recalled: bool = False,
 ) -> str:
     """An observation as text: who and where you are, the map of what you have seen, the blocks that touch you,
@@ -375,6 +415,8 @@ def describe(
         animals = "; ".join(f"{a['animal']} (id {a['id']}) {a['distance']} away" for a in observation["animals"])
         lines.append(f"Animals: {animals}.")
     if recalled:
+        return "\n".join(lines)
+    if chat is None:  # (a player on their own)
         return "\n".join(lines)
     if chat:
         lines.append("Team chat, oldest first:")

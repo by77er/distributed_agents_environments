@@ -2,7 +2,7 @@
 
 Code: `environments/minecraft`
 
-Four agents share a Minecraft world, offline. They are trained with reinforcement learning on a curriculum that runs
+One to four agents share a Minecraft world, offline. They are trained with reinforcement learning on a curriculum that runs
 from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays all
 four, and every agent is rewarded equally with the team's score.
 
@@ -45,7 +45,7 @@ Paths are under `environments/minecraft/`.
 | Limits | `limits.json`, `minecraft_swarm/limits.py`, `harness/lib/limits.js` | The numbers an action keeps and agents are told: reach, the longest `move`, how long walking may dig at a block, what it bridges with, how long `wait` waits, smelting time and fuels, the window's length, a chat message's length. Python and Node read the one file |
 | Prompts | `minecraft_swarm/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
 | Tasks | `minecraft_swarm/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and an unguided variant of the 41 with a way to their goal |
-| Episode | `minecraft_swarm/episode.py` | The program: four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot and a [`Memory`](../libraries/rollout/memory.md) |
+| Episode | `minecraft_swarm/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot and a [`Memory`](../libraries/rollout/memory.md) |
 | Worlds | `minecraft_swarm/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_swarm.worlds:tools`), or on a machine of its own (`rollout tools minecraft_swarm.worlds:tools`, and its URL in the profile) |
 | Catalog | `minecraft_swarm/catalog.py` | The tasks as rows, and a start of one: a world seed and a layout seed, which every episode of a group is given |
 | Profile | `profiles/one-gpu.toml` | One machine with one 16 GB GPU |
@@ -206,7 +206,7 @@ time, it is recorded, and it is trained with the episode's advantage, since what
 part of how it plays.
 
 With Qwen3.5 the system prompt and tools take 2,100 tokens, and a task's way to its goal up to 480 more (the same
-for all four agents, so the engine caches them once), a remembered turn 200 to 350, and the current observation 1,000 to 1,850, of which the map is 750 to 1,600.
+for every agent of a team, so the engine caches them once), a remembered turn 200 to 350, and the current observation 1,000 to 1,850, of which the map is 750 to 1,600.
 
 Agents see no clock: an episode's length is a limit of training, and a policy shown the clock learns to play it;
 doing more before the cut-off is rewarded all the same.
@@ -231,6 +231,13 @@ coordination and its item's chain (`CHAINS`), and names the actions that take it
 unguided variant as well: the same situation without the way, ranked harder by `UNGUIDED` (two steps of the tech
 tree). The curriculum unlocks it as it unlocks any harder row, once the rows before it are solved, so the guidance
 fades task by task; a guided row the team has mastered teaches nothing more and is drawn rarely.
+
+How many play is drawn with each start, from one to four (at least two where the kit is dealt in parts), so every
+episode of a group has the same team. The prompt is written for that many: a player on their own is told so and
+offered no chat; a team is told how to play as one (`prompts.TEAMWORK`: say what you carry and what you will do,
+split the work, hand teammates what they need, say what you find). A task with natural ore is solved by one diamond
+per player. An episode reports its team size and the guidance its prompt carried, word for word and by kind (`way`,
+`teamwork`), so that a learner can take it back out of the prompts.
 
 A world is generated once per seed. A template server holds the overworld around the origin (`GENERATED_CHUNKS`), and
 every server of that seed copies the same chunks, so the episodes of a group start in the same world. Servers that

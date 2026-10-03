@@ -515,18 +515,19 @@ def score(task: Task, state: Mapping[str, Any]) -> float:
     return reward
 
 
-SOLVED_DIAMONDS = len(TEAM)
-"""Diamonds the team must hold for a task with natural ore to count as solved: one each."""
+SOLVED_DIAMONDS = 1
+"""Diamonds each player must hold, as a team, for a task with natural ore to count as solved."""
 
 
-def solved(task: Task, state: Mapping[str, Any], available: int | None = None) -> bool:
-    """Whether the team did what the task is about: holds most of the diamonds that were laid out (`available`, for
-    the staged starts that count them) or one each from ore, made the task's item, or earned its milestone."""
+def solved(task: Task, state: Mapping[str, Any], available: int | None = None, players: int = len(TEAM)) -> bool:
+    """Whether the team of `players` did what the task is about: holds most of the diamonds that were laid out
+    (`available`, for the staged starts that count them) or one each from ore, made the task's item, or earned its
+    milestone."""
     if task.objective is Objective.DIAMONDS:
         held = int(state["team_diamonds"])
         if task.laid_out and available:
             return 2 * held > available
-        return held >= SOLVED_DIAMONDS
+        return held >= SOLVED_DIAMONDS * players
     if task.objective is Objective.CRAFT:
         return str(task.goal) in state.get("team_obtained", {})
     if task.goal == "end/kill_dragon" and state.get("dragon_killed"):

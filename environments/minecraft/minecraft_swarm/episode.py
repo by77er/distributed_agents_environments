@@ -30,11 +30,13 @@ from minecraft_swarm.prompts import (
     ACTIONS,
     CHAT_LINES,
     COMPACT,
+    COMPACT_ALONE,
     NO_CALL,
     ONE_CALL,
     REMEMBERED,
     describe,
     describe_result,
+    guidance,
     system_prompt,
 )
 from minecraft_swarm.tasks import TEAM, TURNS_PER_MINUTE, Task, catalog
@@ -47,8 +49,9 @@ SPARE_TURNS = 4
 
 
 class SwarmEpisode(Program):
-    """Parameters: `task` (an id from the catalog), `world_seed`, `layout_seed`; optionally `minutes` (a shorter
-    budget of game time) and `turns` (a lower cap on turns than the task's own)."""
+    """Parameters: `task` (an id from the catalog), `world_seed`, `layout_seed`; optionally `players` (how many of
+    `TEAM` play, from one to all of them; all, if not given), `minutes` (a shorter budget of game time) and `turns` (a
+    lower cap on turns than the task's own)."""
 
     def __init__(self, parameters: Mapping[str, JsonValue] | None = None) -> None:
         parameters = parameters or {}
@@ -60,8 +63,14 @@ class SwarmEpisode(Program):
         turns = parameters.get("turns")
         budget = round(self.minutes * TURNS_PER_MINUTE)  # the task's budget of turns, for the game time it is given
         self.max_turns = budget if turns is None else min(budget, int(cast(int, turns)))
-        self.system = Message.system(system_prompt(self.task))
-        self.chat: dict[str, list[tuple[int, str, str]]] = {name: [] for name in TEAM}
+        players = int(cast(int, parameters.get("players", len(TEAM))))
+        if not 1 <= players <= len(TEAM):
+            raise ValueError(f"players must be from 1 to {len(TEAM)}, not {players}")
+        self.team = TEAM[:players]
+        """Who plays: the first `players` of `TEAM` (every model slot is declared; the others take no turn)."""
+        self.system = Message.system(system_prompt(self.task, players))
+        self.tools = ACTIONS if players > 1 else [tool for tool in ACTIONS if tool.name != "chat"]
+        self.chat: dict[str, list[tuple[int, str, str]]] = {name: [] for name in self.team}
         """What each agent has heard and said lately: (turn, speaker, message), oldest first."""
 
     def model_slots(self) -> Mapping[str, ModelSlot]:
@@ -72,10 +81,18 @@ class SwarmEpisode(Program):
 
     async def main(self, run: RunContext) -> None:
         begun = await self._call(
-            run, "begin", {"task": self.task.id, "world_seed": self.world_seed, "layout_seed": self.layout_seed}
+            run,
+            "begin",
+            {
+                "task": self.task.id,
+                "world_seed": self.world_seed,
+                "layout_seed": self.layout_seed,
+                "players": len(self.team),
+            },
         )
         episode = str(begun["episode"])
-        memories = {name: Memory(prompt=COMPACT, remembered=REMEMBERED) for name in TEAM}
+        compact = COMPACT if len(self.team) > 1 else COMPACT_ALONE
+        memories = {name: Memory(prompt=compact, remembered=REMEMBERED) for name in self.team}
         budget = self.minutes * TICKS_PER_MINUTE
         spent = 0.0
         turn = 0
@@ -84,24 +101,24 @@ class SwarmEpisode(Program):
             while spent < budget and turn < self.max_turns:
                 turn += 1
                 observations = await run.gather(
-                    *(self._call(run, "observe", {"episode": episode, "agent": name}) for name in TEAM)
+                    *(self._call(run, "observe", {"episode": episode, "agent": name}) for name in self.team)
                 )
-                for name, observation in zip(TEAM, observations, strict=True):
+                for name, observation in zip(self.team, observations, strict=True):
                     answer(memories[name], observation)
-                full = [name for name in TEAM if memories[name].crowded(run.models[name])]
+                full = [name for name in self.team if memories[name].crowded(run.models[name])]
                 if full:
-                    spare = [name for name in TEAM if name in full or len(memories[name].turns) >= SPARE_TURNS]
+                    spare = [name for name in self.team if name in full or len(memories[name].turns) >= SPARE_TURNS]
                     await run.gather(*(memories[name].compact(run.models[name], self.system) for name in spare))
                 actions = await run.gather(
                     *(
                         self._think(run, name, turn, observation, memories[name])
-                        for name, observation in zip(TEAM, observations, strict=True)
+                        for name, observation in zip(self.team, observations, strict=True)
                     )
                 )
                 await run.gather(
                     *(
                         self._call(run, "act", {"episode": episode, "agent": name, "action": action})
-                        for name, action in zip(TEAM, actions, strict=True)
+                        for name, action in zip(self.team, actions, strict=True)
                     )
                 )
                 window = await self._call(run, "window", {"episode": episode})
@@ -113,9 +130,9 @@ class SwarmEpisode(Program):
         finally:
             await self._call(run, "end", {"episode": episode})
         reward = float(cast(float, score["reward"]))
-        for name in TEAM:  # the swarm is rewarded equally
+        for name in self.team:  # the swarm is rewarded equally
             run.reward(reward, slot=name)
-        result = {
+        result: dict[str, JsonValue] = {
             **score,
             "task": self.task.id,
             "turns": turn,
@@ -123,6 +140,8 @@ class SwarmEpisode(Program):
             "saturated": saturated,
             "ended": "nothing left to earn" if saturated else "game time" if spent >= budget else "turns",
             "compactions": max(memory.compactions for memory in memories.values()),
+            "team": len(self.team),
+            "guidance": {kind: text for kind, text in guidance(self.task, len(self.team)).items()},
         }
         await run.emit("result", result)
 
@@ -135,8 +154,8 @@ class SwarmEpisode(Program):
         heard.extend((turn - 1, str(said["from"]), str(said["message"])) for said in observation.get("messages", []))
         del heard[:-CHAT_LINES]
         chat = [(turn - at, who, message) for at, who, message in heard]
-        seen = Message.user(describe(observation, chat=chat))
-        reply = await memory.sample(run.models[name], system=self.system, current=[seen], tools=ACTIONS)
+        seen = Message.user(describe(observation, chat=chat if len(self.team) > 1 else None))
+        reply = await memory.sample(run.models[name], system=self.system, current=[seen], tools=self.tools)
         memory.remember(Message.user(describe(observation, recalled=True)), reply)
         calls = reply.tool_calls
         if not calls:

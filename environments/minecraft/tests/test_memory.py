@@ -282,7 +282,11 @@ def test_the_catalog_offers_every_task_and_draws_one_start_for_a_whole_group() -
     assert len(rows) == 100 and rows[0].key == "t001" and rows[0].parameters == {"task": "t001"}
     assert [row.key for row in Swarm(only=("t003", "t007")).rows()] == ["t003", "t007"]
     start = swarm.start(rows[6], random.Random(5))
-    assert isinstance(start, dict) and set(start) == {"task", "world_seed", "layout_seed"} and start["task"] == "t007"
+    assert (
+        isinstance(start, dict)
+        and set(start) == {"task", "world_seed", "layout_seed", "players"}
+        and start["task"] == "t007"
+    )
     starts: list[Any] = [swarm.start(rows[0], random.Random(seed)) for seed in range(200)]
     worlds = {start["world_seed"] for start in starts}
     assert len(worlds) == 12  # a dozen worlds, each generated once

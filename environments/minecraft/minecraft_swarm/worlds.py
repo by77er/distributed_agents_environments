@@ -115,7 +115,7 @@ class MinecraftWorlds:
         mined = Counter(str(event["block"]) for event in events if event["kind"] == "mined")
         return {
             "reward": score(world.task, state),
-            "solved": solved(world.task, state, world.built.available_diamonds),
+            "solved": solved(world.task, state, world.built.available_diamonds, len(world.team)),
             "objective": world.task.objective.value,
             "team_diamonds": int(state["team_diamonds"]),
             "team_advancements": list(state.get("team_advancements", [])),
@@ -214,7 +214,10 @@ class Operation:
 
 
 async def _begin(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
-    return await worlds.begin(str(arguments["task"]), _int(arguments["world_seed"]), _int(arguments["layout_seed"]))
+    team = TEAM[: _int(arguments["players"])]
+    return await worlds.begin(
+        str(arguments["task"]), _int(arguments["world_seed"]), _int(arguments["layout_seed"]), team
+    )
 
 
 async def _observe(worlds: MinecraftWorlds, arguments: Arguments) -> JsonValue:
@@ -246,7 +249,7 @@ EPISODE: Mapping[str, JsonValue] = {"episode": STRING}
 OPERATIONS: dict[str, Operation] = {
     "begin": Operation(
         "Start a world for an episode.",
-        {"task": STRING, "world_seed": INTEGER, "layout_seed": INTEGER},
+        {"task": STRING, "world_seed": INTEGER, "layout_seed": INTEGER, "players": INTEGER},
         RetryClass.SIDE_EFFECTING,
         _begin,
     ),
