@@ -3,8 +3,8 @@
 Code: `environments/minecraft`
 
 One to four agents share a Minecraft world, offline. They are trained with reinforcement learning on a curriculum that runs
-from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays all
-four, and every agent is rewarded equally with the team's score.
+from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays
+them all, and every agent is rewarded equally with the team's score.
 
 The environment is the package `minecraft-swarm` (import `minecraft_swarm`), which depends on `rollout` alone. It is
 a [catalog](../guide/perspectives.md#building-an-environment) of tasks, a program that plays one episode, and a tool
