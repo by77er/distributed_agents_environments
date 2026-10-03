@@ -30,13 +30,16 @@ async def test_versions_are_added_in_order_and_name_where_their_files_are(tmp_pa
     assert [version.number for version in await policies.versions("miner")] == [1, 2]
     assert await policies.head("miner") == second == await policies.version("miner@2")
     # Each file is a blob of its own, by its path in the checkpoint: nothing is packed.
+    assert first.weights is not None and second.weights is not None
     assert sorted(first.weights.files) == ["adapter_config.json", "nested/adapter_model.safetensors"]
     assert first.state is not None and list(first.state.files) == ["optimizer.pt"]
     assert first.weights.files["adapter_config.json"] == second.weights.files["adapter_config.json"]  # shared
 
     # Another process, another machine: the files come back whole, from the blobs.
     elsewhere = Policies(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    fetched = await elsewhere.files((await elsewhere.version("miner@2")).weights, tmp_path / "cache" / "miner@2")
+    kept = (await elsewhere.version("miner@2")).weights
+    assert kept is not None
+    fetched = await elsewhere.files(kept, tmp_path / "cache" / "miner@2")
     assert (fetched / "nested" / "adapter_model.safetensors").read_text() == "weights 2"
     assert not list((tmp_path / "cache").glob(".fetching-*"))
 
@@ -64,7 +67,7 @@ async def test_names_say_the_policy_and_the_number(tmp_path: Path) -> None:
     assert list((await kept(single, FileBlobStore(tmp_path / "blobs"))).files) == ["weights.bin"]
 
 
-async def test_saves_thin_out_with_age_and_weights_stay(tmp_path: Path) -> None:
+async def test_saves_thin_out_with_age(tmp_path: Path) -> None:
     from rollout_train.policies import Retention
 
     blobs = FileBlobStore(tmp_path / "blobs")
@@ -83,12 +86,13 @@ async def test_saves_thin_out_with_age_and_weights_stay(tmp_path: Path) -> None:
     assert released == [f"miner@{number}" for number in (1, 2, 3, 4, 6, 7, 8, 9)]
     versions = await policies.versions("miner")
     assert [version.number for version in versions if version.state is not None] == [5, 10, 11, 12]
+    assert [version.number for version in versions if version.weights is not None] == [5, 10, 11, 12]
     gone = next(version for version in versions if version.number == 1)
-    assert gone.state is None and gone.released is not None and (await policies.version("miner@1")).state is None
+    assert gone.weights is None and gone.state is None and gone.released is not None
+    assert gone.metrics == {} and gone.parent is None and (await policies.version("miner@1")).weights is None
     stored = {path.name for path in (tmp_path / "blobs").rglob("*") if path.is_file()}
-    for version in versions:  # every version's weights are kept, and only the kept versions' state
-        assert {blob.sha256 for blob in version.weights.files.values()} <= stored
-        if version.state is not None:
-            assert {blob.sha256 for blob in version.state.files.values()} <= stored
-    assert len(stored) == 12 + 1 + 4
+    for version in versions:  # the kept versions' files are all there
+        for manifest in (version.weights, version.state):
+            assert manifest is None or {blob.sha256 for blob in manifest.files.values()} <= stored
+    assert len(stored) == 4 + 1 + 4  # four versions' weights, the config they share, and four states
     assert await policies.thin(writer, "miner", Retention(recent=3, every=5)) == []  # (and again changes nothing)

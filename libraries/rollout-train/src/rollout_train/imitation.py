@@ -144,6 +144,8 @@ async def imitate(
     parent: Checkpoint | None = None
     if head is not None:
         here = directory / head.name
+        if head.weights is None:
+            raise ValueError(f"{head.name} was released: its weights are gone")
         weights = await policies.files(head.weights, here / WEIGHTS)
         parent = Checkpoint(weights, await policies.files(head.state, here / STATE) if head.state else None)
     number = (head.number if head else 0) + 1

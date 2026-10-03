@@ -2691,9 +2691,9 @@ The versions of every policy, in a ledger, and their files in a blob store.
 - `async def add(self, fence: Fence, policy: str, number: int, *, weights: Path, state: Path | None = None, parent: str | None = None, batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Version` — Keep a checkpoint's files and append the version that names them. The append is what makes the version
   exist: a writer that dies before it has made nothing, and one that repeats it (the same number) gets the
   version that is there.
-- `async def thin(self, fence: Fence, policy: str, retention: 'Retention') -> list[str]` — Let go of the trainer state of the versions `retention` does not keep, and return their names. Weights are
-  kept for every version. A release is appended to the ledger before its blobs are deleted, and a blob is
-  deleted only if no version still names it, so this may be repeated after a crash at any point.
+- `async def thin(self, fence: Fence, policy: str, retention: 'Retention') -> list[str]` — Let go of the files (weights and trainer state) of the versions `retention` does not keep, and return their
+  names. A release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no
+  version still names it, so this may be repeated after a crash at any point.
 - `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
   appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
@@ -2777,7 +2777,7 @@ the blob store. `algorithm` is `Grpo()` unless given. `episodes_at_once` caps th
 whatever groups they are of. `binding` says how the program's model slots and imports are
 served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
 one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
-trainer state once a newer one is served (`Retention()` unless given); every version keeps its weights.
+files (weights and trainer state) once a newer one is served (`Retention()` unless given).
 
 ### `Trained`
 
@@ -2838,13 +2838,13 @@ class Version
 |---|---|---|---|
 | `policy` | `str` | required |  |
 | `number` | `int` | required | From 1, in the order the policy's versions were made. |
-| `weights` | `Manifest` | required |  |
+| `weights` | `Manifest \| None` | required | None once it was released (`Policies.thin`). |
 | `parent` | `str \| None` | `None` | The version it was trained from, by name: of this policy, or of another (a fork). None: from the base. |
 | `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its place in a job's log and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
-| `released` | `float \| None` | `None` | When its trainer state was let go (`Policies.thin`), if it was: `state` is then None. |
+| `released` | `float \| None` | `None` | When its files were let go (`Policies.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
 
 **Methods**
 

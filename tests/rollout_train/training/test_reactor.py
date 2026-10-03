@@ -152,6 +152,7 @@ async def check(directory: Path, steps: list[str]) -> None:
     assert all(steps.count(version.name) <= 2 for version in versions)
     for version in versions:
         assert version.batch is not None and json.loads(await policies.blobs.read(version.batch))
+        assert version.weights is not None
         fetched = await policies.files(version.weights, directory / "fetched" / version.name)
         assert sorted(path.name for path in fetched.iterdir()) == ["adapter.bin"]  # whole: no half-written file
     # Each group was asked for once, and four of its runs ended (a run a dying job cut short does not count).

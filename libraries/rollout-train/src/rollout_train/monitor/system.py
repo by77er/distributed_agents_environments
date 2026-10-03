@@ -458,7 +458,9 @@ def _policy(policy: str, versions: list[Version], fence: int | None) -> dict[str
                 "parent": version.parent,
                 "made": version.made,
                 "metrics": dict(version.metrics),
-                "weights": {"files": len(version.weights.files), "bytes": size(version.weights)},
+                "weights": {"files": len(version.weights.files), "bytes": size(version.weights)}
+                if version.weights
+                else None,
                 "state": {"files": len(version.state.files), "bytes": size(version.state)} if version.state else None,
                 "released": version.released,
                 "batch": version.batch is not None,

@@ -83,7 +83,7 @@ async def train(
     whatever groups they are of. `binding` says how the program's model slots and imports are
     served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
     one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
-    trainer state once a newer one is served (`Retention()` unless given); every version keeps its weights."""
+    files (weights and trainer state) once a newer one is served (`Retention()` unless given)."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
     ledger, blobs = policies.ledger, policies.blobs
@@ -112,6 +112,8 @@ async def train(
     async def files(version: Version) -> Checkpoint:
         """A version's files on this machine, read from the blob store if they are not here."""
         here = directory / version.name
+        if version.weights is None:
+            raise ValueError(f"{version.name} was released: its weights are gone")
         weights = await policies.files(version.weights, here / WEIGHTS)
         return Checkpoint(weights, await policies.files(version.state, here / STATE) if version.state else None)
 

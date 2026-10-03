@@ -625,7 +625,7 @@ function drawPolicy(name) {
   if (!policy) return [h("div", { class: "empty" }, `There is no policy ${name}.`)];
   const versions = policy.versions, width = Math.max(300, document.getElementById("main").clientWidth - 100);
   const madeBy = new Map(system.runs.flatMap(run => run.steps.filter(step => step.makes).map(step => [step.makes, [run.run, step.step]])));
-  const size = versions.reduce((sum, version) => sum + version.weights.bytes + (version.state?.bytes ?? 0), 0);
+  const size = versions.reduce((sum, version) => sum + (version.weights?.bytes ?? 0) + (version.state?.bytes ?? 0), 0);
   const serving = system.channels.find(channel => channel.adapter?.startsWith(`${name}@`));
   const newest = [...versions].reverse();
   return [h("div", { class: "head" }, h("h1", {}, `Policy ${policy.policy}`),
@@ -640,7 +640,7 @@ function drawPolicy(name) {
     newest.map(version => [{ text: versionOf(version.name), kind: "key" }, versionOf(version.parent), clock(version.made),
       madeBy.has(version.name) ? `step ${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.segments), figure(version.metrics.optimizer_steps),
       version.metrics.kl_moved?.toFixed(4), version.metrics.loss?.toFixed(3), span(version.metrics.update_seconds ?? version.metrics.seconds),
-      version.state ? "kept" : version.released ? { text: "released", kind: "still" } : "–", bytes(version.weights.bytes + (version.state?.bytes ?? 0))]),
+      version.state ? "kept" : version.released ? { text: "released", kind: "still" } : "–", bytes((version.weights?.bytes ?? 0) + (version.state?.bytes ?? 0))]),
     newest.map(version => madeBy.has(version.name) ? () => go(stepPlace(...madeBy.get(version.name))) : null)))];
 }
 

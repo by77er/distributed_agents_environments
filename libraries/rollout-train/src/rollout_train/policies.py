@@ -42,7 +42,8 @@ class Version:
     policy: str
     number: int
     """From 1, in the order the policy's versions were made."""
-    weights: Manifest
+    weights: Manifest | None
+    """None once it was released (`Policies.thin`)."""
     parent: str | None = None
     """The version it was trained from, by name: of this policy, or of another (a fork). None: from the base."""
     state: Manifest | None = None
@@ -53,7 +54,8 @@ class Version:
     made: float = 0.0
     """When, in seconds since the epoch."""
     released: float | None = None
-    """When its trainer state was let go (`Policies.thin`), if it was: `state` is then None."""
+    """When its files were let go (`Policies.thin`), if they were: its weights and its trainer state are then None.
+    Its record stays: where it came from, what it was trained on, and its metrics."""
 
     @property
     def name(self) -> str:
@@ -135,14 +137,14 @@ class Policies:
         return version
 
     async def thin(self, fence: Fence, policy: str, retention: "Retention") -> list[str]:
-        """Let go of the trainer state of the versions `retention` does not keep, and return their names. Weights are
-        kept for every version. A release is appended to the ledger before its blobs are deleted, and a blob is
-        deleted only if no version still names it, so this may be repeated after a crash at any point."""
+        """Let go of the files (weights and trainer state) of the versions `retention` does not keep, and return their
+        names. A release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no
+        version still names it, so this may be repeated after a crash at any point."""
         versions = await self.versions(policy)
-        kept = retention.kept([version.number for version in versions if version.state is not None])
+        kept = retention.kept([version.number for version in versions])
         released: list[str] = []
         for version in versions:
-            if version.state is not None and version.number not in kept:
+            if version.released is None and version.number not in kept:
                 record: JsonValue = {"at": round(time.time(), 1)}
                 await self.ledger.append(_released(policy), str(version.number), record, fence)
                 released.append(version.name)
@@ -152,11 +154,11 @@ class Policies:
                  for blob in manifest.files.values()}  # fmt: skip
         for number in await self.ledger.read(_released(policy)):
             record = records.get(number)
-            state = _VERSION.validate_python(record).state if record is not None else None
-            files: Mapping[str, BlobReference] = state.files if state else {}
-            for reference in files.values():
-                if reference.sha256 not in named:
-                    await self.blobs.delete(reference)
+            made = _VERSION.validate_python(record) if record is not None else None
+            for manifest in (made.weights, made.state) if made is not None else ():
+                for reference in manifest.files.values() if manifest else ():
+                    if reference.sha256 not in named:
+                        await self.blobs.delete(reference)
         return released
 
     async def files(self, manifest: Manifest, directory: Path) -> Path:
@@ -184,8 +186,8 @@ def _written(contents: Mapping[str, bytes], directory: Path) -> None:
 
 @dataclass(frozen=True)
 class Retention:
-    """Which versions keep their trainer state (what a step can go on from): the newest `recent`, and every
-    `every`-th by number, so that saves thin out with age. Weights are kept for every version."""
+    """Which versions keep their files, their weights and their trainer state (what can be served, and what a step
+    can go on from): the newest `recent`, and every `every`-th by number, so that saves thin out with age."""
 
     recent: int = 2
     every: int = 20
@@ -219,9 +221,9 @@ async def versions_in(ledger: Ledger, policy: str) -> list[Version]:
 
 
 def _as_released(version: Version, released: Mapping[str, JsonValue]) -> Version:
-    """A version as it is once its trainer state was let go, if it was."""
+    """A version as it is once its files were let go, if they were."""
     record: Any = released.get(str(version.number))
-    return replace(version, state=None, released=float(record["at"])) if record is not None else version
+    return replace(version, weights=None, state=None, released=float(record["at"])) if record is not None else version
 
 
 async def policies_in(ledger: Ledger) -> list[str]:
