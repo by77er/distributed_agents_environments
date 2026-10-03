@@ -367,7 +367,7 @@ function drawStep(here) {
         skipped ? h("span", {}, line?.skipped ?? "nothing to train on") : line ? h("span", {}, h("b", {}, line.segments ?? "–"), " segments") : null));
   }));
   const what = card("The update", version ? `${version.name}, from ${version.parent ?? "the base model"}` : step.state === "failed" ? "the step failed" : "being taken",
-    metrics ? pairs([...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
+    metrics ? pairs([...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "mean_weight", "truncated_fraction", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
       .filter(key => metrics[key] !== undefined).map(key => [key.replaceAll("_", " "), figure(metrics[key])]), ["took", span(metrics.update_seconds ?? metrics.seconds)]])
       : step.error ? h("p", { class: "error-text" }, step.error) : h("p", { class: "muted" }, "The trainer is working on it."));
   return [head, kpis, h("div", { class: "section-title" }, h("h2", {}, "Groups"), h("span", {}, "what went into the step")), tiles, what];
@@ -411,7 +411,7 @@ function drawGroup(here) {
     metrics ? [pairs([
       ["version", version ? link(policyPlace(version.name.split("@")[0]), {}, h("b", {}, version.name)) : outcome?.adapter ?? "–"],
       ["from", version?.parent ?? group.step?.parent ?? "the base model"],
-      ...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
+      ...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "mean_weight", "truncated_fraction", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
         .filter(key => metrics[key] !== undefined).map(key => [key.replaceAll("_", " "), figure(metrics[key])]),
       ["took", span(metrics.update_seconds ?? metrics.seconds)]])]
       : group.step ? pairs([["makes", group.step.makes ?? "–"], ["from", group.step.parent ?? "the base model"], ["segments", figure(group.step.segments)],

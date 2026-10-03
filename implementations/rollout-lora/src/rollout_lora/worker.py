@@ -96,12 +96,12 @@ def _step(
 
         from rollout_lora.layers import load_adapter
         from rollout_lora.policy import Policy
-        from rollout_lora.step import ClippedPolicyGradient
+        from rollout_lora.step import PolicyStep
 
         policy = Policy.load(checkpoint, rank=settings.rank, alpha=settings.alpha)
         if parent is not None:
             load_adapter(policy.model, parent.weights)
-        trainer = ClippedPolicyGradient(policy, settings)
+        trainer = PolicyStep(policy, settings)
         if parent is not None and parent.state is not None and (parent.state / OPTIMIZER).exists():
             trainer.optimizer.load_state_dict(torch.load(parent.state / OPTIMIZER, map_location="cuda"))
             for group in trainer.optimizer.param_groups:  # (the saved state carries the rate it was saved with)

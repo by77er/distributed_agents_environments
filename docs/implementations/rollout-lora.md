@@ -29,13 +29,16 @@ Every key of `[trainer]` other than `kind`, `channel`, `policy` and `colocated` 
 |---|---|
 | `rank` | The adapter's rank. Its scaling (`alpha`) is twice the rank |
 | `learning_rate` | AdamW's learning rate. Adam moves a weight by at most this much per optimizer step |
-| `clip_low`, `clip_high` | The probability ratio is clipped to `1 - clip_low` .. `1 + clip_high` |
+| `clip_low`, `clip_high` | A token's ratio to its logprob at the step's start is clipped to `1 - clip_low` .. `1 + clip_high` |
+| `ratio` | `token` (a ratio for each token, PPO) or `segment` (one for each segment, the geometric mean of its tokens', GSPO) |
+| `segment_clip_low`, `segment_clip_high` | With `ratio = "segment"`, the segment's ratio is clipped to `1 - segment_clip_low` .. `1 + segment_clip_high` |
+| `truncate` | The most a token's importance weight may be: its logprob at the step's start against the one it was sampled at (`None`: not truncated) |
 | `tokens_per_step` | Sampled tokens per optimizer step. How far a step moves the policy is set by how many optimizer steps its tokens make |
-| `max_kl` | The pass stops when the policy has moved this far, in nats per token (`None`: never) |
+| `max_kl` | The pass stops when the policy has moved this far from where the step began, in nats per token (`None`: never) |
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
 | `segment_tokens` | The longest segment a step can hold on its GPU (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
-| `objective` | `policy_gradient` (the clipped policy gradient of [the step](#the-step)) or `likelihood` (the sampled tokens' log-likelihood, for [imitation](../libraries/rollout-train/training.md#imitation)) |
+| `objective` | `policy_gradient` (the weighted, clipped policy gradient of [the step](#the-step)) or `likelihood` (the sampled tokens' log-likelihood, for [imitation](../libraries/rollout-train/training.md#imitation)) |
 
 `segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). An open profile
 gives `segment_tokens` to the trained channel as its longest turn, so that every sampled turn can be trained on.
@@ -88,44 +91,59 @@ the next. Segments longer than `segment_tokens` are left out before the pass and
 
 ## The step
 
-One pass over the batch (`rollout_lora.step.ClippedPolicyGradient`). Which segments are in the batch, and each
-one's advantage, is the [algorithm's](../libraries/rollout-train/training.md) business.
+`rollout_lora.step.PolicyStep` takes a step. Which segments are in the batch, and each one's advantage, is the
+[algorithm's](../libraries/rollout-train/training.md) business; the loss is a function from `rollout_lora.objectives`,
+by the settings' name, which any trainer in torch can call.
 
-1. The segments are shuffled with the step's `seed` and cut into minibatches of about `tokens_per_step` sampled
+Three logprobs of each sampled token meet in it:
+
+| Logprob | Computed by | When |
+|---|---|---|
+| behavior | the engine | while sampling, under whichever version was served then (recorded in the segment) |
+| start | the trainer, without a gradient | at the start of the step, on the weights the step starts from |
+| now | the trainer, with a gradient | in each minibatch, as the step updates the weights |
+
+Behavior and start differ because the data came from elsewhere: an older version, and the engine computing
+differently from the trainer. Start and now differ by how far the step has moved the policy.
+
+1. The trainer computes every sampled token's logprob at the start (the recorded spans; forced tokens and prompts are
+   not trained on). A segment that does not fit the GPU here is left out and counted.
+2. The segments are shuffled with the step's `seed` and cut into minibatches of about `tokens_per_step` sampled
    tokens. A last minibatch of less than half that joins the one before.
-2. For each segment, the policy computes the logprob of every token the policy sampled (the recorded spans). Forced
-   tokens and prompts are not trained on.
-3. The loss is PPO's clipped objective against the behavior logprobs recorded while sampling: for each token,
-   `-min(ratio · advantage, clip(ratio) · advantage)`, where `ratio` is the probability now over the probability
-   then. The upper clip is wider than the lower. The loss is a mean over the minibatch's tokens. There is no KL
-   penalty.
-4. Before a minibatch's optimizer step, its estimate of KL(behavior ‖ policy) on the sampled tokens is compared with
-   the first minibatch's. If it is more than `max_kl` beyond it, the pass stops without that step.
+3. For each token, the importance weight `w = min(start / behavior, truncate)` corrects for where it was sampled; it is
+   a constant. The ratio `r = now / start` is 1 when the step begins. The loss is
+   `-w · min(r · advantage, clip(r) · advantage)`, the upper clip wider than the lower, a mean over the minibatch's
+   tokens. With `ratio = "segment"` the ratio and the weight are each one for the segment (the geometric means of its
+   tokens'), clipped as a whole, and the loss is a mean over each segment's tokens and then over the minibatch's
+   segments. There is no KL penalty.
+4. Before a minibatch's optimizer step, its estimate of KL(start ‖ now) on the sampled tokens is compared with
+   `max_kl`. If it is more, the pass stops without that step.
 5. Otherwise gradients are clipped to `max_gradient_norm` and AdamW steps, with no weight decay.
 
-A sampled token whose recorded logprob is not finite fails the step. Under `objective = "likelihood"` steps 3 and 4
-are replaced: the loss is the negative log-likelihood of each sampled token times its segment's advantage, with no
-ratio, no clip and no stop at `max_kl`, and recorded logprobs are not read.
+A sampled token whose recorded logprob is not finite fails the step. Under `objective = "likelihood"` there is no
+first pass, and steps 3 and 4 are replaced: the loss is the negative log-likelihood of each sampled token times its
+segment's advantage, with no weight, ratio, clip or stop at `max_kl`, and recorded logprobs are not read.
 
 ## Metrics
 
 A step returns these. The training loop keeps them with the version the step made, and sends them to the job in its
 `step` note ([the record](../libraries/rollout-train/training.md#the-record)). Under the likelihood objective the
-ratio, clip, mismatch and KL metrics are zero.
+weight, ratio, clip, mismatch and KL metrics are zero.
 
 | Metric | Meaning |
 |---|---|
-| `kl_floor` | The first minibatch's KL estimate, before any optimizer step: the engine's and the trainer's numerical difference, and how stale the segments are |
-| `kl_moved` | The last stepped minibatch's estimate less the floor: how far the step moved the policy |
+| `kl_floor` | KL(behavior ‖ start), estimated on the sampled tokens: how far the data is from the policy the step starts from (the engine's and the trainer's difference, and how stale the segments are) |
+| `mean_mismatch` | The mean absolute difference between the start and behavior logprobs |
+| `mean_weight`, `truncated_fraction` | The mean importance weight, and the share of tokens whose weight was truncated |
+| `kl_moved` | KL(start ‖ now) as the last stepped minibatch found it: how far the step moved the policy |
 | `stopped_at_max_kl` | 1 if the pass stopped at `max_kl` |
-| `loss`, `clip_fraction`, `mean_ratio` | Per token: the loss, the share of tokens whose ratio was clipped, the mean ratio |
-| `mean_mismatch` | The mean absolute difference between the trainer's logprob and the recorded one |
+| `loss`, `clip_fraction`, `mean_ratio` | The loss (per token, or per segment), the share of tokens whose ratio was clipped, the mean ratio |
 | `gradient_norm` | Before clipping, the mean over optimizer steps |
 | `optimizer_steps` | Minibatches stepped on |
 | `tokens`, `segments` | Sampled tokens and segments trained on |
 | `segments_given`, `segments_too_long`, `longest_segment_tokens` | What the batch held, how many were left out for their length, and the longest one kept |
-| `minibatches_out_of_memory` | Minibatches dropped |
-| `seconds` | The pass |
+| `minibatches_out_of_memory`, `start_out_of_memory` | Minibatches dropped, and segments left out of the first pass |
+| `start_seconds`, `seconds` | The first pass, and the whole step |
 | `peak_gpu_gib`, `free_gpu_gib` | GPU memory reserved at the peak, and free when the process started |
 
 ## Measurements
@@ -146,4 +164,5 @@ One RTX 5080 (16 GB), `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32.
 
 `tests/rollout_lora/` needs torch and is collected only when it is installed. It covers the adapter's file format,
 the direction of the update, what each minibatch did, forced tokens, segments left out, the last minibatch, the KL
-stop, a missing logprob and the likelihood objective.
+stop, a missing logprob, the likelihood objective, the importance weight and its truncation, the token clip, and the
+segment ratio and its gradient.

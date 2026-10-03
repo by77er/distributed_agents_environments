@@ -3598,16 +3598,21 @@ class LoraSettings
 | `rank` | `int` | `32` | Of the adapter. Its scaling is twice the rank (`alpha`). |
 | `learning_rate` | `float` | `5e-05` |  |
 | `clip_low` | `float` | `0.2` |  |
-| `clip_high` | `float` | `0.28` | The probability ratio is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher). |
+| `clip_high` | `float` | `0.28` | A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher). |
+| `segment_clip_low` | `float` | `0.0003` |  |
+| `segment_clip_high` | `float` | `0.0004` | With `ratio = "segment"`, the segment's ratio is clipped to 1 - `segment_clip_low` .. 1 + `segment_clip_high` (GSPO's). |
+| `truncate` | `float \| None` | `2.0` | The most a token's importance weight (its logprob at the step's start against the one it was sampled at) may be (None: not truncated). |
 | `tokens_per_step` | `int` | `4096` | Sampled tokens per optimizer step (gradients accumulate over segments until then). Adam moves a weight by at most the learning rate a step, so how far an update goes is set by how many steps its tokens make. |
-| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far (in nats per token, estimated on the sampled tokens) beyond where the first minibatch found it. The first minibatch's value is the floor: the engine's and the trainer's numerical difference, and how stale the segments are. |
+| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far from where the step began (in nats per token, estimated on the sampled tokens). |
 | `max_gradient_norm` | `float` | `1.0` |  |
 | `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
-| `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, against the logprobs they were sampled at. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, clip or stop at `max_kl`. |
+| `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, weight or stop at `max_kl` (`rollout_lora.objectives`). |
+| `ratio` | `str` | `'token'` | `token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens' (GSPO). |
 
 **Methods**
 
+- `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
 - `@property def alpha(self) -> float`
 
 ### `LoraTrainer`

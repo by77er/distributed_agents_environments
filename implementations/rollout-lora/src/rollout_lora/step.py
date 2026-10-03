@@ -1,12 +1,14 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # (torch's annotations leave parts of autograd untyped.)
-"""The clipped policy-gradient step over weighted segments.
+"""A policy step over weighted segments: the logprobs the step starts from, then one pass of updates.
 
-PPO's clipped objective against the behavior policy, the logprobs the engine recorded while sampling (as asynchronous
-RL does): one pass both corrects the engine/trainer mismatch and bounds each update. The clip is asymmetric (DAPO's
-clip-higher) and the loss is a token-level mean over each minibatch. No KL penalty; the pass stops early if the
-policy has moved further from the behavior policy than `max_kl`. Only tokens the policy sampled are trained on.
-The numbers are `LoraSettings`'; which segments, and with what advantages, is the algorithm's business.
+First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`).
+Then the segments are taken in shuffled minibatches of about `tokens_per_step` sampled tokens, an optimizer step
+each, under the objective the settings name (`rollout_lora.objectives`): a ratio to `old` that bounds how far the
+step moves the policy, and an importance weight `old / behavior` for where each token was sampled (an older version,
+and the engine computing differently from the trainer). No KL penalty; the pass stops early if a minibatch finds the
+policy further than `max_kl` from where the step began. Only tokens the policy sampled are trained on. The numbers
+are `LoraSettings`'; which segments, and with what advantages, is the algorithm's business.
 """
 
 import random
@@ -18,6 +20,7 @@ from typing import Protocol
 import torch
 from torch import nn
 
+from rollout_lora.objectives import terms
 from rollout_lora.settings import LoraSettings
 from rollout_train.trainer import Weighted
 
@@ -32,8 +35,13 @@ class TrainablePolicy(Protocol):
     def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor: ...
 
 
+def sampled(weighted: Weighted) -> list[int]:
+    """The positions of the tokens the policy sampled in a segment."""
+    return [position for span in weighted.segment.spans for position in range(span.start, span.end)]
+
+
 @dataclass
-class ClippedPolicyGradient:
+class PolicyStep:
     policy: TrainablePolicy
     settings: LoraSettings = field(default_factory=LoraSettings)
 
@@ -43,56 +51,66 @@ class ClippedPolicyGradient:
         """What each minibatch of the last pass did, in order (`step` returns their totals)."""
 
     def step(self, segments: Sequence[Weighted], *, seed: int = 0) -> dict[str, float]:
-        """One pass over the segments, in shuffled minibatches of about `tokens_per_step` sampled tokens."""
+        """The logprobs the step starts from, then one pass over the segments in shuffled minibatches."""
         started = time.monotonic()
-        settings = self.settings
+        settings, objective = self.settings, self.settings.loss
         longest = settings.segment_tokens
-        order = [weighted for weighted in segments if longest is None or len(weighted.segment.tokens) <= longest]
-        too_long = len(segments) - len(order)
+        order = [
+            weighted
+            for weighted in segments
+            if (longest is None or len(weighted.segment.tokens) <= longest) and sampled(weighted)
+        ]
+        too_long = sum(1 for weighted in segments if longest is not None and len(weighted.segment.tokens) > longest)
         random.Random(seed).shuffle(order)
-        batches = minibatches(order, settings.tokens_per_step)
         self.policy.model.train()
-        totals = {"loss": 0.0, "clipped": 0.0, "tokens": 0.0, "ratio": 0.0, "mismatch": 0.0, "segments": 0.0}
+
+        # Where the step starts: each sampled token's logprob on these weights, and where it was sampled.
+        old: dict[int, torch.Tensor] = {}
+        behaviors: dict[int, torch.Tensor] = {}
+        start_out_of_memory = 0
+        if objective.reads_old:
+            with torch.no_grad():
+                for weighted in list(order):
+                    behavior = torch.tensor(weighted.segment.logprobs)
+                    if not bool(torch.isfinite(behavior).all()):  # (one NaN would make every weight NaN)
+                        raise ValueError("a sampled token has no behavior logprob")
+                    try:
+                        found = self.policy.logprobs(weighted.segment.tokens, sampled(weighted))
+                    except torch.OutOfMemoryError:  # (left out of the step, and counted)
+                        torch.cuda.empty_cache()
+                        start_out_of_memory += 1
+                        order.remove(weighted)
+                        continue
+                    old[id(weighted)] = found.detach()
+                    behaviors[id(weighted)] = behavior.to(found.device)
+        started_pass = time.monotonic()
+
+        totals = dict.fromkeys(("loss", "units", "clipped", "truncated", "tokens", "ratio", "weight", "segments"), 0.0)
         gradient_norms: list[float] = []
-        divergences: list[float] = []  # of each minibatch that was stepped on, as it found the policy
+        moved: list[float] = []  # how far each minibatch that was stepped on found the policy from the step's start
         out_of_memory = 0
         stopped = False
         self.minibatches = []
-        for batch in batches:
-            batch_tokens = sum(weighted.segment.sampled for weighted in batch)
+        for batch in minibatches(order, settings.tokens_per_step):
+            units = sum(objective.units(weighted.segment.sampled) for weighted in batch)
             sums = dict.fromkeys(totals, 0.0)
-            divergence = 0.0
+            distance = 0.0
             try:
                 for weighted in batch:
-                    segment = weighted.segment
-                    positions = [position for span in segment.spans for position in range(span.start, span.end)]
-                    if not positions:
-                        continue
-                    logprobs = self.policy.logprobs(segment.tokens, positions)
-                    if settings.objective == "likelihood":
-                        per_token = -logprobs * weighted.advantage
-                        (per_token.sum() / batch_tokens).backward()
-                        with torch.no_grad():
-                            sums["loss"] += float(per_token.sum())
-                            sums["tokens"] += len(positions)
-                            sums["segments"] += 1
-                        continue
-                    behavior = torch.tensor(segment.logprobs, device=logprobs.device)
-                    if not bool(torch.isfinite(behavior).all()):  # (one NaN would make every weight NaN)
-                        raise ValueError("a sampled token has no behavior logprob")
-                    ratio = torch.exp(logprobs - behavior)
-                    advantage = torch.full_like(ratio, weighted.advantage)
-                    clipped = torch.clamp(ratio, 1 - settings.clip_low, 1 + settings.clip_high)
-                    per_token = -torch.minimum(ratio * advantage, clipped * advantage)
-                    (per_token.sum() / batch_tokens).backward()  # a token-level mean over the minibatch
-                    with torch.no_grad():
-                        sums["loss"] += float(per_token.sum())
-                        sums["clipped"] += float((ratio != clipped).sum())
-                        sums["ratio"] += float(ratio.sum())
-                        sums["mismatch"] += float((logprobs - behavior).abs().sum())
-                        sums["tokens"] += len(positions)
-                        sums["segments"] += 1
-                        divergence += float((behavior - logprobs).sum())
+                    logprobs = self.policy.logprobs(weighted.segment.tokens, sampled(weighted))
+                    found = terms(
+                        objective, logprobs, weighted.advantage, old.get(id(weighted)), behaviors.get(id(weighted))
+                    )
+                    (found.loss / units).backward()
+                    sums["loss"] += float(found.loss.detach())
+                    sums["units"] += objective.units(int(found.tokens))
+                    sums["clipped"] += found.clipped
+                    sums["truncated"] += found.truncated
+                    sums["tokens"] += found.tokens
+                    sums["ratio"] += found.ratio
+                    sums["weight"] += found.weight
+                    sums["segments"] += 1
+                    distance += found.moved
             except torch.OutOfMemoryError:  # a gradient with a segment missing is not this minibatch's: drop it
                 self.optimizer.zero_grad(set_to_none=True)
                 torch.cuda.empty_cache()
@@ -100,12 +118,12 @@ class ClippedPolicyGradient:
                 continue
             if sums["tokens"] == 0:
                 continue
-            divergence /= sums["tokens"]
-            if settings.max_kl is not None and divergences and divergence - divergences[0] > settings.max_kl:
+            distance /= sums["tokens"]
+            if objective.reads_old and settings.max_kl is not None and distance > settings.max_kl:
                 self.optimizer.zero_grad(set_to_none=True)
                 stopped = True
                 break
-            divergences.append(divergence)
+            moved.append(distance)
             for key, value in sums.items():
                 totals[key] += value
             norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), settings.max_gradient_norm)
@@ -114,25 +132,30 @@ class ClippedPolicyGradient:
                 {
                     "segments": sums["segments"],
                     "tokens": sums["tokens"],
-                    "loss": sums["loss"] / sums["tokens"],
+                    "loss": sums["loss"] / units,
                     "clip_fraction": sums["clipped"] / sums["tokens"],
-                    "kl": divergence,
+                    "kl": distance,
                     "gradient_norm": float(norm),
                 }
             )
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
         tokens = max(totals["tokens"], 1.0)
+        start_tokens = max(sum(float(each.numel()) for each in old.values()), 1.0)
         return {
-            "loss": totals["loss"] / tokens,
+            "loss": totals["loss"] / max(totals["units"], 1.0),
             "clip_fraction": totals["clipped"] / tokens,
             "mean_ratio": totals["ratio"] / tokens,
-            "mean_mismatch": totals["mismatch"] / tokens,
-            # KL(behavior || policy) estimated on the sampled tokens, as each minibatch found the policy before its
-            # step. The first minibatch's is the floor (numerical difference between engine and trainer, and how
-            # stale the turns are); the last one's, less the floor, is how far this update moved the policy.
-            "kl_floor": divergences[0] if divergences else 0.0,
-            "kl_moved": divergences[-1] - divergences[0] if divergences else 0.0,
+            # Where the tokens were sampled, against where the step starts: the engine's and the trainer's numerical
+            # difference, and how stale the turns are. `kl_floor` estimates KL(behavior || start) on the sampled
+            # tokens; `mean_mismatch` is the mean absolute difference of their logprobs.
+            "kl_floor": sum(float((behaviors[key] - old[key]).sum()) for key in old) / start_tokens,
+            "mean_mismatch": sum(float((behaviors[key] - old[key]).abs().sum()) for key in old) / start_tokens,
+            "mean_weight": totals["weight"] / tokens,
+            "truncated_fraction": totals["truncated"] / tokens,
+            # How far the update moved the policy: KL(start || now) on the sampled tokens, as the last minibatch
+            # stepped on found it before its step.
+            "kl_moved": moved[-1] if moved else 0.0,
             "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "tokens": totals["tokens"],
             "segments": totals["segments"],
@@ -142,6 +165,8 @@ class ClippedPolicyGradient:
             "optimizer_steps": float(len(gradient_norms)),
             "stopped_at_max_kl": float(stopped),
             "minibatches_out_of_memory": float(out_of_memory),
+            "start_out_of_memory": float(start_out_of_memory),
+            "start_seconds": started_pass - started,
             "seconds": time.monotonic() - started,
         }
 

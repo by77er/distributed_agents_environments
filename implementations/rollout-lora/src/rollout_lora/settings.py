@@ -2,6 +2,36 @@
 
 from dataclasses import dataclass
 
+KINDS = ("policy_gradient", "likelihood")
+RATIOS = ("token", "segment")
+
+
+@dataclass(frozen=True)
+class Objective:
+    """Which loss a policy step takes, and its numbers (`rollout_lora.objectives` evaluates it)."""
+
+    kind: str = "policy_gradient"
+    ratio: str = "token"
+    clip_low: float = 0.2
+    clip_high: float = 0.28
+    truncate: float | None = 2.0
+    """The most the importance weight `old / behavior` may be (None: not truncated)."""
+
+    def __post_init__(self) -> None:
+        if self.kind not in KINDS:
+            raise ValueError(f"objective is one of {', '.join(KINDS)}, not {self.kind!r}")
+        if self.ratio not in RATIOS:
+            raise ValueError(f"ratio is one of {', '.join(RATIOS)}, not {self.ratio!r}")
+
+    @property
+    def reads_old(self) -> bool:
+        """Whether the step must give each token's logprob on the weights it starts from (`old`)."""
+        return self.kind == "policy_gradient"
+
+    def units(self, tokens: int) -> float:
+        """What a segment of `tokens` sampled tokens counts for in its minibatch's mean."""
+        return 1.0 if self.kind == "policy_gradient" and self.ratio == "segment" else float(tokens)
+
 
 @dataclass(frozen=True)
 class LoraSettings:
@@ -10,14 +40,21 @@ class LoraSettings:
     learning_rate: float = 5e-5
     clip_low: float = 0.2
     clip_high: float = 0.28
-    """The probability ratio is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher)."""
+    """A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's
+    clip-higher)."""
+    segment_clip_low: float = 3e-4
+    segment_clip_high: float = 4e-4
+    """With `ratio = "segment"`, the segment's ratio is clipped to 1 - `segment_clip_low` .. 1 + `segment_clip_high`
+    (GSPO's)."""
+    truncate: float | None = 2.0
+    """The most a token's importance weight (its logprob at the step's start against the one it was sampled at) may
+    be (None: not truncated)."""
     tokens_per_step: int = 4_096
     """Sampled tokens per optimizer step (gradients accumulate over segments until then). Adam moves a weight by at
     most the learning rate a step, so how far an update goes is set by how many steps its tokens make."""
     max_kl: float | None = 0.02
-    """Stop the pass when a minibatch, before its step, finds the policy this far (in nats per token, estimated on
-    the sampled tokens) beyond where the first minibatch found it. The first minibatch's value is the floor: the
-    engine's and the trainer's numerical difference, and how stale the segments are."""
+    """Stop the pass when a minibatch, before its step, finds the policy this far from where the step began (in nats
+    per token, estimated on the sampled tokens)."""
     max_gradient_norm: float = 1.0
     segment_tokens: int | None = None
     """The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted
@@ -27,17 +64,28 @@ class LoraSettings:
     """How many segments a step can afford (None: any number)."""
     objective: str = "policy_gradient"
     """`policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's
-    advantage, against the logprobs they were sampled at. `likelihood`: raise the log-likelihood of the sampled tokens,
-    each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, clip or
-    stop at `max_kl`."""
+    advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the
+    sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no
+    ratio, weight or stop at `max_kl` (`rollout_lora.objectives`)."""
+    ratio: str = "token"
+    """`token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens'
+    (GSPO)."""
 
     def __post_init__(self) -> None:
-        if self.objective not in OBJECTIVES:
-            raise ValueError(f"objective is one of {', '.join(OBJECTIVES)}, not {self.objective!r}")
+        self.loss  # noqa: B018 (an objective or ratio it does not know is an error now, not at the first step)
+
+    @property
+    def loss(self) -> Objective:
+        """The objective a step takes, by these settings."""
+        segment = self.ratio == "segment"
+        return Objective(
+            kind=self.objective,
+            ratio=self.ratio,
+            clip_low=self.segment_clip_low if segment else self.clip_low,
+            clip_high=self.segment_clip_high if segment else self.clip_high,
+            truncate=self.truncate,
+        )
 
     @property
     def alpha(self) -> float:
         return 2.0 * self.rank
-
-
-OBJECTIVES = ("policy_gradient", "likelihood")

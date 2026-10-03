@@ -1,15 +1,17 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""The clipped policy-gradient step, on a toy policy: the direction of an update, what is never trained on, and
-when a pass stops."""
+"""The policy step, on a toy policy: the direction of an update, what is never trained on, when a pass stops, and
+how its objectives weigh tokens."""
 
+import math
 from collections.abc import Sequence
 
 import pytest
 import torch
 from torch import nn
 
+from rollout_lora.objectives import Objective, terms
 from rollout_lora.settings import LoraSettings
-from rollout_lora.step import ClippedPolicyGradient, minibatches
+from rollout_lora.step import PolicyStep, minibatches
 from rollout_train import Weighted
 from rollout_train.recorder import Segment, Span
 
@@ -41,7 +43,7 @@ def test_a_positive_advantage_makes_its_tokens_likelier_and_a_negative_one_rarer
     policy = ToyPolicy()
     good, bad = [1, 2, 3, 4], [1, 5, 6, 7]
     before = {name: float(policy.logprobs(t, range(1, 4)).sum()) for name, t in (("good", good), ("bad", bad))}
-    trainer = ClippedPolicyGradient(policy, LoraSettings(learning_rate=0.05, tokens_per_step=100))  # type: ignore[arg-type]
+    trainer = PolicyStep(policy, LoraSettings(learning_rate=0.05, tokens_per_step=100))  # type: ignore[arg-type]
     for step in range(3):
         trainer.step([segment(policy, good, 1.0), segment(policy, bad, -1.0)], seed=step)
     after = {name: float(policy.logprobs(t, range(1, 4)).sum()) for name, t in (("good", good), ("bad", bad))}
@@ -51,7 +53,7 @@ def test_a_positive_advantage_makes_its_tokens_likelier_and_a_negative_one_rarer
 def test_a_pass_keeps_what_each_minibatch_did() -> None:
     policy = ToyPolicy()
     settings = LoraSettings(learning_rate=0.05, tokens_per_step=3, max_kl=None)
-    trainer = ClippedPolicyGradient(policy, settings)  # type: ignore[arg-type]
+    trainer = PolicyStep(policy, settings)  # type: ignore[arg-type]
     metrics = trainer.step([segment(policy, [1, 2, 3, 4], 1.0), segment(policy, [1, 5, 6, 7], -1.0)])
     assert len(trainer.minibatches) == metrics["optimizer_steps"] == 2
     assert [each["tokens"] for each in trainer.minibatches] == [3.0, 3.0]
@@ -62,16 +64,16 @@ def test_forced_tokens_are_never_trained_on() -> None:
     policy = ToyPolicy()
     tokens = [1, 2, 3]
     forced = Weighted(Segment(tokens, [], []), 1.0)
-    trainer = ClippedPolicyGradient(policy, LoraSettings(learning_rate=0.05))  # type: ignore[arg-type]
+    trainer = PolicyStep(policy, LoraSettings(learning_rate=0.05))  # type: ignore[arg-type]
     weights = [parameter.detach().clone() for parameter in policy.parameters()]
     metrics = trainer.step([forced])
     assert metrics["tokens"] == 0
     assert all(torch.equal(a, b) for a, b in zip(weights, policy.parameters(), strict=True))
 
 
-def test_sequences_too_long_for_the_gpu_are_left_out_and_counted() -> None:
+def test_segments_too_long_for_the_gpu_are_left_out_and_counted() -> None:
     policy = ToyPolicy()
-    trainer = ClippedPolicyGradient(policy, LoraSettings(learning_rate=0.05, segment_tokens=4))  # type: ignore[arg-type]
+    trainer = PolicyStep(policy, LoraSettings(learning_rate=0.05, segment_tokens=4))  # type: ignore[arg-type]
     short = segment(policy, [1, 2, 3], 1.0)
     long = segment(policy, [1, 2, 3, 4, 5], -1.0)
     metrics = trainer.step([short, long])
@@ -93,7 +95,7 @@ def test_the_pass_stops_once_the_policy_has_moved_as_far_as_allowed() -> None:
         torch.manual_seed(0)
         policy = ToyPolicy()
         good, bad = segment(policy, [1, 2, 3, 4], 1.0), segment(policy, [1, 5, 6, 7], -1.0)
-        trainer = ClippedPolicyGradient(policy, LoraSettings(learning_rate=0.5, tokens_per_step=6, max_kl=max_kl))  # type: ignore[arg-type]
+        trainer = PolicyStep(policy, LoraSettings(learning_rate=0.5, tokens_per_step=6, max_kl=max_kl))  # type: ignore[arg-type]
         return trainer.step([good, bad] * 10), policy
 
     free, _ = run(None)
@@ -109,7 +111,7 @@ def test_a_sampled_token_without_a_logprob_is_refused() -> None:
     broken = Weighted(Segment([1, 2, 3], [Span(1, 3, 0)], [-0.5, float("nan")]), 1.0)
     weights = [parameter.detach().clone() for parameter in policy.parameters()]
     with pytest.raises(ValueError, match="no behavior logprob"):
-        ClippedPolicyGradient(policy).step([broken])  # type: ignore[arg-type]
+        PolicyStep(policy).step([broken])  # type: ignore[arg-type]
     assert all(torch.equal(a, b) for a, b in zip(weights, policy.parameters(), strict=True))
 
 
@@ -120,9 +122,55 @@ def test_the_likelihood_objective_makes_what_was_sampled_likelier_whatever_it_wa
     # Recorded logprobs from another prompt (the guidance taken out): the objective does not read them.
     taught = Weighted(Segment(shown, [Span(1, 4, 0)], [-9.0, -9.0, -9.0]), 1.0)
     settings = LoraSettings(learning_rate=0.05, tokens_per_step=100, objective="likelihood")
-    trainer = ClippedPolicyGradient(policy, settings)  # type: ignore[arg-type]
+    trainer = PolicyStep(policy, settings)  # type: ignore[arg-type]
     metrics = [trainer.step([taught], seed=step) for step in range(5)]
     assert float(policy.logprobs(shown, range(1, 4)).sum()) > before
     assert metrics[-1]["loss"] < metrics[0]["loss"] and metrics[0]["clip_fraction"] == 0.0
     with pytest.raises(ValueError, match="objective"):
         LoraSettings(objective="something else")
+
+
+def test_where_a_token_was_sampled_is_weighed_and_how_far_the_step_moves_it_is_clipped() -> None:
+    policy = ToyPolicy()
+    good = segment(policy, [1, 2, 3, 4], 1.0)
+    # The engine gave the same tokens other logprobs (another kernel, an older version): far off for one of them.
+    off = Weighted(
+        Segment(
+            good.segment.tokens,
+            good.segment.spans,
+            [value + shift for value, shift in zip(good.segment.logprobs, [0.05, -0.05, -3.0], strict=True)],
+        ),
+        1.0,
+    )
+    trainer = PolicyStep(policy, LoraSettings(learning_rate=0.05, tokens_per_step=100))  # type: ignore[arg-type]
+    metrics = trainer.step([off])
+    # The step starts at its own logprobs: nothing is clipped for the difference, which is weighed instead (the
+    # third token's weight, e^3, truncated at 2).
+    assert metrics["clip_fraction"] == 0.0 and metrics["mean_ratio"] == pytest.approx(1.0)
+    assert metrics["truncated_fraction"] == pytest.approx(1 / 3)
+    assert metrics["mean_weight"] == pytest.approx((math.exp(-0.05) + math.exp(0.05) + 2.0) / 3, rel=1e-4)
+    assert metrics["mean_mismatch"] == pytest.approx((0.05 + 0.05 + 3.0) / 3, rel=1e-4)
+    assert metrics["kl_floor"] == pytest.approx((0.05 - 0.05 - 3.0) / 3, rel=1e-4)
+
+
+def test_a_token_ratio_is_clipped_once_the_step_has_moved_it_far_enough() -> None:
+    logprobs = torch.tensor([-1.0, -1.0], requires_grad=True)
+    old = torch.tensor([-1.0, -1.5])  # the second token's ratio is e^0.5: past 1.28
+    found = terms(Objective(truncate=None), logprobs, 1.0, old, old.clone())
+    found.loss.backward()
+    assert found.clipped == 1.0
+    assert logprobs.grad is not None and logprobs.grad.tolist() == pytest.approx([-1.0, 0.0])  # the clipped one: none
+
+
+def test_a_segment_ratio_is_the_geometric_mean_of_its_tokens_and_its_gradient_is_spread_over_them() -> None:
+    logprobs = torch.tensor([-1.0, -2.0, -3.0], requires_grad=True)
+    old = torch.tensor([-1.0001, -2.0, -2.9999])  # the segment's log ratio: (0.0001 + 0 - 0.0001) / 3 = 0
+    behavior = torch.tensor([-1.3, -2.0, -2.9])
+    objective = Objective(ratio="segment", clip_low=3e-4, clip_high=4e-4, truncate=None)
+    found = terms(objective, logprobs, 2.0, old, behavior)
+    found.loss.backward()
+    weight = math.exp(float((old - behavior).mean()))  # one for the segment, likewise
+    assert found.clipped == 0.0 and found.ratio == pytest.approx(3.0)
+    assert logprobs.grad is not None and logprobs.grad.tolist() == pytest.approx([-weight * 2.0 / 3] * 3)
+    far = terms(objective, logprobs.detach().requires_grad_(True), 2.0, old - 0.01, behavior)  # ratio e^0.01: clipped
+    assert far.clipped == 3.0
