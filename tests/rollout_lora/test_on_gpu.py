@@ -56,3 +56,34 @@ def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_samp
     )
     assert metrics["mean_mismatch"] == pytest.approx(0.04, rel=0.25)  # the noise: E|N(0, 0.05)| is 0.04
     assert stepping.minibatches[0]["clip_fraction"] == 0.0  # before any update nothing is clipped, whatever the noise
+
+
+def test_the_layer_inputs_on_the_host_and_the_mlp_in_pieces_lower_a_steps_peak() -> None:
+    import gc
+
+    from rollout_lora.policy import Policy
+
+    rng = random.Random(1)
+    tokens = [rng.randrange(1_000, 50_000) for _ in range(8_000)]
+    positions = list(range(6_000, 8_000))
+
+    def peak(**options: object) -> tuple[float, torch.Tensor]:
+        policy = Policy.load(MODEL, rank=32, alpha=64.0, **options)  # type: ignore[arg-type]
+        policy.model.train()
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        before = torch.cuda.memory_allocated()
+        logprobs = policy.logprobs(tokens, positions)
+        logprobs.sum().backward()
+        torch.cuda.synchronize()
+        found = (torch.cuda.max_memory_allocated() - before) / 2**30, logprobs.detach().float().cpu()
+        del policy, logprobs
+        gc.collect()
+        torch.cuda.empty_cache()
+        return found
+
+    plain, expected = peak()
+    lower, ours = peak(layer_inputs_on_host=True, mlp_rows=1_024)
+    print(f"\nthe peak of a segment of 8,000 tokens over the weights: {plain:.2f} GiB, and {lower:.2f} GiB with both")
+    assert float((ours - expected).abs().max()) < 1e-2  # the same numbers
+    assert lower < plain - 1.0

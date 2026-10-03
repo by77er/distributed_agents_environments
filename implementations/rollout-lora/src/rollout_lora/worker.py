@@ -98,7 +98,13 @@ def _step(
         from rollout_lora.policy import Policy
         from rollout_lora.step import PolicyStep
 
-        policy = Policy.load(checkpoint, rank=settings.rank, alpha=settings.alpha)
+        policy = Policy.load(
+            checkpoint,
+            rank=settings.rank,
+            alpha=settings.alpha,
+            layer_inputs_on_host=settings.layer_inputs_on_host,
+            mlp_rows=settings.mlp_rows,
+        )
         if parent is not None:
             load_adapter(policy.model, parent.weights)
         trainer = PolicyStep(policy, settings)

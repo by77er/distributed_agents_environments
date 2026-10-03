@@ -22,6 +22,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
+from rollout_lora.activations import HostStore, checkpoint_layers
 from rollout_lora.layers import add_lora, lora_parameters, save_adapter
 from rollout_lora.quantized import replace_compressed_linears
 
@@ -91,6 +92,8 @@ class Policy:
         alpha: float,
         device: str = "cuda",
         gradient_checkpointing: bool = True,
+        layer_inputs_on_host: bool = False,
+        mlp_rows: int | None = None,
     ) -> "Policy":
         from transformers import AutoModelForImageTextToText, CompressedTensorsConfig
 
@@ -119,6 +122,9 @@ class Policy:
             enable(gradient_checkpointing_kwargs={"use_reentrant": False})
             if embedding is None:  # (embeddings read from the file are marked as needing gradients where used)
                 cast(Any, model).enable_input_require_grads()
+            if layer_inputs_on_host or mlp_rows is not None:
+                store = HostStore(pin=device != "cpu") if layer_inputs_on_host else None
+                checkpoint_layers(cast(Any, model).model.language_model, store=store, rows=mlp_rows)
         return cls(model, checkpoint, rank, alpha, embedding)
 
     def parameters(self) -> list[nn.Parameter]:

@@ -38,6 +38,8 @@ Every key of `[trainer]` other than `kind`, `channel`, `policy` and `colocated` 
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
 | `segment_tokens` | The longest segment a step can hold on its GPU (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
+| `layer_inputs_on_host` | Keep each layer's input in pinned system memory between the forward and backward passes ([activations](#activations)) |
+| `mlp_rows` | Run each layer's MLP over this many tokens at a time when it is computed again, and in passes without a gradient (`None`: the whole segment) |
 | `objective` | `policy_gradient` (the weighted, clipped policy gradient of [the step](#the-step)) or `likelihood` (the sampled tokens' log-likelihood, for [imitation](../libraries/rollout-train/training.md#imitation)) |
 
 `segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). An open profile
@@ -78,6 +80,22 @@ The process may use the GPU memory that is free when it starts, less `MEMORY_MAR
 where a step crawls instead of failing; the bound turns that into an out-of-memory error. A minibatch that runs out
 of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass goes on with
 the next. Segments longer than `segment_tokens` are left out before the pass and counted in `segments_too_long`.
+
+## Activations
+
+With gradient checkpointing a layer keeps only its input for the backward pass and computes itself again there.
+Two things still grow with a segment's length, and `rollout_lora.activations` takes each off the GPU's peak:
+
+- **The layer inputs**, a quarter of a megabyte a token for Qwen3.5-9B (2 GiB at 8,000 tokens). With
+  `layer_inputs_on_host` they wait for the backward pass in pinned system memory (`HostStore`, whose buffers are
+  reused from segment to segment).
+- **The MLP of a layer computed again**, whose intermediate activations are the largest part of the layer's peak.
+  With `mlp_rows` it runs over the segment in pieces. A layer's output is `residual + mlp(norm(residual))`, so when
+  the layer is computed again for its backward pass the MLP's output is not needed: it returns at once, and when the
+  gradient arrives each piece is computed with gradients and takes its backward step before the next. Nothing is
+  computed more often than without it.
+
+Both give the same logprobs and gradients. A pass without a gradient stores nothing.
 
 ## The policy
 

@@ -60,6 +60,12 @@ class LoraSettings:
     """The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted
     (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training,
     so whoever serves the policy takes this as the longest turn to sample; the count says whether that held."""
+    layer_inputs_on_host: bool = False
+    """Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the
+    GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B."""
+    mlp_rows: int | None = None
+    """Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in
+    passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak."""
     segments_per_step: int | None = None
     """How many segments a step can afford (None: any number)."""
     objective: str = "policy_gradient"

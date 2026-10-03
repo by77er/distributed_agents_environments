@@ -2,7 +2,8 @@
 
 - `LoraTrainer`, `LoraSettings`: the trainer and its settings (importing them does not load torch).
 - `worker`: each step in a process of its own. `step`: a policy step. `objectives`: the losses it takes, by name.
-  `policy`: the checkpoint as a trainable policy. `layers`: LoRA. `quantized`: 4-bit linear layers. (These import
+  `policy`: the checkpoint as a trainable policy. `activations`:
+  what gradient checkpointing keeps, and where. `layers`: LoRA. `quantized`: 4-bit linear layers. (These import
   torch.)
 """
 
