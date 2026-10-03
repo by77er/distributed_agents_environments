@@ -51,3 +51,17 @@ def test_an_adapter_for_another_model_is_refused(tmp_path: Path) -> None:
     add_lora(other, ["q_proj", "mlp"], rank=2, alpha=4.0, dtype=torch.float32)
     with pytest.raises((ValueError, KeyError)):
         load_adapter(other, tmp_path)
+
+
+def test_the_adapter_trains_in_float32_and_the_frozen_layer_keeps_its_own_dtype() -> None:
+    from rollout_lora.quantized import Int4Linear
+
+    packed = torch.zeros(4, 1, dtype=torch.int32)  # (four outputs, eight inputs, one scale each)
+    frozen = Int4Linear(packed, torch.ones(4, 1, dtype=torch.bfloat16), in_features=8, out_features=4)
+    network = nn.Module()
+    network.add_module("q_proj", frozen)
+    add_lora(nn.Sequential(network), ["q_proj"], rank=2, alpha=4.0, dtype=torch.float32)
+    lora = network.q_proj
+    assert isinstance(lora, LoraLinear) and lora.base is frozen
+    assert frozen.weight_scale.dtype == torch.bfloat16 and frozen.weight_packed.dtype == torch.int32  # not copied
+    assert lora.lora_A.weight.dtype == lora.lora_B.weight.dtype == torch.float32

@@ -46,10 +46,9 @@ def add_lora(
         layer: Any = module
         in_features, out_features = int(layer.in_features), int(layer.out_features)
         device = next(iter(module.buffers()), next(iter(module.parameters()), None))
-        lora = LoraLinear(module, in_features, out_features, rank, alpha).to(
-            device=device.device if device is not None else "cpu", dtype=dtype
-        )
-        lora.base = module  # keep the frozen layer as it is (its dtype and device are its own)
+        lora = LoraLinear(module, in_features, out_features, rank, alpha)
+        for part in (lora.lora_A, lora.lora_B):  # only these: the frozen layer keeps its own dtype and device
+            part.to(device=device.device if device is not None else "cpu", dtype=dtype)
         parent_name, _, child = name.rpartition(".")
         setattr(model.get_submodule(parent_name), child, lora)
         wrapped.append(name)
