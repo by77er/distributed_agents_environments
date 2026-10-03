@@ -6,9 +6,10 @@ guidance show the policy doing the task; taking the guidance back out of their p
 it unguided. `examples` reads such episodes from a job's log and cuts the guidance out of every segment; `imitate`
 takes a supervised step on them (the trainer's likelihood objective) and commits the version it makes.
 
-A segment is cut by its tokens: what came before its first sampled token is decoded, the guidance is taken out of
-that text, and the text is encoded again; what the policy sampled is kept token for token, and its spans move with
-it. A prompt that does not encode back to its own tokens is left out, since cutting it could not be exact.
+A segment is cut by its tokens: the fewest tokens before its first sampled one whose text holds the guidance, and
+which encode back to themselves, are decoded, the guidance is taken out, and the rest is encoded again; what the
+policy sampled is kept token for token, and its spans move with it. A segment where no such stretch is found is left
+out, since cutting it could not be exact.
 """
 
 import asyncio
@@ -35,22 +36,52 @@ GUIDANCE = "guidance"
 
 
 def without(segment: Segment, texts: Sequence[str], renderer: Renderer) -> Segment | None:
-    """The segment as if its prompt had never held `texts`: each is cut from the text before the first sampled
-    token, with the blank line that set it apart, and that text encoded again; the sampled tokens stay as they were.
-    None if a text is not there, or the prompt does not encode back to its own tokens."""
-    first = min((span.start for span in segment.spans), default=len(segment.tokens))
-    prompt = segment.tokens[:first]
-    text = renderer.decode(prompt)
-    if renderer.encode(text) != prompt:
-        return None
-    for cut in texts:
-        if cut not in text:
+    """The segment as if its prompt had never held `texts`: each is cut, with the blank line that set it apart, from
+    the tokens before the first sampled one, and the sampled tokens stay as they were (their spans move with them).
+    None if a text is not there, or no stretch of tokens around it encodes back to itself."""
+    tokens = list(segment.tokens)
+    first = min((span.start for span in segment.spans), default=len(tokens))
+    for text in texts:
+        found = _around(tokens[:first], text, renderer)
+        if found is None:
             return None
-        text = text.replace(f"\n\n{cut}", "", 1) if f"\n\n{cut}" in text else text.replace(f" {cut}", "", 1)
-    shorter = renderer.encode(text)
-    moved = len(shorter) - len(prompt)
+        start, end = found
+        said = renderer.decode(tokens[start:end])
+        cut = said.replace(f"\n\n{text}", "", 1) if f"\n\n{text}" in said else said.replace(text, "", 1)
+        shorter = renderer.encode(cut)
+        tokens[start:end] = shorter
+        first += len(shorter) - (end - start)
+    moved = first - min((span.start for span in segment.spans), default=len(segment.tokens))
     spans = [Span(span.start + moved, span.end + moved, span.version, span.effect_id) for span in segment.spans]
-    return replace(segment, tokens=[*shorter, *segment.tokens[first:]], spans=spans)
+    return replace(segment, tokens=tokens, spans=spans)
+
+
+WIDEST = 16
+"""Tokens on either side of a text that `without` will take in, looking for a stretch that encodes back to itself."""
+
+
+def _around(tokens: Sequence[int], text: str, renderer: Renderer) -> tuple[int, int] | None:
+    """The fewest tokens whose text holds `text` (with the blank line before it) and encodes back to them: a
+    segment's tokens were joined from pieces encoded apart, so the whole prompt need not encode back to itself, but
+    a stretch around a sentence of plain text does."""
+    wanted = f"\n\n{text}" if f"\n\n{text}" in renderer.decode(tokens) else text
+    if wanted not in renderer.decode(tokens):
+        return None
+    low, high = 0, len(tokens)  # the end: the shortest prefix whose text holds it
+    while low < high:
+        middle = (low + high) // 2
+        low, high = (low, middle) if wanted in renderer.decode(tokens[:middle]) else (middle + 1, high)
+    end = low
+    low, high = 0, end  # the start: the latest whose text, to the end, still holds it
+    while low < high:
+        middle = (low + high + 1) // 2
+        low, high = (middle, high) if wanted in renderer.decode(tokens[middle:end]) else (low, middle - 1)
+    start = low
+    for wider in range(WIDEST + 1):
+        a, b = max(0, start - wider), min(len(tokens), end + wider)
+        if renderer.encode(renderer.decode(tokens[a:b])) == list(tokens[a:b]):
+            return a, b
+    return None
 
 
 @dataclass

@@ -176,10 +176,11 @@ the loop over it. For tasks and agents alone, see [guide: testing](../../guide/t
 environment that guides its agents reports, in each episode's result, the guidance its prompts carried, word for
 word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
 
-- **`without(segment, texts, renderer)`** cuts guidance out of a segment: the tokens before its first sampled token
-  are decoded, the texts taken out, and the rest encoded again; the sampled tokens stay as they were, and their
-  spans move with them. A prompt that does not encode back to its own tokens is left out, since cutting it could
-  not be exact.
+- **`without(segment, texts, renderer)`** cuts guidance out of a segment: the fewest tokens before its first sampled
+  token whose text holds it, and which encode back to themselves, are decoded, the guidance taken out, and the rest
+  encoded again; the sampled tokens stay as they were, and their spans move with them. (A segment's tokens were
+  joined from pieces encoded apart, so a whole prompt need not encode back to itself; a stretch of plain text
+  does.) A segment where no such stretch is found is left out.
 - **`examples(log, blobs, renderer, kinds=...)`** reads a job's log for the episodes that carried guidance of those
   kinds and solved their task, and gives their segments, cut, each weighted 1.
 - **`imitate(policies, trainer, examples, ...)`** takes one step of a trainer whose objective is likelihood
