@@ -82,6 +82,7 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         binding = binding_for(words, "policy", platform.tool_bindings)
         assert platform.run.name == "run" and platform.run.id.startswith("run_")  # (named after its directory)
         assert platform.origin is None  # (a new run trains from the base model unless the profile says)
+        assert platform.gateway is not None and platform.recorder.gateway is platform.gateway  # (no [gateway] url)
         await train(
             words,
             platform.trainer,
@@ -110,6 +111,10 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
             ("best", checkpoints[-1].id)
         ]
         assert await platform.bookmarked() == {checkpoints[-1].id}
+        recorded = [
+            name for name in await platform.ledger.tables() if name.startswith(f"runs/{platform.run.id}/turns/")
+        ]
+        assert len(recorded) == len(played)  # each episode's turns, recorded by the gateway in the runner's process
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
     assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_notes.jsonl").exists()
@@ -143,6 +148,15 @@ async def test_a_profile_that_cannot_start_stops_what_it_started(tmp_path: Path)
             pass
     (started,) = support.STARTED
     assert started.told[-1] == "close"
+
+
+async def test_a_runner_that_records_through_a_gateway_elsewhere_has_every_channel_routed(tmp_path: Path) -> None:
+    support.STARTED.clear()
+    elsewhere = Profile.load(write(tmp_path, PROFILE + '\n[gateway]\nurl = "http://gateway:8830"\n'))
+    with pytest.raises(ValueError, match="channels judge, policy: a runner that records through a gateway elsewhere"):
+        async with elsewhere.open(training=False):
+            pass
+    assert all(engine.told[-1] == "close" for engine in support.STARTED)
 
 
 def test_a_key_a_profile_does_not_have_is_an_error(tmp_path: Path) -> None:
