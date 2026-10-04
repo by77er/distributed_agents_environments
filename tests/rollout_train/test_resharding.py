@@ -1,7 +1,6 @@
 """Resharding a version into its engines' layout, here and as a Ray task; and a launcher whose runs are Ray jobs."""
 
 import asyncio
-import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from rollout_train.launcher import OUTPUT, Launcher
 from rollout_train.launches import CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import presence_of
+from rollout_train.ray_cluster import prepare
 from rollout_train.record import scope
 from rollout_train.resharding import RESHARDED, RESHARDING, VERBATIM, on_ray, reshard, resharded
 from rollout_train.versions import Retention, Versions
@@ -59,7 +59,7 @@ async def test_a_released_version_cannot_be_resharded(tmp_path: Path) -> None:
 
 
 async def test_a_reshard_runs_as_a_ray_task(tmp_path: Path) -> None:
-    os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"  # (before Ray is imported: workers run in this environment)
+    prepare()  # (before Ray is imported: workers run in this environment)
     ray = pytest.importorskip("ray")
     versions, fence, version = await a_version(tmp_path)
     sessions = Path.home() / ".cache" / "ray-tests"  # (on disk: /tmp may be memory)

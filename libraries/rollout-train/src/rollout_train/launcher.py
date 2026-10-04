@@ -25,6 +25,7 @@ from typing import Any
 from rollout_train.launches import ASKED, CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Launch, Launches
 from rollout_train.machine import alive, measured
 from rollout_train.presence import Presence
+from rollout_train.ray_cluster import prepare
 
 LAUNCHER = "launcher"
 """What a launcher's heartbeat says it is (`about["kind"]`)."""
@@ -165,6 +166,7 @@ class Launcher:
             await self.launches.note(id, state=FAILED, detail=f"exit {code}: {tail}")
 
     def _client(self) -> Any:
+        prepare()
         from ray.job_submission import JobSubmissionClient
 
         assert self.ray is not None

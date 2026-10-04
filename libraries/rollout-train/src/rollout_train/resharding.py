@@ -24,6 +24,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout.names import named
 from rollout_train.ledger import Fence, Ledger
+from rollout_train.ray_cluster import prepare
 from rollout_train.trainer import WEIGHTS
 from rollout_train.versions import Manifest, Versions, kept
 
@@ -98,9 +99,8 @@ def _on_worker(
 
 
 def connect(address: str) -> None:
-    """Connect this process to a Ray cluster (`auto`: the one this machine is part of). Its workers run in the
-    cluster's own environment: Ray is told not to start them through `uv run` (which would build them another)."""
-    os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
+    """Connect this process to a Ray cluster (`auto`: the one this machine is part of), as `ray_cluster` says."""
+    prepare()
     import ray
 
     ray.init(address=address, log_to_driver=False)  # pyright: ignore[reportUnknownMemberType]

@@ -200,6 +200,9 @@ def _as_job(ray: str, given: list[str]) -> None:
     import shlex
     import socket
 
+    from rollout_train.ray_cluster import prepare
+
+    prepare()
     from ray.job_submission import JobSubmissionClient
 
     client, host = JobSubmissionClient(ray), socket.gethostname()
