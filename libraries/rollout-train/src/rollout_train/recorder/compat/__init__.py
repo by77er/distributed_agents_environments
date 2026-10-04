@@ -17,7 +17,7 @@ refused the way each API refuses one, which harnesses compact on.
 """
 
 import itertools
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, cast
 
 from starlette.applications import Starlette
@@ -30,6 +30,7 @@ from rollout.contracts import (
     ContextOverflow,
     ModelEndpointError,
     SampleRequest,
+    SampleResult,
     arguments_digest,
     context_digests,
 )
@@ -37,7 +38,7 @@ from rollout_train.recorder.compat import chat, messages, responses
 from rollout_train.recorder.compat.wire import Failure, Format
 from rollout_train.recorder.recorder import SERVED_UNDER, Recorder
 
-__all__ = ["create_app"]
+__all__ = ["create_app", "key", "refused", "replied", "requested"]
 
 
 def create_app(recorder: Recorder) -> Starlette:
@@ -59,37 +60,18 @@ def create_app(recorder: Recorder) -> Starlette:
             if served is None:
                 return format.error(Failure.KEY, "this key names no session")
             session_id, endpoint = served
+            allowed = endpoint.describe(session_id).max_output_tokens
             try:
-                body = await request.json()
-                if not isinstance(body, dict):
-                    raise TypeError("the body is not a JSON object")
-                body = cast(dict[str, Any], body)
-                prompt = format.read(body)
-                if not prompt.messages:
-                    raise ValueError("the request has no messages")
-                effect = request.headers.get("idempotency-key") or f"{session_id}:harness:{next(counter)}"
-                allowed = endpoint.describe(session_id).max_output_tokens
-                cap = prompt.max_output_tokens
-                sample = SampleRequest(
-                    effect_id=effect,
-                    arguments_digest=arguments_digest(body),
-                    session_id=session_id,
-                    context=ContextDelta(append=prompt.messages, digest=context_digests(prompt.messages)[-1]),
-                    tools=prompt.tools,
-                    max_output_tokens=min(cap, allowed) if cap else None,
+                body, sample = await requested(
+                    request, format, session_id, allowed, f"{session_id}:harness:{next(counter)}"
                 )
             except (KeyError, TypeError, ValueError) as error:
                 return format.error(Failure.REQUEST, f"the request could not be read: {error}")
             try:
                 result = await endpoint.sample(sample)
-            except ContextOverflow as error:
-                return format.error(Failure.CONTEXT, str(error))
             except ModelEndpointError as error:
-                return format.error(Failure.ENDPOINT, str(error))
-            reply = format.reply(result, effect, body)
-            if body.get("stream"):
-                return StreamingResponse(format.events(reply), media_type="text/event-stream")
-            return JSONResponse(reply)
+                return refused(format, error)
+            return replied(format, result, sample.effect_id, body)
 
         return answer
 
@@ -107,3 +89,45 @@ def key(request: Request) -> str:
     """The key a client sent: OpenAI's clients send it as a bearer token, Anthropic's as `x-api-key`."""
     bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     return request.headers.get("x-api-key") or bearer
+
+
+async def requested(
+    request: Request, format: Format, session_id: str, allowed: int, effect: str
+) -> tuple[dict[str, Any], SampleRequest]:
+    """A request's body, and the sample it asks for in a session: under its `Idempotency-Key` if it has one, else
+    under `effect`, with its cap on the output kept within `allowed`. Raises `KeyError`, `TypeError` or `ValueError`
+    when it cannot be read."""
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise TypeError("the body is not a JSON object")
+    body = cast(dict[str, Any], body)
+    prompt = format.read(body)
+    if not prompt.messages:
+        raise ValueError("the request has no messages")
+    cap = prompt.max_output_tokens
+    sample = SampleRequest(
+        effect_id=request.headers.get("idempotency-key") or effect,
+        arguments_digest=arguments_digest(body),
+        session_id=session_id,
+        context=ContextDelta(append=prompt.messages, digest=context_digests(prompt.messages)[-1]),
+        tools=prompt.tools,
+        max_output_tokens=min(cap, allowed) if cap else None,
+    )
+    return body, sample
+
+
+def replied(
+    format: Format, result: SampleResult, effect: str, body: dict[str, Any], headers: Mapping[str, str] | None = None
+) -> Response:
+    """A sample as the reply to a request: one response, or with `"stream": true` its server-sent events."""
+    reply = format.reply(result, effect, body)
+    if body.get("stream"):
+        return StreamingResponse(format.events(reply), media_type="text/event-stream", headers=headers)
+    return JSONResponse(reply, headers=headers)
+
+
+def refused(format: Format, error: ModelEndpointError) -> Response:
+    """A sample that failed, as the API refuses it: a context too long for the model the way harnesses compact on."""
+    if isinstance(error, ContextOverflow):
+        return format.error(Failure.CONTEXT, str(error))
+    return format.error(Failure.ENDPOINT, str(error))
