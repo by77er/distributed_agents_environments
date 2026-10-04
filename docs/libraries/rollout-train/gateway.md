@@ -218,6 +218,9 @@ Replicas share nothing but the ledger and the blob store.
   `X-Forwarded-*` headers only from `--proxied` addresses (127.0.0.1 unless given).
 - **TLS of its own.** With `--certificate` and `--private-key`, a replica serves HTTPS itself.
 - **Health.** A load balancer sends traffic to replicas whose `/readyz` answers 200.
+- **Heartbeats.** A replica beats beside the ledger every 15 seconds ([heartbeats](rollouts.md#heartbeats)) as
+  `gateway/HOST/LISTEN` (`rollout_train.gateway.beats`): kind `gateway`, its host, where it listens, its machine, and
+  what each channel it samples serves and how fast. The [monitor](monitor.md#the-machines) shows the replicas alive.
 
 ## A runner served by the gateway
 

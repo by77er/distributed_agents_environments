@@ -249,12 +249,22 @@ async def _gateway(
     import uvicorn
 
     from rollout_train.gateway import create_app, deployed
+    from rollout_train.gateway.beats import about, name_of
+    from rollout_train.hosting import ledger_of
+    from rollout_train.presence import beating, presence_of
     from rollout_train.profile import GatewaySpec, Profile
 
     described = Profile.load(profile, directory=directory)
-    host, _, port = (listen or (described.gateway or GatewaySpec()).listen).rpartition(":")
+    listening = listen or (described.gateway or GatewaySpec()).listen
+    host, _, port = listening.rpartition(":")
     async with contextlib.AsyncExitStack() as stack:
-        app = create_app(await deployed(described, stack))
+        gateway = await deployed(described, stack)
+        app = create_app(gateway)
+        presence = presence_of(ledger_of(described))
+        if presence is not None:  # (the monitor shows the replicas alive)
+            said = lambda: about(gateway, listening, described.directory)  # noqa: E731
+            beats = asyncio.ensure_future(beating(presence, name_of(listening), said))
+            stack.callback(beats.cancel)
         config = uvicorn.Config(
             app,
             host=host,

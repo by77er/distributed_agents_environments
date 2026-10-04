@@ -68,13 +68,16 @@ async def test_machines_engines_and_throughput_come_from_the_runners_heartbeats(
     (channel,) = run["channels"]
     assert channel["adapter"] == "kpqx" and channel["version"] == 1 and channel["throughput"][0]["requests"] == 4
     assert run["state"] == "running"  # (it beat just now, though its ledger is a minute old)
-    machines = (await system.machines())["machines"]
-    assert sorted(each["runner"] for each in machines) == ["far/train", "launcher/far"]
-    (far,) = [each for each in machines if each["runner"] == "far/train"]
-    assert far["alive"] and far["machine"]["accelerators"] == [gpu] and far["places"] == 6 and len(far["history"]) == 2
+    machines = await system.machines()
+    assert [each["name"] for each in machines["runners"]] == ["far/train"]
+    assert [each["name"] for each in machines["launchers"]] == ["launcher/far"]
+    (far,) = machines["runners"]
+    assert far["alive"] and far["places"] == 6 and far["channels"][0]["serving"] == "kpqx"
+    (host,) = [each for each in machines["hosts"] if each["host"] == "far/train"]  # (its beats name no host)
+    assert host["machine"]["accelerators"] == [gpu] and len(host["history"]) == 2
     figures = await system.statistics()
     (measured,) = [each for each in figures["runs"] if each["run"] == "train"]
-    assert [each["channel"] for each in measured["inference"]] == ["policy"] and "machines" in figures
+    assert [each["channel"] for each in measured["inference"]] == ["policy"] and "machines" not in figures
     published = [edge for edge in (await system.lineage())["runs"] if edge["run"] == "train"]
     assert published == [] or published[0]["latest"] in (None, "kpqx")
 

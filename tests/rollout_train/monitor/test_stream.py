@@ -104,7 +104,7 @@ async def test_an_answer_names_its_version_and_one_asked_again_with_it_is_told_n
             assert answer.status_code == 200 and etag.startswith('W/"')
             assert (await client.get(path, headers={"If-None-Match": etag})).status_code == 304
         assert (await client.get("/api/groups/train/9")).status_code == 404
-        assert (await client.get("/api/machines")).json() == {"machines": []}  # (no runner has beaten)
+        assert (await client.get("/api/machines")).json()["hosts"] == []  # (nothing has beaten)
 
 
 async def test_a_run_is_named_again_and_the_page_hears_of_it(tmp_path: Path) -> None:

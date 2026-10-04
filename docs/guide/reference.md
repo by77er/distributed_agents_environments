@@ -4861,8 +4861,11 @@ class System
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
   beside the ledger.
 - `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
-  throughput from its runners' heartbeats, what the runs are called, and the runners' machines.
-- `async def machines(self) -> dict[str, Any]` — Every runner's machine, as its heartbeats say: now, and over its recent beats.
+  throughput from its runners' heartbeats, and what the runs are called.
+- `async def machines(self) -> dict[str, Any]` — Every machine that beats and the roles on it, as the heartbeats and the ledger say
+  (`rollout_train.monitor.machines`): the runners and the episodes their claims hold, the sandbox pools and
+  their leases, the engine hosts and how far behind what their run wants each engine is, the launchers and their
+  launches going, and the gateways.
 - `async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
   its step and the checkpoint it made, and its outcome.
 - `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the

@@ -165,7 +165,10 @@ since the beat before (requests, tokens, tokens a second, requests at once); for
 other machines, by its name within each run (`RUN/NAME`), what each of its servers would sample from and how far
 behind that is. The [monitor](monitor.md) shows machines, inference throughput and what is served from these
 beats. An engine host (`rollout engines`, kind `engines`) beats with the run it follows, its machine, and what each
-channel's servers serve ([what a channel should serve](channels.md#what-a-channel-should-serve)).
+channel's servers serve ([what a channel should serve](channels.md#what-a-channel-should-serve)); a gateway replica
+(kind `gateway`) with where it listens, its machine and its channels ([the gateway](gateway.md#running-it)); a pool on
+a machine of its own (kind `pool`) with how full it is; a launcher (kind `launcher`) with what it offers. The
+monitor's [Machines page](monitor.md#the-machines) shows each by its kind.
 
 ## The record
 

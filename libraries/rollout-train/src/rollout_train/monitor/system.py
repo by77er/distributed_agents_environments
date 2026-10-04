@@ -44,6 +44,7 @@ from rollout_train.evals import (
     subject_table,
     suite_of,
 )
+from rollout_train.inference.remote import ENGINES
 from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import (
     ASKED,
@@ -64,6 +65,7 @@ from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
+from rollout_train.monitor.machines import kind_of, machines
 from rollout_train.monitor.scores import evals_of, path_of
 from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
@@ -96,6 +98,8 @@ from rollout_train.registry import (
 )
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, Claims, of_episode
+from rollout_train.sandboxes import leases_of
+from rollout_train.serving import SERVING
 from rollout_train.settings import CHANGEABLE, EVALS_SUITE, TRAINER, Desired, desired_settings_of
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
@@ -596,16 +600,31 @@ class System:
 
     async def statistics(self) -> dict[str, Any]:
         """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
-        throughput from its runners' heartbeats, what the runs are called, and the runners' machines."""
+        throughput from its runners' heartbeats, and what the runs are called."""
         tables = await self._tables()
         beats = await self._beats()
         figures = await asyncio.to_thread(statistics, tables, _noted(beats))
         called = await names(registry_of(self._ledger))
-        return {**figures, "names": {"runs": called["runs"]}, "machines": _machines(beats)}
+        return {**figures, "names": {"runs": called["runs"]}}
 
     async def machines(self) -> dict[str, Any]:
-        """Every runner's machine, as its heartbeats say: now, and over its recent beats."""
-        return {"machines": _machines(await self._beats())}
+        """Every machine that beats and the roles on it, as the heartbeats and the ledger say
+        (`rollout_train.monitor.machines`): the runners and the episodes their claims hold, the sandbox pools and
+        their leases, the engine hosts and how far behind what their run wants each engine is, the launchers and their
+        launches going, and the gateways."""
+        beats = await self._beats()
+        if not await asyncio.to_thread(present, self._ledger):
+            return machines(beats, now=time.time())
+        fences = await self._ledger.fences()
+        claims = {run: await Claims.read(self._ledger, run) for run in await runs_in(self._ledger)}
+        held = leases_of(self._ledger)
+        asked = launches_of(self._ledger)
+        followed = {str(beat.about.get("follows")) for beat in beats if kind_of(beat) == ENGINES}
+        serving = {run: await self._ledger.read(table(run, SERVING)) for run in followed}
+        return machines(
+            beats, now=time.time(), claims=claims, fences=fences, leases=await held.all() if held else [],
+            launches=await asked.all() if asked else [], serving=serving,
+        )  # fmt: skip
 
     async def _beats(self) -> list[Beat]:
         """Every runner's newest heartbeat (none where there is no ledger: reading makes none)."""
@@ -1341,14 +1360,6 @@ def _runners(fences: Mapping[str, int], played: Mapping[str, _Played]) -> list[d
                 shown = {key: claim[key] for key in ("group", "episode", "attempt", "at")}
                 runner["playing"].append({"run": run, **shown})
     return sorted(found.values(), key=lambda runner: (not runner["playing"], -(runner["last"] or 0.0)))
-
-
-def _machines(beats: list[Beat]) -> list[dict[str, Any]]:
-    """Every runner's machine as its heartbeats say: whether it is alive, what it said last, and its recent beats."""
-    return [
-        {"runner": beat.runner, "at": beat.at, "alive": alive(beat), **beat.about, "history": beat.history}
-        for beat in sorted(beats, key=lambda each: (not alive(each), -each.at))
-    ]
 
 
 def _noted(beats: list[Beat]) -> dict[str, list[dict[str, Any]]]:

@@ -1,10 +1,12 @@
 """Heartbeats beside the ledger, where a run's blobs are, and how a machine is doing."""
 
+import asyncio
 import subprocess
 import time
 from pathlib import Path
 
 import pytest
+from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout_train import machine, presence
@@ -39,6 +41,26 @@ async def test_a_runner_beats_and_its_newest_beat_is_kept_with_its_recent_measur
 def test_a_runner_is_alive_while_it_beat_within_the_last_stale_seconds() -> None:
     assert alive(Beat("here", 1000.0, {}, age=STALE)) and not alive(Beat("here", 1000.0, {}, age=STALE + 1))
     assert not alive(None)
+
+
+async def test_a_process_beats_at_once_and_then_every_few_seconds_until_cancelled(tmp_path: Path) -> None:
+    """A gateway replica beats so (`presence.beating`): what it says is asked for at each beat, in a thread."""
+    found = presence_of(FileLedger(tmp_path / "files"))
+    assert found is not None
+    said: list[int] = []
+
+    def about() -> dict[str, JsonValue]:
+        said.append(len(said))
+        return {"kind": "gateway", "beats": len(said)}
+
+    beats = asyncio.ensure_future(presence.beating(found, "gateway/here/0.0.0.0:8830", about, every=0.01))
+    while len(said) < 3:  # noqa: ASYNC110 (the beats are another task's)
+        await asyncio.sleep(0.01)
+    beats.cancel()
+    await asyncio.gather(beats, return_exceptions=True)
+    (beat,) = await found.beats()
+    assert beat.runner == "gateway/here/0.0.0.0:8830" and beat.about["kind"] == "gateway"
+    assert isinstance(beat.about["beats"], int) and beat.about["beats"] >= 3  # (beaten again, its about asked again)
 
 
 @pytest.mark.parametrize("kind", ["sqlite", "postgres"])

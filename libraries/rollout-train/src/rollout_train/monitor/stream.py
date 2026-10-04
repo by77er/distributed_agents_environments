@@ -4,11 +4,11 @@ that changes when what it says does.
 A topic is a thing the page shows, by name:
 
 - `system`: where every run stands (`System.snapshot`);
-- `machines`: every runner's machine, as its heartbeats say (`System.machines`);
+- `machines`: every machine that beats and the roles on it (`System.machines`);
 - `launches`: the runs asked for, and the launchers alive with what each offers (`System.launches`);
 - `evals`: the suites and the evals that played them (`System.evals`);
 - `feeds`: every episode in the runs' feeds, summarised (`System.feeds`);
-- `statistics`: every run in figures (`System.statistics`, without the machines);
+- `statistics`: every run in figures (`System.statistics`);
 - `checkpoints`, `checkpoints/sample`: the checkpoints as a graph, without or with the sample fixture
   (`System.lineage`);
 - `checkpoint-evals/ID`, `path/ID`: every eval a checkpoint has had, and its line with each point's scores
@@ -114,9 +114,7 @@ class Hub:
         if topic == "feeds":
             return await asyncio.to_thread(system.feeds)
         if topic == "statistics":
-            figures = await system.statistics()
-            figures.pop("machines", None)
-            return figures
+            return await system.statistics()
         if topic in ("checkpoints", "checkpoints/sample"):
             return await system.lineage(sample=topic.endswith("/sample"))
         if topic.startswith("checkpoint-evals/"):

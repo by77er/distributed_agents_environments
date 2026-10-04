@@ -16,10 +16,11 @@ and a SQLite database serve one machine, whose clock every writer and reader sha
 """
 
 import asyncio
+import contextlib
 import fcntl
 import json
 import time
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -70,6 +71,17 @@ def presence_of(ledger: Ledger) -> Presence | None:
     if isinstance(ledger, FileLedger):
         return FilePresence(ledger.directory)
     return getattr(ledger, "presence", None)
+
+
+async def beating(
+    presence: Presence, name: str, about: Callable[[], Mapping[str, JsonValue]], *, every: float = 15.0
+) -> None:
+    """Beat as `name` now and every `every` seconds until cancelled, with what `about` says (called in a thread: it may
+    measure). A beat that fails is missed: the next says the same."""
+    while True:
+        with contextlib.suppress(Exception):
+            await presence.beat(name, await asyncio.to_thread(about))
+        await asyncio.sleep(every)
 
 
 def kept(history: list[dict[str, Any]], at: float, about: Mapping[str, JsonValue]) -> list[dict[str, Any]]:

@@ -47,7 +47,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
     - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
     - `/api/system`: where every run stands (`System.snapshot`);
-    - `/api/machines`: every runner's machine as its heartbeats say, now and over its recent beats;
+    - `/api/machines`: every machine that beats and the roles on it, what each holds and how full it is
+      (`System.machines`);
     - `/api/evals`: the suites, their versions and the evals that played them (`System.evals`); `POST
       /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`), and
       `/api/environments/{name}` says what the suites' forms need of an environment (`System.environment`);

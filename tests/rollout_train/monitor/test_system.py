@@ -90,7 +90,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         system = (await client.get("/api/system")).json()
-        machines = (await client.get("/api/machines")).json()["machines"]
+        machines = (await client.get("/api/machines")).json()
         group = (await client.get("/api/groups/train/1")).json()
         script = re.search(r'src="\./(assets/[^"]+\.js)"', (await client.get("/")).text)
         assert script and (await client.get(f"/{script.group(1)}")).status_code == 200  # (the page, as built)
@@ -148,9 +148,10 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert system["ledger"]["fences"] == {scope("train"): 1, runner_scope("here"): 1}
     assert system["ledger"]["tables"][table("train", GROUPS)] == 3
     assert system["kept"]["checkpoints"] > 0 and system["kept"]["episodes"] > 0
-    (machine,) = machines
-    assert machine["runner"] == "here" and machine["alive"] and machine["run"] == "train"
-    assert machine["machine"]["disk"]["total"] > 0 and machine["places"] == 4 and len(machine["history"]) > 1
+    (machine,) = machines["runners"]
+    assert machine["name"] == "here" and machine["alive"] and machine["run"] == "train" and machine["places"] == 4
+    (host,) = machines["hosts"]
+    assert host["machine"]["disk"]["total"] > 0 and len(host["history"]) > 1
     assert system["written"] <= system["at"]
 
 
