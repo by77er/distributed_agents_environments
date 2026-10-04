@@ -26,19 +26,8 @@ export const versionTag = (id: string | null | undefined): string => `v${version
 /** The suite a reference names (`NAME` or `NAME@N`). */
 export const suiteName = (reference: string): string => reference.split("@")[0];
 
-/** Every version of a suite, oldest first (a suite the monitor says no versions of: its version 1, of one entry). */
-export function versionsOf(suite: Suite & { environments?: (string | null)[] }): SuiteVersion[] {
-  if (suite.versions?.length) return suite.versions;
-  const environment = suite.environments?.[0] ?? null;
-  return [{
-    id: `${suite.suite}@1`, number: 1, environments: [environment], made: null, held_out: false, edited_from: null,
-    entries: [{
-      environment, environment_version: null, chosen: DRAWN, eval_data: null, rows: null, seeds: null, held_out: false,
-      episodes: 1, thinking_tokens: null, answer_tokens: null, offset: 0, starts: suite.starts.length,
-    }],
-    starts: suite.starts,
-  }];
-}
+/** Every version of a suite, oldest first. */
+export const versionsOf = (suite: Suite): SuiteVersion[] => suite.versions ?? [];
 
 /** The version a suite's name points to. */
 export function currentOf(suite: Suite): SuiteVersion {
@@ -46,8 +35,8 @@ export function currentOf(suite: Suite): SuiteVersion {
   return versions.find(each => each.id === suite.version) ?? versions[versions.length - 1];
 }
 
-/** The version a subject played, by id (one from before versions: version 1). */
-export const playedVersion = (subject: Subject, suite: string): string => subject.version ?? `${suite}@1`;
+/** The version a subject played, by id. */
+export const playedVersion = (subject: Subject): string | undefined => subject.version;
 
 /** A version's starts of one entry. */
 export const entryStarts = (version: SuiteVersion, entry: SuiteEntry): SuiteStart[] =>
@@ -79,7 +68,7 @@ export function versionGroups(suite: Suite, subjects: Subject[], picked: string)
   return [...versionsOf(suite)]
     .filter(version => picked === ALL || version.id === picked)
     .sort((a, b) => b.number - a.number)
-    .map(version => ({ version, subjects: subjects.filter(subject => playedVersion(subject, suite.suite) === version.id) }))
+    .map(version => ({ version, subjects: subjects.filter(subject => playedVersion(subject) === version.id) }))
     .filter(group => group.subjects.length || group.version.id === picked);
 }
 

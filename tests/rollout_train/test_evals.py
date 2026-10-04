@@ -31,7 +31,6 @@ from rollout_train.evals import (
     suite_entry,
     suite_for,
     suite_of,
-    suite_table,
     suites_in,
 )
 from rollout_train.launcher import LAUNCHER, Launcher
@@ -111,16 +110,6 @@ async def test_an_environments_eval_data_is_frozen_as_a_suite_the_first_time_it_
         await suite_for(ledger, "words-v9", ENVIRONMENT, words)
     by_hand = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[5])])
     assert not by_hand.held_out and by_hand.entries[0].environment_version == "1"
-
-
-async def test_a_suite_made_as_a_catalogs_reads_as_its_environments(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    fence = await ledger.take("suites/older")
-    await ledger.append(suite_table("older", "suite"), "suite", {"catalog": ENVIRONMENT, "made": 1.0}, fence)
-    start: Any = {"task": "say-yes", "title": "say yes", "seed": 1, "parameters": {"word": "yes", "seed": 1}}
-    await ledger.append(suite_table("older", "starts"), "1", start, fence)
-    found = await suite_of(ledger, "older")
-    assert found is not None and found.environments == [ENVIRONMENT] and len(found.starts) == 1
 
 
 async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tmp_path: Path) -> None:

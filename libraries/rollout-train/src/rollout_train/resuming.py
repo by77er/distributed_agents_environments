@@ -153,7 +153,9 @@ async def _asked(ledger: Ledger, run: str, newest: Mapping[str, Any], before: As
         if before is not None:
             return before
         subject: Any = (await ledger.read(subject_table(str(newest.get("suite")), run, "subject"))).get("subject") or {}
-        version = started_version(newest, subject) or str(newest.get("suite"))
+        version = started_version(newest, subject)
+        if version is None:
+            raise ValueError(f"{run}'s start and subject say no version of its suite")
         suite = await suite_of(ledger, version)
         return Asked(
             "", environment, await _name(ledger, run), start=newest.get("checkpoint"), kind=EVAL, suite=version,

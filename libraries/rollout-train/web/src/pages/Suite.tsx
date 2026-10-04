@@ -34,7 +34,7 @@ export function Suite({ name }: { name: string }) {
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind === "eval" && suiteName(each.asked.suite ?? "") === name);
   const said = anySolved(suite.subjects), score = (subject: Subject) => (said ? shareOf(subject) : subject.reward ?? null);
   const ranked = [...suite.subjects].sort((a, b) => (score(b) ?? -Infinity) - (score(a) ?? -Infinity));
-  const compared = ranked.filter(subject => playedVersion(subject, name) === shown.id);  // (subjects compare within a version)
+  const compared = ranked.filter(subject => playedVersion(subject) === shown.id);  // (subjects compare within a version)
   const listed = picked === ALL ? ranked : compared;
   const one = shown.entries.length === 1;  // (a best of several environments would weigh one's rewards against another's)
   const action = <button type="button" className="action" onClick={() => setEditing(!editing)}>{editing ? "Close" : "Edit"}</button>;
@@ -118,7 +118,7 @@ function Entries({ version }: { version: SuiteVersion }) {
 /** Which version the grid shows: every version, or one. */
 function VersionPicker({ suite, picked, onPick }: { suite: EvalSuite; picked: string; onPick: (version: string) => void }) {
   const current = currentOf(suite);
-  const played = (id: string) => suite.subjects.filter(subject => playedVersion(subject, suite.suite) === id).length;
+  const played = (id: string) => suite.subjects.filter(subject => playedVersion(subject) === id).length;
   return (
     <select className="picker" value={picked} onChange={event => onPick(event.target.value)} aria-label="version">
       <option value={ALL}>every version</option>

@@ -129,36 +129,6 @@ async def test_a_suites_name_points_to_a_version_beside_the_ledger(tmp_path: Pat
         await registry.point_suite("a/b", "a/b@1")
 
 
-async def test_a_suite_made_before_versions_reads_as_its_version_1(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    fence = await ledger.take("suites/older")
-    start: Any = {"task": "say-yes", "title": "say yes", "seed": 1, "parameters": {"word": "yes", "seed": 137}}
-    record: Any = {"environment": ENVIRONMENT, "version": "0.9", "made": 1.0, "rows": ["say-yes"], "seeds": [1]}
-    await ledger.append(suite_table("older", "suite"), "suite", record | {"held_out": True, "starts": [start]}, fence)
-    await ledger.append(suite_table("oldest", "suite"), "suite", record, fence)  # (and its starts in a table)
-    await ledger.append(suite_table("oldest", "starts"), "1", start, fence)
-    subject: Any = {"kind": "model", "model": "tiny", "episodes": 1, "asked_by": "by hand"}  # (it says no version)
-    await ledger.append(subject_table("older", "eval-old", "subject"), "subject", subject, fence)
-    await ledger.append(subject_table("older", "eval-old", "results"), "1-1", {"reward": 1.0, "solved": True}, fence)
-    older, oldest = await suite_of(ledger, "older"), await suite_of(ledger, "oldest@1")
-    assert older is not None and oldest is not None
-    (was,), (first,) = older.entries, oldest.entries  # (a version of one entry)
-    assert (older.id, was.environment, was.environment_version) == ("older@1", ENVIRONMENT, "0.9")
-    assert (was.chosen, was.eval_data) == (EVAL_DATA, "older")  # (held out: its eval data of its name)
-    assert (oldest.id, first.chosen, len(oldest.starts), first.episodes) == ("oldest@1", DRAWN, 1, 1)
-
-    edited = await edit_suite(ledger, "older", [suite_entry(ENVIRONMENT, words, starts=older.starts, episodes=2)])
-    assert edited.id == "older@2" and edited.entries[0].environment_version == "1" and edited.starts == older.starts
-    assert edited.entries[0].chosen == EVAL_DATA  # (the same starts: chosen as they were)
-    again = await suite_of(ledger, "older@1")
-    assert again is not None and again.entries[0].environment_version == "0.9"
-    listed = await System(ledger=ledger).evals()
-    (shown,) = [each for each in listed["suites"] if each["suite"] == "older"]
-    assert shown["version"] == "older@2" and [each["id"] for each in shown["versions"]] == ["older@1", "older@2"]
-    (played,) = shown["subjects"]
-    assert played["version"] == "older@1" and played["starts"] == 1  # (an eval from before versions played version 1)
-
-
 async def test_every_eval_keeps_the_version_it_played(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)

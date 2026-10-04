@@ -104,7 +104,7 @@ function SubjectsCard() {
 function SuiteTile({ suite }: { suite: EvalSuite }) {
   const known = useKnown();
   const current = currentOf(suite), versions = versionsOf(suite);
-  const subjects = suite.subjects.filter(subject => playedVersion(subject, suite.suite) === current.id);  // (they compare)
+  const subjects = suite.subjects.filter(subject => playedVersion(subject) === current.id);  // (they compare)
   const said = anySolved(subjects), score = (subject: Subject) => (said ? shareOf(subject) : subject.reward) ?? -Infinity;
   const one = current.entries.length === 1;  // (a best of several environments would weigh one's rewards against another's)
   const best = one ? [...subjects].filter(each => each.played).sort((a, b) => score(b) - score(a))[0] : undefined;

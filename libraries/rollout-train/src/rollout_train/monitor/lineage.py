@@ -321,7 +321,7 @@ class _Reading:
             subjects: list[dict[str, Any]] = []
             for subject in self.named(f"{_EVALUATIONS}{suite}/", "/results"):
                 about = self.record(f"{_EVALUATIONS}{suite}/{subject}/subject", "subject")
-                version = played_version(about, suite)
+                version = played_version(about)
                 by_start: dict[str, list[dict[str, Any]]] = {}
                 episodes = eval_episodes(self.tables, suite, subject)  # (an eval's subject is its run)
                 for key, result in self.read(f"{_EVALUATIONS}{suite}/{subject}/results").items():
@@ -344,7 +344,7 @@ class _Reading:
                         "version": version,
                         "starts": len(by_id[version].starts) if version in by_id else 0,
                         "results": by_start,
-                        "entries": _entries(by_id.get(version), by_start, parts_of(self.tables, suite, subject)),
+                        "entries": _entries(by_id.get(version or ""), by_start, parts_of(self.tables, suite, subject)),
                         "played": len(played),
                         "solved": sum(solved) if solved or not played else None,
                         "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,

@@ -255,7 +255,10 @@ def _played_by(start: Mapping[str, Any], run: str, tables: Mapping[str, Mapping[
     if start.get("kind") != EVAL or not start.get("suite"):
         return []
     subject: Any = tables.get(subject_table(str(start["suite"]), run, "subject"), {}).get("subject") or {}
-    name, number = parsed(started_version(start, subject) or str(start["suite"]))
+    version = started_version(start, subject)
+    if version is None:
+        return []
+    name, number = parsed(version)
     versions = versions_in(tables, name)
     found = next((each for each in versions if each.number == number), versions[-1] if versions else None)
     return [each for each in found.environments if each] if found is not None else []

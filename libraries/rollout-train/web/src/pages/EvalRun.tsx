@@ -28,7 +28,7 @@ export function EvalRun({ run }: { run: string }) {
   if (!entry && !listed) return <Empty>There is no eval {run}.</Empty>;
   const suite = evals.suites.find(each => each.suite === listed?.suite);
   const subject = suite?.subjects.find(each => each.subject === run);
-  const version = suite ? versionsOf(suite).find(each => each.id === (subject ? playedVersion(subject, suite.suite) : listed?.version)) : undefined;
+  const version = suite ? versionsOf(suite).find(each => each.id === (subject ? playedVersion(subject) : listed?.version)) : undefined;
   const starts = version?.starts ?? suite?.starts ?? [];
   const played = Object.values(subject?.results ?? {}).flat();
   const said = played.filter(each => each.solved != null);

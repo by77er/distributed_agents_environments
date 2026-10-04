@@ -285,14 +285,14 @@ describe("a suite", () => {
     const checkpoints = [checkpoint("kpqxlmnoprstuvwx", "kpqx", "run_1", 3)];
     client.setQueryData(topics.system().key, { ...system([run("run_1", 1)]), checkpoints });
     client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
-    const starts = [{ start: "1", task: "say-yes", seed: 1, title: "yes" }, { start: "2", task: "say-no", seed: 1, title: "no" }];
+    const only = version(1, [["games:words", [["say-yes", 1], ["say-no", 1]]]], "words-v1");
     const evals: Evals = {
       suites: [{
-        suite: "words-v1", environments: ["games:words"], made: 1, starts,
+        suite: "words-v1", version: only.id, number: 1, environments: ["games:words"], made: 1, starts: only.starts, versions: [only],
         subjects: [
-          { subject: "eval_a", kind: "checkpoint", checkpoint: "kpqxlmnoprstuvwx", model: "tiny", episodes: 1, played: 2, solved: 2, reward: 1,
-            results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: true, reward: 1 }] } },
-          { subject: "eval_b", kind: "model", model: "org/tiny", episodes: 1, played: 2, solved: 1, reward: 0.5,
+          { subject: "eval_a", kind: "checkpoint", checkpoint: "kpqxlmnoprstuvwx", model: "tiny", version: only.id, episodes: 1, played: 2, solved: 2,
+            reward: 1, results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: true, reward: 1 }] } },
+          { subject: "eval_b", kind: "model", model: "org/tiny", version: only.id, episodes: 1, played: 2, solved: 1, reward: 0.5,
             results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: false, reward: 0 }] } },
         ],
       }],
@@ -479,7 +479,6 @@ describe("a suite's versions", () => {
       ["games:words|say-yes|1", { "words@1": "1" }],
     ]);
     expect(versionTag("words@12")).toBe("v12");
-    expect(versionTag(undefined)).toBe("v1");  // (an eval from before versions played version 1)
   });
 
   it("show where versions change in the grid, and compare subjects of one version only", () => {

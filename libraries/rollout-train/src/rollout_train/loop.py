@@ -66,7 +66,7 @@ import time
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -76,7 +76,7 @@ from rollout.environment import Environment, binding_for, held_out, train_start
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
-from rollout_train.evals import Schedule, evaluate, suite_of
+from rollout_train.evals import Schedule, evaluate
 from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.record import (
@@ -197,7 +197,7 @@ async def train(
         curriculum.recorded(recorded[number])
     for key in sorted(evaluated):
         said = evaluated[key]
-        for entry, played_by in await _entries_of(ledger, said):
+        for entry, played_by in _entries_of(said):
             curriculum.evaluated(str(said["suite"]), str(said["checkpoint"]), await results(ledger, played_by), entry)
     if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
         raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
@@ -296,13 +296,13 @@ async def train(
 
     async def schedule_of(step: int) -> Schedule | None:
         """The evals a step was decided with (those of `evals` for a step whose record says no settings): the version
-        its record names (a step decided before suites had versions names the suite)."""
+        its record names."""
         said = steps.get(step, {}).get("settings")
         if not isinstance(said, dict):
             return evals
         if not said.get(EVALS_SUITE):
             return None
-        version = str(steps[step].get("suite_version") or said[EVALS_SUITE])
+        version = str(steps[step]["suite_version"])
         key = (version, *cadence(said))
         if key not in schedules:
             schedules[key] = await schedule_for(*key)
@@ -587,14 +587,10 @@ async def train(
             await asyncio.gather(stepping, return_exceptions=True)
 
 
-async def _entries_of(ledger: Ledger, said: Mapping[str, JsonValue]) -> list[tuple[str | None, str]]:
-    """The entries an eval in a run's `evals` table played, each its environment and the run that played it; for one
-    whose record names no entries, its run, of the environment its version's one entry is."""
-    entries = said.get("entries")
-    if isinstance(entries, list):
-        return [(str(each["environment"]), str(each["run"])) for each in entries if isinstance(each, dict)]
-    version = await suite_of(ledger, str(said.get("version") or said["suite"]))
-    return [(version.environments[0] if version is not None else None, str(said["run"]))]
+def _entries_of(said: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """The entries an eval in a run's `evals` table played, each its environment and the run that played it."""
+    entries = cast(list[Mapping[str, Any]], said.get("entries") or [])
+    return [(str(each["environment"]), str(each["run"])) for each in entries]
 
 
 async def _over(checkpoints: Checkpoints, checkpoint: Checkpoint) -> str | None:

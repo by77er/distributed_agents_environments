@@ -75,11 +75,6 @@ Two makers of one suite at once leave one of their suites whole. The second to t
 one. Two editors at once make two versions, one after the other: an editor whose number another took tries the next
 (and, given `base=`, is refused), and the name only moves forward, so it points to the later.
 
-A record that says one environment and no `entries` is a version of one entry. A suite made before suites had versions
-is its version 1: one such record whose `version` is the environment's version, or, older still, a record and its
-starts in a table of their own (`evaluations/SUITE/starts`, by number from 1). One held
-out of training was the environment's eval data of the suite's name. An eval recorded before then played version 1.
-
 ## An eval
 
 ```bash

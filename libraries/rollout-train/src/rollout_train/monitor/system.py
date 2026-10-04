@@ -666,7 +666,7 @@ class System:
                     "run": run,
                     "name": called["runs"].get(run, run),
                     "suite": latest.get("suite"),
-                    "version": played_version(who, suite),
+                    "version": played_version(who),
                     "checkpoint": latest.get("checkpoint"),
                     "started": latest.get("started"),
                     "played": len(results),

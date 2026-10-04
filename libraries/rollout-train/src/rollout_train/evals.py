@@ -16,9 +16,7 @@ suite's fence (`suites/NAME`) and never changed or deleted: editing a suite (`ed
 suite's name points to its newest version: the registry beside the ledger holds where
 (`rollout_train.registry.SuiteName`), and each edit moves it; a name the registry holds nothing for is its newest
 version in the ledger. Every version is in `evaluations/NAME/suite`: version 1 under the key `suite`, each later one
-under its number. A record that says one environment and no entries is a version of one entry; a suite made before
-suites had versions is its version 1: one such record, or, older still, a record and its starts in a table of their own
-(`evaluations/NAME/starts`, by number from 1).
+under its number.
 
 Most suites are an environment's eval data, frozen as version 1 of a suite of that name the first time it is played
 (`suite_for`). One can be made by hand too (`make_suite`, of entries `suite_entry` makes). Two makers of one suite at
@@ -35,11 +33,10 @@ runner plays an entry only where it has what the entry's environment needs. A pa
 (`part_of`). Each run asks for one group per start of its entry with that entry's episodes each (runners play them as
 they play any run's), and each group's result is written to that run's own `results`, so a part reads like any run. The
 eval records each episode's outcome under `evaluations/SUITE/EVAL/results` (`START-EPISODE`, the start by its number in
-the version), beside a record of the subject, the version it played and its parts (`evaluations/SUITE/EVAL/subject`; one
-recorded before suites had versions played version 1), and, once every start has been played, each entry's scores
-(`scores`, in the same table): episodes played, solved where its environment's results say it, and the mean reward.
-Entries are scored apart: environments' rewards do not compare. Started again, it goes on: what it decided and what it
-recorded are not done twice.
+the version), beside a record of the subject, the version it played and its parts (`evaluations/SUITE/EVAL/subject`),
+and, once every start has been played, each entry's scores (`scores`, in the same table): episodes played, solved where
+its environment's results say it, and the mean reward. Entries are scored apart: environments' rewards do not compare.
+Started again, it goes on: what it decided and what it recorded are not done twice.
 
 A training run can evaluate its own checkpoints as it makes them (a `Schedule`): the loop plays the suite with the
 checkpoint of every `every`th step between that step and the next, on the channel that already serves it (the policy is
@@ -100,8 +97,7 @@ MAKERS = 5
 
 
 def suite_table(suite: str, part: str) -> str:
-    """A suite's table: `suite` (its versions) or `starts` (version 1's starts, for a suite made before suites were one
-    record)."""
+    """A suite's table: `suite` (its versions)."""
     return f"{EVALUATIONS}{suite}/{part}"
 
 
@@ -132,10 +128,10 @@ def started_version(start: Mapping[str, Any], subject: Mapping[str, Any]) -> str
     return str(found) if found else None
 
 
-def played_version(subject: Mapping[str, Any], suite: str) -> str:
-    """The version an eval played, by id, from its subject's record: version 1 for one recorded before suites had
-    versions."""
-    return str(subject.get("version") or version_id(suite, 1))
+def played_version(subject: Mapping[str, Any]) -> str | None:
+    """The version an eval played, by id, from its subject's record."""
+    found = subject.get("version")
+    return str(found) if found else None
 
 
 @dataclass(frozen=True)
@@ -307,9 +303,7 @@ async def make_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry]) -
     there = await appended(ledger, suite_table(name, FIRST), FIRST, made.record(), fence)
     if there.wrote:
         return made
-    if "starts" in (record := _mapping(there.record)) or "entries" in record:  # another maker's, made meanwhile
-        return _as_suite(name, 1, record, {})
-    return await suite_of(ledger, version_id(name, 1)) or made  # (one made as a record and a table of starts)
+    return _as_suite(name, 1, _mapping(there.record))  # (another maker's, made meanwhile)
 
 
 async def edit_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry], *, base: int | None = None) -> Suite:
@@ -405,52 +399,36 @@ async def pointed_to(ledger: Ledger, name: str) -> int | None:
 
 async def versions_of(ledger: Ledger, name: str) -> list[Suite]:
     """Every version of a suite, oldest first (none: there is no such suite)."""
-    records = await ledger.read(suite_table(name, FIRST))
-    first = _mapping(records.get(FIRST))
-    starts = {} if "starts" in first or "entries" in first else await ledger.read(suite_table(name, "starts"))
-    return _versions(name, records, starts)
+    return _versions(name, await ledger.read(suite_table(name, FIRST)))
 
 
 def versions_in(tables: Mapping[str, Mapping[str, JsonValue]], name: str) -> list[Suite]:
     """Every version of a suite, oldest first, from a ledger's tables as read (by name)."""
-    return _versions(name, tables.get(suite_table(name, FIRST), {}), tables.get(suite_table(name, "starts"), {}))
+    return _versions(name, tables.get(suite_table(name, FIRST), {}))
 
 
-def _versions(name: str, records: Mapping[str, JsonValue], starts: Mapping[str, JsonValue]) -> list[Suite]:
+def _versions(name: str, records: Mapping[str, JsonValue]) -> list[Suite]:
     found: list[Suite] = []
-    if records.get(FIRST) is not None or starts:
-        found.append(_as_suite(name, 1, _mapping(records.get(FIRST)), starts))
+    if records.get(FIRST) is not None:
+        found.append(_as_suite(name, 1, _mapping(records.get(FIRST))))
     for key, record in records.items():
         if key.isdigit() and int(key) > 1:
-            found.append(_as_suite(name, int(key), _mapping(record), {}))
+            found.append(_as_suite(name, int(key), _mapping(record)))
     return sorted(found, key=lambda each: each.number)
 
 
-def _as_suite(name: str, number: int, about: Mapping[str, Any], starts: Mapping[str, JsonValue]) -> Suite:
-    """A version from its record, and its starts by number where the record does not hold them. A record that says one
-    environment and no entries is a version of one entry."""
-    made, edited_from = float(about.get("made") or 0.0), about.get("edited_from")
-    if isinstance(about.get("entries"), list):
-        entries = [_as_entry(_mapping(each), name, {}) for each in cast(list[Any], about["entries"])]
-        return Suite(name, entries, made, number, edited_from)
-    return Suite(name, [_as_entry(about, name, starts)], made, number, edited_from)
+def _as_suite(name: str, number: int, about: Mapping[str, Any]) -> Suite:
+    """A version from its record."""
+    entries = [_as_entry(_mapping(each)) for each in cast(list[Any], about.get("entries") or [])]
+    return Suite(name, entries, float(about.get("made") or 0.0), number, about.get("edited_from"))
 
 
-def _as_entry(about: Mapping[str, Any], suite: str, starts: Mapping[str, JsonValue]) -> SuiteEntry:
-    """An entry from its record. A record from before suites had versions says no more than its environment, its
-    version (`version`), rows, seeds and whether it is held out: one held out was the environment's eval data of the
-    suite's name."""
-    if "starts" in about:
-        listed = [_start(record) for record in about["starts"]]
-    else:
-        listed = [_start(record) for _, record in sorted(starts.items(), key=lambda item: int(item[0]))]
-    environment = str(about.get("environment") or about.get("catalog") or "")  # (a suite made as a catalog's says so)
-    held = bool(about.get("held_out"))
-    chosen = str(about.get("chosen") or (EVAL_DATA if held else DRAWN))
-    eval_data = about.get("eval_data") or (suite if "chosen" not in about and held else None)
+def _as_entry(about: Mapping[str, Any]) -> SuiteEntry:
+    """An entry from its record."""
     return SuiteEntry(
-        environment, listed, about.get("environment_version", about.get("version")), chosen, eval_data,
-        about.get("rows"), about.get("seeds"), held, int(about.get("episodes") or 1), about.get("thinking_tokens"),
+        str(about.get("environment") or ""), [_start(record) for record in cast(list[Any], about.get("starts") or [])],
+        about.get("environment_version"), str(about.get("chosen") or DRAWN), about.get("eval_data"), about.get("rows"),
+        about.get("seeds"), bool(about.get("held_out")), int(about.get("episodes") or 1), about.get("thinking_tokens"),
         about.get("answer_tokens"),
     )  # fmt: skip
 
@@ -461,15 +439,6 @@ def _start(record: JsonValue) -> Start:
     return Start(str(said.get("task") or ""), str(said.get("title") or ""), said.get("seed", 0), said.get("parameters"))
 
 
-def starts_in(tables: Mapping[str, Mapping[str, Any]], suite: str, number: int = 1) -> dict[str, Any]:
-    """A version's starts (version 1 unless `number` says another) by number from 1, across its entries, from a ledger's
-    tables as read (by name), whichever way the suite was written."""
-    found = next((each for each in versions_in(tables, suite) if each.number == number), None)
-    if found is None:
-        return {}
-    return {str(place): asdict(start) for place, start in enumerate(found.starts, start=1)}
-
-
 def start_identity(start: Mapping[str, Any]) -> str:
     """A short name for a start that is the same in every version that has it: its row and its parameters, hashed."""
     said = f"{start.get('task')}|{start_key(start.get('parameters'))}"
@@ -478,7 +447,7 @@ def start_identity(start: Mapping[str, Any]) -> str:
 
 def suites_among(names: Iterable[str]) -> list[str]:
     """The suites tables are of, from their names."""
-    found = {between(each, EVALUATIONS, part) for each in names for part in ("/suite", "/starts")}
+    found = {between(each, EVALUATIONS, "/suite") for each in names}
     return sorted(name for name in found if name and "/" not in name)
 
 
@@ -494,13 +463,10 @@ async def suites_in(ledger: Ledger) -> list[str]:
 def parts_of(tables: Mapping[str, Mapping[str, Any]], suite: str, run: str) -> list[dict[str, Any]]:
     """The runs an eval played its version's entries in, from a ledger's tables as read (by name): each its
     `environment`, its `run`, its `episodes` of each start, and the number of its first start in the version less one
-    (`offset`). An eval that says no parts played in its own run."""
+    (`offset`)."""
     about = _mapping(tables.get(subject_table(suite, run, "subject"), {}).get("subject"))
-    version = next((each for each in versions_in(tables, suite) if each.id == played_version(about, suite)), None)
+    version = next((each for each in versions_in(tables, suite) if each.id == played_version(about)), None)
     said = cast(list[Any], about.get("parts") or [])
-    if not said:
-        environment = version.environments[0] if version is not None and version.entries else None
-        return [{"environment": environment, "run": run, "episodes": about.get("episodes"), "offset": 0}]
     places = offsets(version) if version is not None and len(version.entries) == len(said) else [0] * len(said)
     return [dict(_mapping(each)) | {"offset": place} for each, place in zip(said, places, strict=True)]
 

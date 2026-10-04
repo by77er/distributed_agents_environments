@@ -61,7 +61,9 @@ async def an_eval(
         begun = {**begun, "by": by, "step": step}
     await ledger.append(table(run, STARTS), str(fence.number), begun, fence)
     who: JsonValue = {"kind": "checkpoint" if subject else "model", "checkpoint": subject, "model": "tiny",
-                      "episodes": 1, "asked_by": BY_HAND if by is None else "by its run's schedule"}  # fmt: skip
+                      "episodes": 1, "asked_by": BY_HAND if by is None else "by its run's schedule", "run": run,
+                      "version": f"{suite}@1"}  # fmt: skip
+    who |= {"parts": [{"environment": ENVIRONMENT, "run": run, "episodes": 1}]}
     await ledger.append(subject_table(suite, run, "subject"), "subject", who, fence)
     for number, outcome in enumerate(solved, start=1):
         await ledger.append(table(run, GROUPS), str(number), {"task": "say-yes", "episodes": 1}, fence)
@@ -73,7 +75,8 @@ async def an_eval(
         await ledger.append(table(run, EPISODES), f"{number}/1", record, await ledger.take(runner_scope(run)))
     if by is not None:
         trained = await ledger.take(scope(by))
-        said: JsonValue = {"suite": suite, "checkpoint": subject, "run": run, "played": len(solved)}
+        said: JsonValue = {"suite": suite, "version": f"{suite}@1", "checkpoint": subject, "run": run}
+        said |= {"played": len(solved), "entries": [{"environment": ENVIRONMENT, "run": run}]}
         await ledger.append(table(by, EVALS), str(step), said, trained)
 
 

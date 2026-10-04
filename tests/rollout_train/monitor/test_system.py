@@ -354,8 +354,14 @@ async def test_an_eval_whose_task_never_says_whether_it_solved_counts_no_solves(
     begun: JsonValue = {"kind": EVAL, "suite": "words-v1", "checkpoint": None, "started": 5.0}
     await ledger.append(table("words-eval", STARTS), str(fence.number), begun, fence)
     await ledger.append(table("words-eval", GROUPS), "1", {"task": "say", "episodes": 1}, fence)
-    await ledger.append(suite_table("words-v1", "starts"), "1", {"task": "say", "seed": 1}, fence)
-    await ledger.append(subject_table("words-v1", "words-eval", "subject"), "subject", {"kind": "model"}, fence)
+    version: JsonValue = {"entries": [{"environment": "games:words", "starts": [{"task": "say", "seed": 1}]}]}
+    await ledger.append(suite_table("words-v1", "suite"), "suite", version, fence)
+    who: JsonValue = {
+        "kind": "model",
+        "version": "words-v1@1",
+        "parts": [{"environment": "games:words", "run": "words-eval"}],
+    }
+    await ledger.append(subject_table("words-v1", "words-eval", "subject"), "subject", who, fence)
     outcome: JsonValue = {"run_id": "r_one", "reward": 0.5, "solved": False}
     await ledger.append(subject_table("words-v1", "words-eval", "results"), "1-1", outcome, fence)
     await ended(ledger, "words-eval", 1, 1, "r_one")

@@ -235,7 +235,7 @@ function EvalsTree({ place }: { place: Place }) {
       {evals.suites.map(suite => {
         const key = `suite:${suite.suite}`, open = folds[key] ?? suite.suite === shown;
         const played = evals.evals.filter(each => each.suite === suite.suite).sort((a, b) => (b.started ?? 0) - (a.started ?? 0));
-        const differ = new Set(played.map(each => each.version ?? `${suite.suite}@1`)).size > 1;  // (each says its version then)
+        const differ = new Set(played.map(each => each.version)).size > 1;  // (each says its version then)
         return (
           <div key={suite.suite}>
             <Node to={suitePlace(suite.suite)} current={place.kind === "suite" && place.suite === suite.suite}>

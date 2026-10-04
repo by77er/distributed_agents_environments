@@ -229,7 +229,7 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
         episodes = eval_episodes(tables, suite, run)
         results = cast(dict[str, Any], tables.get(f"{EVALUATIONS}{suite}/{run}/results", {}))
         by, step = scheduled.get(run, (begun.get("by"), begun.get("step")))
-        version = played_version(about, suite)
+        version = played_version(about)
         said = [result for key, result in results.items() if reported(episodes.get(key.replace("-", "/", 1)))]
         rewards = [float(result["reward"]) for result in results.values() if result.get("reward") is not None]
         each_start = int(about.get("episodes") or 1)
