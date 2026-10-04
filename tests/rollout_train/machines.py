@@ -1,11 +1,14 @@
-"""Machines in one process, for the tests of what runs on several: engines that say which weights sampled them, an
-engine host (its engines served over HTTP, a follower beating beside a shared ledger), and ports to serve on."""
+"""Machines in one process, for the tests of what runs on several: engines that say which weights sampled them, a fake
+of vLLM's OpenAI-compatible server over one, an engine host (that server, and a follower that loads into it and beats
+beside a shared ledger), a proxy that passes requests on, and ports to serve on."""
 
 import asyncio
 import contextlib
+import itertools
 import random
 import socket
 from collections.abc import AsyncGenerator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,8 +20,7 @@ from rollout.environment import Description, Row, Start
 from rollout.harness import End, Observation, ProgramReference, RunContext, Task, agent_program
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.following import Follower
-from rollout_train.inference import Channel, Generation, Limits, serve_engines
-from rollout_train.inference.remote import REPLICA
+from rollout_train.inference import Channel, Connection, Generation, RemoteEngine
 from rollout_train.presence import Presence
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
@@ -26,6 +28,8 @@ from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine
 
 PORTS = range(8820, 8830)
 """What the servers of these tests listen on, on 127.0.0.1."""
+MODEL = "a-checkpoint"
+"""The base model the fake servers serve, under its own name."""
 
 
 def free_port() -> int:
@@ -104,13 +108,86 @@ class Yes:
 yes = Yes()
 
 
-def saying_engine(model: str, **options: Any) -> Saying:
-    """What a profile names for an engine that says which weights sampled it, then yes or no in turn."""
-    return Saying(words=("yes", "no"))
+def fake_vllm(engine: ScriptedEngine, *, model: str = MODEL, token: str | None = None) -> Any:
+    """A fake of vLLM's OpenAI-compatible server over `engine`, serving `model` under its name and the adapters loaded
+    under theirs (as `VLLM_ALLOW_RUNTIME_LORA_UPDATING` allows): `/v1/models`, `/v1/completions` of token ids with
+    `return_token_ids` and logprobs (404 for a model it does not have), `/v1/load_lora_adapter` and
+    `/v1/unload_lora_adapter`. With `token`, a request without it as a bearer token is refused (401)."""
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse, PlainTextResponse, Response
+    from starlette.routing import Route
 
+    loaded: dict[str, str] = {}
 
-def saying_channel(replicas: int = 1, name: str = "policy") -> Channel:
-    return Channel(name, [Saying() for _ in range(replicas)], cast(Renderer, PlainRenderer()), Limits())
+    def refused(request: Request) -> Response | None:
+        if token is not None and request.headers.get("authorization") != f"Bearer {token}":
+            return JSONResponse({"error": {"message": "Unauthorized"}}, status_code=401)
+        return None
+
+    async def models(request: Request) -> Response:
+        if (refusal := refused(request)) is not None:
+            return refusal
+        cards = [{"id": model, "object": "model", "max_model_len": engine.max_model_len}]
+        cards += [{"id": name, "object": "model", "parent": model, "root": path} for name, path in loaded.items()]
+        return JSONResponse({"object": "list", "data": cards})
+
+    async def completions(request: Request) -> Response:
+        if (refusal := refused(request)) is not None:
+            return refusal
+        body = await request.json()
+        asked = body["model"]
+        if asked != model and asked not in loaded:
+            error = {"message": f"The model `{asked}` does not exist.", "type": "NotFoundError", "code": 404}
+            return JSONResponse({"error": error}, status_code=404)
+        generation = await engine.generate(
+            body["prompt"],
+            max_tokens=body["max_tokens"],
+            temperature=body["temperature"],
+            top_p=body["top_p"],
+            stop_token_ids=body["stop_token_ids"],
+            adapter=None if asked == model else asked,
+        )
+        logprobs = {
+            "tokens": [f"token_id:{each}" for each in generation.tokens],
+            "token_logprobs": generation.logprobs,
+            "top_logprobs": [None] * len(generation.tokens),
+            "text_offset": [0] * len(generation.tokens),
+        }
+        choice = {
+            "index": 0,
+            "text": "".join(map(chr, generation.tokens)),
+            "token_ids": generation.tokens,
+            "logprobs": logprobs,
+            "finish_reason": generation.finish_reason,
+        }
+        usage = {"prompt_tokens": len(body["prompt"]), "completion_tokens": len(generation.tokens)}
+        return JSONResponse({"object": "text_completion", "model": asked, "choices": [choice], "usage": usage})
+
+    async def load(request: Request) -> Response:
+        if (refusal := refused(request)) is not None:
+            return refusal
+        body = await request.json()
+        await engine.load_adapter(body["lora_name"], body["lora_path"])
+        loaded[body["lora_name"]] = body["lora_path"]
+        return PlainTextResponse(f"Success: LoRA adapter '{body['lora_name']}' added successfully.")
+
+    async def unload(request: Request) -> Response:
+        if (refusal := refused(request)) is not None:
+            return refusal
+        body = await request.json()
+        await engine.remove_adapter(body["lora_name"])
+        loaded.pop(body["lora_name"], None)
+        return PlainTextResponse(f"Success: LoRA adapter '{body['lora_name']}' removed successfully.")
+
+    return Starlette(
+        routes=[
+            Route("/v1/models", models),
+            Route("/v1/completions", completions, methods=["POST"]),
+            Route("/v1/load_lora_adapter", load, methods=["POST"]),
+            Route("/v1/unload_lora_adapter", unload, methods=["POST"]),
+        ]
+    )
 
 
 @contextlib.asynccontextmanager
@@ -132,61 +209,77 @@ async def served(app: Any) -> AsyncGenerator[tuple[str, Any]]:
         await task
 
 
+@dataclass
+class Host:
+    """An engine host, as a test sees it: its vLLM server's address, the server, the engine behind it, the channel its
+    follower publishes to, and the follower."""
+
+    address: str
+    server: Any
+    engine: Saying
+    channel: Channel
+    follower: Follower
+
+
 @contextlib.asynccontextmanager
 async def engine_host(
     name: str,
     checkpoints: Checkpoints,
     run: str,
-    channels: dict[str, Channel],
     directory: Path,
     presence: Presence,
     *,
     following: bool = True,
     token: str | None = None,
-) -> AsyncGenerator[tuple[Follower, Any]]:
-    """An engine host: `channels` served over HTTP (asking for `token`, if given) and followed (unless not
-    `following`: it serves what it has), beating as `name`, its replicas' ids beginning with it. Yields the follower and
-    the server (whose `should_exit` makes the host stop answering)."""
-    async with served(serve_engines(channels, name, token=token)) as (address, server):
-        follower = Follower(
-            name, checkpoints, run, channels, directory, address=address, presence=presence, every=0.05, beating=0.2
+    connection: Connection | None = None,
+) -> AsyncGenerator[Host]:
+    """An engine host: a fake vLLM server (asking for `token`, if given), and a follower that loads what `run` says its
+    channel `policy` should serve into it (unless not `following`: it serves what it has), beating as `name`. The
+    server's `should_exit` makes it stop answering."""
+    engine = Saying(words=("yes", "no"))
+    async with served(fake_vllm(engine, token=token)) as (address, server):
+        channel = Channel(
+            "policy", [RemoteEngine(MODEL, address=address, connection=connection)], cast(Renderer, PlainRenderer())
         )
+        follower = Follower(name, checkpoints, run, {"policy": channel}, directory, presence=presence, every=0.05,
+                            beating=0.2)  # fmt: skip
         task = asyncio.create_task(follower.serve() if following else _beating(follower))
         try:
             await follower.beat()
-            yield follower, server
+            yield Host(address, server, engine, channel, follower)
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
 
-def passing_on(hosts: Mapping[str, str], *, caching: bool = False) -> Any:
-    """A reverse proxy that knows nothing of the protocol but the header naming a request's replica: it sends each
-    request, token and all, to the host of the server the replica's id begins with (`hosts`, by server). `caching`: it
-    answers a sample from the first answer it passed on for that replica, as a proxy that caches would."""
+def passing_on(upstreams: Sequence[str], *, caching: bool = False) -> Any:
+    """A reverse proxy that knows nothing of the API: it passes each request on, token and all, to the next of
+    `upstreams` in turn (a router, as far as a runner can tell). `caching`: it answers every completion after the first
+    from the first answer, as a proxy that caches would."""
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import Response
     from starlette.routing import Route
 
-    kept: dict[str, tuple[int, bytes]] = {}
+    turns = itertools.cycle(upstreams)
+    kept: list[tuple[int, bytes]] = []
 
     async def forward(request: Request) -> Response:
-        replica = request.headers[REPLICA]
         path = request.url.path
-        if caching and path in kept:
-            status, body = kept[path]
+        if caching and path == "/v1/completions" and kept:
+            status, body = kept[0]
             return Response(body, status, media_type="application/json")
         headers = {key: value for key, value in request.headers.items() if key not in ("host", "content-length")}
         async with httpx.AsyncClient() as client:
             answer = await client.request(
-                request.method, hosts[replica.split(".")[0]] + path, content=await request.body(), headers=headers
+                request.method, next(turns) + path, content=await request.body(), headers=headers
             )
-        if path.endswith("/generate") and answer.status_code == 200:
-            kept.setdefault(path, (answer.status_code, answer.content))
-        return Response(answer.content, answer.status_code, media_type="application/json")
+        if path == "/v1/completions" and answer.status_code == 200:
+            kept.append((answer.status_code, answer.content))
+        kind = answer.headers.get("content-type", "application/json")
+        return Response(answer.content, answer.status_code, media_type=kind)
 
-    return Starlette(routes=[Route("/{path:path}", forward, methods=["GET", "POST", "DELETE"])])
+    return Starlette(routes=[Route("/{path:path}", forward, methods=["GET", "POST"])])
 
 
 async def _beating(follower: Follower) -> None:

@@ -6,8 +6,8 @@ checkpoint's id, depth and kind, the files its engines load (the checkpoint's we
 into), the full checkpoint an adapter is served over, and the longest turn the trainer can train on. A run that starts
 from the base model says so first, with no checkpoint.
 
-Whatever serves a replica of the channel, on any machine, reads `wanted` and loads what it says
-(`rollout_train.following`); whatever routes sessions to replicas reads it too, to know how far behind a replica is
+Whatever serves the channel, on any machine, reads `wanted` and loads what it says (`rollout_train.following`);
+whatever samples it elsewhere reads it too, to ask for that checkpoint by name, or for one close enough to it
 (`rollout_train.inference.remote`). A channel never goes back: what a channel should serve now is its record of the
 greatest depth.
 """
@@ -51,11 +51,11 @@ class Serving:
     sequence: int | None = None
     """The longest turn the trainer can train on (`Limits.sequence`), for every runner that samples the channel."""
     served_by: str | None = None
-    """The channel whose replicas serve this (`RUN/NAME`), where it is another run's: an eval played on the channel
+    """The channel whose engines serve this (`RUN/NAME`), where it is another run's: an eval played on the channel
     of the training run whose checkpoint it plays. None: the channel's own."""
     max_lag: int | None = None
-    """How many checkpoints behind a replica may be and still be given new sessions, where the run says (0 for an
-    eval, which plays one checkpoint); None: as the runner's channel says."""
+    """How many checkpoints behind this a sample may be, where the run says (0 for an eval, which plays one
+    checkpoint); None: as the runner's channel says."""
     at: float = field(default_factory=lambda: round(time.time(), 1))
 
     def to_json(self) -> dict[str, JsonValue]:

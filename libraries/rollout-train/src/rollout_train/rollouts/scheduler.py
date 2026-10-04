@@ -145,7 +145,7 @@ async def episodes_of(
 
 class Recorded(Protocol):
     """What a runner needs of the recorder: each run's segments, and the channels it serves. A recorder that routes
-    channels to replicas elsewhere (`rollout_train.recorder.Recorder` with `routes`) also says whether it reaches a
+    channels to engines elsewhere (`rollout_train.recorder.Recorder` with `routes`) also says whether it reaches a
     run's (`reaches`), and names them within the run in its binding (`for_run`)."""
 
     channels: Mapping[str, Any]
@@ -328,7 +328,7 @@ class EpisodeRunner:
         pools = {binding.local for binding in played.binding.pools.values() if binding.local}
         if not (local <= set(self.imports) and pools <= set(self.pools)):
             return False
-        reaches = getattr(self.recorder, "reaches", None)  # (a channel routed elsewhere: whether a replica serves it)
+        reaches = getattr(self.recorder, "reaches", None)  # (a channel served elsewhere: whether a server has it)
         if reaches is not None:
             return await reaches(run, played.binding)
         channels = {binding.recorded.channel for binding in played.binding.models.values() if binding.recorded}

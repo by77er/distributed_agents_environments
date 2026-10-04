@@ -90,18 +90,18 @@ class _Turn:
 
 
 class Routes(Protocol):
-    """Channels whose replicas serve elsewhere, each run's routed apart (`rollout_train.inference.remote.Routes`)."""
+    """Channels whose engines serve elsewhere, each run's apart (`rollout_train.inference.remote.Routes`)."""
 
     def routed(self, channel: str) -> bool:
         """Whether channels of this name are routed."""
         ...
 
     def channel(self, run: str, channel: str) -> Sampler:
-        """A run's channel, routed to the replicas that serve it."""
+        """A run's channel, sampled where its engines serve, from the checkpoints the run says it serves."""
         ...
 
     async def reaches(self, run: str, channel: str) -> bool:
-        """Whether a replica serves a run's channel, close enough to what the run says it should, to take a session."""
+        """Whether a server has a checkpoint of a run's channel close enough to what the run says it should serve."""
         ...
 
 
@@ -116,7 +116,7 @@ class Recorder:
     base_url: str | None = None
     """Where `rollout_train.recorder.compat` serves this recorder, as harnesses reach it (None: it is not served)."""
     routes: Routes | None = None
-    """The channels whose replicas serve elsewhere: a binding names one within its run (`RUN/NAME`, `for_run`)."""
+    """The channels whose engines serve elsewhere: a binding names one within its run (`RUN/NAME`, `for_run`)."""
     _turns: dict[str, list[_Turn]] = field(default_factory=dict[str, list[_Turn]])
     _by_effect: dict[str, SampleResult] = field(default_factory=dict[str, SampleResult])
     _keys: dict[str, tuple[str, ModelEndpoint]] = field(default_factory=dict[str, tuple[str, ModelEndpoint]])
@@ -132,7 +132,7 @@ class Recorder:
 
     def for_run(self, run: str, binding: RunBinding) -> RunBinding:
         """A run's binding, with each recorded model on a routed channel named within the run (`RUN/NAME`), so that
-        its samples go to the replicas serving that run's channel; the same binding if it names none."""
+        its samples are of the checkpoints that run says its channel serves; the same binding if it names none."""
         models = dict(binding.models)
         for slot, model in binding.models.items():
             recorded = model.recorded
@@ -143,7 +143,8 @@ class Recorder:
 
     async def reaches(self, run: str, binding: RunBinding) -> bool:
         """Whether every recorded model of a run's binding can be sampled here: from a channel whose engines this
-        process publishes to, or from a routed channel a replica of which serves the run."""
+        process publishes to, or from a routed channel whose servers have a checkpoint close enough to what the run
+        says it should serve."""
         for model in binding.models.values():
             recorded = model.recorded
             if recorded is None or recorded.channel in self.channels:
@@ -247,17 +248,17 @@ class RecordedEndpoint:
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 return await self._sampled(request, prompt, attempt)
-            except Unserved:  # (the weights the turn began with are gone, or so is its replica: from the start again)
+            except Unserved:  # (the checkpoint the turn began with is not served there, or the server is gone)
                 if attempt == ATTEMPTS:
                     raise
         raise AssertionError(channel.name)  # (unreachable: the last attempt returns or raises)
 
     async def _sampled(self, request: SampleRequest, prompt: list[int], attempt: int = 1) -> SampleResult:
         """One turn sampled and recorded, from the weights its session samples from when it begins. Each request to the
-        channel is named by the effect, the attempt and the phase, so that one sent again is answered once; one whose
-        replica says it sampled at another version than the turn is stamped with is refused (`Unserved`)."""
+        channel is named by the effect, the attempt and the phase; one whose answer names another checkpoint than the
+        turn is stamped with is refused (`Unserved`)."""
         channel, renderer = self._channel, self._channel.renderer
-        adapter, version = await channel.weights(request.session_id)  # (where it is routed, the replica is chosen)
+        adapter, version = await channel.weights(request.session_id)  # (where it is routed, the checkpoint is chosen)
         limits = channel.limits
         thinking = renderer.thinking
         budget, answer = limits.thinking, limits.answer
@@ -297,8 +298,8 @@ class RecordedEndpoint:
                 version=version,
                 request=f"{request.effect_id}/{attempt}/{phases[-1]}",
             )
-            if generation.version is not None and generation.version != version:  # (a replica elsewhere says)
-                raise Unserved(f"{generation.replica} sampled at version {generation.version}, not {version}")
+            if generation.model is not None and adapter is not None and generation.model != adapter:
+                raise Unserved(f"{generation.model} answered for {adapter}")  # (a server elsewhere says which sampled)
             completion.extend(generation.tokens)
             mask.extend([True] * len(generation.tokens))
             logprobs.extend(generation.logprobs)

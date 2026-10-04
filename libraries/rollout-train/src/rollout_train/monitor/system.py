@@ -1167,7 +1167,7 @@ def _noted(beats: list[Beat]) -> dict[str, list[dict[str, Any]]]:
             listed: Any = point.get("channels") or []
             for channel in listed:
                 name = str(channel.get("channel"))
-                counts = {key: value for key, value in channel.items() if key not in ("channel", "adapter", "replicas")}
+                counts = {key: value for key, value in channel.items() if key not in ("channel", "adapter", "servers")}
                 if serving.get(name) != channel.get("adapter"):
                     serving[name] = channel.get("adapter")
                     notes.setdefault(run, []).append(

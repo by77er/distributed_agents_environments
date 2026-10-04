@@ -8,10 +8,8 @@ import asyncio
 import time
 import zlib
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
-
-from pydantic import JsonValue
 
 if TYPE_CHECKING:
     from rollout_train.recorder.renderers import Renderer
@@ -24,11 +22,9 @@ class Generation:
     """Of each sampled token, under the distribution it was sampled from."""
     finish_reason: str
     """`stop` (a stop token, included in `tokens`) or `length`."""
-    version: int | None = None
-    """The version of the weights that sampled it, where a replica elsewhere says (`rollout_train.inference.remote`):
-    the recorder checks that it is the version it stamps the tokens with."""
-    replica: str | None = None
-    """The replica that sampled it, where one elsewhere says."""
+    model: str | None = None
+    """The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by
+    the name it is served as. The recorder checks that it is the checkpoint it stamps the tokens with."""
 
 
 class Engine(Protocol):
@@ -73,9 +69,8 @@ class Engine(Protocol):
 
 
 class Unserved(Exception):
-    """The weights a request names are not served at the version its tokens would be stamped with (they were dropped,
-    or replaced while a turn was in progress), or its replica cannot be reached: the turn is sampled again, from the
-    weights served then."""
+    """The checkpoint a turn began with is not served where it is asked for (not loaded yet, dropped, or another
+    answered), or the server cannot be reached: the turn is sampled again, from what is served then."""
 
 
 @dataclass(frozen=True)
@@ -93,8 +88,8 @@ class Limits:
 
 
 class Sampler(Protocol):
-    """What the recorder samples from: a `Channel`, whose engines this process publishes to, or a channel routed to
-    replicas that serve elsewhere (`rollout_train.inference.remote.RemoteChannel`)."""
+    """What the recorder samples from: a `Channel`, whose engines this process publishes to, or a channel sampled on
+    servers elsewhere (`rollout_train.inference.remote.RemoteChannel`)."""
 
     @property
     def name(self) -> str: ...
@@ -109,8 +104,8 @@ class Sampler(Protocol):
     def context_limit(self) -> int: ...
 
     async def weights(self, session: str) -> tuple[str | None, int]:
-        """The adapter a session's next turn samples from (None: the weights its replica holds), and the version its
-        tokens are stamped with."""
+        """The adapter (the checkpoint) a session's next turn samples from (None: the weights the engines hold), and
+        the version its tokens are stamped with."""
         ...
 
     async def generate(
@@ -126,8 +121,8 @@ class Sampler(Protocol):
         version: int | None = None,
         request: str | None = None,
     ) -> Generation:
-        """Sample on the session's replica; `Unserved` if it does not serve `adapter` at `version` (or is gone).
-        `request` names the request, so that one sent again (a retry, through a proxy say) is answered once."""
+        """Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
+        server is gone). `request` names the request, for whatever logs it."""
         ...
 
 
@@ -146,10 +141,7 @@ class Channel:
     """How many times weights have been published; recorded with every sampled token."""
     held: str | None = None
     """The full checkpoint the engines hold, by name (None: the model's own)."""
-    held_version: int = 0
-    """The version the weights the engines hold are served as: a request that names no adapter is stamped with it."""
-    _loaded: dict[str, int] = field(default_factory=dict[str, int])
-    """The adapters loaded, oldest first, with the version each is served as."""
+    _loaded: list[str] = field(default_factory=list[str])
     _open: asyncio.Event = field(default_factory=asyncio.Event)
     _idle: asyncio.Event = field(default_factory=asyncio.Event)
     _in_flight: int = 0
@@ -179,20 +171,13 @@ class Channel:
         session: str = "",
         version: int | None = None,
         request: str | None = None,
-        replica: int | None = None,
     ) -> Generation:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
-        beginnings are cached. `version` is the version the caller stamps the tokens with. A request addressed to one
-        engine from elsewhere names it (`replica`, by its place among them; `rollout_train.inference.remote`), and is
-        refused with `Unserved` if the weights `adapter` names are not served at `version` there: what that caller
-        knows of the engine may be out of date, while this process's own callers read what it publishes. `request`
-        names a request for a server that answers each once; this process's own callers do not send twice."""
+        beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
+        the request) are for samplers elsewhere: this process's own callers read what it publishes."""
         while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
             await self._open.wait()
-        served_as = self.version_of(adapter)  # (what is served cannot change while a request is in flight)
-        if replica is not None and version is not None and served_as != version:
-            raise Unserved(f"{self.name} does not serve {adapter or 'the weights it holds'} at version {version}")
-        engine = self.engines[zlib.crc32(session.encode()) % len(self.engines) if replica is None else replica]
+        engine = self.engines[zlib.crc32(session.encode()) % len(self.engines)]
         started = time.monotonic()
         if self._in_flight == 0:
             self._throughput.busy(started)
@@ -213,31 +198,17 @@ class Channel:
             if self._in_flight == 0:
                 self._idle.set()
         self._throughput.counted(len(prompt), len(generation.tokens))
-        return generation if replica is None else replace(generation, version=served_as)
+        return generation
 
     async def weights(self, session: str) -> tuple[str | None, int]:
         """The adapter a session's next turn samples from (None: the weights the engines hold), and the version its
         tokens are stamped with: the same for every session, as this process publishes to every engine at once."""
         return self.adapter, self.version
 
-    def version_of(self, adapter: str | None) -> int | None:
-        """The version an adapter loaded on the engines is served as (None: the weights they hold); None if it is not
-        loaded."""
-        return self.held_version if adapter is None else self._loaded.get(adapter)
-
-    def state(self) -> dict[str, JsonValue]:
-        """What the engines serve, as a replica tells whoever routes to it: the adapter sampling now, what is served
-        and its version, the full checkpoint held and its version, each adapter loaded with its version, and the
-        longest sequence they accept."""
-        return {
-            "adapter": self.adapter,
-            "serving": self.serving,
-            "version": self.version,
-            "held": self.held,
-            "held_version": self.held_version,
-            "loaded": dict[str, JsonValue](self._loaded),
-            "max_model_len": min(engine.max_model_len for engine in self.engines),
-        }
+    @property
+    def loaded(self) -> list[str]:
+        """The adapters loaded on the engines, oldest first: the one served, and the one before."""
+        return list(self._loaded)
 
     async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
         """Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
@@ -248,12 +219,11 @@ class Channel:
         adapters trained on the weights before go with them. Publishing what is being served changes nothing."""
         if adapter == self.serving:
             return self.version
-        served_as = self.version + 1 if version is None else version
         if full:
             await self.pause()  # (no turn may be half sampled when the weights under it change)
             try:
                 await asyncio.gather(*(engine.load_weights(path) for engine in self.engines))
-                self.held, self.held_version = adapter, served_as
+                self.held = adapter
             finally:
                 self.resume()
             for dropped in self._loaded:
@@ -263,12 +233,11 @@ class Channel:
         else:
             await asyncio.gather(*(engine.load_adapter(adapter, path) for engine in self.engines))
             self.adapter = adapter
-            self._loaded[adapter] = served_as
+            self._loaded.append(adapter)
             while len(self._loaded) > 2:
-                dropped = next(iter(self._loaded))
-                del self._loaded[dropped]
+                dropped = self._loaded.pop(0)
                 await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
-        self.serving, self.version = adapter, served_as
+        self.serving, self.version = adapter, self.version + 1 if version is None else version
         return self.version
 
     async def pause(self) -> None:

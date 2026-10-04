@@ -31,7 +31,7 @@ from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
 from rollout_train.following import Follower
-from rollout_train.inference import Channel, Connection, Engine, Limits, Replica, Route, Routes
+from rollout_train.inference import Channel, Connection, Engine, Limits, Route, Routes
 from rollout_train.inference.remote import MAX_LAG
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION
@@ -65,44 +65,36 @@ class ChannelSpec:
     reshard: str | None = None
     """`module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the
     trainer's files as they are, with no reshard."""
-    replicas: str | None = None
-    """For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`): `heartbeats`, its replicas are found
-    from the beats of the engine hosts that follow the run's channel; none, each entry of `engines` names one
-    (`address`, `replica`)."""
     max_lag: int = MAX_LAG
-    """Checkpoints a replica serving elsewhere may be behind what the channel should serve and still be given turns."""
+    """For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`, each entry of `engines` a server's
+    `address`): how many checkpoints behind what the channel should serve a sample may be, where its server does not
+    have the newest yet."""
     via: str | None = None
-    """A URL every request to a replica serving elsewhere goes to, naming its replica (a proxy); none: the replica's
-    own address."""
+    """For a channel whose engines serve elsewhere: the URL its runners send every request to (a router or a proxy in
+    front of its servers); none: its servers' addresses. Its engine hosts load checkpoints at the addresses."""
     connection: Mapping[str, str] = field(default_factory=dict[str, str])
-    """How replicas serving elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`,
-    `key`."""
+    """How servers elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`, `key`."""
 
     @property
     def routed(self) -> bool:
-        """Whether its engines serve elsewhere, and its sessions are routed to them (said by name: an engine's module
-        is not imported to load a profile)."""
+        """Whether its engines serve elsewhere (said by name: an engine's module is not imported to load a profile)."""
         return self.engine in REMOTE
 
     def route(self, renderer: Any, sequence: int | None = None) -> Route:
-        """How a runner samples it, its sessions routed to replicas elsewhere; `sequence`, the trainer's longest turn,
-        where this process trains it."""
+        """How a runner samples it on its servers elsewhere; `sequence`, the trainer's longest turn, where this process
+        trains it."""
         limits = {"thinking": self.thinking_tokens, "answer": self.answer_tokens}
-        fixed = None
-        if self.replicas != HEARTBEATS:
-            fixed = tuple(Replica(str(each["address"]), str(each["replica"])) for each in self.engines)
+        servers = (self.via,) if self.via else tuple(str(each["address"]) for each in self.engines)
         return Route(
             renderer,
+            self.model,
+            servers,
             Limits(**{key: value for key, value in limits.items() if value is not None}, sequence=sequence),
-            replicas=fixed,
             max_lag=self.max_lag,
-            via=self.via,
             connection=Connection(**self.connection),
         )
 
 
-HEARTBEATS = "heartbeats"
-"""A routed channel's `replicas`: found from engine hosts' beats."""
 REMOTE = ("rollout_train.inference:RemoteEngine", "rollout_train.inference.remote:RemoteEngine")
 """What a channel whose engines serve elsewhere names as its `engine`."""
 
@@ -220,14 +212,14 @@ class Profile:
         channels: dict[str, ChannelSpec] = {}
         for name, channel in _table(described, "channels").items():
             known = (
-                "model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens", "reshard", "replicas",
-                "max_lag", "via", "connection",
+                "model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens", "reshard", "max_lag",
+                "via", "connection",
             )  # fmt: skip
             given = _only(dict(channel), f"channels.{name}", *known)
             engines = tuple(given.pop("engines", [{}]))
             channels[name] = ChannelSpec(**given, engines=engines)
-            if channels[name].routed and channels[name].replicas not in (None, HEARTBEATS):
-                raise ValueError(f"channels.{name}.replicas is {HEARTBEATS!r}, or each entry of engines names one")
+            if channels[name].routed and not all("address" in each for each in engines):
+                raise ValueError(f"channels.{name}: each entry of engines is a server's address")
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
@@ -268,12 +260,12 @@ class Profile:
 
     @contextlib.asynccontextmanager
     async def engines(self) -> AsyncGenerator[dict[str, Channel]]:
-        """Start the engines of the channels whose engines serve in this process, and nothing else (`rollout
-        engines`), and close them on the way out."""
+        """The channels whose engines are servers elsewhere, as clients of the servers at their addresses, and nothing
+        else: what an engine host (`rollout engines`) loads checkpoints into. Closed on the way out."""
         async with contextlib.AsyncExitStack() as stack:
             self.directory.mkdir(parents=True, exist_ok=True)
-            end_orphans(self.directory / PROCESSES)  # an engine a killed process left behind holds its accelerator
-            yield started_engines(self, stack, {name: spec.model for name, spec in self.channels.items()})
+            models = {name: spec.model for name, spec in self.channels.items()}
+            yield started_engines(self, stack, models, servers=True)
 
 
 def _table(described: dict[str, Any], name: str) -> dict[str, Any]:
@@ -309,7 +301,7 @@ class Platform:
         self.channels: dict[str, Channel] = {}
         """The channels whose engines serve in this process."""
         self.routes: Routes | None = None
-        """The channels whose engines serve elsewhere, each run's routed to the replicas that serve it."""
+        """The channels whose engines serve elsewhere, each run's sampled from the checkpoints it says they serve."""
         self.recorder: Recorder
         self.runner: EpisodeRunner
         self.feed: Any
@@ -383,7 +375,7 @@ class Platform:
             if spec.routed
         }
         if routes:
-            self.routes = Routes(routes, self.ledger, presence_of(self.ledger))
+            self.routes = Routes(routes, self.ledger)
             stack.callback(self.routes.close)
         address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
         base_url = f"{address}{SERVED_UNDER}" if address else None
@@ -523,8 +515,8 @@ class Platform:
 
     def _about(self, record: Path) -> dict[str, JsonValue]:
         """What the runner says of this machine in each beat: its host, the run, its measurements, the engines'
-        processes, what each channel serves and how fast since the beat before, and each run's routed channel
-        (`RUN/NAME`) with the replicas it routes to."""
+        processes, what each channel serves and how fast since the beat before, and each run's channel whose engines
+        are elsewhere (`RUN/NAME`), with what each of its servers would sample from."""
         said = machine_of(self.profile.directory, record)
         channels: list[JsonValue] = [
             {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
@@ -532,8 +524,8 @@ class Platform:
         ]
         routed = self.routes.channels() if self.routes is not None else {}
         for name, channel in routed.items():
-            replicas: list[JsonValue] = list(channel.replicas())
-            channels.append({"channel": name, **channel.take(), "replicas": replicas})
+            servers: list[JsonValue] = list(channel.servers())
+            channels.append({"channel": name, **channel.take(), "servers": servers})
         return {**said, **({"run": self.run.id} if self.plays is None else {}), "channels": channels}
 
     async def _serve(self, address: str) -> None:
@@ -549,21 +541,28 @@ class Platform:
 
 
 def started_engines(
-    profile: Profile, stack: contextlib.AsyncExitStack, models: Mapping[str, str], sequence: int | None = None
+    profile: Profile,
+    stack: contextlib.AsyncExitStack,
+    models: Mapping[str, str],
+    sequence: int | None = None,
+    *,
+    servers: bool = False,
 ) -> dict[str, Channel]:
     """The channels whose engines serve in this process, by name, each engine started from `models[name]` and closed by
-    `stack`, their processes noted in the directory (`PROCESSES`) for whoever must end them if this process is killed.
-    `sequence` (the trainer's longest segment) is the longest turn of the channel the profile's trainer trains."""
+    `stack`, their processes noted in the directory (`PROCESSES`) for whoever must end them if this process is killed;
+    with `servers`, those whose engines are servers elsewhere instead, as clients of them. `sequence` (the trainer's
+    longest segment) is the longest turn of the channel the profile's trainer trains."""
     record = profile.directory / PROCESSES
     trained = profile.trainer.channel if profile.trainer is not None else None
     started: list[Engine] = []
     channels: dict[str, Channel] = {}
     for name, spec in profile.channels.items():
-        if spec.routed:
+        if spec.routed != servers:
             continue
+        reached = {"connection": Connection(**spec.connection)} if spec.routed else {}
         engines: list[Engine] = []
         for options in spec.engines:
-            engine: Engine = named(spec.engine)(models[name], **options)
+            engine: Engine = named(spec.engine)(models[name], **options, **reached)
             stack.callback(engine.close)
             engines.append(engine)
             started.append(engine)

@@ -15,6 +15,8 @@
   eval that plays it with one checkpoint, training nothing, and the evals a training run makes of its checkpoints.
 - `make_dataset`, `dataset_of`, `Dataset` (`datasets`): examples chosen from runs' episodes by a rule and turn filters,
   made once, which a supervised step (`imitation`) trains on.
+- `Serving`, `record_serving`, `wanted` (`serving`): what each run's channel should serve, written down by the loop;
+  `Follower` (`following`): keeps a process's channels serving it, wherever the process runs.
 """
 
 from rollout_train.algorithm import Algorithm, Batch, Grpo, group_advantages
@@ -22,9 +24,11 @@ from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retenti
 from rollout_train.colocated import Colocated
 from rollout_train.datasets import Dataset, dataset_of, make_dataset
 from rollout_train.evals import Schedule, Suite, evaluate, make_suite, suite_for, suite_of
+from rollout_train.following import Follower
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
 from rollout_train.record import Result, Trained, results, trained
+from rollout_train.serving import Serving, record_serving, wanted
 from rollout_train.trainer import Budget, Changeable, Files, Step, StepFailed, Trainer, Weighted
 
 __all__ = [
@@ -40,12 +44,14 @@ __all__ = [
     "Fenced",
     "FileLedger",
     "Files",
+    "Follower",
     "Grpo",
     "Ledger",
     "Manifest",
     "Result",
     "Retention",
     "Schedule",
+    "Serving",
     "Step",
     "StepFailed",
     "Suite",
@@ -57,9 +63,11 @@ __all__ = [
     "group_advantages",
     "make_dataset",
     "make_suite",
+    "record_serving",
     "results",
     "suite_for",
     "suite_of",
     "train",
     "trained",
+    "wanted",
 ]
