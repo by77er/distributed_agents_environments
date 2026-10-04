@@ -4,13 +4,14 @@ See [training](../libraries/rollout-train/training.md), [channels and engines](.
 [checkpoints](../libraries/rollout-train/checkpoints.md), [deploying](../guide/deploying.md),
 [LoRA trainer](../implementations/rollout-lora.md), [the policy graph](policy-dag.md)
 
-**A proposal.** This page asks how this system could train and sample through Thinking Machines' hosted API (Tinker)
-as naturally as it does through `LoraTrainer` and `VllmEngine`, and compares Prime Intellect's offerings. Nothing
-proposed here is implemented: there is no `rollout_tinker` package. Sections say which parts describe the repository
-as it is and which parts are proposed.
+This page asks how this system trains and samples through Thinking Machines' hosted API (Tinker) as naturally as it
+does through `LoraTrainer` and `VllmEngine`, and compares Prime Intellect's offerings. The design below is implemented
+as `rollout_tinker` ([Tinker trainer and engine](../implementations/rollout-tinker.md); [the code](#the-code) says where
+it settled what this page left open). What remains proposed is marked so: a sweeper for released checkpoints, and
+teachers of another base for distillation.
 
 The external facts were checked on 2026-10-03 against the vendors' own documentation, SDK source and package indexes,
-and each cites its source. Anything not confirmed there is marked *unverified*, and the list at the end collects them.
+and each cites its source; Tinker's were re-checked against the SDK's source (0.32.0) and its prices on 2026-10-04. Anything not confirmed there is marked *unverified*, and the list at the end collects them.
 Vendors change prices, model lists and APIs often (Tinker retired 22 models in June 2026), so re-check before acting.
 
 ## The answer in brief
@@ -26,8 +27,8 @@ Vendors change prices, model lists and APIs often (Tinker retired 22 models in J
 - **Our objective maps onto the built-in losses exactly**, in four of five configurations, once importance weights
   and normalisation are folded into the advantages ([the objective on Tinker](#the-objective-on-tinker)). The segment
   ratio (GSPO) with more than one optimizer step per step needs the custom-loss path, which costs more.
-- **The design needs no change to `Trainer`, `Engine`, `Channel`, `Policies` or the loop.** A version's weights
-  directory holds a small pointer file naming its Tinker checkpoint (optionally beside a downloaded PEFT adapter). The
+- **It needed no change to `Trainer`, `Engine`, `Channel`, the checkpoints or the loop.** A checkpoint's weights
+  directory holds a small pointer file naming its Tinker checkpoints (optionally beside a downloaded PEFT adapter). The
   engine reads the pointer when the channel publishes. A profile switches backends by naming `rollout_tinker`
   classes.
 - **Prime Intellect offers no equivalent API today.** Its shared hosted LoRA training stops taking new runs on
@@ -267,14 +268,14 @@ The other parts behave as follows.
 | GSPO segment ratio | `forward_backward_custom_async(data, fn)`, with `fn` calling `rollout_lora.objectives.terms` on the returned logprobs | 1.5x the FLOPs, and up to 3x the wall time |
 | `likelihood` (imitation) | `cross_entropy` with `weights = advantage / units` on sampled rows | Exact |
 | `tokens_per_step`, `max_gradient_norm`, `learning_rate` | Minibatches are ours; `AdamParams(learning_rate, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.0, grad_clip_norm=...)` | Tinker's LoRA scaling (`lora_alpha`) is its own, not our `2 × rank`, so learning rates need re-tuning |
-| `max_kl` stop | KL from each `forward_backward` output (the logprobs before that minibatch's update) against `old` | Exact if we await the forward-backward before submitting `optim_step` (two clock cycles per minibatch), or one minibatch late if pipelined. No call clears accumulated gradients (*unverified*), so after a stop the live client is discarded |
+| `max_kl` stop | KL from each `forward_backward` output (the logprobs before that minibatch's update) against `old` | Exact if we await the forward-backward before submitting `optim_step` (two clock cycles per minibatch), or one minibatch late if pipelined. No call clears accumulated gradients (SDK 0.32.0), so after a stop the live client is not used again |
 | `Budget(segment_tokens, segments)` | The model's context (64K for `Qwen3.5-9B`); no published batch limit (`get_server_capabilities()` reports per-model `max_context_length`) | Chosen for cost, not memory |
 | `Checkpoint`, version files | `tinker://RUN/weights/NAME` (state), `tinker://RUN/sampler_weights/NAME` (sampling) | Named deterministically after the version, so a step retried after a crash overwrites its own checkpoint (`overwrite=True`) |
 | `Channel.publish` → `Engine.load_adapter(name, path)` | `create_sampling_client_async(model_path=sampler path)`, kept under the adapter's name | The previous adapter's client is kept, so a turn in flight finishes on the weights it started with |
 | `Engine.generate` | `sample_async(ModelInput.from_ints(prompt), 1, SamplingParams(max_tokens, temperature, top_p, stop=stop_token_ids))` | Returns ids, logprobs and `stop_reason` (`"length"` maps to `length`, the rest to `stop`). Whether logprobs are of the post-temperature distribution is *unverified*; it is moot at our default temperature and `top_p` of 1.0 |
 | Renderer and tokenizer | None on the sampling path: token ids in and out | Our renderer stays the authority. Agreement with Tinker's tokenizer (`get_tokenizer()`) must be checked once per model |
 | `Engine.sleep`, `wake`, `processes`; `Colocated`; `training_gib` | None | Moot: nothing on this machine to free. `colocated` must be false, or every step would pause play for nothing |
-| Retention, release | `delete_checkpoint_from_tinker_path`, `ttl_seconds` | `Policies.thin` deletes the pointer blobs but not the remote checkpoints. A sweeper is needed ([retention](#retention)) |
+| Retention, release | `delete_checkpoint_from_tinker_path`, `ttl_seconds` | Releasing a checkpoint deletes the pointer blobs but not the remote checkpoints. A sweeper is proposed ([retention](#retention-proposed)) |
 | Weights for local serving | `get_checkpoint_archive_url_from_tinker_path` or `tinker_cookbook.weights.download`, then `build_lora_adapter` | MBs to hundreds of MBs per version, per step (size *unverified*) |
 | Throughput, `Channel.take()` | Session metrics and a Perfetto trace in the console | Our counters keep working: they count at the channel |
 | Costs | Per token: prefill, sample, train; storage per GB-month | No GPU of our own is needed. Play continues during steps |
@@ -329,275 +330,90 @@ How many optimizer steps a step should make is now a cost and behaviour choice, 
 - **Recommendation.** Start with a few minibatches per step (`tokens_per_step` of about 32K to 64K sampled tokens)
   and the `ppo` path. Compare it with a single minibatch on `cispo` as an experiment.
 
-## Proposed code
+## The code
 
-### A package
+`rollout_tinker` ([Tinker trainer and engine](../implementations/rollout-tinker.md)) implements milestone 1 and
+`weights = "peft"`: `TinkerTrainer`, `TinkerEngine`, pointer files, a fake service for tests, and the live smoke test of
+milestone 0. Neither `Trainer`, `Engine`, `Channel`, `Checkpoints` nor the loop changed. Where it settles what the
+proposal left open:
 
-`implementations/rollout-tinker`, import name `rollout_tinker`, depending on `rollout`, `rollout-train`, `tinker`
-and `torch` (CPU, for the custom loss and the equivalence tests). It would join the workspace's default dependencies,
-since it needs no GPU.
+- **A project of its own.** `tinker-cookbook` (for `build_lora_adapter`) pins `transformers<=5.5.4`, which the
+  workspace's vLLM (`>=5.10.4`) and Gemma renderers (`>=5.10`) exclude, so `implementations/rollout-tinker` has its own
+  lock, as `rollout-verifiers` does. The SDK alone (`tinker==0.32.0`) would have added eight small packages to the
+  workspace and moved none. The cookbook runs there on the platform's transformers by an override.
+- **The objective is shared, not copied.** The package depends on `rollout-lora` for `Objective`, `terms`,
+  `minibatches` and `sampled`; importing them loads none of its GPU code.
+- **Names.** A checkpoint's id (sixteen letters) names its Tinker checkpoints, so whether Tinker accepts `@` no longer
+  matters. `save_weights_for_sampler` takes no `overwrite`; a retried step has a new id.
+- **`weights/tinker.json` names the training state as well as the sampler checkpoint**, so a step given a parent's
+  weights without its state (`rollout imitate` starts its optimizer afresh) loads them with
+  `create_training_client_from_state` and a fresh optimizer, warmed up.
+- **The segment ratio** takes the custom loss with one optimizer step too (its logprobs are `old`), rather than
+  `importance_sampling` after a forward pass: the same cost.
+- **Adam.** `AdamParams`' defaults are 0.95 and 1e-12, not torch's; the trainer passes `beta1`, `beta2` and `eps`
+  (torch's by default).
+- **Qwen3.5's q, k and v.** The cookbook's PEFT adapter keeps Tinker's `in_proj_q`, `in_proj_k` and `in_proj_v`, and
+  vLLM 0.30 adapts Qwen3.5's linear attention only as `in_proj_qkv` (packed with `in_proj_z`). The conversion joins the
+  three: A stacked and B block-diagonal (three times the rank), or B stacked at the same rank when they share one A.
 
-**Sharing the objective with `rollout_lora`.** The trainer reuses `Objective`, `terms`, `minibatches` and `sampled`,
-which are pure torch and pure Python. Importing them from `rollout_lora` would drag its GPU dependencies
-(`flash-linear-attention`, `accelerate`) into a CPU-only package. Two choices:
-
-- move them into a small torch-only package that both trainers depend on;
-- or make `rollout-lora`'s heavy dependencies an extra.
-
-Either keeps `tests/test_layers.py` satisfied.
+The tests compare a step through the fake, whose losses are the documented formulas, with `PolicyStep` on the same
+model, for each row of [the table above](#the-objective-on-tinker): the models move the same, and the metrics agree.
 
 ### Versions when the weights are remote
 
-A version's files stay files. Neither `Policies`, `Manifest`, the loop nor `Channel` changes.
-
 | Path under `into` | Holds |
 |---|---|
-| `weights/tinker.json` | `{"sampler": "tinker://RUN/sampler_weights/NAME", "base_model": "Qwen/Qwen3.5-9B", "rank": 32}` |
-| `weights/adapter_config.json`, `adapter_model.safetensors` | Only with `weights = "peft"`: the downloaded adapter remapped by `build_lora_adapter`, which `VllmEngine` loads as it is |
-| `state/tinker.json` | `{"state": "tinker://RUN/weights/NAME", "training_run": "RUN", "sdk": "0.32.0"}` |
+| `weights/tinker.json` | `{"sampler": "tinker://RUN/sampler_weights/ID", "state": "tinker://RUN/weights/ID", "base_model": "Qwen/Qwen3.5-9B", "rank": 32}` |
+| `weights/adapter_config.json`, `adapter_model.safetensors` | Only with `weights = "peft"`: the adapter in PEFT's layout, which `VllmEngine` loads and `rollout merge` folds in |
+| `state/tinker.json` | `{"state": ..., "sampler": ..., "sdk": "0.32.0"}` |
 | `state/minibatches.jsonl` | What each minibatch did, as `LoraTrainer` writes it |
 
-How the pieces fit:
-
-- `NAME` is the version's name (`into.name`, `POLICY_ID@N`, with `@` replaced if Tinker refuses it in names, which
-  is *unverified*).
-- `Policies.add` keeps the pointer files as blobs, as it keeps an adapter today. A fork from a Tinker version works
-  as a fork does now: the child's first step resumes from the parent's state path.
-- The ledger records where every version's weights are without a schema change.
-- A later refinement could give `Manifest` an explicit `remote` field, so that a reader does not have to open a file
-  to know the weights are elsewhere. It is not needed to start.
-
-### `TinkerTrainer`
-
-```py
-# implementations/rollout-tinker/src/rollout_tinker/trainer.py (proposed)
-from collections.abc import Sequence
-from pathlib import Path
-from typing import Any
-
-from rollout_train.trainer import Budget, Checkpoint, Step, StepFailed, Weighted, WEIGHTS, STATE
-
-POINTER = "tinker.json"
-
-
-@dataclass(frozen=True)
-class TinkerSettings:
-    """LoraSettings' names where they mean the same, so a profile switches by changing `kind`."""
-    rank: int = 32
-    learning_rate: float = 2e-5          # re-tuned: Tinker's lora_alpha is not ours
-    clip_low: float = 0.2
-    clip_high: float = 0.28
-    segment_clip_low: float = 3e-4
-    segment_clip_high: float = 4e-4
-    truncate: float | None = 2.0
-    tokens_per_step: int = 65_536
-    max_kl: float | None = 0.02
-    strict_kl: bool = True               # await each forward-backward before its optim_step
-    max_gradient_norm: float = 1.0
-    segment_tokens: int | None = 32_768  # at most the model's context on Tinker (64K for Qwen3.5-9B)
-    segments_per_step: int | None = None
-    objective: str = "policy_gradient"
-    ratio: str = "token"
-    train_unembed: bool = False          # vLLM's support for an lm_head adapter is unverified
-    weights: str = "pointer"             # or "peft": also download the adapter for local engines
-    project: str | None = None           # a Tinker project id (not a secret); else TINKER_PROJECT_ID
-
-
-class TinkerTrainer:
-    """A `Trainer` whose weights live at Thinking Machines. A step resumes the parent's training state (or starts a
-    LoRA run on `model`), trains, saves a state and a sampler checkpoint named after the version, and leaves pointers
-    to them in `into`. A client from the last step is reused when the parent is the state it saved."""
-
-    def __init__(self, model: str, *, service: "ServiceFactory | None" = None, **settings: Any) -> None:
-        self.settings = TinkerSettings(**settings)
-        self.budget = Budget(self.settings.segment_tokens, self.settings.segments_per_step)
-        self._model = model
-        self._service = service or connected(self.settings.project)  # reads the key from the environment
-        self._live: tuple[str, "tinker.TrainingClient"] | None = None
-        self._lock = asyncio.Lock()
-
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
-        async with self._lock:
-            try:
-                client = await self._client(parent, seed)
-                metrics, clean = await passed(client, batch, self.settings, seed)  # old, then minibatches
-                name = checkpoint_name(into.name)
-                state = await settled(client.save_state_async(name, overwrite=True))
-                sampler = await settled(client.save_weights_for_sampler_async(name))
-            except tinker.TinkerError as error:  # (never the key: the SDK's errors carry no credentials)
-                self._live = None
-                raise StepFailed(f"tinker: {type(error).__name__}: {error}") from error
-            await written(into, sampler.path, state.path, self._model, self.settings)  # pointers; PEFT if asked
-            self._live = (state.path, client) if clean else None  # (a stop at max_kl may leave gradients behind)
-            return Step(metrics)
-
-    async def _client(self, parent: Checkpoint | None, seed: int) -> "tinker.TrainingClient":
-        if parent is None:
-            return await self._service.create_lora_training_client_async(
-                base_model=self._model, rank=self.settings.rank, seed=seed,
-                train_unembed=self.settings.train_unembed,
-            )
-        state = pointer(parent.state, "state") if parent.state else None
-        if state is None:
-            raise StepFailed("the parent was not trained on Tinker: a Tinker step cannot start from its files")
-        if self._live is not None and self._live[0] == state:
-            return self._live[1]
-        return await self._service.create_training_client_from_state_with_optimizer_async(state)
-```
-
-How `passed` works:
-
-1. It drops segments longer than `segment_tokens`, or with nothing sampled, and counts them.
-2. It shuffles with `seed`.
-3. It builds one `Datum` per segment.
-4. If the objective needs `old` ([the table above](#the-objective-on-tinker)), it runs `forward_async` once and
-   checks that every behaviour logprob is finite, as `PolicyStep` does.
-5. For each minibatch it submits the loss call and `optim_step_async(AdamParams(...))`. It submits both together
-   unless `strict_kl` requires the forward-backward's result first.
-6. Its metrics mirror `PolicyStep.step`'s (`loss`, `clip_fraction`, `mean_ratio`, `kl_floor`, `mean_mismatch`,
-   `mean_weight`, `truncated_fraction`, `kl_moved`, `tokens`, `segments`, `segments_too_long`, `optimizer_steps`,
-   `stopped_at_max_kl`, `seconds`).
-7. It adds Tinker's own measures: the tokens billed per meter and their estimated cost, and the optimizer's metrics
-   when `OptimStepResponse.metrics` reports a gradient norm (*unverified* that it does).
-
-`settled` awaits either an `APIFuture` or a direct result. The docs show both for the `_async` variants.
-
-### `TinkerEngine`
-
-```py
-# implementations/rollout-tinker/src/rollout_tinker/engine.py (proposed)
-from rollout_train.inference import Generation
-
-
-class TinkerEngine:
-    """An `Engine` that samples at Thinking Machines: the base model, or the sampler checkpoint an adapter's pointer
-    names. Token ids in, ids and logprobs out; no chat template is applied there."""
-
-    processes: Sequence[int] = ()
-
-    def __init__(self, model: str, *, max_model_len: int = 32_768, project: str | None = None,
-                 service: "ServiceFactory | None" = None) -> None:
-        self.max_model_len = max_model_len
-        self._model = model
-        self._service = service or connected(project)
-        self._base: "tinker.SamplingClient | None" = None
-        self._adapters: dict[str, "tinker.SamplingClient"] = {}
-
-    async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float,
-                       stop_token_ids: Sequence[int], adapter: str | None) -> Generation:
-        client = self._adapters[adapter] if adapter is not None else await self._base_client()
-        response = await client.sample_async(
-            prompt=tinker.ModelInput.from_ints(list(prompt)), num_samples=1,
-            sampling_params=tinker.SamplingParams(max_tokens=max_tokens, temperature=temperature, top_p=top_p,
-                                                  stop=list(stop_token_ids)),
-        )
-        sequence = response.sequences[0]
-        tokens, logprobs = list(sequence.tokens), sequence.logprobs
-        if logprobs is None or len(logprobs) != len(tokens):  # (it could not be trained on)
-            raise RuntimeError("the sampler returned a token without its logprob")
-        return Generation(tokens, list(logprobs), "length" if sequence.stop_reason == "length" else "stop")
-
-    async def load_adapter(self, name: str, path: str) -> None:
-        """`path` is a version's weights directory: its pointer names the sampler checkpoint."""
-        self._adapters[name] = await self._service.create_sampling_client_async(model_path=pointer(Path(path), "sampler"))
-
-    async def remove_adapter(self, name: str) -> None:
-        self._adapters.pop(name, None)
-
-    async def sleep(self) -> None: ...   # nothing on this machine to free
-    async def wake(self) -> None: ...
-    def close(self) -> None: ...
-```
-
-**How publishing swaps the sampler.** The loop's `serve` calls `Recorder.publish`, which calls `Channel.publish`,
-which calls `TinkerEngine.load_adapter("POLICY@N", ".../POLICY@N/weights")`. That reads `tinker.json` and makes a
-`SamplingClient` for the sampler path. From then on, requests that name `POLICY@N` sample from it. The channel keeps
-the previous version's client for turns in flight and drops the one before, as it does with vLLM adapters. Every
-sampled span is still stamped with the version.
+The checkpoints, their manifests and the ledger are unchanged: the pointers are blobs like any weights.
 
 ### A profile
 
-```toml
-# Train and serve at Thinking Machines; play (the worlds, the runners) on this machine. TINKER_API_KEY in the
-# environment, never in this file.
-directory = "~/.cache/rollout/runs/team-tinker"
-feed_runs = 80
-episodes_at_once = 12             # no GPU to share: what the machine's memory for Paper servers allows
+`environments/minecraft/profiles/tinker.toml` trains and samples the full `Qwen/Qwen3.5-9B` at Tinker with
+one-gpu.toml's turn budgets, segment budget and shared ledger, and has the local-serving alternative commented.
 
-[ledger]
-kind = "rollout_train.database:DatabaseLedger"
-url = "sqlite:///~/.cache/rollout/ledger.db"
+### Retention (proposed)
 
-[channels.policy]
-model = "Qwen/Qwen3.5-9B"         # Tinker's id; also what rollout_qwen:qwen35 loads the tokenizer from
-renderer = "rollout_qwen:qwen35"
-engine = "rollout_tinker:TinkerEngine"
-engines = [{ max_model_len = 32768 }]
-thinking_tokens = 1024
-answer_tokens = 400
+`Checkpoints.thin` releases a checkpoint by deleting its blobs. For a Tinker checkpoint those are the pointer files, so
+the remote checkpoints remain and keep costing storage. They are named after checkpoint ids, so a sweeper could
+reconcile them:
 
-[trainer]
-kind = "rollout_tinker:TinkerTrainer"
-channel = "policy"
-colocated = false                 # nothing to share
-rank = 32
-learning_rate = 2e-5
-segment_tokens = 16000
-segments_per_step = 384
-tokens_per_step = 65536
+- list `RestClient.list_user_checkpoints()`;
+- map each checkpoint's name back to a checkpoint;
+- delete, with `delete_checkpoint_from_tinker_path`, those of released checkpoints, and those of no checkpoint once
+  older than a day (steps that died before their checkpoint was appended).
 
-[pools.minecraft]
-kind = "minecraft_team.worlds:worlds"
-
-[memory]
-runs_gib = 6
-```
-
-The same profile with `engine = "rollout_vllm:VllmEngine"` and `weights = "peft"` under `[trainer]` trains remotely
-and serves locally ([mixed setups](#mixed-setups)).
-
-**What does not apply.**
-
-- `colocated` and `training_gib` do nothing.
-- `Colocated` is never used. Wrapping a remote trainer in it would pause play for every step and gain nothing.
-- `TinkerEngine.processes` is empty, so `engine.json` lists nothing.
-- `Platform.start` needs no change: it calls `named(kind)(model, **settings)` and `named(engine)(model, **options)`
-  as it does now.
-
-### Retention
-
-`Policies.thin` releases a version by deleting its blobs. For a Tinker version those are the pointer files, so the
-remote checkpoints remain and keep costing storage. Checkpoints are named after versions, so a sweeper can reconcile
-them:
-
-- `rollout_tinker.sweep(policies, policy)` (proposed) lists `RestClient.list_user_checkpoints()`.
-- It maps each checkpoint's name back to a version.
-- It deletes, with `delete_checkpoint_from_tinker_path`:
-  - the checkpoints of released versions;
-  - checkpoints of no version at all once they are older than a day (steps that died before their version was
-    appended).
-
-It could run after each `thin`, from a hook, or as `rollout tinker sweep`. TTLs alone do not fit: `Retention` keeps
-every twentieth version indefinitely, and the trainer cannot know at save time which versions will be kept.
+TTLs alone do not fit: retention keeps some checkpoints indefinitely, and the trainer cannot know at save time which.
+Until then, `tinker checkpoint delete` deletes them by path or by run.
 
 ## Mixed setups
 
 | Trains | Serves | Works | What to know |
 |---|---|---|---|
 | Tinker | Tinker | Yes | Pointers only; no weight transfer |
-| Tinker | Local vLLM | Yes, with `weights = "peft"` | Each step downloads the archive and remaps it (`build_lora_adapter`). See below |
+| Tinker | Local vLLM | Yes, with `weights = "peft"` | Each step downloads the archive and converts it (`build_lora_adapter`, then q, k and v joined). See below |
 | Local `LoraTrainer` | Tinker | No | No call imports an adapter into Tinker (*unverified*). `TinkerTrainer` raises `StepFailed` for such a parent instead of silently starting over |
+| Tinker, then local `LoraTrainer` | Local vLLM | Through a merge | A Tinker adapter has other layers and ranks than `LoraTrainer`'s; `rollout merge` folds it into the model, and a run starts from that full checkpoint |
 | Tinker | A frontier model, beside it | Yes, unrelated | Other slots of a run can be bound to `DirectModel` endpoints as today |
 
-**Training remotely and serving with local vLLM.**
+**Training remotely and serving with local vLLM** (measured on the 16 GB card with a synthetic adapter in Tinker's
+layout, converted as `weights = "peft"` converts one; no Tinker call):
 
-- `max_lora_rank` must be at least the Tinker rank.
-- Tinker adapts the unembedding by default. Whether vLLM serves an `lm_head` adapter is *unverified*, so the
-  proposed default is `train_unembed = false`.
-- Serving the adapter over the AWQ 4-bit checkpoint (`cyankiwi/Qwen3.5-9B-AWQ-4bit`), rather than the BF16 base it
-  was trained on, works but widens the gap between behaviour and trainer logprobs. The truncated importance weight
-  absorbs it, and `kl_floor` and `mean_mismatch` measure it. Serving `Qwen/Qwen3.5-9B` in BF16 avoids it, if the GPU
-  holds it.
+- vLLM 0.30 loads the converted adapter, its q, k and v joined into `in_proj_qkv`, and it changes what is sampled.
+  `max_lora_rank` must reach the adapter's largest rank: 32 when the three share one A, 96 (so 128) when each has its
+  own. Which Tinker sends is *unverified*; the smoke test records its names.
+- The full `Qwen/Qwen3.5-9B` does not fit at an 8,192-token context. Quantized to FP8 as it loads, its weights take
+  10.8 GiB (the embeddings and the output layer stay bfloat16, 2 GiB each), and at 0.88 of the card (the most that
+  was free beside 1.5 GiB other programs held) with 1,024-token batches, 0.25 GiB is left for the cache: not one turn.
+- The 4-bit checkpoint (`cyankiwi/Qwen3.5-9B-AWQ-4bit`) fits: at 0.78 of the card, 85,000 tokens of cache with a
+  rank-32 adapter, 15,600 with `max_lora_rank = 128`. It widens the gap between behaviour and trainer logprobs (the
+  adapter was trained over bfloat16); the truncated importance weight absorbs it, and `kl_floor` and `mean_mismatch`
+  measure it.
+- Tinker adapts the unembedding by default; `train_unembed` is false here, and whether vLLM serves an `lm_head`
+  adapter is *unverified*.
 
 **Distillation teachers** from the [policy graph](policy-dag.md#distillation) gain an option. A teacher of another
 base (`Qwen/Qwen3.5-397B-A17B`, say) can score the student's tokens with `target_prompt_logprobs` or top-k prompt
@@ -616,31 +432,21 @@ logprobs, since the Qwen3.5 family shares a tokenizer (*unverified* across sizes
 - **Latency in real-time worlds.** Tinker is tuned for throughput. A turn that takes long while a Paper server keeps
   ticking changes the game, and Tinker asks us not to cut requests short. Measure turn latency against the local
   engine before trusting results, and check that no recorder or runner timeout sits on the sampling path.
-- **Costs scale with tokens, not hours.** An estimate for one step at the one-GPU profile's scale assumes:
-  - 384 segments of about 4,000 tokens, 1,000 of them sampled;
-  - about eight turns per segment, so about 16,000 prompt tokens re-sent per segment;
-  - 80% of prefill hitting the cache.
-
-  | Item | Tokens | Cost |
-  |---|---|---|
-  | Training | 1.5M | $2.25 |
-  | The `old` pass | 1.5M | $2.25 |
-  | Sampled tokens | 0.38M | $0.77 |
-  | Prefill | 6.1M | $1.45 (cached) to $4.05 |
-  | Total, trained segments only | | about $7 to $9 |
-
-  Play also produces segments that are never trained on (equal-score groups are skipped), so more like $10 per step,
-  or about $1,000 per 100 steps. The single-minibatch `cispo` path saves the `old` pass. Real numbers should come from
-  a past run's `inference` notes (prompt and generated tokens per minute) before committing. Storage adds $0.10 per
-  GB-month per kept checkpoint.
-- **What the API does not give.** These points are *unverified*:
-  - a way to clear accumulated gradients, which matters after a `max_kl` stop;
-  - the gradient norm in `optim_step`'s metrics;
-  - LoRA rank limits (the cookbook uses 32 to 128);
-  - published rate limits;
-  - billing of `forward_backward_custom`'s extra forward pass (probably at the training price);
-  - whether `create_training_client_from_state*` makes a new training run each time (reusing the live client avoids
-    it in steady state).
+- **Costs scale with tokens, not hours.** From curriculum-9's records (31 steps over 72 groups; a group made 1,486
+  requests of 4,861 prompt and 170 sampled tokens; a full step trained 384 segments of about 5,100 tokens), a full step
+  with its 2.3 groups of play costs about $8 (80% of prefill cached, one optimizer step) to $18 (none cached, several
+  steps and the `old` pass), and a run as long as curriculum-9 about $230 to $520. Play costs more than training:
+  every turn is played, at 4,861 prompt tokens. The assumptions and the table are in
+  [costs](../implementations/rollout-tinker.md#costs). Storage adds $0.10 per GB-month per kept checkpoint.
+- **What the API gives, from the SDK's source (0.32.0).**
+  - No call clears accumulated gradients: after a stop at `max_kl` the trainer does not use that client again.
+  - `create_training_client_from_state*` makes a new LoRA training client, and so a new training run, and loads the
+    state into it. Reusing the live client avoids it in steady state.
+  - `forward_backward_custom` runs a training client's `forward` and then its `forward_backward`: both training passes,
+    billed at the training price.
+  - `optim_step` returns `metrics`, a dictionary whose keys are not documented: whether it holds the gradient norm is
+    *unverified*.
+  - LoRA rank limits and per-account rate limits are not published (*unverified*).
 - **Model churn.** Models retire with a few months' notice. A policy's versions are tied to its base, so a retired
   base strands a remote policy unless its adapters were downloaded (`weights = "peft"` keeps a local copy in the blob
   store).
@@ -724,78 +530,63 @@ its `llms-full.txt` and OpenAPI spec), the live inference model list, and the `p
 
 Prime Intellect is a source of GPUs and open-source parts. Tinker is the managed service that keeps our loop.
 
-## A first milestone
+## Milestones
 
-The milestones run in order: first a live smoke test, then the smallest integration, then the rest.
+**0. The live smoke test** (`implementations/rollout-tinker/tests/test_live.py`, `-m tinker`, skipped without a key)
+runs on `Qwen/Qwen3.5-4B`, the same family at half the price, for well under ten cents:
 
-**0. Live smoke script.** About an hour, under $0.10 (*estimate*: a few thousand tokens at $2 or less per million).
-An opt-in script or test (`-m tinker`, skipped without `TINKER_API_KEY`) on `Qwen/Qwen3.5-4B`, the same family at
-half the price. It checks:
+1. **Tokenizer agreement.** `rollout_qwen.qwen35("Qwen/Qwen3.5-4B")` renders a conversation with tools; Tinker's
+   tokenizer encodes its text to the same ids, and the vocabularies hash the same.
+2. **Sampling contract.** A sample with our stop ids returns `stop` or `length`, a logprob per token, and the stop
+   token among the tokens.
+3. **Numerics.** A training client's `forward` recomputes the sampled tokens' logprobs; the mean absolute difference
+   is the `mean_mismatch` to expect.
+4. **Round trip.** One `cispo` step on four segments, its sampler checkpoint loaded by `TinkerEngine` and sampled; the
+   archive's configuration and names are recorded.
+5. **Local serving.** The same with `weights = "peft"`: the adapter served by this machine's vLLM.
+6. **Cleanup.** Each test deletes the checkpoints it made.
 
-1. **Tokenizer agreement.** `rollout_qwen.qwen35("Qwen/Qwen3.5-4B")` renders a conversation with tools. Its token
-   ids are compared with Tinker's `get_tokenizer()` encoding, and the vocabularies are hashed.
-2. **Sampling contract.** It samples 64 tokens with our stop ids. It checks that the stop token is included,
-   `stop_reason` is `stop` or `length`, and there is one logprob per token.
-3. **Numerics.** It recomputes the sampled tokens' logprobs with a training client's `forward`, and reports the mean
-   absolute difference (the expected `mean_mismatch`).
-4. **Round trip.** It runs one `cispo` step on four segments, then `save_state`, `save_weights_for_sampler`, a new
-   `SamplingClient` and a sample.
-5. **Cleanup.** It deletes the checkpoints.
+**1. `rollout_tinker`**: the engine, the trainer with every row of [the table](#the-objective-on-tinker),
+`likelihood` for `rollout imitate`, pointer files, the live client, `StepFailed`, and `weights = "peft"`. Its tests
+run on a fake service (a bigram whose losses are the documented formulas), with no network:
 
-**1. `rollout-tinker` with the token-ratio objective, serving from Tinker only.** About two days.
+- a step through the fake moves the model as `PolicyStep` does, with the same metrics, for each row of the table, with
+  passes, warm-up and a stop at `max_kl`;
+- going on from a parent's state (on the live client or a new one) equals the LoRA step going on with its optimizer, a
+  parent's weights alone start a fresh optimizer, and a parent not trained on Tinker is refused;
+- a datum's alignment, the engine's contract and a publish through `Channel` and `Recorder`;
+- the cookbook's conversion with q, k and v joined, and `rollout merge` folding it in exactly, on a tiny model laid out
+  as Qwen3.5;
+- a profile naming `rollout_tinker`'s classes, the loop playing groups and stepping.
 
-- `TinkerEngine`.
-- `TinkerTrainer` with the `cispo` (one minibatch) and `ppo` (several) paths, plus `likelihood`, so that
-  `rollout imitate` works.
-- Pointer files, the live-client reuse, `StepFailed` mapping and deterministic checkpoint names.
-
-**Tests without a network.** `TinkerTrainer` and `TinkerEngine` take a `service` factory, and a fake service stands
-in for Tinker.
-
-- **The fake.** Its "model" is a learnable bias over a small vocabulary (log-softmax per position, in torch). Its
-  `forward`, `forward_backward` (the documented `ppo`, `cispo`, `importance_sampling` and `cross_entropy` formulas),
-  `optim_step` (AdamW on the bias), `save_state`, `save_weights_for_sampler` and `sample` all act on that bias.
-- **Tests on top of it:**
-  - Datum alignment: the shift by one, spans across several turns, forced tokens masked.
-  - **Equivalence**: a step through the fake gives the same update as `PolicyStep`'s `terms` on the same tiny model,
-    for each row of [the table](#the-objective-on-tinker). This is the test that proves the substitutions exact.
-  - Resume from a parent's state, reuse of the live client, refusal of a parent without a pointer.
-  - Engine contract and publish swap through `Channel` and `Recorder`, with `rollout_train.testing`'s
-    `PlainRenderer`.
-  - A whole profile opened with `rollout_tinker` names and the fake, running the loop for two groups, as
-    `tests/rollout_train/test_profile.py` does with a scripted engine.
-
-These are package-local tests, run on their own.
-
-**First real run.** A short Minecraft run (five groups, two steps) on `Qwen/Qwen3.5-9B`, audited before anything
-longer:
+**First real run.** A short Minecraft run on `Qwen/Qwen3.5-9B` (`environments/minecraft/profiles/tinker.toml`, five
+groups, two steps), audited before anything longer:
 
 - Check the launch flags.
 - Check the share of actions that fail.
 - Check that `kl_floor` is small and that the steps move the policy (`kl_moved`, `clip_fraction` above zero).
-- Compare turn latency and cost per step with the estimates above.
+- Compare turn latency and cost per step with the estimates above (`billed_tokens`, and Tinker's billing usage).
 
-**2. Afterwards.**
+**2. Proposed.**
 
-- `weights = "peft"` for local serving.
-- The sweeper.
-- The segment ratio through `forward_backward_custom`.
+- The sweeper ([retention](#retention-proposed)).
 - Teachers of another base for distillation.
 
 ## Unverified points
 
-- Whether Tinker accepts `@` in checkpoint names.
 - Whether there is an API to import an adapter trained elsewhere.
-- Whether accumulated gradients can be cleared.
-- Whether `optim_step` reports the gradient norm.
+- What `optim_step`'s metrics hold (the gradient norm?).
 - LoRA rank limits.
 - Per-account rate limits.
-- How the custom loss's extra forward pass is billed.
-- Whether resuming from a state makes a new training run.
 - Whether sampled logprobs are post-temperature.
-- Whether vLLM serves an unembedding adapter.
-- Checkpoint sizes for a rank-32 adapter of the 9B model, with and without its Adam state.
-- The cost estimate's token counts.
+- Whether vLLM serves an unembedding adapter (vLLM 0.30's Qwen3.5 maps `lm_head` adapters onto its output embeddings;
+  not run). `train_unembed` is false by default.
+- Tinker's names in an archive of a Qwen3.5 adapter (the cookbook expects `in_proj_q`, `in_proj_k` and `in_proj_v`
+  apart), and its `lora_alpha` (the cookbook assumes 32). The smoke test records both.
+- What training is billed on: every token of a datum (assumed), or the trained rows only.
+- How often turns hit Tinker's prefix cache.
+- Checkpoint sizes: 86.5 million parameters for a rank-32 adapter of the 9B model without the output layer (the
+  cookbook's count), in a dtype not documented; the Adam state beside it.
 - Whether the Qwen3.5 tokenizer is the same across sizes (for teachers).
 - For Prime Intellect: whether Prime Inference supports token-id prompts and logprobs; whether dedicated runs accept
   LoRA; whether hosted environments can reach outside services.

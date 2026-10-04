@@ -47,6 +47,7 @@ Each implements one interface a library defines.
 | [Durable runner](implementations/rollout-durable/README.md) | Runs that survive their process, on DBOS. [Evicting idle runs](implementations/rollout-durable/eviction.md); [several runners](implementations/rollout-durable/runners.md) on one Postgres, and the database stores use |
 | [vLLM engine](implementations/rollout-vllm.md) | Options (speculative decoding among them), adapters by name, sleep and wake, the engine core process, measurements |
 | [LoRA trainer](implementations/rollout-lora.md) | Settings, a fresh process per step, the memory bound, the step, metrics, measurements |
+| [Tinker trainer and engine](implementations/rollout-tinker.md) | Training and sampling at Thinking Machines: installing (a project of its own), the key, the objective as Tinker's losses, what a checkpoint holds, serving its adapters here, costs |
 | [Qwen renderers](implementations/rollout-qwen.md) | The token formats of Qwen3.5 and Qwen3 |
 | [Gemma renderers](implementations/rollout-gemma.md) | The token format of Gemma 4 |
 | [Computers](implementations/rollout-computers.md) | Environment backends and the tools that act on them |
@@ -76,6 +77,7 @@ Each implements one interface a library defines.
 | `implementations/rollout-durable` | `rollout_durable` | A runner whose runs survive their process, on DBOS; a database for stores | `Runner` |
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
 | `implementations/rollout-lora` | `rollout_lora` | A trainer for 4-bit checkpoints with LoRA | `Trainer` |
+| `implementations/rollout-tinker` | `rollout_tinker` | A trainer and an engine at Thinking Machines (Tinker); a uv project of its own | `Trainer`, `Engine` |
 | `implementations/rollout-qwen` | `rollout_qwen` | The Qwen families' token formats | `Renderer` |
 | `implementations/rollout-gemma` | `rollout_gemma` | Gemma 4's token format | `Renderer` |
 | `implementations/rollout-computers` | `rollout_computers` | Computers for tasks, and the tools that act on them | `EnvironmentService` |

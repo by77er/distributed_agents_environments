@@ -119,15 +119,21 @@ are their own.
 
 | Key | Called with | Implementations in this repository |
 |---|---|---|
-| `engine` of a channel | The channel's `model`, and one entry of `engines` as keyword arguments. Once per entry | `rollout_vllm:VllmEngine` ([vLLM engine](../implementations/rollout-vllm.md)) |
+| `engine` of a channel | The channel's `model`, and one entry of `engines` as keyword arguments. Once per entry | `rollout_vllm:VllmEngine` ([vLLM engine](../implementations/rollout-vllm.md)), `rollout_tinker:TinkerEngine` ([Tinker](../implementations/rollout-tinker.md)) |
 | `renderer` of a channel | The channel's `model` | `rollout_qwen:qwen35`, `rollout_qwen:qwen3` ([Qwen renderers](../implementations/rollout-qwen.md)), `rollout_gemma:gemma4` ([Gemma renderers](../implementations/rollout-gemma.md)) |
-| `kind` of the trainer | The trained channel's `model`, and every other key of `[trainer]` except `channel`, `start`, `bookmark` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)) |
+| `kind` of the trainer | The trained channel's `model`, and every other key of `[trainer]` except `channel`, `start`, `bookmark` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)), `rollout_tinker:TinkerTrainer` ([Tinker](../implementations/rollout-tinker.md)) |
 | An entry of `tools` | The run's directory | An environment's own |
 | An entry of `pools` | The run's directory, and the entry's other keys as keyword arguments | `minecraft_team.worlds:worlds` ([Minecraft team](../products/minecraft-team.md#the-worlds)) |
 
 `rollout_train.testing` has a scripted engine and a readable renderer for profiles that need no GPU
 (`rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer`). The GPU packages are installed
 with `uv sync --all-extras`.
+
+The Tinker trainer and engine train and sample at Thinking Machines, on no GPU of this machine. They are in a uv
+project of its own, `implementations/rollout-tinker`, locked apart from the workspace, so a profile that names them is
+run from there (`cd implementations/rollout-tinker && uv run rollout train PROFILE ENVIRONMENT`), with the key in
+`TINKER_API_KEY` or `~/.tinker/credentials.json` ([Tinker trainer and engine](../implementations/rollout-tinker.md)).
+`environments/minecraft/profiles/tinker.toml` is the Minecraft environment's.
 
 ## Opening a profile
 
