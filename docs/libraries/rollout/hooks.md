@@ -32,8 +32,7 @@ Rules:
 - Hooks see what their own runner's process records and performs. Under a durable runner, a run that moves to another
   process after a crash is seen from there on by that process's hooks; a sample retried after a crash is seen again.
 - A harness that samples at a slot's address ([harnesses over HTTP](../rollout-train/harness-endpoint.md)) samples
-  through the gateway, not the runner's endpoints: a gateway in the runner's own process tells the runner's hooks of
-  each such sample, and a gateway elsewhere does not.
+  through the gateway, not the runner's endpoints ([which gateway tells the hooks](../rollout-train/gateway.md#a-runner-served-by-the-gateway)).
 - Hooks are observers. They cannot change a request or a reply; code that must is a `ModelEndpoint`.
 
 The [monitor](../rollout-train/monitor.md) is built on hooks. Episode runners and the training loop have hooks of

@@ -241,7 +241,8 @@ run's slot. `tests/rollout_train/gateway/test_harnesses.py` replays requests rec
 codex-cli 0.157.1, so the formats keep working without the binaries.
 
 **Variables.** A sandbox's lease puts each slot's address in its environment
-([sandboxes](../rollout/sandboxes.md#harnesses-inside-a-sandbox)), suffixed per slot:
+([sandboxes](../rollout/sandboxes.md#harnesses-inside-a-sandbox)), each suffixed with the slot's name in capitals
+(`OPENAI_API_KEY_AGENT_1`), and unsuffixed too when the sandbox's spec names one slot:
 
 | Variable | Value | Read by |
 |---|---|---|
@@ -374,8 +375,9 @@ uv run rollout eval profile.toml SUITE --name NAME  # in the environment's: samp
   `--directory` moves the default), and the same keys' secrets (`[gateway] keys`).
 
 **Hooks.** A program's samples reach the runner's hooks through its endpoints. A harness's go straight to the
-gateway: one in the runner's process tells the runner's hooks of each (`Gateway.hooks`), and the
-[monitor](monitor.md) reads the turns of an episode a gateway elsewhere recorded.
+gateway: one in the runner's process tells the runner's hooks of each (`Gateway.hooks`), so the
+[monitor](monitor.md)'s feed has both; one elsewhere does not, and the monitor reads the turns of an episode it
+recorded from the ledger.
 
 **A runner started again.** A durable run resumed by a runner started again asks again for the samples it had not
 heard back from, under the same effect ids, and is answered with the recorded turns; what it had recorded before

@@ -38,9 +38,8 @@ shapes. The gateway serves them under `SERVED_UNDER` (`/v1`), and a base URL han
 at a [profile](../../guide/deploying.md)'s `[gateway] url`, or a gateway in the runner's own process served at the
 profile's `serve` and reached at its `address`. `Model.address()` raises `RuntimeError` otherwise.
 
-A gateway in the runner's own process tells the runner's hooks of each sample a harness asks for, as the runner's own
-endpoints tell them of its program's samples, so the [monitor](monitor.md)'s feed has both. A gateway elsewhere does
-not; the monitor reads such an episode's turns from the ledger instead.
+What a harness samples reaches the runner's hooks only from a gateway in the runner's own process
+([hooks](gateway.md#a-runner-served-by-the-gateway)).
 
 ## What a request means
 
