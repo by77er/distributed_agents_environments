@@ -36,6 +36,21 @@ Tinker project; a project's id is not a secret. Nothing in `rollout_tinker` prin
 an error is cleared of it before it reaches a failed step's record. Every process that opens the profile's channel or
 trainer needs the key, in its environment or its user's credentials file.
 
+## Billing errors are fatal
+
+Tinker bills a prepaid balance. With its automatic top-up off, a call it refuses for billing (HTTP 402: the balance ran
+out, or billing is not set up) will be refused again until someone adds money, so it is never retried:
+
+- the SDK's own pause on a 402 (it otherwise asks again every five seconds for up to an hour) is turned off in every
+  session `rollout_tinker` opens (`service.no_billing_pause`);
+- the engine raises `Unpaid` (a `ModelEndpointError`: the gateway answers it as the endpoint failing) for that turn,
+  and for every later one without calling Tinker again;
+- the trainer raises `Unpaid` rather than `StepFailed`, so the run stops instead of going on to a step that would be
+  refused too.
+
+No call of the SDK, documented or in its REST client, reads the balance. `RestClient.get_billing_usage` (`tinker billing usage`) gives usage by hour, each
+row with an estimated cost at list prices, up to several hours late: what has been spent, not what is left.
+
 ## In a profile
 
 ```toml
@@ -61,6 +76,33 @@ tokens_per_step = 16384
 cd implementations/rollout-tinker
 uv run rollout train ../../environments/minecraft/profiles/tinker.toml minecraft_team.environment:environment --groups 30
 ```
+
+### Evals through a gateway
+
+An environment that cannot share this project's environment (verifiers' pins its own `openai` and `mcp`) is played by
+a runner in its own project, sampling at Tinker through a gateway served from here
+([a gateway elsewhere that hosts channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels)).
+One profile serves both: `rollout gateway` here starts the `TinkerEngine` channel and records every turn; the runner,
+with `[gateway] url`, starts no engine and samples there under signed keys. The channel serves the base model.
+`implementations/rollout-verifiers/examples/gsm8k_tinker.toml` is GSM8K's, on `Qwen/Qwen3.5-9B`:
+
+```bash
+uv run rollout gateway ../rollout-verifiers/examples/gsm8k_tinker.toml     # from here
+```
+
+and the eval from `implementations/rollout-verifiers` ([GSM8K](rollout-verifiers.md#gsm8k)). Its first run,
+`gsm8k-tinker-base` on 2026-10-04, played the suite `math` (`gsm8k-test-100`, one episode each, 1,024 tokens of
+thinking and 512 of answer) in four minutes, eight episodes at once:
+
+| | |
+|---|---|
+| Solved | 89 of 100 (mean reward 0.89) |
+| Turns | 100, one an episode, each in two phases: the thinking closed by force at 1,024 tokens in nearly every turn, and 12 answers cut at 512 |
+| Tokens | 126,142 sampled (1,261 a turn), each with a finite logprob; 210 forced, with none; 125,588 of prefill over both phases |
+| Exact | every prompt is our renderer's rendering of its task, the ids Tinker sampled from |
+| Cost at list prices | $0.27 to $0.33, by how much of each second phase's prefix Tinker cached |
+
+Qwen3.5-9B thinks past 1,024 tokens on most GSM8K problems, so the cap, not the problem, ends its thinking.
 
 `colocated`, `training_gib` and `reshard` do nothing for a remote trainer: there is nothing on this machine to share,
 and a step's files are pointers. An engine's options are `max_model_len` (the longest turn; Tinker's context for

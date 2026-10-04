@@ -4,8 +4,12 @@ service (`rollout_tinker.testing`) stands in for it in tests.
 The key is the SDK's business: it reads `TINKER_API_KEY`, else the credential `tinker auth login` stored in
 `~/.tinker/credentials.json`. Nothing here prints or records it: `said` looks at it only to take it out of an error's
 text before that goes anywhere, and `has_key` only asks whether there is one.
+
+A call Tinker refuses for billing (402) is fatal (`Unpaid`): the trainer stops the run rather than fail one step, the
+engine refuses every later turn without calling Tinker, and the SDK's own pause-and-retry on 402 is turned off.
 """
 
+import importlib
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -21,12 +25,28 @@ from tinker import (
     SamplingParams,
 )
 
+from rollout.contracts import ModelEndpointError
 from rollout.names import named
 
-__all__ = ["CREDENTIALS", "Rest", "Sampler", "Service", "Trainable", "connected", "has_key", "said", "service_of"]
+__all__ = [
+    "CREDENTIALS",
+    "Rest",
+    "Sampler",
+    "Service",
+    "Trainable",
+    "Unpaid",
+    "connected",
+    "has_key",
+    "no_billing_pause",
+    "said",
+    "service_of",
+    "unpaid",
+]
 
 CREDENTIALS = Path("~/.tinker/credentials.json")
 """Where `tinker auth login` keeps the key."""
+PAYMENT_REQUIRED = 402
+"""What Tinker answers a call it will not bill: the balance ran out (no automatic top-up), or billing is not set up."""
 
 
 class Saved(Protocol):
@@ -97,10 +117,40 @@ class Service(Protocol):
     def create_rest_client(self) -> Rest: ...
 
 
+class Unpaid(ModelEndpointError):
+    """Tinker refused a call for billing (402): the balance ran out, or billing is not set up. It is fatal: what
+    raises it never calls Tinker again, and nothing retries it."""
+
+
+def unpaid(error: BaseException) -> bool:
+    """Whether an error is (or was raised from) Tinker's refusal for billing: a 402, which the SDK may wrap."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, Unpaid) or getattr(current, "status_code", None) == PAYMENT_REQUIRED:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def no_billing_pause() -> None:
+    """Have the SDK raise a 402 at once. It otherwise pauses a call refused for billing and asks again every five
+    seconds, for up to an hour, as if the balance might come back by itself (with no automatic top-up it does not)."""
+    holder: Any = importlib.import_module("tinker.lib.internal_client_holder").InternalClientHolder  # (no stubs)
+
+    def never(self: object, status_code: int, detail: str) -> bool:
+        return False
+
+    holder._should_pause_on_billing = never
+
+
 def connected(project: str | None = None) -> Service:
-    """A session with Tinker (in `project`, else `TINKER_PROJECT_ID`'s), its key read by the SDK."""
+    """A session with Tinker (in `project`, else `TINKER_PROJECT_ID`'s), its key read by the SDK; a call refused for
+    billing raises at once (`no_billing_pause`)."""
     import tinker
 
+    no_billing_pause()
     service: Any = tinker.ServiceClient(project_id=project)
     return service
 

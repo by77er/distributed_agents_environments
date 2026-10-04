@@ -43,7 +43,7 @@ from tinker import AdamParams, Datum, ForwardBackwardOutput
 from rollout_lora.objectives import Terms, terms
 from rollout_lora.step import minibatches, sampled
 from rollout_tinker.data import datum, rows
-from rollout_tinker.service import Service, Trainable, said, service_of
+from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
 from rollout_tinker.settings import CHANGEABLE, TinkerSettings
 from rollout_tinker.weights import (
     checkpoint_name,
@@ -116,6 +116,8 @@ class TinkerTrainer:
                 raise
             except Exception as error:  # (Tinker's errors, and a batch it cannot take: the run goes on)
                 self._live = None
+                if unpaid(error):  # (but not unpaid: every step after would be refused too)
+                    raise Unpaid(f"tinker refused the step for billing: {said(error)}") from error
                 raise StepFailed(f"tinker: {said(error)}") from error
             except BaseException:
                 self._live = None
@@ -124,6 +126,8 @@ class TinkerTrainer:
                 await self._write(into, sampler, state, minibatch_lines)
             except Exception as error:  # (the download or the conversion: Tinker holds the checkpoints all the same)
                 self._live = None
+                if unpaid(error):
+                    raise Unpaid(f"tinker refused the step's weights for billing: {said(error)}") from error
                 raise StepFailed(f"the step's weights could not be kept: {said(error)}") from error
             self._live = (state, client) if clean else None
             metrics["seconds"] = time.monotonic() - started
