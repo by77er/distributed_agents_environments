@@ -90,7 +90,7 @@ Guidance is cut when the examples are made: each example's prompt loses the guid
 
 ```bash
 rollout imitate PROFILE --dataset REF [--start REF] [--name NAME] [--directory RUN] [--limit N] [--seed N] \
-    [--resume-optimizer]
+    [--learning-rate R] [--warmup N] [--passes N] [--resume-optimizer]
 ```
 
 The profile's trainer takes the step with `objective = "likelihood"`: the LoRA trainer, or the trainer of every
@@ -103,9 +103,10 @@ the newest checkpoint the run made, else `--start` (any [reference](checkpoints.
 - **Its parents** are the checkpoint it trained from, then the checkpoints that sampled the examples it trained on,
   by depth. The checkpoint graph shows those as learned-from edges, as it shows a distillation's teachers. A step
   from the base model has no parents; its `dataset` still says where its examples came from.
-- **Its record names the dataset** (`dataset`, the id), and its metrics add `imitated_episodes` and
-  `imitated_segments` and `optimizer_resumed`. Its batch records each example's source, as a training step's does. The monitor serves the
-  `dataset` of each checkpoint with the rest of its record.
+- **Its record names the dataset** (`dataset`, the id), and its metrics add `imitated_episodes`,
+  `imitated_segments` and `optimizer_resumed`, beside the trainer's `learning_rate`, `warmup_updates` and `passes`.
+  Its batch records each example's source, as a training step's does. The monitor serves the `dataset` of each
+  checkpoint with the rest of its record.
 - **From where it starts:** a step goes on from its parent's weights when the trainer makes what the parent is (an
   adapter from an adapter, every weight from every weight), with its optimizer started afresh: the parent's trainer
   state holds the moments of another objective (a policy gradient's, say). `--resume-optimizer` goes on from that
@@ -113,6 +114,39 @@ the newest checkpoint the run made, else `--start` (any [reference](checkpoints.
   new adapter over those weights; its trainer and its base are that checkpoint. A step of every weight from an
   adapter is refused: [merge](checkpoints.md#full-weights-and-merges) the adapter first.
 - **`--limit N`** trains on N examples drawn at random (by `--seed`); the batch says which.
+
+### Its schedule
+
+A supervised step has a rate, a warmup and passes of its own, whatever the profile's `[trainer]` says for training
+runs:
+
+| | Default | Flag |
+|---|---|---|
+| rate | 1e-6 for every weight, 1e-4 for an adapter (`imitation.RATES`) | `--learning-rate` |
+| warmup | a fresh optimizer's rate rises linearly over its first 4 updates (`imitation.WARMUP`) | `--warmup` |
+| passes | enough passes for at least 8 optimizer updates of `tokens_per_step` sampled tokens (`passes_for`, `imitation.UPDATES`): one for a large dataset, more for a small one | `--passes` |
+
+Passes rather than a smaller `tokens_per_step`: each update stays the size the trainer's settings make it, over
+examples shuffled anew each pass, and a dataset large enough for its updates takes one pass as before. They are the
+trainer's settings `passes` and `warmup_updates` ([LoRA trainer](../../implementations/rollout-lora.md)); a
+training run's steps use them only if its profile sets them, and a step that goes on from an optimizer's state is
+not warmed up.
+
+The defaults come from steps on `slqm` (12 short answers the base model gave in the guessing game, 107 sampled
+tokens) from the full checkpoint `qvqy` of Qwen3-0.6B, optimizer fresh. Mean logprob of a sampled token before and
+after, on the 12 and on 24 held-out answers of the same game (`qwtv`):
+
+| Step | Updates | Trained on | Held out |
+|---|---|---|---|
+| every weight, 1e-5, no warmup | 1 | −0.352 → −0.944 | −0.457 → −1.615 |
+| every weight, 1e-6, warmup 4 | 8 | −0.352 → −0.291 | −0.457 → −0.374 |
+| every weight, 1e-5, warmup 4 | 8 | −0.352 → −0.149 | −0.457 → −0.708 |
+| adapter over `qvqy`, 3e-4, warmup 4 | 8 | −0.352 → −0.245 | −0.457 → −0.593 |
+
+A fresh Adam's first update moves every weight by about the full rate, so one update at 1e-5 wrecks the model; eight
+warmed-up updates at 1e-6 raise both. At 1e-5 (and an adapter at 3e-4) the step fits the twelve and loses the
+held-out answers. The adapter's default, 1e-4, is a third of the rate that overfitted here; it has not been measured
+on its own.
 
 In Python:
 

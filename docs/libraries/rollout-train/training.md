@@ -257,11 +257,14 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
 rollout imitate PROFILE [--directory RUN] [--without KIND ...] [--limit N] [--seed N]   # with the run stopped
 rollout imitate PROFILE --dataset REF [--start REF] [--name NAME]                     # a dataset's examples
 rollout imitate PROFILE … --resume-optimizer          # go on from the parent's trainer state (by default: afresh)
+rollout imitate PROFILE … --learning-rate R --warmup N --passes N   # the step's schedule
 ```
 
 It takes the run's fence, so the run must be stopped, and writes a start of `kind: imitation`. It reads the episodes
 of the run in the directory for guidance of the kinds given (`way` by default), or, with `--dataset`, a
 [dataset's](datasets.md) examples; steps the profile's trainer with `objective = "likelihood"`; and adds
 `imitated_episodes`, `imitated_segments` and `optimizer_resumed` to the checkpoint's metrics. The step starts from
-the parent's weights with its optimizer afresh, unless `--resume-optimizer`. Started again, the training loop serves
+the parent's weights with its optimizer afresh, unless `--resume-optimizer`, on a schedule of its own: 1e-6 for
+every weight or 1e-4 for an adapter, warmed up over 4 updates, with passes enough for 8 updates
+([its schedule](datasets.md#its-schedule)). Started again, the training loop serves
 the checkpoint imitation made (the run's newest) and trains on from it.

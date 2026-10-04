@@ -68,6 +68,13 @@ class LoraSettings:
     passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak."""
     segments_per_step: int | None = None
     """How many segments a step can afford (None: any number)."""
+    passes: int = 1
+    """Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch
+    makes more optimizer updates (a supervised step on a small dataset, say)."""
+    warmup_updates: int = 0
+    """When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this
+    many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every
+    weight by about the full rate. A step that goes on from an optimizer's state is not warmed up."""
     objective: str = "policy_gradient"
     """`policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's
     advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the
@@ -78,6 +85,8 @@ class LoraSettings:
     (GSPO)."""
 
     def __post_init__(self) -> None:
+        if self.passes < 1 or self.warmup_updates < 0:
+            raise ValueError("passes is at least 1, and warmup_updates is not negative")
         self.loss  # noqa: B018 (an objective or ratio it does not know is an error now, not at the first step)
 
     @property
@@ -91,6 +100,13 @@ class LoraSettings:
             clip_high=self.segment_clip_high if segment else self.clip_high,
             truncate=self.truncate,
         )
+
+    def rate(self, update: int, *, fresh: bool) -> float:
+        """The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
+        `fresh`."""
+        if not fresh or self.warmup_updates <= 0:
+            return self.learning_rate
+        return self.learning_rate * min(1.0, (update + 1) / self.warmup_updates)
 
     @property
     def alpha(self) -> float:

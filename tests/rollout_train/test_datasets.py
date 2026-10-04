@@ -25,7 +25,7 @@ from rollout_train.datasets import (
     served_at,
     turn_filter,
 )
-from rollout_train.imitation import GUIDANCE, imitate
+from rollout_train.imitation import GUIDANCE, imitate, passes_for
 from rollout_train.record import GROUPS, STARTS, scope, table
 from rollout_train.recorder import Segment, Span
 from rollout_train.registry import Taken, registry_of
@@ -343,3 +343,10 @@ async def test_a_datasets_name_says_one_dataset(tmp_path: Path, kind: str) -> No
         ("guesses", "kkkkmmmm"),
     ]
     assert [each.name for each in await registry.runs()] == ["a-run"]  # (runs and bookmarks are as they were)
+
+
+def test_a_small_dataset_takes_passes_enough_for_its_updates() -> None:
+    twelve = [Weighted(segment("user: a\nassistant: ", "x" * 10, 0), 1.0) for _ in range(12)]  # 120 sampled tokens
+    assert passes_for(twelve, 512) == 8  # (a pass is one update: eight passes make eight)
+    assert passes_for(twelve, 40) == 3  # (three updates a pass)
+    assert passes_for(twelve * 100, 512) == 1  # (large enough: one pass)

@@ -1,14 +1,15 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # (torch's annotations leave parts of autograd untyped.)
-"""A policy step over weighted segments: the logprobs the step starts from, then one pass of updates.
+"""A policy step over weighted segments: the logprobs the step starts from, then passes of updates.
 
 First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`).
 Then the segments are taken in shuffled minibatches of about `tokens_per_step` sampled tokens, an optimizer step
 each, under the objective the settings name (`rollout_lora.objectives`): a ratio to `old` that bounds how far the
 step moves the policy, and an importance weight `old / behavior` for where each token was sampled (an older checkpoint,
 and the engine computing differently from the trainer). No KL penalty; the pass stops early if a minibatch finds the
-policy further than `max_kl` from where the step began. Only tokens the policy sampled are trained on. The numbers
-are `LoraSettings`'; which segments, and with what advantages, is the algorithm's business.
+policy further than `max_kl` from where the step began. A step takes `passes` passes, each shuffled anew; a fresh
+optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens the policy sampled are trained on.
+The numbers are `LoraSettings`'; which segments, and with what advantages, is the algorithm's business.
 """
 
 import random
@@ -44,6 +45,8 @@ def sampled(weighted: Weighted) -> list[int]:
 class PolicyStep:
     policy: TrainablePolicy
     settings: LoraSettings = field(default_factory=LoraSettings)
+    fresh: bool = True
+    """Whether the optimizer starts afresh (warmed up), or goes on from a state loaded into it."""
 
     def __post_init__(self) -> None:
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=self.settings.learning_rate, weight_decay=0.0)
@@ -51,7 +54,7 @@ class PolicyStep:
         """What each minibatch of the last pass did, in order (`step` returns their totals)."""
 
     def step(self, segments: Sequence[Weighted], *, seed: int = 0) -> dict[str, float]:
-        """The logprobs the step starts from, then one pass over the segments in shuffled minibatches."""
+        """The logprobs the step starts from, then `passes` passes over the segments in shuffled minibatches."""
         started = time.monotonic()
         settings, objective = self.settings, self.settings.loss
         longest = settings.segment_tokens
@@ -61,7 +64,8 @@ class PolicyStep:
             if (longest is None or len(weighted.segment.tokens) <= longest) and sampled(weighted)
         ]
         too_long = sum(1 for weighted in segments if longest is not None and len(weighted.segment.tokens) > longest)
-        random.Random(seed).shuffle(order)
+        shuffled = random.Random(seed)
+        shuffled.shuffle(order)
         self.policy.model.train()
 
         # Where the step starts: each sampled token's logprob on these weights, and where it was sampled.
@@ -91,7 +95,8 @@ class PolicyStep:
         out_of_memory = 0
         stopped = False
         self.minibatches = []
-        for batch in minibatches(order, settings.tokens_per_step):
+        passes = [order] + [shuffled.sample(order, len(order)) for _ in range(settings.passes - 1)]
+        for batch in (batch for each in passes for batch in minibatches(each, settings.tokens_per_step)):
             units = sum(objective.units(weighted.segment.sampled) for weighted in batch)
             sums = dict.fromkeys(totals, 0.0)
             distance = 0.0
@@ -127,6 +132,9 @@ class PolicyStep:
             for key, value in sums.items():
                 totals[key] += value
             norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), settings.max_gradient_norm)
+            rate = settings.rate(len(gradient_norms), fresh=self.fresh)
+            for group in self.optimizer.param_groups:
+                group["lr"] = rate
             gradient_norms.append(float(norm))
             self.minibatches.append(
                 {
@@ -136,6 +144,7 @@ class PolicyStep:
                     "clip_fraction": sums["clipped"] / sums["tokens"],
                     "kl": distance,
                     "gradient_norm": float(norm),
+                    "learning_rate": rate,
                 }
             )
             self.optimizer.step()
@@ -163,6 +172,9 @@ class PolicyStep:
             "segments_too_long": float(too_long),
             "longest_segment_tokens": float(max((len(weighted.segment.tokens) for weighted in order), default=0)),
             "optimizer_steps": float(len(gradient_norms)),
+            "passes": float(settings.passes),
+            "learning_rate": settings.learning_rate,
+            "warmup_updates": float(settings.warmup_updates if self.fresh else 0),
             "stopped_at_max_kl": float(stopped),
             "minibatches_out_of_memory": float(out_of_memory),
             "start_out_of_memory": float(start_out_of_memory),

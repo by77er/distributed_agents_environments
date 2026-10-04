@@ -258,6 +258,9 @@ async def _imitate(
     start_at: str | None = None,
     name: str | None = None,
     resume_optimizer: bool = False,
+    learning_rate: float | None = None,
+    warmup: int | None = None,
+    passes: int | None = None,
 ) -> None:
     import socket
     import time
@@ -266,7 +269,7 @@ async def _imitate(
     from rollout_train.checkpoints import Checkpoints
     from rollout_train.datasets import dataset_of, resolved_dataset
     from rollout_train.datasets import examples as dataset_examples
-    from rollout_train.imitation import IMITATION, examples, imitate
+    from rollout_train.imitation import IMITATION, RATES, WARMUP, examples, imitate, passes_for
     from rollout_train.layout import BLOBS, LEDGER
     from rollout_train.ledger import opened
     from rollout_train.profile import Profile
@@ -304,6 +307,13 @@ async def _imitate(
     if under is not None and under.weights is not None and getattr(kind, "weights", "lora") == "lora":
         model = str(await checkpoints.files(under.weights, described.directory / "bases" / under.id))
     settings = {**described.trainer.settings, "objective": "likelihood"}
+    chosen = taught.segments if limit is None else taught.segments[:limit]  # (as many as the step takes)
+    weights = str(getattr(kind, "weights", "lora"))
+    settings["learning_rate"] = learning_rate if learning_rate is not None else RATES.get(weights, 1e-6)
+    settings["warmup_updates"] = WARMUP if warmup is None else warmup
+    settings["passes"] = passes or passes_for(chosen, int(settings.get("tokens_per_step", 4096)))
+    print(f"{settings['passes']} passes at {settings['learning_rate']:g}, warmed up over "
+          f"{settings['warmup_updates']} updates", flush=True)  # fmt: skip
     trainer = kind(model, **settings)
     fence = await ledger.take(scope(run.id))  # (the run is stopped: imitation writes as it)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
@@ -592,6 +602,9 @@ def main() -> None:
     imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
     imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
     imitating.add_argument("--seed", type=int, default=0)
+    imitating.add_argument("--learning-rate", type=float, help="the step's rate (by default 1e-6 full, 1e-4 LoRA)")
+    imitating.add_argument("--warmup", type=int, help="updates a fresh optimizer warms up over (4)")
+    imitating.add_argument("--passes", type=int, help="passes over the examples (by default enough for 8 updates)")
     imitating.add_argument(
         "--resume-optimizer", action="store_true",
         help="go on from the trainer state of the checkpoint it trains from (by default the optimizer starts afresh)",
@@ -774,6 +787,7 @@ def main() -> None:
         work = _imitate(
             arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed,
             arguments.dataset, arguments.start, arguments.name, arguments.resume_optimizer,
+            arguments.learning_rate, arguments.warmup, arguments.passes,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "dataset":

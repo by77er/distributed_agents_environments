@@ -36,6 +36,12 @@ from rollout_train.trainer import STATE, WEIGHTS, Files, Trainer, Weighted
 
 GUIDANCE = "guidance"
 """The entry of an episode's result that holds the guidance its prompts carried: by kind, word for word."""
+UPDATES = 8
+"""Optimizer updates a supervised step takes at least, unless it is told how many passes to take (`passes_for`)."""
+WARMUP = 4
+"""Updates over which a supervised step's fresh optimizer warms up to its rate."""
+RATES = {"full": 1e-6, "lora": 1e-4}
+"""A supervised step's learning rate, by what its trainer makes: every weight, or an adapter."""
 IMITATION = "imitation"
 """The kind of a run's start that took a supervised step (`rollout imitate`), as its `starts` record says."""
 
@@ -87,6 +93,13 @@ def _around(tokens: Sequence[int], text: str, renderer: Renderer) -> tuple[int, 
         if renderer.encode(renderer.decode(tokens[a:b])) == list(tokens[a:b]):
             return a, b
     return None
+
+
+def passes_for(segments: Sequence[Weighted], tokens_per_step: int, updates: int = UPDATES) -> int:
+    """Passes over `segments` that make at least `updates` optimizer updates of about `tokens_per_step` sampled tokens
+    each: one for a dataset large enough, more for a small one."""
+    per_pass = max(1, sum(weighted.segment.sampled for weighted in segments) // tokens_per_step)
+    return max(1, -(-updates // per_pass))
 
 
 @dataclass

@@ -118,6 +118,7 @@ def _step(
         trainer = PolicyStep(policy, settings)
         if parent is not None and parent.state is not None and (parent.state / OPTIMIZER).exists():
             trainer.optimizer.load_state_dict(torch.load(parent.state / OPTIMIZER, map_location="cuda"))
+            trainer.fresh = False
             for group in trainer.optimizer.param_groups:  # (the saved state carries the rate it was saved with)
                 group["lr"] = settings.learning_rate
         metrics: dict[str, Any] = trainer.step(segments, seed=seed)

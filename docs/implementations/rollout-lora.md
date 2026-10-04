@@ -63,6 +63,8 @@ whose update has another shape. It is what `rollout merge` calls by default
 | `tokens_per_step` | Sampled tokens per optimizer step. How far a step moves the policy is set by how many optimizer steps its tokens make |
 | `max_kl` | The pass stops when the policy has moved this far from where the step began, in nats per token (`None`: never) |
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
+| `passes` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own (1) |
+| `warmup_updates` | When a step's optimizer starts afresh, its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` (0: none). A step that goes on from an optimizer's state is not warmed up |
 | `segment_tokens` | The longest segment a step can hold on its GPU (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
 | `layer_inputs_on_host` | Keep each layer's input in pinned system memory between the forward and backward passes ([activations](#activations)) |
@@ -154,7 +156,9 @@ differently from the trainer. Start and now differ by how far the step has moved
 1. The trainer computes every sampled token's logprob at the start (the recorded spans; forced tokens and prompts are
    not trained on). A segment that does not fit the GPU here is left out and counted.
 2. The segments are shuffled with the step's `seed` and cut into minibatches of about `tokens_per_step` sampled
-   tokens. A last minibatch of less than half that joins the one before.
+   tokens. A last minibatch of less than half that joins the one before. With `passes` above 1, the segments are
+   shuffled anew for each further pass and cut into minibatches of its own. A fresh optimizer's rate is warmed up
+   over its first `warmup_updates` updates; each minibatch notes the rate it was stepped at (`learning_rate`).
 3. For each token, the importance weight `w = min(start / behavior, truncate)` corrects for where it was sampled; it is
    a constant. The ratio `r = now / start` is 1 when the step begins. The loss is
    `-w · min(r · advantage, clip(r) · advantage)`, the upper clip wider than the lower, a mean over the minibatch's

@@ -3952,12 +3952,16 @@ class LoraSettings
 | `layer_inputs_on_host` | `bool` | `False` | Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B. |
 | `mlp_rows` | `int \| None` | `None` | Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
+| `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
+| `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
 | `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, weight or stop at `max_kl` (`rollout_lora.objectives`). |
 | `ratio` | `str` | `'token'` | `token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens' (GSPO). |
 
 **Methods**
 
 - `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
+- `def rate(self, update: int, *, fresh: bool) -> float` — The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
+  `fresh`.
 - `@property def alpha(self) -> float`
 
 ### `LoraTrainer`

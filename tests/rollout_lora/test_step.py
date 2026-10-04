@@ -57,7 +57,33 @@ def test_a_pass_keeps_what_each_minibatch_did() -> None:
     metrics = trainer.step([segment(policy, [1, 2, 3, 4], 1.0), segment(policy, [1, 5, 6, 7], -1.0)])
     assert len(trainer.minibatches) == metrics["optimizer_steps"] == 2
     assert [each["tokens"] for each in trainer.minibatches] == [3.0, 3.0]
-    assert set(trainer.minibatches[0]) == {"segments", "tokens", "loss", "clip_fraction", "kl", "gradient_norm"}
+    assert set(trainer.minibatches[0]) == {"segments", "tokens", "loss", "clip_fraction", "kl", "gradient_norm",
+                                          "learning_rate"}  # fmt: skip
+
+
+def test_a_fresh_optimizers_rate_rises_over_its_warmup_and_one_that_goes_on_is_not_warmed_up() -> None:
+    settings = LoraSettings(learning_rate=1e-5, warmup_updates=4)
+    assert [settings.rate(update, fresh=True) for update in range(6)] == pytest.approx(
+        [2.5e-6, 5e-6, 7.5e-6, 1e-5, 1e-5, 1e-5]
+    )
+    assert [settings.rate(update, fresh=False) for update in range(3)] == [1e-5] * 3
+    assert LoraSettings(learning_rate=1e-5).rate(0, fresh=True) == 1e-5  # (no warmup unless asked)
+    with pytest.raises(ValueError):
+        LoraSettings(passes=0)
+
+
+def test_passes_make_more_updates_each_at_its_warmed_up_rate() -> None:
+    policy = ToyPolicy()
+    settings = LoraSettings(learning_rate=0.04, tokens_per_step=100, max_kl=None, passes=4, warmup_updates=2,
+                            objective="likelihood")  # fmt: skip
+    trainer = PolicyStep(policy, settings)  # type: ignore[arg-type]
+    metrics = trainer.step([segment(policy, [1, 2, 3, 4], 1.0), segment(policy, [1, 5, 6, 7], 1.0)])
+    assert metrics["optimizer_steps"] == 4 and metrics["passes"] == 4  # (a pass of 6 tokens is one update)
+    assert [each["learning_rate"] for each in trainer.minibatches] == pytest.approx([0.02, 0.04, 0.04, 0.04])
+    assert [each["segments"] for each in trainer.minibatches] == [2.0] * 4
+    goes_on = PolicyStep(policy, settings, fresh=False)  # type: ignore[arg-type]
+    goes_on.step([segment(policy, [1, 2, 3, 4], 1.0)])
+    assert {each["learning_rate"] for each in goes_on.minibatches} == {0.04}
 
 
 def test_forced_tokens_are_never_trained_on() -> None:
