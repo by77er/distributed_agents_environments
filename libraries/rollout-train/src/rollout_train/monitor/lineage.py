@@ -326,7 +326,7 @@ class _Reading:
                 by_start: dict[str, list[dict[str, Any]]] = {}
                 episodes = eval_episodes(self.tables, suite, subject)  # (an eval's subject is its run)
                 for key, result in self.read(f"{_EVALUATIONS}{suite}/{subject}/results").items():
-                    said = reported(episodes.get(key.replace("-", "/", 1))) is not False
+                    said = bool(reported(episodes.get(key.replace("-", "/", 1))))
                     by_start.setdefault(key.partition("-")[0], []).append(
                         {"solved": bool(result.get("solved")) if said else None, "reward": result.get("reward")}
                         | {"run_id": result.get("run_id")}

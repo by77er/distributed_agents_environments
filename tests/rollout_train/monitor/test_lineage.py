@@ -72,7 +72,16 @@ def tables() -> dict[str, dict[str, JsonValue]]:
             "suite": {"entries": [{"starts": [{"task": "t1", "seed": 1}, {"task": "t2", "seed": 1}]}]}
         },
         "evaluations/suite/minerthree/subject": {
-            "subject": {"kind": "checkpoint", "checkpoint": "minerthree", "version": "suite@1"}
+            "subject": {
+                "kind": "checkpoint",
+                "checkpoint": "minerthree",
+                "version": "suite@1",
+                "parts": [{"environment": "", "run": "minerthree", "episodes": 1}],
+            }
+        },
+        "runs/minerthree/episodes": {  # (what each episode says: whether it solved its start)
+            "1/1": {"episode": {"info": {"solved": True}}},
+            "2/1": {"episode": {"info": {"solved": False}}},
         },
         "evaluations/suite/minerthree/results": {
             "1-1": {"solved": True, "reward": 1.0},

@@ -40,12 +40,8 @@ from rollout_train.evals import (
     Suite,
     SuiteEntry,
     edit_suite,
-    eval_episodes,
     make_suite,
     parsed,
-    parts_of,
-    played_version,
-    subject_table,
     suite_entry,
     suite_of,
 )
@@ -72,8 +68,8 @@ from rollout_train.monitor.environments import Read, described, listed, page_of
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
 from rollout_train.monitor.machines import kind_of, machines
-from rollout_train.monitor.scores import CHECKPOINT, entry_of, evals_of, history_of, path_of, subjects_in
-from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
+from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in
+from rollout_train.monitor.statistics import newest, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
 from rollout_train.record import (
     ENDINGS,
@@ -633,43 +629,19 @@ class System:
         for each in suites:
             current = next(version for version in each["versions"] if version["id"] == each["version"])
             each |= {"environments": current["environments"], "made": current["made"]}
-        evals: list[dict[str, Any]] = []
-        for run in named_runs(tables):
-            starts: Any = tables.get(table(run, STARTS), {})
-            latest = newest_record(starts)
-            if latest.get("kind") != EVAL or latest.get("part_of"):  # (a part is shown as its eval)
-                continue
-            suite = str(latest.get("suite"))
-            results: Any = tables.get(subject_table(suite, run, "results"), {})
-            who: Any = tables.get(subject_table(suite, run, "subject"), {}).get("subject") or latest
-            parts = parts_of(tables, suite, run)
-            starts_of = [len(cast(dict[str, Any], tables.get(table(str(part["run"]), GROUPS), {}))) for part in parts]
-            groups = [
-                group for part in parts
-                for group in cast(dict[str, Any], tables.get(table(str(part["run"]), GROUPS), {})).values()
-            ]  # fmt: skip
-            expected = sum(int(group.get("episodes") or 0) for group in groups)
-            episodes = eval_episodes(tables, suite, run)
-            solved = _solved_count(results, episodes)
-            entries: list[dict[str, Any]] = []  # (each environment's, for an eval of several)
-            for part, count in zip(parts, starts_of, strict=True) if len(parts) > 1 else ():
-                said = entry_of(str(part["environment"]), results, episodes, int(part["offset"]), count)
-                entries.append({key: said[key] for key in ("environment", "played", "solved", "share", "reward")})
-            evals.append(
-                {
-                    "run": run,
-                    "name": called["runs"].get(run, run),
-                    "suite": latest.get("suite"),
-                    "version": played_version(who),
-                    "checkpoint": latest.get("checkpoint"),
-                    "started": latest.get("started"),
-                    "played": len(results),
-                    "expected": expected,
-                    "solved": solved,
-                    "done": bool(groups) and len(results) >= expected,
-                    "entries": entries,
-                }
-            )
+        evals: list[dict[str, Any]] = [
+            {key: each[key] for key in ("run", "name", "suite", "version", "checkpoint", "started", "played")}
+            | {key: each[key] for key in ("expected", "solved", "done")}
+            | {  # (each environment's, for an eval of several)
+                "entries": [
+                    {key: entry[key] for key in ("environment", "played", "solved", "share", "reward")}
+                    for entry in each["entries"]
+                ]
+                if len(each["entries"]) > 1
+                else []
+            }
+            for each in evals_in(tables, called)
+        ]
         evals.sort(key=lambda each: -(each["started"] or 0.0))
         return {"suites": suites, "evals": evals}
 
@@ -1325,13 +1297,6 @@ def _given(environment: Environment, listed: Any) -> list[Start]:
         parameters = given["parameters"] if "parameters" in given else environment.start(row, random.Random(seed))
         made.append(Start(row.key, row.title, seed, parameters))
     return made
-
-
-def _solved_count(results: Mapping[str, Any], episodes: Mapping[str, Any]) -> int | None:
-    """How many of an eval's episodes solved their start (its results, by `START-EPISODE`, beside its run's
-    `episodes`); None where none of them said whether it did."""
-    said = [result for key, result in results.items() if reported(episodes.get(key.replace("-", "/", 1))) is not False]
-    return sum(bool(result.get("solved")) for result in said) if said or not results else None
 
 
 def _run_in(directory: Path) -> str | None:
