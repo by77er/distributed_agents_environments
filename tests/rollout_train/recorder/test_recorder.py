@@ -14,6 +14,7 @@ from rollout.harness import (
     RunBinding,
     RunContext,
     RunSpecification,
+    SamplingParameters,
     Task,
     agent_program,
 )
@@ -208,6 +209,17 @@ async def test_a_long_prompt_leaves_less_room_to_think_so_that_no_turn_is_too_lo
     assert 0 < room < 64 and engine.budgets[0] == room  # not the channel's 64
     (segment,) = await exported(recorder)
     assert len(segment.tokens) <= limit
+
+
+async def test_a_bindings_thinking_and_answer_room_win_over_the_channels(tokenizer: Tokenizer, tmp_path: Path) -> None:
+    engine = ScriptedEngine(tokenizer, [("thinking " * 30, "length"), ("\n\nhi<|im_end|>", "stop")])
+    recorder = await recorded(channel(engine, thinking=64, answer=16), tmp_path)
+    own = RecordedModel(channel="policy", sampling=SamplingParameters(thinking_tokens=10, answer_tokens=7))
+    endpoint = recorder.endpoint(own)
+    assert endpoint.describe("r_1/ada").max_output_tokens == 17  # (not the channel's 64 + 16)
+    await endpoint.sample(sample_request([Message.user("Say hi.")]))
+    assert engine.budgets == [10, 7]  # the binding's thinking, then its answer, as the key carries them
+    assert recorder.endpoint(POLICY).describe("r_1/ada").max_output_tokens == 80  # (a binding that gives none)
 
 
 async def test_a_request_can_cap_its_output_down_to_no_thinking_at_all(tokenizer: Tokenizer, tmp_path: Path) -> None:

@@ -30,9 +30,10 @@ from rollout.contracts import (
 )
 from rollout.harness.runner import RecordedModel, RunBinding
 from rollout_train.gateway.keys import Grant, Keyring, granted
-from rollout_train.gateway.service import Gateway, Refused, contract_of
+from rollout_train.gateway.service import Gateway, Refused, contract_of, limits_of
 from rollout_train.gateway.turns import TurnStore
 from rollout_train.inference import Routes
+from rollout_train.inference.channel import Sampler
 from rollout_train.ledger import Fence
 from rollout_train.recorder.compat import SERVED_UNDER
 from rollout_train.recorder.segments import Segment
@@ -142,20 +143,30 @@ class GatewayEndpoints:
             attempt=attempt.attempt,
             temperature=binding.sampling.temperature,
             top_p=binding.sampling.top_p,
+            thinking=binding.sampling.thinking_tokens,
+            answer=binding.sampling.answer_tokens,
         )
         return self.keyring.mint(granted(grant, self.lifetime))
 
-    def contract(self, session_id: str, channel: str) -> CapabilityContract:
-        """What a channel guarantees a session: a routed channel, as its run's servers say (the run is admitted)."""
+    def contract(self, session_id: str, binding: RecordedModel) -> CapabilityContract:
+        """What a binding's channel guarantees a session, with the thinking and answer room the binding gives in place
+        of the channel's: a routed channel, as its run's servers say (the run is admitted)."""
+        channel, said = binding.channel, binding.sampling
         name = _name(channel)
+        sampler: Sampler | None = None
         if self.gateway is not None and name in self.gateway.channels:
-            return contract_of(self.gateway.channels[name])
-        if self.routes is not None and self.routes.routed(name):
+            sampler = self.gateway.channels[name]
+        elif self.routes is not None and self.routes.routed(name):
             run = parts(channel)[0] if "/" in channel else self.attempt(SessionIdentity.parse(session_id).owner).run
-            return contract_of(self.routes.channel(run, name))
+            sampler = self.routes.channel(run, name)
+        if sampler is not None:
+            return contract_of(sampler, limits_of(sampler.limits, said.thinking_tokens, said.answer_tokens))
         if name not in self.contracts:
             raise ModelEndpointError(f"no recorded channel {channel!r}")
-        return self.contracts[name]
+        given = self.contracts[name]
+        if said.thinking_tokens is None or said.answer_tokens is None:
+            return given
+        return given.model_copy(update={"max_output_tokens": said.thinking_tokens + said.answer_tokens})
 
     async def reaches(self, run: str, binding: RunBinding) -> bool:
         """Whether every recorded model of a run's binding can be sampled now: a channel the gateway in this process
@@ -190,7 +201,7 @@ class GatewayEndpoint:
         self._binding = binding
 
     def describe(self, session_id: str) -> CapabilityContract:
-        return self._endpoints.contract(session_id, self._binding.channel)
+        return self._endpoints.contract(session_id, self._binding)
 
     def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
         """The gateway, and a key for the session. What a harness samples there is recorded by the gateway, so it does

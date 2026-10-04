@@ -98,7 +98,8 @@ A bookmark is read once, when the eval starts. Without `--checkpoint`, the base 
 
 `rollout eval` finds the version, and loads each entry's environment, before it opens the profile. An entry's sampling
 limits travel in its episodes' binding (`SamplingParameters.thinking_tokens` and `answer_tokens` of each recorded
-model), and the recorder samples with them in place of the channel's own, so entries of one eval take different limits
+model, carried in each slot's [gateway key](gateway.md#keys)), and the gateway samples with them in place of the
+channel's own, so entries of one eval take different limits
 on one channel. It opens the profile without its trainer (`Profile.open(training=False)`): no trainer is made, and the
 engines never sleep for one. What the trainer's `start` would be is the checkpoint, so the trained channel's engines
 load what it is served over: the model; a full checkpoint's files; or, for an adapter over a full checkpoint, that

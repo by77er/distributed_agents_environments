@@ -58,6 +58,10 @@ class Grant:
     attempt: int = 0
     temperature: float = 1.0
     top_p: float = 1.0
+    thinking: int | None = None
+    """Tokens of thinking per turn, and of answer after it, in place of the channel's own (the binding's: an eval's,
+    say); none: the channel's."""
+    answer: int | None = None
 
     @property
     def session_id(self) -> str:
@@ -75,6 +79,8 @@ class Grant:
             "attempt": self.attempt,
             "temperature": self.temperature,
             "top_p": self.top_p,
+            **({"thinking": self.thinking} if self.thinking is not None else {}),
+            **({"answer": self.answer} if self.answer is not None else {}),
         }
 
     @classmethod
@@ -91,6 +97,8 @@ class Grant:
             attempt=int(data.get("attempt", 0)),
             temperature=float(data.get("temperature", 1.0)),
             top_p=float(data.get("top_p", 1.0)),
+            thinking=int(data["thinking"]) if data.get("thinking") is not None else None,
+            answer=int(data["answer"]) if data.get("answer") is not None else None,
         )
 
 

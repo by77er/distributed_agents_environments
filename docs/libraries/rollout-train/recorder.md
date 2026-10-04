@@ -42,7 +42,8 @@ content and records the turn.
 
 ### Thinking
 
-Thinking has a budget (`Limits.thinking`):
+Thinking has a budget: the channel's (`Limits.thinking`, and `Limits.answer` for the answer), or the binding's where it
+gives one (`SamplingParameters.thinking_tokens` and `answer_tokens`: an eval entry's, say), which its key carries:
 
 1. A first phase samples until the thinking closes or the budget runs out. For a model family that opens the block
    itself (Qwen3), rather than its prompt (Qwen3.5), the phase also has room for the opening.

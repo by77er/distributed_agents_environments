@@ -85,6 +85,7 @@ rk1.KID.PAYLOAD.SIGNATURE
 | `episode`, `attempt` | `GROUP/EPISODE` and the attempt, for an episode a run asked for |
 | `fence` | `[scope, number]`: the fence the turns are appended under |
 | `temperature`, `top_p` | how the binding samples |
+| `thinking`, `answer` | the thinking and answer room the binding gives (`SamplingParameters.thinking_tokens`, `answer_tokens`), in place of the channel's own; absent: the channel's |
 | `expires` | seconds since the epoch. A key is taken up to `leeway` (30 s) after it, for clocks that differ |
 
 `SIGNATURE` is the HMAC-SHA256 of `rk1.KID.PAYLOAD` under the secret named `KID`. A

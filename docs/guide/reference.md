@@ -4424,7 +4424,8 @@ without one, a run cannot give a harness an address.
 - `def endpoint(self, binding: RecordedModel) -> 'GatewayEndpoint'`
 - `def attempt(self, run_id: str) -> Attempt` — The attempt an admitted run plays.
 - `def key(self, session_id: str, binding: RecordedModel) -> str` — A key for a session of an admitted run.
-- `def contract(self, session_id: str, channel: str) -> CapabilityContract` — What a channel guarantees a session: a routed channel, as its run's servers say (the run is admitted).
+- `def contract(self, session_id: str, binding: RecordedModel) -> CapabilityContract` — What a binding's channel guarantees a session, with the thinking and answer room the binding gives in place
+  of the channel's: a routed channel, as its run's servers say (the run is admitted).
 - `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled now: a channel the gateway in this process
   samples (a routed one only once its servers have a checkpoint close enough to what the run says it should
   serve), or one the gateway elsewhere serves (a routed one likewise, as this process sees its servers).
@@ -4452,6 +4453,8 @@ What a key lets its holder do: sample for one model slot of one attempt, until i
 | `attempt` | `int` | `0` |  |
 | `temperature` | `float` | `1.0` |  |
 | `top_p` | `float` | `1.0` |  |
+| `thinking` | `int \| None` | `None` | Tokens of thinking per turn, and of answer after it, in place of the channel's own (the binding's: an eval's, say); none: the channel's. |
+| `answer` | `int \| None` | `None` |  |
 
 **Methods**
 

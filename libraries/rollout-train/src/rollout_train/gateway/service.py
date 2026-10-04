@@ -34,7 +34,7 @@ import time
 import uuid
 from array import array
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from pydantic import ValidationError
@@ -47,7 +47,7 @@ from rollout.contracts import CapabilityContract, ModelEndpointError, SampleRequ
 from rollout.harness.hooks import ModelSample, RunHooks
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
 from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore
-from rollout_train.inference import Channel, Generation, Routes
+from rollout_train.inference import Channel, Generation, Limits, Routes
 from rollout_train.inference.channel import Sampler, Unserved
 from rollout_train.inference.remote import NoReplica
 from rollout_train.ledger import Fenced
@@ -126,7 +126,7 @@ class Gateway:
         return [*self.channels, *(name for name in routed if name not in self.channels)]
 
     def describe(self, grant: Grant) -> CapabilityContract:
-        return contract_of(self.sampler(grant))
+        return contract_of(self.sampler(grant), limits_of(self.sampler(grant).limits, grant.thinking, grant.answer))
 
     async def sample(self, grant: Grant, request: SampleRequest, links: Sequence[Link] = ()) -> Reply:
         """One reply, recorded before it is returned: the one recorded under the request's effect id, if there is one.
@@ -189,7 +189,8 @@ class Gateway:
                 raise Unserved(f"{generation.model} answered for {adapter}")  # (its tokens would be misstamped)
             return generation
 
-        turn = await sample_turn(request, sampler.renderer, sampler.limits, sampler.context_limit, generate)
+        limits = limits_of(sampler.limits, grant.thinking, grant.answer)
+        turn = await sample_turn(request, sampler.renderer, limits, sampler.context_limit, generate)
         held = getattr(sampler, "held", None) or getattr(sampler, "model", None)
         return TurnRecord(
             effect_id=request.effect_id,
@@ -310,9 +311,15 @@ def create_app(gateway: Gateway) -> Starlette:
     )
 
 
-def contract_of(sampler: Sampler) -> CapabilityContract:
-    """What a channel guarantees a session: its context, and room for thinking and an answer."""
-    limits = sampler.limits
+def limits_of(limits: Limits, thinking: int | None, answer: int | None) -> Limits:
+    """A channel's limits, with the thinking and answer room a binding gives in place of its own."""
+    return replace(limits, thinking=thinking or limits.thinking, answer=answer or limits.answer)
+
+
+def contract_of(sampler: Sampler, limits: Limits | None = None) -> CapabilityContract:
+    """What a channel guarantees a session: its context, and room for thinking and an answer (by `limits`, else the
+    channel's own)."""
+    limits = limits or sampler.limits
     return CapabilityContract(context_limit=sampler.context_limit, max_output_tokens=limits.thinking + limits.answer)
 
 
