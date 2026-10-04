@@ -2486,7 +2486,9 @@ Every checkpoint, in a ledger, and their files in a blob store.
   release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no checkpoint
   still names it, so this may be repeated after a crash at any point.
 - `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
-  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
+  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint. A file this
+  store lacks is read from the store of any run that has it (a checkpoint made by a run that kept its blobs
+  elsewhere, or a merge of one), as each run's start says where its store is.
 
 ### `Colocated`
 
