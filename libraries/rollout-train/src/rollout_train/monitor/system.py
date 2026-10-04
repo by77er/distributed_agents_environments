@@ -69,7 +69,7 @@ from rollout_train.record import (
 from rollout_train.record import scope as run_scope
 from rollout_train.registry import Bookmark, Entry, Registry, Taken, checked, found, names, registry_of, resolved
 from rollout_train.rollouts.episodes import Outcome, Record
-from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
+from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, Claims, of_episode
 from rollout_train.settings import EVALS_SUITE, TRAINER, Desired, desired_settings_of
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
@@ -91,7 +91,7 @@ FAILED = "failed"
 
 LOST = "lost"
 """How a launch is shown when its launcher stopped beating before it finished."""
-RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED, ENDS)
+RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED, ADOPTED, ENDS)
 """A run's tables, as the page reads them."""
 ARCHIVED = 8
 """Episodes read back from their events that are kept at a time."""
@@ -102,7 +102,8 @@ RUNNING, IDLE, GONE = "running", "idle", "ended"
 """A run's process is there and writing; there and quiet; not heard from in long (a run from before runs said how
 they ended, or that never beat); its runners beat and stopped with no word of how it ended (it crashed or was
 killed). A run that said how it ended is in the state it said (`FINISHED`, `STOPPED`, `FAILED`)."""
-"""A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds,
+"""A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds
+(by the clock of the store that keeps the beats),
 and it is running (idle if it wrote nothing for `QUIET` seconds); none, and its process is gone: ended. An eval that
 played every start has ended; one a training run's schedule asked for, and not done, is as that run is. Otherwise by
 when it last wrote anything this reads (its records in the ledger, and its feed where that can be read): within
@@ -230,11 +231,10 @@ class System:
         beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known."""
         found = launches_of(self._ledger)
         listed = await found.all() if found is not None and await asyncio.to_thread(present, self._ledger) else []
-        now = time.time()
         launchers = [
             {"launcher": beat.runner, "at": beat.at, **beat.about}
             for beat in await self._beats()
-            if beat.about.get("kind") == LAUNCHER and alive(beat, now)
+            if beat.about.get("kind") == LAUNCHER and alive(beat)
         ]
         beating = {str(each["launcher"]) for each in launchers}
         shown = [
@@ -613,9 +613,11 @@ class System:
     ) -> dict[str, Any]:
         noted = _noted(beats)
         beaten: dict[str, float] = {}  # each run's runners' newest beat
+        ages: dict[str, float] = {}  # and how old it is, by the clock of the store that keeps them
         for beat in beats:
             if beat.about.get("run"):
                 beaten[str(beat.about["run"])] = max(beaten.get(str(beat.about["run"]), 0.0), beat.at)
+                ages[str(beat.about["run"])] = min(ages.get(str(beat.about["run"]), beat.age), beat.age)
         made = {checkpoint.id: checkpoint for checkpoint in checkpoints}
         shorter = short(made)
         blobs = {digest: size for checkpoint in checkpoints for digest, size in _blobs(checkpoint)}  # (each kept once)
@@ -634,7 +636,9 @@ class System:
             own = {name: tables.get(table(run, name), {}) for name in RUN_TABLES}
             played[run] = _Played(run, own, fences, self._records)
             listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
-            seen = self._read(run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run))
+            seen = self._read(
+                run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run), ages.get(run)
+            )
             seen |= _how_it_ended(seen["state"], starts, own[ENDS], beaten.get(run) is not None)
             begun: Any = starts[max(starts, key=int)] if starts else {}
             kind = str(begun.get("kind") or "run")
@@ -668,7 +672,10 @@ class System:
             "bookmarks": dict(called["bookmarks"]),
             "runners": _runners(fences, played),
             "channels": [channel | {"run": run} for run, notes in noted.items() for channel in _channels(notes)],
-            "ledger": {"fences": dict(fences), "tables": {name: len(records) for name, records in tables.items()}},
+            "ledger": {
+                "fences": {scope: number for scope, number in fences.items() if not of_episode(scope)},
+                "tables": {name: len(records) for name, records in tables.items()},
+            },
             "kept": {
                 "checkpoints": sum(blobs.values()),
                 "episodes": sum(each.kept for each in played.values()),
@@ -684,12 +691,13 @@ class System:
         now: float,
         notes: list[dict[str, Any]],
         beaten: float | None,
+        age: float | None,
     ) -> dict[str, Any]:
         """What a run's start says (where it is, what started it), its engines (as its runners' heartbeats say),
-        and what its episodes' place adds (its groups in flight with their episodes); when it last wrote or beat,
-        and so whether it is running."""
+        and what its episodes' place adds (its groups in flight with their episodes); when it last wrote or beat
+        (`beaten`, and how long ago by the beats' store, `age`), and so whether it is running."""
         latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
-        beating = beaten is not None and now - beaten <= STALE
+        beating = age is not None and age <= STALE
         added: dict[str, Any] = {"channels": _channels(notes) if beating else []}  # (what a gone process served is not)
         written = newest([wrote, latest.get("started"), beaten])
         if isinstance(found, _Place):
@@ -1089,14 +1097,12 @@ class _Played:
             self.kept += each["kept"]
             self.sampled += each["sampled"]
         done, cut = tables.get(EPISODES, {}), tables.get(INTERRUPTED, {})
-        for key, line in tables.get(CLAIMS, {}).items():
+        made = cast(Mapping[str, Mapping[str, Any]], tables.get(CLAIMS, {}))
+        claims = Claims(made, set(cut), set(done), set(tables.get(ADOPTED, {})))
+        for key, line in made.items():
             claim: Any = line
             group, episode, attempt = key.split("/")
-            holds = (
-                f"{group}/{episode}" not in done
-                and key not in cut
-                and fences.get(runner_scope(str(claim["runner"]))) == claim["fence"]
-            )
+            holds = f"{group}/{episode}" not in done and claims.holds(key, fences, None)
             made = {"group": int(group), "episode": episode, "attempt": int(attempt), "runner": claim["runner"]}
             made["at"] = claim.get("at")
             self.claims.append(made | {"holds": holds})
@@ -1169,10 +1175,9 @@ def _runners(fences: Mapping[str, int], played: Mapping[str, _Played]) -> list[d
 
 def _machines(beats: list[Beat]) -> list[dict[str, Any]]:
     """Every runner's machine as its heartbeats say: whether it is alive, what it said last, and its recent beats."""
-    now = time.time()
     return [
-        {"runner": beat.runner, "at": beat.at, "alive": alive(beat, now), **beat.about, "history": beat.history}
-        for beat in sorted(beats, key=lambda each: (not alive(each, now), -each.at))
+        {"runner": beat.runner, "at": beat.at, "alive": alive(beat), **beat.about, "history": beat.history}
+        for beat in sorted(beats, key=lambda each: (not alive(each), -each.at))
     ]
 
 

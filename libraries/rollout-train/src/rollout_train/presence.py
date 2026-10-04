@@ -8,6 +8,11 @@ measurements of its recent ones, so the monitor can show how its machine moved, 
 A runner whose newest beat is older than `STALE` seconds is taken to be gone: what it had claimed is open to be
 claimed again. This is ordinary state, changed in place, not part of the ledger's append-only record: a file beside a
 ledger of files (`FilePresence`), a table in a database ledger's database (`rollout_train.database.DatabasePresence`).
+
+A beat's time is the store's, not the runner's: the store stamps a beat when it keeps it, and says how old it is when it
+is read (`Beat.age`), by the same clock. A Postgres database stamps and ages beats by its server's clock, so a runner
+whose machine's clock is behind or ahead of the reader's is judged by when it last beat all the same. A ledger of files
+and a SQLite database serve one machine, whose clock every writer and reader shares.
 """
 
 import asyncio
@@ -16,7 +21,7 @@ import json
 import time
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -36,10 +41,13 @@ MEASURED = ("at", "machine", "channels", "playing")
 class Beat:
     runner: str
     at: float
+    """When the store kept it, in seconds since the epoch by the store's clock."""
     about: Mapping[str, JsonValue]
     """What the runner said of itself in its newest beat."""
     history: list[dict[str, JsonValue]] = field(default_factory=list[dict[str, JsonValue]])
     """Its recent beats' measurements (`MEASURED`), oldest first."""
+    age: float = 0.0
+    """Seconds since the store kept it, by the store's clock, when it was read."""
 
 
 class Presence(Protocol):
@@ -52,9 +60,9 @@ class Presence(Protocol):
         ...
 
 
-def alive(beat: Beat | None, now: float | None = None) -> bool:
-    """Whether a runner beat within the last `STALE` seconds."""
-    return beat is not None and (time.time() if now is None else now) - beat.at <= STALE
+def alive(beat: Beat | None) -> bool:
+    """Whether a runner beat within the last `STALE` seconds, by the store's clock."""
+    return beat is not None and beat.age <= STALE
 
 
 def presence_of(ledger: Ledger) -> Presence | None:
@@ -71,7 +79,8 @@ def kept(history: list[dict[str, Any]], at: float, about: Mapping[str, JsonValue
 
 
 class FilePresence:
-    """`Presence` in `presence.json` in a ledger's directory, under the lock the ledger's files are written under."""
+    """`Presence` in `presence.json` in a ledger's directory, under the lock the ledger's files are written under. Its
+    clock is the machine's: a ledger of files serves one machine."""
 
     def __init__(self, directory: Path) -> None:
         self.directory = directory
@@ -85,13 +94,17 @@ class FilePresence:
                 was = beats.get(runner)
                 beats[runner] = Beat(runner, at, dict(about), kept(was.history if was else [], at, about))
                 staged = self.path.with_suffix(".staged")
-                staged.write_text(json.dumps([asdict(each) for each in beats.values()]))
+                staged.write_text(json.dumps([_stored(each) for each in beats.values()]))
                 staged.replace(self.path)
 
         await asyncio.to_thread(noted)
 
     async def beats(self) -> list[Beat]:
-        return await asyncio.to_thread(lambda: sorted(self._read().values(), key=lambda beat: beat.runner))
+        def read() -> list[Beat]:
+            now = time.time()
+            return [replace(beat, age=now - beat.at) for beat in sorted(self._read().values(), key=_runner)]
+
+        return await asyncio.to_thread(read)
 
     def _read(self) -> dict[str, Beat]:
         if not self.path.exists():
@@ -107,3 +120,14 @@ class FilePresence:
                 yield
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _runner(beat: Beat) -> str:
+    return beat.runner
+
+
+def _stored(beat: Beat) -> dict[str, Any]:
+    """A beat as a file keeps it: how old it is is said when it is read."""
+    kept = asdict(beat)
+    del kept["age"]
+    return kept

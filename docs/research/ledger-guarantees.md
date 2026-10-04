@@ -18,8 +18,9 @@ the claim, the mechanism, the assumptions it rests on, and the verdict, with fil
 guarantee fails, it gives a scenario and a proposed fix. The last section says what a proposed HTTP ledger service would
 have to guarantee for all of this to carry over.
 
-The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 3, 4, 7, 8, 11, 12 and 14 have
-since been fixed: their sections say what the code does now, without line numbers.
+The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 1, 2, 3, 4, 5, 6, 7, 8, 10, 11,
+12, 13 and 14 have since been fixed, and finding 9 in part: their sections say what the code does now, with line
+numbers only where they say what the code did then.
 
 **Evidence.** Each violation still open has a test marked `xfail(strict=True)`: the suite stays green, and a fix turns
 the test into a failure until its mark is removed. A fixed violation's test passes, unmarked. Tests that pass show a
@@ -41,23 +42,25 @@ leaks.
 
 | # | Kind | Finding | Status | Test |
 |---|---|---|---|---|
-| 1 | Safety | A runner whose claim lapsed (it paused) still records its episode. The keeper deleted its sandbox when the claim lapsed, so its run fails, and that failure, made by the platform, becomes the episode's outcome and drops the newer attempt's result | open | `test_a_runner_whose_claim_lapsed_does_not_record_the_episode` |
-| 2 | Safety | Two claims of one episode hold at once: a lapsed claim holds again when its runner beats again, and an adoption races a new attempt | open | `test_a_lapsed_claim_does_not_hold_again_beside_a_newer_attempt`, `test_an_adoption_and_a_new_attempt_never_both_hold` |
+| 1 | Safety | A runner whose claim lapsed (it paused) still records its episode. The keeper deleted its sandbox when the claim lapsed, so its run fails, and that failure, made by the platform, becomes the episode's outcome and drops the newer attempt's result | fixed: a fence per episode, and a claim holds only as its episode's latest attempt ([2](#the-fence-per-episode)) | `test_a_runner_whose_claim_lapsed_does_not_record_the_episode` |
+| 2 | Safety | Two claims of one episode hold at once: a lapsed claim holds again when its runner beats again, and an adoption races a new attempt | fixed: as 1 ([2](#the-fence-per-episode)) | `test_a_lapsed_claim_does_not_hold_again_beside_a_newer_attempt`, `test_an_adoption_and_a_new_attempt_never_both_hold` |
 | 3 | Safety | Retention can delete a blob that a checkpoint added at the same moment names (content addressing finds it stored and does not write it again) | fixed: a grace period, and a put that finds a blob sets its time ([6](#6-retention-and-blobs)) | `test_thin_never_deletes_a_blob_a_concurrent_add_names` |
 | 4 | Safety | `FileLedger`: after a writer dies mid-line, the next acknowledged append is lost, and its key then accepts a second, different record | fixed: the next append removes the unfinished line first, and appends are on disk before they are acknowledged | `test_an_append_after_a_torn_line_is_kept` |
-| 5 | Safety | Staleness and wall-time limits compare wall clocks. A runner whose clock is 90 s behind looks dead while it plays (finding 1, everywhere at once), and a clock stepped forward ends sandbox leases early | open | `test_a_live_runner_whose_clock_is_behind_keeps_its_claims`, `test_a_clock_stepped_forward_does_not_end_a_lease_early` |
-| 6 | Safety | Durable runner: a run replayed after its terminal event was stored appends a second terminal event (introduced by `42e324d`) | open | `test_a_run_replayed_after_it_ended_has_one_terminal_event` |
+| 5 | Safety | Staleness and wall-time limits compare wall clocks. A runner whose clock is 90 s behind looks dead while it plays (finding 1, everywhere at once), and a clock stepped forward ends sandbox leases early | fixed: beats stamped and aged by the store's clock, time limits on the pool's monotonic clock ([3](#3-clocks)) | `test_a_live_runner_whose_clock_is_behind_keeps_its_claims`, `test_a_clock_stepped_forward_does_not_end_a_lease_early` |
+| 6 | Safety | Durable runner: a run replayed after its terminal event was stored appends a second terminal event (introduced by `42e324d`) | fixed: one terminal event and one end ([9](#9-the-durable-runner)) | `test_a_run_replayed_after_it_ended_has_one_terminal_event` |
 | 7 | Safety | Launch states are overwritten unconditionally: a stop asked for while a run starts is lost, and a stop racing a claim marks a running launch `stopped` | fixed: every state change compares and sets ([7](#7-launches-and-settings)) | `test_a_stop_asked_for_while_a_run_starts_stops_it`, `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` |
 | 8 | Safety | Two makers of one suite leave a suite that neither made | fixed: a suite is one record ([8](#8-suites-finding-8)) | `test_two_makers_of_one_suite_leave_one_of_their_suites` |
-| 9 | Safety | Two loops of one run (a replaced one that has not noticed yet) share unfenced side effects: the run's directory, the trainer, the bookmark | open | none (analysis) |
-| 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all its durable runs on its next start | open | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
+| 9 | Safety | Two loops of one run (a replaced one that has not noticed yet) share unfenced side effects: the run's directory, the trainer, the bookmark | fixed in part: the loop looks at its fence before acting outside the ledger, and trains in a directory of its own ([5](#5-the-training-loop)) | `test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes_and_bookmarks_nothing` |
+| 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all its durable runs on its next start | fixed: adoption under any earlier fence ([2](#adoption-adopts-under-any-earlier-fence-finding-10)) | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
 | 11 | Liveness | `FileLedger`: a crash while taking a fence leaves `fences.json` empty, and the ledger is unusable until repaired by hand | fixed: `fences.json` is replaced whole | `test_a_crash_while_taking_a_fence_leaves_the_ledger_usable` |
 | 12 | Liveness | `FileLedger` blocks the event loop on its lock and rereads whole tables on every append, which can delay beats | fixed: it waits in a thread, and keeps each table's keys | `test_a_ledger_of_files_does_not_hold_up_the_event_loop_while_another_holds_its_lock` |
-| 13 | Liveness | The keeper decides from a read and releases afterwards: a lease whose claim was adopted in between is released, and its run is played again | open | none (analysis) |
+| 13 | Liveness | The keeper decides from a read and releases afterwards: a lease whose claim was adopted in between is released, and its run is played again | fixed: the keeper reads the claim again and ends it in the ledger before releasing ([4](#4-leases-and-sandboxes)) | `test_the_keeper_reads_a_lapsed_claim_again_and_ends_it_in_the_ledger_before_releasing` |
 | 14 | Documentation | "A table's records … in the order they were appended" does not hold on Postgres for tables that several scopes write | fixed: an append holds its table's lock while it numbers its record | `test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres` |
 
 The [durable runner](#9-the-durable-runner) section lists further problems found by reading `rollout_durable`. Only
-finding 6 among them is tested.
+finding 6 among them is tested. Tests of what the fixes added are in `tests/rollout_train/test_episode_fences.py`,
+`tests/rollout_train/test_presence.py`, `tests/rollout/harness/test_sandboxes.py`, `tests/rollout/harness/test_blobs.py`
+and `tests/rollout_train/training/test_loop.py`.
 
 ## 1. Fencing
 
@@ -143,7 +146,8 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
   its offset), and of any other ledger the table is read back.
   - `Checkpoints.add` reads back, and so does `reshard`.
   - `make_suite` uses `appended` and plays the winner's suite (finding 8, fixed).
-  - `EpisodeRunner._ended` does not read back. That is intended: the loser's episode is dropped.
+  - `EpisodeRunner._ended` does not read back. That is intended: the loser's episode is dropped. Most losers are
+    refused before that: an older attempt's record raises `Fenced` once a newer attempt took the episode's fence.
 
 ### Order of records: holds (finding 14, fixed)
 
@@ -173,21 +177,24 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 **Claims** (rollouts.md "What runners write"):
 
 - "two runners never play one attempt";
-- "A claim holds while its runner keeps its fence and beats";
-- "The first record of an episode is its record";
+- "A claim holds while it is its episode's latest attempt and its runner keeps its fence and beats";
+- "The first record of an episode is its record", and only the attempt that holds the episode's fence can append it;
 - at-least-once play: an episode with no record and no claim that holds is open again.
 
 **Mechanism.**
 
-- A claim is an append to `runs/RUN/claims` under `GROUP/EPISODE/ATTEMPT`, under the runner's fence `runners/NAME`
-  (`scheduler.py:377-390`).
-- `holds` (`scheduler.py:74-90`) says a claim holds if all of these are true:
+- A claim is an append to `runs/RUN/claims` under `GROUP/EPISODE/ATTEMPT`, under the runner's fence `runners/NAME`.
+  The runner whose append succeeded then takes the episode's fence, `runs/RUN/episodes/GROUP/EPISODE`
+  ([below](#the-fence-per-episode)).
+- `Claims.holds` says a claim holds if all of these are true:
+  - it is its episode's latest attempt (no claim of a higher attempt exists);
   - it is not noted in `interrupted`;
   - it was made under its runner's newest fence, or adopted under it;
-  - its runner's newest beat is no older than `STALE` = 90 s, unless the reader is that runner.
-- `open` reads the fences, the beats and six tables, one after another and not as one snapshot. It offers an
-  episode's next attempt when no claim of it holds (`scheduler.py:288-322`).
-- The episode's record is an append under `GROUP/EPISODE` (`scheduler.py:490-494`), under the runner's own fence.
+  - its runner's newest beat is no older than `STALE` = 90 s by the store's clock ([clocks](#3-clocks)), unless the
+    reader is that runner.
+- `open` reads the fences, the beats and the run's tables, one after another and not as one snapshot. It offers an
+  episode's next attempt when no claim of it holds.
+- The episode's record is an append under `GROUP/EPISODE`, under the episode's fence.
 
 **What holds.**
 
@@ -197,11 +204,11 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
   (`episodes.py:127-143`), and the recorder's segments are kept by `run_id` (`scheduler.py:474`).
 - At-least-once play holds as long as some runner with room keeps serving.
 
-### A zombie's record is accepted (finding 1)
+### A zombie's record (finding 1): refused
 
-The fence that guards the record is the runner's own, and it does not move when the runner's claim lapses for want
-of beats. A runner that was paused (a stop-the-world pause, a suspended VM, a network partition) and resumes therefore
-records its episode, although by the scheduler's own rule its claim no longer holds.
+At `6ec3721` the fence that guarded the record was the runner's own, and it does not move when the runner's claim
+lapses for want of beats. A runner that was paused (a stop-the-world pause, a suspended VM, a network partition) and
+resumed therefore recorded its episode, although by the scheduler's own rule its claim no longer held:
 
 1. Runner Z claims `1/1/1`, acquires its sandbox, and stops beating (paused).
 2. After 90 s, `holds` says the claim lapsed. The keeper releases Z's lease at its second look and deletes the
@@ -216,11 +223,15 @@ the checkpoint (`evals.py:240-268`). Without sandboxes, Z's completed episode wi
 attempt's data), but the run trains on an attempt whose claim had lapsed.
 
 `test_a_runner_whose_claim_lapsed_does_not_record_the_episode` plays exactly this, with the real runner, keeper and
-pool. The recorded outcome is `failed: KeyError: 'there is no sandbox …'`.
+pool. Now the episode's fence refuses step 4 twice over: the keeper took it before it deleted Z's sandbox (step 2), and
+F took it when it claimed attempt 2 (step 3). Z's record raises `Fenced`; Z notes its attempt cut short (`SUPERSEDED`),
+and F's completed episode is the record. Without a pool, a paused runner whose episode nobody claimed again holds its
+claim again when it beats again, and its record stands: its run was not harmed, and it is the only attempt.
 
-### Two claims of one episode hold at once (finding 2)
+### Two claims of one episode (finding 2): never both hold
 
-`holds` never asks whether a later attempt exists. There are two ways for two claims of one episode to hold at once:
+At `6ec3721` `holds` never asked whether a later attempt existed. There were two ways for two claims of one episode
+to hold at once:
 
 - **A lapsed claim holds again.** Continue the scenario above. When Z beats again, its claim `1/1/1` holds again,
   beside F's `1/1/2`. A pool beside the ledger then admits Z's key again (`sandboxes.py:182-193`). If Z had not yet
@@ -233,81 +244,121 @@ pool. The recorded outcome is `failed: KeyError: 'there is no sandbox …'`.
   `test_an_adoption_and_a_new_attempt_never_both_hold`. The window is the whole of `_adopt`, which reads four tables
   per run, for every run.
 
-Consequences: the episode is played twice, and one pool place is used twice. The first record wins as before. If the
-adopted run ends first, its record is left out of training (`RESUMED`, `scheduler.py:480-481`), and the trainable
-attempt is dropped.
+The consequences were that the episode was played twice, and one pool place used twice. Now `holds` asks for the
+latest attempt, so at most one claim of an episode holds at any moment: once attempt 2's claim is appended, attempt 1's
+holds no more, whatever its runner's beats and adoptions say. Both tests pass. In the adoption race, the runner started
+again takes the episode's fence before it reads the claims a second time: attempt 2 claimed before that take is seen,
+and the claim is not adopted (it is cut short as `LAPSED`); attempt 2 claimed after it takes the fence in turn, and
+the adoption, or the adopted run's record, is refused.
 
-### Fix for findings 1 and 2: a fence per episode
+### The fence per episode
 
-Give each episode a scope of its own, `runs/RUN/episodes/GROUP/EPISODE`.
+Each episode has a scope of its own, `runs/RUN/episodes/GROUP/EPISODE` (`episode_scope`).
 
-- To claim, take that scope's fence and append the claim under it. The attempt number can be the fence number.
-- Append the episode's record, the `interrupted` note and the adoption under the same fence.
-- A newer claim then fences out every older attempt at once:
-  - a zombie's record raises `Fenced`;
-  - an adoption after a newer claim raises `Fenced`;
-  - `holds` needs only "is this attempt the episode's newest fence, and is its runner alive".
-- This uses only the ledger's existing operations. The cost is one fence row per episode.
+| Who | Takes it | Appends under it |
+|---|---|---|
+| The runner whose claim was appended (`_claim`) | right after the claim; only the winner of an attempt takes it | the episode's record (`_ended`) |
+| A runner started again (`_adopt`), for each claim it adopts | before it reads its claims a second time | the adoption, then the record |
+| A pool's keeper (`ending`), for a lapsed claim that is its episode's latest attempt | after reading the claim again, before releasing its lease | the note that the attempt was cut short (`RELEASED`) |
 
-A smaller fix, without fences: a claim holds only if it is its episode's latest attempt, and `_ended` appends only
-after reading that its attempt is still the latest. That narrows the window but does not close it.
+- **The claim stays under the runner's fence, and the attempt number is the claim's.** Claimers take the episode's
+  fence only after their claim was appended. Were the fence taken first, a runner that lost the race for an attempt
+  (runners look at the same open episodes, oldest first) would take the fence after the winner's claim and shut the
+  winner out; numbering attempts by the fence instead would let every late claimer pre-empt the claim before it. The
+  claim's key decides who plays an attempt (first append wins), and the fence decides whose writes about the episode
+  count (the last taker's).
+- **What closes findings 1 and 2.** "Latest attempt" in `holds` means at most one claim of an episode holds at a
+  time. The fence means an older attempt can write nothing that counts once a newer one, or a keeper, has taken it:
+  its record and its adoption raise `Fenced`. A runner whose record was refused notes its attempt cut short under its
+  own fence (`SUPERSEDED`), so its claim holds no more; that matters when the taker was a keeper racing a new claim,
+  which leaves the new claim the latest attempt but unable to record.
+- **Interrupts stay under the runner's fence.** Noting one's own attempt cut short only ever ends one's own claim, so
+  it needs no fence of the episode, and it then succeeds for every live runner.
+- **Records from before the change.** Claims, records and adoptions written before episodes had fences read as before:
+  a claim holds by the same rule, a record under a runner's fence counts, and a runner started again takes the
+  episode's fence to adopt an old claim like any other. Nothing is migrated.
+- **Cost.** One more `take` per claim (an upsert in one transaction: SQLite's single write lock, or one Postgres row
+  and a transaction-scoped advisory lock), and one fence row per episode claimed. `fences()` returns every row, so
+  each look of each runner, each keeper sweep and each loop's check of its own fence reads one more row per episode
+  the ledger has claimed; at hundreds of thousands of episodes, a filter by prefix on `fences()` would be worth
+  adding. The monitor leaves episode fences out of the fences it lists.
+- **What is left.** An attempt claimed between the keeper's read and its take loses its fence to the keeper: its
+  record is refused, and it is played again (liveness). A claimer that dies between its claim and its take leaves a
+  claim with no fence taken; that claim holds while its runner beats, and lapses when the runner is started again
+  (a durable runner finds no run for it). A zombie can still record in the moment between a new claim's append and its
+  take, if nobody (no keeper) took the fence before.
 
-### Adoption takes "my previous fence" to be "my fence − 1" (finding 10)
+### Adoption adopts under any earlier fence (finding 10)
 
-`_adopt` judges a claim held if it was made under `self._fence.number - 1`, or adopted under it (`scheduler.py:406,427`).
+At `6ec3721` `_adopt` judged a claim held if it was made under `self._fence.number - 1`, or adopted under it
+(`scheduler.py:406,427`). A runner that took its fence and died before adopting (an out-of-memory kill, a crash in
+`prepare`), or whose take was applied twice (a retried request), found its claims two fences back, noted them all
+`LAPSED` and cancelled their runs.
 
-- A runner that takes its fence and dies before adopting (an out-of-memory kill, a crash in `prepare`) moves its fence
-  twice. On its next start, every claim it held is two fences back. It notes them all `LAPSED` and cancels their runs.
-- Over HTTP, a retried `take` does the same (see [HTTP](#10-a-proposed-http-ledger-service)).
-- Test: `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again`.
-- This is liveness only: the episodes are played again.
-- **Fix:** adopt a claim made or adopted under any earlier fence of this runner, provided it is not noted
-  interrupted and no later attempt of its episode exists. Fences of one name only grow, and one incarnation runs at a
-  time, so "earlier" is enough; with a fence per episode (above) the check is the episode's fence alone.
+Now `_adopt` adopts a run of any claim of its own (made under any earlier fence of its name) that is its episode's
+latest attempt, not cut short, of an episode without a record, as long as the episode's fence it takes is still its
+when it appends the adoption. Fences of one name only grow, and one incarnation runs at a time, so "earlier" is enough.
+`test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` passes.
 
 ### `holds()` and time of check against time of use
 
 - `open` and `holding` read fences, beats and tables at different moments. A stale read can only make a claim look
-  lapsed later, or held later, than it is. Duplicates that follow are absorbed by first append wins, except as above.
+  lapsed later, or held later, than it is. Duplicates that follow are absorbed by first append wins, and by the
+  episode's fence, which refuses an older attempt's record once a newer attempt took it.
 - `admits` decides, and then `acquire` creates the sandbox (`harness/sandboxes.py:319-347`). A claim that lapses in
   between keeps its sandbox until the keeper's two looks. That is liveness only.
 
 ## 3. Clocks
 
-Every timestamp below is `time.time()` on the machine that wrote it.
+At `6ec3721` every timestamp below was `time.time()` on the machine that wrote it.
 
 | Decision | Writer's clock | Reader's clock | Effect of skew or a step | Kind |
 |---|---|---|---|---|
-| A runner is alive: beat `at` ≥ now − 90 s | runner (`presence.py:84`, `database.py:342`) | whoever judges: other runners, every pool's `admits` and keeper (`presence.py:55-57`) | Writer 90 s behind, or reader stepped 90 s ahead: a live runner's claims lapse. Others play them again, keepers delete its sandboxes, and finding 1 follows for every episode it plays. Writer ahead: a dead runner's claims hold longer | **Safety** (two holders, wrong outcomes) |
+| A runner is alive: beat `at` ≥ now − 90 s | runner (`presence.py:84`, `database.py:342`) | whoever judges: other runners, every pool's `admits` and keeper (`presence.py:55-57`) | Writer 90 s behind, or reader stepped 90 s ahead: a live runner's claims lapse. Others play them again, keepers delete its sandboxes, and finding 1 follows for every episode it plays. Writer ahead: a dead runner's claims hold longer | **Safety** (two holders, wrong outcomes). **Fixed**: the store's clock |
 | "Two sweeps in a row" | keeper (`sandboxes.py:212-221`) | keeper | none: two looks, counted, with no times compared | — |
-| Sandbox wall-time limit: `Lease.ends` ≤ now | pool, at acquire (`harness/sandboxes.py:336,345`) | same pool, at sweep (`harness/sandboxes.py:387,392`) | A step forward ends leases early and deletes sandboxes in use. A step back lets sandboxes overstay | **Safety** (a sandbox deleted under its run) |
+| Sandbox wall-time limit: `Lease.ends` ≤ now | pool, at acquire (`harness/sandboxes.py:336,345`) | same pool, at sweep (`harness/sandboxes.py:387,392`) | A step forward ends leases early and deletes sandboxes in use. A step back lets sandboxes overstay | **Safety** (a sandbox deleted under its run). **Fixed**: a duration on the pool's monotonic clock |
 | Durable runner takeover: heartbeat older than `takeover_after` | each runner | each runner | A live runner's runs are executed twice at once (documented, runners.md) | **Safety** |
 | Durable eviction and waking (`wake_at`, `last_activity`, `recorded_at`) | several machines | evicting runner | Runs evicted or woken early or late | Liveness |
 | Launch `at` (ordering of launches asked for) | whoever asked | launcher | Launches started out of order | Liveness |
-| Run state shown by the monitor (beat ages) | runner | monitor | Wrong display | Display |
-
-Tests:
-
-- `test_a_live_runner_whose_clock_is_behind_keeps_its_claims` writes a beat stamped by a clock two minutes behind. The
-  runner's live claim does not hold.
-- `test_a_clock_stepped_forward_does_not_end_a_lease_early` steps the pool's clock forward two hours. A sandbox
-  acquired seconds ago, with an hour's limit, is deleted.
+| Run state shown by the monitor (beat ages) | runner | monitor | Wrong display | Display. **Fixed**: the store's clock |
 
 WSL2 is prone to both problems: its clock drifts while the host sleeps, and is stepped when it resyncs.
 
-**Fixes.**
+**Staleness by the store's clock.** Two designs were open: database time, or each reader's monotonic observation of a
+beat changing. The code uses the store's clock:
 
-- **Liveness by observation, not by comparison.** A reader judges a runner dead when the runner's beat has not changed
-  for 90 s by the reader's own `time.monotonic()`. Keep `(runner, at)` → first time seen, in memory. Skew between
-  machines then cannot matter, and a step of the reader's clock does not matter either. The price is that a reader
-  that starts fresh waits 90 s before it judges anyone dead. Keepers and runners run long, so that is acceptable.
-- **Or database time.** `DatabasePresence.beat` writes `at = now()` on the server (Postgres `clock_timestamp()`). The
-  staleness test becomes SQL (`now() - at > interval '90 s'`). One clock, so no skew. This is the natural form behind
-  an HTTP service.
-- **Wall-time limits.** Store the limit as a duration, and judge it from the pool process's monotonic clock. On a pool
-  restart, credit the time already used from the database's clock, not the local one.
-- Keep `takeover_after` and `STALE` well above the largest expected skew. Alert when a beat's `at` is in the reader's
-  future.
+- The store stamps a beat when it keeps it (`Beat.at`) and says how old it is when it is read (`Beat.age`), by the
+  same clock; `alive(beat)` is `beat.age <= STALE`. The writer's clock is never read.
+  - `DatabasePresence` on Postgres stamps and ages in SQL with the server's `clock_timestamp()`: one clock for every
+    machine, so skew between runners and readers cannot make a live runner look dead.
+  - On SQLite it uses SQLite's own `julianday('now')`, and `FilePresence` the machine's clock: both serve one machine,
+    whose clock every writer and reader shares.
+- Everything that judges liveness reads the age: `Claims.holds` (so runners' `open`, pools' `admits` and keepers'
+  sweeps) and the monitor's run state and machines.
+- Why not observation: a reader that starts fresh would have to wait 90 s before it could judge anyone dead, and every
+  reader (each runner, each pool, the monitor) would judge separately, so two readers could disagree on whether one
+  claim holds. A clock in the store gives every reader one answer at once, and is the form an HTTP service would
+  have.
+- What is left: a step of the store's own clock (the Postgres server's, or the one machine's for SQLite and files)
+  ages every beat at once until each runner beats again (every 15 s). Claims of live runners can then look lapsed for
+  that long; with the episode's fence, the cost is attempts played again, not wrong records.
+
+**Time limits on the pool's monotonic clock.** A lease keeps its limit as a duration (`Lease.seconds`, from
+`Lease.at`), and `SandboxPool` keeps each lease's end on its own process's `time.monotonic()`. A pool started again
+credits each lease with the time it has lasted, by the wall clock, once, as it reads its leases.
+
+Tests:
+
+- `test_a_live_runner_whose_clock_is_behind_keeps_its_claims` beats from a writer whose clock is two minutes behind,
+  into SQLite and into Postgres. The claim holds. (A ledger of files has no other machine's clock to be behind.)
+- `test_a_database_stamps_and_ages_beats_by_its_own_clock_not_the_writers` beats from clocks an hour ahead and an hour
+  behind.
+- `test_a_clock_stepped_forward_does_not_end_a_lease_early` steps the pool's wall clock forward two hours. The
+  sandbox, acquired seconds before with an hour's limit, stays.
+- `test_a_pool_started_again_counts_the_time_its_leases_have_lasted`.
+
+Keep `takeover_after` (the durable runner's own heartbeats, which still compare wall clocks) well above the largest
+expected skew.
 
 ## 4. Leases and sandboxes
 
@@ -324,8 +375,8 @@ WSL2 is prone to both problems: its clock drifts while the host sleeps, and is s
 - names each sandbox by a hash of its key (`handle_of`, `:269-272`), so a retried acquire finds the same sandbox;
 - `admits` refuses a key whose claim does not hold, and ends its lease (`:319-322`).
 
-The keeper (`sandboxes.py:202-230`) releases leases found lapsed at two looks 15 s apart. `sweep` deletes sandboxes the
-provider has that no lease or making names (`harness/sandboxes.py:401-403`).
+The keeper (`keep`) releases leases found lapsed at two looks 15 s apart, after reading each claim again and ending it
+in the ledger (`ending`, below). `sweep` deletes sandboxes the provider has that no lease or making names.
 
 **What holds.**
 
@@ -339,23 +390,31 @@ provider has that no lease or making names (`harness/sandboxes.py:401-403`).
 **What does not.**
 
 - **A rightful holder can lose its sandbox.** The rule is "a lease ends with its claim", so a runner whose claim
-  lapsed is by definition not the rightful holder. The problem is that the claim lapses on a clock (section 3) or a
-  pause, and the runner carries on (finding 1). A clock step deletes sandboxes under their runs (finding 5).
-- **A pool name used by two processes at once.** Pools are named `KIND@HOST/DIRECTORY` (`profile.py:396`). Nothing
-  fences a pool's name, so two processes of one run's directory on one host (finding 9) load the same leases and keep
-  separate memories of them. Each process's `sweep` deletes sandboxes "no lease names" by its own memory.
-  - With a provider whose `held()` lists sandboxes on the machine rather than in the process (Minecraft worlds,
-    `worlds.py:133`), one process deletes the other's sandboxes. Unverified with a real provider.
-  - **Fix:** the pool takes a fence `pools/NAME` and refuses to sweep once it is fenced out. Or the database holds the
-    single truth of the leases, with the per-key lock as an advisory lock.
+  lapsed is by definition not the rightful holder. The claim lapses on the store's clock (section 3) or a pause, and
+  the runner carries on; what it records then is refused, because the keeper ends the claim in the ledger before it
+  ends the lease (below, and finding 1).
+- **A pool name used by two processes at once.** Pools are named `KIND@HOST/DIRECTORY` (`profile.py:396`), so two
+  processes of one run's directory on one host (finding 9) load the same leases and keep separate memories of them.
+  Each process's `sweep` deletes sandboxes "no lease names" by its own memory, and with a provider whose `held()`
+  lists sandboxes on the machine rather than in the process (Minecraft worlds), one process would delete the other's.
+  Now each keeper takes the pool's fence (`pools/NAME`) when it starts, looks at it before each sweep, and stops
+  sweeping once another process took it (`test_a_keeper_stops_sweeping_once_another_process_keeps_its_pool`). Left:
+  a sweep already under way when the other process starts runs to its end; the replaced process still acquires and
+  releases for its own runs (which its replaced runner no longer starts).
 - **Leaks.** A lease of a run the ledger does not know ends only when released (documented). The leases of a pool name
   that is never opened again (a host renamed, a directory moved) are never swept. Neither are their sandboxes, for a
-  provider whose sandboxes outlive the process (a cloud API).
-  - **Fix:** a sweep by any keeper of leases whose pool has not beaten for a long time.
-- **The keeper decides from a read and releases afterwards (finding 13).** `ended` reads the ledger, and `sweep` then
-  releases. An adoption appended in between makes the claim hold again, but the release still happens. The adopted
-  run then fails with `SandboxLost`, is noted `LOST`, and is played again. This is liveness only, and needs an
-  adoption that took longer than two looks (30 s).
+  provider whose sandboxes outlive the process (a cloud API). A fix would be a sweep, by any keeper, of the leases of
+  pools that have not beaten for a long time; pools opened by a profile do not beat today, so it needs that first.
+- **The keeper reads the claim again and ends it before releasing (finding 13).** At `6ec3721` `ended` read the
+  ledger and `sweep` released afterwards, so an adoption appended in between made the claim hold again while the
+  release still happened. Now, for each lease found lapsed at two looks, `ending` reads the claim again just before
+  releasing: one that holds again keeps its lease. One that is still its episode's latest attempt is ended in the
+  ledger first, by a compare-and-set made of the ledger's own operations: the keeper takes the episode's fence and
+  appends the `interrupted` note (`RELEASED`) under it. An adoption appended before the take is seen by the second
+  read; an adopter that takes the episode's fence after the keeper's take finds the note when it reads the claims
+  again, and does not adopt; one that takes it between the keeper's take and its note gets its adoption, and the
+  keeper's note is refused, so the lease stays (and is looked at again). The release follows only a note that stands.
+  Test: `test_the_keeper_reads_a_lapsed_claim_again_and_ends_it_in_the_ledger_before_releasing`.
 - **Calls are not checked against the lease.** `SandboxPool.call` and the HTTP `/call` operate on whatever sandbox
   the key hashes to, without checking that the key holds a lease (`harness/sandboxes.py:369-374`). A zombie whose
   lease was not yet swept keeps operating. Any client that knows a key can operate its sandbox (see scoped tokens).
@@ -394,8 +453,8 @@ provider has that no lease or making names (`harness/sandboxes.py:401-403`).
   `Budget`, takes the step over different segments than its record and its checkpoint's `batch` say.
   - **Fix:** train from the recorded batch manifest (sources and advantages), loading the segments by source.
 
-**Two loops of one run (finding 9).** The fence stops only ledger appends. A replaced loop that has not yet tried to
-append keeps doing everything else:
+**Two loops of one run (finding 9), as at `6ec3721`.** The fence stops only ledger appends. A replaced loop that has
+not yet tried to append keeps doing everything else:
 
 - **The trainer.** It writes into `DIRECTORY/MAKES` (`loop.py:395-400`). The new loop, retaking the same step,
   removes that directory first (`loop.py:396`) and trains into it while the old loop may still be writing there. Both
@@ -411,9 +470,26 @@ append keeps doing everything else:
   (`loop.py:209-211`), including the other loop's working and served directories.
 - **The bookmark.** `made` moves the profile's bookmark (`profile.py:434-437`). The registry is not fenced, so a late
   old loop moves it back.
-- **Fix:** take the run's fence again before each side effect that matters, and check it after. Better, give each
-  loop incarnation a working directory of its own (`DIRECTORY/FENCE/…`), copy rather than hard-link files a process
-  may still write, and fence registry writes made on a run's behalf.
+**What the loop does now.**
+
+- **It looks at its fence before each side effect outside the ledger** (`newest(ledger, fence)`, which raises
+  `Fenced`): before it publishes a checkpoint, before `serve()` deletes directories, before it renames a step's
+  directory, and before it moves a bookmark (`made`).
+- **Its trainer writes into a directory of the loop's own**, `DIRECTORY/making/FENCE/MAKES`. Once the checkpoint is
+  appended, the directory is renamed to `DIRECTORY/MAKES`, where the checkpoint's files are looked for. The checkpoint
+  is then the loop's own: another loop's add of it under an older fence is refused once this loop took its fence, and
+  it was not there when the step began. A loop replaced while its trainer ran writes only under its own fence's
+  directory, which its replacement's `serve()` deletes.
+- **Linked-out files are checked.** Nothing writes a kept file in place now: a trainer writes into a fresh
+  directory, and a kept file is read-only. `FileBlobStore.link` checks a blob before linking it out: its size always,
+  and its hash too up to 64 MiB (`CHECKED`), and raises for a blob that does not match
+  (`test_a_blob_changed_in_place_is_not_put_in_place`).
+- Test: `test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes_and_bookmarks_nothing`.
+
+**What is left.** A look and the action after it are two steps, so a loop replaced between them still acts once: it
+may delete what its replacement just fetched, publish once, or move a bookmark back once. Registry writes are not
+fenced. A blob larger than 64 MiB changed in place without changing its size is linked out unnoticed; reading it
+through `FileBlobStore.read` still verifies its hash.
 
 ## 6. Retention and blobs
 
@@ -547,7 +623,7 @@ reading the code. Only the first item was run.
 primary key `(run_id, seq)` with `ON CONFLICT DO NOTHING` (`store.py:323-331`), so the first writer of a `seq` wins.
 A replay's events that were already stored are dropped, which is what keeps the log free of duplicates.
 
-- **A second terminal event (finding 6, tested).**
+- **A second terminal event (finding 6, tested, fixed).**
   - What `42e324d` changed: a terminal event takes `MAX(seq) + 1` whenever any event is stored (`context.py:97-102`),
     so that a replay that took another way still ends its stream.
   - What that broke: after the terminal event is stored, `execute` still releases environments and sandboxes and
@@ -561,8 +637,11 @@ A replay's events that were already stored are dropped, which is what keeps the 
   - Test: `test_a_run_replayed_after_it_ended_has_one_terminal_event` gets `[(7, run.completed), (8, run.completed)]`.
     `DurableRunHandle.events()` stops at the first terminal event, so an episode runner records the first. The
     store's log, the feed and the outcome may disagree with it.
-  - **Fix:** bump `seq` only while no terminal event is stored, and make `finish_run` conditional on the run still
-    running.
+  - **What the runner does now.** A terminal event takes `MAX(seq) + 1` only while no terminal event is stored; when
+    one is (`RunStore.terminal_seq`), the replay's takes that event's `seq`, and the store drops it as a duplicate.
+    `finish_run` changes a run only while its status is `running`, so a replay never rewrites how a run ended. The
+    test passes. Left: a replay that takes a longer way than the first execution can still store non-terminal events
+    after the terminal one; readers stop at the first terminal event.
 - **Hooks see replayed events again.** `_recorded` publishes every event, whether or not the store kept it
   (`runner.py:375-377`). **Fix:** have `append` return whether it inserted, and publish only then.
 - **Teardown on DBOS control flow (unverified).** The harness skips `teardown` only for an `UNLOAD` cancellation
@@ -605,8 +684,7 @@ Below is what each operation must keep.
 
 - It is not idempotent: a lost response followed by a retry takes two fences.
 - Fencing survives that, because the client uses the number it got. But anything that reads meaning into the number
-  breaks. `_adopt`'s "previous fence = mine − 1" (finding 10) cuts every durable run short, and `plans` and `starts`
-  get gaps.
+  breaks: `plans` and `starts` get gaps. (`_adopt` no longer reads the number: it adopts under any earlier fence.)
 - The service must accept a client request id. It stores `(scope, request id) → number` in the same transaction as
   the increment, and answers a retry with the stored number.
 - The client sends one request id per logical take, and retries with it until it gets an answer.
@@ -668,8 +746,8 @@ transaction-scoped.
 - Mutable tables (presence, leases, launches, settings) stream as "this row changed, at version *v*". Consumers re-read
   the row and treat the event as a hint.
 
-**Presence and claims by server time.** Beats get `at = now()` on the server, and staleness is judged in SQL against
-`now()`. Section 3's safety problems then go away for everything behind the service.
+**Presence and claims by server time.** `DatabasePresence` already stamps beats with the database's clock and ages them
+by it ([clocks](#3-clocks)); a service in front of Postgres keeps that as it is.
 
 **Synchronous claims.**
 
@@ -742,8 +820,8 @@ What the client must do:
   (WSL's virtual disk, network filesystems).
 - Clocks for retention's grace: a store of files on a filesystem shared by machines compares a file's time, set by the
   machine that put it, with the thinning machine's clock. Skew much smaller than the grace (an hour) is assumed.
-- Whether a trainer writes its working files in place after `kept` has hard-linked them, and whether any deployment
-  runs trainers as root (which would let such a write reach the blob).
+- Whether any deployment runs trainers as root. A trainer no longer shares a working directory with another loop, and
+  nothing in the loop writes a kept file in place.
 - Pools of one name in two processes with a real provider (Minecraft worlds).
 - The durable runner items marked unverified above: teardown on DBOS exceptions, eviction ordering, unloading
   mid-effect, the liveness items. They come from reading the code and DBOS 3.1.0's sources, and were not run.

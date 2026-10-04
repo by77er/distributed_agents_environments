@@ -107,7 +107,7 @@ A run's state:
 | State | When |
 |---|---|
 | **finished**, **stopped**, **failed** | its newest start said how it ended: it played what it was asked, it was interrupted or stopped, or it raised (the page shows the error). Every command that starts a run (`rollout train`, `eval`, `imitate`, `env check`) says so as it exits, in the run's `ends` table under the fence its start was written with (`rollout_train.record.ending`), so a process another has replaced says nothing of the newer start |
-| **running** | one of its runners beat ([heartbeats](rollouts.md#heartbeats)) within the last 90 seconds and something this reads was written within 20 minutes |
+| **running** | one of its runners beat ([heartbeats](rollouts.md#heartbeats)) within the last 90 seconds (by the clock of the store that keeps the beats) and something this reads was written within 20 minutes |
 | **idle** | one of its runners beat within 90 seconds, but nothing was written for 20 minutes: its process is there and waiting |
 | **lost** | its runners beat once and no longer do, and it never said how it ended: it crashed or was killed |
 | **ended** | a run with no beat and no word of how it ended, told by when it last wrote (a record in the ledger, its start, or its feed): **running** within 20 minutes, **idle** until three hours have passed, **ended** after |
@@ -224,7 +224,7 @@ runners' heartbeats; every chart is drawn to scale and says each series' value u
 | `pace` | episodes and groups an hour (counted when each group's result was written); what was done with each group (trained on, in a step being taken, waiting for a step, nothing to train on, no episode or a failed step, in flight); why groups gave nothing to train on |
 | `queue` | how many groups were in flight (decided, their result not written), and how many waited for a step (recorded with something to train on, no step begun over them), over time |
 | `inference` | each run's engines: tokens a second and requests at once, a measurement each beat while they are busy |
-| `machines` | a card for each runner's and launcher's machine, as its heartbeats say: its host, alive or gone (no beat for 90 seconds), memory, accelerators and disk now and over its recent beats, its engines' processes, what each channel serves and how fast, and a launcher's profiles; then each channel's throughput, each runner in the ledger (what it plays now, the claims it has made, its fence), the ledger's fences and tables (`#/system` opens it) |
+| `machines` | a card for each runner's and launcher's machine, as its heartbeats say: its host, alive or gone (no beat for 90 seconds), memory, accelerators and disk now and over its recent beats, its engines' processes, what each channel serves and how fast, and a launcher's profiles; then each channel's throughput, each runner in the ledger (what it plays now, the claims it has made, its fence), the ledger's fences (but [episodes'](rollouts.md#each-episodes-fence), one per episode claimed) and tables (`#/system` opens it) |
 
 An episode's reward is summed as the trainer sums it ([rewards](episodes.md#rewards)): the mean of its slots'. One
 still playing is shown with its reward so far, read from its feed the same way, and each slot's where they differ.
@@ -266,8 +266,9 @@ A group's stage is read from the records alone, so it is what a [loop](training.
 | `ended` | as many episodes are in the run's `episodes` table as were asked for, and no result is written yet |
 | `done` | the `results` table has its result |
 
-A claim holds while its runner keeps the fence it was made under and the attempt was not cut short; the page lists
-the claims that hold as what each runner plays. A step's state is read likewise: `stepping` while it has neither made
+A claim holds while it is its episode's latest attempt, its runner keeps the fence it was made (or adopted) under,
+and the attempt was not cut short ([claims](rollouts.md#what-runners-write)); the page lists the claims that hold as
+what each runner plays. A step's state is read likewise: `stepping` while it has neither made
 the checkpoint it names nor failed, then `committed` or `failed`. A group that is done carries the number and state of
 the step that covers it, if one does; a recorded group that no step covers waits toward the next one.
 

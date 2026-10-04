@@ -13,7 +13,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`sweep`](#sweep)
+- **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
@@ -474,7 +474,8 @@ just after finds no file and writes it again.
   (and share one modification time: the put's). Elsewhere the file is copied. The file is read in pieces, never
   whole.
 - `async def link(self, reference: BlobReference, target: Path) -> bool` — Put the blob at `target`: a hard link to it where `target` is on the store's filesystem, else a copy.
-  Returns False, putting nothing, if the store does not have it.
+  Returns False, putting nothing, if the store does not have it. Raises if the blob is not the one `reference`
+  names: its size is checked, and its hash too where it is small (`CHECKED`).
 
 ### `History`
 
@@ -562,7 +563,7 @@ A sandbox held under a key: what a pool hands out, and what its `Leases` table k
 | `addresses` | `Mapping[str, str]` | `Field(default_factory=dict[str, str])` |  |
 | `environment` | `Mapping[str, str]` | `Field(default_factory=dict[str, str])` |  |
 | `at` | `float` | `0.0` | When it was made, in seconds since the epoch. |
-| `ends` | `float \| None` | `None` | When its wall time is over (`SandboxLimits.seconds`), in seconds since the epoch. |
+| `seconds` | `float \| None` | `None` | How long it may last from when it was made (`SandboxLimits.seconds`). |
 | `lost` | `bool` | `False` | Its sandbox is gone (it ended with the pool's process, say): the key cannot have it back. |
 
 ### `LeaseRefused`
@@ -1195,7 +1196,7 @@ What the sandbox may use. Unset: as much as the pool gives.
 | `cpus` | `float \| None` | `None` |  |
 | `memory_mib` | `int \| None` | `None` |  |
 | `processes` | `int \| None` | `None` |  |
-| `seconds` | `float \| None` | `None` | Wall time from its start: past it, its lease ends and the pool deletes it. |
+| `seconds` | `float \| None` | `None` | Time from its start: past it, its lease ends and the pool deletes it (measured by the pool's monotonic clock, which a change of the machine's wall clock does not move). |
 
 ### `SandboxLost`
 
@@ -1230,7 +1231,7 @@ A `Pool` over a `Provider`: at most `provider.size` leases at once, kept in `lea
 - `async def capacity(self) -> Capacity`
 - `async def call(self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str) -> ToolResult`
 - `async def held(self) -> list[Lease]` — This pool's leases, those whose sandboxes are lost included.
-- `async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]` — Release the leases `ended` says have ended, and those past their wall time; mark lost those whose sandbox
+- `async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]` — Release the leases `ended` says have ended, and those past their time limit; mark lost those whose sandbox
   is gone (the pool's process was started again, say), which their keys cannot have back; and delete the
   sandboxes no lease names. Returns the keys released or marked lost.
 - `async def close(self, *, release: bool = True) -> None` — Release every lease the pool holds (deleting its sandboxes), and close the provider. With `release` False,
@@ -2981,6 +2982,19 @@ async def ended(leases: list[Lease], ledger: Ledger, presence: Presence | None) 
 
 Which of `leases` have ended, as the ledger says now: those whose run it knows and whose claim does not hold.
 
+### `ending`
+
+*function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
+
+```python
+async def ending(keys: Collection[str], ledger: Ledger, presence: Presence | None) -> set[str]
+```
+
+Of the keys of leases found ended, those that may be released now. Each claim is read again: one that holds
+again (adopted meanwhile) keeps its lease. One that is still its episode's latest attempt, and neither cut short nor
+recorded, is ended in the ledger first: its episode's fence is taken, and the attempt noted cut short under it. One
+whose note is refused (another took the fence meanwhile) is left for the next look.
+
 ### `FileLeases`
 
 *class* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
@@ -3007,8 +3021,9 @@ class FileLeases
 async def keep(pool: SandboxPool, ledger: Ledger, presence: Presence | None, *, beat_as: str | None = None, every: float = 15.0) -> None
 ```
 
-Sweep the pool every `every` seconds, until cancelled, releasing a lease once its claim was found lapsed at two
-looks running; with `beat_as`, beat under that name too.
+Sweep the pool every `every` seconds, until cancelled or another process takes the pool's fence, releasing a
+lease once its claim was found lapsed at two looks running and again just before (`ending`); with `beat_as`, beat
+under that name too.
 
 ### `leases_of`
 
@@ -3020,6 +3035,16 @@ def leases_of(ledger: Ledger) -> Leases | None
 
 The leases beside a ledger: a file beside a ledger of files, a table in a database ledger's database.
 
+### `pool_scope`
+
+*function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
+
+```python
+def pool_scope(name: str) -> str
+```
+
+The scope whose fence a pool's keeper holds while it sweeps (`pools/NAME`).
+
 ### `sweep`
 
 *function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
@@ -3028,7 +3053,8 @@ The leases beside a ledger: a file beside a ledger of files, a table in a databa
 async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None) -> list[str]
 ```
 
-Release the pool's leases whose claims have ended (and delete what no lease names); the keys released.
+Release the pool's leases whose claims have ended, ending the claims in the ledger first (`ending`), and delete
+what no lease names; the keys released.
 
 ## `rollout_train`
 
@@ -4915,9 +4941,10 @@ class DurableRunContext(LocalRunContext)
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, started_at: datetime, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, blobs: Blobs | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None, mark_attempt: Callable[[str], bool] = lambda effect_id: True, last_seq: Callable[[], int | None] = lambda: None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, started_at: datetime, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, blobs: Blobs | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None, mark_attempt: Callable[[str], bool] = lambda effect_id: True, last_seq: Callable[[], int | None] = lambda: None, terminal_seq: Callable[[], int | None] = lambda: None) -> None`
 - `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent` — Events are stored by `seq`, and a replay's are the ones stored. A replay that took another way (a sandbox
-  refused, say) would give its terminal event a `seq` already taken; it comes after every stored event.
+  refused, say) would give its terminal event a `seq` already taken; it comes after every stored event, unless
+  a terminal event is stored already: then it takes that one's `seq`, and is not stored.
 - `def now(self) -> datetime`
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
 - `async def take_steering_messages(self) -> list[Envelope]`
@@ -5009,7 +5036,8 @@ class RunStore
 
 - `def __init__(self, database: Database | Path) -> None` — A `Database`, or the path of a SQLite file.
 - `def create_run(self, run_id: str, specification: JsonValue, conversation: str | None, conversation_key: JsonValue = None) -> None`
-- `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None`
+- `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None` — Say how a run ended, if it is still running: a replay of a run that ended (recovered after its terminal
+  event was stored, say) does not say it again.
 - `def run(self, run_id: str) -> RunRecord | None`
 - `def read_all_run_ids(self) -> list[str]`
 - `def evict(self, run_id: str, wake_at: str | None) -> None`
@@ -5031,6 +5059,7 @@ class RunStore
 - `def forget_runner(self, runner_id: str) -> None`
 - `def append(self, event: RunEvent) -> None`
 - `def last_seq(self, run_id: str) -> int | None` — The `seq` of a run's latest stored event; None when it has none.
+- `def terminal_seq(self, run_id: str) -> int | None` — The `seq` of a run's stored terminal event; None when it has none.
 - `def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]`
 - `async def changed(self, run_id: str, wait_seconds: float) -> None` — Wait until the run records something, or `wait_seconds` pass (other processes write without notifying).
 - `def close(self) -> None` — Close the database if this store opened it (a shared `Database` is closed by its owner).

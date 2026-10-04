@@ -5,15 +5,26 @@ the run's sandboxes are leased under `RUN/GROUP/EPISODE/ATTEMPT/NAME` (`rollout.
 leases beside the ledger, as ordinary state changed in place: `sandboxes.json` beside a ledger of files
 (`FileLeases`), the `sandboxes` table of a database ledger's database (`rollout_train.database.DatabaseLeases`).
 
-A claim holds as the scheduler says (`rollout_train.rollouts.scheduler.holds`): it lapses when its runner takes its
-fence anew without adopting it, notes the attempt cut short, or stops beating for `STALE` seconds, or when the episode
-has its record. A pool beside the ledger (`admits`) refuses to acquire under a key whose claim does not hold, and
-releases the lease the key has: a run whose claim lapsed cannot have a sandbox, even for a moment. Its keeper (`keep`)
-looks every few seconds, and releases a lease whose claim it has found lapsed twice running (a runner started again
-adopts its claims a moment after taking its fence anew), deleting its sandbox: a runner that dies leaves its sandboxes
-to their pools. A lease of a run the ledger does not know (a run started by hand, say) is admitted, and ends only when
-it is released. With a name to beat under, the keeper beats too, saying how full the pool is: a pool served from a
-machine of its own.
+A claim holds as the scheduler says (`rollout_train.rollouts.scheduler.Claims.holds`): it lapses when a newer attempt
+of its episode is claimed, when its runner takes its fence anew without adopting it, notes the attempt cut short, or
+stops beating for `STALE` seconds, or when the episode has its record. A pool beside the ledger (`admits`) refuses to
+acquire under a key whose claim does not hold, and releases the lease the key has: a run whose claim lapsed cannot have
+a sandbox, even for a moment. Its keeper (`keep`) looks every few seconds, and releases a lease whose claim it has found
+lapsed twice running (a runner started again adopts its claims a moment after taking its fence anew), deleting its
+sandbox: a runner that dies leaves its sandboxes to their pools.
+
+Before it releases a lease, the keeper reads the claim again (one adopted meanwhile holds again, and keeps its lease),
+and ends a claim that is still its episode's latest attempt in the ledger: it takes the episode's fence, which refuses
+whatever the claim's runner would still record of it, and notes the attempt cut short under that fence (`RELEASED`). A
+runner that was only paused, and resumes to find its sandbox gone, therefore cannot record the failure that follows;
+the episode is played again. If another takes the episode's fence between the keeper's take and its note (a runner
+adopting the claim, or claiming the episode anew), the note is refused and the lease is left to the next look.
+
+A lease of a run the ledger does not know (a run started by hand, say) is admitted, and ends only when it is released.
+The keeper takes its pool's fence (`pools/NAME`) when it starts, and stops sweeping once another process takes it:
+two processes of one pool's name (a run's directory started twice on one machine) never delete each other's
+sandboxes as named by no lease. With a name to beat under, the keeper beats too, saying how full the pool is: a pool
+served from a machine of its own.
 """
 
 import asyncio
@@ -22,19 +33,20 @@ import fcntl
 import json
 import logging
 import socket
-from collections.abc import Awaitable, Callable, Generator
+import time
+from collections.abc import Awaitable, Callable, Collection, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease, Leases, SandboxPool
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import Fenced, FileLedger, Ledger
 from rollout_train.presence import Presence
-from rollout_train.record import runs_in
-from rollout_train.rollouts.scheduler import holding
+from rollout_train.record import runs_in, table
+from rollout_train.rollouts.scheduler import INTERRUPTED, RELEASED, Claims, episode_scope, holding
 
-__all__ = ["FileLeases", "admits", "ended", "keep", "leases_of", "sweep"]
+__all__ = ["FileLeases", "admits", "ended", "ending", "keep", "leases_of", "pool_scope", "sweep"]
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +59,11 @@ def leases_of(ledger: Ledger) -> Leases | None:
     if isinstance(ledger, FileLedger):
         return FileLeases(ledger.directory)
     return getattr(ledger, "sandboxes", None)
+
+
+def pool_scope(name: str) -> str:
+    """The scope whose fence a pool's keeper holds while it sweeps (`pools/NAME`)."""
+    return f"pools/{name}"
 
 
 def _claim_of(key: str) -> tuple[str, str] | None:
@@ -84,10 +101,44 @@ def admits(ledger: Ledger, presence: Presence | None) -> Callable[[str], Awaitab
     return admitted
 
 
+async def ending(keys: Collection[str], ledger: Ledger, presence: Presence | None) -> set[str]:
+    """Of the keys of leases found ended, those that may be released now. Each claim is read again: one that holds
+    again (adopted meanwhile) keeps its lease. One that is still its episode's latest attempt, and neither cut short nor
+    recorded, is ended in the ledger first: its episode's fence is taken, and the attempt noted cut short under it. One
+    whose note is refused (another took the fence meanwhile) is left for the next look."""
+    claimed: dict[str, list[tuple[str, str]]] = {}
+    for key in keys:
+        if (claim := _claim_of(key)) is not None:
+            claimed.setdefault(claim[0], []).append((key, claim[1]))
+    if not claimed:
+        return set()
+    fences = await ledger.fences()
+    beats = {beat.runner: beat for beat in await presence.beats()} if presence is not None else None
+    released: set[str] = set()
+    for run, found in claimed.items():
+        claims = await Claims.read(ledger, run)
+        for key, attempt in found:
+            episode = attempt.rsplit("/", 1)[0]
+            if episode not in claims.done and claims.holds(attempt, fences, beats):
+                continue  # (it holds again: adopted since it was found lapsed)
+            if attempt not in claims.cut and episode not in claims.done and claims.is_latest(attempt):
+                fence = await ledger.take(episode_scope(run, episode))
+                note: dict[str, JsonValue] = {"why": RELEASED, "at": round(time.time(), 1)}
+                try:
+                    await ledger.append(table(run, INTERRUPTED), attempt, note, fence)
+                except Fenced:
+                    continue  # (another took the episode's fence since: looked at again next time)
+            released.add(key)
+    return released
+
+
 async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None) -> list[str]:
-    """Release the pool's leases whose claims have ended (and delete what no lease names); the keys released."""
+    """Release the pool's leases whose claims have ended, ending the claims in the ledger first (`ending`), and delete
+    what no lease names; the keys released."""
     held = await pool.held()  # (before the claims are read: a lease is acquired after its claim is made)
-    return await pool.sweep(await ended(held, ledger, presence))
+    over = await ended(held, ledger, presence)
+    released = await ending([lease.key for lease in held if over(lease)], ledger, presence)
+    return await pool.sweep(lambda lease: lease.key in released)
 
 
 async def keep(
@@ -98,16 +149,21 @@ async def keep(
     beat_as: str | None = None,
     every: float = 15.0,
 ) -> None:
-    """Sweep the pool every `every` seconds, until cancelled, releasing a lease once its claim was found lapsed at two
-    looks running; with `beat_as`, beat under that name too."""
+    """Sweep the pool every `every` seconds, until cancelled or another process takes the pool's fence, releasing a
+    lease once its claim was found lapsed at two looks running and again just before (`ending`); with `beat_as`, beat
+    under that name too."""
     lapsed: set[str] = set()
+    mine = await ledger.take(pool_scope(pool.name))
     while True:
         try:
+            if (await ledger.fences()).get(mine.scope) != mine.number:
+                logger.error("another process keeps the pool %s now: this one no longer sweeps it", pool.name)
+                return
             held = await pool.held()
             over = await ended(held, ledger, presence)
             now = {lease.key for lease in held if over(lease)}
-            twice = now & lapsed
-            gone = await pool.sweep(lambda lease, twice=twice: lease.key in twice)
+            released = await ending(now & lapsed, ledger, presence)
+            gone = await pool.sweep(lambda lease, released=released: lease.key in released)
             lapsed = now
             if gone:
                 logger.info("released the leases of claims that ended: %s", ", ".join(gone))

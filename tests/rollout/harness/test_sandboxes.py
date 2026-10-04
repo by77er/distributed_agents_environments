@@ -283,7 +283,9 @@ class Works(Builds):
         for operation, arguments in asked:
             result = await worker.call(operation, arguments)
             answered.append("refused" if result.is_error else result.structured)
-        await run.emit("worked", {"answered": answered, "addresses": dict(worker.addresses), "ends": worker.lease.ends})
+        await run.emit(
+            "worked", {"answered": answered, "addresses": dict(worker.addresses), "seconds": worker.lease.seconds}
+        )
 
 
 async def test_a_worker_for_an_environment_is_a_sandbox_like_a_world() -> None:
@@ -306,7 +308,7 @@ async def test_a_worker_for_an_environment_is_a_sandbox_like_a_world() -> None:
     assert rest == [{"written": 1000}, "refused", "refused", "refused", {"reached": "pypi.org"}, "refused"]
     addresses: dict[str, str] = worked["addresses"]  # type: ignore[assignment]
     assert addresses["process"].endswith("/process")  # how the runner reaches the worker
-    assert isinstance(worked["ends"], float)  # its wall time
+    assert worked["seconds"] == 3600  # its time limit
     assert sandboxes.sandboxes == {}
 
 
@@ -315,5 +317,17 @@ async def test_a_sandbox_past_its_wall_time_is_deleted_by_the_next_sweep() -> No
     pool = SandboxPool(sandboxes)
     brief = await pool.acquire(WORKER.model_copy(update={"limits": SandboxLimits(seconds=0)}), "brief/worker")
     lasting = await pool.acquire(WORKER, "lasting/worker")
-    assert brief.ends is not None and lasting.ends is not None and lasting.ends > brief.ends
+    assert brief.seconds == 0 and lasting.seconds == 3600
     assert await pool.sweep() == ["brief/worker"] and list(sandboxes.sandboxes) == [lasting.handle]
+
+
+async def test_a_pool_started_again_counts_the_time_its_leases_have_lasted() -> None:
+    from rollout.harness.sandboxes import MemoryLeases
+
+    sandboxes, leases = FakeSandboxes(), MemoryLeases()
+    minute = WORKER.model_copy(update={"limits": SandboxLimits(seconds=60)})
+    pool = SandboxPool(sandboxes, leases=leases)
+    old, young = await pool.acquire(minute, "old/worker"), await pool.acquire(minute, "young/worker")
+    leases.leases[old.key] = old.model_copy(update={"at": old.at - 61})  # made a minute and more ago
+    again = SandboxPool(sandboxes, leases=leases)  # the pool's process started again: its clock starts anew
+    assert await again.sweep() == ["old/worker"] and list(sandboxes.sandboxes) == [young.handle]

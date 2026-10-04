@@ -55,7 +55,7 @@ def sandboxes(self) -> Mapping[str, SandboxSpec]:
 | `mounts` | files it sees, read-only (`Mount`: `source`, as the pool finds it, and `target`, inside): an environment version's files, its virtual environment |
 | `scratch` | a directory it may write, empty at the start, and the most it may hold (`Scratch`: `path`, `mib`). Without one it writes nowhere |
 | `network` | what it may reach besides its connection to the runner (`Network`: `allow`, a list of hosts): nothing by default |
-| `limits` | `SandboxLimits`: `cpus`, `memory_mib`, `processes`, and `seconds` of wall time, past which its lease ends and the pool deletes it |
+| `limits` | `SandboxLimits`: `cpus`, `memory_mib`, `processes`, and `seconds` from its start, past which its lease ends and the pool deletes it |
 
 A world for an episode needs only a kind and parameters. A worker for an environment is the same kind of thing with
 more said:
@@ -71,7 +71,10 @@ SandboxSpec(
 )
 ```
 
-A provider enforces what its spec says as far as it can; the pool ends a lease past its wall time at its next sweep.
+A provider enforces what its spec says as far as it can; the pool ends a lease past its time limit at its next sweep.
+The lease keeps the limit as a duration (`Lease.seconds`, from `Lease.at`), and the pool measures it by its process's
+monotonic clock, which a change of the machine's wall clock (a resync, a resumed virtual machine) does not move. A pool
+started again counts the time its leases have lasted by the wall clock, once, as it reads them.
 
 ## What a program sees
 
@@ -139,7 +142,7 @@ provider:
 - **A sandbox is never made again under a key whose lease it was.** A lease whose sandbox is gone (it ended with
   the pool's process, say) is lost, and its key gets `SandboxLost`: a new sandbox would not be the one its run was
   playing in.
-- **`sweep(ended)`** releases the leases `ended` says have ended and those past their wall time, marks lost those
+- **`sweep(ended)`** releases the leases `ended` says have ended and those past their time limit, marks lost those
   whose sandbox is gone, and deletes the sandboxes no lease names. A lost lease holds no room.
 - **`close()`** releases every lease it holds and closes the provider; `close(release=False)` leaves the leases, for
   the runs a durable runner resumes to acquire again.
@@ -199,7 +202,8 @@ A pool that raises answers 500 with `error`, and the client raises it.
 `rollout pool FACTORY [--directory DIRECTORY] [--ledger WHERE] [--name NAME] [--host 127.0.0.1] [--port 8710]`
 serves a `SandboxPool` over the provider `FACTORY` (`module:function`, called with the directory) returns, named
 `NAME` (by default `KIND@HOST`). With `--ledger`, its leases are kept beside that ledger, it refuses a key whose
-claim has lapsed, its keeper ends leases with their claims, and it beats as `pools/NAME`. Without, it cannot tell
+claim has lapsed, its keeper ends leases with their claims, and it beats as `pools/NAME` (the pool's `name`).
+Without, it cannot tell
 whether a claim holds: it admits every key, keeps its leases in the process, and a lease ends only when released (a
 run's own release, when it ends). A pool that serves training runs is served with `--ledger`.
 
@@ -217,19 +221,31 @@ run resumed) gets the same sandboxes; a new attempt gets new ones.
   changed in place: `sandboxes.json` beside a ledger of files (`FileLeases`), the `sandboxes` table of a database
   ledger's database (`DatabaseLeases`); `leases_of(ledger)` finds them.
 - **A lapsed claim gets no sandbox.** A claim holds as the scheduler says
-  ([claims](../rollout-train/rollouts.md#what-runners-write)): it lapses when its runner takes its fence anew without
-  adopting it, notes the attempt cut short, or stops beating for 90 seconds, and its lease ends with the episode's
-  record too. A pool opened by a profile admits a key only while its claim holds (`admits(ledger, presence)`), so a
-  run recovered after its claim lapsed is refused its sandboxes, and the lease it had is released at once. A key of
-  a run the ledger does not know (a run started by hand) is admitted.
+  ([claims](../rollout-train/rollouts.md#what-runners-write)): it lapses when a newer attempt of its episode is
+  claimed, when its runner takes its fence anew without adopting it, notes the attempt cut short, or stops beating for
+  90 seconds, and its lease ends with the episode's record too. A pool opened by a profile admits a key only while its
+  claim holds (`admits(ledger, presence)`), so a run recovered after its claim lapsed is refused its sandboxes, and
+  the lease it had is released at once. A key of a run the ledger does not know (a run started by hand) is admitted.
 - **Expiry.** A pool's keeper (`keep(pool, ledger, presence)`) sweeps every 15 seconds, and releases a lease whose
   claim it found lapsed at two sweeps running (a runner started again adopts its claims a moment after it takes its
   fence anew), deleting its sandbox. A runner that dies leaves its sandboxes to their pools, which delete them within
   two minutes. A lease of a run the ledger does not know ends only when it is released.
-- **A runner started again** over a durable runner adopts the runs of its claims that held until it stopped
-  ([rollouts](../rollout-train/rollouts.md#a-runner-started-again)); they acquire their sandboxes under the same keys
-  and get them back. A pool opened by a profile with a durable runner leaves its leases when it closes. A sandbox
-  that outlived the process (a pool on a machine of its own) is the run's again; one that ended with it (a Paper
-  server in the process) is lost, and the run is cut short and played again as a new attempt.
+- **The keeper ends the claim before it ends the lease** (`ending`). Just before releasing, it reads the claim again:
+  one adopted since it was found lapsed holds again, and keeps its lease. One that is still its episode's latest
+  attempt is ended in the ledger first: the keeper takes the
+  [episode's fence](../rollout-train/rollouts.md#each-episodes-fence), which refuses whatever the claim's runner would
+  still record of the attempt, and notes the attempt cut short under it (`RELEASED`). A runner that was only paused,
+  and resumes to find its sandbox gone, therefore cannot record the failure that follows; the episode is played
+  again. If another takes the episode's fence between the keeper's take and its note (a runner adopting the claim,
+  or claiming the episode anew), the note is refused and the lease waits for the next sweep.
+- **One keeper per pool name.** A keeper takes its pool's fence (`pools/NAME`) when it starts, and stops sweeping once
+  another process takes it: a run's directory started twice on one machine has one keeper deleting the sandboxes no
+  lease names, not two. Leases of a pool name that is never opened again (a host renamed, a run's directory moved)
+  are swept by no keeper, and neither are their sandboxes where those outlive the process.
+- **A runner started again** over a durable runner adopts the runs of its claims that are still their episodes'
+  latest attempts ([rollouts](../rollout-train/rollouts.md#a-runner-started-again)); they acquire their sandboxes
+  under the same keys and get them back. A pool opened by a profile with a durable runner leaves its leases when it
+  closes. A sandbox that outlived the process (a pool on a machine of its own) is the run's again; one that ended
+  with it (a Paper server in the process) is lost, and the run is cut short and played again as a new attempt.
 - **A pool started again** under its name finds its leases beside the ledger; those whose sandboxes are gone are
   marked lost, and sandboxes no lease names are deleted.

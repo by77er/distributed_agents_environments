@@ -36,7 +36,7 @@ from rollout_train.evals import make_suite, suite_of
 from rollout_train.launcher import Launcher
 from rollout_train.launches import CLAIMED, STOPPED, STOPPING, Asked, FileLaunches, Launch
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
-from rollout_train.presence import STALE, FilePresence
+from rollout_train.presence import STALE, FilePresence, Presence
 from rollout_train.record import scope, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, playing
@@ -93,8 +93,13 @@ def beat_at(directory: Path, runner: str, at: float) -> None:
     path.write_text(json.dumps(beats))
 
 
-async def beats_of(presence: FilePresence) -> dict[str, Any]:
+async def beats_of(presence: Presence) -> dict[str, Any]:
     return {beat.runner: beat for beat in await presence.beats()}
+
+
+async def idle(runner: EpisodeRunner) -> bool:
+    """Whether a runner plays nothing now."""
+    return not runner._playing  # pyright: ignore[reportPrivateUsage]
 
 
 async def until(condition: Callable[[], Awaitable[bool]], seconds: float = 10.0) -> None:
@@ -380,12 +385,6 @@ async def test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_post
 # --- Claims ---------------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="holds() judges a claim by its runner's fence and beat only: a runner that stopped beating (paused, "
-    "partitioned) and beats again has its old claim hold again beside the newer attempt another runner claimed "
-    "meanwhile, and a pool beside the ledger admits its key again",
-)
 async def test_a_lapsed_claim_does_not_hold_again_beside_a_newer_attempt(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     beats = FilePresence(ledger.directory)
@@ -433,12 +432,6 @@ class NoRecorder:
         pass
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="EpisodeRunner._adopt checks 'no later attempt claimed since' and then appends its adoption, with the "
-    "claim not holding in between (its fence moved on): a runner that claims the next attempt in that window and "
-    "the adoption both stand, and two claims of one episode hold",
-)
 async def test_an_adoption_and_a_new_attempt_never_both_hold(tmp_path: Path) -> None:
     files = FileLedger(tmp_path / "ledger")
     beats = FilePresence(files.directory)
@@ -473,12 +466,6 @@ async def test_an_adoption_and_a_new_attempt_never_both_hold(tmp_path: Path) -> 
     assert len(held) == 1, f"two claims of one episode hold: {sorted(held)}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="EpisodeRunner._adopt takes the fence its claims held under to be its new fence less one: a runner that "
-    "died after taking its fence and before adopting (or whose take was applied twice, a retried request) finds its "
-    "claims made two fences back, judges them lapsed, and cuts its runs short",
-)
 async def test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again(tmp_path: Path) -> None:
     files = FileLedger(tmp_path / "ledger")
     beats = FilePresence(files.directory)
@@ -497,12 +484,6 @@ async def test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_a
     assert list(await files.read(table("train", ADOPTED))) == ["1/1/1/3"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a runner whose claim lapsed (it stopped beating) still records its episode under its own fence, which "
-    "never moved: the keeper deleted its sandbox when the claim lapsed, so its run fails, and that platform-made "
-    "failure is the episode's first record; the newer attempt's completed episode is dropped",
-)
 async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     beats = FilePresence(ledger.directory)
@@ -533,8 +514,9 @@ async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path:
         async with playing(fresh):
             await until(lambda: leased("train/1/1/2/box"))  # the episode's next attempt
             gate("train/1/1/1/box").set()  # the zombie resumes
-            await until(recorded)
+            await until(lambda: idle(zombie))  # its run fails (its sandbox is gone), and it tries to record it
             gate("train/1/1/2/box").set()
+            await until(recorded)
             await until(lambda: _not(leased("train/1/1/2/box")))
     episode = Record.from_json(_mapping((await ledger.read(table("train", EPISODES)))["1/1"])).episode
     assert episode.outcome is Outcome.COMPLETED, f"recorded {episode.outcome.value}: {episode.detail}"
@@ -549,21 +531,24 @@ def _mapping(record: JsonValue) -> dict[str, Any]:
     return record
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="staleness compares a beat's time, written by the runner's clock, with the reader's clock: a runner whose "
-    "clock is behind by more than STALE (90 s) looks dead the moment it beats, so its claims lapse while it plays "
-    "(other runners play them again, and the keeper deletes its sandboxes)",
-)
-async def test_a_live_runner_whose_clock_is_behind_keeps_its_claims(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    beats = FilePresence(ledger.directory)
-    await ask(ledger, {1: ({}, 1)})
-    fence = await ledger.take(runner_scope("behind"))
-    await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "behind", "fence": fence.number}, fence)
-    await beats.beat("behind", {})
-    beat_at(ledger.directory, "behind", time.time() - 120)  # it beat just now, by its clock, two minutes behind
-    assert await holding(ledger, "train", await ledger.fences(), await beats_of(beats)) == {"1/1/1"}
+@pytest.mark.parametrize("kind", ["sqlite", "postgres"])
+async def test_a_live_runner_whose_clock_is_behind_keeps_its_claims(
+    tmp_path: Path, kind: str, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = f"sqlite:///{tmp_path / 'ledger.db'}" if kind == "sqlite" else request.getfixturevalue("postgres")
+    ledger = DatabaseLedger(url)
+    beats = ledger.presence
+    try:
+        await ask(ledger, {1: ({}, 1)})
+        fence = await ledger.take(runner_scope("behind"))
+        await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "behind", "fence": fence.number}, fence)
+        real = time.time
+        with monkeypatch.context() as behind:  # the runner's machine: its clock two minutes behind the reader's
+            behind.setattr(time, "time", lambda: real() - 120)
+            await beats.beat("behind", {})  # it beats just now
+        assert await holding(ledger, "train", await ledger.fences(), await beats_of(beats)) == {"1/1/1"}
+    finally:
+        ledger.close()
 
 
 class SteppedClock:
@@ -579,11 +564,6 @@ class SteppedClock:
         return time.monotonic()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a sandbox's wall-time limit is kept as a wall-clock time (Lease.ends) and compared with the wall clock: "
-    "a clock stepped forward ends a lease early, and the keeper deletes a sandbox its run is still using",
-)
 async def test_a_clock_stepped_forward_does_not_end_a_lease_early(monkeypatch: pytest.MonkeyPatch) -> None:
     from rollout.harness import sandboxes as module
     from rollout.harness.sandboxes import SandboxLimits

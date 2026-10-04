@@ -8,12 +8,19 @@ first append wins, so two runners never play one attempt). It plays the episode,
 the blob store, and records it under `GROUP/EPISODE` (`runs/RUN/episodes`) when it ends. The run reads a group's
 episodes from there once they have all ended.
 
-A claim holds while its runner is the one that made it and is alive: a runner started again takes its fence anew, and
-a runner beats every few seconds (`rollout_train.presence`), so one whose machine died stops beating; what either had
-claimed is claimed again by whoever has room. An episode its runner cut short by closing is noted
-(`runs/RUN/interrupted`) and claimed again too. A claim names the run that plays it. Over a runner whose runs survive
-it (a durable one), a runner started again adopts the runs it finds of its claims that held until it stopped
-(`runs/RUN/adopted`, under its new fence), and they play on; one whose claim lapsed meanwhile is cut short.
+A claim holds while it is its episode's latest attempt and its runner is the one that made it and is alive: a runner
+started again takes its fence anew, and a runner beats every few seconds (`rollout_train.presence`), so one whose
+machine died stops beating; what either had claimed is claimed again by whoever has room. An episode its runner cut
+short by closing is noted (`runs/RUN/interrupted`) and claimed again too. A claim names the run that plays it. Over a
+runner whose runs survive it (a durable one), a runner started again adopts the runs it finds of its claims that are
+still their episodes' latest attempts (`runs/RUN/adopted`, under its new fence), and they play on; one whose claim
+lapsed meanwhile is cut short.
+
+Each episode has a fence of its own (`runs/RUN/episodes/GROUP/EPISODE`, `episode_scope`). The runner whose claim was
+appended takes it at once, and a runner started again takes it anew for each claim it adopts; the episode's record and
+the adoption are appended under it. So whoever took it last shuts out every attempt before: a runner that paused past
+its claim's lapse while another claimed the episode again finds its record refused (`Fenced`), and an adoption is
+refused once a newer attempt has taken the fence.
 
 Several runners, on one machine or many, share the work the same way: which machine plays a group's episodes is only
 a matter of where runners are.
@@ -26,10 +33,13 @@ have room for them.
 
 import asyncio
 import contextlib
+import logging
+import re
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Collection, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import Any, Protocol
 
 from pydantic import JsonValue
@@ -47,9 +57,9 @@ from rollout.harness.runner import (
     with_row,
 )
 from rollout.harness.sandboxes import Pool, PoolBinding, SandboxLost
-from rollout_train.ledger import Fence, Ledger
+from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.presence import Beat, Presence, alive
-from rollout_train.record import GROUPS, RESULTS, runs_in, table
+from rollout_train.record import GROUPS, RESULTS, runs_in, scope, table
 from rollout_train.recorder import Segment
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, assemble, loaded, stored
 
@@ -64,6 +74,12 @@ LOST = "its sandboxes did not outlive its runner"
 """Why a run its runner adopted was cut short: what it was playing in is gone, so it is played again."""
 RESUMED = "its runner was started again while it played: what was sampled before is not recorded"
 """Why an episode a runner adopted is left out of training (its outcome and result still count)."""
+SUPERSEDED = "another took its episode's fence: its record was refused"
+"""Why an attempt that ended was not recorded (a newer attempt claimed its episode meanwhile, say)."""
+RELEASED = "its claim lapsed, and its pool released its sandboxes"
+"""Why a pool's keeper cut an attempt short (`rollout_train.sandboxes`): it is played again."""
+
+logger = logging.getLogger(__name__)
 
 
 def runner_scope(name: str) -> str:
@@ -71,38 +87,82 @@ def runner_scope(name: str) -> str:
     return f"runners/{name}"
 
 
-def holds(
-    claim: Mapping[str, Any],
-    key: str,
-    cut: Collection[str],
-    fences: Mapping[str, int],
-    beats: Mapping[str, Beat] | None,
-    me: str | None = None,
-    adopted: Collection[str] = (),
-) -> bool:
-    """Whether the claim made under `key` holds: not noted as cut short, made (or adopted, `adopted` holding
-    `KEY/FENCE`) under its runner's newest fence, and (where runners beat) its runner beating; a runner's own claims
-    (`me`) hold for it without its beat."""
-    runner = str(claim["runner"])
-    newest = fences.get(runner_scope(runner))
-    if key in cut or (newest != claim["fence"] and f"{key}/{newest}" not in adopted):
-        return False
-    return beats is None or runner == me or alive(beats.get(runner))
+def episode_scope(run: str, episode: str) -> str:
+    """The scope of an episode's fence (`runs/RUN/episodes/GROUP/EPISODE`): taken by the runner of each attempt once
+    its claim is appended (or as it adopts it), and what the attempt's record is appended under, so that the newest
+    attempt shuts out the ones before."""
+    return f"{scope(run)}/episodes/{episode}"
+
+
+def of_episode(name: str) -> bool:
+    """Whether a scope is an episode's (`episode_scope`)."""
+    return _EPISODE_SCOPE.fullmatch(name) is not None
+
+
+_EPISODE_SCOPE = re.compile(r"runs/.+/episodes/\d+/\d+")
+
+
+@dataclass(frozen=True)
+class Claims:
+    """A run's claims as read at one moment, with what says whether each holds: the attempts cut short, the episodes
+    that ended, and the adoptions (`KEY/FENCE`)."""
+
+    made: Mapping[str, Mapping[str, Any]]
+    cut: Collection[str] = ()
+    done: Collection[str] = ()
+    adopted: Collection[str] = ()
+
+    @classmethod
+    async def read(cls, ledger: Ledger, run: str) -> "Claims":
+        claims = await ledger.read(table(run, CLAIMS))
+        return cls(
+            {key: _mapping(claim) for key, claim in claims.items()},
+            set(await ledger.read(table(run, INTERRUPTED))),
+            set(await ledger.read(table(run, EPISODES))),
+            set(await ledger.read(table(run, ADOPTED))),
+        )
+
+    @cached_property
+    def latest(self) -> dict[str, int]:
+        """Each claimed episode's latest attempt, by `GROUP/EPISODE`."""
+        found: dict[str, int] = {}
+        for key in self.made:
+            episode, attempt = key.rsplit("/", 1)
+            found[episode] = max(found.get(episode, 0), int(attempt))
+        return found
+
+    def is_latest(self, key: str) -> bool:
+        """Whether the claim under `key` is its episode's latest attempt."""
+        episode, attempt = key.rsplit("/", 1)
+        return self.latest.get(episode) == int(attempt)
+
+    def holds(
+        self, key: str, fences: Mapping[str, int], beats: Mapping[str, Beat] | None, me: str | None = None
+    ) -> bool:
+        """Whether the claim made under `key` holds: its episode's latest attempt, not noted as cut short, made (or
+        adopted) under its runner's newest fence, and (where runners beat) its runner beating; a runner's own claims
+        (`me`) hold for it without its beat."""
+        claim = self.made.get(key)
+        if claim is None or key in self.cut or not self.is_latest(key):
+            return False
+        runner = str(claim["runner"])
+        newest = fences.get(runner_scope(runner))
+        if newest != claim["fence"] and f"{key}/{newest}" not in self.adopted:
+            return False
+        return beats is None or runner == me or alive(beats.get(runner))
+
+    def holding(self, fences: Mapping[str, int], beats: Mapping[str, Beat] | None, me: str | None = None) -> set[str]:
+        """The keys of the claims that hold, of episodes that have not ended."""
+        return {
+            key for key in self.made if key.rsplit("/", 1)[0] not in self.done and self.holds(key, fences, beats, me)
+        }
 
 
 async def holding(
     ledger: Ledger, run: str, fences: Mapping[str, int], beats: Mapping[str, Beat] | None, me: str | None = None
 ) -> set[str]:
     """The keys of a run's claims that hold, of episodes that have not ended."""
-    claims = await ledger.read(table(run, CLAIMS))
-    cut = await ledger.read(table(run, INTERRUPTED))
-    done = await ledger.read(table(run, EPISODES))
-    adopted = await ledger.read(table(run, ADOPTED))
-    return {
-        key
-        for key, claim in claims.items()
-        if holds(_mapping(claim), key, cut, fences, beats, me, adopted) and key.rsplit("/", 1)[0] not in done
-    }
+    return (await Claims.read(ledger, run)).holding(fences, beats, me)
 
 
 @dataclass(frozen=True)
@@ -209,7 +269,9 @@ class EpisodeRunner:
     _news: asyncio.Event = field(default_factory=asyncio.Event)
     _kinds: dict[tuple[str, int], Counter[str]] = field(default_factory=dict[tuple[str, int], Counter[str]])
     """The kinds of sandbox each group's program declares, and how many of each."""
-    _adopting: list[tuple[Open, str, RunHandle]] = field(default_factory=list[tuple[Open, str, RunHandle]])
+    _adopting: list[tuple[Open, str, RunHandle, Fence]] = field(
+        default_factory=list[tuple[Open, str, RunHandle, Fence]]
+    )
     _lapsed: list[str] = field(default_factory=list[str])
     """Runs found on starting again whose claims lapsed: cancelled once the runner is serving."""
 
@@ -237,8 +299,8 @@ class EpisodeRunner:
         beating: asyncio.Task[None] | None = None
         if self.presence is not None:
             beating = asyncio.create_task(self._beats())
-        for each, key, handle in self._adopting:
-            self._follow(key, self._watch(each, key, handle, adopted=True))
+        for each, key, handle, fence in self._adopting:
+            self._follow(key, self._watch(each, key, handle, fence, adopted=True))
         for run_id in self._lapsed:
             self._follow(f"lapsed/{run_id}", self._cut_short(run_id))
         self._adopting, self._lapsed = [], []
@@ -300,15 +362,8 @@ class EpisodeRunner:
                 continue
             groups = await self.ledger.read(table(run, GROUPS))
             results = await self.ledger.read(table(run, RESULTS))
-            done = await self.ledger.read(table(run, EPISODES))
-            claims = await self.ledger.read(table(run, CLAIMS))
-            cut = await self.ledger.read(table(run, INTERRUPTED))
-            adopted = await self.ledger.read(table(run, ADOPTED))
-            attempts: dict[str, list[tuple[int, bool]]] = {}  # each episode's attempts: (attempt, whether it holds)
-            for key, claim in claims.items():
-                group, number, attempt = key.split("/")
-                held = holds(_mapping(claim), key, cut, fences, beats, self.name, adopted)
-                attempts.setdefault(f"{group}/{number}", []).append((int(attempt), held))
+            claims = await Claims.read(self.ledger, run)
+            held = {key.rsplit("/", 1)[0] for key in claims.holding(fences, beats, self.name)}
             for key, group in groups.items():
                 record = _mapping(group)
                 count = record.get("episodes")
@@ -316,11 +371,10 @@ class EpisodeRunner:
                     continue
                 for number in range(1, count + 1):
                     episode = f"{key}/{number}"
-                    made = attempts.get(episode, [])
-                    if episode in done or any(holds for _, holds in made):
+                    if episode in claims.done or episode in held:
                         continue
                     decided = float(str(record.get("decided") or 0.0))
-                    found.append(Open(run, int(key), number, max((a for a, _ in made), default=0) + 1, decided))
+                    found.append(Open(run, int(key), number, claims.latest.get(episode, 0) + 1, decided))
         return sorted(found, key=lambda each: (each.decided, each.run, each.group, each.number))
 
     async def _serves(self, run: str, played: Plan) -> bool:
@@ -393,7 +447,9 @@ class EpisodeRunner:
         }
         if not await self.ledger.append(table(each.run, CLAIMS), key, claim, self._fence):
             return False  # another runner claimed this attempt first
-        self._follow(key, self._play(each, key, run_id))
+        # Only the claim's winner takes its episode's fence: no attempt before this one can record the episode now.
+        fence = await self.ledger.take(episode_scope(each.run, f"{each.group}/{each.number}"))
+        self._follow(key, self._play(each, key, run_id, fence))
         return True
 
     def _follow(self, key: str, work: Coroutine[Any, Any, None]) -> None:
@@ -406,38 +462,45 @@ class EpisodeRunner:
         self._news.set()
 
     async def _adopt(self) -> None:
-        """Find the runs of this runner's claims, as its runner recovered them: adopt those whose claims held until
-        it stopped (made or adopted under its previous fence, and no later attempt claimed since); cut short the
-        others still going."""
+        """Find the runs of this runner's claims, as its runner recovered them: adopt those whose claims are still
+        their episodes' latest attempts, not cut short, of episodes without a record (made under any fence this runner
+        held before: one that died before adopting, or whose fence was taken twice, adopts them all the same); cut
+        short the others still going. Each episode's fence is taken before its claims are read again and the claim is
+        adopted under it: an attempt claimed before the take is seen, and one claimed after shuts the adoption out."""
         assert self._fence is not None
-        previous = self._fence.number - 1
         for run in await runs_in(self.ledger):
             if self.runs is not None and run not in self.runs:
                 continue
-            claims = await self.ledger.read(table(run, CLAIMS))
-            cut = await self.ledger.read(table(run, INTERRUPTED))
-            done = await self.ledger.read(table(run, EPISODES))
-            adopted = await self.ledger.read(table(run, ADOPTED))
-            latest: dict[str, int] = {}
-            for key in claims:
-                episode, attempt = key.rsplit("/", 1)
-                latest[episode] = max(latest.get(episode, 0), int(attempt))
-            for key, claim in claims.items():
-                made = _mapping(claim)
-                episode, attempt = key.rsplit("/", 1)
-                if made["runner"] != self.name or key in cut or episode in done or "run_id" not in made:
+            claims = await Claims.read(self.ledger, run)
+            found: list[tuple[str, RunHandle]] = []
+            for key, made in claims.made.items():
+                ended = key.rsplit("/", 1)[0] in claims.done
+                if made["runner"] != self.name or key in claims.cut or ended or "run_id" not in made:
                     continue
                 try:
-                    handle = self.runner.run(str(made["run_id"]))
+                    found.append((key, self.runner.run(str(made["run_id"]))))
                 except KeyError:
                     continue  # (not a run its runner has: its claim lapses)
-                held = made["fence"] == previous or f"{key}/{previous}" in adopted
-                group, number = (int(part) for part in episode.split("/"))
-                if held and latest[episode] == int(attempt):
+            fences = {
+                key: await self.ledger.take(episode_scope(run, key.rsplit("/", 1)[0]))
+                for key, _ in found
+                if claims.is_latest(key)
+            }
+            now = await Claims.read(self.ledger, run) if fences else claims  # (as it is once the fences are taken)
+            for key, handle in found:
+                episode, attempt = key.rsplit("/", 1)
+                fence = fences.get(key)
+                if fence is not None and key not in now.cut and episode not in now.done and now.is_latest(key):
                     noted: dict[str, JsonValue] = {"run_id": handle.run_id, "at": round(time.time(), 1)}
-                    await self.ledger.append(table(run, ADOPTED), f"{key}/{self._fence.number}", noted, self._fence)
-                    self._adopting.append((Open(run, group, number, int(attempt), 0.0), key, handle))
-                elif not handle.done:
+                    try:
+                        await self.ledger.append(table(run, ADOPTED), f"{key}/{self._fence.number}", noted, fence)
+                    except Fenced:  # (a newer attempt took the episode's fence meanwhile)
+                        pass
+                    else:
+                        group, number = (int(part) for part in episode.split("/"))
+                        self._adopting.append((Open(run, group, number, int(attempt), 0.0), key, handle, fence))
+                        continue
+                if not handle.done:
                     why: dict[str, JsonValue] = {"why": LAPSED, "at": round(time.time(), 1)}
                     await self.ledger.append(table(run, INTERRUPTED), key, why, self._fence)
                     self._lapsed.append(handle.run_id)
@@ -447,7 +510,7 @@ class EpisodeRunner:
             await self.runner.cancel(run_id, reason=LAPSED)
         self.recorder.forget(run_id)
 
-    async def _play(self, each: Open, key: str, run_id: str) -> None:
+    async def _play(self, each: Open, key: str, run_id: str, fence: Fence) -> None:
         plans = await self.ledger.read(table(each.run, PLANS))
         played = Plan.from_json(_mapping(plans[max(plans, key=int)]))
         group = _mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
@@ -459,13 +522,15 @@ class EpisodeRunner:
             handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")
         except Exception as error:  # a run that cannot start is a failed episode like any other
             detail = f"{type(error).__name__}: {error}"
-            await self._ended(each, Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail), [])
+            failed = Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail)
+            await self._ended(each, key, failed, [], fence)
             return
-        await self._watch(each, key, handle)
+        await self._watch(each, key, handle, fence)
 
-    async def _watch(self, each: Open, key: str, handle: RunHandle, *, adopted: bool = False) -> None:
-        """Follow a run to its end, and record its episode. An adopted run is left out of training (what it sampled
-        before its runner stopped is not recorded); one whose sandboxes are gone is cut short, to be played again."""
+    async def _watch(self, each: Open, key: str, handle: RunHandle, fence: Fence, *, adopted: bool = False) -> None:
+        """Follow a run to its end, and record its episode under its episode's `fence`. An adopted run is left out of
+        training (what it sampled before its runner stopped is not recorded); one whose sandboxes are gone is cut
+        short, to be played again."""
         assert self._fence is not None
         self._tell("started", run=each.run, group=each.group, episode=each.number, run_id=handle.run_id)
         events: list[RunEvent] = []
@@ -488,7 +553,7 @@ class EpisodeRunner:
             return
         if adopted:
             episode = replace(episode, excluded=episode.excluded or RESUMED)
-        await self._ended(each, episode, events)
+        await self._ended(each, key, episode, events, fence)
 
     async def _interrupt(self, each: Open, key: str, why: str) -> None:
         assert self._fence is not None
@@ -496,11 +561,16 @@ class EpisodeRunner:
         with contextlib.suppress(Exception):
             await asyncio.shield(self.ledger.append(table(each.run, INTERRUPTED), key, cut, self._fence))
 
-    async def _ended(self, each: Open, episode: Episode, events: Sequence[RunEvent]) -> None:
-        assert self._fence is not None
+    async def _ended(self, each: Open, key: str, episode: Episode, events: Sequence[RunEvent], fence: Fence) -> None:
+        """Record an episode under its episode's fence. Once another took the fence (a newer attempt) the record is
+        refused, and the attempt is noted cut short: its claim holds no more."""
         record = await stored(episode, events, self.blobs)
-        key = f"{each.group}/{each.number}"
-        await self.ledger.append(table(each.run, EPISODES), key, record.to_json(), self._fence)
+        try:
+            await self.ledger.append(table(each.run, EPISODES), f"{each.group}/{each.number}", record.to_json(), fence)
+        except Fenced:
+            logger.info("%s/%s ended after another took its episode's fence: it is not recorded", each.run, key)
+            await self._interrupt(each, key, SUPERSEDED)
+            return
         self._tell(
             "ended",
             run=each.run,

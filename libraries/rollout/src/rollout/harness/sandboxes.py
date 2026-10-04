@@ -76,7 +76,8 @@ class SandboxLimits(ContractModel):
     memory_mib: int | None = None
     processes: int | None = None
     seconds: float | None = None
-    """Wall time from its start: past it, its lease ends and the pool deletes it."""
+    """Time from its start: past it, its lease ends and the pool deletes it (measured by the pool's monotonic clock,
+    which a change of the machine's wall clock does not move)."""
 
 
 class SandboxSpec(ContractModel):
@@ -124,8 +125,8 @@ class Lease(ContractModel):
     environment: Mapping[str, str] = Field(default_factory=dict[str, str])
     at: float = 0.0
     """When it was made, in seconds since the epoch."""
-    ends: float | None = None
-    """When its wall time is over (`SandboxLimits.seconds`), in seconds since the epoch."""
+    seconds: float | None = None
+    """How long it may last from when it was made (`SandboxLimits.seconds`)."""
     lost: bool = False
     """Its sandbox is gone (it ended with the pool's process, say): the key cannot have it back."""
 
@@ -298,6 +299,8 @@ class SandboxPool:
         self._made: set[str] = set()
         """Handles this process made and has not deleted: never taken for a sandbox no lease names."""
         self._locks: dict[str, asyncio.Lock] = {}
+        self._ends: dict[str, float] = {}
+        """When each lease with a time limit is over, by key, on this process's monotonic clock."""
 
     @property
     def deduplicates(self) -> bool:
@@ -323,6 +326,7 @@ class SandboxPool:
             if lease is not None:
                 if not lease.lost and (lease.handle in self._made or lease.handle in await self.provider.held()):
                     self._held[key] = lease
+                    self._timed(lease)
                     return lease
                 await self._end(lease)
                 raise SandboxLost(f"the sandbox of {key} is gone")
@@ -333,7 +337,6 @@ class SandboxPool:
             self._made.add(handle)
             try:
                 reach = await self.provider.create(handle, spec, dict(environment or {}))
-                at = time.time()
                 lease = Lease(
                     key=key,
                     kind=spec.kind,
@@ -341,9 +344,11 @@ class SandboxPool:
                     handle=handle,
                     addresses=reach.addresses,
                     environment={**(environment or {}), **reach.environment},
-                    at=round(at, 1),
-                    ends=at + spec.limits.seconds if spec.limits.seconds is not None else None,
+                    at=round(time.time(), 1),
+                    seconds=spec.limits.seconds,
                 )
+                if lease.seconds is not None:
+                    self._ends[key] = time.monotonic() + lease.seconds
                 await self.leases.put(lease)
             except BaseException:
                 with contextlib.suppress(Exception):
@@ -379,17 +384,17 @@ class SandboxPool:
         return list(self._held.values())
 
     async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]:
-        """Release the leases `ended` says have ended, and those past their wall time; mark lost those whose sandbox
+        """Release the leases `ended` says have ended, and those past their time limit; mark lost those whose sandbox
         is gone (the pool's process was started again, say), which their keys cannot have back; and delete the
         sandboxes no lease names. Returns the keys released or marked lost."""
         await self._load()
         there = set(await self.provider.held())
-        now = time.time()
+        now = time.monotonic()
         gone: list[str] = []
         for lease in list(self._held.values()):
             if lease.key in self._making:
                 continue
-            if ended(lease) or (lease.ends is not None and now >= lease.ends):
+            if ended(lease) or now >= self._ends.get(lease.key, float("inf")):
                 await self.release(lease.key)
                 gone.append(lease.key)
             elif not lease.lost and lease.handle not in there and lease.handle not in self._made:
@@ -420,6 +425,7 @@ class SandboxPool:
             await self.provider.delete(lease.handle)
         self._made.discard(lease.handle)
         self._held.pop(lease.key, None)
+        self._ends.pop(lease.key, None)
         await self.leases.delete(lease.key)
 
     def _live(self) -> set[str]:
@@ -429,7 +435,16 @@ class SandboxPool:
     async def _load(self) -> None:
         if not self._loaded:
             self._held = {lease.key: lease for lease in await self.leases.all() if lease.pool == self.name}
+            for lease in self._held.values():
+                self._timed(lease)
             self._loaded = True
+
+    def _timed(self, lease: Lease) -> None:
+        """Note when a lease this process did not make is over: its limit less the time it has lasted, as the wall
+        clock says once (the monotonic clocks of two processes do not compare)."""
+        if lease.seconds is not None and lease.key not in self._ends:
+            lasted = min(max(time.time() - lease.at, 0.0), lease.seconds)
+            self._ends[lease.key] = time.monotonic() + lease.seconds - lasted
 
     def _lock(self, key: str) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())

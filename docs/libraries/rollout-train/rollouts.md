@@ -35,24 +35,55 @@ nothing more.
 | Table | Keyed by | Holds |
 |---|---|---|
 | `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when, and the run that plays it (`run_id`) |
-| `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended |
-| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt its runner cut short, and why: it closed, the claim lapsed while it was stopped, or the run's sandboxes did not outlive it |
-| `runs/RUN/adopted` | `GROUP/EPISODE/ATTEMPT/FENCE` | an attempt whose run its runner, started again, took up under its new fence |
+| `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended, appended under [the episode's fence](#each-episodes-fence) |
+| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, the run's sandboxes did not outlive it, another took the episode's fence before it was recorded, or its pool released its sandboxes |
+| `runs/RUN/adopted` | `GROUP/EPISODE/ATTEMPT/FENCE` | an attempt whose run its runner, started again, took up under its new fence, appended under the episode's fence |
 
 - **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
   the one whose append is refused looks for other work.
-- **A claim holds while its runner keeps its fence and beats.** A runner takes the fence of `runners/NAME` when it
-  starts. Its claims hold until it is started again (under the same name, its fence moves on) and does not adopt
-  them, it notes an attempt as interrupted, or, where runners beat ([heartbeats](#heartbeats)), its newest beat is
-  older than 90 seconds (its machine died, say). `holds(...)` is the rule, and `holding(ledger, run, ...)` the claims
-  of a run that hold; pools beside the ledger use them too ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)). An episode with no record and no claim that holds is open: the next claim is its next attempt.
-  A runner does not wait on its own beat: its own claims hold for it while its fence is its own.
+- **A claim holds while it is its episode's latest attempt and its runner keeps its fence and beats.** A runner takes
+  the fence of `runners/NAME` when it starts. Its claims hold until a newer attempt of the episode is claimed, until it
+  is started again (under the same name, its fence moves on) and does not adopt them, until it notes an attempt as
+  interrupted, or, where runners beat ([heartbeats](#heartbeats)), until its newest beat is older than 90 seconds (its
+  machine died, say). `Claims` holds a run's claims as read at one moment, and `Claims.holds(...)` is the rule;
+  `holding(ledger, run, ...)` is the claims of a run that hold, which pools beside the ledger use too
+  ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)). An episode with no record and no
+  claim that holds is open: the next claim is its next attempt. So at most one claim of an episode holds at a time,
+  and a claim that lapsed never holds again beside a newer one. A runner does not wait on its own beat: its own claims
+  hold for it while its fence is its own.
 - **Every attempt that ends is an episode**, whatever its outcome: completed, failed (the program raised, or the run
-  could not start), cancelled. The first record of an episode is its record.
+  could not start), cancelled. The first record of an episode is its record, and only the attempt that holds the
+  episode's fence can append it.
 - **An episode's trajectories and its run's events go to the blob store**; the record names both
   ([the record](#the-record)). A run started by `rollout train` says in its `starts` record where that store is
   (`rollout_train.stores`: its kind and settings, never a credential), so that any machine can read a finished
   episode back.
+
+## Each episode's fence
+
+Each episode has a fence of its own, `runs/RUN/episodes/GROUP/EPISODE` (`episode_scope(run, episode)`), beside its
+runner's.
+
+| Who | Takes the episode's fence | And appends under it |
+|---|---|---|
+| The runner whose claim of an attempt was appended | at once, after the claim: only the winner of an attempt takes it | the episode's record, when the attempt ends |
+| A runner started again, for each claim it adopts | before it reads its claims again | the adoption, then the record |
+| A pool's keeper, ending a lapsed claim ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)) | before it releases the claim's lease | the note that the attempt was cut short (`RELEASED`) |
+
+Whoever took the fence last shuts out every attempt before it:
+
+- **A runner whose claim lapsed records nothing over a newer attempt.** A runner that paused (a stop-the-world pause,
+  a suspended machine, a partition) past its claim's lapse, while another claimed the episode again, finds its record
+  refused (`Fenced`) when it resumes. It notes the attempt cut short (`SUPERSEDED`) and goes on.
+- **An adoption and a new attempt never both stand.** A runner started again takes the episode's fence, then reads
+  the claims: an attempt claimed before the take is seen, and the claim is not adopted; one claimed after takes the
+  fence in turn, and the adoption (or the adopted run's record) is refused.
+- **A runner's interrupts** stay under its own fence: noting an attempt cut short only ever ends its own claim.
+
+Claims written before episodes had fences read as before: such a claim holds by the same rule (its episode's latest
+attempt, its runner's fence and beat), and a runner started again takes the episode's fence to adopt it like any
+other. Each fence is a row of the ledger's fences, one per episode claimed; the [monitor](monitor.md) leaves them out
+of the fences it lists.
 
 ## A runner
 
@@ -75,8 +106,9 @@ open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
   room.
 - **An episode is played** as the run's program with the group's `parameters` as its row, labelled `run`, `group`
   and `episode`, with the claim's key (`RUN/GROUP/EPISODE/ATTEMPT`) as the run's lease: its sandboxes are leased
-  under it, and their leases end with the claim. When it ends, the runner takes the run's segments from the recorder (which then forgets the run),
-  assembles the [episode](episodes.md), stores it and appends its record.
+  under it, and their leases end with the claim. When it ends, the runner takes the run's segments from the recorder
+  (which then forgets the run), assembles the [episode](episodes.md), stores it and appends its record under the
+  episode's fence.
 - **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
   `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
   is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop. Over a runner whose runs
@@ -88,12 +120,13 @@ Over a runner whose runs survive it, a runner started again under its name takes
 finds of its runs (`prepare()`, which `serve` calls if it has not been; a profile calls it before it launches the
 runner, so that the runs the runner recovers find their claims adopted):
 
-- **Adopted:** a run of its own claim that held until it stopped (made or adopted under its previous fence, not cut
-  short, its episode without a record, and no later attempt claimed since), found by the claim's `run_id`. The
-  adoption is noted in `adopted` under the new fence, and the claim holds again. The runner follows the run to its
-  end and records its episode, which is left out of training: what it sampled before its runner stopped is not
-  recorded (its outcome and result still count). A run that ended while its runner was stopped, unrecorded, is
-  recorded now.
+- **Adopted:** a run of its own claim that is still its episode's latest attempt, not cut short, its episode without
+  a record, found by the claim's `run_id`; the claim may have been made under any fence the runner held before (one
+  that died before adopting, or whose fence was taken twice, adopts its runs all the same). The runner takes the
+  episode's fence, reads the claims again, and notes the adoption in `adopted`, keyed by its new fence and appended
+  under the episode's; the claim holds again. The runner follows the run to its end and records its episode, which is
+  left out of training: what it sampled before its runner stopped is not recorded (its outcome and result still
+  count). A run that ended while its runner was stopped, unrecorded, is recorded now.
 - **Cut short:** a run of its own claim that lapsed meanwhile (another runner took the episode up, say), still
   going. The attempt is noted in `interrupted` and the run cancelled; a pool beside the ledger refuses it its
   sandboxes and releases them.
@@ -116,6 +149,14 @@ is kept with the measurements of its recent ones (240: an hour), so its machine 
 Beats are kept beside the ledger, as ordinary state changed in place, not appended: `presence.json` beside a ledger
 of files, the `presence` table in a database ledger's database (`DatabasePresence`); `presence_of(ledger)` finds
 them. A runner whose newest beat is older than `STALE` (90 seconds) is taken to be gone, and its claims lapse.
+
+A beat's time is the store's, never the runner's. The store stamps a beat (`Beat.at`) when it keeps it, and says how
+old it is when it is read (`Beat.age`), by the same clock; `alive(beat)` compares the age with `STALE`. A Postgres
+database stamps and ages beats by its server's clock (`clock_timestamp()`), so a runner whose machine's clock is
+behind or ahead of the reader's is judged by when it last beat all the same. A SQLite database (`julianday('now')`)
+and a ledger of files serve one machine, whose clock every writer and reader shares. What every reader of the beats
+judges by them (whether a claim holds, whether a pool's keeper ends a lease, whether the monitor shows a run running)
+goes by the age.
 
 An open profile's runner says, in each beat: its host, the run it serves, the run's directory, its machine
 (`rollout_train.machine`: memory, each GPU's memory and how busy, the disk the directory is on), its engines'

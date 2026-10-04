@@ -37,8 +37,29 @@ async def test_a_runner_beats_and_its_newest_beat_is_kept_with_its_recent_measur
 
 
 def test_a_runner_is_alive_while_it_beat_within_the_last_stale_seconds() -> None:
-    beat = Beat("here", 1000.0, {})
-    assert alive(beat, now=1000.0 + STALE) and not alive(beat, now=1000.0 + STALE + 1) and not alive(None)
+    assert alive(Beat("here", 1000.0, {}, age=STALE)) and not alive(Beat("here", 1000.0, {}, age=STALE + 1))
+    assert not alive(None)
+
+
+@pytest.mark.parametrize("kind", ["sqlite", "postgres"])
+async def test_a_database_stamps_and_ages_beats_by_its_own_clock_not_the_writers(
+    tmp_path: Path, kind: str, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = f"sqlite:///{tmp_path / 'ledger.db'}" if kind == "sqlite" else request.getfixturevalue("postgres")
+    ledger = DatabaseLedger(url)
+    try:
+        real = time.time
+        with monkeypatch.context() as skewed:  # the writer's clock an hour ahead
+            skewed.setattr(time, "time", lambda: real() + 3600)
+            await ledger.presence.beat("ahead", {})
+        with monkeypatch.context() as skewed:  # and this one's an hour behind
+            skewed.setattr(time, "time", lambda: real() - 3600)
+            await ledger.presence.beat("behind", {})
+        ahead, behind = await ledger.presence.beats()
+        assert abs(ahead.at - real()) < 30 and abs(behind.at - real()) < 30  # (when the database kept each)
+        assert abs(ahead.age) < 30 and abs(behind.age) < 30 and alive(ahead) and alive(behind)
+    finally:
+        ledger.close()
 
 
 async def test_a_store_is_noted_without_its_credentials_and_opened_again_from_the_note(tmp_path: Path) -> None:

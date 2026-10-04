@@ -349,15 +349,19 @@ class DatabaseLaunches:
 
 
 class DatabasePresence:
-    """`Presence` (`rollout_train.presence`) in the `presence` table of a database."""
+    """`Presence` (`rollout_train.presence`) in the `presence` table of a database. Beats are stamped and aged by the
+    database's clock (`now`), never the writer's: on Postgres the server's, which every machine shares."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        self.now = (
+            "EXTRACT(EPOCH FROM clock_timestamp())" if database.shared else "(julianday('now') - 2440587.5) * 86400.0"
+        )
+        """The database's clock, in seconds since the epoch, as SQL."""
 
     async def beat(self, runner: str, about: Mapping[str, JsonValue]) -> None:
-        at = round(time.time(), 1)
-
         def noted(connection: Connection) -> None:
+            at = round(float(sql(connection, f"SELECT {self.now}").scalar_one()), 1)
             row = fetch_one(connection, "SELECT history FROM presence WHERE runner = :runner", {"runner": runner})
             history = kept(json.loads(row[0]) if row else [], at, about)
             sql(
@@ -372,11 +376,13 @@ class DatabasePresence:
 
     async def beats(self) -> list[Beat]:
         def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT runner, at, about, history FROM presence ORDER BY runner")
+            query = f"SELECT runner, at, about, history, {self.now} - at FROM presence ORDER BY runner"
+            return fetch_all(connection, query)
 
         found = await asyncio.to_thread(self.database.read, rows)
         return [
-            Beat(str(runner), float(at), json.loads(about), json.loads(history)) for runner, at, about, history in found
+            Beat(str(runner), float(at), json.loads(about), json.loads(history), float(age))
+            for runner, at, about, history, age in found
         ]
 
 
