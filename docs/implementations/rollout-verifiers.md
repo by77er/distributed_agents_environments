@@ -64,12 +64,12 @@ that name it, and its page says it does not load, with what the ledger has of it
 `examples` has two profiles for it, both on the shared ledger `sqlite:///~/.cache/rollout/ledger.db`:
 
 - **`gsm8k_tinker.toml`**: the base `Qwen/Qwen3.5-9B` sampled at Tinker, through a gateway that hosts the channel
-  in rollout-tinker's environment, while the eval's runner plays GSM8K in this one
+  in the workspace's environment (with its `tinker` extra), while the eval's runner plays GSM8K in this one
   ([a gateway elsewhere that hosts channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels),
   [Tinker](rollout-tinker.md#evals-through-a-gateway)):
 
   ```bash
-  (cd ../rollout-tinker && uv run rollout gateway ../rollout-verifiers/examples/gsm8k_tinker.toml) &
+  (cd ../.. && uv run rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.toml) &
   uv run rollout eval examples/gsm8k_tinker.toml math --name gsm8k-tinker-base --directory ~/.cache/rollout/runs/gsm8k-tinker-base
   ```
 

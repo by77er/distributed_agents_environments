@@ -1,8 +1,7 @@
 # The full Qwen3.5-9B (bfloat16), trained and sampled at Thinking Machines (Tinker); the Paper servers and the runner
 # stay on this machine, and nothing here uses its GPU. Its settings are one-gpu.toml's where they still apply. Run it
-# from the rollout-tinker project, whose environment has Tinker's SDK (docs/implementations/rollout-tinker.md):
-#   cd implementations/rollout-tinker
-#   uv run rollout train ../../environments/minecraft/profiles/tinker.toml minecraft_team.environment:environment --groups 30
+# from the workspace, synced with the `tinker` extra (docs/implementations/rollout-tinker.md):
+#   uv run rollout train environments/minecraft/profiles/tinker.toml minecraft_team.environment:environment --groups 30
 # The key comes from TINKER_API_KEY or `tinker auth login`, never from this file. Cost, from curriculum-9's numbers:
 # about $8 to $18 a step of 384 segments, $230 to $520 for a run as long as curriculum-9's 72 groups and 31 steps.
 directory = "~/.cache/rollout/runs/team-tinker"

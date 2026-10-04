@@ -170,7 +170,10 @@ over tokens, not a mean.
   | `get_billing_usage(start, end)` | Usage, with estimated costs since SDK 0.30.2 |
 
   `ServiceClient.copy_weights(path)` copies a checkpoint into another project.
-- **The archive** holds `adapter_model.safetensors` and `adapter_config.json` with Tinker's own keys.
+- **The archive** holds `adapter_model.safetensors` and `adapter_config.json` with Tinker's own keys. The live test's,
+  of a rank-32 `Qwen/Qwen3.5-4B` adapter, holds 496 float32 tensors named as a plain text model's layers
+  (`base_model.model.model.layers.0.linear_attn.in_proj_q.lora_A.weight`: q, k and v apart, no `language_model`), and
+  says `lora_alpha` 32 and `target_modules` `all-linear`.
   `tinker_cookbook.weights.build_lora_adapter(base_model, adapter_path, output_path)` remaps them to PEFT names for
   vLLM or SGLang. `build_hf_model` merges them into a full model instead
   ([PEFT adapter](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/index.md)). The CLI
@@ -337,10 +340,11 @@ How many optimizer steps a step should make is now a cost and behaviour choice, 
 milestone 0. Neither `Trainer`, `Engine`, `Channel`, `Checkpoints` nor the loop changed. Where it settles what the
 proposal left open:
 
-- **A project of its own.** `tinker-cookbook` (for `build_lora_adapter`) pins `transformers<=5.5.4`, which the
-  workspace's vLLM (`>=5.10.4`) and Gemma renderers (`>=5.10`) exclude, so `implementations/rollout-tinker` has its own
-  lock, as `rollout-verifiers` does. The SDK alone (`tinker==0.32.0`) would have added eight small packages to the
-  workspace and moved none. The cookbook runs there on the platform's transformers by an override.
+- **In the workspace, with the SDK alone.** `implementations/rollout-tinker` is a workspace member (the `tinker`
+  extra); `tinker==0.32.0` added eight small packages to the workspace's lock and moved none. The archive's renaming
+  into PEFT's layout is ours (`rollout_tinker.weights.peft_adapter`): `tinker-cookbook` pins `transformers<=5.5.4`,
+  which the workspace's vLLM and Gemma renderers exclude. On a synthetic archive with the live test's 496 names and
+  247.6 MB, it writes what the cookbook's `build_lora_adapter` (0.5.7) wrote, byte for byte.
 - **The objective is shared, not copied.** The package depends on `rollout-lora` for `Objective`, `terms`,
   `minibatches` and `sampled`; importing them loads none of its GPU code.
 - **Names.** A checkpoint's id (sixteen letters) names its Tinker checkpoints, so whether Tinker accepts `@` no longer
@@ -352,7 +356,7 @@ proposal left open:
   `importance_sampling` after a forward pass: the same cost.
 - **Adam.** `AdamParams`' defaults are 0.95 and 1e-12, not torch's; the trainer passes `beta1`, `beta2` and `eps`
   (torch's by default).
-- **Qwen3.5's q, k and v.** The cookbook's PEFT adapter keeps Tinker's `in_proj_q`, `in_proj_k` and `in_proj_v`, and
+- **Qwen3.5's q, k and v.** Renamed, the PEFT adapter keeps Tinker's `in_proj_q`, `in_proj_k` and `in_proj_v`, and
   vLLM 0.30 adapts Qwen3.5's linear attention only as `in_proj_qkv` (packed with `in_proj_z`). The conversion joins the
   three: A stacked and B block-diagonal (three times the rank), or B stacked at the same rank when they share one A.
 
@@ -394,7 +398,7 @@ Until then, `tinker checkpoint delete` deletes them by path or by run.
 | Trains | Serves | Works | What to know |
 |---|---|---|---|
 | Tinker | Tinker | Yes | Pointers only; no weight transfer |
-| Tinker | Local vLLM | Yes, with `weights = "peft"` | Each step downloads the archive and converts it (`build_lora_adapter`, then q, k and v joined). See below |
+| Tinker | Local vLLM | Yes, with `weights = "peft"` | Each step downloads the archive and converts it (renamed, then q, k and v joined). See below |
 | Local `LoraTrainer` | Tinker | No | No call imports an adapter into Tinker (*unverified*). `TinkerTrainer` raises `StepFailed` for such a parent instead of silently starting over |
 | Tinker, then local `LoraTrainer` | Local vLLM | Through a merge | A Tinker adapter has other layers and ranks than `LoraTrainer`'s; `rollout merge` folds it into the model, and a run starts from that full checkpoint |
 | Tinker | A frontier model, beside it | Yes, unrelated | Other slots of a run can be bound to `DirectModel` endpoints as today |
@@ -532,7 +536,7 @@ Prime Intellect is a source of GPUs and open-source parts. Tinker is the managed
 
 ## Milestones
 
-**0. The live smoke test** (`implementations/rollout-tinker/tests/test_live.py`, `-m tinker`, skipped without a key)
+**0. The live smoke test** (`tests/rollout_tinker/test_live.py`, `ROLLOUT_TINKER=1`, skipped without a key)
 runs on `Qwen/Qwen3.5-4B`, the same family at half the price, for well under ten cents:
 
 1. **Tokenizer agreement.** `rollout_qwen.qwen35("Qwen/Qwen3.5-4B")` renders a conversation with tools; Tinker's
@@ -555,8 +559,8 @@ run on a fake service (a bigram whose losses are the documented formulas), with 
 - going on from a parent's state (on the live client or a new one) equals the LoRA step going on with its optimizer, a
   parent's weights alone start a fresh optimizer, and a parent not trained on Tinker is refused;
 - a datum's alignment, the engine's contract and a publish through `Channel` and `Recorder`;
-- the cookbook's conversion with q, k and v joined, and `rollout merge` folding it in exactly, on a tiny model laid out
-  as Qwen3.5;
+- the conversion with q, k and v joined, and `rollout merge` folding it in exactly, on a tiny model laid out as
+  Qwen3.5;
 - a profile naming `rollout_tinker`'s classes, the loop playing groups and stepping.
 
 **First real run.** A short Minecraft run on `Qwen/Qwen3.5-9B` (`environments/minecraft/profiles/tinker.toml`, five
@@ -581,12 +585,10 @@ groups, two steps), audited before anything longer:
 - Whether sampled logprobs are post-temperature.
 - Whether vLLM serves an unembedding adapter (vLLM 0.30's Qwen3.5 maps `lm_head` adapters onto its output embeddings;
   not run). `train_unembed` is false by default.
-- Tinker's names in an archive of a Qwen3.5 adapter (the cookbook expects `in_proj_q`, `in_proj_k` and `in_proj_v`
-  apart), and its `lora_alpha` (the cookbook assumes 32). The smoke test records both.
 - What training is billed on: every token of a datum (assumed), or the trained rows only.
 - How often turns hit Tinker's prefix cache.
-- Checkpoint sizes: 86.5 million parameters for a rank-32 adapter of the 9B model without the output layer (the
-  cookbook's count), in a dtype not documented; the Adam state beside it.
+- Checkpoint sizes: 86.5 million parameters for a rank-32 adapter of the 9B model without the output layer, in
+  float32 in an archive; the Adam state beside it.
 - Whether the Qwen3.5 tokenizer is the same across sizes (for teachers).
 - For Prime Intellect: whether Prime Inference supports token-id prompts and logprobs; whether dedicated runs accept
   LoRA; whether hosted environments can reach outside services.

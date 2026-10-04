@@ -1,10 +1,9 @@
 # GSM8K played by the base Qwen/Qwen3.5-9B, sampled at Tinker: one profile, two processes, each in its own project's
 # environment, sharing the ledger, the blob store and the keys' secrets.
 #
-#   The gateway, in rollout-tinker's environment (Tinker's SDK): it hosts the channel's engine, samples every turn
-#   there and records it.
-#     cd implementations/rollout-tinker
-#     uv run rollout gateway ../rollout-verifiers/examples/gsm8k_tinker.toml
+#   The gateway, in the workspace's environment (synced with the `tinker` extra, for Tinker's SDK): it hosts the
+#   channel's engine, samples every turn there and records it, beside any other channel it hosts.
+#     uv run rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.toml
 #
 #   The eval's runner, in rollout-verifiers' environment (GSM8K): with [gateway] url it starts no engine, learns what
 #   the channel guarantees from the gateway, and hands each episode's harness the gateway's address and a signed key.

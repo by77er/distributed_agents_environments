@@ -145,11 +145,11 @@ are their own.
 (`rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer`). The GPU packages are installed
 with `uv sync --all-extras`.
 
-The Tinker trainer and engine train and sample at Thinking Machines, on no GPU of this machine. They are in a uv
-project of its own, `implementations/rollout-tinker`, locked apart from the workspace, so a profile that names them is
-run from there (`cd implementations/rollout-tinker && uv run rollout train PROFILE ENVIRONMENT`), with the key in
-`TINKER_API_KEY` or `~/.tinker/credentials.json` ([Tinker trainer and engine](../implementations/rollout-tinker.md)).
-`environments/minecraft/profiles/tinker.toml` is the Minecraft environment's.
+The Tinker trainer and engine train and sample at Thinking Machines, on no GPU of this machine. They are installed
+with the workspace's `tinker` extra (`uv sync --extra tinker`, or `--all-extras`), and a profile that names them runs
+from the workspace like any other, with the key in `TINKER_API_KEY` or `~/.tinker/credentials.json`
+([Tinker trainer and engine](../implementations/rollout-tinker.md)). One gateway hosts a Tinker channel beside
+channels on this machine's engines. `environments/minecraft/profiles/tinker.toml` is the Minecraft environment's.
 
 ## Opening a profile
 

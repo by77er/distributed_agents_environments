@@ -204,6 +204,9 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
   an engine that calls a hosted API, such as `TinkerEngine`) samples whatever it serves: the base model, unless
   something in that process publishes to it.
 
+One gateway samples channels of every kind at once: a `TinkerEngine` channel beside a routed one and one on this
+machine's vLLM, say, all from the workspace's environment (Tinker's SDK comes with its `tinker` extra).
+
 A turn's weights are chosen once, when it begins: both phases of its thinking ask for the same checkpoint. The turn
 records the checkpoint that served it (by id; the base model's name before the first checkpoint) and that
 checkpoint's depth. An answer that names another checkpoint than the one asked for, or a server that unloaded it

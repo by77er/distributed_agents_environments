@@ -12,26 +12,21 @@ the objective are the platform's own: Tinker holds the weights and does the arit
 
 ## Installing
 
-`implementations/rollout-tinker` is a uv project of its own, with its own lock, outside the workspace. Tinker's
-`tinker-cookbook`, whose weight tools turn Tinker's adapters into PEFT's, pins `transformers<=5.5.4`, and the
-platform's vLLM and Gemma renderers need 5.10 or later. The project pins `tinker==0.32.0` and `tinker-cookbook==0.5.7`,
-runs the cookbook on the platform's `transformers` (5.17.0, by an override: its weight tools read a model's
-configuration and safetensors headers only, and the tests run them there), and holds `torch`, `vllm` and `openai` at
-the platform's versions. It depends on the workspace's packages by path.
+`implementations/rollout-tinker` is a member of the workspace, installed by its `tinker` extra. Its one dependency
+beyond the workspace's is Tinker's SDK, pinned at `tinker==0.32.0`.
 
 ```bash
-cd implementations/rollout-tinker
-uv sync                 # the trainer, the engine, the Minecraft environment, the Qwen renderers, the tests
-uv sync --group local   # with vLLM, to serve Tinker's adapters on this machine (`weights = "peft"`)
-uv run pytest tests     # on a fake Tinker: no key, no network
+uv sync --extra tinker                  # or --all-extras, with vLLM to serve Tinker's adapters here (`weights = "peft"`)
+uv run pytest tests/rollout_tinker      # on a fake Tinker: no key, no network
 ```
 
-Commands run from there (`uv run rollout ...`) have Tinker's SDK; the workspace's environment does not.
+Every command of the workspace (`uv run rollout ...`) then has Tinker's SDK: one gateway hosts a Tinker channel beside
+channels on this machine's engines.
 
 ## The key
 
 The SDK reads `TINKER_API_KEY`, else the key `tinker auth login` stores in `~/.tinker/credentials.json`
-(`uv run tinker auth login` from the project). `TINKER_PROJECT_ID`, or the `project` setting, puts the sessions in a
+(`uv run tinker auth login`). `TINKER_PROJECT_ID`, or the `project` setting, puts the sessions in a
 Tinker project; a project's id is not a secret. Nothing in `rollout_tinker` prints or records the key, and the text of
 an error is cleared of it before it reaches a failed step's record. Every process that opens the profile's channel or
 trainer needs the key, in its environment or its user's credentials file.
@@ -73,21 +68,21 @@ tokens_per_step = 16384
 `environments/minecraft/profiles/tinker.toml` is the Minecraft environment's, on the full `Qwen/Qwen3.5-9B`:
 
 ```bash
-cd implementations/rollout-tinker
-uv run rollout train ../../environments/minecraft/profiles/tinker.toml minecraft_team.environment:environment --groups 30
+uv run rollout train environments/minecraft/profiles/tinker.toml minecraft_team.environment:environment --groups 30
 ```
 
 ### Evals through a gateway
 
-An environment that cannot share this project's environment (verifiers' pins its own `openai` and `mcp`) is played by
-a runner in its own project, sampling at Tinker through a gateway served from here
+An environment that cannot share the workspace's environment (verifiers' pins its own `openai` and `mcp`) is played
+by a runner in its own project, sampling at Tinker through a gateway served from the workspace
 ([a gateway elsewhere that hosts channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels)).
-One profile serves both: `rollout gateway` here starts the `TinkerEngine` channel and records every turn; the runner,
-with `[gateway] url`, starts no engine and samples there under signed keys. The channel serves the base model.
-`implementations/rollout-verifiers/examples/gsm8k_tinker.toml` is GSM8K's, on `Qwen/Qwen3.5-9B`:
+One profile serves both: `rollout gateway` starts the `TinkerEngine` channel, beside any other channel the profile
+names, and records every turn; the runner, with `[gateway] url`, starts no engine and samples there under signed keys.
+The channel serves the base model. `implementations/rollout-verifiers/examples/gsm8k_tinker.toml` is GSM8K's, on
+`Qwen/Qwen3.5-9B`:
 
 ```bash
-uv run rollout gateway ../rollout-verifiers/examples/gsm8k_tinker.toml     # from here
+uv run rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.toml
 ```
 
 and the eval from `implementations/rollout-verifiers` ([GSM8K](rollout-verifiers.md#gsm8k)). Its first run,
@@ -116,7 +111,7 @@ mean the same, so a profile switches trainers by changing `kind`.
 | Setting | What it sets |
 |---|---|
 | `rank` | The adapter's rank |
-| `learning_rate` | AdamW's rate (1e-4). Tinker scales its adapters by its own `lora_alpha / rank`. Its cookbook assumes an alpha of 32, half our scale at rank 32, so twice `LoraTrainer`'s rate would move the weights as far (*unverified*: the live test records the alpha an archive says) |
+| `learning_rate` | AdamW's rate (1e-4). Tinker scales its adapters by its own `lora_alpha / rank`, and its archives say an alpha of 32 (the live test's), half our scale at rank 32, so twice `LoraTrainer`'s rate moves the weights as far |
 | `clip_low`, `clip_high`, `segment_clip_low`, `segment_clip_high`, `truncate`, `ratio`, `objective` | As `LoraSettings` |
 | `tokens_per_step` | Sampled tokens per optimizer step (65,536). A step that is one optimizer step needs no pass for where it starts (below) |
 | `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`, `segment_tokens`, `segments_per_step` | As `LoraSettings` |
@@ -194,19 +189,23 @@ checkpoint (retention) deletes its files from the blob store, not its checkpoint
 storage until deleted: `uv run tinker checkpoint delete --run-id RUN` (or by path) deletes them.
 
 **`weights = "peft"`.** After saving, the step downloads the sampler checkpoint's archive (Tinker's own names), turns
-it into PEFT's layout with `tinker_cookbook.weights.build_lora_adapter`, in a process that cannot see the GPU, and keeps
-it beside the pointer. Qwen3.5's linear-attention layers hold one `in_proj_qkv` projection where Tinker adapts
-`in_proj_q`, `in_proj_k` and `in_proj_v` apart, and vLLM loads only the joined name: the three are joined into one
-adapter (A stacked and B block-diagonal, three times the rank; at the same rank when they share one A), which is the
-same update. `rollout_tinker.weights.ranks(directory)` says the largest rank, which an engine's `max_lora_rank` must
-reach. Then:
+it into PEFT's layout (`rollout_tinker.weights.peft_adapter`, on the CPU), and keeps it beside the pointer. Tinker
+names an adapted weight `base_model.model.` and its name in a plain text model (`model.layers.0.mlp.up_proj.weight`,
+`model.unembed_tokens.weight`); the adapter's names are the model's own, read from its configuration and its
+safetensors' headers: under `model.language_model.` for Qwen3.5, and the unembedding the model's `lm_head`, or its
+`embed_tokens` where the two are tied. Adapters of experts (a mixture of experts) and of the model families Tinker
+names otherwise (GPT-OSS, DeepSeek, Kimi, Nemotron) are refused. Qwen3.5's linear-attention layers hold one
+`in_proj_qkv` projection where Tinker adapts `in_proj_q`, `in_proj_k` and `in_proj_v` apart, and vLLM loads only the
+joined name: the three are joined into one adapter (A stacked and B block-diagonal, three times the rank; at the same
+rank when they share one A), which is the same update. `rollout_tinker.weights.ranks(directory)` says the largest
+rank, which an engine's `max_lora_rank` must reach. Then:
 
 - `rollout_vllm:VllmEngine` serves it, as the commented profile in `tinker.toml` shows;
 - `rollout merge CHECKPOINT --base Qwen/Qwen3.5-9B` folds it into the model, a full checkpoint of its own;
 - the blob store holds the adapter, so the policy outlives the model's retirement at Tinker.
 
-A rank-32 adapter of `Qwen/Qwen3.5-9B` without the output layer has 86.5 million parameters (Tinker's cookbook counts
-them), about 0.35 GB in float32.
+A rank-32 adapter of `Qwen/Qwen3.5-9B` without the output layer has 86.5 million parameters, about 0.35 GB in
+float32.
 
 On this machine's 16 GB card (measured with a synthetic adapter in Tinker's layout, converted so), vLLM loads the
 joined adapter and samples from it. The full model does not fit at an 8,192-token context even in FP8: its weights take
@@ -267,7 +266,7 @@ and how often (a new sampler checkpoint each step starts its cache afresh), is t
 
 `rollout_tinker.testing.FakeService` stands in for Tinker: a bigram model (a fixed table of logits by the token before,
 plus a learnable table) with training runs, checkpoints, sampling and archives, its losses computed as Tinker's
-documentation writes them. The project's tests show, with no network:
+documentation writes them. The tests (`tests/rollout_tinker`) show, with no network:
 
 - the substitutions are exact: a step through the fake moves the model as `rollout_lora.step.PolicyStep` moves the same
   model, and its metrics are the same, for each row of the table above, with two passes and warm-up, and at a stop at
@@ -275,16 +274,18 @@ documentation writes them. The project's tests show, with no network:
   optimizer; a parent's weights alone start a fresh optimizer;
 - a datum's rows: the shift by one, spans across turns, forced tokens left out;
 - the engine's contract, and a published version sampled at once through the channel and the gateway;
-- `weights = "peft"`: the cookbook's conversion (on the platform's transformers) and the joining of q, k and v, on a
-  tiny model laid out as Qwen3.5, and `rollout merge` folding the result in exactly;
-- a profile naming the trainer and the engine, the loop playing groups and stepping on the fake.
+- `weights = "peft"`: the renaming and the joining of q, k and v, on a tiny model laid out as Qwen3.5, and `rollout
+  merge` folding the result in exactly; and on the names and shapes of a real archive of `Qwen/Qwen3.5-4B`'s
+  (`qwen35_archive.json`), the adapter `tinker_cookbook` 0.5.7's converter made of it, name for name and shape for
+  shape;
+- a profile naming the trainer and the engine, the loop playing groups and stepping on the fake;
+- one gateway, started from the workspace, hosting a Tinker channel and a channel on an engine of this machine at once.
 
-`tests/test_live.py` is opt-in (`-m tinker`) and skipped without a key. On `Qwen/Qwen3.5-4B` it checks the tokenizer
+`tests/rollout_tinker/test_live.py` runs only when asked (`ROLLOUT_TINKER=1`) and is skipped without a key. On `Qwen/Qwen3.5-4B` it checks the tokenizer
 against our renderer, the sampling contract, the sampler's logprobs against a training pass's, a step's round trip to a
 new sampler, and the adapter downloaded, converted and served by this machine's vLLM; it deletes what it made and
 writes what it found to `~/.cache/rollout/tinker-smoke.json`. It costs well under ten cents:
 
 ```bash
-cd implementations/rollout-tinker
-flock ~/.cache/rollout/gpu.lock uv run --group local pytest -m tinker -s tests/test_live.py
+ROLLOUT_TINKER=1 flock ~/.cache/rollout/gpu.lock uv run pytest -s tests/rollout_tinker/test_live.py
 ```
