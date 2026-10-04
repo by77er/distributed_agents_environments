@@ -6,8 +6,12 @@ Code: `rollout_verifiers` · See [the recorder over HTTP](../libraries/rollout-t
 Prime Intellect's [`verifiers`](https://github.com/PrimeIntellect-ai/verifiers) v1 describes an environment as a
 **taskset** (its tasks, and how each is scored) played by a **harness** (the program the model runs in) in a
 **runtime**, one rollout per task. This package wraps any such environment, a package from the Environments Hub or
-one built into verifiers, as a catalog that runs train on and evals play. It is installed with
-`uv sync --extra verifiers` (or `--all-extras`), and pins `verifiers==0.3.2.dev185`.
+one built into verifiers, as a catalog that runs train on and evals play.
+
+It is a uv project of its own, with its own lock, outside the workspace: verifiers ships development releases daily
+and pins what it needs (`openai<3`, `mcp==2.0.0`, a pre-release of Prime's `renderers`), so it is resolved apart from
+the platform. It pins `verifiers==0.3.2.dev185` and depends on the workspace's `rollout` (and, for its tests and the
+example, `rollout-train` and the implementations a profile names) by path.
 
 ```py
 from rollout_verifiers import VerifiersEnvironment
@@ -16,17 +20,27 @@ train = VerifiersEnvironment("primeintellect/gsm8k", train={"split": "train"}, e
 test = train.evaluation()
 ```
 
-`implementations/rollout-verifiers/examples` has this catalog (`prime_gsm8k.py`, not `gsm8k.py`: a catalog's module
-must not take the name of the environment's package) and a profile for it. The profile serves the model endpoint
-(`serve`): the harness needs an address.
+## Installing and running
 
 ```bash
-uv pip install https://hub.primeintellect.ai/primeintellect/gsm8k/@eb4818f9/gsm8k-0.1.4-py3-none-any.whl
-export PYTHONPATH=implementations/rollout-verifiers/examples
-uv run rollout suite make gsm8k-test --catalog prime_gsm8k:test --seeds 1,2,3 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
-uv run rollout eval implementations/rollout-verifiers/examples/prime_gsm8k.toml gsm8k-test
-uv run rollout train implementations/rollout-verifiers/examples/prime_gsm8k.toml prime_gsm8k:train --groups 8
+cd implementations/rollout-verifiers
+uv sync                  # the adapter, and what its tests need
+uv run pytest tests
+uv sync --group spike    # with rollout-train, vLLM, the LoRA trainer, the Qwen renderers and primeintellect/gsm8k 0.1.4
 ```
+
+`examples` has the catalog above (`prime_gsm8k.py`, not `gsm8k.py`: a catalog's module must not take the name of the
+environment's package) and a profile for it, which serves the model endpoint (`serve`): the harness needs an address.
+Its ledger is the shared one, `sqlite:///~/.cache/rollout/ledger.db`. From `implementations/rollout-verifiers`:
+
+```bash
+export PYTHONPATH=examples
+uv run --group spike rollout suite make gsm8k-test --catalog prime_gsm8k:test --seeds 1,2,3 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
+uv run --group spike rollout eval examples/prime_gsm8k.toml gsm8k-test --directory ~/.cache/rollout/runs/gsm8k-eval
+uv run --group spike rollout train examples/prime_gsm8k.toml prime_gsm8k:train --groups 8 --groups-per-step 2
+```
+
+Another environment is installed into the project the same way: its Hub wheel as a dependency of a group.
 
 ## The catalog
 
@@ -77,5 +91,7 @@ your own (`custom`).
 
 ## Tests
 
-`tests/rollout_verifiers/` plays a two-task taskset defined in the test through the `null` harness, against a
-recorder served on `127.0.0.1:8809`. It needs `uv` (the harness runs as a uv script) and, the first time, the network.
+`implementations/rollout-verifiers/tests/` plays a two-task taskset defined in the test through the `null` harness,
+against a recorder served on `127.0.0.1:8809`. It runs in the project's own environment (`uv run pytest tests` there),
+needs `uv` (the harness runs as a uv script) and, the first time, the network. Elsewhere it skips: it needs
+`verifiers`.

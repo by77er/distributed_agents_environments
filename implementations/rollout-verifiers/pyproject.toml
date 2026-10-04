@@ -1,16 +1,43 @@
+# A project of its own, locked apart from the workspace: verifiers moves fast and pins what it needs (openai, mcp, a
+# pre-release of renderers), so it resolves here and never in the platform's lock.
+#   uv sync                     the adapter and what its tests need
+#   uv sync --group spike       with the engine, the trainer, the Qwen renderers and primeintellect/gsm8k: the spike
 [project]
 name = "rollout-verifiers"
 version = "0.0.0"
 description = "Prime Intellect's verifiers environments, played through the recorder"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.15"
 dependencies = [
     "rollout",
-    "verifiers==0.3.2.dev185; python_full_version < '3.15'",
-    "renderers>=0.1.12.dev2; python_full_version < '3.15'",  # what that verifiers needs: a pre-release
+    "verifiers==0.3.2.dev185",
+    "renderers>=0.1.12.dev2",  # what that verifiers needs: a pre-release
+]
+
+[dependency-groups]
+dev = [
+    "rollout-train[http]",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+]
+spike = [
+    "rollout-train[http,durable]",  # (durable: the database ledger)
+    "rollout-vllm",
+    "rollout-lora",
+    "rollout-qwen",
+    "gsm8k @ https://hub.primeintellect.ai/primeintellect/gsm8k/@eb4818f9/gsm8k-0.1.4-py3-none-any.whl",  # the Hub's, 0.1.4
 ]
 
 [tool.uv.sources]
-rollout = { workspace = true }
+rollout = { path = "../../libraries/rollout", editable = true }
+rollout-train = { path = "../../libraries/rollout-train", editable = true }
+rollout-vllm = { path = "../rollout-vllm", editable = true }
+rollout-lora = { path = "../rollout-lora", editable = true }
+rollout-qwen = { path = "../rollout-qwen", editable = true }
+rollout-durable = { path = "../rollout-durable", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = ["--import-mode=importlib"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

@@ -15,7 +15,8 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 - **A verifiers v1 environment runs here as a catalog**, with no change to the loop, the scheduler, evals or the
   trainer. Its harness reaches the model through verifiers' own interception server, which relays each request in
   the harness's own API to the episode's model address. The recorder renders and samples every request, so the
-  tokens and logprobs are recorded by this system and are exact.
+  tokens and logprobs are recorded by this system and are exact. The adapter, `rollout-verifiers`, is a uv project of
+  its own, locked apart from the platform: verifiers' pins never reach the platform's lock.
 - **The recorder now speaks the three APIs verifiers relays:** Chat Completions (verifiers' `null`, `bash` and most
   harnesses), Responses (Codex) and Messages (Claude Code), with streaming, tool calls, reasoning, errors and
   `Idempotency-Key` in each. This is also the front door for testing black-box harnesses against each other.
@@ -55,14 +56,35 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 Run on 2026-10-04 on one RTX 5080, from `implementations/rollout-verifiers/examples` (`prime_gsm8k.py` and
 `prime_gsm8k.toml`), with every run in the shared ledger.
 
+**Installing and running it.** `implementations/rollout-verifiers` is a uv project of its own, locked apart from the
+workspace; its `spike` group adds `rollout-train`, vLLM, the LoRA trainer, the Qwen renderers (all by path from the
+workspace) and the Hub's `gsm8k` 0.1.4 wheel. From that directory:
+
+```bash
+uv sync --group spike
+export PYTHONPATH=examples
+uv run --group spike rollout suite make e2e-prime-gsm8k-test --catalog prime_gsm8k:test --seeds 1,2,...,100 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
+uv run --group spike rollout eval examples/prime_gsm8k.toml e2e-prime-gsm8k-test --directory ~/.cache/rollout/runs/e2e-prime-eval-base --name e2e-prime-eval-base
+uv run --group spike rollout train examples/prime_gsm8k.toml prime_gsm8k:train --groups 8 --groups-per-step 2 --directory ~/.cache/rollout/runs/e2e-prime-lora --name e2e-prime-lora
+uv run --group spike rollout eval examples/prime_gsm8k.toml e2e-prime-gsm8k-test --checkpoint e2e-prime-lora:3 --directory ~/.cache/rollout/runs/e2e-prime-eval-lora --name e2e-prime-eval-lora
+```
+
+verifiers' own eval ran as `vf-eval primeintellect/gsm8k --env.taskset.split test --env.agent.harness.id null
+--env.agent.runtime.type subprocess --client.base-url URL --client.api-key-var VARIABLE --select.include.idx …
+--no-push`, against a recorder serving the same channel on `127.0.0.1:8801` with a key made for one session. The
+logprobs were scored again with `rollout_lora.policy.Policy.logprobs`. Those two scripts are not in the repository.
+The runs below were played while the adapter was still resolved in the workspace's lock, except
+`e2e-prime-eval-standalone`, which played the same suite from the project's own lock.
+
 **The environment.** `primeintellect/gsm8k` 0.1.4, installed from the Hub's wheel. It is a v1 taskset: a train split
 of 7,473 tasks and a test split of 1,319, a prompt asking for the answer after `####`, and one reward, `correct`,
 which runs a `math-verify` script inside the rollout's runtime. It was played by the `null` harness (a tool-less chat
 loop, run as a uv script) in the `subprocess` runtime.
 
 **The channel.** Qwen/Qwen3-0.6B, renderer `qwen3`, `thinking_tokens = 512`, `answer_tokens = 256`, turns of at
-most 2,048 tokens, a LoRA adapter of rank 16. Qwen3 opens its own thinking, so the recorder cannot close it by force:
-the two budgets act as one cap of 768 sampled tokens. 71 of the base model's 100 eval episodes and 26 of the 32
+most 2,048 tokens, a LoRA adapter of rank 16. Qwen3 opens its own thinking: the `qwen3` renderer's
+`ThinkingFormat` has `prompt_opens=False`, so the recorder samples in one phase and cannot close thinking by force,
+and the two budgets act as one cap of 768 sampled tokens. 71 of the base model's 100 eval episodes and 26 of the 32
 training episodes ran into it, mostly while still thinking. Those score 0, so the solve rate here measures finishing
 within 768 tokens as much as arithmetic. A real run would raise the cap.
 
@@ -72,6 +94,7 @@ within 768 tokens as much as arithmetic. A real run would raise the cap.
 | `e2e-prime-eval-base` | `rollout eval`, the base model, 1 episode a start | solved 36 of 100 (mean reward 0.36) |
 | `e2e-prime-lora` | `rollout train`, 8 groups of 4, 2 groups a step | 3 steps (2 groups had equal rewards and taught nothing); checkpoints `mkzlyrlnmwumvzlp` (released), `lmrzxkonrylyznox`, `vmwqpuouttquvwpx` |
 | `e2e-prime-eval-lora` | `rollout eval`, checkpoint `e2e-prime-lora:3` | solved 31 of 100 (mean reward 0.31) |
+| `e2e-prime-eval-standalone` | `rollout eval`, the base model again, from the adapter's own project and lock (`uv run --group spike`) | solved 39 of 100 (mean reward 0.39) |
 | `vf-eval` (not in the ledger) | verifiers' own eval of the suite's 93 tasks, its client pointed at a recorder serving the same channel, `--no-push` | mean reward 0.387 (0.390 over the suite's 100 starts) |
 
 The two evals of the base model played each task once with the same channel and sampling, so they differ only by
@@ -194,8 +217,9 @@ Either way the model calls still go harness → interception server → the reco
   `primeintellect/reverse-text` 0.1.4 is a v0 `load_environment()` package. v0 packages do not load on 0.3.2.
 - **Dependency pins move.** 0.3.1 requires `mcp<2`, which vLLM 0.30 (`mcp>=2`) cannot sit beside. The 0.3.2
   development releases require `mcp==2.0.0`, `openai>=2.54,<3` and a pre-release of Prime's `renderers`. So the
-  version that installs beside vLLM is a development release, pinned exactly, and installing it moves this
-  workspace's `openai` from 3.19 to 2.54 and `mcp` from 2.2 to 2.0.
+  version that installs beside vLLM is a development release, pinned exactly. Resolved together with the platform,
+  it would move the workspace's `openai` from 3.19 to 2.54 and `mcp` from 2.2 to 2.0; so `rollout-verifiers` is a
+  project of its own with its own lock, and the platform's lock does not know it.
 - **Docs and code drift.** The hosted docs say `uv run eval`; the command is `vf-eval` (the repository's own docs say
   so). The hosted docs list `--no-serve`, which the pinned `vf-eval` refuses. Nothing named `verifiers.v1.packages`
   exists in the pinned release or on `main`; the v1 API is `verifiers.v1`. `vf-eval` uploads its results to Prime

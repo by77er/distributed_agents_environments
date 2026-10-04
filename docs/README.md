@@ -87,7 +87,8 @@ Each implements one interface a library defines.
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
 
 `uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
-`rollout-qwen`, `rollout-gemma` (`--extra gemma`: that one alone) and `rollout-verifiers` (`--extra verifiers`).
+`rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone). `implementations/rollout-verifiers` is a project of
+its own, with its own lock, outside the workspace.
 
 ## Research
 
