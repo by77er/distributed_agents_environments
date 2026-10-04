@@ -24,13 +24,13 @@ Every key of `[trainer]` other than `kind`, `channel`, `start`, `bookmark` and `
 
 ### Every weight
 
-`FullTrainer` trains every weight of a text model, with the same settings (the adapter's, `rank`, are not used) and
-the same fresh process per step. The weights are kept in float32 and the forward pass runs in bfloat16 (autocast);
-each step leaves `weights/` in the model's own layout (float32 safetensors, with the configuration saying
-`bfloat16`, which is what vLLM loads them as, and the tokenizer) and the optimizer's state in `state/`. A step starts
-from its parent's weights and state, or from the model for the first. It refuses an image-text model.
-Qwen3-0.6B's step of 4 segments of 600 tokens peaks under 14 GiB on a 16 GB card; its optimizer's state is about
-5 GB.
+`FullTrainer` trains every weight of a text model, with the same settings (`rank`, `layer_inputs_on_host` and
+`mlp_rows` are not used) and the same fresh process per step. The weights are kept in float32 and the forward pass
+runs in bfloat16 (autocast); each step leaves `weights/` in the model's own layout (float32 safetensors, with the
+configuration saying `bfloat16`, which is what vLLM loads them as, and the tokenizer) and the optimizer's state in
+`state/`. A step starts from its parent's weights and state, or from the model for the first. It refuses an
+image-text model. Qwen3-0.6B's step of 4 segments of 600 tokens peaks under 14 GiB on a 16 GB card; its optimizer's
+state is about 5 GB.
 
 ```toml
 [trainer]

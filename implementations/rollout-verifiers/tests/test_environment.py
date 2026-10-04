@@ -1,5 +1,5 @@
 """A verifiers environment is one of ours: its tasks are a row's starts and its eval data, and an episode is one
-verifiers episode whose harness reaches the model through the recorder, which records what it samples."""
+verifiers episode whose harness reaches the model through the gateway, which records what it samples."""
 
 import asyncio
 import importlib
@@ -60,7 +60,7 @@ sys.modules["rollout_verifiers_echo"] = module  # verifiers imports a taskset by
 
 
 @pytest.fixture
-async def recorder(tmp_path: Path) -> AsyncIterator[GatewayEndpoints]:
+async def gateway(tmp_path: Path) -> AsyncIterator[GatewayEndpoints]:
     """A gateway served over HTTP, whose policy says `apple` whatever it is asked, with run `r_1` admitted."""
     channel = plain_channel(always=[("apple\n", "stop")])
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
@@ -108,11 +108,11 @@ def test_the_training_tasks_are_the_starts_of_its_row_and_the_eval_tasks_its_eva
 
 
 async def test_an_episode_is_played_by_the_harness_through_the_gateway_and_scored_by_the_task(
-    recorder: GatewayEndpoints,
+    gateway: GatewayEndpoints,
 ) -> None:
     train = environment()
     (row,) = train.rows()
-    address = recorder.endpoint(RecordedModel(channel="policy")).address("r_1/policy")
+    address = gateway.endpoint(RecordedModel(channel="policy")).address("r_1/policy")
     outcomes: list[tuple[str, float]] = []
     for seed in range(8):
         start: Any = train.start(row, random.Random(seed))
@@ -121,7 +121,7 @@ async def test_an_episode_is_played_by_the_harness_through_the_gateway_and_score
             outcomes.append((start["task"]["answer"], reward))
             assert info["rewards"] == {"exact": reward} and info["turns"] == 1
     assert sorted(outcomes) == [("apple", 1.0), ("river", 0.0)]
-    segments: Sequence[Any] = (await recorder.sessions("train", "r_1"))["policy"]
+    segments: Sequence[Any] = (await gateway.sessions("train", "r_1"))["policy"]
     said = [
         "".join(chr(token) for token in segment.tokens[span.start : span.end])
         for segment in segments

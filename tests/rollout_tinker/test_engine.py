@@ -1,5 +1,5 @@
 """The engine's contract on the fake: ids and logprobs out, the stop token kept; a published version sampled at once
-through the channel and the recorder, the one before kept for turns in flight."""
+through the channel and the gateway, the one before kept for turns in flight."""
 
 from pathlib import Path
 from typing import cast
