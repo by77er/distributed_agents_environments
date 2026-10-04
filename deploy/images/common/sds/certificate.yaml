@@ -1,0 +1,12 @@
+# The pod's certificate and key, as Envoy serves them. pki.sh publishes each new pair by swapping the link
+# /certs/current in one rename; Envoy watches /certs for it and reads the pair whole.
+resources:
+  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
+    name: pod_certificate
+    tls_certificate:
+      certificate_chain:
+        filename: /certs/current/tls.crt
+      private_key:
+        filename: /certs/current/tls.key
+      watched_directory:
+        path: /certs

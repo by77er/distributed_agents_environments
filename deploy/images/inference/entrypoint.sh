@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# An inference pod (deploy/images/inference/README.md): its certificate first, then the renewal daemon, Envoy, the
+# vLLM server and the follower. When any of them ends, the others are ended and the container exits.
+set -euo pipefail
+source /opt/rollout/bin/supervise.sh
+
+for name in ROLLOUT_POD_NAME ROLLOUT_RUN ROLLOUT_MODEL ROLLOUT_LEDGER ROLLOUT_BLOBS STEP_CA_URL STEP_FINGERPRINT; do
+    if [ -z "${!name:-}" ]; then
+        echo "$name is not set" >&2
+        exit 1
+    fi
+done
+
+/opt/rollout/bin/pki.sh bootstrap
+unset STEP_TOKEN # (used, and good for nothing more: no other process sees it)
+
+export HF_HOME=${HF_HOME:-/workspace/huggingface}
+export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
+read -r -a vllm_options <<<"${VLLM_ARGS:-}"
+
+start certificates /opt/rollout/bin/pki.sh renew
+start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}"
+start vllm vllm serve "$ROLLOUT_MODEL" --host 127.0.0.1 --port 8000 \
+    --enable-lora --max-lora-rank "${VLLM_MAX_LORA_RANK:-32}" --max-loras 2 \
+    --logprobs-mode processed_logprobs "${vllm_options[@]}"
+start follower /opt/rollout/venv/bin/python -m rollout_train.pods.inference
+
+supervise

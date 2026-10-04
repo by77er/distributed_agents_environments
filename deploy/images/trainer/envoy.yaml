@@ -1,0 +1,145 @@
+# Envoy in front of a training pod's training service (deploy/images/trainer/README.md).
+#
+# As on an inference pod: a raw TCP port, mutual TLS ended here, and only a client whose certificate chains to the
+# cluster's root and carries the gateway's identity. It passes on the training API and nothing else: POST /v1/steps,
+# GET /v1/steps/CHECKPOINT and GET /v1/trainer. Every other request is answered 404 here. The training service listens
+# on 127.0.0.1 only.
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: pod
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8443 }
+      per_connection_buffer_limit_bytes: 1048576
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                tls_params:
+                  tls_minimum_protocol_version: TLSv1_2
+                alpn_protocols: ["h2", "http/1.1"]
+                tls_certificate_sds_secret_configs:
+                  - name: pod_certificate
+                    sds_config:
+                      path_config_source:
+                        path: /etc/envoy/sds/certificate.yaml
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher: { exact: "spiffe://rollout/gateway" }
+                  validation_context_sds_secret_config:
+                    name: cluster_ca
+                    sds_config:
+                      path_config_source:
+                        path: /etc/envoy/sds/ca.yaml
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: pod
+                codec_type: AUTO
+                use_remote_address: true
+                normalize_path: true
+                merge_slashes: true
+                path_with_escaped_slashes_action: REJECT_REQUEST
+                request_headers_timeout: 10s
+                stream_idle_timeout: 120s
+                max_request_headers_kb: 16
+                common_http_protocol_options:
+                  idle_timeout: 600s
+                  headers_with_underscores_action: REJECT_REQUEST
+                access_log:
+                  # One line per request, without bodies: who asked (the client certificate's SAN), what, and how it went.
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          start: "%START_TIME%"
+                          peer: "%DOWNSTREAM_PEER_URI_SAN%"
+                          client: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(:PATH)%"
+                          route: "%ROUTE_NAME%"
+                          status: "%RESPONSE_CODE%"
+                          flags: "%RESPONSE_FLAGS%"
+                          received: "%BYTES_RECEIVED%"
+                          sent: "%BYTES_SENT%"
+                          milliseconds: "%DURATION%"
+                route_config:
+                  name: pod
+                  virtual_hosts:
+                    - name: pod
+                      domains: ["*"]
+                      routes:
+                        - name: step
+                          match:
+                            path: /v1/steps
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: POST }
+                          route:
+                            cluster: trainer
+                            timeout: 60s
+                        - name: steps
+                          match:
+                            safe_regex: { regex: "/v1/steps/[A-Za-z0-9_@-]{1,128}" }
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: GET }
+                          route:
+                            cluster: trainer
+                            timeout: 30s
+                        - name: trainer
+                          match:
+                            path: /v1/trainer
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: GET }
+                          route:
+                            cluster: trainer
+                            timeout: 30s
+                        - name: refused
+                          match: { prefix: / }
+                          direct_response: { status: 404 }
+                http_filters:
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: requests
+                      token_bucket:
+                        max_tokens: 40
+                        tokens_per_fill: 20
+                        fill_interval: 1s
+                      filter_enabled:
+                        runtime_key: local_rate_limit_enabled
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      filter_enforced:
+                        runtime_key: local_rate_limit_enforced
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                  - name: envoy.filters.http.buffer
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+                      max_request_bytes: 1048576
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: trainer
+      type: STATIC
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: trainer
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 8001 }

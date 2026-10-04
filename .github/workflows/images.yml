@@ -1,0 +1,82 @@
+# The pods' images (deploy/images): the Envoy configurations validated, then both images built and pushed to GHCR,
+# on a version tag or when asked for. Each image is tagged with the repository's version (the tag, or the commit for
+# a run asked for by hand) and pushed by digest; the digests are in the run's summary.
+name: images
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ENVOY_IMAGE: envoyproxy/envoy:v1.38.5
+
+jobs:
+  envoy:
+    name: Validate the Envoy configurations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Certificates where the configurations look for them
+        run: |
+          mkdir -p certs/current
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=validate" \
+            -addext "subjectAltName=URI:spiffe://rollout/pod/validate" \
+            -keyout certs/current/tls.key -out certs/current/tls.crt
+          cp certs/current/tls.crt certs/current/ca.crt
+          chmod -R a+rX certs
+      - name: envoy --mode validate
+        run: |
+          for role in inference trainer; do
+            docker run --rm \
+              -v "$PWD/deploy/images/$role/envoy.yaml:/etc/envoy/envoy.yaml:ro" \
+              -v "$PWD/deploy/images/common/sds:/etc/envoy/sds:ro" \
+              -v "$PWD/certs:/certs:ro" \
+              "$ENVOY_IMAGE" --mode validate --config-path /etc/envoy/envoy.yaml
+          done
+
+  build:
+    name: Build and push ${{ matrix.role }}
+    needs: envoy
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        role: [inference, trainer]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space (the vLLM and CUDA layers are large)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: The versions
+        id: versions
+        run: |
+          vllm=$(python3 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('uv.lock', 'rb'))['package'] if p['name'] == 'vllm'))")
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then version=${GITHUB_REF_NAME#v}; else version=sha-${GITHUB_SHA::12}; fi
+          echo "vllm=$vllm" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/images/${{ matrix.role }}/Dockerfile
+          build-args: VLLM_VERSION=${{ steps.versions.outputs.vllm }}
+          push: true
+          tags: ghcr.io/by77er/rollout-${{ matrix.role }}:${{ steps.versions.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.versions.outputs.version }}
+      - name: The digest
+        run: |
+          echo "ghcr.io/by77er/rollout-${{ matrix.role }}:${{ steps.versions.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/by77er/rollout-${{ matrix.role }}@${{ steps.push.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
