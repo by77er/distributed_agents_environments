@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["rollout-vllm", "rollout-lora", "rollout-qwen"]
 gemma = ["rollout-gemma"]
+verifiers = ["rollout-verifiers"]  # Prime Intellect's verifiers environments
 ray = ["rollout-train[ray]"]  # a launcher that submits runs as Ray jobs, and resharding as Ray tasks
 
 [tool.uv.workspace]
@@ -35,6 +36,7 @@ rollout-vllm = { workspace = true }
 rollout-lora = { workspace = true }
 rollout-qwen = { workspace = true }
 rollout-gemma = { workspace = true }
+rollout-verifiers = { workspace = true }
 rollout-computers = { workspace = true }
 rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
@@ -51,6 +53,8 @@ dev = [
     "pgembed>=0.2",
     "moto[server]>=5.1",
     "boto3-stubs[s3]>=1.40",
+    "openai>=2.25",  # the official clients, for the recorder's HTTP endpoint
+    "anthropic>=1.0",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -82,6 +86,7 @@ extraPaths = [
     "implementations/rollout-computers/src",
     "implementations/rollout-openai/src",
     "implementations/rollout-s3/src",
+    "implementations/rollout-verifiers/src",
     "products/project-assistant/src",
     "products/agent-sessions/src",
     "environments/minecraft",

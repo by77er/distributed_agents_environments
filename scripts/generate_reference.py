@@ -44,6 +44,7 @@ PUBLIC_MODULES = [
     ("rollout_computers.tools", "Tools for agents that work on a computer: shell, files, edits and images."),
     ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
     ("rollout_s3", "Blobs in S3 or any S3-compatible object store."),
+    ("rollout_verifiers", "Prime Intellect's verifiers environments, played through the recorder."),
 ]
 
 

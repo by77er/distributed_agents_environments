@@ -1,0 +1,31 @@
+# An adapter over Qwen3-0.6B, on GSM8K from the Environments Hub (prime_gsm8k.py, on PYTHONPATH).
+directory = "~/.cache/rollout/runs/e2e-prime-gsm8k"
+episodes_at_once = 8
+serve = "127.0.0.1:8800"  # the model endpoint verifiers' interception server relays the harness's requests to
+
+[ledger]
+kind = "rollout_train.database:DatabaseLedger"
+url = "sqlite:///~/.cache/rollout/ledger.db"
+
+[channels.policy]
+model = "Qwen/Qwen3-0.6B"
+renderer = "rollout_qwen:qwen3"
+engine = "rollout_vllm:VllmEngine"
+thinking_tokens = 512
+answer_tokens = 256
+engines = [{ gpu_memory_utilization = 0.35, max_model_len = 2048, max_num_seqs = 16, max_lora_rank = 32 }]
+
+[trainer]
+kind = "rollout_lora:LoraTrainer"
+channel = "policy"
+colocated = true
+learning_rate = 1e-4
+rank = 16
+tokens_per_step = 2048
+segment_tokens = 2048
+segments_per_step = 16
+max_kl = 0.5
+
+[memory]
+runs_gib = 1
+training_gib = 4
