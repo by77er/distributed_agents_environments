@@ -49,6 +49,10 @@ CHECK = "check"
 NOTHING_TAUGHT = "every episode scored the same: a group-relative update learns nothing from it"
 REPLIES = 1000
 """Replies the scripted model has: an episode that asks for more fails."""
+SEEDS = (0, 1, 2)
+"""The seeds each row's start is drawn with twice, to see that one seed draws one start."""
+DRAWS = 50
+"""Training starts drawn of each row, to see that none is an eval start."""
 
 
 @dataclass(frozen=True)
@@ -63,13 +67,13 @@ class Finding:
         return f"{'FAIL' if not self.passed else 'FLAG' if self.flagged else 'ok':<5} {self.check}: {self.said}"
 
 
-def checked(environment: Environment, *, seeds: Sequence[int] = (0, 1, 2), draws: int = 50) -> list[Finding]:
-    """What can be checked without playing: its rows, its description, its starts, and its eval data against training
-    (`draws` training starts of each row)."""
+def checked(environment: Environment) -> list[Finding]:
+    """What can be checked without playing: its rows, its description, its starts (`SEEDS`), and its eval data
+    against training (`DRAWS` training starts of each row)."""
     found = [_rows(environment), _description(environment)]
     if not found[0].passed:
         return found
-    return [*found, _starts(environment, seeds), _held_out(environment, draws)]
+    return [*found, _starts(environment, SEEDS), _held_out(environment, DRAWS)]
 
 
 def _rows(environment: Environment) -> Finding:

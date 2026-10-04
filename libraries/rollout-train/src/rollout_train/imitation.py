@@ -109,11 +109,11 @@ def _around(tokens: Sequence[int], text: str, renderer: Renderer) -> tuple[int, 
     return None
 
 
-def passes_for(segments: Sequence[Weighted], tokens_per_step: int, updates: int = UPDATES) -> int:
-    """Passes over `segments` that make at least `updates` optimizer updates of about `tokens_per_step` sampled tokens
+def passes_for(segments: Sequence[Weighted], tokens_per_step: int) -> int:
+    """Passes over `segments` that make at least `UPDATES` optimizer updates of about `tokens_per_step` sampled tokens
     each: one for a dataset large enough, more for a small one."""
     per_pass = max(1, sum(weighted.segment.sampled for weighted in segments) // tokens_per_step)
-    return max(1, -(-updates // per_pass))
+    return max(1, -(-UPDATES // per_pass))
 
 
 @dataclass
@@ -136,11 +136,9 @@ class Examples:
         return supervision_of([weighted.segment for weighted in self.segments])
 
 
-async def examples(
-    ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str], solved_only: bool = True
-) -> Examples:
-    """The segments of every episode of `run` whose prompts carried guidance of each of `kinds` and (with
-    `solved_only`) that solved its task, with that guidance cut out."""
+async def examples(ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str]) -> Examples:
+    """The segments of every episode of `run` whose prompts carried guidance of each of `kinds` and that solved its
+    task, with that guidance cut out."""
     found = Examples([])
     for line in (await ledger.read(table(run, EPISODES))).values():
         record = Record.from_json(cast(dict[str, Any], line))
@@ -148,7 +146,7 @@ async def examples(
         guidance = cast(dict[str, Any], said) if isinstance(said, dict) else {}
         if not all(kind in guidance for kind in kinds):
             continue
-        if solved_only and not record.episode.solved:
+        if not record.episode.solved:
             continue
         episode: Episode = await loaded(record, blobs)
         cut = [str(guidance[kind]) for kind in kinds]
