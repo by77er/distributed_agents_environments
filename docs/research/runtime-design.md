@@ -1161,3 +1161,23 @@ sequences should then merge by dropping whichever side lands second:
 4. **Tinker's prompt and top-k logprobs.** Distillation's validation needs to know whether Tinker's sampler returns
    them. The design has the Tinker provider declare what the SDK version offers, confirmed by a live test that costs a
    few cents. Acceptable?
+
+## Decisions after review
+
+The user settled the design's open questions on 2026-10-04:
+
+- **No Ray Serve.** The gateway and the monitor are stateless HTTP services. On Kubernetes they are ordinary
+  Deployments behind a Service and an Ingress (TLS, autoscaling, and any auth proxy in front, as the cluster provides);
+  on one machine they are local processes. Ray runs what needs it: each run's job and the actors it owns (trainer,
+  runners, engine hosts), the launcher, sandbox pools, and tasks (bridges, merges, dataset builds). The gateway reaches
+  engines over HTTP (vLLM servers, or a router in front of them), not through actor handles.
+- **Retries belong to the job.** A run is a Ray job, a RayJob on KubeRay. When its driver's node dies, the job is
+  submitted again by its retry setting (`backoffLimit`); submitting it again is resuming it, and fences make the
+  takeover safe. The launcher does not resubmit on its own.
+- **Channels have a serving mode.** A channel serves either a fixed model (a base model, or a pinned checkpoint: a
+  judge, a frozen opponent) or follows another channel's checkpoints, optionally some steps behind (self-play against a
+  recent snapshot). A following channel reads the followed channel's serving record with that offset. A run's settings
+  attach channels to its program's slots (`agent-1` on the trained channel, `agent-2` on an opponent that follows it
+  five steps behind).
+- **Tinker's logprobs are checked live** (a few cents) before distillation's validation relies on prompt or top-k
+  logprobs from Tinker.
