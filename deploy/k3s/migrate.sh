@@ -45,9 +45,11 @@ POD=migrate
 say() { printf '\n== %s\n' "$*"; }
 
 host_services() {  # this user's launchers, gateways, monitors and Ray processes, outside the cluster's containers
-  local pid
+  local pid             # (tests' own Ray sessions, under ray-tests, write no ledger and are left out)
   for pid in $(pgrep -u "$(id -u)" -f 'rollout(_train\.cli)? (launcher|gateway|monitor)|gcs_server|raylet' || true); do
-    grep -q kubepods "/proc/$pid/cgroup" 2>/dev/null || ps -o pid=,args= -p "$pid" | cut -c1-160
+    grep -q kubepods "/proc/$pid/cgroup" 2>/dev/null && continue
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q /ray-tests/ && continue
+    ps -o pid=,args= -p "$pid" | cut -c1-160
   done
 }
 if [[ $mode == final ]]; then

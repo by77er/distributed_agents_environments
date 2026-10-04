@@ -14,15 +14,15 @@ alias kubectl='k3s kubectl'
 
 Nothing should be playing: `RAY_AUTH_MODE=token uv run ray job list --address http://127.0.0.1:8265` (in
 `~/Code/distributed_agents_environments-run`) shows the Minecraft launcher's job and no `run-…` job running, and the
-monitor's launches show none `running`. Then, in this order:
+monitor's launches show none `running`. Then:
 
 ```sh
-pkill -u "$USER" -INT -f 'rollout launcher .*--name gsm8k'                 # the GSM8K launcher (a process)
-pkill -u "$USER" -INT -f 'rollout gateway .*gsm8k_tinker.toml'             # the gateway on 127.0.0.1:8900
-pkill -u "$USER" -INT -f 'rollout monitor '                               # the monitors on 8765 (both) and 8766
-(cd ~/Code/distributed_agents_environments-run && uv run ray stop)   # every Ray process of yours: the head and its jobs
-pgrep -u "$USER" -af 'rollout (launcher|gateway|monitor)|raylet|gcs_server'      # nothing of the above is left
+deploy/k3s/stop-host.sh
 ```
+
+It stops the GSM8K launcher, the gateway on 127.0.0.1:8900, the monitors on 8765 and 8766, the Minecraft launcher,
+and the host's Ray head with its workers (one process session), then lists anything left. It leaves tests' own Ray
+sessions (under `~/.cache/rollout/ray-tests`) and the cluster's containers running; `ray stop` would stop those too.
 
 ## 2. Run the final migration
 
