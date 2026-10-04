@@ -108,8 +108,6 @@ def _step(
                 checkpoint,
                 rank=settings.rank,
                 alpha=settings.alpha,
-                layer_inputs_on_host=settings.layer_inputs_on_host,
-                mlp_rows=settings.mlp_rows,
             )
             if parent is not None:
                 load_adapter(policy.model, parent.weights)

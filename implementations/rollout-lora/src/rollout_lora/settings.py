@@ -1,5 +1,5 @@
 """The trainers' settings: the one place their defaults are written. `StepSettings` are a policy step's, which the
-LoRA, full-weight and Tinker trainers take alike; `LoraSettings` add what a step on this machine's GPU takes."""
+LoRA, full-weight and Tinker trainers take alike; `LoraSettings` add the adapter's scaling."""
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
@@ -136,15 +136,8 @@ class StepSettings:
 
 @dataclass(frozen=True)
 class LoraSettings(StepSettings):
-    """The settings of `LoraTrainer` and `FullTrainer`: a step's, and how a step holds its activations on the GPU.
-    The adapter's scaling is twice its rank (`alpha`)."""
-
-    layer_inputs_on_host: bool = False
-    """Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the
-    GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B."""
-    mlp_rows: int | None = None
-    """Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in
-    passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak."""
+    """The settings of `LoraTrainer` and `FullTrainer`: a step's, and the adapter's scaling, which is twice its rank
+    (`alpha`)."""
 
     @property
     def alpha(self) -> float:

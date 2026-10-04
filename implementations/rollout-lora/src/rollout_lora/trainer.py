@@ -40,7 +40,7 @@ class LoraTrainer:
 class FullTrainer(LoraTrainer):
     """Trains every weight of a text model (`rollout_lora.full`), one step at a time in a fresh process: a step
     starts from its parent's full weights (the model's own for the first) and the optimizer's state, and leaves the
-    new ones where it is told. `settings` are `LoraSettings`' fields; `rank`, `layer_inputs_on_host` and
-    `mlp_rows` are not used."""
+    new ones where it is told. `settings` are `LoraSettings`' fields; `rank` is not
+    used."""
 
     weights = "full"

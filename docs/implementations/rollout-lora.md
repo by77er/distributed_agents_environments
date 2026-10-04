@@ -24,13 +24,12 @@ Every key of `[trainer]` other than `kind`, `channel`, `start`, `bookmark` and `
 
 ### Every weight
 
-`FullTrainer` trains every weight of a text model, with the same settings (`rank`, `layer_inputs_on_host` and
-`mlp_rows` are not used) and the same fresh process per step. The weights are kept in float32 and the forward pass
-runs in bfloat16 (autocast); each step leaves `weights/` in the model's own layout (float32 safetensors, with the
-configuration saying `bfloat16`, which is what vLLM loads them as, and the tokenizer) and the optimizer's state in
-`state/`. A step starts from its parent's weights and state, or from the model for the first. It refuses an
-image-text model. Qwen3-0.6B's step of 4 segments of 600 tokens peaks under 14 GiB on a 16 GB card; its optimizer's
-state is about 5 GB.
+`FullTrainer` trains every weight of a text model, with the same settings (`rank` is not used) and the same fresh
+process per step. The weights are kept in float32 and the forward pass runs in bfloat16 (autocast); each step leaves
+`weights/` in the model's own layout (float32 safetensors, with the configuration saying `bfloat16`, which is what vLLM
+loads them as, and the tokenizer) and the optimizer's state in `state/`. A step starts from its parent's weights and
+state, or from the model for the first. It refuses an image-text model. Qwen3-0.6B's step of 4 segments of 600 tokens
+peaks under 14 GiB on a 16 GB card; its optimizer's state is about 5 GB.
 
 ```toml
 [trainer]
@@ -53,7 +52,7 @@ whose update has another shape. It is what `rollout merge` calls by default
 
 [`LoraSettings`](../guide/reference.md#lorasettings) is the one place the settings and their defaults are written: a
 policy step's ([`StepSettings`](../guide/reference.md#stepsettings), which the [Tinker trainer](rollout-tinker.md)
-takes too), and `layer_inputs_on_host` and `mlp_rows`.
+takes too).
 
 | Setting | What it sets |
 |---|---|
@@ -70,8 +69,6 @@ takes too), and `layer_inputs_on_host` and `mlp_rows`.
 | `warmup_updates` | When a step's optimizer starts afresh, its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` (0: none). A step that goes on from an optimizer's state is not warmed up |
 | `segment_tokens` | The longest segment a step can hold on its GPU (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
-| `layer_inputs_on_host` | Keep each layer's input in pinned system memory between the forward and backward passes ([activations](#activations)) |
-| `mlp_rows` | Run each layer's MLP over this many tokens at a time when it is computed again, and in passes without a gradient (`None`: the whole segment) |
 | `objective` | `policy_gradient` (the weighted, clipped policy gradient of [the step](#the-step)) or `likelihood` (the sampled tokens' log-likelihood, for [imitation](../libraries/rollout-train/training.md#imitation)) |
 
 `segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). An open profile
@@ -112,22 +109,6 @@ The process may use the GPU memory that is free when it starts, less `MEMORY_MAR
 where a step crawls instead of failing; the bound turns that into an out-of-memory error. A minibatch that runs out
 of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass goes on with
 the next. Segments longer than `segment_tokens` are left out before the pass and counted in `segments_too_long`.
-
-## Activations
-
-With gradient checkpointing a layer keeps only its input for the backward pass and computes itself again there.
-Two things still grow with a segment's length, and `rollout_lora.activations` takes each off the GPU's peak:
-
-- **The layer inputs**, a quarter of a megabyte a token for Qwen3.5-9B (2 GiB at 8,000 tokens). With
-  `layer_inputs_on_host` they wait for the backward pass in pinned system memory (`HostStore`, whose buffers are
-  reused from segment to segment).
-- **The MLP of a layer computed again**, whose intermediate activations are the largest part of the layer's peak.
-  With `mlp_rows` it runs over the segment in pieces. A layer's output is `residual + mlp(norm(residual))`, so when
-  the layer is computed again for its backward pass the MLP's output is not needed: it returns at once, and when the
-  gradient arrives each piece is computed with gradients and takes its backward step before the next. Nothing is
-  computed more often than without it.
-
-On a small model both give the same logprobs and gradients. On the 4-bit Qwen3.5-9B checkpoint, `tests/rollout_lora/test_on_gpu.py` finds a segment's logprobs with both set up to 0.07 apart from those without (its tolerance is 0.01), so neither is set by a profile until that difference is explained. A pass without a gradient stores nothing.
 
 ## The policy
 

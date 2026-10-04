@@ -23,7 +23,6 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from rollout_lora.activations import HostStore, checkpoint_layers
 from rollout_lora.layers import add_lora, lora_parameters, save_adapter
 from rollout_lora.models import config, local, multimodal, quantized
 from rollout_lora.quantized import replace_compressed_linears
@@ -120,8 +119,6 @@ class Policy:
         *,
         rank: int,
         alpha: float,
-        layer_inputs_on_host: bool = False,
-        mlp_rows: int | None = None,
     ) -> "Policy":
         """The checkpoint on the GPU with a new adapter, its layers checkpointed for the backward pass."""
         from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, CompressedTensorsConfig
@@ -154,9 +151,6 @@ class Policy:
         cast(Any, model).gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         if embedding is None:  # (embeddings read from the file are marked as needing gradients where used)
             cast(Any, model).enable_input_require_grads()
-        if layer_inputs_on_host or mlp_rows is not None:
-            store = HostStore(pin=True) if layer_inputs_on_host else None
-            checkpoint_layers(body(model), store=store, rows=mlp_rows)
         return cls(model, checkpoint, rank, alpha, embedding)
 
     def parameters(self) -> list[nn.Parameter]:

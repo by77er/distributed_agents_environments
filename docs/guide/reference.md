@@ -6,9 +6,9 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#rolloutharnessenvironment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Priority`](#priority), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
-- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
-- **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#rolloutenvironmentenvironment), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
+- **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`with_row`](#with_row)
+- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#environment), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
@@ -42,21 +42,6 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 ## `rollout.harness`
 
 Writing tasks, agents and programs; runners; memory; tool sets.
-
-### `Address`
-
-*class* · `libraries/rollout/src/rollout/harness/conversations.py`
-
-```python
-class Address(ContractModel)
-```
-
-Where a message or output goes.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `kind` | `Literal['conversation', 'run', 'external']` | required |  |
-| `value` | `str` | required | `{deployment}/{key}`, a `run_id`, or a connector target. |
 
 ### `Agent`
 
@@ -193,28 +178,6 @@ Advisory for the agent: how much history the task needs the model to see.
 | `history` | `HistoryShape` | `HistoryShape.FULL` |  |
 | `window` | `int \| None` | `None` | For `WINDOW`: the number of recent turns. |
 
-### `ConversationKey`
-
-*class* · `libraries/rollout/src/rollout/harness/conversations.py`
-
-```python
-class ConversationKey(ContractModel)
-```
-
-Identifies a conversation: a deployment and a caller-chosen key. One live run per conversation.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `deployment` | `str` | required | e.g. `acme/support-bot`. |
-| `key` | `str` | required | Caller-chosen, e.g. `slack:T1/C2/171.2` or `user:42`. |
-| `origin` | `Address \| None` | `None` | Where replies go by default (e.g. a connector target). |
-
-**Methods**
-
-- `@property def address(self) -> str` — `{deployment}/{key}`: the value of the conversation's `Address`.
-- `@classmethod def parse(cls, address: str, *, origin: Address | None = None) -> 'ConversationKey'` — The conversation an address value names. A deployment is `{namespace}/{name}`; the rest is the key, which
-  may itself contain `/`.
-
 ### `DeduplicatingToolSet`
 
 *class* · `libraries/rollout/src/rollout/harness/imports.py`
@@ -229,56 +192,6 @@ a class): its side-effecting tools are then safe to call again (docs/libraries/r
 **Methods**
 
 - `@property def deduplicates(self) -> bool`
-
-### `DeliveryMode`
-
-*class* · `libraries/rollout/src/rollout/harness/conversations.py`
-
-```python
-class DeliveryMode(StrEnum)
-```
-
-How a message reaches a run that is busy.
-
-| Member | Value | Description |
-|---|---|---|
-| `QUEUE` | `'queue'` | Deliver only when the run next waits (`WaitFor`). |
-| `STEER` | `'steer'` | Add to the next observation at the next turn boundary; cancel nothing. |
-| `INTERRUPT` | `'interrupt'` | Cancel the in-flight reply now; the message becomes the next observation. |
-
-### `DeliveryPolicy`
-
-*class* · `libraries/rollout/src/rollout/harness/conversations.py`
-
-```python
-class DeliveryPolicy(ContractModel)
-```
-
-Maps priorities to delivery modes. Default: LOW → QUEUE, NORMAL → STEER, HIGH → INTERRUPT.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `modes` | `Mapping[Priority, DeliveryMode]` | `Field(default_factory=_default_modes)` |  |
-| `max_priority_by_sender` | `Mapping[str, Priority]` | `Field(default_factory=dict[str, Priority])` | Caps per sender class, so an external system cannot interrupt when it should only queue. |
-
-**Methods**
-
-- `def mode(self, priority: Priority, sender: str | None = None) -> DeliveryMode` — The delivery mode for a message, after capping the priority by sender.
-
-### `Deployment`
-
-*class* · `libraries/rollout/src/rollout/harness/runner.py`
-
-```python
-class Deployment(ContractModel)
-```
-
-A named, addressable agent: conversations addressed to it start runs of its specification.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `name` | `str` | required | `{namespace}/{name}`, e.g. `acme/support-bot`. |
-| `specification` | `RunSpecification` | required |  |
 
 ### `DirectModel`
 
@@ -354,107 +267,6 @@ A model slot bound to an endpoint. Every sample sends the full context.
 - `def address(self) -> ModelAddress`
 - `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None, links: Sequence[SampleLink] = ()) -> Message`
 
-### `Envelope`
-
-*class* · `libraries/rollout/src/rollout/harness/conversations.py`
-
-```python
-class Envelope(ContractModel)
-```
-
-A message delivered to a run.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `kind` | `str` | `'message'` | `message`, or an application-defined kind that `WaitFor` can select. |
-| `content` | `FrozenSequence[Block]` | `()` |  |
-| `data` | `JsonValue` | `None` | A structured payload. |
-| `reply_to` | `Address \| None` | `None` |  |
-| `message_id` | `str` | `''` | Set by the runner: the caller's idempotency key (a sending run's `effect_id`, say), or a new `m_{ulid}`. |
-| `sender` | `str \| None` | `None` | Set by the runner; never trusted from the payload. |
-
-### `Environment` {#rolloutharnessenvironment}
-
-*class* · `libraries/rollout/src/rollout/harness/environments.py`
-
-```python
-class Environment
-```
-
-A handle to one environment. Its methods are effects.
-
-**Methods**
-
-- `def __init__(self, environment_id: str, service: EnvironmentService, effects: Effects) -> None`
-- `async def execute(self, command: str, *, timeout_seconds: float = 120.0, cwd: str | None = None) -> ExecutionResult` — Run a shell command.
-- `async def put(self, path: str, data: bytes | str) -> None` — Write a file (relative paths are under the working directory).
-- `async def get(self, path: str) -> bytes`
-- `async def destroy(self) -> None`
-
-### `Environments`
-
-*class* · `libraries/rollout/src/rollout/harness/environments.py`
-
-```python
-class Environments
-```
-
-`run.environments`: creates environments the run owns.
-
-**Methods**
-
-- `def __init__(self, service: EnvironmentService, effects: Effects) -> None`
-- `async def create(self, specification: EnvironmentSpecification | None = None) -> Environment`
-- `def attach(self, environment_id: str) -> Environment` — A handle to an existing environment.
-- `async def release_all(self) -> None` — Destroy every environment the run created, directly (not as effects); for runners when a run ends.
-
-### `EnvironmentService`
-
-*class* · `libraries/rollout/src/rollout/harness/environments.py`
-
-```python
-class EnvironmentService(Protocol)
-```
-
-An environment backend. Every method must be safe to repeat with the same arguments, except `execute`.
-
-**Methods**
-
-- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None` — Create the environment, or do nothing if it already exists.
-- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult` — Run a command. `effect_id` identifies the attempt (it is the same on every re-execution).
-- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
-- `async def get(self, environment_id: str, path: str) -> bytes`
-- `async def destroy(self, environment_id: str) -> None` — Destroy the environment, or do nothing if it is already gone.
-
-### `EnvironmentSpecification`
-
-*class* · `libraries/rollout/src/rollout/harness/environments.py`
-
-```python
-class EnvironmentSpecification(ContractModel)
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `image` | `str` | `'alpine'` | A base image the backend knows, e.g. `alpine` (latest) or `alpine:3.24.2`. |
-| `setup` | `FrozenSequence[str]` | `()` | Shell commands run once at creation: a recipe for identical start states. |
-
-### `ExecutionResult`
-
-*class* · `libraries/rollout/src/rollout/harness/environments.py`
-
-```python
-class ExecutionResult(ContractModel)
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `exit_code` | `int \| None` | required | None when the command timed out. |
-| `output` | `str` | required | Standard output and standard error, interleaved. |
-| `truncated` | `bool` | `False` | `output` is only the end of the output (see `full_output_path`). |
-| `timed_out` | `bool` | `False` |  |
-| `full_output_path` | `str \| None` | `None` | When truncated: where, inside the environment, the full output was saved. |
-
 ### `FileBlobStore`
 
 *class* · `libraries/rollout/src/rollout/harness/blobs.py`
@@ -524,20 +336,6 @@ def instantiate(reference: ProgramReference) -> Program
 ```
 
 Create the program a reference names.
-
-### `Interrupted`
-
-*class* · `libraries/rollout/src/rollout/harness/context.py`
-
-```python
-class Interrupted(Exception)
-```
-
-The reply in progress was cancelled by a message delivered with mode `INTERRUPT`.
-
-**Methods**
-
-- `def __init__(self, envelope: Envelope, reply_effect_id: str | None) -> None`
 
 ### `InvalidObservation`
 
@@ -646,24 +444,6 @@ class MemoryLeases
 - `async def put(self, lease: Lease) -> None`
 - `async def delete(self, key: str) -> None`
 - `async def all(self) -> list[Lease]`
-
-### `MessageRouter`
-
-*class* · `libraries/rollout/src/rollout/harness/runner.py`
-
-```python
-class MessageRouter(ABC)
-```
-
-`Runner.send`, and the hand-over between a conversation's runs, over the transport a runner supplies: where
-its runs are, how a message reaches one, and where delivered messages are remembered.
-
-A message is claimed (remembered as delivered, under its `message_id`) only once it is delivered. A send that
-fails before that can be retried with the same idempotency key; a retry of a delivered message is dropped.
-
-**Methods**
-
-- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str`
 
 ### `Model`
 
@@ -831,22 +611,6 @@ How a kind of sandbox is served. Exactly one kind is set.
 | `local` | `str \| None` | `None` | The name of a pool registered with the runner, in process. |
 | `url` | `str \| None` | `None` | A pool served over HTTP (`rollout.harness.remote.serve_pool`), wherever its sandboxes live. |
 
-### `Priority`
-
-*class* · `libraries/rollout/src/rollout/harness/conversations.py`
-
-```python
-class Priority(StrEnum)
-```
-
-A sender's priority; the run's `DeliveryPolicy` maps it to a delivery mode.
-
-| Member | Value | Description |
-|---|---|---|
-| `LOW` | `'low'` |  |
-| `NORMAL` | `'normal'` |  |
-| `HIGH` | `'high'` |  |
-
 ### `Process`
 
 *class* · `libraries/rollout/src/rollout/harness/sandboxes.py`
@@ -1008,7 +772,6 @@ class RunBinding(ContractModel)
 | `models` | `Mapping[str, ModelBinding]` | required | Model slot → how it is served. |
 | `imports` | `Mapping[str, ToolBinding]` | `Field(default_factory=dict[str, ToolBinding])` | Import name → how the tool set is served. |
 | `pools` | `Mapping[str, PoolBinding]` | `Field(default_factory=dict[str, PoolBinding])` | Sandbox kind → the pool its sandboxes are acquired from. |
-| `delivery` | `DeliveryPolicy` | `DeliveryPolicy()` |  |
 
 ### `RunContext`
 
@@ -1023,13 +786,11 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 **Methods**
 
 - `@property def run_id(self) -> str`
-- `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int` — Completed model turns so far.
 - `@property def history(self) -> History`
 - `@property def models(self) -> Mapping[str, Model]`
 - `@property def model(self) -> Model` — `models["policy"]`.
 - `@property def tools(self) -> Tools` — Imported tools; each call is a `tool.call` effect.
-- `@property def environments(self) -> Environments | None` — Creates environments the run owns; None when the runner has no environment backend.
 - `def sandbox(self, name: str) -> Sandbox` — A sandbox the program declared (`Program.sandboxes()`), acquired for this run: its addresses, its
   environment, its operations. `KeyError` for a name the program did not declare.
 - `@property def blobs(self) -> Blobs | None` — Stores bytes such as images for `Media` blocks; None when the runner has no blob store.
@@ -1039,11 +800,8 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `def reward(self, value: float, *, slot: str = 'policy', key: str = 'default') -> None` — Assign a reward to a model slot outside an observation (e.g. to an opponent, or several keyed rewards).
 - `def exclude_from_training(self, reason: str) -> None` — Mark the run as unsuitable for training, e.g. after an infrastructure fault that is not the policy's.
 - `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]` — Await concurrently, in order. Equivalent to `asyncio.gather`.
-- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Output of the run, such as a reply to a person; a connector or client delivers it.
-- `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None` — Append a turn to the history. A `WaitFor` records only the reply it answers.
-- `async def wait_for_message(self, wait: WaitFor) -> Envelope | None` — Suspend until a message of `wait.kind` arrives; `None` on timeout.
-- `async def take_steering_messages(self) -> list[Envelope]` — Messages delivered with mode `STEER` since the last turn boundary.
-- `async def interruptible[T](self, reply: Awaitable[T]) -> T` — Await an agent's reply; raises `Interrupted` if a message with mode `INTERRUPT` arrives meanwhile.
+- `async def emit(self, kind: str, payload: JsonValue) -> None` — Output of the run, such as its result: recorded as an `output.emit` effect and an `output.emitted` event.
+- `def record(self, observation: Observation, *, reply: Message | None = None) -> None` — Append a turn to the history.
 
 ### `RunHandle`
 
@@ -1089,25 +847,10 @@ class Runner(Protocol)
 
 - `async def launch(self) -> None` — Make the runner ready: call it once, before anything else that starts or reaches a run.
 - `async def close(self) -> None` — Release what the runner holds; it cannot be used afterwards.
-- `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
 - `def run(self, run_id: str) -> RunHandle` — The handle of a run; `KeyError` if the runner does not know it.
-- `def conversation_of(self, run_id: str) -> ConversationKey | None` — The conversation a run serves, if any.
-- `def conversation_runs(self, deployment: str, key: str) -> Sequence[RunHandle]` — The conversation's runs, oldest first.
-- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None, lease: str | None = None) -> RunHandle` — Start a run. Its sandboxes are acquired under `lease` and each one's name (by default the `run_id`): an
+- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, labels: Mapping[str, str] | None = None, lease: str | None = None) -> RunHandle` — Start a run. Its sandboxes are acquired under `lease` and each one's name (by default the `run_id`): an
   episode's claim, say, so that they end with it.
-- `async def send(self, to: Address, envelope: Envelope, *, priority: Priority = Priority.NORMAL, idempotency_key: str | None = None, sender: str | None = None) -> str` — Deliver a message and return its `message_id`; a message to a conversation starts its run when none
-  is live. A message sent again with the same `idempotency_key` is delivered once.
 - `async def cancel(self, run_id: str, *, reason: str) -> None`
-
-### `RunNotLive`
-
-*class* · `libraries/rollout/src/rollout/harness/runner.py`
-
-```python
-class RunNotLive(Exception)
-```
-
-A message was addressed to a run that has ended.
 
 ### `RunOutcome`
 
@@ -1304,10 +1047,8 @@ Subclass it and implement `start`; override the other hooks as needed. Declarati
 
 - `def __init__(self, parameters: Any = None) -> None` — Once per run, with the row's parameters. Subclasses may define their own signature.
 - `async def setup(self, run: RunContext) -> None` — Once per run, before `start`.
-- `async def start(self, run: RunContext) -> Observation | WaitFor` — Open the episode, or wait for the first message.
-- `async def respond(self, run: RunContext, reply: Message) -> Observation | WaitFor` — The environment's step. Default: execute the reply's tool calls; end the episode when there are none.
-- `async def resume(self, run: RunContext, envelope: Envelope) -> Observation | WaitFor` — Turn a message that satisfied a `WaitFor`, or interrupted a turn, into the next observation.
-- `async def steer(self, run: RunContext, envelopes: list[Envelope], observation: Observation) -> Observation` — Merge messages delivered with mode `STEER` into the next observation. Default: append as USER content.
+- `async def start(self, run: RunContext) -> Observation` — Open the episode.
+- `async def respond(self, run: RunContext, reply: Message) -> Observation` — The environment's step. Default: execute the reply's tool calls; end the episode when there are none.
 - `async def score(self, run: RunContext) -> float | None` — Episode-level reward, attached to the end of the trajectory.
 - `async def teardown(self, run: RunContext) -> None` — Always runs if `setup` began; must be idempotent.
 - `def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]` — The tools offered this turn. Default: every `@tool` method and every imported tool.
@@ -1377,31 +1118,12 @@ A provider of tools: in process, or a client of an MCP server, an HTTP service o
 class Turn
 ```
 
-One step of the episode: a reply and the observation that answers it.
-
-The start observation, and observations produced by `resume`, have no reply. A reply answered by a `WaitFor`
-has no observation until the run resumes.
+One step of the episode: a reply and the observation that answers it. The start observation has no reply.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `reply` | `Message \| None` | required |  |
-| `observation` | `Observation \| None` | required |  |
-
-### `WaitFor`
-
-*class* · `libraries/rollout/src/rollout/harness/observation.py`
-
-```python
-class WaitFor
-```
-
-Suspend the run until a message of `kind` arrives or `timeout` passes.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `kind` | `str` | `'message'` |  |
-| `timeout` | `timedelta \| None` | `None` |  |
-| `on_timeout` | `Observation` | `field(default_factory=lambda: End(truncated=True))` |  |
+| `observation` | `Observation` | required |  |
 
 ### `with_row`
 
@@ -1630,8 +1352,6 @@ The catalog of effects.
 |---|---|---|
 | `MODEL_SAMPLE` | `'model.sample'` |  |
 | `TOOL_CALL` | `'tool.call'` |  |
-| `ENVIRONMENT_CALL` | `'environment.call'` |  |
-| `ENVIRONMENT_LIFECYCLE` | `'environment.lifecycle'` |  |
 | `OUTPUT_EMIT` | `'output.emit'` |  |
 
 ### `EffectStatus`
@@ -1805,16 +1525,6 @@ The model must call this tool.
 |---|---|---|---|
 | `name` | `str` | required |  |
 
-### `new_message_id`
-
-*function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
-
-```python
-def new_message_id() -> str
-```
-
-`m_{ulid}`: the id of a message sent without an idempotency key.
-
 ### `new_run_id`
 
 *function* · `libraries/rollout/src/rollout/contracts/identifiers.py`
@@ -1963,7 +1673,6 @@ The closed catalog of run events.
 | Member | Value | Description |
 |---|---|---|
 | `RUN_CREATED` | `'run.created'` |  |
-| `RUN_SUSPENDED` | `'run.suspended'` |  |
 | `RUN_COMPLETED` | `'run.completed'` |  |
 | `RUN_FAILED` | `'run.failed'` |  |
 | `RUN_CANCEL_REQUESTED` | `'run.cancel_requested'` |  |
@@ -1974,8 +1683,6 @@ The closed catalog of run events.
 | `OUTPUT_EMITTED` | `'output.emitted'` |  |
 | `EFFECT_REQUESTED` | `'effect.requested'` |  |
 | `EFFECT_COMPLETED` | `'effect.completed'` |  |
-| `MESSAGE_RECEIVED` | `'message.received'` |  |
-| `TURN_INTERRUPTED` | `'turn.interrupted'` |  |
 | `TOOLS_RESOLVED` | `'tools.resolved'` |  |
 | `SANDBOXES_ACQUIRED` | `'sandboxes.acquired'` |  |
 
@@ -2272,7 +1979,7 @@ def drawn(environment: Environment, *, seeds: Sequence[int], rows: Sequence[str]
 A start of each row (of `rows`, by key; else every row) for each seed, drawn with `random.Random(seed)`: eval
 data derived from rows and seeds. Raises `ValueError` for a row the environment lacks, or no seeds.
 
-### `Environment` {#rolloutenvironmentenvironment}
+### `Environment`
 
 *class* · `libraries/rollout/src/rollout/environment.py`
 
@@ -2457,15 +2164,13 @@ Implements `RunContext` and `Effects` in process.
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, blobs: Blobs | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, blobs: Blobs | None = None, on_event: Callable[[RunEvent], None] | None = None) -> None`
 - `@property def run_id(self) -> str`
-- `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int`
 - `@property def history(self) -> History`
 - `@property def models(self) -> Mapping[str, Model]`
 - `@property def model(self) -> Model`
 - `@property def tools(self) -> Tools`
-- `@property def environments(self) -> Environments | None`
 - `def sandbox(self, name: str) -> Sandbox`
 - `@property def blobs(self) -> Blobs | None`
 - `@property def random(self) -> random.Random`
@@ -2474,13 +2179,8 @@ Implements `RunContext` and `Effects` in process.
 - `def reward(self, value: float, *, slot: str = 'policy', key: str = 'default') -> None`
 - `def exclude_from_training(self, reason: str) -> None`
 - `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]`
-- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Output of the run, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect.
-- `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None`
-- `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
-- `async def take_steering_messages(self) -> list[Envelope]`
-- `async def interruptible[T](self, reply: Awaitable[T]) -> T`
-- `def take_undelivered(self) -> list[Envelope]` — Messages the run never consumed; the runner hands them to the conversation's next run.
-- `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/guide/conversations.md#priority-and-delivery-mode).
+- `async def emit(self, kind: str, payload: JsonValue) -> None` — Output of the run, such as its result. Recorded as an `output.emit` effect.
+- `def record(self, observation: Observation, *, reply: Message | None = None) -> None`
 - `async def acquire_sandboxes(self, specs: Mapping[str, SandboxSpec], pools: Mapping[str, Pool], lease: str) -> None` — Acquire each declared sandbox from the pool of its kind, under `lease` and its name, giving a harness
   inside it its slots' model addresses; then record them.
 - `async def release_sandboxes(self) -> None` — Release every sandbox the run acquired, or began to: when the program has ended.
@@ -2499,7 +2199,7 @@ A run started by a `LocalRunner`. Its context is available for inspection in tes
 
 **Methods**
 
-- `def __init__(self, run_id: str, specification: RunSpecification, conversation: ConversationKey | None, lease: str | None = None) -> None`
+- `def __init__(self, run_id: str, specification: RunSpecification, lease: str | None = None) -> None`
 - `@property def run_id(self) -> str`
 - `@property def done(self) -> bool`
 - `@property def outcome(self) -> RunOutcome | None`
@@ -2516,27 +2216,21 @@ A run started by a `LocalRunner`. Its context is available for inspection in tes
 *class* · `libraries/rollout/src/rollout/local/runner.py`
 
 ```python
-class LocalRunner(MessageRouter)
+class LocalRunner
 ```
 
-Implements `Runner` in process.
-
-Direct model bindings are served by endpoint factories registered by provider name. Conversations addressed to a
-deployment start a run of its specification when none is live; one run consumes a conversation's messages at a
-time, and messages a run never consumed start the conversation's next run.
+Implements `Runner` in process. Direct model bindings are served by endpoint factories registered by provider
+name.
 
 **Methods**
 
-- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), pools: Mapping[str, Pool] | None = None) -> None` — `recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `pools`
+- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), pools: Mapping[str, Pool] | None = None) -> None` — `recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `pools`
   are the sandbox pools a binding names as `local`. `hooks` watch every run: each event recorded and each model
   sample.
 - `async def launch(self) -> None` — Nothing to start: runs execute on the caller's event loop.
 - `async def close(self) -> None` — Nothing to release: nothing outlives the process.
-- `def deploy(self, deployment: Deployment) -> None` — Register or replace a deployment; a conversation's next run uses the current version.
 - `def run(self, run_id: str) -> LocalRunHandle`
-- `def conversation_of(self, run_id: str) -> ConversationKey | None` — The conversation a run serves, if any.
-- `def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]` — The conversation's runs, oldest first.
-- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None, lease: str | None = None) -> LocalRunHandle`
+- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, labels: Mapping[str, str] | None = None, lease: str | None = None) -> LocalRunHandle`
 - `async def cancel(self, run_id: str, *, reason: str) -> None`
 
 ### `RewardAssignment`
@@ -6854,8 +6548,8 @@ class FullTrainer(LoraTrainer)
 
 Trains every weight of a text model (`rollout_lora.full`), one step at a time in a fresh process: a step
 starts from its parent's full weights (the model's own for the first) and the optimizer's state, and leaves the
-new ones where it is told. `settings` are `LoraSettings`' fields; `rank`, `layer_inputs_on_host` and
-`mlp_rows` are not used.
+new ones where it is told. `settings` are `LoraSettings`' fields; `rank` is not
+used.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -6869,13 +6563,8 @@ new ones where it is told. `settings` are `LoraSettings`' fields; `rank`, `layer
 class LoraSettings(StepSettings)
 ```
 
-The settings of `LoraTrainer` and `FullTrainer`: a step's, and how a step holds its activations on the GPU.
-The adapter's scaling is twice its rank (`alpha`).
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `layer_inputs_on_host` | `bool` | `False` | Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B. |
-| `mlp_rows` | `int \| None` | `None` | Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak. |
+The settings of `LoraTrainer` and `FullTrainer`: a step's, and the adapter's scaling, which is twice its rank
+(`alpha`).
 
 **Methods**
 
