@@ -1,15 +1,16 @@
 // A new training run, asked for from the page: a launcher alive on a training machine offers its profiles (each with
 // the settings a launch may change), and starts the run asked for on one of them, with the evals it makes of its
-// checkpoints.
+// checkpoints: a suite (by default the environment's own eval data, where it has some), or none, said so.
 
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
+import { useEnvironment, useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
 import type { Launcher, OfferedProfile } from "../api/types";
 import { Card, Empty, Head, SectionTitle } from "../components/ui";
 import { Ago } from "../layout/runs";
 import { nameOf } from "../lib/model";
-import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, shown, typed } from "../lib/settings";
+import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, NO_EVALS, shown, typed } from "../lib/settings";
+import { currentOf, versionTag } from "../lib/suites";
 
 export { typed };
 const EVALS = [EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES];
@@ -74,11 +75,17 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [rows, setRows] = useState<Row[]>([]);
   const defaults = chosen?.profile.settings ?? {};
-  const [suite, setSuite] = useState<string | null>(null);  // (none chosen: the profile's)
+  const { data: described } = useEnvironment(environment);
+  const [suite, setSuite] = useState<string | null>(null);  // (none chosen: the profile's, else the environment's eval data)
   const [every, setEvery] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<string | null>(null);
-  const evalsAsked = evalsSettings(suite ?? shown(defaults[EVALS_SUITE]), every ?? (shown(defaults[EVALS_EVERY]) || "1"),
-    episodes ?? (shown(defaults[EVALS_EPISODES]) || "1"));
+  const suites = (evals?.suites ?? []).filter(each => !each.environment || each.environment === environment);
+  const unplayed = Object.keys(described?.evals ?? {}).filter(each => !suites.some(made => made.suite === each));
+  const own = Object.keys(described?.evals ?? {})[0];
+  const chosenSuite = suite ?? (shown(defaults[EVALS_SUITE]) || own || "");
+  const evalsAsked = evalsSettings(chosenSuite, every ?? (shown(defaults[EVALS_EVERY]) || "1"), episodes ?? shown(defaults[EVALS_EPISODES]));
+  const evaluating = Boolean(chosenSuite) && chosenSuite !== NO_EVALS;
+  const suiteEpisodes = suites.find(each => each.suite === chosenSuite);
   const settingKeys = Object.keys(defaults).filter(key => key !== "trainer.start" && key !== "trainer.bookmark" && !EVALS.includes(key)).sort();
   const room = chosen ? chosen.launchers.some(each => (each.playing ?? 0) < (each.at_once ?? 1)) : false;
   const checkpoints = [...(system?.checkpoints ?? [])].sort((a, b) => b.made - a.made);
@@ -97,8 +104,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
       if (shown(value) !== shown(defaults[key])) settings[key] = value;
     }
     for (const row of rows) if (row.key.trim()) settings[row.key.trim()] = typed(row.value);
-    for (const [key, value] of Object.entries(evalsAsked.settings)) if (shown(value) !== shown(defaults[key])) settings[key] = value;
-    return settings;
+    return { ...settings, ...evalsAsked.settings };  // (the evals, always said: a suite, or none)
   };
 
   const submit = (event: React.FormEvent) => {
@@ -113,7 +119,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
     );
   };
 
-  const count = Object.keys(changed()).length;
+  const count = Object.keys(changed()).filter(key => !EVALS.includes(key)).length;
   return (
     <form className="launch-form" onSubmit={submit}>
       <div className="cols">
@@ -126,7 +132,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             <label className="field">
               <span>Profile</span>
               <select value={chosen?.profile.profile ?? ""} onChange={event => {
-                const next = offered.find(each => each.profile.profile === event.target.value)?.profile;
+                const next = offered.find(each => each.profile.profile === event.target.value)?.profile;  // (its evals are its own)
                 const from = start && system?.bookmarks[start] ? system.bookmarks[start] : start;
                 setProfileName(event.target.value); setEdits({}); setSuite(null); setEvery(null); setEpisodes(null);
                 if (from && !startable(from, next)) setStart("");
@@ -138,10 +144,10 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             <label className="field">
               <span>Environment</span>
               {environments.length ? (
-                <select value={environment} onChange={event => setEnvironment(event.target.value)}>
+                <select value={environment} onChange={event => { setEnvironment(event.target.value); setSuite(null); }}>
                   {environments.map(each => <option key={each} value={each}>{each}</option>)}
                 </select>
-              ) : <input value={environment} onChange={event => setEnvironment(event.target.value)} placeholder="module:name" required spellCheck={false} />}
+              ) : <input value={environment} onChange={event => { setEnvironment(event.target.value); setSuite(null); }} placeholder="module:name" required spellCheck={false} />}
             </label>
             <label className="field">
               <span>Starts from</span>
@@ -201,20 +207,24 @@ function Form({ launchers }: { launchers: Launcher[] }) {
           <div className="field-row evals-fields">
             <label className="field">
               <span>Suite</span>
-              <select value={suite ?? shown(defaults[EVALS_SUITE])} onChange={event => setSuite(event.target.value)}>
-                {shown(defaults[EVALS_SUITE]) ? null : <option value="">none</option>}
-                {(evals?.suites ?? []).filter(each => !each.environment || each.environment === environment).map(each => <option key={each.suite} value={each.suite}>{each.suite} · {each.starts.length} starts</option>)}
-                {shown(defaults[EVALS_SUITE]) && !evals?.suites.some(each => each.suite === defaults[EVALS_SUITE]) ? <option value={shown(defaults[EVALS_SUITE])}>{shown(defaults[EVALS_SUITE])}</option> : null}
+              <select value={chosenSuite} onChange={event => setSuite(event.target.value)} required>
+                {chosenSuite ? null : <option value="">choose…</option>}
+                <option value={NO_EVALS}>none</option>
+                {suites.map(each => <option key={each.suite} value={each.suite}>{each.suite} · {versionTag(currentOf(each).id)} · {currentOf(each).starts.length} starts</option>)}
+                {unplayed.map(each => <option key={each} value={each}>{each} · eval data · {described?.evals[each]} starts</option>)}
+                {chosenSuite && chosenSuite !== NO_EVALS && !suites.some(each => each.suite === chosenSuite) && !unplayed.includes(chosenSuite) ? <option value={chosenSuite}>{chosenSuite}</option> : null}
               </select>
+              {evalsAsked.errors[EVALS_SUITE] ? <small className="error-text">{evalsAsked.errors[EVALS_SUITE]}</small> : null}
             </label>
             <label className="field">
               <span>Every N steps</span>
-              <input type="number" min={1} value={every ?? (shown(defaults[EVALS_EVERY]) || "1")} onChange={event => setEvery(event.target.value)} disabled={!(suite ?? shown(defaults[EVALS_SUITE]))} />
+              <input type="number" min={1} value={every ?? (shown(defaults[EVALS_EVERY]) || "1")} onChange={event => setEvery(event.target.value)} disabled={!evaluating} />
               {evalsAsked.errors[EVALS_EVERY] ? <small className="error-text">{evalsAsked.errors[EVALS_EVERY]}</small> : null}
             </label>
             <label className="field">
               <span>Episodes per start</span>
-              <input type="number" min={1} value={episodes ?? (shown(defaults[EVALS_EPISODES]) || "1")} onChange={event => setEpisodes(event.target.value)} disabled={!(suite ?? shown(defaults[EVALS_SUITE]))} />
+              <input type="number" min={1} value={episodes ?? shown(defaults[EVALS_EPISODES])} onChange={event => setEpisodes(event.target.value)} disabled={!evaluating}
+                placeholder={suiteEpisodes ? String(currentOf(suiteEpisodes).episodes) : "suite's"} />
               {evalsAsked.errors[EVALS_EPISODES] ? <small className="error-text">{evalsAsked.errors[EVALS_EPISODES]}</small> : null}
             </label>
           </div>

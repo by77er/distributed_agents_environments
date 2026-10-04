@@ -26,10 +26,12 @@ export function typed(text: string): unknown {
 /** A value as a form shows it. */
 export const shown = (value: unknown): string => (value == null ? "" : typeof value === "string" ? value : JSON.stringify(value));
 
-/** One setting's value from what was typed, or why it cannot be: a whole number of 1 at least where one is needed, a
- * suite's name or none for the evals' suite, else as `typed` reads it (empty: none). */
+/** One setting's value from what was typed, or why it cannot be: a whole number of 1 at least where one is needed (the
+ * evals' episodes may be empty: the suite's own), a suite's name or none for the evals' suite, else as `typed` reads it
+ * (empty: none). */
 export function settingOf(key: string, text: string): { value: unknown } | { error: string } {
   if (key === EVALS_SUITE) return { value: text.trim() || null };
+  if (key === EVALS_EPISODES && !text.trim()) return { value: null };
   if (WHOLE.has(key)) {
     const value = Number(text.trim());
     return Number.isInteger(value) && value >= 1 && text.trim() !== "" ? { value } : { error: "a whole number, 1 at least" };
@@ -50,9 +52,15 @@ export function wantedOf(fields: Record<string, string>, current: Record<string,
   return { settings, errors };
 }
 
-/** The evals a new run makes, as launch settings: none without a suite; else the suite, every how many steps and how
- * many episodes of each start, or why those cannot be. */
+/** The choice of no evals, beside the suites (no suite's name says `@`). */
+export const NO_EVALS = "@none";
+
+/** The evals a new run makes, as launch settings: a suite (`suite`, by name), every how many steps and how many episodes
+ * of each start (empty: the suite's own); or none (`NO_EVALS`), said so. Nothing chosen, or a field that cannot be what
+ * was typed, says why. */
 export function evalsSettings(suite: string, every: string, episodes: string): { settings: Record<string, unknown>; errors: Record<string, string> } {
-  if (!suite.trim()) return { settings: {}, errors: {} };
-  return wantedOf({ [EVALS_SUITE]: suite, [EVALS_EVERY]: every, [EVALS_EPISODES]: episodes }, {});
+  if (!suite.trim()) return { settings: {}, errors: { [EVALS_SUITE]: "a suite, or none" } };
+  if (suite === NO_EVALS) return { settings: { [EVALS_SUITE]: null }, errors: {} };
+  const asked = wantedOf({ [EVALS_SUITE]: suite, [EVALS_EVERY]: every, [EVALS_EPISODES]: episodes }, {});
+  return { settings: { [EVALS_EPISODES]: null, ...asked.settings }, errors: asked.errors };
 }

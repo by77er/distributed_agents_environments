@@ -1,11 +1,13 @@
-// Evals from a checkpoint's point of view: every eval it had, and each suite's score along its line from the base model.
+// Evals from a checkpoint's point of view: every eval it had, and each suite's score along its line from the base model
+// (each version's apart: two versions' scores do not compare).
 
 import { Link } from "react-router-dom";
-import { useCheckpointEvals, useKnown, usePath } from "../api/queries";
+import { useCheckpointEvals, useEvals, useKnown, usePath } from "../api/queries";
 import { Ago } from "../layout/runs";
 import { clock, figure, percent } from "../lib/format";
 import { evalPlace, runPlace, suitePlace } from "../lib/places";
 import { pathChart } from "../lib/scores";
+import { versionsOf, versionTag } from "../lib/suites";
 import { LineChart, Sized } from "./charts";
 import { Card, Legend, Table } from "./ui";
 
@@ -31,7 +33,9 @@ export function PathCard({ checkpoint }: { checkpoint: string }) {
 /** Every eval a checkpoint had, by hand or by its run's schedule, newest first: one opens the eval. */
 export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
   const { data } = useCheckpointEvals(checkpoint);
+  const { data: suites } = useEvals();
   const known = useKnown();
+  const several = new Set((suites?.suites ?? []).filter(each => versionsOf(each).length > 1).map(each => each.suite));
   const evals = data?.evals ?? [];
   return (
     <Card title="Evals">
@@ -40,7 +44,7 @@ export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
           heads={[["suite"], ["solved", "n"], ["mean reward", "n"], ["episodes", "n"], ["asked by"], ["started"], ["eval"]]}
           keys={evals.map(each => each.run)}
           rows={evals.map(each => [
-            <Link to={suitePlace(each.suite)} className="linkish" onClick={event => event.stopPropagation()}>{each.suite}</Link>,
+            <><Link to={suitePlace(each.suite)} className="linkish" onClick={event => event.stopPropagation()}>{each.suite}</Link>{several.has(each.suite) ? <span className="tag-version">{versionTag(each.version)}</span> : null}</>,
             each.share == null ? "–" : <span title={`${each.solved} of ${each.played}`}>{percent(each.share)}</span>,
             figure(each.reward),
             <span title={`${each.episodes} of each start`}>{each.played === each.expected ? each.played : `${each.played} of ${each.expected}`}</span>,

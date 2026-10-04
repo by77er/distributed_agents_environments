@@ -8,6 +8,7 @@ import type { Launch, System } from "../api/types";
 import { Ago } from "../layout/runs";
 import { span } from "../lib/format";
 import { evalPlace, runPlace, suitePlace } from "../lib/places";
+import { suiteName, versionTag } from "../lib/suites";
 import { Mark, SectionTitle, Tile } from "./ui";
 import { CheckpointTag } from "./checkpoints";
 
@@ -51,7 +52,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
       <div className="facts wraps"><span>{asked.profile}</span><span className="mono small">{asked.environment}</span></div>
       {asked.kind === "eval" ? (
         <div className="facts">
-          <span>plays <Link to={suitePlace(asked.suite ?? "")} className="linkish">{asked.suite}</Link> with <CheckpointTag id={asked.start ?? null} /></span>
+          <span>plays <Link to={suitePlace(suiteName(asked.suite ?? ""))} className="linkish">{suiteName(asked.suite ?? "")}</Link>{asked.suite?.includes("@") ? <span className="tag-version">{versionTag(asked.suite)}</span> : null} with <CheckpointTag id={asked.start ?? null} /></span>
           <span>{asked.episodes ?? 1} episode{(asked.episodes ?? 1) === 1 ? "" : "s"} a start</span>
         </div>
       ) : (

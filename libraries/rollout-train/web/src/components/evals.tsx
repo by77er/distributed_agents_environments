@@ -1,5 +1,5 @@
-// How a suite's subjects are said and drawn wherever they appear: who played (a checkpoint, or the base model), and
-// how each did at each start of the suite.
+// How a suite's subjects are said and drawn wherever they appear: who played (a checkpoint, or the base model), the
+// version of the suite it played, and how each did at each start of it.
 
 import { Link } from "react-router-dom";
 import { useKnown, useSystem } from "../api/queries";
@@ -7,10 +7,11 @@ import type { Suite } from "../api/types";
 import { figure, percent } from "../lib/format";
 import type { Known } from "../lib/model";
 import { evalPlace, runPlace } from "../lib/places";
+import { ALL, currentOf, gridRows, type Subject, versionGroups, versionTag } from "../lib/suites";
 import { CheckpointTag } from "./checkpoints";
 import { solvedClass } from "./ui";
 
-export type Subject = Suite["subjects"][number];
+export type { Subject };
 export type SuiteStart = Suite["starts"][number];
 
 /** The share of its episodes a subject solved (none: it played none yet, or its task does not say). */
@@ -80,13 +81,13 @@ export function columnsOf(subjects: Subject[], known: Known): Column[] {
 
 /** A column's heading: the checkpoint (its short id, what its weights are, its bookmarks) and its step, or the base
  * model's name; under it, how many episodes of each start (opening the eval). */
-function SubjectHead({ subject, runs }: { subject: Subject; runs: Set<string> }) {
+function SubjectHead({ subject, runs, className = "" }: { subject: Subject; runs: Set<string>; className?: string }) {
   const known = useKnown();
   const checkpoint = known.checkpoint(subject.checkpoint);
   const each = `${subject.episodes ?? 1} per start`;
   const scheduled = subject.asked_by && subject.asked_by !== "by hand" ? " · scheduled" : "";  // (asked for by a run)
   return (
-    <th className="subject">
+    <th className={`subject${className}`}>
       <div>{subject.kind === "model" ? <span className="nowrap" title={subject.model ?? ""}>{subject.model?.split("/").at(-1) ?? "base model"}</span> : <CheckpointTag id={subject.checkpoint} bare />}</div>
       <small>
         {checkpoint?.step != null ? `S${checkpoint.step} · ` : ""}
@@ -97,34 +98,53 @@ function SubjectHead({ subject, runs }: { subject: Subject; runs: Set<string> })
 }
 
 /** Every subject of a suite, start by start: what each solved, and in all. Columns stand by run, then depth; a column
- * opens the eval that played it. */
-export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subject[] }) {
+/** Every subject of a suite, start by start: what each solved, and in all. Columns stand by the version each subject
+ * played (newest first, a version's columns marked off from the next), then by run and depth; a row is a start, empty
+ * under a version that does not have it. A column opens the eval that played it. `picked` is a version's id, or `ALL`. */
+export function SuiteMatrix({ suite, subjects, picked = ALL }: { suite: Suite; subjects: Subject[]; picked?: string }) {
   const { data: system } = useSystem();
   const known = useKnown();
   const runs = new Set((system?.runs ?? []).map(run => run.run)), said = anySolved(subjects);
-  const columns = columnsOf(subjects, known), ordered = columns.flatMap(column => column.subjects);
+  const current = currentOf(suite).id;
+  const groups = versionGroups(suite, subjects, picked).filter(group => group.subjects.length);
+  const several = groups.length > 1;
+  const rows = gridRows(groups.map(group => group.version));
+  const stood = groups.map(group => ({ group, columns: columnsOf(group.subjects, known) }));
+  const ordered = stood.flatMap(({ group, columns }) =>
+    columns.flatMap(column => column.subjects).map((subject, place) => ({ subject, version: group.version, first: several && place === 0 })));
+  const edge = (first: boolean) => (first ? " version-start" : "");
   return (
     <>
       <div className="table">
         <table className="evals">
           <thead>
+            {several ? (
+              <tr className="groups versions">
+                <th rowSpan={3}>start</th>
+                {groups.map(group => (
+                  <th key={group.version.id} colSpan={group.subjects.length} className="group version-start">
+                    {versionTag(group.version.id)}{group.version.id === current ? " · newest" : ""}
+                  </th>
+                ))}
+              </tr>
+            ) : null}
             <tr className="groups">
-              <th rowSpan={2}>start</th>
-              {columns.map(column => (
-                <th key={column.key} colSpan={column.subjects.length} className="group">
+              {several ? null : <th rowSpan={2}>start</th>}
+              {stood.flatMap(({ group, columns }) => columns.map((column, place) => (
+                <th key={`${group.version.id}:${column.key}`} colSpan={column.subjects.length} className={`group${edge(several && place === 0)}`}>
                   {column.run && runs.has(column.run) ? <Link to={runPlace(column.run)} className="linkish">{column.label}</Link> : column.label}
                 </th>
-              ))}
+              )))}
             </tr>
-            <tr>{ordered.map(subject => <SubjectHead key={subject.subject} subject={subject} runs={runs} />)}</tr>
+            <tr>{ordered.map(({ subject, first }) => <SubjectHead key={subject.subject} subject={subject} runs={runs} className={edge(first)} />)}</tr>
           </thead>
           <tbody>
             <tr className="total">
               <td>{said ? "solved" : "mean reward"}</td>
-              {ordered.map(subject => {
-                const expected = suite.starts.length * (subject.episodes ?? 1);
+              {ordered.map(({ subject, version, first }) => {
+                const expected = (subject.starts || version.starts.length) * (subject.episodes ?? 1);
                 return (
-                  <td key={subject.subject} className="n" title={`mean reward ${figure(subject.reward)}`}>
+                  <td key={subject.subject} className={`n${edge(first)}`} title={`mean reward ${figure(subject.reward)}`}>
                     {subject.solved == null ? <b>{figure(subject.reward)}</b> : <b>{subject.solved}/{subject.played}</b>}
                     {subject.played < expected ? <small className="faint"> {subject.solved == null ? `${subject.played} of ${expected}` : `of ${expected}`}</small> : null}
                     {subject.solved == null ? null : <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, expected)).toFixed(1)}%` }} /></div>}
@@ -132,10 +152,15 @@ export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subje
                 );
               })}
             </tr>
-            {suite.starts.map(start => (
-              <tr key={start.start}>
-                <td className="key" title={start.title ?? ""}>{startName(start)}</td>
-                {ordered.map(subject => <td key={subject.subject} className="cell-result"><Played subject={subject} start={start} /></td>)}
+            {rows.map(row => (
+              <tr key={row.key}>
+                <td className="key" title={row.start.title ?? ""}>{startName(row.start)}</td>
+                {ordered.map(({ subject, version, first }) => {
+                  const number = row.at[version.id];
+                  return number == null
+                    ? <td key={subject.subject} className={`cell-result absent${edge(first)}`} title={`not in ${versionTag(version.id)}`} />
+                    : <td key={subject.subject} className={`cell-result${edge(first)}`}><Played subject={subject} start={{ ...row.start, start: number }} /></td>;
+                })}
               </tr>
             ))}
           </tbody>

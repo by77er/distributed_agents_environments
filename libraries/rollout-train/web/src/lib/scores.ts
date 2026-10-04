@@ -25,13 +25,13 @@ const weightsName = (kind: string): string => (kind === "full" ? "full" : kind =
  * outside one) and where its weights change between full and LoRA. */
 export function pathChart(path: Path, colorOf: (place: number) => string = place => `var(--series-${(place % 8) + 1})`): PathChart {
   const points = path.points;
-  const series = path.suites.map(({ suite }, place) => {
+  const series = path.suites.map(({ suite, label }, place) => {
     const scored = points.filter(point => point.scores[suite]);
     const measure: "solved" | "reward" = scored.some(point => point.scores[suite].solved != null) ? "solved" : "reward";
     const values = scored
       .map(point => [point.depth, measure === "solved" ? point.scores[suite].solved : point.scores[suite].reward] as [number, number | null])
       .filter((each): each is [number, number] => each[1] != null);
-    return { name: suite, suite, measure, color: colorOf(place), points: values };
+    return { name: label ?? suite, suite: label ?? suite, measure, color: colorOf(place), points: values };
   }).filter(each => each.points.length);
   const labels = new Map(points.map(point => [point.depth, pointLabel(point)]));
   const marks: { x: number; label: string }[] = [];

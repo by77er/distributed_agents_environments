@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, CheckpointEvals, Entry, Episode, Evals, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, System } from "./types";
+import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, Episode, Evals, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -108,6 +108,27 @@ export const useLaunches = () =>
 
 export const useEvals = (enabled = true) =>
   useQuery({ queryKey: topics.evals().key, enabled, queryFn: ({ signal }) => readJson<Evals>(topics.evals().path, signal) });
+
+/** What the suites' forms need of an environment (none where it does not load on the monitor's machine). */
+export const useEnvironment = (name: string) =>
+  useQuery({
+    queryKey: ["environment", name],
+    enabled: Boolean(name),
+    staleTime: Infinity,
+    refetchInterval: false,
+    retry: false,
+    queryFn: ({ signal }) => readJson<EnvironmentInfo>(`api/environments/${encodeURIComponent(name)}`, signal),
+  });
+
+/** Make a suite, or its next version (which its name then points to). */
+export function useSaveSuite(name: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Record<string, unknown>) =>
+      asked<{ suite: string; version: string; number: number }>(`api/suites/${encodeURIComponent(name)}`, "POST", body),
+    onSuccess: () => client.invalidateQueries({ queryKey: topics.evals().key }),
+  });
+}
 
 /** Ask for a run or an eval: a launcher alive that offers its profile starts it. */
 export function useLaunch() {

@@ -13,6 +13,7 @@ import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
 import { episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
+import { versionTag } from "../lib/suites";
 import { RunDot, running, useRunColor } from "./runs";
 
 /** A row of the tree: it opens its place. */
@@ -229,6 +230,7 @@ function EvalsTree({ place }: { place: Place }) {
       {evals.suites.map(suite => {
         const key = `suite:${suite.suite}`, open = folds[key] ?? suite.suite === shown;
         const played = evals.evals.filter(each => each.suite === suite.suite).sort((a, b) => (b.started ?? 0) - (a.started ?? 0));
+        const differ = new Set(played.map(each => each.version ?? `${suite.suite}@1`)).size > 1;  // (each says its version then)
         return (
           <div key={suite.suite}>
             <Node to={suitePlace(suite.suite)} current={place.kind === "suite" && place.suite === suite.suite}>
@@ -242,6 +244,7 @@ function EvalsTree({ place }: { place: Place }) {
                   <Node key={each.run} to={evalPlace(each.run)} current={place.kind === "eval" && place.run === each.run}>
                     <span className={`dot${each.done ? "" : " alive"}`} />
                     <span className="name" title={each.name}>{each.checkpoint ? known.short(each.checkpoint) : "base model"}</span>
+                    {differ ? <span className="version">{versionTag(each.version)}</span> : null}
                     <span className="tag">{each.done ? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`}</span>
                   </Node>
                 ))}

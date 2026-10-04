@@ -1,5 +1,5 @@
-// An eval: one suite played by one checkpoint (or the base model), nothing trained. Who played, the suite, who asked
-// for it, its score, and how it did at each start.
+// An eval: one version of a suite played by one checkpoint (or the base model), nothing trained. Who played, the suite
+// and its version, who asked for it, its score, and how it did at each start of that version.
 
 import { Link } from "react-router-dom";
 import { useEvals, useKnown, useSystem } from "../api/queries";
@@ -10,6 +10,7 @@ import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/
 import { clock, figure, mean, percent, span } from "../lib/format";
 import { nameOf } from "../lib/model";
 import { runPlace, stepPlace, suitePlace } from "../lib/places";
+import { playedVersion, versionsOf, versionTag } from "../lib/suites";
 
 export function EvalRun({ run }: { run: string }) {
   const { data: evals } = useEvals();
@@ -21,6 +22,8 @@ export function EvalRun({ run }: { run: string }) {
   if (!entry && !listed) return <Empty>There is no eval {run}.</Empty>;
   const suite = evals.suites.find(each => each.suite === listed?.suite);
   const subject = suite?.subjects.find(each => each.subject === run);
+  const version = suite ? versionsOf(suite).find(each => each.id === (subject ? playedVersion(subject, suite.suite) : listed?.version)) : undefined;
+  const starts = version?.starts ?? suite?.starts ?? [];
   const played = Object.values(subject?.results ?? {}).flat();
   const said = played.filter(each => each.solved != null);
   const share = said.length ? said.filter(each => each.solved).length / said.length : null;
@@ -35,7 +38,7 @@ export function EvalRun({ run }: { run: string }) {
         <Specs>
           <Spec label="state" kind={ended ? "" : "good"}>{listed?.done ? "done" : entry?.state ?? "–"}</Spec>
           <Spec label="played by">{checkpoint ? <CheckpointTag id={checkpoint} /> : <CheckpointTag id={null} base={subject?.model} />}</Spec>
-          <Spec label="suite">{listed ? <Link to={suitePlace(listed.suite)}>{listed.suite}</Link> : "–"}</Spec>
+          <Spec label="suite">{listed ? <><Link to={suitePlace(listed.suite)}>{listed.suite}</Link> {versionTag(version?.id ?? listed.version)}</> : "–"}</Spec>
           <Spec label="asked by">
             {by ? <><Link to={runPlace(by)}>{known.run(by)}</Link>{step != null ? <> · <Link to={stepPlace(by, step)}>S{step}</Link></> : null}</> : "by hand"}
           </Spec>
@@ -54,8 +57,8 @@ export function EvalRun({ run }: { run: string }) {
         {suite && subject ? (
           <Table
             heads={[["start"], ["episodes"], ["solved", "n"], ["mean reward", "n"]]}
-            keys={suite.starts.map(start => start.start)}
-            rows={suite.starts.map(start => {
+            keys={starts.map(start => start.start)}
+            rows={starts.map(start => {
               const here = subject.results[start.start] ?? [];
               const solved = here.filter(each => each.solved != null);
               return [

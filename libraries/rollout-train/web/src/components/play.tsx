@@ -1,9 +1,10 @@
-// The form that asks a launcher to play a suite with a checkpoint (an eval: nothing trained): on a suite's page, the
-// checkpoint is chosen; on a checkpoint's, the suite.
+// The form that asks a launcher to play a version of a suite with a checkpoint (an eval: nothing trained): on a suite's
+// page, the checkpoint is chosen; on a checkpoint's, the suite. The version is the newest unless another is chosen.
 
 import { useState } from "react";
 import { useKnown, useLaunch } from "../api/queries";
 import type { EvalSuite, Launcher, OfferedProfile, System } from "../api/types";
+import { currentOf, versionsOf, versionTag } from "../lib/suites";
 import { Card } from "./ui";
 
 /** A name no run has: the one wanted, else it with the first number after it that no run has. */
@@ -34,7 +35,8 @@ interface PlayProps {
   title: string;
 }
 
-/** Ask a launcher to play a suite with a checkpoint (or the base model), so many episodes of each start. */
+/** Ask a launcher to play a version of a suite with a checkpoint (or the base model), so many episodes of each start
+ * (by default the version's). */
 export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject: fixedSubject, title }: PlayProps) {
   const launch = useLaunch();
   const known = useKnown();
@@ -44,7 +46,8 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
   const offered = offeredFor(suite, launchers);
   const [profile, setProfile] = useState("");
   const [chosenSubject, setSubject] = useState("");
-  const [episodes, setEpisodes] = useState("1");
+  const [episodes, setEpisodes] = useState("");
+  const [versions, setVersions] = useState<Record<string, string>>({});  // (the version chosen of each suite)
   const [name, setName] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
   const subject = fixedSubject ?? chosenSubject;
@@ -53,13 +56,16 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
   const bookmarks = Object.keys(system.bookmarks ?? {}).sort();
   const taken = new Set(Object.values(system.names?.runs ?? {}).concat(system.runs.map(run => run.name ?? run.run)));
   const said = subject ? (system.bookmarks[subject] ? subject : known.short(subject)) : "base";
-  const named = name.trim() || free(`${suite?.suite ?? "suite"} on ${said}`, taken);
-  const count = Number(episodes);
+  const every = suite ? [...versionsOf(suite)].reverse() : [];
+  const version = (suite && every.find(each => each.id === versions[suite.suite])) ?? (suite ? currentOf(suite) : undefined);
+  const tag = suite && every.length > 1 && version ? ` ${versionTag(version.id)}` : "";
+  const named = name.trim() || free(`${suite?.suite ?? "suite"}${tag} on ${said}`, taken);
+  const count = episodes.trim() ? Number(episodes) : version?.episodes ?? 1;
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!chosen || !suite) return;
+    if (!chosen || !suite || !version) return;
     launch.mutate(
-      { kind: "eval", suite: suite.suite, profile: chosen.profile, environment: suite.environment ?? "", name: named, start: subject || null, episodes: count },
+      { kind: "eval", suite: version.id, profile: chosen.profile, environment: version.environment ?? suite.environment ?? "", name: named, start: subject || null, episodes: episodes.trim() ? count : null },
       { onSuccess: made => { setAsked(made.asked.name); setName(""); } },
     );
   };
@@ -106,9 +112,15 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
               </label>
             )}
             <label className="field">
+              <span>Version</span>
+              <select value={version?.id ?? ""} onChange={event => setVersions({ ...versions, [suite.suite]: event.target.value })} disabled={every.length < 2}>
+                {every.map((each, place) => <option key={each.id} value={each.id}>{versionTag(each.id)}{place === 0 ? " (newest)" : ""} · {each.starts.length} starts</option>)}
+              </select>
+            </label>
+            <label className="field">
               <span>Episodes per start</span>
-              <input type="number" min={1} value={episodes} onChange={event => setEpisodes(event.target.value)} />
-              <small>{suite.starts.length * Math.max(1, count || 1)} in all</small>
+              <input type="number" min={1} value={episodes} onChange={event => setEpisodes(event.target.value)} placeholder={String(version?.episodes ?? 1)} />
+              <small>{(version?.starts.length ?? suite.starts.length) * Math.max(1, count || 1)} in all</small>
             </label>
           </div>
           <div className="field-row">

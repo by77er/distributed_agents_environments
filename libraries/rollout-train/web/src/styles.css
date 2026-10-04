@@ -58,6 +58,7 @@
   .node .num { font: 600 12px var(--mono); color: var(--ink); }
   .node.top { color: var(--ink); font-weight: 600; font-size: 14px; }
   .node .tag { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .node .version { font: 600 10.5px var(--mono); color: var(--quiet); border: 1px solid var(--line); border-radius: 2px; padding: 0 4px; }
   .twist { width: 16px; height: 16px; flex: none; display: grid; place-items: center; border: 0; background: none; padding: 0; cursor: pointer;
            color: var(--faint); border-radius: 2px; }
   .twist:hover { color: var(--ink); background: var(--line); }
@@ -321,6 +322,9 @@
   table.evals th.subject small { display: block; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; white-space: nowrap; }
   table.evals td { text-align: center; padding: 5px 8px; } table.evals td.key { text-align: left; }
   table.evals tr.total td { border-bottom: 1px solid var(--line-strong); }
+  table.evals .version-start { border-left: 2px solid var(--line-strong); }
+  table.evals tr.versions th.group { color: var(--ink); font-weight: 600; }
+  table.evals td.absent { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line) 5px 6px); }
   table.evals .track { height: 5px; margin-top: 4px; }
   .cell-result i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin: 0 1px; vertical-align: middle; }
   .cell-result i.solved { background: var(--good); } .cell-result i.unsolved { background: var(--line-strong); }
@@ -395,6 +399,7 @@
   .action { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid var(--accent);
             border-radius: 2px; padding: 5px 11px; vertical-align: middle; }
   .action:hover { background: var(--accent-soft); }
+  button.action { background: none; cursor: pointer; }
   .launch-form { display: grid; gap: 18px; }
   .fields { display: grid; gap: 14px; }
   .field { display: grid; gap: 4px; min-width: 0; }
@@ -409,11 +414,20 @@
   .launch-form input:focus, .launch-form select:focus, .field input:focus, .field select:focus, .setting input:focus, .setting select:focus {
     outline: 2px solid var(--accent); outline-offset: 1px; }
   .field input:disabled { opacity: .5; }
+  .field textarea { font: 12.5px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 3px;
+    padding: 6px 9px; width: 100%; min-width: 0; resize: vertical; }
+  .field textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ticks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 4px 0; }
+  .tick { display: inline-flex; align-items: center; gap: 5px; font: 12.5px var(--mono); color: var(--ink); cursor: pointer; }
+  .field .tick input { width: auto; }
+  .card header select.picker { font: 12px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong);
+    border-radius: 3px; padding: 2px 6px; }
+  .tag-version { font: 600 10.5px var(--mono); color: var(--quiet); margin-left: 6px; }
   .setting small { grid-column: 2; font-size: 11px; }
   .settings-grid { display: grid; gap: 8px; margin-bottom: 14px; }
   .settings-grid > .linkish { justify-self: start; }
   .card .section-title { margin: 4px 0 10px; }
-  .evals-fields { margin-bottom: 16px; }
+  .evals-fields { margin-bottom: 16px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); }
   .setting { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 10px; align-items: center; }
   .setting > span { font-size: 12px; color: var(--quiet); overflow-wrap: anywhere; }
   .setting.changed > span { color: var(--accent); font-weight: 600; }

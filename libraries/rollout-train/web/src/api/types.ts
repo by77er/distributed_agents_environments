@@ -285,9 +285,10 @@ export interface LaunchAsked {
   settings?: Record<string, unknown>;
   /** A training run (`run`, the default) or an eval (`eval`): one suite played by `start` (none: the base model). */
   kind?: "run" | "eval";
+  /** An eval's suite: by name (the version its name points to), or a version by id (`NAME@N`). */
   suite?: string | null;
-  /** An eval's episodes of each start. */
-  episodes?: number;
+  /** An eval's episodes of each start; none: the suite's own. */
+  episodes?: number | null;
 }
 
 export type LaunchState = "asked" | "claimed" | "running" | "stopping" | "ended" | "failed" | "stopped";
@@ -510,9 +511,47 @@ export interface Worker {
   sample: boolean;
 }
 
+/** A start of a suite's version: its number in the version, its row and seed, and what it is in every version that has
+ * it (`identity`). */
+export interface SuiteStart {
+  start: string;
+  task: string;
+  seed: number | string;
+  title?: string;
+  identity?: string;
+}
+
+/** How a version's starts were chosen. */
+export type Chosen = "eval data" | "rows and seeds" | "starts";
+
+/** One version of a suite: an eval configuration, never changed. */
+export interface SuiteVersion {
+  id: string;
+  number: number;
+  environment: string | null;
+  environment_version: string | null;
+  made: number | null;
+  chosen: Chosen;
+  eval_data: string | null;
+  rows: string[] | null;
+  seeds: (number | string)[] | null;
+  held_out: boolean;
+  episodes: number;
+  thinking_tokens: number | null;
+  answer_tokens: number | null;
+  edited_from: string | null;
+  starts: SuiteStart[];
+}
+
 export interface Suite {
   suite: string;
-  starts: { start: string; task: string; seed: number | string; title?: string }[];
+  /** The version its name points to, by id, and its number. */
+  version?: string;
+  number?: number;
+  /** That version's starts. */
+  starts: SuiteStart[];
+  /** Every version, oldest first. */
+  versions?: SuiteVersion[];
   subjects: {
     subject: string;
     kind: string;
@@ -520,6 +559,9 @@ export interface Suite {
     model?: string;
     asked_by?: string;
     episodes?: number;
+    /** The version it played, by id, and how many starts that version has. */
+    version?: string;
+    starts?: number;
     played: number;
     /** None: none of its episodes said whether it solved its start. */
     solved: number | null;
@@ -540,6 +582,8 @@ export interface EvalRun {
   run: string;
   name: string;
   suite: string;
+  /** The version it played, by id. */
+  version?: string;
   checkpoint: string | null;
   started: number | null;
   played: number;
@@ -584,6 +628,8 @@ export interface Lineage {
  * step), how far it got and its score. */
 export interface CheckpointEval {
   suite: string;
+  /** The version it played, by id. */
+  version?: string;
   run: string;
   name: string;
   kind: string;
@@ -638,7 +684,16 @@ export interface PathPoint {
 export interface Path {
   checkpoint: string;
   points: PathPoint[];
-  suites: { suite: string; environment: string | null }[];
+  /** Each version any point was evaluated on: `suite` is its id (what `scores` are keyed by), `label` how it is said. */
+  suites: { suite: string; environment: string | null; name?: string; number?: number; label?: string }[];
+}
+
+/** What the suites' forms need of an environment: its version, its rows, and its eval data (how many starts each). */
+export interface EnvironmentInfo {
+  environment: string;
+  version: string;
+  rows: { key: string; title: string }[];
+  evals: Record<string, number>;
 }
 
 /** A training run's settings, by dotted key: fixed ones, changeable ones as it started, those its newest step used,

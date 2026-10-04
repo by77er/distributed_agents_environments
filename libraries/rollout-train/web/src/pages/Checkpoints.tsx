@@ -36,7 +36,7 @@ function indexOf(lineage: Lineage): Index {
   const checkpoints = new Map(lineage.checkpoints.map(checkpoint => [checkpoint.id, checkpoint])), runs = new Map(lineage.runs.map(run => [run.run, run]));
   const scores: Index["scores"] = new Map();
   for (const suite of lineage.evaluations) for (const subject of suite.subjects) {
-    if (subject.checkpoint && !scores.has(subject.checkpoint)) scores.set(subject.checkpoint, { ...subject, suite: suite.suite, starts: suite.starts.length });
+    if (subject.checkpoint && !scores.has(subject.checkpoint)) scores.set(subject.checkpoint, { ...subject, suite: suite.suite, starts: subject.starts || suite.starts.length });
   }
   return {
     checkpoints, runs, scores,
@@ -388,7 +388,8 @@ function Way({ checkpoint }: { checkpoint: LineageCheckpoint }) {
 }
 
 function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order: (checkpoint: LineageCheckpoint) => number }) {
-  const subjects = [...suite.subjects].sort((a, b) => {
+  const current = (subject: Suite["subjects"][number]) => !suite.version || (subject.version ?? `${suite.suite}@1`) === suite.version;
+  const subjects = suite.subjects.filter(current).sort((a, b) => {  // (the version its name points to: they compare)
     const place = (subject: Suite["subjects"][number]) => {
       const checkpoint = subject.checkpoint ? index.checkpoints.get(subject.checkpoint) : undefined;
       return checkpoint ? order(checkpoint) * 1000 + checkpoint.depth : subject.checkpoint ? 9e8 : 1e9;

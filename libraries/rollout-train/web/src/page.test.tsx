@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint, Evals, Path, PathPoint, PlainMessage, SampleLine } from "./api/types";
+import type { Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteVersion } from "./api/types";
 import { scale, sparkPoints } from "./components/charts";
 import { columnsOf, type Subject } from "./components/evals";
 import { slotHue } from "./lib/format";
@@ -11,7 +11,8 @@ import { episodeClass, knownOf, lineOf, reported } from "./lib/model";
 import { titleOf } from "./layout/Shell";
 import { placeOf } from "./lib/places";
 import { pathChart } from "./lib/scores";
-import { evalsSettings, settingOf, wantedOf } from "./lib/settings";
+import { evalsSettings, NO_EVALS, settingOf, wantedOf } from "./lib/settings";
+import { ALL, DRAWN, fieldsOf, GIVEN, gridRows, SAME, suiteBody, versionGroups, versionTag, wholes } from "./lib/suites";
 import { mapRows, resultOf, samplesOf, seenOf } from "./pages/Episode";
 import { Runs } from "./pages/Runs";
 import { Suite } from "./pages/Suite";
@@ -244,7 +245,7 @@ describe("a suite", () => {
         <MemoryRouter><Suite name="words-v1" /></MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("words-v1");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("words-v1Edit");
     expect(screen.getAllByText("say-yes · 1").length).toBe(1);  // (in the matrix; the starts compared differ only at say-no)
     expect(screen.getAllByText("say-no · 1").length).toBe(2);
     expect(screen.getByText(/At the 2 starts both played/).textContent).toMatch(/solved more at 1,\s*less at 0, and as much at 1/);
@@ -328,6 +329,8 @@ describe("a run's settings, as typed", () => {
     expect(settingOf("groups_per_step", "1.5")).toEqual({ error: "a whole number, 1 at least" });
     expect(settingOf("groups_per_step", "")).toEqual({ error: "a whole number, 1 at least" });
     expect(settingOf("evals.suite", "  ")).toEqual({ value: null });
+    expect(settingOf("evals.episodes", "")).toEqual({ value: null });  // (the suite's own)
+    expect(settingOf("evals.episodes", "0")).toEqual({ error: "a whole number, 1 at least" });
     expect(settingOf("trainer.learning_rate", "3e-5")).toEqual({ value: 3e-5 });
     expect(settingOf("trainer.truncate", "")).toEqual({ value: null });
   });
@@ -340,9 +343,95 @@ describe("a run's settings, as typed", () => {
     expect(wantedOf({ "evals.suite": "" }, current)).toEqual({ settings: {}, errors: {} });
   });
 
-  it("make a new run's evals: none without a suite", () => {
-    expect(evalsSettings("", "2", "3")).toEqual({ settings: {}, errors: {} });
+  it("make a new run's evals: a suite, or none said so, and nothing until one is chosen", () => {
+    expect(evalsSettings("", "2", "3")).toEqual({ settings: {}, errors: { "evals.suite": "a suite, or none" } });
+    expect(evalsSettings(NO_EVALS, "2", "3")).toEqual({ settings: { "evals.suite": null }, errors: {} });
     expect(evalsSettings("words", "2", "3")).toEqual({ settings: { "evals.suite": "words", "evals.every": 2, "evals.episodes": 3 }, errors: {} });
+    expect(evalsSettings("words", "1", "")).toEqual({ settings: { "evals.suite": "words", "evals.every": 1, "evals.episodes": null }, errors: {} });
     expect(evalsSettings("words", "0", "3").errors).toEqual({ "evals.every": "a whole number, 1 at least" });
+  });
+});
+
+
+const version = (number: number, starts: [string, number][], extra: Partial<SuiteVersion> = {}): SuiteVersion => ({
+  id: `words@${number}`, number, environment: "games:words", environment_version: "1", made: number, chosen: "rows and seeds", eval_data: null,
+  rows: null, seeds: null, held_out: false, episodes: 1, thinking_tokens: null, answer_tokens: null, edited_from: number > 1 ? `words@${number - 1}` : null,
+  starts: starts.map(([task, seed], place) => ({ start: String(place + 1), task, seed, title: task, identity: `${task}|${seed}` })), ...extra,
+});
+
+const versioned = (): EvalSuite => {
+  const first = version(1, [["say-yes", 1], ["say-no", 1]]), second = version(2, [["say-no", 1], ["say-maybe", 1]], { episodes: 2 });
+  const subject = (name: string, played: string, results: Record<string, boolean[]>): EvalSuite["subjects"][number] => ({
+    subject: name, kind: "model", model: `org/${name}`, version: played, starts: 2, episodes: 1, played: Object.values(results).flat().length,
+    solved: Object.values(results).flat().filter(Boolean).length,
+    results: Object.fromEntries(Object.entries(results).map(([start, solved]) => [start, solved.map(each => ({ solved: each, reward: each ? 1 : 0 }))])),
+  });
+  return {
+    suite: "words", version: "words@2", number: 2, environment: "games:words", made: 2, sample: false, starts: second.starts, versions: [first, second],
+    subjects: [subject("old", "words@1", { "1": [true], "2": [false] }), subject("new", "words@2", { "1": [true], "2": [true] }),
+      subject("newer", "words@2", { "1": [false], "2": [true] })],
+  };
+};
+
+describe("a suite's versions", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("stand subjects by the version each played, newest first, and every start of the versions shown once", () => {
+    const suite = versioned();
+    expect(versionGroups(suite, suite.subjects, ALL).map(group => [versionTag(group.version.id), group.subjects.map(each => each.subject)])).toEqual([
+      ["v2", ["new", "newer"]], ["v1", ["old"]],
+    ]);
+    expect(versionGroups(suite, suite.subjects, "words@1").map(group => group.subjects.map(each => each.subject))).toEqual([["old"]]);
+    expect(versionGroups({ ...suite, subjects: [] }, [], "words@2").map(group => group.version.id)).toEqual(["words@2"]);  // (picked, though none played it)
+    const rows = gridRows(suite.versions!);
+    expect(rows.map(row => [row.key, row.at])).toEqual([
+      ["say-no|1", { "words@2": "1", "words@1": "2" }], ["say-maybe|1", { "words@2": "2" }], ["say-yes|1", { "words@1": "1" }],
+    ]);
+    expect(versionTag("words@12")).toBe("v12");
+    expect(versionTag(undefined)).toBe("v1");  // (an eval from before versions played version 1)
+  });
+
+  it("show where versions change in the grid, and compare subjects of one version only", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
+    const client = newQueryClient();
+    client.setQueryData(topics.system().key, system([]));
+    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    const evals: Evals = { suites: [versioned()], evals: [] };
+    client.setQueryData(topics.evals().key, evals);
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><Suite name="words" /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const heads = [...container.querySelectorAll("table.evals tr.versions th")].map(each => each.textContent);
+    expect(heads).toEqual(["start", "v2 · newest", "v1"]);
+    expect(container.querySelectorAll("table.evals th.subject.version-start").length).toBe(2);  // (where each version begins)
+    expect(container.querySelectorAll("table.evals tbody tr").length).toBe(4);  // (the totals, and three starts)
+    expect(container.querySelectorAll("table.evals td.absent").length).toBe(3);  // (a start a version does not have)
+    expect(screen.getByText("Compared").closest("section")?.textContent).toContain("v2");
+    expect(screen.getByText(/At the 2 starts both played/)).toBeTruthy();  // (new and newer: both played v2)
+    expect(screen.getByRole("option", { name: /v1 · 2 starts · 1 played/ })).toBeTruthy();
+  });
+
+  it("are made and edited from forms read as the monitor takes them", () => {
+    expect(wholes("1, 2 3,5-7")).toEqual([1, 2, 3, 5, 6, 7]);
+    expect(wholes("one")).toBeNull();
+    expect(wholes("4-2")).toBeNull();
+    const fields = { ...fieldsOf(undefined, DRAWN), rows: ["say-yes"], seeds: "1-3", episodes: "2", thinking: "64" };
+    expect(suiteBody(fields)).toEqual({
+      body: { chosen: DRAWN, rows: ["say-yes"], seeds: [1, 2, 3], episodes: 2, thinking_tokens: 64, answer_tokens: null }, errors: {},
+    });
+    expect(suiteBody({ ...fields, rows: [], seeds: "" }).errors).toEqual({ seeds: "whole numbers, as 1, 2, 3 or 1-5" });
+    expect(suiteBody({ ...fields, rows: [] }).body.rows).toBeNull();  // (every row)
+    expect(suiteBody({ ...fields, episodes: "0", answer: "x" }).errors).toEqual({ episodes: "a whole number, 1 at least", answer: "a whole number, 1 at least, or empty" });
+    expect(suiteBody({ ...fields, chosen: GIVEN, starts: "say-yes 1\nsay-no 4\n" }).body.starts).toEqual([{ task: "say-yes", seed: 1 }, { task: "say-no", seed: 4 }]);
+    expect(suiteBody({ ...fields, chosen: GIVEN, starts: "say-yes" }).errors).toEqual({ starts: "a row and a seed on each line" });
+    expect(suiteBody({ ...fields, chosen: "eval data", evalData: "" }).errors).toEqual({ evalData: "which eval data" });
+    const edited = fieldsOf(versioned().versions![1]);
+    expect([edited.chosen, edited.episodes, edited.starts]).toEqual([SAME, "2", "say-no 1\nsay-maybe 1"]);
+    expect(suiteBody({ ...edited, episodes: "3" }, 2).body).toEqual({ chosen: SAME, episodes: 3, thinking_tokens: null, answer_tokens: null, base: 2 });
   });
 });
