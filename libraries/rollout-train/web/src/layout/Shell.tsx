@@ -6,9 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { type Topic, topics, useEpisode, useKnown, useSystem } from "../api/queries";
 import { useConnection, useStream } from "../api/stream";
-import { span } from "../lib/format";
 import { nameOf, stepOf } from "../lib/model";
-import { useNow } from "../lib/now";
 import { episodePlace, groupPlace, PAGES, type Place, runPlace, stepPlace, usePlace } from "../lib/places";
 import { Tree } from "./Tree";
 
@@ -75,22 +73,14 @@ export function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-/** Whether runs are running, when anything was last written, and whether the monitor is heard from. */
+/** Nothing while the monitor is heard from; a notice while it is not. */
 function Live() {
   const { data: system, isError } = useSystem();
   const connection = useConnection();
-  const now = useNow();
   if (isError && !system) return <div className="live"><span className="dot gone" />cannot reach the monitor</div>;
   if (!system) return <div className="live">connecting…</div>;
-  const busy = system.runs.filter(run => run.state === "running").length;
-  return (
-    <div className="live" title={connection === "live" ? "the monitor says when anything changes" : "not hearing from the monitor: trying again"}>
-      <span className={`dot ${connection === "lost" ? "gone" : busy ? "alive" : ""}`} />
-      {connection === "lost" ? "reconnecting · " : ""}
-      {busy} of {system.runs.length} run{system.runs.length === 1 ? "" : "s"} running
-      {system.written ? ` · wrote ${span(Math.max(0, now - system.written))} ago` : ""}
-    </div>
-  );
+  if (connection === "lost") return <div className="live" title="not hearing from the monitor: trying again"><span className="dot gone" />reconnecting</div>;
+  return null;
 }
 
 /** Where one is: the page, then each place above the one shown. */
