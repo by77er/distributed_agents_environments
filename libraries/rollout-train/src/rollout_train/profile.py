@@ -61,8 +61,10 @@ class ChannelSpec:
     engines: tuple[Mapping[str, Any], ...] = ({},)
     """One entry per replica: what that engine is told (its share of a GPU, which device, where it listens)."""
     thinking_tokens: int | None = None
-    """Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own."""
+    """Tokens of thinking per turn before it is closed by force (`Limits.thinking`); none: no thinking budget."""
     answer_tokens: int | None = None
+    """Room for the answer after the thinking (`Limits.answer`); none: whatever room the turn has left. With neither,
+    a turn may fill what the context leaves."""
     reshard: str | None = None
     """`module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the
     trainer's files as they are, with no reshard."""
@@ -76,6 +78,12 @@ class ChannelSpec:
     connection: Mapping[str, str] = field(default_factory=dict[str, str])
     """How servers elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`, `key`."""
 
+    def __post_init__(self) -> None:
+        for key in ("thinking_tokens", "answer_tokens"):
+            value = getattr(self, key)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
+                raise ValueError(f"{key} is a whole number, 1 at least, or none for no budget (not {value!r})")
+
     @property
     def routed(self) -> bool:
         """Whether its engines serve elsewhere (said by name: an engine's module is not imported to load a profile)."""
@@ -84,13 +92,12 @@ class ChannelSpec:
     def route(self, renderer: Any, sequence: int | None = None) -> Route:
         """How a runner samples it on its servers elsewhere; `sequence`, the trainer's longest turn, where this process
         trains it."""
-        limits = {"thinking": self.thinking_tokens, "answer": self.answer_tokens}
         servers = (self.via,) if self.via else tuple(str(each["address"]) for each in self.engines)
         return Route(
             renderer,
             self.model,
             servers,
-            Limits(**{key: value for key, value in limits.items() if value is not None}, sequence=sequence),
+            Limits(self.thinking_tokens, self.answer_tokens, sequence=sequence),
             max_lag=self.max_lag,
             connection=Connection(**self.connection),
         )
@@ -227,7 +234,9 @@ class Profile:
     def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> "Profile":
         """The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
         `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
-        file has and a profile does not is an error: a misspelt guard would otherwise be no guard."""
+        file has and a profile does not is an error: a misspelt guard would otherwise be no guard. A channel's
+        `thinking_tokens` or `answer_tokens` of `"none"` is no budget (TOML has no null: what a setting that removes
+        the file's budget says)."""
         described = tomllib.loads(path.read_text())
         for dotted, value in (settings or {}).items():
             *tables, key = dotted.split(".")
@@ -242,6 +251,9 @@ class Profile:
                 "via", "connection",
             )  # fmt: skip
             given = _only(dict(channel), f"channels.{name}", *known)
+            for budget in ("thinking_tokens", "answer_tokens"):  # (`none`: no budget, where a setting unsets one)
+                if given.get(budget) == "none":
+                    given[budget] = None
             engines = tuple(given.pop("engines", [{}]))
             channels[name] = ChannelSpec(**given, engines=engines)
             if channels[name].routed and not all("address" in each for each in engines):
@@ -632,15 +644,11 @@ def started_engines(
             engines.append(engine)
             started.append(engine)
             note_processes(record, [pid for each in started for pid in each.processes])
-        limits = {"thinking": spec.thinking_tokens, "answer": spec.answer_tokens}
         channels[name] = Channel(
             name,
             engines,
             named(spec.renderer)(models[name]),
-            Limits(
-                **{key: value for key, value in limits.items() if value is not None},
-                sequence=sequence if name == trained else None,
-            ),
+            Limits(spec.thinking_tokens, spec.answer_tokens, sequence=sequence if name == trained else None),
         )
     return channels
 

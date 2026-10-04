@@ -52,12 +52,7 @@ SPECIFICATION = RunSpecification(program=agent_program(Walk), binding=BINDING)
 
 def contracts() -> dict[str, CapabilityContract]:
     channel = echo_channel()
-    limits = channel.limits
-    return {
-        "policy": CapabilityContract(
-            context_limit=channel.context_limit, max_output_tokens=limits.thinking + limits.answer
-        )
-    }
+    return {"policy": CapabilityContract(context_limit=channel.context_limit, max_output_tokens=channel.context_limit)}
 
 
 class Losing(httpx.AsyncBaseTransport):

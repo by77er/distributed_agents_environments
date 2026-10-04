@@ -19,8 +19,8 @@ model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
 renderer = "rollout_qwen:qwen35"              # the model family's token format
 engine = "rollout_vllm:VllmEngine"            # what serves it; each entry of `engines` is one replica's options
 engines = [{ gpu_memory_utilization = 0.78, max_model_len = 8192, max_num_seqs = 20 }]
-thinking_tokens = 1024
-answer_tokens = 400
+thinking_tokens = 1024                        # optional: thinking past this is closed by force (none: no budget)
+answer_tokens = 400                           # optional: room for the answer after it (none: what the turn has left)
 
 [trainer]
 kind = "rollout_lora:LoraTrainer"             # what trains; the keys below it does not name here are its settings
@@ -95,7 +95,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | Part | What it decides | To scale it |
 |---|---|---|
 | `directory` | Where the run's state is kept. `rollout train --directory` replaces it: one profile, many runs | |
-| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own). `reshard` names the layout its engines load a checkpoint's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each checkpoint is then [resharded](../libraries/rollout-train/checkpoints.md#resharding) before it is served. Without it, the engines load the trainer's files as they are. A channel whose `engine` is `rollout_train.inference:RemoteEngine` has its engines on other machines: vLLM servers, each entry of `engines` one's `address` (`via`, `max_lag`, `connection`: [engines on other machines](#engines-on-other-machines)) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one. Or serve them on machines of their own (`rollout engines`), behind a router |
+| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`: [`Limits`](reference.md#limits)' `thinking` and `answer`; either left out is no budget, and with neither a turn may fill all the context its prompt leaves, [limits](../libraries/rollout-train/channels.md#limits)). `reshard` names the layout its engines load a checkpoint's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each checkpoint is then [resharded](../libraries/rollout-train/checkpoints.md#resharding) before it is served. Without it, the engines load the trainer's files as they are. A channel whose `engine` is `rollout_train.inference:RemoteEngine` has its engines on other machines: vLLM servers, each entry of `engines` one's `address` (`via`, `max_lag`, `connection`: [engines on other machines](#engines-on-other-machines)) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one. Or serve them on machines of their own (`rollout engines`), behind a router |
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the checkpoint a new run trains from, by any [reference](../libraries/rollout-train/checkpoints.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest checkpoint. `bookmark` names a bookmark the run moves to each checkpoint it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
@@ -414,7 +414,8 @@ It beats like a runner, saying what it offers: each profile, with the base model
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
 `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
 `evals.episodes`, which the monitor's **New run** form asks for as the run's evals); its environments; and how many runs
-it plays.
+it plays. A channel's budget left empty in the form, or set to `none` (`--set channels.policy.thinking_tokens=none`), is
+no budget, whatever the profile says.
 A launch (`rollout_train.launches`) names a profile, an environment, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, one
 every training run can change, or one the profile offers). A training run's launch says the evals it makes

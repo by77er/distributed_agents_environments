@@ -16,7 +16,8 @@ An environment is in a version once. Each entry says:
   (`Environment.evals()`, [train and eval](rollouts.md#train-and-eval)); a start of each of some rows (every row, by
   default) for each of some seeds, the row's start drawn with `random.Random(seed)`; or starts given as they are;
 - the episodes of each start an eval plays, unless it is asked for another number;
-- optional sampling limits for its episodes: `thinking_tokens` and `answer_tokens` (none: the channel's own).
+- optional sampling limits for its episodes: `thinking_tokens` and `answer_tokens` (none: the channel's own, which
+  may be no budget, [limits](channels.md#limits)).
 
 A version's starts are numbered from 1 across its entries, in order: the first entry's, then the next's. Training never
 draws an environment's eval starts. An entry says whether every one of its starts is among them (`held_out`): always so
@@ -152,11 +153,12 @@ version, how many episodes were solved of how many were played, and the mean rew
 The monitor's **Evals** page (`#/evals`) lists every suite and every eval, and its **New suite** form makes a suite:
 its name and its entries. Each entry has its environment, picked from those the monitor knows (`GET /api/environments`:
 offered by a launcher alive, started on by a run, or played by a suite; those a launcher offers first), how its starts
-are chosen (eval data, rows and seeds, or starts, a row and a seed on each line), the episodes per start and the limits.
-Entries are added and removed. A suite's page (`#/evals/SUITE`) shows:
+are chosen (eval data, rows and seeds, or starts, a row and a seed on each line), the episodes per start and the limits
+(thinking and answer tokens, each left empty for the channel's own). Entries are added and removed. A suite's page (`#/evals/SUITE`) shows:
 
 - the version its name points to: for one entry, its environment and version, how its starts were chosen, its rows,
-  seeds, episodes per start and limits; for several, a table of its environments with the same;
+  seeds, episodes per start and limits ("channel's" for a limit it leaves to the channel); for several, a table of
+  its environments with the same;
 - an **Edit** form, the same fields filled from that version (each entry's starts kept unless they are chosen again),
   which saves the next version;
 - each subject's episodes at each start, with totals, a column group for each version played (newest first, marked

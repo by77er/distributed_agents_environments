@@ -312,15 +312,23 @@ def create_app(gateway: Gateway) -> Starlette:
 
 
 def limits_of(limits: Limits, thinking: int | None, answer: int | None) -> Limits:
-    """A channel's limits, with the thinking and answer room a binding gives in place of its own."""
-    return replace(limits, thinking=thinking or limits.thinking, answer=answer or limits.answer)
+    """A channel's limits, with the thinking and answer room a binding gives in place of its own (none: the
+    channel's)."""
+    return replace(
+        limits,
+        thinking=limits.thinking if thinking is None else thinking,
+        answer=limits.answer if answer is None else answer,
+    )
 
 
 def contract_of(sampler: Sampler, limits: Limits | None = None) -> CapabilityContract:
     """What a channel guarantees a session: its context, and room for thinking and an answer (by `limits`, else the
-    channel's own)."""
+    channel's own). Where either budget is unset, a reply may take all the context its prompt leaves: the most output
+    is the context limit."""
     limits = limits or sampler.limits
-    return CapabilityContract(context_limit=sampler.context_limit, max_output_tokens=limits.thinking + limits.answer)
+    context = sampler.context_limit
+    room = context if limits.thinking is None or limits.answer is None else limits.thinking + limits.answer
+    return CapabilityContract(context_limit=context, max_output_tokens=room)
 
 
 def linked(request: Request) -> list[Link]:

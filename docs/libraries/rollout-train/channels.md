@@ -51,13 +51,25 @@ engine runs in this process's care, or is a client of a server elsewhere.
 ## Limits
 
 [`Limits`](../../guide/reference.md#limits) say what a turn may take, in tokens: how much thinking, how much room
-for the answer after it, and the longest turn.
+for the answer after it, and the longest turn. Each is optional, and none is set unless a profile or the code that
+makes the channel sets it.
+
+| Limit | Set | None (the default) |
+|---|---|---|
+| `thinking` (a profile's `thinking_tokens`) | thinking past this many tokens is closed by force, and the answer follows | thinking runs until the model closes it, or until the room left after the answer's is spent |
+| `answer` (`answer_tokens`) | room for the answer after the thinking | the answer has whatever room the turn has left |
+| `sequence` | the longest turn, prompt and completion | the engines' own longest |
+
+With neither budget, a turn is one generation that may fill all the context its prompt leaves: nothing is cut off or
+closed by force, and a reply that reaches the end of the context ends there (`length`). How each combination samples
+is in [thinking](recorder.md#thinking).
 
 - The deployment's hardware decides them. An open profile sets `Limits.sequence` to what the trainer can train on
   (`Budget.segment_tokens`, [the trainer](training.md#the-trainer)), and the channel's longest turn,
   `context_limit`, is the smaller of that and what its engines accept.
 - Code above the channel receives the outcome, never the numbers: a context limit in a model's capability contract,
-  and a refusal when a context is full ([a sample](recorder.md#a-sample)).
+  and a refusal when a context is full ([a sample](recorder.md#a-sample)). The contract's most output is the thinking
+  and answer budgets together, or the context limit where either is none.
 
 ## Publishing weights
 

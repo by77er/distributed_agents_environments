@@ -1,14 +1,23 @@
-"""One turn, sampled: render the context, sample with a two-phase thinking budget, and parse.
+"""One turn, sampled: render the context, sample within the channel's budgets, and parse.
 
 `sample_turn` is what a recorded sample does between receiving a request and keeping its turn, for whoever does it (the
 recorder in this process, the gateway in front of remote engines). It is told how to generate (`Generate`: the
 engines, the weights and the sampling parameters are the caller's), and returns the reply with the tokens to record.
 
-Thinking has a budget: a first phase samples until thinking closes or the budget runs out; then the close is forced
-(not sampled, so never trained on) and a second phase samples the answer. Where the model opens its thinking itself
-(Qwen3) rather than the prompt, the first phase also has room to open it, and the close is forced only if it did. A
-request may cap its own output (`max_output_tokens`): the answer's room comes first and thinking gets what is left,
-down to none (the block is closed before it starts).
+A turn's room is what the context leaves after the prompt (the channel's `context_limit`, and `Limits.sequence`), and
+within the request's own cap (`max_output_tokens`) where it gives one. The budgets (`Limits.thinking`,
+`Limits.answer`) are each optional:
+
+- **Neither**: one generation with the whole room. Nothing is forced: a turn that fills the room while it thinks ends
+  there (`length`).
+- **A budget set**: thinking is bounded, by its own budget if it has one and always by the room left after the
+  answer's. A first phase samples until thinking closes or its bound is reached; then the close is forced (not sampled,
+  so never trained on) and a second phase samples the answer: `Limits.answer` tokens, or with no answer budget,
+  whatever room is left. Where the model opens its thinking itself (Qwen3) rather than the prompt, the first phase also
+  has room to open it, and the close is forced only if it did.
+
+The answer's room is reserved first: `Limits.answer`, or with no answer budget, `MINIMUM_ANSWER` tokens (both within
+the request's cap). A prompt that leaves less than that, and room for a forced close, is refused (`ContextOverflow`).
 """
 
 import math
@@ -22,6 +31,10 @@ from rollout_train.inference import Generation, Limits
 
 if TYPE_CHECKING:
     from rollout_train.recorder.renderers import Renderer
+
+MINIMUM_ANSWER = 256
+"""The least room left for an answer where no answer budget is set: a prompt that leaves less is refused, so that its
+program compacts rather than receives a reply cut off by the context's end. A tool call takes tens of tokens."""
 
 
 class Generate(Protocol):
@@ -49,15 +62,15 @@ async def sample_turn(
     """Sample one reply to `request`. Raises `ContextOverflow` when the prompt leaves no room to answer."""
     prompt = renderer.render(request.context.append, request.tools)
     thinking = renderer.thinking
-    budget, answer = limits.thinking, limits.answer
-    if request.max_output_tokens is not None:  # the request's own cap: the answer first, thinking with the rest
-        answer = min(answer, request.max_output_tokens)
-        budget = min(budget, request.max_output_tokens - answer)
-    closing = len(renderer.encode(thinking.forced_close)) if thinking is not None else 0
-    if len(prompt) + closing + answer > context_limit:  # no room left to answer: the caller must compact
+    cap = request.max_output_tokens
+    space = min(context_limit, limits.sequence or context_limit) - len(prompt)  # everything the context leaves
+    room = space if cap is None else min(space, cap)  # within the request's own cap
+    answer = limits.answer if limits.answer is None or cap is None else min(limits.answer, cap)
+    needed = answer if answer is not None else MINIMUM_ANSWER if cap is None else min(MINIMUM_ANSWER, cap)
+    bounded = thinking is not None and (limits.thinking is not None or limits.answer is not None)
+    closing = len(renderer.encode(thinking.forced_close)) if bounded and thinking is not None else 0
+    if closing + needed > space:  # no room left to answer: the caller must compact
         raise ContextOverflow(context_limit)
-    if limits.sequence is not None:  # what the prompt leaves, after room for the answer
-        budget = max(0, min(budget, limits.sequence - len(prompt) - answer - closing))
     stops = renderer.stop_token_ids()
     completion: list[int] = []
     mask: list[bool] = []
@@ -81,23 +94,36 @@ async def sample_turn(
         logprobs.extend(generation.logprobs)
         return generation.finish_reason
 
-    if thinking is not None and thinking.prompt_opens:
-        spent = budget == 0  # with no room to think, the block the prompt opened is closed at once
-        if budget > 0:
-            spent = await phase(prompt, budget, [*renderer.thinking_end_token_ids(), *stops]) == "length"
-        if spent:  # out of budget: close the thinking, unsampled
-            force()
-        if not completion or completion[-1] not in stops:
-            await phase([*prompt, *completion], answer, stops)
-    elif thinking is not None and budget > 0:  # the model opens its thinking, if it thinks at all
-        opening = renderer.encode(thinking.open)
-        ended = await phase(prompt, budget + len(opening), [*renderer.thinking_end_token_ids(), *stops])
-        if ended == "length" and completion[: len(opening)] == opening:  # still thinking at the budget: close it
-            force()
-        if not completion or completion[-1] not in stops:
-            await phase([*prompt, *completion], answer, stops)
-    else:
-        await phase(prompt, budget + answer, stops)
+    async def answering() -> None:
+        """The answer, unless the turn already ended: its budget, or everything the turn has left."""
+        if completion and completion[-1] in stops:
+            return
+        left = answer if answer is not None else room - len(completion)
+        if left > 0:
+            await phase([*prompt, *completion], left, stops)
+
+    if bounded and thinking is not None:
+        opening = 0 if thinking.prompt_opens else len(renderer.encode(thinking.open))
+        budget = room - closing - needed - opening  # thinking may take what the answer leaves
+        budget = max(0, budget if limits.thinking is None else min(limits.thinking, budget))
+        if thinking.prompt_opens:
+            spent = budget == 0  # with no room to think, the block the prompt opened is closed at once
+            if budget > 0:
+                spent = await phase(prompt, budget, [*renderer.thinking_end_token_ids(), *stops]) == "length"
+            if spent:  # out of budget: close the thinking, unsampled
+                force()
+            await answering()
+        elif budget > 0:  # the model opens its thinking, if it thinks at all
+            ended = await phase(prompt, budget + opening, [*renderer.thinking_end_token_ids(), *stops])
+            if ended == "length" and completion[:opening] == renderer.encode(thinking.open):  # still thinking: close it
+                force()
+            await answering()
+        else:  # no room to think: the answer's
+            await answering()
+    elif limits.thinking is not None and limits.answer is not None:  # no thinking block: one phase, both budgets
+        await phase(prompt, min(room, limits.thinking + limits.answer), stops)
+    else:  # no budget: everything the context leaves
+        await phase(prompt, room, stops)
     message = renderer.parse(completion, request.tools)
     finished = bool(completion) and completion[-1] in stops
     reason = FinishReason.TOOL_USE if message.tool_calls else FinishReason.STOP if finished else FinishReason.LENGTH

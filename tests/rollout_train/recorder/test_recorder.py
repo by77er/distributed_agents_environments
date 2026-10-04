@@ -145,6 +145,19 @@ async def test_thinking_that_closes_in_budget_needs_no_forcing(tokenizer: Tokeni
     assert result.message.text == "Nothing to do." and result.finish_reason is FinishReason.STOP
 
 
+async def test_with_no_budget_one_generation_parses_into_thought_and_answer(
+    tokenizer: Tokenizer, tmp_path: Path
+) -> None:
+    engine = ScriptedEngine(tokenizer, [("A thought.</think>\n\nHello.<|im_end|>", "stop")])
+    recorder = await recorded(channel(engine, thinking=None, answer=None), tmp_path)
+    result = await recorder.endpoint(POLICY).sample(sample_request([Message.user("Hi")]))
+    (thought,) = [block.text for block in result.message.content if isinstance(block, Reasoning)]
+    assert (thought, result.message.text, result.finish_reason) == ("A thought.", "Hello.", FinishReason.STOP)
+    assert engine.budgets == [engine.max_model_len - len(engine.prompts[0])]  # one generation: all the context left
+    (segment,) = await exported(recorder)
+    assert segment.spans == [Span(len(engine.prompts[0]), len(segment.tokens), 0, "r_1:0:0")]  # nothing forced
+
+
 async def test_a_run_bound_to_a_recorded_channel_is_recorded(tokenizer: Tokenizer, tmp_path: Path) -> None:
     class Ask(Task):
         async def start(self, run: RunContext) -> Observation:
@@ -237,7 +250,7 @@ async def test_a_request_can_cap_its_output_down_to_no_thinking_at_all(tokenizer
     engine.script = [("thinking " * 30, "length"), ("\n\nhi<|im_end|>", "stop")]
     partly = sample_request([Message.user("Sum up.")], "r_1:0:9").model_copy(update={"max_output_tokens": 24})
     await recorder.endpoint(POLICY).sample(partly)
-    assert engine.budgets[1:] == [8, 16]  # what the cap leaves after the answer's room, then the answer
+    assert engine.budgets[1:] == [24 - 16 - forced, 16]  # what the cap leaves after the answer and the close
 
 
 async def test_a_channel_tells_programs_its_limit_and_refuses_what_is_over_it(

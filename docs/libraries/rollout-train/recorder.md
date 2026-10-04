@@ -17,8 +17,8 @@ This page is what recording does with a sample, the same wherever the gateway ru
   [harnesses that bring their own loop](harness-endpoint.md).
 
 A session is one model slot of one run. Its capability contract comes from its channel: the context limit is the
-channel's longest turn, and the most output is the channel's thinking and answer room together
-([limits](channels.md#limits)).
+channel's longest turn, and the most output is the channel's thinking and answer budgets together, or the context
+limit where either is none ([limits](channels.md#limits)).
 
 ## A sample
 
@@ -34,7 +34,8 @@ content and records the turn.
   checkpoint, the turn is sampled again from the start, three times at most: no token is stamped with a version that
   did not sample it.
 - **No turn is longer than the channel's limit.** A long prompt leaves less room to think. A prompt that leaves no
-  room to answer is refused with `ContextOverflow`, which callers compact on.
+  room to answer is refused with `ContextOverflow`, which callers compact on: room for the answer budget, or with no
+  answer budget, for `MINIMUM_ANSWER` (256) tokens, and for a forced close where thinking has a bound.
 - **The reply** is the parsed message, a finish reason (`tool_use` when it calls tools, `stop` when it ended on a
   stop token, `length` otherwise) and usage in tokens.
 - **Links.** A request may say how it follows from earlier ones of its session (`SampleRequest.links`: a type and the
@@ -42,22 +43,36 @@ content and records the turn.
 
 ### Thinking
 
-Thinking has a budget: the channel's (`Limits.thinking`, and `Limits.answer` for the answer), or the binding's where it
-gives one (`SamplingParameters.thinking_tokens` and `answer_tokens`: an eval entry's, say), which its key carries:
+A turn's room is what the context leaves after the prompt (the channel's longest turn), within the request's own cap
+(`max_output_tokens`, from a harness's `max_tokens` or `max_output_tokens`) where it gives one. The budgets are the
+channel's (`Limits.thinking`, and `Limits.answer` for the answer), or the binding's where it gives one
+(`SamplingParameters.thinking_tokens` and `answer_tokens`: an eval entry's, say), which its key carries. Each is
+optional, and none is the default:
 
-1. A first phase samples until the thinking closes or the budget runs out. For a model family that opens the block
+| Budgets | How the turn samples |
+|---|---|
+| neither | One generation with all the room. Nothing is forced: a turn still thinking when the room runs out ends there, all reasoning (`length`). |
+| only `answer` | Thinking takes the room the answer's leaves, then is closed by force if still open; the answer has its budget. |
+| only `thinking` | Thinking takes its budget (less, where the room is short: the least answer, `MINIMUM_ANSWER`, comes first), then is closed by force if still open; the answer has whatever room is left. |
+| both | Thinking takes its budget, then is closed by force if still open; the answer has its budget. |
+
+Where a budget is set:
+
+1. A first phase samples until the thinking closes or its bound is reached. For a model family that opens the block
    itself (Qwen3), rather than its prompt (Qwen3.5), the phase also has room for the opening.
-2. If the budget ran out while thinking, the close is forced. The forced tokens are not sampled, so they are never
+2. If the bound was reached while thinking, the close is forced. The forced tokens are not sampled, so they are never
    trained on. A model that opens no block and answers at once is not closed.
 3. A second phase samples the answer, unless the turn already ended.
 
-- A request may cap its own output (`max_output_tokens`). The answer's room comes first and thinking gets what is
-  left, down to none: the block is then closed before it starts.
+- A request's cap counts every token of the reply: the answer's room comes first, then the forced close, and thinking
+  gets what is left, down to none (the block is then closed before it starts).
 - A model whose thinking was closed for it may go on thinking and close the block again itself. The last close
-  ends the thinking: everything before it is kept as reasoning, and what follows is the answer.
+  ends the thinking: everything before it is kept as reasoning, and what follows is the answer. With no budget, the
+  reply parses the same way: reasoning up to the model's own close, the answer after it.
 - A turn whose thinking never closes is all reasoning.
 
-For a family with no thinking block, one phase samples with the thinking and answer room together.
+For a family with no thinking block, one phase samples: with the thinking and answer budgets together where both are
+set, else with all the room.
 
 ## What a session exports
 

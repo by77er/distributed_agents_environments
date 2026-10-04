@@ -22,6 +22,10 @@ def qwen_tokenizer() -> Tokenizer:
     return cast(Tokenizer, loaded)
 
 
+BUDGETS = {"thinking": 1024, "answer": 400}
+"""The budgets the scripts are written for, unless a test gives its own: a thought, then its answer (two phases)."""
+
+
 def channel(engine: ScriptedEngine, *, renderer: str = "qwen3.5", name: str = "policy", **limits: Any) -> Channel:
     family = {"qwen3.5": qwen35, "qwen3": qwen3}[renderer]
-    return Channel(name, [engine], family(engine.tokenizer), Limits(**limits))
+    return Channel(name, [engine], family(engine.tokenizer), Limits(**(BUDGETS | limits)))

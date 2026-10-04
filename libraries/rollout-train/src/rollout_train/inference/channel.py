@@ -78,10 +78,12 @@ class Limits:
     """What a turn may take, in tokens: the deployment's hardware decides, and code above it receives the outcome
     (a context limit in a model's capability contract, a refusal when a context is full), never these numbers."""
 
-    thinking: int = 1024
-    """Tokens of thinking per turn before it is closed by force."""
-    answer: int = 400
-    """Room for the answer after the thinking."""
+    thinking: int | None = None
+    """Tokens of thinking per turn before it is closed by force; none: thinking runs until the model closes it, or
+    until what the context leaves after the answer's room is spent."""
+    answer: int | None = None
+    """Room for the answer after the thinking; none: whatever room the turn has left. With neither budget, a turn is
+    one generation that may fill what the context leaves (`rollout_train.recorder.sampling`)."""
     sequence: int | None = None
     """The longest turn (prompt and completion): the smaller of what the engines accept and what the trainer can
     train on. A long prompt leaves less room to think, so that every turn can be trained on."""

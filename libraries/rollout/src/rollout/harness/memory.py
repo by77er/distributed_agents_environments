@@ -92,7 +92,9 @@ class Memory:
 
     def crowded(self, model: Model) -> bool:
         """Whether one more turn might leave the model less than its full room to reply (by what its last prompt
-        took, which the model reports, and by how much a turn has been seen to add)."""
+        took, which the model reports, and by how much a turn has been seen to add). The room kept is the contract's
+        most output, up to a quarter of the context: a model with no output budget may reply up to its whole context,
+        which no compaction could keep free."""
         usage = model.usage
         if usage is None or usage.input_tokens is None:
             return False
@@ -100,7 +102,8 @@ class Memory:
             self._growth = max(self._growth, usage.input_tokens - self._last)
         self._last = usage.input_tokens
         margin = 2 * self._growth or usage.context_limit // 10
-        return usage.input_tokens + margin > usage.context_limit - model.capabilities.max_output_tokens
+        room = min(model.capabilities.max_output_tokens, usage.context_limit // 4)
+        return usage.input_tokens + margin > usage.context_limit - room
 
     async def compact(self, model: Model, system: Message | None = None, *, keep: int | None = None) -> None:
         """Replace the oldest turns with what the agent says it needs to remember of them. The newest `keep` stay as

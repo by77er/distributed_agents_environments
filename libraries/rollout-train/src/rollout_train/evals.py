@@ -148,7 +148,8 @@ class SuiteEntry:
     episodes: int = 1
     """Episodes of each start an eval plays, unless it is asked for another number."""
     thinking_tokens: int | None = None
-    """Its episodes' tokens of thinking per turn, and of answer after it; none: the channel's own."""
+    """Its episodes' tokens of thinking per turn, and of answer after it; none: the channel's own (which may be no
+    budget)."""
     answer_tokens: int | None = None
 
     @property

@@ -6,7 +6,7 @@ offer every environment of; and the page makes, edits and lists such suites, and
 import asyncio
 import functools
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -120,8 +120,9 @@ async def test_an_eval_of_two_environments_plays_each_in_a_part_and_scores_each_
     guessed: Any = await ledger.read(table("eval-1-2", PLANS))
     (sampling,) = [each.recorded for each in Plan.from_json(guessed[max(guessed, key=int)]).binding.models.values()]
     assert sampling is not None and (sampling.sampling.thinking_tokens, sampling.sampling.answer_tokens) == (10, 7)
-    budgets = recorder.channels["policy"].engines[0].budgets  # type: ignore[attr-defined]
-    assert 17 in budgets and 1024 + 400 in budgets  # (the guesses' limits, and the channel's own for the words)
+    budgets = cast(list[int], recorder.channels["policy"].engines[0].budgets)  # type: ignore[attr-defined]
+    assert 17 in budgets  # the guesses' limits
+    assert max(budgets) > 30_000  # and the channel's own for the words: none, all the context leaves
 
     results: Any = await ledger.read(subject_table("mixed", "eval-1", "results"))
     assert sorted(results) == [

@@ -47,13 +47,14 @@ class Counting:
     """Calls `wait` every turn; asked what to remember, answers with a numbered summary. It reports 100 tokens of
     input a message; or, with `overflow`, reports nothing and refuses a context of more than that many messages."""
 
-    def __init__(self, overflow: int | None = None) -> None:
+    def __init__(self, overflow: int | None = None, output: int = OUTPUT) -> None:
         self.requests: list[SampleRequest] = []
         self.summaries = 0
         self.overflow = overflow
+        self.output = output
 
     def describe(self, session_id: str) -> CapabilityContract:
-        return CapabilityContract(context_limit=LIMIT, max_output_tokens=OUTPUT)
+        return CapabilityContract(context_limit=LIMIT, max_output_tokens=self.output)
 
     async def cancel(self, effect_id: str) -> None:
         pass
@@ -120,6 +121,14 @@ async def test_memory_is_compacted_when_the_model_says_its_context_is_nearly_ful
     # The second compaction builds on the first summary, and replaces it.
     assert texts(compactions[1])[1].endswith("SUMMARY 1")
     assert texts(acting[-1])[1].endswith("SUMMARY 2") and memory.summary == "SUMMARY 2"
+
+
+async def test_a_model_with_no_output_budget_keeps_a_quarter_of_its_context_free() -> None:
+    endpoint, memory = Counting(output=LIMIT), Memory()  # (its most output: the whole context)
+    await play(memory, model(endpoint), 24)
+    acting = [request for request in endpoint.requests if texts(request)[-1] != PROMPT]
+    largest = max(len(request.context.append) for request in acting)
+    assert 100 * largest <= LIMIT - LIMIT // 4 < 100 * (largest + 6) and memory.compactions == 2  # not every turn
 
 
 async def test_each_request_says_how_it_follows_from_a_compaction() -> None:
