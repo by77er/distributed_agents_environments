@@ -6,7 +6,7 @@ gets a model) and the **episode** (the labelled trajectory that comes out).
 | You are | You write | You are given | You never see | You import |
 |---|---|---|---|---|
 | Building an environment | A world and its rulebook: a catalog of situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs | `rollout` |
-| Designing training | What to run, how to group it, what each episode counts for | Jobs to submit rows to, a stream of finished episodes, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
+| Designing training | What to run, how to group it, what each episode counts for | A ledger to ask for episodes in, the finished episodes back, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
 | Deploying | A profile: channels and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms | Nothing: a profile names implementations |
 
 ## Building an environment
@@ -54,26 +54,28 @@ looks like once it is no longer the current one, and what to ask when turns must
 ## Designing training
 
 ```python fragment
-job = await jobs.start(program=catalog.program, binding=binding, in_flight=6)
-ticket = await job.run(catalog.start(row, rng), labels={"group": "0012", "task": row.key}, count=4)
-episodes = await ticket.episodes()                          # when all four have ended
+await plan(ledger, "miner-1", Plan(catalog.program, binding), fence)
+group = {"parameters": catalog.start(row, rng), "episodes": 4, "task": row.key}
+await ledger.append(table("miner-1", GROUPS), "12", group, fence)      # runners play it from here
+episodes = await episodes_of(ledger, blobs, "miner-1", 12, 4)          # when all four have ended
 batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
 await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path("versions/miner@3"))
-await job.publish("policy", "miner@3", "versions/miner@3/weights", 3)
+await publish("policy", "miner@3", "versions/miner@3/weights", 3)
 ```
 
-- A **job** runs rows and keeps a log of finished **episodes**, read with a cursor (`job.episodes(cursor)`) or per
-  ticket. Reading while runs are in flight is all asynchronous training needs: every sampled token carries the
-  weights version it was sampled at.
+- A run asks for a **group** of episodes in the ledger, and **runners**, wherever they are, claim them, play them
+  and record the finished **episodes** there. Asking for more while others are in flight is all asynchronous
+  training needs: every sampled token carries the weights version it was sampled at.
 - An **episode** has its labels, its outcome, its result, and for each model slot its trajectory: the segments of
   tokens the policy saw and continued, with the logprobs it sampled them at.
 - `rollout_train.train` is the loop most runs use: a curriculum over a catalog picks rows, each start is played as a
   group of episodes, and a step is taken over several groups at a time, while play goes on
   ([training](../libraries/rollout-train/training.md)).
-- Watching: `job.status()`, the job's own events (tickets, episodes, published weights, your notes), and each run's
-  feed, on one page (`rollout monitor RUN`).
+- Watching: the ledger (each group, its claims and its episodes), the notes runners and the loop write (episodes
+  started and ended, published weights, results, steps), and each run's feed, on one page (`rollout monitor RUN`).
 
-The same code holds `RolloutJobs` (runs in this process) or `RolloutClient(url)` (runs elsewhere).
+The same code serves when the runners are in this process and when they are on other machines: they share only the
+ledger and the blob store ([rollouts](../libraries/rollout-train/rollouts.md)).
 
 ## Deploying
 

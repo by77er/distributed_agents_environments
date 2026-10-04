@@ -39,14 +39,16 @@ of segments.
 | **Catalog / row** | What an environment offers to train on, easiest first / one situation of it, of which a start is drawn for each group. See [three ways in](../guide/perspectives.md#building-an-environment). |
 | **Training run** | One training loop (`rollout_train.train`, `rollout train`) over a catalog, kept in one directory and in the ledger: its groups, their results and its steps. See [training](../libraries/rollout-train/training.md). |
 | **Step** | One call of the trainer, over the groups queued with something to train on (at least `groups_per_step` of them, except at the end of the run); it makes one version of the policy. |
-| **Group** | One start of one row, played as several episodes (one ticket of `group_size` runs) that are compared with each other. Its episodes carry the label `group` (its number); the rest of it is in its record. |
+| **Group** | One start of one row, played as several episodes (its record says how many: `group_size`) that are compared with each other. Its episodes are numbered from 1 within it and carry the labels `run`, `group` and `episode`; the rest of it is in its record. |
 | **Episode** | One run of a program, as training sees it once it has ended: labels, outcome, result, and a trajectory per model slot. See [episodes](../libraries/rollout-train/episodes.md). |
 | **Rollout** | One model slot's part of an episode as it plays: every turn of one agent. Each rollout becomes a trajectory. |
 | **Session** | The recorder's record of one rollout: every sample of one model slot of one run. |
 | **Trajectory** | What a rollout leaves to train on: its segments and its rewards (`Trajectory`). |
 | **Segment** | A piece of a trajectory: tokens that only grew by appending, with the spans the policy sampled, their behavior logprobs and weights versions (`Segment`). An edited context (a compaction, thinking dropped) starts the next. |
 | **Behavior logprob** | The log-probability of a sampled token under the distribution it was sampled from. |
-| **Rollout job** | Runs rows submitted by a caller and delivers their episodes through one ordered log. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
+| **Plan** | How a training run's episodes are played: its program and its binding, in the run's `plans` table. |
+| **Episode runner** | Claims the episodes runs ask for in the ledger, plays them on a runner and records them, at most as many at once as it has places. Several, on one machine or many, share the work. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
+| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under. |
 | **Policy / version** | One line of training, by name / one of its versions, `policy@number`, which a step makes. See [policies](../libraries/rollout-train/policies.md). |
 | **Ledger** | Append-only tables that hold a training run's decisions and results and the policies' versions, with fences so that one writer holds each. |
 | **Channel** | A trainable policy being served, by name: its engines, its limits, and the version it samples from. |

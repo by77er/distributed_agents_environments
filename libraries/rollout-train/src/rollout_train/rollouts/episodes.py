@@ -52,11 +52,13 @@ class Trajectory:
 
 @dataclass(frozen=True)
 class Episode:
-    cursor: int
-    """Its place in the job's log: episodes are numbered from 1 in the order they ended."""
-    job: str
-    ticket: str
+    run: str
+    """The training run (or other caller) that asked for it."""
+    group: int
+    number: int
+    """Its number in its group, from 1."""
     run_id: str
+    """The program's run that played it."""
     labels: Mapping[str, str]
     outcome: Outcome
     detail: str | None = None
@@ -190,9 +192,9 @@ def assemble(
     events: Sequence[RunEvent],
     segments: Mapping[str, list[Segment]],
     *,
-    cursor: int,
-    job: str,
-    ticket: str,
+    run: str,
+    group: int,
+    number: int,
 ) -> Episode:
     """An episode from a run's events (its labels, rewards, result and ending) and what the recorder kept of each
     of its model slots."""
@@ -223,4 +225,4 @@ def assemble(
         for slot in dict.fromkeys([*segments, *assigned])
     }
     run_id = events[0].run_id if events else ""
-    return Episode(cursor, job, ticket, run_id, labels, outcome, detail, info, excluded, trajectories)
+    return Episode(run, group, number, run_id, labels, outcome, detail, info, excluded, trajectories)

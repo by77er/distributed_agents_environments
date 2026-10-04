@@ -1,6 +1,6 @@
 # Runs and events
 
-A run records what happened as a sequence of typed **run events**. Consumers such as rollout jobs, client event
+A run records what happened as a sequence of typed **run events**. Consumers such as episode runners, client event
 streams, the monitor and tests read these events, never a runner's internals. This page covers what a run records
 and how to read it.
 

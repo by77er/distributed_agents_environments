@@ -4,30 +4,34 @@ Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md),
 [API reference](../../guide/reference.md#rollout_train)
 
 The training loop, what it asks of an algorithm and of a trainer, and the curriculum. The loop is written against
-[`Jobs`](rollouts.md), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and [`Policies`](policies.md)
-only: the same loop runs with everything in one process and with the runs, the engines and the trainer on machines
-of their own.
+the [ledger](policies.md#the-ledger), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and
+[`Policies`](policies.md) only: it asks for each group's episodes in the ledger, and [runners](rollouts.md) play them,
+wherever they are. The same loop runs with everything in one process and with the runners, the engines and the
+trainer on machines of their own.
 
 ```python
-await train(jobs, catalog, trainer, policies, policy="miner", channel="policy", directory=versions, groups=100)
+await train(catalog, trainer, policies, policy="miner", channel="policy", directory=versions,
+            publish=recorder.publish, run="miner-1", groups=100)
 ```
 
 `rollout train PROFILE CATALOG [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
-the profile opens into jobs, a trainer and the policies, names the policy to train and the channel that serves it,
-and sets `episodes_at_once` ([deploying](../../guide/deploying.md)).
+the profile opens into a trainer, the policies, a way to publish versions and a runner that plays the run's episodes,
+names the policy to train and the channel that serves it, and sets `episodes_at_once`
+([deploying](../../guide/deploying.md)). The run is named after its directory.
 
 ## The loop
 
 [`train`](../../guide/reference.md#train) trains one [policy](policies.md) on a catalog and serves it on one
-channel. Unless a `binding` says otherwise, every model slot of the catalog's program is served from that channel.
+channel, which `publish` serves versions on. Unless a `binding` says otherwise, every model slot of the catalog's
+program is served from that channel. When it starts it writes the run's [plan](rollouts.md#what-a-run-writes): the
+catalog's program and that binding.
 
-- **Groups.** A group is one ticket: `algorithm.group_size` runs of one start of one row, labelled with its number
-  (`group`). The curriculum picks the row and the catalog draws the start; the run's `groups` table keeps both, with
-  when it was decided.
-- **Play and training go their own ways.** At most `episodes_at_once` episodes (6 by default) run at once,
-  whatever groups they are of: it is the job's `in_flight`, and the job starts runs as room allows, the rest of one
-  ticket's and then the next's ([admission](rollouts.md#guarantees)). Enough groups are kept asked for that an
-  episode is waiting whenever one ends, so a group may begin before the one before it is done, and end first.
+- **Groups.** A group is `algorithm.group_size` episodes of one start of one row. The curriculum picks the row and
+  the catalog draws the start; the run's `groups` table keeps both, with how many episodes the group asks for and
+  when it was decided. Runners play its episodes from there, and `episodes_of` waits for them.
+- **Play and training go their own ways.** Enough groups are kept asked for that `episodes_at_once` episodes (6 by
+  default) have work waiting, whatever groups they are of. Runners claim the oldest group's episodes first, as many
+  at once as each has places, so a group may begin before the one before it is done, and end first.
 - **When a group's last episode ends**, its result is written at once: the curriculum records it, and the algorithm
   says what in it to train on. A group with nothing to train on is done with, with the algorithm's reason
   (`skipped`); the others join a queue.
@@ -38,7 +42,6 @@ channel. Unless a `binding` says otherwise, every model slot of the catalog's pr
   older version are corrected for by the trainer's objective. One step is taken at a time.
 - **A step that fails** (`StepFailed`) is written down with its `error`, its groups are done with, and the policy
   stays as it was. `FAILED_UPDATES` in a row stop the loop.
-- **A ticket the job refuses** stops the loop with [`Refused`](rollouts.md#guarantees).
 
 ## Dying and starting again
 
@@ -48,7 +51,7 @@ be taken twice.
 
 | Table | Keyed by | Written | Holds |
 |---|---|---|---|
-| `runs/RUN/groups` | group | before a group is asked for | the row, and the start every episode of the group is given |
+| `runs/RUN/groups` | group | when a group is decided: runners play it from there | the row, the start every episode of the group is given, and how many episodes it asks for |
 | `runs/RUN/results` | group | when its last episode ends | how it went: a [`Result`](../../guide/reference.md#result) |
 | `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the policy, the version it starts from, the number of the one it will make, the batch (a blob) and how many segments it has, the seed, when it was decided |
 | `runs/RUN/failures` | step | when a step's trainer fails | its error |
@@ -58,8 +61,7 @@ nothing, or the step that covers it has made its version or failed.
 
 | It died | Started again, it |
 |---|---|
-| after deciding a group | asks for that group again under the same key, and the job gives back the ticket it has |
-| while a group played | waits for the episodes the job still owes; the others are in the job's [log](rollouts.md#the-log) |
+| after deciding a group, or while it played | waits for its episodes: runners play them, and play again any a runner cut short ([claims](rollouts.md#what-runners-write)) |
 | after a group ended | finds no result, and writes it |
 | with groups queued | finds results to train on that no step covers, and queues them again |
 | during a step | finds the step decided and no version made, and takes it again over the same groups, from the same parent |
@@ -67,9 +69,9 @@ nothing, or the step that covers it has made its version or failed.
 
 - **A step that was decided is finished before another is decided.** A decision names the version it will make,
   and only one step may make it.
-- **Episodes are acknowledged once their group is done with**, so that a loop started again finds in the job every
-  episode a queued group or an unfinished step still needs. What a step trains on is the algorithm's batch of
-  those episodes, the same each time it is computed.
+- **Every episode stays in the ledger**, so a loop started again finds every episode a queued group or an
+  unfinished step still needs. What a step trains on is the algorithm's batch of those episodes, the same each time
+  it is computed.
 - **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
   policy's table. A step that died before the append made nothing.
 - **Saves thin out.** Once a version is served, the policy is thinned to `retention` (`Retention()`: the weights and
@@ -79,8 +81,8 @@ nothing, or the step that covers it has made its version or failed.
 - **`groups` is how many groups this start plays**, those a stopped loop left unplayed among them; the loop ends
   once they are played and every one with something to train on has been in a step.
 
-What is redone: a step that was in progress, and the runs that were in flight if they ran in the loop's own process
-(the job runs them again from the same start).
+What is redone: a step that was in progress, and the episodes that were in flight in a runner that stopped with it
+(a runner plays them again from the same start).
 
 ## The algorithm (`Grpo`)
 
@@ -98,9 +100,6 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
 | Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (DAPO). So is a group with fewer than two episodes fit to train on. |
 | The fastest of the saturated | Episodes that reached everything their task has to give earned the same; the one that took the least scores a point more, and episodes that tie for fastest all do. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. An episode that does not say its duration is not compared. `tie_break` turns this off. |
 | What is trained on | Every segment of the episodes whose advantage is not zero, up to what the trainer can afford in a step (`Budget.segments`). Beyond that, segments are taken at even steps through the group, so that each episode and slot keeps its share, spread over its whole game. |
-
-`complete_groups` gathers the episodes of a job's stream by a label, for a loop of your own that reads the stream
-rather than tickets.
 
 ## The curriculum
 
@@ -158,15 +157,16 @@ episode ends: the rewards, `solved` and durations of the episodes fit to train o
 how many segments were recorded and how many the algorithm found to train on (`segments`; none, and `skipped` with
 its reason, if it found none), its notes, and how many rows are unlocked. What the group's own record says is not
 kept again: `results(ledger, run)` reads each result with its group's number, row (`task`, `title`) and the time from
-its decision to its result (`rollout_seconds`). The result goes to the job as a `result` note with the group's
-number; each step goes as a `step` note with the version it made and its metrics, or its error.
+its decision to its result (`rollout_seconds`). The result goes to the loop's `hooks` as a `result` note with the
+group's number; each step goes as a `step` note with the version it made and its metrics, or its error; each version
+served, as a `published` note ([watching](rollouts.md#watching)).
 
 What was done with a group is read by joining: `trained(ledger, run)` gives, for each group a step covers, that step
 and the version it made or why it failed (a [`Trained`](../../guide/reference.md#trained)); the version's record
 has the trainer's metrics. The report and the [monitor](monitor.md) read `results(ledger, run)` and that join.
 
-With the job's [log](rollouts.md#the-log) and the policy's [versions](policies.md), that is the whole run: every
-episode, what each step was trained on, and the weights and the trainer's state after it.
+With the run's [episodes](rollouts.md#the-record) and the policy's [versions](policies.md), that is the whole run:
+every episode, what each step was trained on, and the weights and the trainer's state after it.
 
 ## Reporting
 
@@ -200,8 +200,8 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   encoded again; the sampled tokens stay as they were, and their spans move with them. (A segment's tokens were
   joined from pieces encoded apart, so a whole prompt need not encode back to itself; a stretch of plain text
   does.) A segment where no such stretch is found is left out.
-- **`examples(log, blobs, renderer, kinds=...)`** reads a job's log for the episodes that carried guidance of those
-  kinds and solved their task, and gives their segments, cut, each weighted 1.
+- **`examples(ledger, run, blobs, renderer, kinds=...)`** reads a run's episodes for those that carried guidance
+  of those kinds and solved their task, and gives their segments, cut, each weighted 1.
 - **`imitate(policies, trainer, examples, ...)`** takes one step of a trainer whose objective is likelihood
   ([LoRA trainer](../../implementations/rollout-lora.md)) from the policy's newest version, and commits the next.
 
@@ -209,6 +209,6 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
 rollout imitate PROFILE [--without KIND ...] [--limit N]    # with the run stopped: it takes the policy's writer
 ```
 
-The command reads every job's log in the run's directory for guidance of the kinds given (`way` by default), steps
+The command reads the episodes of the run named after the directory for guidance of the kinds given (`way` by default), steps
 the profile's trainer with `objective = "likelihood"`, and adds `imitated_episodes` to the version's metrics. Started
 again, the training loop serves the version imitation made and trains on from it.

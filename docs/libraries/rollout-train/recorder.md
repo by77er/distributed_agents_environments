@@ -79,7 +79,7 @@ Training wants contexts that only grew; a session is a series of samples. The re
   template. A program that only appends gets one. A program that shortens each observation once it is no longer the
   current one gets a segment per turn.
 
-A job reads `sessions(run_id)` when a run ends and puts the segments in the run's
+A [runner](rollouts.md#a-runner) reads `sessions(run_id)` when a run ends and puts the segments in the run's
 [episode](episodes.md#how-an-episode-is-assembled).
 
 ## Renderers

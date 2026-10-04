@@ -3,7 +3,8 @@
 An environment may guide its agents (tell them the way to a goal, say) and report, in an episode's result, the
 guidance its prompts carried, word for word and by kind (`info["guidance"]`). The episodes that succeeded under
 guidance show the policy doing the task; taking the guidance back out of their prompts makes them examples of doing
-it unguided. `examples` reads such episodes from a job's log and cuts the guidance out of every segment; `imitate`
+it unguided. `examples` reads such episodes from a run's episodes in the ledger and cuts the guidance out of every
+segment; `imitate`
 takes a supervised step on them (the trainer's likelihood objective) and commits the version it makes.
 
 A segment is cut by its tokens: the fewest tokens before its first sampled one whose text holds the guidance, and
@@ -23,12 +24,13 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout.harness.blobs import Blobs
-from rollout_train.ledger import Fence
+from rollout_train.ledger import Fence, Ledger
 from rollout_train.policies import Policies, Version
+from rollout_train.record import table
 from rollout_train.recorder.recorder import Segment, Span
 from rollout_train.recorder.renderers import Renderer
 from rollout_train.rollouts.episodes import Episode, Record, loaded
-from rollout_train.rollouts.jobs import EPISODES
+from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, Trainer, Weighted
 
 GUIDANCE = "guidance"
@@ -96,14 +98,13 @@ class Examples:
 
 
 async def examples(
-    log: Path, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str], solved_only: bool = True
+    ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str], solved_only: bool = True
 ) -> Examples:
-    """The segments of every episode in a job's log (`log`, its directory) whose prompts carried guidance of each of
-    `kinds` and (with `solved_only`) that solved its task, with that guidance cut out."""
-    lines = await asyncio.to_thread(lambda: (log / EPISODES).read_text().splitlines())
+    """The segments of every episode of `run` whose prompts carried guidance of each of `kinds` and (with
+    `solved_only`) that solved its task, with that guidance cut out."""
     found = Examples([])
-    for line in lines:
-        record = Record.from_json(json.loads(line))
+    for line in (await ledger.read(table(run, EPISODES))).values():
+        record = Record.from_json(cast(dict[str, Any], line))
         said: Any = record.episode.info.get(GUIDANCE)
         guidance = cast(dict[str, Any], said) if isinstance(said, dict) else {}
         if not all(kind in guidance for kind in kinds):
@@ -119,7 +120,9 @@ async def examples(
                 if shorter is None:
                     found.left_out += 1
                     continue
-                found.segments.append(Weighted(shorter, 1.0, f"{episode.cursor}/{slot}/{index}"))
+                found.segments.append(
+                    Weighted(shorter, 1.0, f"{episode.run}/{episode.group}/{episode.number}/{slot}/{index}")
+                )
     return found
 
 

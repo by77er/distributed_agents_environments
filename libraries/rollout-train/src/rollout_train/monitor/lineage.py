@@ -68,7 +68,7 @@ def lineage(
     sample: bool = False,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """The graph a ledger's tables (by name) describe, with the feed's job lines (`notes`). With `sample`, the
+    """The graph a ledger's tables (by name) describe, with the feed's notes (`notes`). With `sample`, the
     fixture's tables and notes are read beside them (a table of the ledger's own is never replaced)."""
     now = time.time() if now is None else now
     sampled: set[str] = set()

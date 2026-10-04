@@ -16,7 +16,7 @@ from rollout_train.profile import Profile
 from rollout_train.trainer import WEIGHTS
 from tests.rollout_train.rollouts.games import words
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 PROFILE = """
 directory = "{directory}"
@@ -79,18 +79,26 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         binding = binding_for(words, "policy", platform.tool_bindings)
         assert platform.policy == "run"  # (the run directory's name, unless the profile names the policy)
         await train(
-            platform.jobs, words, platform.trainer, platform.policies, policy=platform.policy, channel="policy",
-            directory=tmp_path / "run" / "versions", groups=2, binding=binding,
-        )  # fmt: skip
+            words,
+            platform.trainer,
+            platform.policies,
+            policy=platform.policy,
+            channel="policy",
+            directory=tmp_path / "run" / "versions",
+            publish=platform.publish,
+            run="run",
+            groups=2,
+            binding=binding,
+        )  # fmt: skip  (the platform's runner plays the run named after its directory)
         versions = await platform.policies.versions("run")
-        steps = await platform.ledger.read("runs/train/steps")
+        steps = await platform.ledger.read("runs/run/steps")
+        played = await platform.ledger.read("runs/run/episodes")
         assert versions and [version.number for version in versions] == list(range(1, len(steps) + 1))
         assert policy.adapter == versions[-1].name and judge.version == 0  # served on the trained channel only
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
-    assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_job.jsonl").exists()
-    kept = (tmp_path / "run" / "jobs" / "train" / "episodes.jsonl").read_text().splitlines()
-    assert len(kept) == 8 and any((tmp_path / "run" / "blobs").iterdir())  # every episode, and its trajectories
+    assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_notes.jsonl").exists()
+    assert len(played) == 8 and any((tmp_path / "run" / "blobs").iterdir())  # every episode, and its trajectories
 
 
 async def test_a_profile_that_cannot_start_stops_what_it_started(tmp_path: Path) -> None:

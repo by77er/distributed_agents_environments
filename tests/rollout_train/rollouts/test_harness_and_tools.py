@@ -2,6 +2,7 @@
 any other to whoever trains on them."""
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from pathlib import Path
 
 import httpx
 import pytest
@@ -19,10 +20,13 @@ from rollout.harness import (
     bind,
     register,
 )
+from rollout.harness.blobs import FileBlobStore
 from rollout.harness.remote import RemoteToolSet, serve
 from rollout.local import LocalRunner
+from rollout_train.ledger import FileLedger
+from rollout_train.record import GROUPS, scope, table
 from rollout_train.recorder import Recorder
-from rollout_train.rollouts import Outcome, RolloutJobs
+from rollout_train.rollouts import Episode, EpisodeRunner, Outcome, Plan, episodes_of, plan, playing
 from rollout_train.testing import plain_channel
 
 pytest.importorskip("starlette")
@@ -53,7 +57,7 @@ class Seen(RunHooks):
         self.samples.append(sample)
 
 
-async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded_and_watched() -> None:
+async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded_and_watched(tmp_path: Path) -> None:
     recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])}, base_url="http://recorder/v1")
     app = create_app(recorder)
 
@@ -68,21 +72,30 @@ async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded
     HARNESS["play"] = play
     seen = Seen()
     program = ProgramReference(program=register(Outsourced))
-    jobs = RolloutJobs(LocalRunner(recorder=recorder, hooks=[seen]), recorder)
-    job = await jobs.start(program=program, binding=binding_of(program), in_flight=4)
-    won, lost = await (await job.run({"word": "yes"})).episodes(), await (await job.run({"word": "no"})).episodes()
+    won, lost = await played(tmp_path / "served", LocalRunner(recorder=recorder, hooks=[seen]), recorder, program)
     assert (won[0].reward, lost[0].reward) == (1.0, 0.0) and won[0].info == {"solved": True}
     (segment,) = won[0].trajectories["policy"].segments  # what the harness sampled is the slot's trajectory
     assert "".join(chr(token) for token in segment.tokens) == "user: Say the word.\nassistant: yes\n"
     assert len(seen.samples) == 2 and seen.samples[0].run_id == won[0].run_id and seen.samples[0].slot == "policy"
-    await jobs.close()
 
     unserved = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})  # no base URL: nothing to hand out
-    alone = RolloutJobs(LocalRunner(recorder=unserved), unserved)
-    job = await alone.start(program=program, binding=binding_of(program), in_flight=1)
-    (failed,) = await (await job.run({"word": "yes"})).episodes()
-    assert failed.outcome is Outcome.FAILED and "not served over HTTP" in str(failed.detail)
-    await alone.close()
+    failed, _ = await played(tmp_path / "alone", LocalRunner(recorder=unserved), unserved, program)
+    assert failed[0].outcome is Outcome.FAILED and "not served over HTTP" in str(failed[0].detail)
+
+
+async def played(
+    where: Path, runner: LocalRunner, recorder: Recorder, program: ProgramReference
+) -> tuple[list[Episode], list[Episode]]:
+    """Two groups of one episode, a run's rows `yes` and `no`, played by a runner over a ledger of their own."""
+    ledger, blobs = FileLedger(where / "ledger"), FileBlobStore(where / "blobs")
+    fence = await ledger.take(scope("train"))
+    await plan(ledger, "train", Plan(program, binding_of(program)), fence)
+    for number, word in ((1, "yes"), (2, "no")):
+        await ledger.append(table("train", GROUPS), str(number), {"parameters": {"word": word}, "episodes": 1}, fence)
+    async with playing(EpisodeRunner("here", ledger, runner, recorder, blobs, 4, every=0.02)):
+        return await episodes_of(ledger, blobs, "train", 1, 1, every=0.01), await episodes_of(
+            ledger, blobs, "train", 2, 1, every=0.01
+        )
 
 
 def binding_of(program: ProgramReference) -> RunBinding:

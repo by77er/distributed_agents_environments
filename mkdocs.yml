@@ -103,3 +103,4 @@ nav:
       - "Local services": development/local-services.md
   - Research:
       - "The policy graph": research/policy-dag.md
+      - "Curricula": research/curricula.md

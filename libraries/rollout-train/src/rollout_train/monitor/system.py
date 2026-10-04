@@ -1,13 +1,14 @@
 """Where every run of a ledger stands: what the monitor shows.
 
-A ledger (`rollout_train.ledger`) may be shared by many runs. It holds what each training loop decided and what
-happened (`rollout_train.record`), where and when each run was started, the policies' versions and the fences. Each
-run keeps the rest in its own directory, as an open profile lays it out (`rollout_train.layout`): the jobs' logs (what
-was asked for, the episodes that ended, what was acknowledged), the feed (what is happening now) and the episodes'
-events. A run's `starts` record says where its directory is and where the monitor on its machine serves: `System`
-reads the directory where it is on this machine, asks that monitor otherwise (`System._source` decides which), and
-else shows what the ledger alone has. It asks nothing of any run's process: it says the same whether that process is
-alive or not, and what it says of a group is what a loop that started now would find.
+A ledger (`rollout_train.ledger`) may be shared by many runs. It holds what each training loop decided and what happened
+(`rollout_train.record`), where and when each run was started, the policies' versions and the fences. Each run's
+episodes are in the ledger too, as runners claim, play and record them (`rollout_train.rollouts.scheduler`). Each run
+keeps the rest in its own directory, as an open profile lays it out (`rollout_train.layout`): the feed (what is
+happening now) and the episodes' events. A run's `starts` record says where its directory is and where the monitor on
+its machine serves: `System` reads the directory where it is on this machine, asks that monitor otherwise
+(`System._source` decides which), and else shows what the ledger alone has. It asks nothing of any run's process: it
+says the same whether that process is alive or not, and what it says of a group is what a loop that started now would
+find.
 """
 
 import asyncio
@@ -16,7 +17,6 @@ import lzma
 import shutil
 import socket
 import subprocess
-import threading
 import time
 from collections import deque
 from collections.abc import Mapping
@@ -30,23 +30,22 @@ from pydantic import JsonValue
 
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.layout import BLOBS, FEED, JOBS, PROCESSES
-from rollout_train.ledger import FileLedger, Ledger, of_run, present
-from rollout_train.monitor.feed import Appended, FeedReader, plain
+from rollout_train.layout import BLOBS, FEED, PROCESSES
+from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
+from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
 from rollout_train.monitor.statistics import newest, statistics
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
 from rollout_train.record import scope as run_scope
-from rollout_train.rollouts.episodes import Record
-from rollout_train.rollouts.jobs import ACKNOWLEDGED, EPISODES, INTERRUPTED, TICKETS
+from rollout_train.rollouts.episodes import Outcome, Record
+from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 
-DECIDED = "decided"
-"""A group the loop decided to play and has not asked the job for (a loop that starts now asks for it)."""
 WAITING = "waiting"
-"""Asked for; none of its episodes has started."""
+"""Asked for; no runner has claimed any of its episodes."""
 PLAYING = "playing"
+"""A runner has claimed one of its episodes, at least, and not all have ended."""
 ENDED = "ended"
 """Every episode has ended; its result is not written yet (a loop that starts now writes it)."""
 DONE = "done"
@@ -58,7 +57,7 @@ it again."""
 COMMITTED = "committed"
 FAILED = "failed"
 
-RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES)
+RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED)
 """A run's tables, as the page reads them."""
 ARCHIVED = 8
 """Episodes read back from their events that are kept at a time."""
@@ -66,8 +65,8 @@ SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
 RUNNING, IDLE, GONE = "running", "idle", "ended"
-"""A run's state, by when it last wrote anything this reads (its records in the ledger, and its jobs' logs and feed
-where those can be read): within `QUIET` seconds it is running, within `SILENT` idle, and after that ended. No process
+"""A run's state, by when it last wrote anything this reads (its records in the ledger, and its feed where that can
+be read): within `QUIET` seconds it is running, within `SILENT` idle, and after that ended. No process
 is asked: a run may be on any machine."""
 QUIET = 20 * 60
 SILENT = 3 * 3600
@@ -109,6 +108,8 @@ class System:
         """Where each run's episodes are, as it was last found."""
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
+        self._records: dict[tuple[str, str], dict[str, Any]] = {}
+        """Episodes' records, as the page shows them, by run and key (`GROUP/EPISODE`): a record never changes."""
 
     @property
     def ledger(self) -> str:
@@ -118,17 +119,17 @@ class System:
         return str(getattr(self._ledger, "url", type(self._ledger).__name__))
 
     def _source(self, run: str, starts: Mapping[str, Any], relayed: bool = False) -> "_Place | _Remote | None":
-        """Where a run's episodes are (its jobs' logs, its feed, its episodes' events): the one place that decides.
+        """Where a run's episodes are seen (its feed, its episodes' events): the one place that decides.
 
         - its directory, where its newest start says, if that is on this machine; for a run that says nothing, the
-          directory this was opened on, if the run is its (its job's log is there, or it is named after it);
+          directory this was opened on, if the run is named after it;
         - else the monitor at the address its newest start names, which serves its machine's runs (unless this was
           asked by another monitor: then nothing more is asked of others);
         - else nowhere this can read: what is shown of the run is what the ledger has."""
         latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
         if latest.get("directory"):
             where: Path | None = Path(str(latest["directory"])).expanduser().resolve()
-        elif self.directory is not None and ((self.directory / JOBS / run).is_dir() or run == self.directory.name):
+        elif self.directory is not None and run == self.directory.name:
             where = self.directory
         else:
             where = None
@@ -143,8 +144,8 @@ class System:
 
     async def snapshot(self, relayed: bool = False) -> dict[str, Any]:
         """Where everything stands now: every run (where it is and whether it is running; its groups that are not
-        done with and the ones that are), the policies' versions, the jobs, what each channel serves and how fast,
-        the machine, and what is kept."""
+        done with and the ones that are), the policies' versions, the runners and what they play, what each channel
+        serves and how fast, the machine, and what is kept."""
         tables: dict[str, dict[str, JsonValue]] = {}
         fences: dict[str, int] = {}
         policies: list[dict[str, Any]] = []
@@ -182,12 +183,12 @@ class System:
         return {name: await self._ledger.read(name) for name in await self._ledger.tables()}
 
     def _notes(self, tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, list[dict[str, Any]]]:
-        """What each run's job said in its feed, by run (for the runs whose directory is on this machine)."""
+        """The notes in each run's feed, by run (for the runs whose directory is on this machine)."""
         notes: dict[str, list[dict[str, Any]]] = {}
         for run in named_runs(tables):
             found = self._source(run, tables.get(table(run, STARTS), {}), relayed=True)
             if isinstance(found, _Place):
-                notes[run] = found.feed.job()
+                notes[run] = found.feed.notes()
         return notes
 
     async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None:
@@ -207,7 +208,8 @@ class System:
             for policy in await policies_in(self._ledger)
             for version in await versions_in(self._ledger, policy)
         }
-        return await asyncio.to_thread(self._group, run, str(number), record, tables, versions, found)
+        fences = await self._ledger.fences()
+        return await asyncio.to_thread(self._group, run, str(number), record, tables, fences, versions, found)
 
     def _group(
         self,
@@ -215,12 +217,13 @@ class System:
         number: str,
         record: Mapping[str, Any],
         tables: Mapping[str, Mapping[str, JsonValue]],
+        fences: Mapping[str, int],
         versions: Mapping[str, Version],
         found: "_Place | _Remote | None",
     ) -> dict[str, Any]:
         place = found if isinstance(found, _Place) else None
-        job, in_feed = (place.jobs().get(run), place.feed.runs()) if place else (None, [])
-        group = _group(number, record, tables, versions, job, in_feed)
+        played = _Played(run, tables, fences, self._records)
+        group = _group(number, record, tables, versions, played, place.feed.runs() if place else [])
         step: Any = group["step"]
         made = versions.get(str(step.get("makes"))) if step else None
         result: Any = tables[RESULTS].get(number)
@@ -246,9 +249,17 @@ class System:
 
     async def episode(self, run_id: str, after: int = 0, relayed: bool = False) -> dict[str, Any]:
         """One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
-        replies and tool calls from the events the job kept), from which its rollouts (one per model slot) are
-        drawn; what it reported when it ended; and where it sits: its job, its group and its labels. An episode of a
+        replies and tool calls from the events its runner kept), from which its rollouts (one per model slot) are
+        drawn; what it reported when it ended; and where it sits: its run, its group and its labels. An episode of a
         run on another machine is asked of the monitor there."""
+        if run_id not in self._ended_by_id and await asyncio.to_thread(present, self._ledger):
+            for name in await self._ledger.tables():
+                if (run := between(name, "runs/", f"/{EPISODES}")) is not None:
+                    _remembered(run, await self._ledger.read(name), self._records)
+        known = self._ended_by_id.get(run_id)
+        if known is not None and known[0] not in self._sources:  # (where its run's events are: found once)
+            starts = await self._ledger.read(table(known[0], STARTS))
+            await asyncio.to_thread(self._source, known[0], starts, relayed)
         place, ended, summary = await asyncio.to_thread(self._found, run_id)
         if place is None and not relayed:
             for remote in list(self._remotes.values()):
@@ -270,16 +281,20 @@ class System:
             "lines": lines,
         }
 
+    @property
+    def _ended_by_id(self) -> dict[str, tuple[str, dict[str, Any]]]:
+        return {each["run_id"]: (run, each) for (run, _), each in list(self._records.items()) if each["run_id"]}
+
     def _found(self, run_id: str) -> tuple["_Place | None", dict[str, Any] | None, dict[str, Any] | None]:
-        """An episode in a job's log (once it has ended) and in a feed (while the feed keeps it), and the directory
-        on this machine that has it."""
+        """An episode in the ledger (once it has ended) and in a feed (while the feed keeps it), and the directory on
+        this machine that has it (where its run's events are kept)."""
+        run, ended = self._ended_by_id.get(run_id, (None, None))
         for place in list(self._places.values()):
-            jobs = place.jobs()
-            ended = next((each for job in jobs.values() for each in job.episodes if each["run_id"] == run_id), None)
-            summary = next((run for run in place.feed.runs() if run["run_id"] == run_id), None)
-            if ended is not None or summary is not None:
+            summary = next((each for each in place.feed.runs() if each["run_id"] == run_id), None)
+            if summary is not None:
                 return place, ended, summary
-        return None, None, None
+        found = self._sources.get(run) if run is not None else None
+        return (found if isinstance(found, _Place) else None), ended, None
 
     async def _archived(self, place: "_Place", run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
         if run_id not in self._archive:
@@ -302,19 +317,16 @@ class System:
         blobs = {digest: size for policy in policies for digest, size in policy.pop("blobs")}  # (each kept once)
         now = time.time()
         runs: list[dict[str, Any]] = []
+        played: dict[str, _Played] = {}
         for run in named_runs(tables):
             starts: Any = tables.get(table(run, STARTS), {})
             found = self._source(run, starts, relayed)
             place = found if isinstance(found, _Place) else None
-            listed = _run(
-                run,
-                {name: tables.get(table(run, name), {}) for name in RUN_TABLES},
-                fences.get(run_scope(run)),
-                made,
-                place.jobs().get(run) if place else None,
-                place.feed.runs() if place else [],
-            )
-            runs.append(listed | self._read(run, starts, found, listed["wrote"], now))
+            own = {name: tables.get(table(run, name), {}) for name in RUN_TABLES}
+            played[run] = _Played(run, own, fences, self._records)
+            listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
+            seen = self._read(run, starts, found, listed["wrote"], now)
+            runs.append(listed | seen | {"played": played[run].counts()})
         rank = {RUNNING: 0, IDLE: 1, GONE: 2}
         runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
         read = list(self._places.values())
@@ -328,19 +340,17 @@ class System:
             "processes": _processes(self.directory / PROCESSES) if self.directory else None,
             "runs": runs,
             "policies": policies,
-            "jobs": [
-                job.counts() | {"directory": str(place.directory)} for place in read for job in place.jobs().values()
-            ],
+            "runners": _runners(fences, played),
             "channels": [
                 channel | {"directory": str(place.directory)}
                 for place in read
-                for channel in _channels(place.feed.job())
+                for channel in _channels(place.feed.notes())
             ],
             "ledger": {"fences": dict(fences), "tables": {name: len(records) for name, records in tables.items()}},
             "machine": self.machine.shown(),
             "kept": {
                 "versions": sum(blobs.values()),
-                "episodes": sum(job.kept for place in read for job in place.jobs().values()),
+                "episodes": sum(each.kept for each in played.values()),
             },
         }
 
@@ -348,16 +358,15 @@ class System:
         self, run: str, starts: Mapping[str, Any], found: "_Place | _Remote | None", wrote: float | None, now: float
     ) -> dict[str, Any]:
         """What a run's start says (where it is, what started it) and what its episodes' place adds: its groups in
-        flight with their episodes, its job and its engines, when it last wrote, and so whether it is running."""
+        flight with their episodes, and its engines; when it last wrote, and so whether it is running."""
         latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
-        added: dict[str, Any] = {"channels": [], "job": None}
+        added: dict[str, Any] = {"channels": []}
         written = newest([wrote, latest.get("started")])
         if isinstance(found, _Place):
-            jobs = found.jobs()
-            added = {"channels": _channels(found.feed.job()), "job": jobs[run].counts() if run in jobs else None}
+            added = {"channels": _channels(found.feed.notes())}
             written = newest([written, found.written()])
         elif isinstance(found, _Remote) and (there := found.run(run)) is not None:
-            added = {key: there[key] for key in ("open", "done", "channels", "job") if key in there}
+            added = {key: there[key] for key in ("open", "done", "channels") if key in there}
             written = newest([written, there.get("written")])
         quiet = now - written if written is not None else float("inf")
         return {
@@ -377,33 +386,18 @@ class System:
 
 
 class _Place:
-    """A run's directory on this machine, as it is read: its jobs' logs, its feed and its blobs."""
+    """A run's directory on this machine, as it is read: its feed and its blobs."""
 
     def __init__(self, directory: Path, feed: FeedReader | None = None) -> None:
         self.directory = directory
         self.feed = feed if feed is not None else FeedReader(directory / FEED)
         self.blobs = FileBlobStore(directory / BLOBS)
-        self._jobs: dict[str, _JobLog] = {}
-        self._reading = threading.Lock()
-        """Held while the jobs' logs are read: requests are answered in threads, and two must not read at once."""
-
-    def jobs(self) -> dict[str, "_JobLog"]:
-        """The jobs' logs, each read up to its end, by job (a run's job is named after the run)."""
-        with self._reading:
-            directory = self.directory / JOBS
-            for path in sorted(directory.iterdir()) if directory.is_dir() else []:
-                if path.is_dir() and path.name not in self._jobs:
-                    self._jobs[path.name] = _JobLog(path)
-            for job in self._jobs.values():
-                job.refresh()
-            return dict(self._jobs)
 
     def written(self) -> float | None:
-        """When anything this reads here was last written: a job's log, or the feed."""
-        times: list[Any] = [job.written for job in self.jobs().values()]
-        times += [run["updated"] for run in self.feed.runs()]
-        job = self.feed.directory / "_job.jsonl"
-        times += [job.stat().st_mtime] if job.exists() else []
+        """When the feed was last written."""
+        times: list[Any] = [run["updated"] for run in self.feed.runs()]
+        notes = self.feed.directory / f"{NOTES}.jsonl"
+        times += [notes.stat().st_mtime] if notes.exists() else []
         return newest(each for each in times if each)
 
 
@@ -454,7 +448,7 @@ def _run(
     tables: Mapping[str, Mapping[str, JsonValue]],
     fence: int | None,
     versions: Mapping[str, Version],
-    job: "_JobLog | None",
+    played: "_Played",
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """A run: its groups that are not done with, each with its stage, its episodes and its step; the ones that are,
@@ -462,7 +456,7 @@ def _run(
     that gave nothing to train on is listed with the first step decided after it, and until there is one, with
     those the next step will cover (`next`)."""
     groups: Any = tables[GROUPS]
-    entries = [_group(number, groups[number], tables, versions, job, in_feed) for number in sorted(groups, key=int)]
+    entries = [_group(number, groups[number], tables, versions, played, in_feed) for number in sorted(groups, key=int)]
     done: list[dict[str, Any]] = []
     for entry in entries:
         if entry["stage"] == DONE:
@@ -527,44 +521,43 @@ def _group(
     group: Mapping[str, Any],
     tables: Mapping[str, Mapping[str, JsonValue]],
     versions: Mapping[str, Version],
-    job: "_JobLog | None",
+    played: "_Played",
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """A group: its stage, its episodes (from the feed while they run, from the job's log once they end) and the
-    step that covers it, if one does."""
+    """A group: its stage, its episodes (from the feed while they run, from the ledger once they end) and the step
+    that covers it, if one does."""
     results: Any = tables[RESULTS]
     failures: Any = tables[FAILURES]
-    ticket = job.asked(number) if job else None
-    asked = ticket["id"] if ticket else None
+    count = group.get("episodes")
+    ended = {each["run_id"]: each for each in played.ended.get(number, [])}
     episodes: dict[str, dict[str, Any]] = {}
     for each in reversed(in_feed):  # (oldest first)
-        if asked and each["labels"].get("ticket") == asked:
+        labels = each["labels"]
+        if labels.get("run") == played.run and str(labels.get("group")) == number:
             episodes[each["run_id"]] = {
                 "run_id": each["run_id"],
-                "episode": each["labels"].get("episode"),
+                "episode": labels.get("episode"),
                 "state": each["state"],
                 "samples": each["samples"],
                 "slots": sorted(each["slots"]),
                 "reward": next(iter(each["rewards"].values()), None),
                 "updated": each["updated"],
                 "in_feed": True,
+                "interrupted": each["state"] == Outcome.CANCELLED.value and each["run_id"] not in ended,
             }
-    for ended in job.of(asked) if job and asked else []:
-        episodes.setdefault(ended["run_id"], {"samples": None, "updated": None, "in_feed": False}).update(ended)
-    counted = [each for each in episodes.values() if "outcome" in each and not each.get("interrupted")]
+    for run_id, each in ended.items():
+        shown = {name: value for name, value in each.items() if name not in ("events", "kept")}
+        episodes.setdefault(run_id, {"samples": None, "updated": None, "in_feed": False}).update(shown)
     key, intent = next(
         ((key, step) for key, step in cast(Mapping[str, Any], tables[STEPS]).items() if int(number) in _covers(step)),
         (None, None),
     )
-    result = results.get(number)
-    if result is not None:
+    if results.get(number) is not None:
         stage = DONE
-    elif ticket is None:
-        stage = DECIDED
-    elif len(counted) >= int(ticket["count"]):
+    elif isinstance(count, int) and len(ended) >= count:
         stage = ENDED
     else:
-        stage = PLAYING if episodes else WAITING
+        stage = PLAYING if ended or played.playing.get(number) else WAITING
     step = None
     if intent is not None:
         step = {name: value for name, value in intent.items() if name != "batch"} | {
@@ -578,9 +571,9 @@ def _group(
         "title": group.get("title"),
         "decided": group.get("decided"),
         "stage": stage,
-        "ticket": asked,
-        "count": int(ticket["count"]) if ticket else None,
-        "ended": len(counted),
+        "count": count if isinstance(count, int) else None,
+        "ended": len(ended),
+        "playing": played.playing.get(number, []),
         "episodes": sorted(episodes.values(), key=lambda each: (str(each.get("episode")), each["run_id"])),
         "step": step,
         "error": failures[str(key)].get("error") if key is not None and str(key) in failures else None,
@@ -606,11 +599,6 @@ def _done(
         "error": error,
         "seconds": round(ended - began, 1) if began else None,
     }
-
-
-def _number(label: Any) -> int | None:
-    """A group's number from its label (written `39` or `0039`)."""
-    return int(label) if isinstance(label, str) and label.isdigit() else None
 
 
 def _state(key: str, step: Mapping[str, Any], failures: Mapping[str, Any], versions: Mapping[str, Version]) -> str:
@@ -732,75 +720,106 @@ def _alive(pid: int) -> bool:
     return Path(f"/proc/{pid}").exists()
 
 
-class _JobLog:
-    """A job's log, read as it grows: what was asked for, the episodes that ended, what was acknowledged."""
+class _Played:
+    """A run's episodes as the ledger has them: those that ended, by group, and those runners play now (their claims
+    that hold: not cut short, made by a runner whose fence is the one it made them under)."""
 
-    def __init__(self, directory: Path) -> None:
-        self.directory = directory
-        self.tickets: list[dict[str, Any]] = []
-        self.episodes: list[dict[str, Any]] = []
+    def __init__(
+        self,
+        run: str,
+        tables: Mapping[str, Mapping[str, JsonValue]],
+        fences: Mapping[str, int],
+        records: dict[tuple[str, str], dict[str, Any]],
+    ) -> None:
+        self.run = run
+        self.ended: dict[str, list[dict[str, Any]]] = {}
+        self.playing: dict[str, list[dict[str, Any]]] = {}
+        self.claims: list[dict[str, Any]] = []
+        """Every claim, with whether it holds."""
         self.kept = 0
         """Bytes of the episodes' trajectories and events in the blob store."""
         self.sampled = 0
-        self.written = 0.0
-        self._tickets, self._episodes = Appended(directory / TICKETS), Appended(directory / EPISODES)
-
-    def refresh(self) -> None:
-        self.tickets.extend(self._tickets.more())
-        for line in self._episodes.more():
-            record = Record.from_json(line)
-            episode = record.episode
-            self.kept += sum(blob.size for blob in (record.trajectories, record.events) if blob is not None)
-            self.sampled += sum(record.sampled.values())
-            self.episodes.append(
-                {
-                    "cursor": episode.cursor,
-                    "ticket": episode.ticket,
-                    "run_id": episode.run_id,
-                    "episode": episode.labels.get("episode"),
-                    "state": episode.outcome.value,
-                    "outcome": episode.outcome.value,
-                    "interrupted": episode.detail == INTERRUPTED,
-                    "detail": episode.detail or episode.excluded,
-                    "reward": episode.reward,
-                    "solved": episode.solved,
-                    "sampled": sum(record.sampled.values()),
-                    "labels": dict(episode.labels),
-                    "slots": sorted(episode.trajectories),
-                    "info": dict(episode.info),
-                    "events": record.events.model_dump(mode="json") if record.events else None,
-                }
+        for key, each in _remembered(run, tables.get(EPISODES, {}), records).items():
+            self.ended.setdefault(key.split("/")[0], []).append(each)
+            self.kept += each["kept"]
+            self.sampled += each["sampled"]
+        done, cut = tables.get(EPISODES, {}), tables.get(INTERRUPTED, {})
+        for key, line in tables.get(CLAIMS, {}).items():
+            claim: Any = line
+            group, episode, attempt = key.split("/")
+            holds = (
+                f"{group}/{episode}" not in done
+                and key not in cut
+                and fences.get(runner_scope(str(claim["runner"]))) == claim["fence"]
             )
-        logs = [path for path in (self.directory / TICKETS, self.directory / EPISODES) if path.exists()]
-        self.written = max((path.stat().st_mtime for path in logs), default=0.0)
-
-    def asked(self, number: str) -> dict[str, Any] | None:
-        """The ticket a group was asked for under, by the group's number (the label `group`)."""
-        asked = [ticket for ticket in self.tickets if _number(ticket["labels"].get("group")) == int(number)]
-        return asked[-1] if asked else None
-
-    def of(self, ticket: str) -> list[dict[str, Any]]:
-        return [
-            {key: value for key, value in episode.items() if key != "events"}
-            for episode in self.episodes
-            if episode["ticket"] == ticket
-        ]
+            made = {"group": int(group), "episode": episode, "attempt": int(attempt), "runner": claim["runner"]}
+            made["at"] = claim.get("at")
+            self.claims.append(made | {"holds": holds})
+            if holds:
+                self.playing.setdefault(group, []).append(made)
+        self.interrupted = len(cut)
 
     def counts(self) -> dict[str, Any]:
         outcomes: dict[str, int] = {}
-        for episode in self.episodes:
-            outcome = "interrupted" if episode["interrupted"] else episode["outcome"]
-            outcomes[outcome] = outcomes.get(outcome, 0) + 1
-        acknowledged = self.directory / ACKNOWLEDGED
+        for each in (each for group in self.ended.values() for each in group):
+            outcomes[each["outcome"]] = outcomes.get(each["outcome"], 0) + 1
         return {
-            "job": self.directory.name,
-            "tickets": len(self.tickets),
-            "episodes": len(self.episodes),
+            "episodes": sum(map(len, self.ended.values())),
             "outcomes": outcomes,
-            "last": self.episodes[-1]["cursor"] if self.episodes else 0,
-            "acknowledged": int(acknowledged.read_text() or 0) if acknowledged.exists() else 0,
+            "playing": sum(map(len, self.playing.values())),
+            "interrupted": self.interrupted,
             "sampled": self.sampled,
         }
+
+
+def _remembered(
+    run: str, lines: Mapping[str, JsonValue], records: dict[tuple[str, str], dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """A run's episodes that ended, by key, as the page shows them: each read once into `records`."""
+    for key, line in lines.items():
+        if (run, key) not in records:
+            records[run, key] = _ended(Record.from_json(cast(Mapping[str, Any], line)))
+    return {key: records[run, key] for key in lines}
+
+
+def _ended(record: Record) -> dict[str, Any]:
+    """An episode that ended, as the page shows it."""
+    episode = record.episode
+    return {
+        "run_id": episode.run_id,
+        "episode": str(episode.number),
+        "state": episode.outcome.value,
+        "outcome": episode.outcome.value,
+        "detail": episode.detail or episode.excluded,
+        "reward": episode.reward,
+        "solved": episode.solved,
+        "sampled": sum(record.sampled.values()),
+        "labels": dict(episode.labels),
+        "slots": sorted(episode.trajectories),
+        "info": dict(episode.info),
+        "events": record.events.model_dump(mode="json") if record.events else None,
+        "kept": sum(blob.size for blob in (record.trajectories, record.events) if blob is not None),
+    }
+
+
+def _runners(fences: Mapping[str, int], played: Mapping[str, _Played]) -> list[dict[str, Any]]:
+    """Every runner that has taken its fence in the ledger: what it plays now, and the claims it has made."""
+    found: dict[str, dict[str, Any]] = {}
+    for scope, fence in fences.items():
+        if (name := between(scope, "runners/", "")) is not None:
+            found[name] = {"runner": name, "fence": fence, "playing": [], "claims": 0, "last": None}
+    for run, each in played.items():
+        for claim in each.claims:
+            runner = found.setdefault(
+                str(claim["runner"]),
+                {"runner": claim["runner"], "fence": None, "playing": [], "claims": 0, "last": None},
+            )
+            runner["claims"] += 1
+            runner["last"] = newest([runner["last"], claim["at"]])
+            if claim["holds"]:
+                shown = {key: claim[key] for key in ("group", "episode", "attempt", "at")}
+                runner["playing"].append({"run": run, **shown})
+    return sorted(found.values(), key=lambda runner: (not runner["playing"], -(runner["last"] or 0.0)))
 
 
 class Machine:

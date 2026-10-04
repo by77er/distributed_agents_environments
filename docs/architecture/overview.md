@@ -6,9 +6,10 @@ A **run** is one episode of a **program**: usually an agent acting in a **task**
 reinforcement-learning sense: it defines tools and responds to every model turn; the agent decides what the model
 sees and how it acts. Both are Python `async` code. Model samples go to a **model endpoint**: an adapter to a
 third-party model, or the **recorder**, which samples from a trainable **channel** and keeps the exact tokens,
-logprobs and weights versions. **Rollout jobs** run a catalog's rows in bulk and deliver **episodes** to a training
-loop, which plays a row's start as a **group** of episodes and takes a **step** over several groups at a time; each
-step's new weights are published to the channel without any task or agent noticing. A **profile** says which
+logprobs and weights versions. A training loop asks for a row's start to be played as a **group** of **episodes**,
+in the **ledger**; **episode runners**, on any machine that reaches the ledger, claim the episodes, play them and
+record them there. The loop takes a **step** over several groups at a time; each step's new weights are published to
+the channel without any task or agent noticing. A **profile** says which
 engines, trainer, runner and tool sets stand behind all of it.
 
 ## Layers
@@ -19,7 +20,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the catalog |
-| | `rollout-train` | Reinforcement learning on `rollout`: rollout jobs and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; policies and the ledger; the profile, the `rollout` command and the monitor |
+| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; policies and the ledger; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-team` | An environment to train on |
@@ -48,7 +49,7 @@ profile names engines, renderers, trainers and tool sets as `module:name`, so `r
 | [`ToolSet`](../guide/reference.md#toolset) | `rollout.harness` | runs → imported tools | a tool set in process, `RemoteToolSet` over HTTP ([tools](../guide/tools.md#imported-tools)) |
 | [`EnvironmentService`](../guide/reference.md#environmentservice) | `rollout.harness` | runs → computers | `NamespaceEnvironments`, `LocalEnvironments` ([`rollout_computers`](../implementations/rollout-computers.md)) |
 | [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
-| [`Jobs`, `Job`, `Ticket`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `RolloutJobs`, `RolloutClient` over HTTP |
+| [the ledger's `plans`, `groups`, `claims` and `episodes`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `EpisodeRunner`, on any machine that reaches the ledger and the blob store |
 | [`Catalog`](../guide/reference.md#catalog) | `rollout.catalog` | training → an environment's rows | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
 | [`RunHooks`](../libraries/rollout/hooks.md), `JobHooks` | `rollout.harness`, `rollout_train.rollouts` | runners and jobs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
 
@@ -63,7 +64,7 @@ What each part sees. A ✗ is a boundary the code keeps, not an optimization lef
 | Task and agent code | ✓ | ✗ | ✗ | ✗ |
 | Runner | ✓ | ✗ | ✗ | ✗ |
 | Recorder and channels | ✓ | ✓ | ✓ | engines only |
-| Rollout jobs | labels and results | ✓ (in episodes) | ✓ | ✗ |
+| Episode runners | labels and results | ✓ (in episodes) | ✓ | ✗ |
 | Training loop and trainer | labels and results | ✓ | ✓ | ✗ |
 | Profile | ✗ | ✗ | ✗ | ✓ |
 
@@ -85,7 +86,7 @@ Everything that leaves task or agent code on the way is an **effect** with an id
 |---|---|---|
 | Where code runs | the caller's process | the runner's process, inside a DBOS workflow |
 | An effect | a call, recorded as run events | a durable step: its first recorded result is final |
-| After a crash | runs in flight are lost; a rollout job with a log, started again under its name, runs them again | the program is run again and recorded effects return their results; what was in flight is performed again under the same identity |
+| After a crash | runs in flight are lost; their episodes are open again in the ledger, and an episode runner plays them again | the program is run again and recorded effects return their results; what was in flight is performed again under the same identity |
 | A side effect that cannot be deduplicated | performed once | guarded by an attempt marker: a possible duplicate is reported as `OUTCOME_UNKNOWN` to the model, never silently retried |
 | Messages | delivered once by `message_id`, in process | delivered once by `message_id`, through any runner sharing the database |
 

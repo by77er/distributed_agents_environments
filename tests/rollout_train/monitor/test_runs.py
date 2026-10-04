@@ -1,6 +1,5 @@
 """Every run of a shared ledger: where each one's episodes are read, and whether it is running."""
 
-import json
 import os
 import time
 from pathlib import Path
@@ -10,13 +9,13 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
-from rollout_train.layout import FEED, JOBS
+from rollout_train.layout import FEED
 from rollout_train.ledger import Ledger
 from rollout_train.monitor import RunFeed, System
 from rollout_train.monitor.system import GONE, IDLE, RELAYED, RUNNING
 from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
-from rollout_train.rollouts.jobs import EPISODES, TICKETS
+from rollout_train.rollouts.scheduler import EPISODES, runner_scope
 
 
 async def started(ledger: Ledger, run: str, at: float, **where: JsonValue) -> None:
@@ -25,29 +24,26 @@ async def started(ledger: Ledger, run: str, at: float, **where: JsonValue) -> No
     await ledger.append(
         table(run, STARTS), str(fence.number), {"policy": run, "host": "here", "started": at, **where}, fence
     )
-    await ledger.append(table(run, GROUPS), "1", {"task": "t1", "title": "one", "decided": at}, fence)
+    await ledger.append(table(run, GROUPS), "1", {"task": "t1", "title": "one", "decided": at, "episodes": 1}, fence)
     result: JsonValue = {"time": at + 1, "rewards": [1.0], "solved": [True], "segments": 0, "skipped": "alone"}
     await ledger.append(table(run, RESULTS), "1", result, fence)
 
 
-def played(directory: Path, run: str, run_id: str, at: float) -> None:
-    """A run's directory with its job's log (one group asked for, one episode ended) and a feed that measured its
-    engines once; every file written at `at`."""
-    log = directory / JOBS / run
-    log.mkdir(parents=True)
-    (log / TICKETS).write_text(
-        json.dumps({"id": f"t_{run}", "parameters": None, "labels": {"group": "1"}, "count": 1}) + "\n"
-    )
+async def played(ledger: Ledger, directory: Path, run: str, run_id: str, at: float) -> None:
+    """A run's one episode, recorded by its runner, and its directory with a feed that measured its engines once;
+    every file written at `at`."""
+    fence = await ledger.take(runner_scope(f"{run}-runner"))
     trajectories = {"ada": Trajectory([], {"default": 1.0})}
-    episode = Episode(1, run, f"t_{run}", run_id, {"episode": "1", "group": "1", "job": run}, Outcome.COMPLETED,
-                      trajectories=trajectories)  # fmt: skip
-    (log / EPISODES).write_text(json.dumps(Record(episode, sampled={"ada": 10}).to_json()) + "\n")
+    labels = {"run": run, "group": "1", "episode": "1"}
+    episode = Episode(run, 1, 1, run_id, labels, Outcome.COMPLETED, trajectories=trajectories)
+    record: JsonValue = Record(episode, sampled={"ada": 10}).to_json()
+    await ledger.append(table(run, EPISODES), "1/1", record, fence)
     feed = RunFeed(directory / FEED)
-    feed.on_job(
+    feed.on_note(
         {"kind": "inference", "at": at, "channel": "policy", "tokens_per_second": 50.0, "mean_concurrency": 2.0}
     )
     feed.close()
-    for path in [*log.iterdir(), *(directory / FEED).iterdir()]:
+    for path in (directory / FEED).iterdir():
         os.utime(path, (at, at))
 
 
@@ -61,19 +57,19 @@ async def test_one_monitor_shows_every_run_of_a_database_each_from_its_own_direc
     await started(ledger, "busy", now - 60, directory=str(busy))
     await started(ledger, "quiet", now - 3600, directory=str(quiet))
     await started(ledger, "gone", now - 5 * 3600, directory="/nowhere/gone")
-    played(busy, "busy", "r_busy", now - 30)
-    played(quiet, "quiet", "r_quiet", now - 3600)
+    await played(ledger, busy, "busy", "r_busy", now - 30)
+    await played(ledger, quiet, "quiet", "r_quiet", now - 3600)
 
     system = System(ledger=ledger)
     snapshot = await system.snapshot()
     runs = {run["run"]: run for run in snapshot["runs"]}
     assert [run["run"] for run in snapshot["runs"]] == ["busy", "quiet", "gone"]  # (running ones first)
     assert [runs[name]["state"] for name in ("busy", "quiet", "gone")] == [RUNNING, IDLE, GONE]
-    assert runs["busy"]["episodes_at"] == "here" and runs["busy"]["job"]["episodes"] == 1
+    assert runs["busy"]["episodes_at"] == "here" and runs["busy"]["played"]["episodes"] == 1
     assert runs["busy"]["directory"] == str(busy) and runs["busy"]["host"] == "here"
-    assert runs["gone"]["episodes_at"] is None and runs["gone"]["job"] is None and runs["gone"]["done"]
+    assert runs["gone"]["episodes_at"] is None and runs["gone"]["played"]["episodes"] == 0 and runs["gone"]["done"]
     assert snapshot["directory"] is None and snapshot["ledger_at"] == ledger.url
-    assert sorted(job["job"] for job in snapshot["jobs"]) == ["busy", "quiet"]
+    assert sorted(runner["runner"] for runner in snapshot["runners"]) == ["busy-runner", "quiet-runner"]
 
     group = await system.group("quiet", 1)
     assert (
@@ -82,7 +78,7 @@ async def test_one_monitor_shows_every_run_of_a_database_each_from_its_own_direc
         and [each["run_id"] for each in group["episodes"]] == ["r_quiet"]
     )
     episode = await system.episode("r_busy")
-    assert episode["ended"] is not None and episode["labels"]["job"] == "busy"
+    assert episode["ended"] is not None and episode["labels"]["run"] == "busy"
 
     figures = await system.statistics()
     measured = {run["run"]: run["inference"] for run in figures["runs"]}
@@ -105,7 +101,7 @@ class Elsewhere:
         episode: dict[str, Any] = {"run_id": "r_far", "episode": "1", "state": "running", "samples": 3}
         if path == "/api/system":
             far = {"run": "far", "open": [{"number": 1, "stage": "playing", "episodes": [episode]}], "done": [],
-                   "job": {"job": "far", "episodes": 0}, "channels": [], "written": time.time()}  # fmt: skip
+                   "channels": [], "written": time.time()}  # fmt: skip
             return httpx.Response(200, json={"runs": [far]})
         if path == "/api/groups/far/1":
             return httpx.Response(200, json={"number": 1, "run": "far", "stage": "playing", "episodes": [episode]})
@@ -126,7 +122,7 @@ async def test_a_run_on_another_machine_has_its_episodes_from_the_monitor_its_st
 
     (run,) = (await system.snapshot())["runs"]
     assert run["episodes_at"] == "http://runner-2:8765" and run["reached"] and run["state"] == RUNNING
-    assert run["open"][0]["episodes"][0]["run_id"] == "r_far" and run["job"]["job"] == "far"
+    assert run["open"][0]["episodes"][0]["run_id"] == "r_far"
     group = await system.group("far", 1)
     assert group is not None and group["stage"] == "playing" and group["episodes_at"] == "http://runner-2:8765"
     assert (await system.episode("r_far"))["source"] == "feed"

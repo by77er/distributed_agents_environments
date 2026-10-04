@@ -1,17 +1,18 @@
 # Deploying
 
 A deployment is described once, in a profile: the channels and the engines behind them, the trainer, the runner, and
-where each environment's tool set lives. Whoever trains gets jobs and a trainer from it and never learns what stands
-behind them; an environment is named in it only by its tool set. This page is the one place the profile file is
+where each environment's tool set lives. Whoever trains gets a trainer, the policies and a way to publish versions
+from it, while a runner it opens plays the episodes the run asks for, and never learns what stands behind them; an
+environment is named in it only by its tool set. This page is the one place the profile file is
 described. The code is `rollout_train.profile`, and the command is `rollout` (`rollout_train.cli`).
 
 ```toml
-directory = "~/.cache/rollout/runs/first"     # the run's state: adapters, the job's log, metrics, the monitor's feed
+directory = "~/.cache/rollout/runs/first"     # the run's state: versions in use, metrics, the monitor's feed
 runner = "local"                              # or "durable": runs survive this process
-serve = "0.0.0.0:8900"                        # optional: rollout jobs and the model endpoint for harnesses, over HTTP
+serve = "0.0.0.0:8900"                        # optional: the model endpoint for harnesses, over HTTP
 address = "http://trainer-1:8900"             # what others reach it at, if not http://{serve}
 feed_runs = 80                                # optional: episodes kept in the monitor's feed
-episodes_at_once = 6                          # optional: the most episodes a run plays at once
+episodes_at_once = 6                          # optional: the most episodes this machine's runner plays at once
 
 [channels.policy]
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
@@ -62,13 +63,13 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `channels` | Which model each policy is, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
-| `serve`, `address` | Where the rollout service and the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listen, and the URL others reach them at | A training loop elsewhere connects with `RolloutClient(url)` |
+| `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
 | `ledger` | Where the run's tables and the policies' versions are kept ([policies](../libraries/rollout-train/policies.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. `[trainer] policy` names the policy to train (by default the run directory's name); a policy that has versions is gone on with | Runs that share a ledger and a blob store see each other's policies |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
-| `memory` | System memory that must be available before runs are admitted (`runs_gib`) and before a colocated step starts (`training_gib`); short of it the run stops with `NotEnoughMemory` rather than exhaust its machine | |
+| `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the step stops with `NotEnoughMemory`) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
-| `episodes_at_once` | The most episodes a run plays at once, whatever groups they are of (6 unless it says otherwise): what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
+| `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
 
 ## What a profile names
 
@@ -95,15 +96,17 @@ In code, a profile opens into a platform:
 async with Profile.load(Path("profile.toml")).open() as platform:
     binding = binding_for(catalog, "policy", platform.tool_bindings)
     await train(
-        platform.jobs, catalog, platform.trainer, platform.policies, policy=platform.policy, channel="policy",
-        directory=platform.profile.directory / "versions", binding=binding,
+        catalog, platform.trainer, platform.policies, policy=platform.policy, channel="policy",
+        directory=platform.profile.directory / "versions", publish=platform.publish, binding=binding,
+        run=platform.profile.directory.name, hooks=[platform.feed],
     )
 ```
 
 Opening starts, in order: the trainer; each channel's engines; the channels, the trained one with the trainer's
 longest segment as its longest turn; the recorder; the monitor's feed in `directory/feed`; the tool sets; the blob
-store and the policies; the runner; the rollout jobs. A colocated trainer is wrapped in
-[`Colocated`](reference.md#colocated). With `serve`, the rollout service and the endpoint for harnesses listen there.
+store and the policies; the runner, and the [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over
+it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
+listens there.
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
 policy's newest version on its channel when it starts.
 
@@ -111,6 +114,18 @@ policy's newest version on its channel when it starts.
 and over every other run sharing its ledger (`rollout monitor` also takes the ledger itself: a database's URL or a
 ledger's directory). `rollout train --monitor http://HOST:PORT` writes where that page serves into the run's start, so
 that a monitor on another machine asks it for the run's episodes ([monitor](../libraries/rollout-train/monitor.md)).
+
+## Runners
+
+Opening a profile starts an [episode runner](../libraries/rollout-train/rollouts.md#a-runner) named
+`HOST/DIRECTORY` (this machine's name and the run directory's), with `episodes_at_once` places and the profile's tool
+sets. It plays the episodes of the run named after its directory, claiming them in the ledger and recording them
+there, with their trajectories and events in the blob store. Started again, it takes its fence anew, and what it had
+claimed is open to be played again.
+
+Runners on other machines share a run's work through the ledger and the blob store alone: a database ledger they
+all reach (`postgresql://…`) and a blob store they all reach (an object store), with the channels and tool sets the
+run's plan names. The run does not know where its episodes were played.
 
 ## Stopping
 

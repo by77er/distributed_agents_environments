@@ -1,24 +1,26 @@
-"""The training loop under two wirings: everything in this process, and a durable runner with the rollout jobs
-behind HTTP. The loop's code is the same; so is what it does."""
+"""The training loop with a runner playing the episodes it asks for in the ledger, under two runners: one in this
+process, and a durable one. The loop's code is the same; so is what it does."""
 
 import asyncio
+import contextlib
+import functools
 import json
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
 from rollout.harness import Runner
-from rollout.harness.blobs import FileBlobStore
+from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.local import LocalRunner
 from rollout_train import (
     Budget,
     Checkpoint,
     Colocated,
     FileLedger,
+    Ledger,
     Policies,
     Step,
     StepFailed,
@@ -27,12 +29,20 @@ from rollout_train import (
     train,
     trained,
 )
+from rollout_train import loop as loop_module
 from rollout_train.record import STEPS, table
 from rollout_train.recorder import Recorder
-from rollout_train.rollouts import JobHooks, Jobs, RolloutJobs, loaded
+from rollout_train.rollouts import EpisodeRunner, Hooks, Record, episodes_of, loaded, playing
+from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.testing import ScriptedEngine, plain_channel
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
+
+
+@pytest.fixture(autouse=True)
+def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The loop looks for its groups' episodes in the ledger often (a run looks twice a second)."""
+    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 class Counting:
@@ -60,11 +70,11 @@ class Counting:
         return Step({"segments": float(len(batch))})
 
 
-class Notes(JobHooks):
+class Notes(Hooks):
     def __init__(self) -> None:
         self.kinds: list[str] = []
 
-    def on_job(self, event: Mapping[str, JsonValue]) -> None:
+    def on_note(self, event: Mapping[str, JsonValue]) -> None:
         self.kinds.append(str(event["kind"]))
 
 
@@ -72,47 +82,57 @@ def policies_in(directory: Path) -> Policies:
     return Policies(FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs"))
 
 
-@pytest.fixture(params=["in process", "durable runner, jobs over HTTP"])
-async def wiring(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[tuple[Jobs, Recorder, Notes]]:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
-    notes = Notes()
-    blobs = FileBlobStore(tmp_path / "blobs")
+def answering() -> Recorder:
+    return Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
+
+
+@contextlib.asynccontextmanager
+async def here(
+    ledger: Ledger,
+    recorder: Recorder,
+    blobs: Blobs,
+    *,
+    runner: Runner | None = None,
+    hooks: Sequence[Hooks] = (),
+    places: int = 6,
+    name: str = "here",
+) -> AsyncGenerator[EpisodeRunner]:
+    """A runner that plays what runs ask for in `ledger`, while the block runs."""
+    played = runner if runner is not None else LocalRunner(recorder=recorder)
+    episodes = EpisodeRunner(name, ledger, played, recorder, blobs, places, hooks=hooks, every=0.01)
+    async with playing(episodes):
+        yield episodes
+
+
+@pytest.fixture(params=["in process", "durable runner"])
+async def wiring(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[tuple[Runner, Recorder]]:
+    recorder = answering()
     if request.param == "in process":
-        local = RolloutJobs(LocalRunner(recorder=recorder), recorder, log=tmp_path / "log", blobs=blobs, hooks=[notes])
-        yield local, recorder, notes
-        await local.close()
+        yield LocalRunner(recorder=recorder), recorder
         return
     pytest.importorskip("dbos")
-    pytest.importorskip("starlette")
     from rollout_durable import DurableRunner
-    from rollout_train.rollouts.service import RolloutClient, create_app
 
     runner = DurableRunner(tmp_path / "runs", recorder=recorder)
     await runner.launch()
-    served = RolloutJobs(cast_runner(runner), recorder, log=tmp_path / "log", blobs=blobs, hooks=[notes])
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(served)), base_url="http://rollouts")
     try:
-        yield RolloutClient("http://rollouts", blobs, client=client), recorder, notes
+        yield cast(Runner, runner), recorder
     finally:
-        await served.close()
         await runner.close()
 
 
-def cast_runner(runner: Any) -> Runner:
-    return runner
-
-
 async def test_the_loop_records_each_group_and_steps_on_what_it_played(
-    wiring: tuple[Jobs, Recorder, Notes], tmp_path: Path
+    wiring: tuple[Runner, Recorder], tmp_path: Path
 ) -> None:
-    jobs, recorder, notes = wiring
-    policies, trainer = policies_in(tmp_path), Counting()
+    runner, recorder = wiring
+    policies, trainer, notes = policies_in(tmp_path), Counting(), Notes()
 
     async def more(groups: int) -> None:
-        await train(
-            jobs, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "versions",
-            groups=groups, groups_per_step=1, seed=1,
-        )  # fmt: skip
+        async with here(policies.ledger, recorder, policies.blobs, runner=runner, hooks=[notes]):
+            await train(
+                Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "versions",
+                publish=recorder.publish, groups=groups, groups_per_step=1, seed=1, hooks=[notes],
+            )  # fmt: skip
 
     await more(3)
     lines = await results(policies.ledger)
@@ -137,7 +157,7 @@ async def test_the_loop_records_each_group_and_steps_on_what_it_played(
     assert trainer.parents == [None, *[f"weights after {n} steps" for n in range(1, len(played))]]
     for version, batch in zip(versions, trainer.batches, strict=True):
         assert version.state is not None and list(version.state.files) == ["optimizer.bin"]
-        assert version.batch is not None  # what it was trained on: each segment by its place in the job's log
+        assert version.batch is not None  # what it was trained on: each segment by its episode and its place there
         listed = json.loads(await policies.blobs.read(version.batch))
         assert listed == [[weighted.source, weighted.advantage] for weighted in batch]
         (line,) = [line for line in played if covered[line.group].version == version.name]
@@ -149,7 +169,8 @@ async def test_the_loop_records_each_group_and_steps_on_what_it_played(
             said = "".join(chr(token) for token in weighted.segment.tokens[weighted.segment.spans[0].start :]).strip()
             assert (weighted.advantage > 0) == (said == word)
     assert notes.kinds.count("result") == 3 and notes.kinds.count("step") == notes.kinds.count("published")
-    assert notes.kinds.count("published") == len(played) and notes.kinds.count("episode") == 12
+    assert notes.kinds.count("published") == len(played)
+    assert notes.kinds.count("started") == notes.kinds.count("ended") == 12
 
     await more(2)  # started again: it goes on after the last group, from the newest version
     assert [line.group for line in await results(policies.ledger)] == [1, 2, 3, 4, 5]
@@ -157,15 +178,14 @@ async def test_the_loop_records_each_group_and_steps_on_what_it_played(
 
 
 async def test_a_step_waits_for_its_groups_and_takes_them_together(tmp_path: Path) -> None:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
-    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder)
+    recorder = answering()
     policies, trainer = policies_in(tmp_path), Counting()
     trainer.budget = Budget(segments=100)
-    await train(
-        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v",
-        groups=6, groups_per_step=2, seed=1,
-    )  # fmt: skip
-    await rollouts.close()
+    async with here(policies.ledger, recorder, policies.blobs):
+        await train(
+            Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=6, groups_per_step=2, seed=1,
+        )  # fmt: skip
     lines = await results(policies.ledger)
     played = sorted(line.group for line in lines if line.segments)
     steps = await policies.ledger.read(table("train", STEPS))
@@ -178,25 +198,25 @@ async def test_a_step_waits_for_its_groups_and_takes_them_together(tmp_path: Pat
     assert len(await policies.versions("words")) == len(covers)
 
 
-class Running(JobHooks):
-    """Counts the episodes running, and the groups they are of, as the job tells of them."""
+class Running(Hooks):
+    """Counts the episodes running, and the groups they are of, as the runner tells of them."""
 
     def __init__(self) -> None:
-        self.running: dict[str, str] = {}
-        """Each episode running: its ticket."""
+        self.running: dict[str, int] = {}
+        """Each episode running: its group."""
         self.most = 0
         self.groups_at_once = 0
 
-    def on_job(self, event: Mapping[str, JsonValue]) -> None:
-        if event["kind"] == "admitted":
-            self.running.update(dict.fromkeys(cast(list[str], event["runs"]), str(event["ticket"])))
-        elif event["kind"] == "episode":
-            self.running.pop(str(event["run"]), None)
+    def on_note(self, event: Mapping[str, JsonValue]) -> None:
+        if event["kind"] == "started":
+            self.running[str(event["run_id"])] = cast(int, event["group"])
+        elif event["kind"] == "ended":
+            self.running.pop(str(event["run_id"]), None)
         self.most = max(self.most, len(self.running))
         self.groups_at_once = max(self.groups_at_once, len(set(self.running.values())))
 
 
-async def test_episodes_of_any_groups_run_at_once_up_to_a_cap(tmp_path: Path) -> None:
+async def test_episodes_of_any_groups_run_at_once_up_to_the_runners_places(tmp_path: Path) -> None:
     channel = plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])
     engine = cast(ScriptedEngine, channel.engines[0])
     answer = engine.generate
@@ -208,29 +228,48 @@ async def test_episodes_of_any_groups_run_at_once_up_to_a_cap(tmp_path: Path) ->
     engine.generate = slowly
     recorder = Recorder({"policy": channel})
     running = Running()
-    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder, hooks=[running])
-    await train(
-        rollouts, Words(), Counting(), policies_in(tmp_path), policy="words", channel="policy",
-        directory=tmp_path / "v", groups=5, groups_per_step=2, episodes_at_once=6, seed=1,
-    )  # fmt: skip
-    await rollouts.close()
+    policies = policies_in(tmp_path)
+    async with here(policies.ledger, recorder, policies.blobs, hooks=[running], places=6):
+        await train(
+            Words(), Counting(), policies, policy="words", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=5, groups_per_step=2, episodes_at_once=6, seed=1,
+        )  # fmt: skip
     # Four episodes a group: six at once are a group and half the next.
     assert running.most == 6 and running.groups_at_once >= 2
 
 
+async def test_runners_share_a_runs_episodes_and_none_is_played_twice(tmp_path: Path) -> None:
+    recorder = answering()
+    policies, first, second = policies_in(tmp_path), Notes(), Notes()
+    ledger = policies.ledger
+    async with (
+        here(ledger, recorder, policies.blobs, hooks=[first], places=2, name="one"),
+        here(FileLedger(tmp_path / "ledger"), recorder, policies.blobs, hooks=[second], places=2, name="two"),
+    ):
+        await train(
+            Words(), Counting(), policies, policy="words", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=4, groups_per_step=2, seed=1,
+        )  # fmt: skip
+    assert first.kinds.count("ended") and second.kinds.count("ended")  # each played some
+    assert first.kinds.count("ended") + second.kinds.count("ended") == 16
+    assert sorted(await ledger.read(table("train", EPISODES))) == sorted(
+        f"{group}/{number}" for group in range(1, 5) for number in range(1, 5)
+    )
+
+
 async def test_a_trainer_that_shares_the_engines_gpu_puts_them_to_sleep_around_each_step(tmp_path: Path) -> None:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
-    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder)
+    recorder = answering()
     channel = recorder.channels["policy"]
     engine: Any = channel.engines[0]
     assert isinstance(engine, ScriptedEngine)
     guarded: list[str] = []
     trainer = Colocated(Counting(), [channel], guard=lambda: guarded.append(engine.told[-1]))
     policies = policies_in(tmp_path)
-    await train(
-        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=2
-    )
-    await rollouts.close()
+    async with here(policies.ledger, recorder, policies.blobs):
+        await train(
+            Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=2,
+        )  # fmt: skip
     versions = await policies.versions("words")
     assert versions and engine.told[:4] == ["sleep", "wake", "load words@1", "sleep"][: len(engine.told[:4])]
     assert guarded and set(guarded) == {"sleep"}  # the guard runs once the engines are asleep
@@ -238,14 +277,13 @@ async def test_a_trainer_that_shares_the_engines_gpu_puts_them_to_sleep_around_e
 
 
 async def test_a_step_that_fails_leaves_the_weights_and_the_run_goes_on(tmp_path: Path) -> None:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
-    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder)
+    recorder = answering()
     policies, trainer = policies_in(tmp_path), Counting(fails=1)
-    await train(
-        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=3,
-        groups_per_step=1,
-    )  # fmt: skip
-    await rollouts.close()
+    async with here(policies.ledger, recorder, policies.blobs):
+        await train(
+            Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=3, groups_per_step=1,
+        )  # fmt: skip
     covered = await trained(policies.ledger)
     first, *rest = [covered[group] for group in sorted(covered)]
     assert first.error == "out of memory" and first.version is None  # written down, and the weights as they were
@@ -253,19 +291,19 @@ async def test_a_step_that_fails_leaves_the_weights_and_the_run_goes_on(tmp_path
     assert [version.number for version in await policies.versions("words")] == list(range(1, len(rest) + 1))
 
 
-async def test_the_job_keeps_every_episode_a_step_trained_on(tmp_path: Path) -> None:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
-    rollouts = RolloutJobs(LocalRunner(recorder=recorder), recorder, log=tmp_path / "log")
-    assert rollouts.blobs is not None
-    policies, trainer = Policies(FileLedger(tmp_path / "ledger"), rollouts.blobs), Counting()
-    await train(
-        rollouts, Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v", groups=2
-    )
-    job = rollouts.job("train")
+async def test_the_ledger_keeps_every_episode_a_step_trained_on(tmp_path: Path) -> None:
+    recorder = answering()
+    policies, trainer = policies_in(tmp_path), Counting()
+    async with here(policies.ledger, recorder, policies.blobs):
+        await train(
+            Words(), trainer, policies, policy="words", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=2,
+        )  # fmt: skip
+    ended = await policies.ledger.read(table("train", EPISODES))
     for version, batch in zip(await policies.versions("words"), trainer.batches, strict=True):
         assert version.batch is not None
-        cursor, slot, index = json.loads(await policies.blobs.read(version.batch))[0][0].split("/")
-        (record,) = [record for record in job.after(0) if record.episode.cursor == int(cursor)]
-        episode = await loaded(record, rollouts.blobs)  # the log still has it, long after it was acknowledged
+        run, group, number, slot, index = json.loads(await policies.blobs.read(version.batch))[0][0].split("/")
+        assert run == "train"
+        record = Record.from_json(cast(Mapping[str, Any], ended[f"{group}/{number}"]))
+        episode = await loaded(record, policies.blobs)
         assert episode.trajectories[slot].segments[int(index)] == batch[0].segment
-    await rollouts.close()

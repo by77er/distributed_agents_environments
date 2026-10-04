@@ -1,7 +1,7 @@
 """Group-relative policy optimisation over episodes: what to compare, how much each episode counts, what to train on.
 
-- **Groups.** Episodes of one row from one start are compared with each other (`complete_groups` gathers them from
-  a job's stream by a label).
+- **Groups.** Episodes of one row from one start are compared with each other: the loop asks for a group's episodes
+  together, and reads them once all have ended (`rollout_train.rollouts.scheduler`).
 - **Advantages** (Dr. GRPO): an episode's score minus its group's mean, without dividing by the group's spread
   (which favours groups that are nearly solved or nearly hopeless). Every token the policy sampled in the episode
   gets it: with several model slots, every slot's, so a team is rewarded together.
@@ -16,7 +16,7 @@
 
 import random
 import statistics
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -49,19 +49,6 @@ class Algorithm(Protocol):
     def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch:
         """What to train on from a group's episodes (of every outcome), within what the trainer can afford."""
         ...
-
-
-async def complete_groups(
-    episodes: AsyncIterator[Episode], *, by: str = "group", size: int
-) -> AsyncIterator[list[Episode]]:
-    """The episodes of a stream, gathered by the label `by`: each group is yielded when `size` of its episodes have
-    ended (whatever their outcome)."""
-    gathering: dict[str, list[Episode]] = {}
-    async for episode in episodes:
-        group = gathering.setdefault(episode.labels.get(by, ""), [])
-        group.append(episode)
-        if len(group) == size:
-            yield gathering.pop(episode.labels.get(by, ""))
 
 
 def group_advantages(scores: Sequence[float]) -> list[float] | None:
@@ -113,7 +100,7 @@ class Grpo:
         if advantages is None:
             return Batch(skipped="every episode scored the same", notes=notes)
         weighted = [
-            Weighted(segment, advantage, f"{episode.cursor}/{slot}/{index}")
+            Weighted(segment, advantage, f"{episode.run}/{episode.group}/{episode.number}/{slot}/{index}")
             for episode, advantage in zip(good, advantages, strict=True)
             if advantage != 0.0
             for slot, trajectory in episode.trajectories.items()

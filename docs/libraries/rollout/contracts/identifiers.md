@@ -24,8 +24,8 @@ A ULID is 48 bits of Unix time in milliseconds and 80 random bits, written as 26
 Identifiers made from one sort by the time they were made. Runners and services make them; task code does not,
 because it has no randomness of its own under a durable runner ([determinism](../determinism.md)).
 
-Identifiers above the harness are defined where they are used: a job, a ticket and a cursor in
-[rollouts](../../rollout-train/rollouts.md), a channel's weights version in
+Identifiers above the harness are defined where they are used: a training run, a group, an episode and an attempt
+in [rollouts](../../rollout-train/rollouts.md), a channel's weights version in
 [channels](../../rollout-train/channels.md#publishing-weights).
 
 ## Rules

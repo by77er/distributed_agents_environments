@@ -3,101 +3,87 @@
 Code: `rollout_train.rollouts` · See [episodes](episodes.md), [training](training.md),
 [API reference](../../guide/reference.md#rollout_trainrollouts)
 
-A rollout job runs a program's rows, many at a time, and delivers the finished runs as one stream of episodes. The
-caller, typically whoever trains, decides what to run, how often and how to group it: a job knows no algorithm.
+A run asks for episodes in the [ledger](policies.md#the-ledger), and runners play them. The run decides what to play,
+how often and how to group it; a runner knows no algorithm, and the run never learns where its episodes were played.
+Several runners, on one machine or many, share the work of every run whose ledger they reach: which machine plays a
+group's episodes is only a matter of where runners are.
 
 ```python
-job = await jobs.start(program=program, binding=binding, in_flight=5, name="train")
-ticket = await job.run({"word": "yes"}, labels={"group": "0001"}, count=4)
-episodes = await ticket.episodes()                 # the ticket's four, once all have ended
-async for episode in job.episodes(cursor):         # or the whole stream, while runs are still going
-    ...
-await job.acknowledge(episode.cursor)
-await job.publish("policy", "miner@3", "/versions/miner@3/weights", 3)
+await plan(ledger, "train", Plan(program, binding), fence)        # how the run's episodes are played
+await ledger.append(table("train", GROUPS), "1", {"parameters": row, "episodes": 4}, fence)
+async with playing(EpisodeRunner("host/train", ledger, runner, recorder, blobs, places=6)):
+    episodes = await episodes_of(ledger, blobs, "train", 1, 4)     # the group's four, once all have ended
 ```
 
-[`Jobs`](../../guide/reference.md#jobs), [`Job`](../../guide/reference.md#job) and
-[`Ticket`](../../guide/reference.md#ticket) are protocols. A training loop written against them holds jobs in its
-own process or jobs served elsewhere, and cannot tell which.
+The [training loop](training.md) writes the plan and the groups; a [profile](../../guide/deploying.md) opens a runner
+beside it. Everything goes through the ledger, so the run and its runners may be in one process or on different
+machines.
 
-| | In this process | Over HTTP |
+## What a run writes
+
+| Table | Keyed by | Holds |
 |---|---|---|
-| Jobs | `RolloutJobs(runner, recorder, log=..., blobs=...)`, over any [`Runner`](../rollout/README.md#runner) | `RolloutClient(url, blobs)` |
-| Served by | | `rollout_train.rollouts.service.create_app(jobs)`, which a profile's `serve` starts ([deploying](../../guide/deploying.md)) |
+| `runs/RUN/plans` | the fence the run's loop took | how its episodes are played from then on: a [`Plan`](../../guide/reference.md#plan), the program (each group's start is its row) and the [`RunBinding`](../rollout/README.md#run-specifications) |
+| `runs/RUN/groups` | group | its row, the start each of its episodes is given (`parameters`), and how many episodes it asks for (`episodes`) |
 
-## A job
+An episode is `GROUP/EPISODE`, numbered from 1 within its group. A group with a result (`runs/RUN/results`) asks for
+nothing more.
 
-- **A job** runs one program under one binding, at most `in_flight` runs at a time. Its id is its `name`, or `j_`
-  and ten hexadecimal digits.
-- **A named job is found again.** `RolloutJobs.start` under the name of a job that is still open closes that job
-  first, and the new job goes on over its log.
-- **A ticket** is `count` runs of one row: `job.run(parameters, labels=..., count=...)`. Each run is the job's
-  program with the row as its parameters, so the runs of a ticket start alike. A ticket's id is `t_` and ten
-  hexadecimal digits.
-- **A ticket asked for with a `key`** is `t_KEY`, and asking again is asking for the same ticket: a caller that
-  died after asking gets it back, with whatever episodes it has.
-- **Labels** go to the runs and to their episodes. The job adds `job`, `ticket` and `episode` (the run's number
-  within its ticket).
-- **The log** numbers episodes from 1 in the order their runs ended. That number is the episode's `cursor`.
+## What runners write
 
-## Guarantees
+| Table | Keyed by | Holds |
+|---|---|---|
+| `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when |
+| `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended |
+| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt its runner cut short by closing, and why |
 
-- **Every run is an episode**, whatever its outcome: completed, failed (the program raised, or the run could not
-  start), cancelled. Counts stay exact, and a ticket is complete when its count is.
-- **Admission.** Runs start in the order their tickets were queued, as many at a time as `in_flight` leaves room
-  for: the rest of a ticket's runs start as runs end, and then the next ticket's. With `in_flight` six and groups of
-  four, a group and half the next run at once.
-- **Refusal.** A `guard` given to `RolloutJobs` is called before runs are started and raises to refuse them: a
-  ticket none of whose runs has started is refused, and the rest of one that has begun wait until runs end. A
-  ticket that was queued when its job closed is refused too. `ticket.episodes()` then raises
-  [`Refused`](../../guide/reference.md#refused), in this process and over HTTP alike. `RolloutTicket.refused`
-  holds the reason.
-- **A ticket's episodes** are returned by `ticket.episodes()` once every one of its runs has ended, in the order
-  they ended. `RolloutTicket.ready(seconds)` waits that long at most and says whether the ticket is over.
-- **Asynchronous training** is reading the stream while runs are in flight. Nothing waits for a batch: each sampled
-  token carries the weights version it was sampled at, and the caller decides how stale it tolerates data.
-- **Acknowledging** a cursor says that everything through it has been consumed. The job then lets go of every
-  ticket whose episodes are all acknowledged. Until then `job.ticket(id)` finds a ticket by its id, as
-  `jobs.job(id)` finds a job: the HTTP service holds nothing else.
-- **A caller that stops** goes on from its cursor: a job started again under its name knows how far its caller got.
-- **The recorder forgets a run** once its episode is assembled: the episode holds everything training needs of it.
-- **Closing** a job stops admission, cancels its runs in the runner, refuses every ticket that is not over to
-  whoever waits on it, and ends every `episodes` stream.
+- **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
+  the one whose append is refused looks for other work.
+- **A claim holds while its runner keeps its fence.** A runner takes the fence of `runners/NAME` when it starts. Its
+  claims hold until it is started again (under the same name, its fence moves on) or it notes an attempt as
+  interrupted. An episode with no record and no claim that holds is open: the next claim is its next attempt.
+- **Every attempt that ends is an episode**, whatever its outcome: completed, failed (the program raised, or the run
+  could not start), cancelled. The first record of an episode is its record.
+- **An episode's trajectories and its run's events go to the blob store**; the record names both
+  ([the record](#the-record)).
 
-`job.publish(channel, adapter, path, version)` serves new weights on a channel and returns the version they are
-served as: the number the caller's policy gives them ([channels](channels.md#publishing-weights),
-[policies](policies.md)). `job.status()` counts the runs queued and running, the episodes
-finished and the cursor acknowledged.
+## A runner
 
-## The log
+[`EpisodeRunner(name, ledger, runner, recorder, blobs, places, ...)`](../../guide/reference.md#episoderunner) claims
+open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
 
-A job given a `log` directory keeps every episode, from the moment its run ends.
+- **`places`**: how many episodes it plays at once. When one ends it looks again at once; otherwise every `every`
+  seconds.
+- **Oldest group first.** Open episodes are claimed in the order their groups were decided, across every run it
+  serves.
+- **What it serves.** A run whose plan's recorded models are all on channels its recorder serves, and whose local
+  imports are all among `imports` (the tool sets it has). With `runs`, those runs only.
+- **`guard`** is called before claiming, and raises to wait: a machine short of memory claims nothing until it has
+  room.
+- **An episode is played** as the run's program with the group's `parameters` as its row, labelled `run`, `group`
+  and `episode`. When it ends, the runner takes the run's segments from the recorder, assembles the
+  [episode](episodes.md), stores it and appends its record. The recorder then forgets the run.
+- **Closing** cancels what it plays, in the runner too, and notes each attempt in `interrupted`: the episode is open
+  again, for any runner with room.
+
+`serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
+[`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`
+episodes of a group have records and returns them, trajectories and all.
+
+## The record
 
 | Kept | Where | What |
 |---|---|---|
-| A [`Record`](../../guide/reference.md#record) per episode | one line of `log/JOB/episodes.jsonl` | Everything about the episode but its trajectories' segments: labels, outcome, result, rewards, tokens sampled by slot. It names two blobs |
-| The trajectories | a blob | Each slot's segments, spans and logprobs |
-| The run's events | a blob | Its tool calls and their results, observations and rewards, as the runner recorded them |
-| What was asked for | one line of `log/JOB/tickets.jsonl` per ticket | The row, the labels and the count, as they were asked |
-| How far the caller got | `log/JOB/acknowledged` | The cursor acknowledged |
+| A [`Record`](../../guide/reference.md#record) per episode | `runs/RUN/episodes`, under `GROUP/EPISODE` | everything about the episode but its trajectories' segments: labels, outcome, result, rewards, tokens sampled by slot. It names two blobs |
+| The trajectories | a blob | each slot's segments, spans and logprobs |
+| The run's events | a blob | its tool calls and their results, observations and rewards, as the runner recorded them |
 
-- **Nothing is deleted.** Acknowledging records the caller's cursor and frees the job's memory. `job.episodes(cursor)`
-  reads the log from any cursor, trajectories and all, so earlier episodes can be trained on again.
-- **Blobs** go to the [`Blobs`](../../guide/reference.md#blobs) store the jobs are given, or to files under
-  `log/blobs`. They are JSON, compressed. How long they are kept is the store's business.
+- **Nothing is deleted.** Every episode stays in the ledger and can be read and trained on again (`loaded(record,
+  blobs)`), for as long as the blob store keeps its blobs.
+- **Blobs** go to the [`Blobs`](../../guide/reference.md#blobs) store the runner is given. They are JSON, compressed.
+  Runners on several machines need a store they all reach, as they need a ledger they all reach.
 - **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trajectory
   can be joined to what the action it sampled did. `events_of(record, blobs)` reads the events.
-- **A job started again runs what it still owes.** A ticket some of whose runs have no episode gets those runs
-  again, from the same row. A run the job itself cut short by closing is in the log as a cancelled episode whose
-  `detail` says so, and is not one of its ticket's episodes: it is one of the runs still owed.
-- **Without a log** a job holds episodes in memory until they are acknowledged, and then they are gone.
-
-## Over HTTP
-
-`RolloutClient` polls. A read of a ticket or of the stream waits on the server for news, up to a `wait` in seconds,
-and then answers with what there is. The routes are listed in `rollout_train.rollouts.service`. Episodes cross as
-their records, and the client reads their trajectories from the blob store, which both sides share. Jobs served over
-HTTP therefore need a log.
 
 ## Catalog
 
@@ -110,15 +96,14 @@ rows (easiest first), and how one start of a row is drawn. A row may name other 
 
 ## Watching
 
-[`JobHooks.on_job(event)`](../../guide/reference.md#jobhooks) receives what a job did, at the level its caller
-thinks at. Every event has `kind`, `job` and `at`.
+[`Hooks.on_note(event)`](../../guide/reference.md#hooks) receives what a runner and a run do, at the level they think
+at. Every event has `kind` and `at`; a runner's also have `runner`, a run's `run`.
 
-| `kind` | When | Also carries |
-|---|---|---|
-| `ticket` | a ticket is queued | `ticket`, `labels`, `count` |
-| `admitted` | a ticket's runs have started | `ticket`, `runs` |
-| `episode` | a run ended | `cursor`, `ticket`, `run`, `labels`, `outcome`, `detail`, `reward`, `info`, and `sampled`: tokens sampled by slot |
-| `published` | weights were published | `channel`, `adapter`, `version` |
-| anything else | the caller's `job.note(kind, payload)` | the payload. The training loop notes each group's `result` and each `step` ([the record](training.md#the-record)). |
+| `kind` | From | When | Also carries |
+|---|---|---|---|
+| `started` | a runner | an episode's run started | `run`, `group`, `episode`, `run_id` |
+| `ended` | a runner | an episode was recorded | `run`, `group`, `episode`, `run_id`, `labels`, `outcome`, `detail`, `reward`, `info`, and `sampled`: tokens sampled by slot |
+| `published` | the run | weights were published | `channel`, `adapter`, `version` |
+| `result`, `step` | the run | a group's result, a step's outcome | [the record](training.md#the-record) |
 
 The [monitor](monitor.md)'s feed is one such hook.

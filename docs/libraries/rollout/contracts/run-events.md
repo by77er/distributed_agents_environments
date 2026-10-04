@@ -5,7 +5,7 @@ Code: `rollout.contracts.events` · See [`RunEvent`](../../../guide/reference.md
 
 Run events are the typed record of what happened in a run. Every runner produces the same stream: the `LocalRunner`
 keeps it in memory, the `DurableRunner` in its store
-([durability](../../../implementations/rollout-durable/README.md#state)). Rollout jobs, hooks, the monitor, clients
+([durability](../../../implementations/rollout-durable/README.md#state)). Episode runners, hooks, the monitor, clients
 and tests read these events, never a runner's internals.
 
 ## The stream
@@ -73,7 +73,7 @@ logprobs never appear in run events; a recorder keeps them ([recorder](../../rol
 
 | Reader | Reads |
 |---|---|
-| A rollout job | `run.created` (labels), rewards on observations and `reward.assigned`, `output.emitted` of kind `result`, `training.excluded`, and the terminal event: together an [episode](../../rollout-train/episodes.md#how-an-episode-is-assembled) |
+| An [episode runner](../../rollout-train/rollouts.md#a-runner) | `run.created` (labels), rewards on observations and `reward.assigned`, `output.emitted` of kind `result`, `training.excluded`, and the terminal event: together an [episode](../../rollout-train/episodes.md#how-an-episode-is-assembled) |
 | [Hooks](../hooks.md) | every event, as it is recorded |
 | A client of a conversation | `output.emitted`: what the agent said, and to whom |
 | The eviction of idle runs | `run.suspended`: since when a run has waited |

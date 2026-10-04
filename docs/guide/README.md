@@ -31,7 +31,7 @@ Beyond the guide:
 | Runs that survive their process | [Durable runner](../implementations/rollout-durable/README.md) |
 | Computers for tasks: shell and file tools on an environment | [Computers](../implementations/rollout-computers.md) |
 | Long episodes in a context that fits any model | [Memory](../libraries/rollout/memory.md) |
-| Training: rollout jobs, episodes, the training loop, policies, recorded channels | [Rollouts](../libraries/rollout-train/rollouts.md), [episodes](../libraries/rollout-train/episodes.md), [training](../libraries/rollout-train/training.md), [policies](../libraries/rollout-train/policies.md), [channels](../libraries/rollout-train/channels.md), [recorder](../libraries/rollout-train/recorder.md) |
+| Training: episode runners, episodes, the training loop, policies, recorded channels | [Rollouts](../libraries/rollout-train/rollouts.md), [episodes](../libraries/rollout-train/episodes.md), [training](../libraries/rollout-train/training.md), [policies](../libraries/rollout-train/policies.md), [channels](../libraries/rollout-train/channels.md), [recorder](../libraries/rollout-train/recorder.md) |
 | What a profile names: an engine, a trainer, a model family's renderer | [vLLM engine](../implementations/rollout-vllm.md), [LoRA trainer](../implementations/rollout-lora.md), [Qwen renderers](../implementations/rollout-qwen.md), [Gemma renderers](../implementations/rollout-gemma.md) |
 
 ## Concepts in one place
@@ -67,7 +67,7 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 | `rollout.local` | `rollout` | `LocalRunner`, `LocalRunContext`: runs in this process |
 | `rollout.catalog` | `rollout` | `Catalog`, `Row`, `binding_for` |
 | `rollout.testing` | `rollout` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
-| `rollout_train.rollouts` | `rollout-train` | `Jobs`, `Job`, `Ticket`, `Episode`, `RolloutJobs`; `RolloutClient` in `rollout_train.rollouts.service` |
+| `rollout_train.rollouts` | `rollout-train` | `EpisodeRunner`, `Plan`, `plan`, `episodes_of`, `playing`, `Hooks`, `Episode`, `Record` |
 | `rollout_train` | `rollout-train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `Colocated`, `Policies`, `FileLedger` |
 | `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Segment`, `Renderer` |
 | `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |

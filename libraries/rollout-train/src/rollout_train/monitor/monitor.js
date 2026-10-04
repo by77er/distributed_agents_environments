@@ -89,8 +89,8 @@ const meter = (name, used, total, says) => {
 const pairs = entries => h("dl", { class: "pairs" }, entries.flatMap(([key, value]) => [h("dt", {}, key), h("dd", {}, value)]));
 
 // A group's stages, up to its result; what is trained on it is its step's (a step is shown as a thing of its own).
-const STAGES = ["decided", "asked", "played", "recorded"];
-const AT = { decided: [1, "to ask"], waiting: [2, "to start"], playing: [2, ""], ended: [3, "recording"], done: [4, ""] };
+const STAGES = ["asked", "claimed", "played", "recorded"];
+const AT = { waiting: [1, "to claim"], playing: [2, ""], ended: [3, "recording"], done: [4, ""] };
 function stages(group) {
   const [at, waits] = AT[group.stage];
   const says = group.stage === "playing" ? `playing ${group.ended}/${group.count}` : waits;
@@ -255,7 +255,7 @@ function runsTree(here) {
   const system = state.system, showing = here.kind === "episode" ? state.episode?.labels : null;
   const nodes = [link("#/runs", { class: `label${here.kind === "runs" ? " here" : ""}` }, `Runs · ${system.runs.length}`)];
   for (const run of system.runs) {
-    const runKey = `run:${run.run}`, mine = here.run === run.run || showing?.job === run.run;
+    const runKey = `run:${run.run}`, mine = here.run === run.run || showing?.run === run.run;
     const runOpen = folds[runKey] ?? (mine || system.runs.length === 1);
     nodes.push(node(runPlace(run.run), here.kind === "run" && here.run === run.run, twist(runKey, runOpen),
       runDot(run), h("span", { class: "name" }, run.run),
@@ -263,7 +263,7 @@ function runsTree(here) {
     if (!runOpen) continue;
     const groups = groupsOf(run), children = [];
     const inGroup = number => (here.kind === "group" && here.run === run.run && here.number === number)
-      || (showing?.job === run.run && Number(showing?.group) === number);
+      || (showing?.run === run.run && Number(showing?.group) === number);
     const groupRows = (number, skipped) => {
       const group = groups.get(number);
       if (!group) return [];
@@ -310,7 +310,7 @@ function runsTree(here) {
     }
     nodes.push(h("div", { class: "children" }, children));
   }
-  const others = state.runs.filter(run => !run.labels.job);
+  const others = state.runs.filter(run => !run.labels.run);
   nodes.push(h("div", { class: "label" }, "Outside a run"));
   nodes.push(node("#/episodes", here.kind === "outside", h("span", { class: "name" }, "Episodes outside a run"), h("span", { class: "tag" }, String(others.length))));
   return nodes;
@@ -378,16 +378,11 @@ function drawRun(name) {
   const committed = run.steps.filter(step => step.state === "committed").length;
   const throughput = channel?.throughput.at(-1);
   const width = Math.max(300, document.getElementById("main").clientWidth - 100);
+  const from = run.steps[0]?.parent, current = run.steps.findLast(step => step.state === "committed")?.makes;
   const head = h("div", { class: "head" }, h("h1", {}, `Run ${run.run}`),
-    specs(spec("state", `${running(run)} · ${wrote(run)}`, run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""), policy ? spec("trains", policy.policy, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
+    specs(spec("state", `${running(run)} · ${wrote(run)}`, run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""), policy ? spec("trains", policy.policy, "violet") : null,
+      spec("from", from ?? (run.steps.length ? "the base model" : "–")), current ? spec("now", current, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
       spec("fence", run.fence ?? "–"), spec("directory", run.directory ?? "–"), run.starts > 1 ? spec("started", `${run.starts} times`) : null));
-  const kpis = h("div", { class: "kpis" },
-    kpi("Steps", `${run.steps.length}`, `${committed} committed · ${run.next.length} groups toward the next`),
-    kpi("Groups done", `${run.done.length}`, `${trained} trained on, of ${run.decided} decided`),
-    kpi("Rows unlocked", last ? `${last.unlocked}` : "–", "of the catalog"),
-    kpi("Policy head", policy ? versionOf(policy.head) : "–", policy ? `${policy.versions.length} versions` : ""),
-    kpi("Inference", throughput ? `${figure(throughput.tokens_per_second)} tok/s` : "–", throughput ? `${figure(throughput.mean_concurrency)} requests at once` : "no measurement yet"),
-    kpi("Episodes ended", run.job ? `${run.job.episodes}` : "–", run.job ? `${tokens(run.job.sampled)} tokens sampled` : "its job's log is not here"));
   const groups = groupsOf(run), stepping = run.steps.filter(step => step.state === "stepping");
   const waiting = run.next.filter(number => groups.get(number)?.line);
   const member = number => {
@@ -416,6 +411,21 @@ function drawRun(name) {
     task.groups += 1; task.trained += line.update ? 1 : 0; task.last = line; tasks.set(line.task, task);
   }
   const played = [...tasks].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+  // From what it started, where it is now, and how its groups went, early and late.
+  const solvedOf = lines => lines.flatMap(line => line.solved), share = outcomes => outcomes.length ? `${Math.round(100 * outcomes.filter(Boolean).length / outcomes.length)}%` : "–";
+  const outcomes = solvedOf(run.done), half = Math.ceil(run.done.length / 2);
+  const all = run.done.filter(line => line.solved.length && line.solved.every(Boolean)).length, none = run.done.filter(line => line.solved.length && !line.solved.some(Boolean)).length;
+  const kpis = h("div", { class: "kpis" },
+    kpi("Started from", from ? versionOf(from) : run.steps.length ? "base" : "–", from ?? (run.steps.length ? "the base model" : "no step yet")),
+    kpi("Now", current ? versionOf(current) : "–", policy ? `${policy.versions.length} versions kept` : "no step committed"),
+    kpi("Steps", `${run.steps.length}`, `${committed} committed · ${run.next.length} waiting`),
+    kpi("Groups done", `${run.done.length}`, `${trained} trained on, of ${run.decided} decided`),
+    kpi("Groups solved", `${all} · ${run.done.length - all - none} · ${none}`, "all · some · none solved"),
+    kpi("Episodes", `${outcomes.length}`, `${outcomes.filter(Boolean).length} solved · ${share(outcomes)}`),
+    kpi("Solved, early → late", run.done.length > 1 ? `${share(solvedOf(run.done.slice(0, half)))} → ${share(solvedOf(run.done.slice(half)))}` : "–", run.done.length > 1 ? `groups 1–${half}, then the ${run.done.length - half} after` : ""),
+    kpi("Mean reward", figure(mean(run.done.flatMap(line => line.rewards))), "over every episode done"),
+    kpi("Rows unlocked", last ? `${last.unlocked}` : "–", "of the catalog"),
+    kpi("Inference", throughput ? `${figure(throughput.tokens_per_second)} tok/s` : "–", throughput ? `${figure(throughput.mean_concurrency)} requests at once` : "no measurement yet"));
   return [head, elsewhere(run), kpis,
     h("div", { class: "section-title" }, h("h2", {}, "In flight"),
       h("span", {}, [`${run.open.length} groups playing`, stepping.length ? `step ${stepping.map(step => step.step).join(", ")} being taken` : null].filter(Boolean).join(" · "))), flight,
@@ -529,7 +539,7 @@ function drawGroup(here) {
   const failures = result?.failures?.length ? card("Why episodes failed", `${result.failures.length}`, result.failures.map(failure => h("p", { class: "error-text" }, failure))) : null;
   const run = state.system.runs.find(each => each.run === group.run);
   return [head, run ? elsewhere({ ...run, episodes_at: group.episodes_at }) : null, kpis, group.stage !== "done" ? card("Stage", "", stages(group)) : null,
-    h("div", { class: "section-title" }, h("h2", {}, "Episodes"), h("span", {}, group.ticket ? `${group.count ?? "?"} asked for under ticket ${group.ticket}` : "")), episodes,
+    h("div", { class: "section-title" }, h("h2", {}, "Episodes"), h("span", {}, group.count ? `${group.count} asked for · ${group.playing.length ? `${group.playing.map(claim => claim.runner).filter((name, index, names) => names.indexOf(name) === index).join(", ")} playing` : `${group.ended} ended`}` : "")), episodes,
     h("div", { class: "cols" }, what, start), failures];
 }
 
@@ -548,7 +558,7 @@ function drawEpisode(here) {
   }
   const ordered = new Map([...slots].sort(([a], [b]) => a.localeCompare(b)));
   // An episode of a training run is of a group, whose record says its task; another says it in its labels, if at all.
-  const run = labels.job ? state.system.runs.find(each => each.run === labels.job) : null;
+  const run = labels.run ? state.system.runs.find(each => each.run === labels.run) : null;
   const group = run && labels.group ? groupsOf(run).get(Number(labels.group)) : null;
   const task = group?.task ?? labels.task, title = group?.title ?? labels.title;
   const head = h("div", { class: "head" }, h("h1", {}, labels.episode ? `Episode ${labels.episode}` : episode.run_id.slice(-8)),
@@ -1067,7 +1077,7 @@ function drawPolicies(here) {
 
 // Every run of the ledger: running ones first, each with how it is going.
 function drawRuns() {
-  const system = state.system, others = state.runs.filter(run => !run.labels.job);
+  const system = state.system, others = state.runs.filter(run => !run.labels.run);
   const tiles = system.runs.map(run => {
     const recent = run.done.slice(-12), solved = recent.flatMap(line => line.solved);
     const committed = run.steps.filter(step => step.state === "committed").length;
@@ -1428,18 +1438,19 @@ function machine(half) {
         kpi("requests at once", figure(latest.mean_concurrency)), kpi("each", `${figure(latest.tokens_per_second_per_stream)} tok/s`))]
         : h("p", { class: "muted" }, "No request has been measured yet."));
   });
-  const jobs = system.jobs.map(job => card(`Job ${job.job}`, `${job.directory.split("/").at(-1)} · ${job.tickets} tickets`, h("div", { class: "kpis" },
-    kpi("episodes in its log", `${job.episodes}`, Object.entries(job.outcomes).map(([outcome, count]) => `${count} ${outcome}`).join(", ")),
-    kpi("acknowledged", `${job.acknowledged} of ${job.last}`), kpi("tokens sampled", tokens(job.sampled)))));
+  const runners = system.runners.map(runner => card(`Runner ${runner.runner}`, runner.last ? `last claimed ${span(Math.max(0, system.at - runner.last))} ago` : "has claimed nothing",
+    [h("div", { class: "kpis", style: "margin-bottom:12px" }, kpi("playing", String(runner.playing.length)), kpi("claims", String(runner.claims)), kpi("fence", String(runner.fence ?? "–"))),
+      runner.playing.length ? table([["run"], ["group", "n"], ["episode", "n"], ["attempt", "n"], ["since", "n"]],
+        runner.playing.map(claim => [claim.run, `#${claim.group}`, `E${claim.episode}`, String(claim.attempt), claim.at ? `${span(Math.max(0, system.at - claim.at))}` : "–"])) : null]));
   const ledger = card("Ledger", `${system.ledger_at} · ${bytes(system.kept.versions)} of versions and ${bytes(system.kept.episodes)} of episodes kept`,
     table([["scope"], ["fence", "n"]], Object.entries(system.ledger.fences)), h("div", { style: "height:14px" }),
     table([["table"], ["records", "n"]], Object.entries(system.ledger.tables)));
-  return [h("div", { class: "section-title", id: "section-machine" }, h("h2", {}, "Machine"), h("span", {}, "the machine this monitor runs on, the engines and jobs it can read, and the ledger")),
-    h("div", { class: "cols" }, memory, gpu, busy, meters), h("div", { class: "cols" }, ...channels, ...jobs, ledger)];
+  return [h("div", { class: "section-title", id: "section-machine" }, h("h2", {}, "Machine"), h("span", {}, "the machine this monitor runs on, the engines it can read, the runners in the ledger, and the ledger")),
+    h("div", { class: "cols" }, memory, gpu, busy, meters), h("div", { class: "cols" }, ...channels, ...runners, ledger)];
 }
 
 function drawOthers() {
-  const others = state.runs.filter(run => !run.labels.job);
+  const others = state.runs.filter(run => !run.labels.run);
   return [h("div", { class: "head" }, h("h1", {}, "Episodes outside a run"), h("div", { class: "sub" }, "Episodes in the feed that no training run asked for: evaluations, tests, programs run by hand.")),
     others.length ? h("div", { class: "tiles" }, others.map(run => link(episodePlace(run.run_id), { class: `tile rail ${stateKind(run.state)}` },
       h("header", {}, h("b", {}, run.labels.title ?? run.labels.task ?? run.run_id.slice(-8)), h("span", { class: "what" }, ""), mark(run.state)),
@@ -1464,8 +1475,8 @@ function redraw() {
   else if (here.kind === "group") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], ...stepCrumb(here.run, here.number), [`Group #${here.number}`, ""]); content = drawGroup(here); }
   else if (here.kind === "episode") {
     const labels = state.episode?.labels ?? {};
-    if (labels.job && labels.group) crumbs.push([`Run ${labels.job}`, runPlace(labels.job)], ...stepCrumb(labels.job, Number(labels.group)),
-      [`Group #${Number(labels.group)}`, groupPlace(labels.job, Number(labels.group))]);
+    if (labels.run && labels.group) crumbs.push([`Run ${labels.run}`, runPlace(labels.run)], ...stepCrumb(labels.run, Number(labels.group)),
+      [`Group #${Number(labels.group)}`, groupPlace(labels.run, Number(labels.group))]);
     else crumbs.push(["Episodes outside a run", "#/episodes"]);
     crumbs.push([labels.episode ? `Episode ${labels.episode}` : "Episode", here.slot ? episodePlace(here.id) : ""]);
     if (here.slot) crumbs.push([`Rollout ${here.slot}`, ""]);

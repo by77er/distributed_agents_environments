@@ -144,7 +144,7 @@ segment's advantage, with no weight, ratio, clip or stop at `max_kl`, and record
 
 ## Metrics
 
-A step returns these. The training loop keeps them with the version the step made, and sends them to the job in its
+A step returns these. The training loop keeps them with the version the step made, and sends them to its hooks in its
 `step` note ([the record](../libraries/rollout-train/training.md#the-record)). Under the likelihood objective the
 weight, ratio, clip, mismatch and KL metrics are zero.
 

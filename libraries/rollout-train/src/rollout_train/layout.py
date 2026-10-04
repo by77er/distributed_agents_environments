@@ -2,8 +2,6 @@
 
 LEDGER = "ledger"
 """The run's tables, the policies' versions and the fences, in files (unless the profile names another place)."""
-JOBS = "jobs"
-"""The rollout jobs' logs, a directory per job."""
 FEED = "feed"
 """The monitor's feed."""
 BLOBS = "blobs"

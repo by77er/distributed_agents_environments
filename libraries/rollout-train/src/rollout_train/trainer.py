@@ -20,7 +20,7 @@ class Weighted:
     segment: Segment
     advantage: float
     source: str = ""
-    """Where the segment is from, for the record of what a step trained on: `cursor/slot/index` in the job's log."""
+    """Where the segment is from, for the record of what a step trained on: `RUN/GROUP/EPISODE/SLOT/INDEX`."""
 
 
 @dataclass(frozen=True)

@@ -35,5 +35,5 @@ Rules:
   seen like any other sample.
 - Hooks are observers. They cannot change a request or a reply; code that must is a `ModelEndpoint`.
 
-The [monitor](../rollout-train/monitor.md) is built on hooks. A rollout job has hooks of its own
-([`JobHooks`](../rollout-train/rollouts.md#watching)).
+The [monitor](../rollout-train/monitor.md) is built on hooks. Episode runners and the training loop have hooks of
+their own ([`Hooks`](../rollout-train/rollouts.md#watching)).

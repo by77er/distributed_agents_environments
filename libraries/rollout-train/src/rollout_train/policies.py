@@ -49,7 +49,7 @@ class Version:
     state: Manifest | None = None
     """What a trainer goes on from: the optimizer's state, say."""
     batch: BlobReference | None = None
-    """What it was trained on: the segments, each as its place in a job's log and its advantage."""
+    """What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage."""
     metrics: Mapping[str, float] = field(default_factory=dict[str, float])
     made: float = 0.0
     """When, in seconds since the epoch."""

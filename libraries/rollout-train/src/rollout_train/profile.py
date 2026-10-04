@@ -1,7 +1,8 @@
 """A deployment, described: the channels and the engines behind them, the trainer, the runner, where tool sets live.
 
-Whoever deploys writes this down once (a TOML file, or the dataclasses below) and opens it; whoever trains gets
-`jobs` and a `trainer` and never learns what stands behind them. Scaling is a change here: more engines behind a
+Whoever deploys writes this down once (a TOML file, or the dataclasses below) and opens it; whoever trains gets the
+`policies`, a `trainer` and a way to `publish` versions, while a runner plays the episodes the run asks for in the
+ledger, and never learns what stands behind them. Scaling is a change here: more engines behind a
 channel, a durable runner instead of an in-process one, a tool set at a URL instead of in this process.
 
 Engines, renderers, the trainer and tool sets are named as `module:name`, and what the profile says of each is
@@ -12,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import math
+import socket
 import time
 import tomllib
 from collections.abc import AsyncGenerator, Callable, Coroutine, Mapping
@@ -26,11 +28,11 @@ from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Colocated, Ledger, Policies, Trainer
 from rollout_train.inference import Channel, Engine, Limits
-from rollout_train.layout import BLOBS, FEED, JOBS, LEDGER, PROCESSES
+from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION, opened
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
-from rollout_train.rollouts import RolloutJobs
+from rollout_train.rollouts.scheduler import EpisodeRunner
 
 __all__ = ["ChannelSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
 
@@ -87,13 +89,14 @@ def require_memory(gib: float, purpose: str) -> None:
 @dataclass(frozen=True)
 class Profile:
     directory: Path
-    """The run's state: adapters, the job's log, metrics, the monitor's feed."""
+    """The run's state: versions' files while in use, the monitor's feed, and (unless the profile names other places)
+    its ledger and blobs."""
     channels: Mapping[str, ChannelSpec]
     trainer: TrainerSpec | None = None
     runner: str = "local"
     """`local` runs episodes in this process; `durable` records them so that they survive it."""
     serve: str | None = None
-    """`host:port` to serve the rollout jobs and the model endpoint for harnesses on."""
+    """`host:port` to serve the model endpoint for harnesses on."""
     address: str | None = None
     """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
@@ -170,7 +173,8 @@ def _only(table: dict[str, Any], where: str, *known: str) -> dict[str, Any]:
 
 
 class Platform:
-    """An open profile: `jobs` to run episodes with, a `trainer` to step, and the `policies` it trains."""
+    """An open profile: the `policies` it trains, a `trainer` to step, `publish` to serve a version, and a `runner` that
+    plays the episodes its run asks for (`rollout_train.rollouts.scheduler.EpisodeRunner`)."""
 
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
@@ -183,12 +187,14 @@ class Platform:
         """The policy the profile's trainer trains."""
         self.channels: dict[str, Channel] = {}
         self.recorder: Recorder
-        self.jobs: RolloutJobs
+        self.runner: EpisodeRunner
+        self.feed: Any
+        """The monitor's feed (`RunFeed`): the loop's results and steps go there too."""
         self.trainer: Trainer | None = None
         self.tool_bindings: dict[str, ToolBinding] = {}
         """Where a run finds each tool set the profile names (for a run's binding)."""
         self.blobs: Blobs
-        """Where the jobs keep their episodes."""
+        """Where episodes' trajectories and events, and versions' files, are kept."""
 
     @classmethod
     async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> "Platform":
@@ -255,11 +261,20 @@ class Platform:
             raise ValueError(f"runner is {profile.runner!r}: it is local or durable")
         await runner.launch()
         stack.push_async_callback(runner.close)
-        guard = _needs(profile.runs_gib, "to run more episodes")
-        self.jobs = RolloutJobs(
-            runner, self.recorder, log=directory / JOBS, blobs=self.blobs, hooks=[feed], guard=guard
+        self.feed = feed
+        self.runner = EpisodeRunner(
+            f"{socket.gethostname()}/{directory.name}",  # (the same name when started again: what it claimed is free)
+            self.ledger,
+            runner,
+            self.recorder,
+            self.blobs,
+            places=profile.episodes_at_once,
+            imports=list(tool_sets),
+            runs=[directory.name],
+            hooks=[feed],
+            guard=_needs(profile.runs_gib, "to run more episodes"),
         )
-        stack.push_async_callback(self.jobs.close)
+        _background(stack, self.runner.serve())
         self.trainer = learner
         if learner is not None and described is not None and described.colocated:
             ready = _needs(profile.training_gib, "to train")
@@ -269,6 +284,10 @@ class Platform:
             _background(stack, self._serve(profile.serve))
         return self
 
+    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
+        """Serve new weights on a channel from now on; returns the version they are served as."""
+        return await self.recorder.publish(channel, adapter, path, version)
+
     async def _measure(self, feed: Any, every: float = 60.0) -> None:
         """Tell whoever watches how the engines are doing, once a minute."""
         while True:
@@ -277,18 +296,17 @@ class Platform:
                 counts = channel.take()
                 if counts["requests"]:
                     at = round(time.time(), 3)
-                    feed.on_job({"kind": "inference", "at": at, "channel": name, "version": channel.version, **counts})
+                    feed.on_note({"kind": "inference", "at": at, "channel": name, "version": channel.version, **counts})
 
     async def _serve(self, address: str) -> None:
-        """Rollout jobs and the harness endpoint, over HTTP."""
+        """The harness endpoint, over HTTP."""
         import uvicorn
         from starlette.applications import Starlette
 
         from rollout_train.recorder.compat import create_app as harness_endpoint
-        from rollout_train.rollouts.service import create_app as rollout_service
 
         host, _, port = address.rpartition(":")
-        app = Starlette(routes=[*harness_endpoint(self.recorder).routes, *rollout_service(self.jobs).routes])
+        app = Starlette(routes=list(harness_endpoint(self.recorder).routes))
         await uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning")).serve()
 
 

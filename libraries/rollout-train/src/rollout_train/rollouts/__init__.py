@@ -1,36 +1,22 @@
-"""Rollouts: run a task's rows at scale and read the finished episodes as a stream
-(docs/libraries/rollout-train/rollouts.md)."""
+"""Rollouts: the episodes a run asks for in the ledger, claimed and played by runners wherever they are, and read
+back once they end (docs/libraries/rollout-train/rollouts.md)."""
 
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory, events_of, loaded, stored
-from rollout_train.rollouts.jobs import (
-    Job,
-    JobHooks,
-    Jobs,
-    Recorded,
-    Refused,
-    RolloutJob,
-    RolloutJobs,
-    RolloutTicket,
-    Status,
-    Ticket,
-)
+from rollout_train.rollouts.scheduler import EpisodeRunner, Hooks, Plan, Recorded, episodes_of, plan, playing
 
 __all__ = [
     "Episode",
-    "Job",
-    "JobHooks",
-    "Jobs",
+    "EpisodeRunner",
+    "Hooks",
     "Outcome",
+    "Plan",
     "Record",
     "Recorded",
-    "Refused",
-    "RolloutJob",
-    "RolloutJobs",
-    "RolloutTicket",
-    "Status",
-    "Ticket",
     "Trajectory",
+    "episodes_of",
     "events_of",
     "loaded",
+    "plan",
+    "playing",
     "stored",
 ]

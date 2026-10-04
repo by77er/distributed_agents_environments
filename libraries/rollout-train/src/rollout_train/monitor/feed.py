@@ -17,9 +17,9 @@ from pydantic import JsonValue
 
 from rollout.contracts import Message, Reasoning, RunEvent, RunEventType, Text, ToolCall, ToolResultBlock
 from rollout.harness.hooks import ModelSample, RunHooks
-from rollout_train.rollouts import JobHooks
 from rollout_train.rollouts.episodes import DEFAULT
 from rollout_train.rollouts.episodes import rewards as assigned
+from rollout_train.rollouts.scheduler import Hooks
 
 ENDED = (RunEventType.RUN_COMPLETED, RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED)
 
@@ -50,13 +50,14 @@ def plain(message: Message) -> dict[str, JsonValue]:
     }
 
 
-JOB = "_job"
-"""The feed file of what jobs did (tickets, episodes, published weights, the caller's notes), beside the runs'."""
+NOTES = "_notes"
+"""The feed file of notes beside the runs': episodes as runners start and end them, published weights, the loop's
+results and steps, the engines' throughput."""
 
 
-class RunFeed(RunHooks, JobHooks):
+class RunFeed(RunHooks, Hooks):
     """Writes every run's events and samples under `directory`, one file per run, as they happen; and what a
-    rollout job did, at the level its caller thinks at, in one file more.
+    runner and the loop note, at the level they think at, in one file more.
 
     `keep` bounds the directory: when more runs than that have files, the oldest are deleted. A directory has one
     writer at a time: runs that an earlier writer left without an end (its process was stopped) are marked cancelled
@@ -69,7 +70,7 @@ class RunFeed(RunHooks, JobHooks):
         directory.mkdir(parents=True, exist_ok=True)
         self._files: dict[str, IO[str]] = {}
         for path in directory.glob("*.jsonl"):
-            if path.stem != JOB and not _ended(path):
+            if path.stem != NOTES and not _ended(path):
                 written = path.stat()
                 line = {"kind": "event", "seq": -1, "type": RunEventType.RUN_CANCELLED.value, "at": written.st_mtime}
                 with path.open("a") as file:
@@ -88,8 +89,8 @@ class RunFeed(RunHooks, JobHooks):
         if event.type in ENDED:
             self._close(event.run_id)
 
-    def on_job(self, event: Mapping[str, JsonValue]) -> None:
-        self._write(JOB, event)
+    def on_note(self, event: Mapping[str, JsonValue]) -> None:
+        self._write(NOTES, event)
 
     def on_sample(self, sample: ModelSample) -> None:
         line: dict[str, JsonValue] = {
@@ -125,7 +126,7 @@ class RunFeed(RunHooks, JobHooks):
     def _prune(self) -> None:
         files = sorted(self.directory.glob("*.jsonl"), key=lambda path: path.stat().st_mtime)
         for path in files[: max(0, len(files) - self.keep)]:
-            if path.stem not in self._files and path.stem != JOB:
+            if path.stem not in self._files and path.stem != NOTES:
                 path.unlink(missing_ok=True)
 
 
@@ -206,8 +207,8 @@ class FeedReader:
         self.directory = directory
         self._reading = threading.Lock()
         self._runs: dict[str, tuple[Appended, _Summary]] = {}
-        self._job = Appended(directory / f"{JOB}.jsonl")
-        self._job_lines: list[dict[str, Any]] = []
+        self._noted = Appended(directory / f"{NOTES}.jsonl")
+        self._notes: list[dict[str, Any]] = []
 
     def refresh(self) -> None:
         with self._reading:
@@ -216,7 +217,7 @@ class FeedReader:
     def _refresh(self) -> None:
         here: set[str] = set()
         for path in self.directory.glob("*.jsonl"):
-            if path.stem == JOB:
+            if path.stem == NOTES:
                 continue
             here.add(path.stem)
             file, summary = self._runs.setdefault(path.stem, (Appended(path), _Summary()))
@@ -224,7 +225,7 @@ class FeedReader:
                 summary.add(line)
         for run_id in set(self._runs) - here:
             del self._runs[run_id]
-        self._job_lines.extend(self._job.more())
+        self._notes.extend(self._noted.more())
 
     def runs(self) -> list[dict[str, Any]]:
         """Every run in the feed, newest first: its labels, state, rewards and how much it has done."""
@@ -232,11 +233,11 @@ class FeedReader:
         summaries = [summary.of(run_id) for run_id, (_, summary) in self._runs.items()]
         return sorted(summaries, key=lambda run: run["started"], reverse=True)
 
-    def job(self, after: int = 0) -> list[dict[str, Any]]:
-        """What the rollout job did, from index `after` on: tickets, episodes, published weights, the loop's results
-        and steps, the engines' throughput."""
+    def notes(self, after: int = 0) -> list[dict[str, Any]]:
+        """The notes from index `after` on: episodes as runners start and end them, published weights, the loop's
+        results and steps, the engines' throughput."""
         self.refresh()
-        return self._job_lines[after:]
+        return self._notes[after:]
 
     def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         """A run's lines from index `after` on."""

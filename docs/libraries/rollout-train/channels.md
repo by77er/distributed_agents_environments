@@ -66,7 +66,8 @@ nothing.
   weights it began with. The one before that is dropped.
 - Every sampled span records the version it was sampled at
   ([what a session exports](recorder.md#what-a-session-exports)).
-- Callers publish through a job (`job.publish`) or the recorder (`Recorder.publish`), which name the channel.
+- Callers publish through the recorder (`Recorder.publish`, which a profile's platform hands on as `publish`),
+  naming the channel.
 
 ## Sharing an accelerator
 

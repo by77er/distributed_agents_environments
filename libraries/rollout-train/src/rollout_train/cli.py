@@ -3,7 +3,7 @@
 rollout train PROFILE CATALOG    the training loop: PROFILE is a TOML file (`rollout_train.profile`), CATALOG names an
                                  environment's catalog as `module:name`
 rollout report RUN CATALOG       chart a run's progress and summarise it; post both to a Discord webhook
-rollout imitate PROFILE          a supervised step on the solved episodes of the run's log, without their guidance
+rollout imitate PROFILE          a supervised step on the run's solved episodes, without their guidance
 rollout monitor WHERE            the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO      copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY            serve an environment's tool set over HTTP: FACTORY is `module:name`
@@ -73,17 +73,17 @@ async def _train(
         assert platform.trainer is not None
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
-            platform.jobs, rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
-            directory=described.directory / "versions", groups=groups, groups_per_step=groups_per_step, seed=seed,
-            episodes_at_once=described.episodes_at_once, binding=binding, run=described.directory.name,
-            started=started,
+            rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
+            directory=described.directory / "versions", publish=platform.publish, groups=groups,
+            groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
+            run=described.directory.name, started=started, hooks=[platform.feed],
         )  # fmt: skip
 
 
 async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
     from rollout.harness.blobs import FileBlobStore
     from rollout_train.imitation import examples, imitate
-    from rollout_train.layout import BLOBS, JOBS, LEDGER
+    from rollout_train.layout import BLOBS, LEDGER
     from rollout_train.ledger import opened
     from rollout_train.policies import Policies
     from rollout_train.profile import Profile
@@ -95,19 +95,12 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     renderer = named(spec.renderer)(spec.model)
     store = dict(described.blobs)
     blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
-    policies = Policies(opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)}), blobs)
+    ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
+    policies = Policies(ledger, blobs)
     policy = described.trainer.policy or described.directory.name
-    taught = None
-    for log in sorted((described.directory / JOBS).iterdir()):
-        found = await examples(log, blobs, renderer, kinds=kinds)
-        if taught is None:
-            taught = found
-        else:
-            taught.segments += found.segments
-            taught.episodes += found.episodes
-            taught.left_out += found.left_out
-    if taught is None or not taught.segments:
-        raise SystemExit("no solved episode in the run's log carried that guidance")
+    taught = await examples(ledger, described.directory.name, blobs, renderer, kinds=kinds)
+    if not taught.segments:
+        raise SystemExit("no solved episode of the run carried that guidance")
     print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out)", flush=True)
     settings = {**described.trainer.settings, "objective": "likelihood"}
     trainer = named(described.trainer.kind)(spec.model, **settings)

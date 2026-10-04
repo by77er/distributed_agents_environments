@@ -71,7 +71,7 @@ Each implements one interface a library defines.
 | Directory | Import | What it is | Implements |
 |---|---|---|---|
 | `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.catalog`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, conversations, and a runner in this process | |
-| `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.profile`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: jobs and episodes, the training loop, channels, the recorder, profiles | |
+| `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.profile`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the recorder, profiles | |
 | `implementations/rollout-durable` | `rollout_durable` | A runner whose runs survive their process, on DBOS; a database for stores | `Runner` |
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
 | `implementations/rollout-lora` | `rollout_lora` | A trainer for 4-bit checkpoints with LoRA | `Trainer` |

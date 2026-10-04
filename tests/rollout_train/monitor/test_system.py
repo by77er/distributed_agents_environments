@@ -1,6 +1,6 @@
-"""Where a run stands, read from its directory: the monitor's system view."""
+"""Where a run stands, read from its ledger and its directory: the monitor's system view."""
 
-import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -10,35 +10,56 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import FileLedger, Policies, train
-from rollout_train.layout import BLOBS, FEED, JOBS, LEDGER
+from rollout_train import Budget, Checkpoint, FileLedger, Policies, Step, Weighted, train
+from rollout_train.layout import BLOBS, FEED, LEDGER
+from rollout_train.ledger import Ledger
 from rollout_train.monitor import FeedReader, RunFeed, System
-from rollout_train.monitor.system import DECIDED, DONE, ENDED, PLAYING, WAITING
-from rollout_train.record import GROUPS, RESULTS, STEPS, scope, table
+from rollout_train.monitor.system import DONE, ENDED, PLAYING, WAITING
+from rollout_train.record import GROUPS, RESULTS, STARTS, STEPS, scope, table
 from rollout_train.recorder import Recorder
-from rollout_train.rollouts import RolloutJobs
+from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
-from rollout_train.rollouts.jobs import EPISODES, INTERRUPTED, TICKETS
+from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.testing import plain_channel
+from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
-from tests.rollout_train.training.test_loop import Counting
 
 
-async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_have_it(tmp_path: Path) -> None:
+class Trains:
+    """A trainer that trains nothing and leaves files as a trainer would."""
+
+    budget = Budget(segments=3)
+
+    def __init__(self) -> None:
+        self.steps = 0
+
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+        self.steps += 1
+        (into / WEIGHTS).mkdir(parents=True)
+        (into / WEIGHTS / "adapter.bin").write_text(f"weights after {self.steps} steps")
+        (into / STATE).mkdir()
+        (into / STATE / "optimizer.bin").write_text(f"moments after {self.steps} steps")
+        return Step({"segments": float(len(batch))})
+
+
+async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tmp_path: Path) -> None:
     pytest.importorskip("starlette")
     from rollout_train.monitor.app import create_app
 
     feed = RunFeed(tmp_path / FEED)
     recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
     blobs = FileBlobStore(tmp_path / BLOBS)
-    runner = LocalRunner(recorder=recorder, hooks=[feed])
-    jobs = RolloutJobs(runner, recorder, log=tmp_path / JOBS, blobs=blobs, hooks=[feed])
-    policies = Policies(FileLedger(tmp_path / LEDGER), blobs)
-    await train(
-        jobs, Words(), Counting(), policies, policy="words", channel="policy", directory=tmp_path / "versions",
-        groups=3, groups_per_step=1, seed=1,
-    )  # fmt: skip
-    await jobs.close()
+    ledger = FileLedger(tmp_path / LEDGER)
+    policies = Policies(ledger, blobs)
+    local = LocalRunner(recorder=recorder, hooks=[feed])
+    runner = EpisodeRunner("here", ledger, local, recorder, blobs, places=4, hooks=[feed], every=0.05)
+    async with playing(runner):
+        await train(
+            Words(), Trains(), policies, policy="words", channel="policy", directory=tmp_path / "versions",
+            publish=recorder.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
+            started={"directory": str(tmp_path)},
+        )  # fmt: skip
+    await local.close()
     feed.close()
 
     transport = httpx.ASGITransport(app=create_app(tmp_path))
@@ -57,7 +78,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     )
     assert any(line["kind"] == "sample" and line["messages"] for line in episode["lines"])
 
-    # Once the feed has let an episode go, its replies and tool calls are read back from the events the job kept.
+    # Once the feed has let an episode go, its replies and tool calls are read back from the events its runner kept.
     kept = await System(tmp_path, FeedReader(tmp_path / "elsewhere")).episode(episode["run_id"])
     samples = [line for line in kept["lines"] if line["kind"] == "sample"]
     assert kept["source"] == "archive" and samples and all(not each["messages"] and each["reply"] for each in samples)
@@ -66,9 +87,11 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     ]
     (run,) = system["runs"]
     assert run["run"] == "train" and run["fence"] == 1 and run["decided"] == 3 and run["open"] == []
-    # The loop wrote down where it ran; its directory is the one opened, whose logs and feed are read.
+    # The loop wrote down where it ran; its directory is the one opened, whose feed is read.
     assert run["starts"] == 1 and run["policy"] == "words" and run["host"] and run["started"] <= system["at"]
-    assert run["episodes_at"] == "here" and run["state"] == "running" and run["job"]["episodes"] == 12
+    assert run["episodes_at"] == "here" and run["state"] == "running"
+    assert run["played"] == {**run["played"], "episodes": 12, "outcomes": {"completed": 12}, "playing": 0}
+    assert run["played"]["sampled"] > 0
     assert [line["group"] for line in run["done"]] == [1, 2, 3]
     trained = [line for line in run["done"] if line["update"]]
     assert trained  # (the policy says yes and no in turn: some group has something to compare)
@@ -76,25 +99,36 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     # after it (or toward the next one, when none was).
     members = [number for step in run["steps"] for number in [*step["groups"], *step["skipped"]]]
     assert sorted([*members, *run["next"]]) == [1, 2, 3]
-    assert all(step["groups"] == [line["group"]] for step, line in zip(run["steps"], trained, strict=True))
+    # (groups play at once: a step covers every group queued when it begins, one or more)
+    assert sorted(number for step in run["steps"] for number in step["groups"]) == [line["group"] for line in trained]
+    assert all(line["adapter"] == f"words@{line['step']}" for line in trained)
 
     (policy,) = system["policies"]
-    assert policy["policy"] == "words" and policy["fence"] == 1 and policy["head"] == trained[-1]["adapter"]
-    assert [version["name"] for version in policy["versions"]] == [line["adapter"] for line in trained]
+    assert policy["policy"] == "words" and policy["fence"] == 1 and policy["head"] == f"words@{len(run['steps'])}"
+    assert [version["name"] for version in policy["versions"]] == [step["makes"] for step in run["steps"]]
     first = policy["versions"][0]
     assert (
         first["parent"] is None and first["weights"]["files"] == 1 and first["state"]["files"] == 1 and first["batch"]
     )
 
-    (job,) = system["jobs"]
-    assert job == {**job, "job": "train", "tickets": 3, "episodes": 12, "outcomes": {"completed": 12}}
-    assert job["last"] == job["acknowledged"] == 12 and job["sampled"] > 0
+    (runner_seen,) = system["runners"]
+    assert runner_seen == {**runner_seen, "runner": "here", "fence": 1, "playing": [], "claims": 12}
     (channel,) = system["channels"]
     assert channel["channel"] == "policy" and channel["adapter"] == policy["head"]
-    assert system["ledger"]["fences"] == {scope("train"): 1, "policies/words": 1}
+    assert system["ledger"]["fences"] == {scope("train"): 1, "policies/words": 1, runner_scope("here"): 1}
     assert system["ledger"]["tables"][table("train", GROUPS)] == 3
     assert system["kept"]["versions"] > 0 and system["kept"]["episodes"] > 0
     assert system["machine"]["now"]["disk"]["total"] > 0 and system["written"] <= system["at"]
+
+
+async def ended(ledger: Ledger, run: str, group: int, number: int, run_id: str, runner: str = "here") -> None:
+    """An episode a runner recorded: its reward is its number."""
+    fence = await ledger.take(runner_scope(f"{runner}-records"))  # (records are written under a fence of their own)
+    trajectories = {"ada": Trajectory([], {"default": float(number)})}
+    labels = {"run": run, "group": str(group), "episode": str(number)}
+    episode = Episode(run, group, number, run_id, labels, Outcome.COMPLETED, trajectories=trajectories)
+    record: JsonValue = Record(episode, sampled={"ada": 40}).to_json()
+    await ledger.append(table(run, EPISODES), f"{group}/{number}", record, fence)
 
 
 async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_it_at(tmp_path: Path) -> None:
@@ -104,8 +138,6 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     writer = await policies.writer("miner")
     feed = RunFeed(tmp_path / FEED)
     system = System(tmp_path, FeedReader(tmp_path / FEED))
-    log = tmp_path / JOBS / "train"
-    log.mkdir(parents=True)
 
     async def group() -> dict[str, Any]:
         (run,) = (await system.snapshot())["runs"]
@@ -116,38 +148,42 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
         assert found is not None
         return found
 
-    def ended(cursor: int, run_id: str, detail: str | None = None) -> None:
-        outcome = Outcome.CANCELLED if detail else Outcome.COMPLETED
-        labels = {"episode": str(cursor), "ticket": "t_train-0001"}
-        trajectories = {"ada": Trajectory([], {"default": float(cursor)})}
-        episode = Episode(cursor, "train", "t_train-0001", run_id, labels, outcome, detail, trajectories=trajectories)
-        with (log / EPISODES).open("a") as file:
-            file.write(json.dumps(Record(episode, sampled={"ada": 40}).to_json()) + "\n")
+    start: JsonValue = {"policy": "miner", "host": "here", "started": 5.0, "directory": str(tmp_path)}
+    await ledger.append(table("train", STARTS), str(fence.number), start, fence)
+    decided: JsonValue = {"task": "t003", "title": "chests", "decided": 5.0, "episodes": 2}
+    await ledger.append(table("train", GROUPS), "1", decided, fence)
+    waiting = await group()
+    assert waiting == {**waiting, "number": 1, "task": "t003", "stage": WAITING, "count": 2, "playing": []}
 
-    await ledger.append(table("train", GROUPS), "1", {"task": "t003", "title": "chests", "decided": 5.0}, fence)
-    assert (await group()) == {**(await group()), "number": 1, "task": "t003", "stage": DECIDED, "ticket": None}
+    runner = await ledger.take(runner_scope("here"))
+    claim: JsonValue = {"runner": "here", "fence": runner.number, "at": 6.0}
+    await ledger.append(table("train", CLAIMS), "1/1/1", claim, runner)
+    claimed = await group()
+    assert claimed["stage"] == PLAYING and claimed["ended"] == 0
+    assert claimed["playing"] == [{"group": 1, "episode": "1", "attempt": 1, "runner": "here", "at": 6.0}]
 
-    ticket = {"id": "t_train-0001", "parameters": None, "labels": {"group": "1"}, "count": 2}
-    (log / TICKETS).write_text(json.dumps(ticket) + "\n")
-    assert (await group())["stage"] == WAITING
-
-    created: JsonValue = {"labels": {"ticket": "t_train-0001", "episode": "1"}}
+    created: JsonValue = {"labels": {"run": "train", "group": "1", "episode": "1"}}
     feed._write("r_one", {"kind": "event", "type": "run.created", "at": 6.0, "payload": created})  # pyright: ignore[reportPrivateUsage]
     feed._write("r_one", {"kind": "sample", "slot": "ada", "at": 7.0})  # pyright: ignore[reportPrivateUsage]
-    playing = await group()
-    assert playing["stage"] == PLAYING and playing["ended"] == 0
-    (episode,) = playing["episodes"]
+    (episode,) = (await group())["episodes"]
     assert episode == {**episode, "run_id": "r_one", "episode": "1", "state": "running", "samples": 1, "in_feed": True}
 
-    ended(1, "r_one")
-    ended(2, "r_cut", INTERRUPTED)  # (a run a closed job left: it is run again, and does not count)
-    playing = await group()
-    assert playing["stage"] == PLAYING and playing["ended"] == 1
-    assert [(each["run_id"], each["state"], each["reward"]) for each in playing["episodes"]] == [
-        ("r_one", "completed", 1.0),
-        ("r_cut", "cancelled", 2.0),
+    # The second episode's first attempt is cut short when its runner closes: it is claimed again, and played again.
+    await ledger.append(table("train", CLAIMS), "1/2/1", claim, runner)
+    created = {"labels": {"run": "train", "group": "1", "episode": "2"}}
+    feed._write("r_cut", {"kind": "event", "type": "run.created", "at": 6.5, "payload": created})  # pyright: ignore[reportPrivateUsage]
+    feed._write("r_cut", {"kind": "event", "type": "run.cancelled", "at": 7.5, "payload": {}})  # pyright: ignore[reportPrivateUsage]
+    await ledger.append(table("train", INTERRUPTED), "1/2/1", {"why": CLOSED, "at": 7.5}, runner)
+    await ended(ledger, "train", 1, 1, "r_one")
+    playing_now = await group()
+    assert playing_now["stage"] == PLAYING and playing_now["ended"] == 1 and playing_now["playing"] == []
+    assert [
+        (each["run_id"], each["state"], each["reward"], each["interrupted"]) for each in playing_now["episodes"]
+    ] == [
+        ("r_one", "completed", 1.0, False),
+        ("r_cut", "cancelled", None, True),
     ]
-    ended(3, "r_two")
+    await ended(ledger, "train", 1, 2, "r_two")
     assert (await group())["stage"] == ENDED
 
     result: JsonValue = {"group": 1, "time": 9.0, "task": "t003", "failures": ["x", "x"], "segments": 8}
@@ -194,13 +230,36 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     assert [(each["run_id"], each["interrupted"]) for each in done["episodes"]] == [
         ("r_one", False),
         ("r_cut", True),
-        ("r_two", False),
+        ("r_two", None),
     ]
     feed.close()
 
 
 async def test_a_directory_that_is_no_run_has_nothing_to_show_and_is_left_as_it_is(tmp_path: Path) -> None:
     system = await System(tmp_path, FeedReader(tmp_path / FEED)).snapshot()
-    assert system["runs"] == system["policies"] == system["jobs"] == system["channels"] == []
+    assert system["runs"] == system["policies"] == system["runners"] == system["channels"] == []
     assert system["written"] is None and system["processes"] is None
     assert not (tmp_path / LEDGER).exists()  # (reading makes no ledger)
+
+
+async def test_a_claim_holds_while_its_runner_keeps_the_fence_it_was_made_under(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / LEDGER)
+    fence = await ledger.take(scope("train"))
+    decided: JsonValue = {"task": "t003", "decided": 5.0, "episodes": 2}
+    await ledger.append(table("train", GROUPS), "1", decided, fence)
+    first, other = await ledger.take(runner_scope("first")), await ledger.take(runner_scope("other"))
+    for key, runner, at in (("1/1/1", first, 6.0), ("1/2/1", other, 7.0)):
+        claim: JsonValue = {"runner": runner.scope.removeprefix("runners/"), "fence": runner.number, "at": at}
+        await ledger.append(table("train", CLAIMS), key, claim, runner)
+    system = System(ledger=ledger)
+    runners = {each["runner"]: each for each in (await system.snapshot())["runners"]}
+    assert [claim["episode"] for claim in runners["first"]["playing"]] == ["1"]
+    assert [claim["episode"] for claim in runners["other"]["playing"]] == ["2"]
+
+    await ledger.take(runner_scope("first"))  # started again: what it claimed before is anyone's
+    snapshot = await system.snapshot()
+    runners = {each["runner"]: each for each in snapshot["runners"]}
+    assert runners["first"] == {**runners["first"], "fence": 2, "playing": [], "claims": 1, "last": 6.0}
+    assert [each["runner"] for each in snapshot["runners"]] == ["other", "first"]  # (playing ones first)
+    (run,) = snapshot["runs"]
+    assert run["played"]["playing"] == 1 and [claim["runner"] for claim in run["open"][0]["playing"]] == ["other"]
