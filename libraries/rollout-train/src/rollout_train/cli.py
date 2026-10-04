@@ -213,8 +213,7 @@ async def _evaluate(
 
     from rollout.environment import binding_for
     from rollout_train.evals import Suite, environments_of, evaluate, suite_for, suite_of
-    from rollout_train.layout import LEDGER
-    from rollout_train.ledger import opened
+    from rollout_train.hosting import ledger_of
     from rollout_train.profile import Profile
     from rollout_train.record import ending
     from rollout_train.registry import resolved
@@ -229,7 +228,7 @@ async def _evaluate(
         trainer = dataclasses.replace(described.trainer, start=reference, bookmark=None)
         described = dataclasses.replace(described, trainer=trainer)
     channel = described.trainer.channel if described.trainer else next(iter(described.channels))
-    ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
+    ledger = ledger_of(described)
     try:  # (the suite, and its environments, before the engines)
         found: Suite | None
         if environment is not None:  # (its eval data of that name is frozen as the suite, if it is not yet)
@@ -519,13 +518,12 @@ async def _imitate(
     import socket
     import time
 
-    from rollout.harness.blobs import FileBlobStore
     from rollout_train.checkpoints import Checkpoints
     from rollout_train.datasets import dataset_of, resolved_dataset
     from rollout_train.datasets import examples as dataset_examples
+    from rollout_train.hosting import blobs_of, ledger_of
     from rollout_train.imitation import IMITATION, RATES, WARMUP, examples, imitate, passes_for
-    from rollout_train.layout import BLOBS, LEDGER
-    from rollout_train.ledger import opened
+    from rollout_train.layout import BLOBS
     from rollout_train.profile import Profile
     from rollout_train.record import PROCESS, STARTS, ending, scope, table
     from rollout_train.registry import registry_of, resolved, run_of
@@ -547,9 +545,7 @@ async def _imitate(
         raise SystemExit(f"{profile} describes no trainer")
     spec = described.channels[described.trainer.channel]
     renderer = named(spec.renderer)(spec.model)
-    store = dict(described.blobs)
-    blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
-    ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
+    blobs, ledger = blobs_of(described), ledger_of(described)
     checkpoints, registry = Checkpoints(ledger, blobs), registry_of(ledger)
     run = await run_of(described.directory, ledger, registry, name)
     try:
