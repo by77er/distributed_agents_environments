@@ -13,6 +13,7 @@ rollout tools FACTORY               serve an environment's tool set over HTTP: F
 rollout pool FACTORY                serve a pool of an environment's sandboxes over HTTP: FACTORY makes their provider
 rollout engines PROFILE --run RUN   keep a profile's engines (vLLM servers) serving what the run says
 rollout runner PROFILE              play runs' episodes, and nothing else
+rollout gateway PROFILE             serve a replica of the gateway: it samples PROFILE's channels and records every turn
 
 `rollout COMMAND --help` lists each command's options.
 """
@@ -221,6 +222,38 @@ async def _pool(factory: str, directory: Path, where: str | None, name: str | No
             keeping.cancel()
             await asyncio.gather(keeping, return_exceptions=True)
         await pool.close()
+
+
+async def _gateway(
+    profile: Path,
+    directory: Path | None,
+    listen: str | None,
+    certificate: Path | None,
+    private_key: Path | None,
+    proxied: str,
+) -> None:
+    import contextlib
+
+    import uvicorn
+
+    from rollout_train.gateway import create_app, deployed
+    from rollout_train.profile import GatewaySpec, Profile
+
+    described = Profile.load(profile, directory=directory)
+    host, _, port = (listen or (described.gateway or GatewaySpec()).listen).rpartition(":")
+    async with contextlib.AsyncExitStack() as stack:
+        app = create_app(await deployed(described, stack))
+        config = uvicorn.Config(
+            app,
+            host=host,
+            port=int(port),
+            log_level="warning",
+            proxy_headers=True,
+            forwarded_allow_ips=proxied,
+            ssl_certfile=str(certificate) if certificate else None,
+            ssl_keyfile=str(private_key) if private_key else None,
+        )
+        await uvicorn.Server(config).serve()
 
 
 async def _suite(
@@ -831,6 +864,17 @@ def main() -> None:
     pooling.add_argument("--name", help="what the pool is called among those sharing the ledger (KIND@HOST)")
     pooling.add_argument("--host", default="127.0.0.1")
     pooling.add_argument("--port", type=int, default=8710)
+    gateway = commands.add_parser("gateway", help="serve a replica of the gateway, which records every turn")
+    gateway.add_argument("profile", type=Path, help="a profile: its channels, ledger, blobs and [gateway] table")
+    gateway.add_argument("--directory", type=Path, help="in place of the profile's own")
+    gateway.add_argument("--listen", help="host:port, in place of the profile's [gateway] listen")
+    gateway.add_argument(
+        "--certificate", type=Path, help="serve TLS with this certificate (else a proxy terminates it)"
+    )
+    gateway.add_argument("--private-key", type=Path, help="the certificate's private key")
+    gateway.add_argument(
+        "--proxied", default="127.0.0.1", help="addresses of proxies whose X-Forwarded-* headers are trusted ('*': any)"
+    )
     arguments = parser.parse_args()
     if arguments.command == "train":
         work = _train(
@@ -900,6 +944,10 @@ def main() -> None:
     if arguments.command == "checkpoints":
         asyncio.run(_checkpoints(arguments.ledger))
         return
+    if arguments.command == "gateway":
+        work = _gateway(arguments.profile, arguments.directory, arguments.listen, arguments.certificate,
+                        arguments.private_key, arguments.proxied)  # fmt: skip
+        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "pool":
         work = _pool(arguments.factory, arguments.directory, arguments.ledger, arguments.name, arguments.host,
                      arguments.port)  # fmt: skip

@@ -55,6 +55,8 @@ the test suite and a block tagged `python fragment` does not. The API reference 
   engines, limits, publishing weights, token recording
 - [The recorder over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the OpenAI-compatible endpoint for
   harnesses that bring their own loop
+- [The gateway](docs/libraries/rollout-train/gateway.md): a stateless service that samples channels for programs and
+  harnesses with signed keys, and records every turn in the ledger and the blob store
 - [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a run's directory: its steps, groups,
   episodes and every agent's turns
 

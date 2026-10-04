@@ -45,6 +45,11 @@ training_gib = 4                              # and to start a step
 suite = "words-held-out"                      # optional: evaluate checkpoints as they are made (its eval data, say)
 every = 2                                     # the checkpoint of every second step
 episodes = 1                                  # episodes of each start
+
+[gateway]                                     # optional: for `rollout gateway`, a replica that records every turn
+url = "https://models.example/gw"             # where programs and harnesses reach it, through its proxy
+listen = "127.0.0.1:8830"                     # where a replica serves
+keys = "~/.config/rollout/gateway.keys"       # the secrets keys are signed with (else ROLLOUT_GATEWAY_KEYS)
 ```
 
 ```bash
@@ -59,6 +64,7 @@ uv run rollout pool minecraft_team.worlds:worlds --directory DATA --ledger URL -
 uv run rollout tools FACTORY --directory DATA --port 8700            # a tool set on a machine of its own
 uv run rollout engines engines.toml --run first   # load what run first serves into this machine's vLLM servers
 uv run rollout runner runner.toml --run first                       # a machine that plays first's episodes, and nothing else
+uv run rollout gateway profile.toml --listen 127.0.0.1:8830          # a replica of the gateway: as many as wanted
 uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
 uv run rollout env check ENVIRONMENT --profile profile.toml --groups 4   # does it hold together; do its groups teach
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # a frozen list of starts
@@ -100,6 +106,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
 | `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
+| `gateway` | The [gateway](#the-gateway) `rollout gateway` serves: where it is reached (`url`) and serves (`listen`), the file of the secrets its keys are signed with (`keys`), and how long a key minted for a slot is good for (`lifetime`, 6 hours) | Start more replicas behind a proxy |
 | `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines can take. An episode is claimed only while its sandboxes' pools have room for it too | Raise it with the engines' `max_num_seqs`, and the pools' sizes with the memory for their sandboxes |
 
 ## What can change while a run goes
@@ -345,6 +352,26 @@ engine host's profile; each runner box runs `rollout runner` over a profile with
 pools. A channel whose engines are clients of a service elsewhere (a sampler switched to the checkpoint named) can be
 served by the runner's own process: `rollout runner --run RUN` keeps the channels whose engines are in its process
 following what that run says, as an engine host does.
+
+## The gateway
+
+`rollout gateway PROFILE` serves a replica of the [gateway](../libraries/rollout-train/gateway.md): it samples the
+profile's channels for programs and harnesses that hold a signed key, and records every turn in the profile's ledger
+and blob store before it replies. Replicas keep no session, so as many as wanted stand behind one proxy, and any of
+them may stop at any moment.
+
+- **Keys.** The secrets are read from `[gateway] keys`, else from the environment (`ROLLOUT_GATEWAY_KEYS`, or a file
+  named by `ROLLOUT_GATEWAY_KEYS_FILE`), and never from the ledger. Whoever mints keys holds the same secrets.
+- **Which checkpoint.** A channel whose engines serve elsewhere (`engine = "rollout_train.inference:RemoteEngine"`,
+  with its servers or `via` a router) is sampled per run from what the run says it should serve, within its
+  `max_lag` ([engines on other machines](#engines-on-other-machines)); a channel with engines of its own is started in
+  the replica.
+- **TLS and proxies.** A proxy in front terminates TLS and checks its own credentials; `--proxied` names the addresses
+  whose `X-Forwarded-*` headers are trusted. `--certificate` and `--private-key` serve TLS from the replica itself.
+- **Health.** `/healthz` answers while the process serves; `/readyz` answers 200 once the ledger and the blob store
+  answer, and 503 otherwise.
+
+A run's own runner records through the recorder in its process, whether or not the profile has a `[gateway]` table.
 
 ## Launchers
 

@@ -36,7 +36,7 @@ Interfaces, and what runs with no implementation beyond this process.
 | Package | Pages |
 |---|---|
 | `rollout` | [Harness](libraries/rollout/README.md): the loop, programs and runners. [Sandboxes](libraries/rollout/sandboxes.md), [determinism](libraries/rollout/determinism.md), [hooks](libraries/rollout/hooks.md), [memory](libraries/rollout/memory.md). [Contracts](libraries/rollout/contracts/README.md): [identifiers](libraries/rollout/contracts/identifiers.md), [canonical content](libraries/rollout/contracts/canonical-content.md), [run events](libraries/rollout/contracts/run-events.md), [effects](libraries/rollout/contracts/effects.md), the [model endpoint](libraries/rollout/contracts/model-endpoint.md) |
-| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [checkpoints, runs and the ledger](libraries/rollout-train/checkpoints.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [channels](libraries/rollout-train/channels.md), the [recorder](libraries/rollout-train/recorder.md) and its [endpoint for harnesses](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
+| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [checkpoints, runs and the ledger](libraries/rollout-train/checkpoints.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [channels](libraries/rollout-train/channels.md), the [recorder](libraries/rollout-train/recorder.md) and its [endpoint for harnesses](libraries/rollout-train/harness-endpoint.md), the [gateway](libraries/rollout-train/gateway.md), the [monitor](libraries/rollout-train/monitor.md) |
 
 ## Implementations
 

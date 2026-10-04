@@ -33,10 +33,14 @@ shapes. `create_app(recorder)` serves them under `SERVED_UNDER`, and a recorder'
 [profile](../../guide/deploying.md)'s `serve`, reached at its `address`. `Model.address()` raises `RuntimeError`
 otherwise.
 
+The [gateway](gateway.md) serves the same paths, read and answered by the same functions (`requested`, `replied`,
+`refused`), with two differences: its keys are signed and name their session by themselves, and every turn is
+recorded in the ledger and the blob store before its reply is sent. What follows holds for both.
+
 ## What a request means
 
-- **The key names the session.** Each call of `address()` makes a key for one run's slot. It is valid until the
-  recorder forgets the run. OpenAI's clients send it as a bearer token, Anthropic's as `x-api-key`; either is read on
+- **The key names the session.** Each call of `address()` makes a key for one run's slot. The recorder's is valid
+  until the recorder forgets the run; the gateway's until it expires ([keys](gateway.md#keys)). OpenAI's clients send it as a bearer token, Anthropic's as `x-api-key`; either is read on
   every path.
 - **The model name and sampling parameters a client sends are ignored**: a trainable channel samples as its binding
   says, so that the trainer can reproduce the distribution. So is Anthropic's `thinking.budget_tokens`: the channel's

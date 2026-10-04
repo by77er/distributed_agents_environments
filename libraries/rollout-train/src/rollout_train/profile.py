@@ -12,6 +12,7 @@ of each is passed to it: this module knows no engine and no trainer. docs/guide/
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import math
 import socket
@@ -46,7 +47,7 @@ from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.sandboxes import admits, keep, leases_of
 from rollout_train.stores import location, opened
 
-__all__ = ["ChannelSpec", "EvalsSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
+__all__ = ["ChannelSpec", "EvalsSpec", "GatewaySpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,21 @@ class EvalsSpec:
             raise ValueError("evals: `every` and `episodes` are 1 at least")
 
 
+@dataclass(frozen=True)
+class GatewaySpec:
+    """The gateway (`rollout_train.gateway`): a stateless service that samples the channels and records every turn,
+    which `rollout gateway PROFILE` serves, as many replicas as wanted."""
+
+    url: str | None = None
+    """Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it)."""
+    listen: str = "127.0.0.1:8830"
+    """`host:port` a replica serves on."""
+    keys: str | None = None
+    """A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's."""
+    lifetime: float = 6 * 3600.0
+    """Seconds a key minted for a slot is good for."""
+
+
 class NotEnoughMemory(Exception):
     """Stopping is better than exhausting the machine (a host may shut down rather than kill one process)."""
 
@@ -196,6 +212,9 @@ class Profile:
     `rollout rename`; its id, in the directory's `run.json`, never changes."""
     evals: EvalsSpec | None = None
     """The evals a training run makes of its checkpoints as it makes them."""
+    gateway: GatewaySpec | None = None
+    """The gateway that samples the channels and records turns, for `rollout gateway PROFILE`. A run's own runner
+    does not use it yet: it records in its own process."""
 
     @classmethod
     def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> "Profile":
@@ -224,6 +243,11 @@ class Profile:
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
         evals = _only(_table(described, "evals"), "evals", "suite", "every", "episodes")
+        gateway = _only(
+            _table(described, "gateway"),
+            "gateway",
+            *(each.name for each in dataclasses.fields(GatewaySpec)),
+        )
         known = (
             "directory", "ledger", "runner", "serve", "address", "tools", "pools", "feed_runs", "episodes_at_once",
             "ray",
@@ -238,6 +262,7 @@ class Profile:
             blobs=blobs,
             channels=channels,
             evals=EvalsSpec(**evals) if evals else None,
+            gateway=GatewaySpec(**gateway) if gateway else None,
             trainer=TrainerSpec(
                 kind=trainer.pop("kind"),
                 channel=trainer.pop("channel"),

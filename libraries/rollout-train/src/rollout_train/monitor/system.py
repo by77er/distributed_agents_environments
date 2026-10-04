@@ -471,10 +471,12 @@ class System:
         return await presence.beats()
 
     async def _tables(self) -> dict[str, dict[str, JsonValue]]:
-        """Every table of the ledger, by name (none where there is no ledger: reading makes none)."""
+        """Every table of the ledger, by name (none where there is no ledger: reading makes none), but the gateway's
+        tables of turns (`runs/RUN/turns/RUN_ID`), a row per turn, which nothing here reads."""
         if not await asyncio.to_thread(present, self._ledger):
             return {}
-        return {name: await self._ledger.read(name) for name in await self._ledger.tables()}
+        names = [name for name in await self._ledger.tables() if "/turns/" not in name]
+        return {name: await self._ledger.read(name) for name in names}
 
     async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,

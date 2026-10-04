@@ -87,6 +87,7 @@ nav:
           - "Channels": libraries/rollout-train/channels.md
           - "Recorder": libraries/rollout-train/recorder.md
           - "The recorder over HTTP": libraries/rollout-train/harness-endpoint.md
+          - "The gateway": libraries/rollout-train/gateway.md
           - "Monitor": libraries/rollout-train/monitor.md
   - Implementations:
       - Durable runner:

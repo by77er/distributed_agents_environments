@@ -6,7 +6,10 @@ A **run** is one episode of a **program**: usually an agent acting in a **task**
 reinforcement-learning sense: it defines tools and responds to every model turn; the agent decides what the model
 sees and how it acts. Both are Python `async` code. Model samples go to a **model endpoint**: an adapter to a
 third-party model, or the **recorder**, which samples from a trainable **channel** and keeps the exact tokens,
-logprobs and the version of the weights (the depth of the checkpoint served). A training loop asks for a row's start to be played as a **group** of **episodes**,
+logprobs and the version of the weights (the depth of the checkpoint served). The **gateway** does the recorder's
+work as a service with no session of its own: programs and harnesses that hold a signed key speak a standard model API
+to it, and it chooses the checkpoint, samples, and records every turn in the ledger and the blob store before it
+replies. A training loop asks for a row's start to be played as a **group** of **episodes**,
 in the **ledger**; **episode runners**, on any machine that reaches the ledger, claim the episodes, play them and
 record them there. A program runs against the **sandboxes** it declares (a Minecraft world, a container), which the
 runner leases from **pools** before the program starts, under the episode's claim, and releases when it ends. The loop
@@ -23,7 +26,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, sandboxes and their pools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment and the curriculum |
-| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the graph of checkpoints, the ledger and the registry; resharding; evaluation suites and evals; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
+| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; resharding; evaluation suites and evals; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-team` | An environment to train on |
@@ -74,6 +77,7 @@ What each part sees. A ✗ is a boundary the code keeps, not an optimization lef
 | Runner | ✓ | ✗ | ✗ | ✗ |
 | Recorder and channels | ✓ | ✓ | ✓ | engines only |
 | Engine hosts | ✗ | ✗ | ✓ | their servers only |
+| Gateway | ✓ | ✓ | ✓ | the endpoints it samples |
 | Episode runners | labels and results | ✓ (in episodes) | ✓ | ✗ |
 | Training loop and trainer | labels and results | ✓ | ✓ | ✗ |
 | Profile | ✗ | ✗ | ✗ | ✓ |
@@ -85,6 +89,7 @@ The agent samples a reply; the task responds with an observation.
 ```
 agent.act ──▶ Model.sample ──▶ model endpoint ──▶ (recorder ──▶ channel ──▶ engine: tokens in; tokens, logprobs out)
           ◀── canonical reply + usage
+harness ──▶ a model API + signed key ──▶ gateway ──▶ endpoint (the checkpoint, by name) ──▶ turn kept ──▶ reply
 task.respond(reply) ──▶ run_tools ──▶ @tool method ──▶ (an imported tool set, a sandbox, an environment, a blob store)
           ◀── Observation(tool results) ──▶ steering messages merged ──▶ next turn
 ```
