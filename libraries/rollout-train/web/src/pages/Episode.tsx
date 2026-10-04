@@ -69,15 +69,22 @@ const Reported = memo(function Reported({ info }: { info: Record<string, unknown
   );
 });
 
-/** Each agent's samples, in order (an agent summarising its memory is offered no action, and is counted apart). */
-function samplesOf(lines: Line[]): { slots: Map<string, SampleLine[]>; summaries: number } {
-  const slots = new Map<string, SampleLine[]>();
-  let summaries = 0;
+/** Each agent's samples, in order. An agent offered actions on its turns that summarises its memory is offered none
+ * then: those samples are counted apart. An agent never offered an action (a task that is all words) has only turns. */
+export function samplesOf(lines: Line[]): { slots: Map<string, SampleLine[]>; summaries: number } {
+  const every = new Map<string, SampleLine[]>();
   for (const line of lines) {
     if (line.kind !== "sample") continue;
-    if (!line.tools.length) { summaries += 1; continue; }
-    if (!slots.has(line.slot)) slots.set(line.slot, []);
-    slots.get(line.slot)!.push(line);
+    if (!every.has(line.slot)) every.set(line.slot, []);
+    every.get(line.slot)!.push(line);
+  }
+  const slots = new Map<string, SampleLine[]>();
+  let summaries = 0;
+  for (const [slot, samples] of every) {
+    const acting = samples.some(sample => sample.tools.length);
+    const turns = acting ? samples.filter(sample => sample.tools.length) : samples;
+    summaries += samples.length - turns.length;
+    slots.set(slot, turns);
   }
   return { slots: new Map([...slots].sort(([a], [b]) => a.localeCompare(b))), summaries };
 }

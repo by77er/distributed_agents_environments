@@ -3,9 +3,10 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint, Evals } from "./api/types";
+import type { Run, System, Checkpoint, Evals, SampleLine } from "./api/types";
 import { knownOf } from "./lib/model";
 import { placeOf } from "./lib/places";
+import { samplesOf } from "./pages/Episode";
 import { Runs } from "./pages/Runs";
 import { Suite } from "./pages/Suite";
 
@@ -56,6 +57,23 @@ describe("checkpoints", () => {
     expect(known.bookmarks("kpqxlmnoprstuvwx")).toEqual(["good"]);
     expect(known.title("klmnopqrstuvwxyz")).toBe("klmnopqrstuvwxyz · depth 2\nmade outside a run, from kpqx");
     expect(knownOf(checkpoints, runs)).toBe(known);  // (the same answer, the same helpers: nothing draws again)
+  });
+});
+
+describe("an episode's rollouts", () => {
+  const sample = (slot: string, tools: string[], text: string): SampleLine => ({
+    kind: "sample", slot, at: 0, seconds: 1, messages: [], tools, reply: { text, reasoning: "", calls: [] },
+  });
+
+  it("are every agent's turns, less the summaries of an agent offered actions on its turns", () => {
+    const { slots, summaries } = samplesOf([
+      sample("agent-1", ["mine"], "go"), sample("agent-1", [], "what happened so far"), sample("agent-1", ["mine"], "dig"),
+      sample("policy", [], "candle"),
+    ]);
+    expect([...slots].map(([slot, turns]) => [slot, turns.map(turn => turn.reply.text)])).toEqual([
+      ["agent-1", ["go", "dig"]], ["policy", ["candle"]],
+    ]);
+    expect(summaries).toBe(1);
   });
 });
 
