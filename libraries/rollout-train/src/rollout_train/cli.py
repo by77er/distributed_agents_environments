@@ -51,7 +51,13 @@ async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
 
 
 async def _train(
-    profile: Path, directory: Path | None, catalog: str, groups: int, groups_per_step: int, seed: int
+    profile: Path,
+    directory: Path | None,
+    catalog: str,
+    groups: int,
+    groups_per_step: int,
+    seed: int,
+    monitor: str | None = None,
 ) -> None:
     from rollout.catalog import binding_for
     from rollout_train import train
@@ -61,6 +67,8 @@ async def _train(
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
     channel, rows = described.trainer.channel, named(catalog)
+    where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
+    started = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (the run's `starts` record)
     async with described.open() as platform:
         assert platform.trainer is not None
         binding = binding_for(rows, channel, platform.tool_bindings)
@@ -68,6 +76,7 @@ async def _train(
             platform.jobs, rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
             directory=described.directory / "versions", groups=groups, groups_per_step=groups_per_step, seed=seed,
             episodes_at_once=described.episodes_at_once, binding=binding, run=described.directory.name,
+            started=started,
         )  # fmt: skip
 
 
@@ -151,6 +160,7 @@ def main() -> None:
     training.add_argument("--groups", type=int, default=100)
     training.add_argument("--groups-per-step", type=int, default=4, help="groups a step waits for (4)")
     training.add_argument("--seed", type=int, default=0)
+    training.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
     reporting.add_argument("catalog")
@@ -186,6 +196,7 @@ def main() -> None:
             arguments.groups,
             arguments.groups_per_step,
             arguments.seed,
+            arguments.monitor,
         )
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "ledger":

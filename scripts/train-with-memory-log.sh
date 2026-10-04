@@ -36,7 +36,7 @@ cd "$(dirname "$0")/.." || exit 1
 uv run rollout monitor "$run" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
 trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
-uv run rollout train "$profile" "$catalog" --directory "$run" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
+uv run rollout train "$profile" "$catalog" --directory "$run" --monitor "http://$(hostname):${MONITOR_PORT:-8765}" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
 trainer=$!
 # A signal to this script goes on to the trainer, and the script waits for it to end: otherwise the trainer would
 # run on alone, with nothing logging its memory.

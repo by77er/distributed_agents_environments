@@ -1,5 +1,9 @@
-"""What a training run writes down: four tables in a ledger.
+"""What a training run writes down: five tables in a ledger.
 
+- `starts`: each time the run was started, where and by what (its directory and host, where the monitor on its
+  machine serves, the profile, the policy, when), by the number of the fence its loop took. Written as the loop
+  starts, so that whatever reads the ledger (the monitor) finds every run that shares it, and where each keeps the
+  rest.
 - `groups`: what the run decided to play (the row, and the start every episode of the group is given), by the
   group's number. Written before the group is asked for.
 - `results`: how each group went (a `Result`), by the group's number. Written when its last episode ends, before
@@ -14,7 +18,7 @@ failed. A run that is started again reads the tables and goes on: whatever has a
 where it was left.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, cast
 
@@ -86,13 +90,19 @@ def table(run: str, name: str) -> str:
     return f"{scope(run)}/{name}"
 
 
-GROUPS, RESULTS, STEPS, FAILURES = "groups", "results", "steps", "failures"
+GROUPS, RESULTS, STEPS, FAILURES, STARTS = "groups", "results", "steps", "failures", "starts"
 _RUNS = "runs/"
 
 
 async def runs_in(ledger: Ledger) -> list[str]:
-    """The runs a ledger has groups of, by name."""
-    return [run for each in await ledger.tables() if (run := between(each, _RUNS, f"/{GROUPS}"))]
+    """The runs a ledger has, by name: those that were started or decided a group."""
+    return named_runs(await ledger.tables())
+
+
+def named_runs(tables: Iterable[str]) -> list[str]:
+    """The runs that tables (by name) are of: those with a `starts` or a `groups` table."""
+    found = {run for each in tables for name in (STARTS, GROUPS) if (run := between(each, _RUNS, f"/{name}"))}
+    return sorted(found)
 
 
 async def results(ledger: Ledger, run: str = "train") -> list[Result]:

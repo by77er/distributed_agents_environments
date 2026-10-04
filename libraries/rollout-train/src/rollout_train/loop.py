@@ -34,8 +34,9 @@ import asyncio
 import json
 import random
 import shutil
+import socket
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.curriculum import Curriculum
 from rollout_train.policies import Policies, Retention, Version, named
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, scope, table
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, scope, table
 from rollout_train.rollouts import Episode, Jobs
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Trainer, Weighted
 
@@ -73,6 +74,7 @@ async def train(
     binding: RunBinding | None = None,
     curriculum: Curriculum | None = None,
     retention: Retention | None = None,
+    started: Mapping[str, JsonValue] | None = None,
 ) -> None:
     """Train `policy` on `catalog` until `groups` more groups have been played (those a stopped loop left unplayed
     among them) and every group played has been trained on, serving it on `channel`. A step is taken over the groups
@@ -83,7 +85,9 @@ async def train(
     whatever groups they are of. `binding` says how the program's model slots and imports are
     served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
     one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
-    files (weights and trainer state) once a newer one is served (`Retention()` unless given)."""
+    files (weights and trainer state) once a newer one is served (`Retention()` unless given). `started` is what the
+    run's `starts` record says beside what the loop knows (the policy, this host, the time): where the run's directory
+    is, where the monitor on its machine serves (`address`), and what profile started it, say."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
     ledger, blobs = policies.ledger, policies.blobs
@@ -105,6 +109,8 @@ async def train(
         in_flight=episodes_at_once,
         name=run,
     )
+    here = {"policy": policy, "host": socket.gethostname(), "started": round(time.time(), 1)}
+    await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
     asking = -(-(episodes_at_once + algorithm.group_size - 1) // algorithm.group_size)
     """Groups kept asked for: when one of the episodes running ends, another is waiting (a group is decided only once
     the last of one before it has ended)."""

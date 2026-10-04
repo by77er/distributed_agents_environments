@@ -147,6 +147,12 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 ## The record
 
+When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the policy, the
+host, when, and what `train(started=…)` adds; `rollout train` adds the run's directory, the profile and, with
+`--monitor URL`, where the monitor on that machine serves (`address`), as other machines reach it. A run started
+again appends another. That is how a [monitor](monitor.md) over a shared ledger finds every run, and where each keeps
+its episodes.
+
 For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table when its last
 episode ends: the rewards, `solved` and durations of the episodes fit to train on, how many episodes failed and why,
 how many segments were recorded and how many the algorithm found to train on (`segments`; none, and `skipped` with
