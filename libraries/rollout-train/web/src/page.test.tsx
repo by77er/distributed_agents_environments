@@ -43,7 +43,6 @@ describe("places", () => {
     expect(placeOf("/episode/r_1/agent-2")).toEqual({ page: "runs", kind: "episode", id: "r_1", slot: "agent-2" });
     expect(placeOf("/checkpoints")).toEqual({ page: "checkpoints", kind: "checkpoints" });
     expect(placeOf("/checkpoint/kpqx")).toEqual({ page: "checkpoints", kind: "checkpoint", id: "kpqx" });
-    expect(placeOf("/system")).toEqual({ page: "machines", kind: "machines" });
     expect(placeOf("/runs/new")).toEqual({ page: "runs", kind: "launch" });
     expect(placeOf("/evals")).toEqual({ page: "evals", kind: "evals" });
     expect(placeOf("/evals/words-v1")).toEqual({ page: "evals", kind: "suite", suite: "words-v1" });

@@ -63,17 +63,14 @@ export function placeOf(pathname: string): Place {
   if (parts[0] === "episode" && parts[1]) return { page: "runs", kind: "episode", id: parts[1], slot: parts[2] || null };
   if (parts[0] === "episodes") return { page: "runs", kind: "outside" };
   if (parts[0] === "runs" && parts[1] === "new") return { page: "runs", kind: "launch" };
-  // (`versions` and `version` are what these pages were called: links to them still open them)
-  if (parts[0] === "checkpoints" || parts[0] === "versions") return { page: "checkpoints", kind: "checkpoints" };
-  if ((parts[0] === "checkpoint" || parts[0] === "version") && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
+  if (parts[0] === "checkpoints") return { page: "checkpoints", kind: "checkpoints" };
+  if (parts[0] === "checkpoint" && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
   if (parts[0] === "eval" && parts[1]) return { page: "evals", kind: "eval", run: parts[1] };
   if (parts[0] === "evals" && (parts[1] === "checkpoint" || parts[1] === "model") && parts[2]) return { page: "evals", kind: "subject", subject: parts[1], id: parts.slice(2).join("/") };
   if (parts[0] === "evals") return parts[1] ? { page: "evals", kind: "suite", suite: parts[1] } : { page: "evals", kind: "evals" };
   if (parts[0] === "environment" && parts[1]) return { page: "environments", kind: "environment", environment: parts[1] };
   if (parts[0] === "environments") return { page: "environments", kind: "environments" };
   if (parts[0] === "machines") return parts[1] ? { page: "machines", kind: "host", host: parts[1], role: parts[2] || null } : { page: "machines", kind: "machines" };
-  // (the machines were a section of the statistics, and `system` before that: links to them open the machines)
-  if (parts[0] === "system" || (parts[0] === "statistics" && parts[1] === "machines")) return { page: "machines", kind: "machines" };
   if (parts[0] === "statistics") return { page: "statistics", kind: "statistics", section: parts[1] || null };
   return { page: "runs", kind: "runs" };
 }

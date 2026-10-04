@@ -87,7 +87,6 @@ describe("machines", () => {
   it("are a page of their own, and each machine a place with its roles", () => {
     expect(placeOf("/machines")).toEqual({ page: "machines", kind: "machines" });
     expect(placeOf(hostPlace("gpu-1", "gpu-1/train"))).toEqual({ page: "machines", kind: "host", host: "gpu-1", role: "gpu-1/train" });
-    expect(placeOf("/statistics/machines")).toEqual({ page: "machines", kind: "machines" });
   });
 });
 
