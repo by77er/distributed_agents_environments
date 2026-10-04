@@ -99,9 +99,22 @@ acquired, in a [`sandboxes.acquired`](contracts/run-events.md#lifecycle) event.
 
 A harness that brings its own loop (a coding agent in a container, an environment's worker) needs no wrapper program
 to reach its model. For each slot a spec names, the runner puts the slot's
-[address](../rollout-train/harness-endpoint.md) in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and
-`OPENAI_MODEL`, each suffixed with the slot's name in capitals (`OPENAI_API_KEY_AGENT_1`), and unsuffixed too when
-the spec names one slot. What the harness samples there is recorded for the slot like any other sample. A key names
+[address](../rollout-train/harness-endpoint.md) in the sandbox's environment, as OpenAI's clients read it and as
+Anthropic's do:
+
+| Variable | Value |
+|---|---|
+| `OPENAI_BASE_URL` | the base URL, ending in `/v1` |
+| `OPENAI_API_KEY` | the slot's key |
+| `OPENAI_MODEL` | the name to send as the model |
+| `ANTHROPIC_BASE_URL` | the base URL without `/v1`, which Anthropic's clients add |
+| `ANTHROPIC_AUTH_TOKEN` | the slot's key, which Claude Code sends as a bearer token |
+| `ANTHROPIC_MODEL` | the name to send as the model |
+
+Each is suffixed with the slot's name in capitals (`OPENAI_API_KEY_AGENT_1`), and unsuffixed too when the spec names
+one slot. Claude Code needs nothing more; Codex is given a provider whose base URL is `OPENAI_BASE_URL` and whose key
+is read from `OPENAI_API_KEY` ([Claude Code and Codex](../rollout-train/gateway.md#claude-code-and-codex)). What the
+harness samples there is recorded for the slot like any other sample. A key names
 the run's session of its slot only, and stops working once it expires or a newer attempt takes its episode's fence
 ([keys](../rollout-train/gateway.md#keys)). A slot whose model is not served over HTTP has no address, and the run
 fails.

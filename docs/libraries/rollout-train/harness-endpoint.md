@@ -10,7 +10,7 @@ slot for an address and hands over a base URL and a key:
 ```python
 address = run.model.address()          # ModelAddress(base_url, api_key, model)
 # an OpenAI client:     OPENAI_BASE_URL=address.base_url     OPENAI_API_KEY=address.api_key
-# an Anthropic client:  ANTHROPIC_BASE_URL=address.base_url.removesuffix("/v1")  ANTHROPIC_API_KEY=address.api_key
+# an Anthropic client:  ANTHROPIC_BASE_URL=address.base_url.removesuffix("/v1")  ANTHROPIC_AUTH_TOKEN=address.api_key
 ```
 
 A harness inside a sandbox is handed its address without any of that: a sandbox's spec names the slots it samples,
@@ -26,7 +26,11 @@ are exactly what the policy sampled.
 | `POST {base_url}/chat/completions` | OpenAI's Chat Completions |
 | `POST {base_url}/responses` | OpenAI's Responses (what Codex speaks) |
 | `POST {base_url}/messages` | Anthropic's Messages (what Claude Code speaks) |
+| `POST {base_url}/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer, as `{"input_tokens"}`. Nothing is sampled or recorded |
 | `GET {base_url}/models` | the gateway's channels, in a list both OpenAI's and Anthropic's clients read |
+
+Claude Code and Codex run against these unchanged: [Claude Code and Codex](gateway.md#claude-code-and-codex) says
+how to point them at a gateway.
 
 Each answers with one reply, or with `"stream": true` the same reply as server-sent events in that API's own event
 shapes. The gateway serves them under `SERVED_UNDER` (`/v1`), and a base URL handed to a harness ends with that path
@@ -42,10 +46,11 @@ not; the monitor reads such an episode's turns from the ledger instead.
 
 - **The key names the session.** Each call of `address()` makes a key for one run's slot, valid until it expires
   or another attempt takes its episode's fence ([keys](gateway.md#keys)). OpenAI's clients send it as a bearer token,
-  Anthropic's as `x-api-key`; either is read on every path.
+  Anthropic's as `x-api-key` (or as a bearer token, given `ANTHROPIC_AUTH_TOKEN`); either is read on every path.
 - **The model name and sampling parameters a client sends are ignored**: a trainable channel samples as its binding
-  says, so that the trainer can reproduce the distribution. So is Anthropic's `thinking.budget_tokens`: the channel's
-  [thinking budget](recorder.md) applies.
+  says, so that the trainer can reproduce the distribution. So is Anthropic's `thinking` (its type, budget and
+  display): the channel's [thinking budget](recorder.md) applies. Caching hints (`cache_control`,
+  `prompt_cache_key`) are ignored too: the engines cache by prefix.
 - **A cap on the output** is honoured, up to what the slot's capability contract allows: `max_completion_tokens` or
   `max_tokens` in Chat Completions, `max_output_tokens` in Responses, `max_tokens` in Messages.
 - **`Idempotency-Key`** is honoured as the sample's `effect_id`: a request repeated under one key returns the
@@ -62,9 +67,14 @@ not; the monitor reads such an episode's turns from the ledger instead.
   | Responses | a `reasoning` item with `reasoning_text` content | a `reasoning` item's content, or its summary |
   | Messages | a `thinking` block, signed with a digest of its text | `thinking` blocks |
 
-- **Messages are canonical messages.** A `developer` message (or Responses' `instructions`, or Anthropic's `system`)
-  is a system message. The items of one Responses turn (its reasoning, message and function calls) are one assistant
-  message, and so are the blocks of one Anthropic assistant message. A tool's result is a tool message.
+  A `thinking` block's signature is never checked and never rendered: the gateway's own and any other (from
+  Anthropic's API, say) are taken alike. `redacted_thinking` blocks are taken and not rendered.
+
+- **Messages are canonical messages.** A `developer` message (or Responses' `instructions`, or Anthropic's `system`,
+  or a `system` message among Anthropic's `messages`) is a system message. The block Claude Code puts first in
+  `system` for Anthropic's billing (`x-anthropic-billing-header: ...`) is not part of the prompt and is dropped. The
+  items of one Responses turn (its reasoning, message and function calls) are one assistant message, and so are the
+  blocks of one Anthropic assistant message. A tool's result is a tool message.
 - **Responses are stateless**: a request carries its whole input, as Codex sends it (`store: false`).
   `previous_response_id` is refused.
 - **A stream is sampled before its first event**, so a recorded turn is kept whole or not at all. Chat Completions

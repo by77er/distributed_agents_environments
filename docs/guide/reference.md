@@ -1258,7 +1258,7 @@ only a kind and parameters; a worker for an environment names a process, mounts,
 |---|---|---|---|
 | `kind` | `str` | required | The kind of sandbox (`minecraft`, say): the binding names the pool that serves each kind. |
 | `parameters` | `Mapping[str, JsonValue]` | `Field(default_factory=dict[str, JsonValue])` | What the pool makes it from: a task and its seeds, an image. |
-| `slots` | `FrozenSequence[str]` | `()` | Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it expires or a newer attempt of its episode takes the episode's fence. |
+| `slots` | `FrozenSequence[str]` | `()` | Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, and `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_MODEL` (`harness_environment`), suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it expires or a newer attempt of its episode takes the episode's fence. |
 | `process` | `Process \| None` | `None` |  |
 | `mounts` | `FrozenSequence[Mount]` | `()` |  |
 | `scratch` | `Scratch \| None` | `None` | Without it, the sandbox writes nowhere. |
@@ -4379,6 +4379,7 @@ its endpoints).
   `links` are those its harness declared besides the request's own. Raises `Refused`, or the endpoint's
   `ModelEndpointError` (`ContextOverflow` when the context is too long).
 - `def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None` — Tell the hooks of a sample a harness asked for, newly recorded.
+- `async def count(self, grant: Grant, prompt: Prompt) -> int` — How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold.
 - `async def ready(self) -> dict[str, str]` — What is not ready, by part (empty: ready): the ledger and the blob store must answer.
 
 ### `GatewayEndpoint`
@@ -5349,6 +5350,7 @@ def qwen3(model: str | Tokenizer) -> Renderer
 ```
 
 Qwen3: JSON tool calls, and thinking the model opens. `model` is a checkpoint's name, or its tokenizer.
+A turn ends with `<|im_end|>`, or with the end of text, where the model stops too.
 
 ### `qwen35`
 
@@ -5359,6 +5361,7 @@ def qwen35(model: str | Tokenizer) -> Renderer
 ```
 
 Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer.
+A turn ends with `<|im_end|>`, or with the end of text, where the model stops too.
 
 ### `tokenizer_of` {#rollout_qwentokenizer_of}
 

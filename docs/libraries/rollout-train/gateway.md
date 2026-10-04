@@ -33,6 +33,7 @@ app = create_app(gateway)               # serve with uvicorn, as many replicas a
 | `POST /v1/chat/completions` | OpenAI's Chat Completions |
 | `POST /v1/responses` | OpenAI's Responses |
 | `POST /v1/messages` | Anthropic's Messages |
+| `POST /v1/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer; nothing is recorded |
 | `POST /v1/samples` | a [`SampleRequest`](../../guide/reference.md#samplerequest), answered with a `SampleResult`, for programs in a runner |
 | `GET /v1/models` | the channels, as models |
 | `GET /healthz` | 200 while the process serves |
@@ -230,6 +231,98 @@ Replicas share nothing but the ledger and the blob store.
 - **Heartbeats.** A replica beats beside the ledger every 15 seconds ([heartbeats](rollouts.md#heartbeats)) as
   `gateway/HOST/LISTEN` (`rollout_train.gateway.beats`): kind `gateway`, its host, where it listens, its machine, and
   what each channel it samples serves and how fast. The [monitor](monitor.md#the-machines) shows the replicas alive.
+
+## Claude Code and Codex
+
+Both run against the gateway unchanged, Claude Code over Messages and Codex over Responses, with a key minted for a
+run's slot. `tests/rollout_train/gateway/test_harnesses.py` replays requests recorded from Claude Code 2.1.288 and
+codex-cli 0.157.1, so the formats keep working without the binaries.
+
+**Variables.** A sandbox's lease puts each slot's address in its environment
+([sandboxes](../rollout/sandboxes.md#harnesses-inside-a-sandbox)), suffixed per slot:
+
+| Variable | Value | Read by |
+|---|---|---|
+| `OPENAI_BASE_URL` | the gateway's base URL, ending in `/v1` | OpenAI's clients; Codex through its provider's `base_url` |
+| `OPENAI_API_KEY` | the slot's key | OpenAI's clients; Codex through its provider's `env_key` |
+| `OPENAI_MODEL` | the name to send as the model | |
+| `ANTHROPIC_BASE_URL` | the same URL without `/v1` (Anthropic's clients add `/v1/messages`) | Claude Code |
+| `ANTHROPIC_AUTH_TOKEN` | the slot's key, sent as a bearer token | Claude Code, which takes it without the approval an interactive session asks for `ANTHROPIC_API_KEY` |
+| `ANTHROPIC_MODEL` | the name to send as the model | Claude Code |
+
+**Claude Code.** Given those variables, a home of its own, and telemetry and nonessential traffic switched off, it
+connects to nothing but the gateway:
+
+```bash
+export HOME=/sandbox/home CLAUDE_CONFIG_DIR=/sandbox/claude CLAUDE_CODE_TMPDIR=/sandbox/tmp
+export DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1
+cd /work && claude -p "Create a file named hello.txt containing the word hi." \
+    --output-format stream-json --verbose \
+    --tools Read,Write,Edit,Glob,Grep --allowedTools Read,Write,Edit,Glob,Grep --disallowedTools Bash \
+    --permission-prompts none --restricted --strict-mcp-config
+```
+
+`--restricted` keeps its file tools in the working directory. It sends `HEAD /api/hello` first, answered 404, which
+it ignores; `/context` counts tokens at `/v1/messages/count_tokens`; `/compact` asks for a summary like any other
+request.
+
+**Codex.** It reads no base URL from its environment (with only `OPENAI_BASE_URL` set it goes to OpenAI's servers):
+it is given a provider in `$CODEX_HOME/config.toml`. Its plugin sync reaches GitHub and `chatgpt.com` at startup;
+with it off, and analytics and feedback off, it connects to nothing but the gateway:
+
+```toml
+model = "policy"                       # OPENAI_MODEL
+model_provider = "rollout"
+model_context_window = 32768           # the channel's context
+check_for_update_on_startup = false
+
+[model_providers.rollout]
+name = "rollout"
+base_url = "http://gateway:8830/v1"    # OPENAI_BASE_URL
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+supports_websockets = false
+
+[features]
+plugins = false
+
+[sandbox_workspace_write]              # commands write in the working directory only
+exclude_slash_tmp = true
+exclude_tmpdir_env_var = true
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+```
+
+```bash
+codex exec --sandbox workspace-write --cd /work --skip-git-repo-check --ephemeral --json \
+    "Run the command: echo hi > hello.txt"
+```
+
+The provider can be given as flags instead (`-c model_provider=rollout -c model_providers.rollout.base_url=...`,
+one per key). Codex warns that it has no metadata for the model's name and uses its defaults. A compaction is a
+request like any other.
+
+**Supported:**
+
+- Messages: `system` given as text or blocks; `system` messages anywhere in `messages`; `thinking` blocks sent
+  back, whatever their signature; `tool_use` and `tool_result` blocks, several in one message; streams; every
+  `anthropic-beta` header; `count_tokens`, counted with the channel's renderer (the whole prompt, through the
+  start of the reply) and not recorded.
+- Responses: `instructions`, `developer` messages, `reasoning` items sent back with their content, several function
+  calls and their outputs in one turn, streams.
+- A reply cut off inside its thinking (the model stopped before closing it) is all reasoning: Claude Code asks for
+  more, Codex ends its turn.
+
+**Ignored:** the model's name; sampling parameters; Anthropic's `thinking`, `output_config`, `context_management`,
+`safeguards` and `metadata`; Responses' `reasoning`, `include` (there is no encrypted reasoning), `tool_choice`,
+`parallel_tool_calls` and `client_metadata`; caching hints (`cache_control`, `prompt_cache_key`), since the engines
+cache by prefix; the block Claude Code puts first in `system` for Anthropic's billing; provider tools (`web_search`).
+
+Every request a harness sends is a turn of its slot, its compactions' summaries too.
 
 ## A runner served by the gateway
 
