@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
+import { shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
 import { episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
@@ -215,30 +216,40 @@ function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   );
 }
 
-/** The suites, each with how many subjects played it; then the evals playing now, and the eval shown. */
+/** The suites, each opening to its evals, newest first: who played it and how it went. */
 function EvalsTree({ place }: { place: Place }) {
   const { data: evals } = useEvals();
+  const [folds, fold] = useFolds();
   const known = useKnown();
   if (!evals) return null;
-  const playing = evals.evals.filter(each => !each.done || (place.kind === "eval" && place.run === each.run));
+  if (!evals.suites.length) return <div className="empty">No suite yet.</div>;
+  const shown = place.kind === "eval" ? evals.evals.find(each => each.run === place.run)?.suite : place.kind === "suite" ? place.suite : null;
   return (
     <>
-      {evals.suites.length ? <div className="label">Suites</div> : null}
-      {evals.suites.map(suite => (
-        <Node key={suite.suite} to={suitePlace(suite.suite)} current={place.kind === "suite" && place.suite === suite.suite}>
-          <span className="name">{suite.suite}</span>
-          <span className="tag">{suite.subjects.length} played</span>
-        </Node>
-      ))}
-      {evals.suites.length ? null : <div className="empty">No suite yet.</div>}
-      {playing.length ? <div className="label">Evals</div> : null}
-      {playing.map(each => (
-        <Node key={each.run} to={evalPlace(each.run)} current={place.kind === "eval" && place.run === each.run}>
-          <span className={`dot${each.done ? "" : " alive"}`} />
-          <span className="name" title={`${each.suite} with ${known.short(each.checkpoint)}`}>{each.name}</span>
-          <span className="tag">{each.played}/{each.expected}</span>
-        </Node>
-      ))}
+      {evals.suites.map(suite => {
+        const key = `suite:${suite.suite}`, open = folds[key] ?? suite.suite === shown;
+        const played = evals.evals.filter(each => each.suite === suite.suite).sort((a, b) => (b.started ?? 0) - (a.started ?? 0));
+        return (
+          <div key={suite.suite}>
+            <Node to={suitePlace(suite.suite)} current={place.kind === "suite" && place.suite === suite.suite}>
+              <Twist open={open} has={played.length > 0} onToggle={() => fold(key, !open)} />
+              <span className="name">{suite.suite}</span>
+              <span className="tag">{played.length}</span>
+            </Node>
+            {open && played.length ? (
+              <div className="children">
+                {played.map(each => (
+                  <Node key={each.run} to={evalPlace(each.run)} current={place.kind === "eval" && place.run === each.run}>
+                    <span className={`dot${each.done ? "" : " alive"}`} />
+                    <span className="name" title={each.name}>{each.checkpoint ? known.short(each.checkpoint) : "base model"}</span>
+                    <span className="tag">{each.done ? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`}</span>
+                  </Node>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </>
   );
 }
