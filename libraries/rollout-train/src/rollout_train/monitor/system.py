@@ -36,13 +36,16 @@ from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
+from rollout_train.monitor.scores import evals_of, path_of
 from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
-from rollout_train.presence import Beat, alive, presence_of
+from rollout_train.presence import STALE, Beat, alive, presence_of
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, runs_in, table
 from rollout_train.record import scope as run_scope
 from rollout_train.registry import Bookmark, Entry, Registry, Taken, checked, found, names, registry_of, resolved
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
+from rollout_train.settings import EVALS_SUITE, TRAINER, Desired, desired_settings_of
+from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
 
 WAITING = "waiting"
@@ -70,9 +73,12 @@ SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
 RUNNING, IDLE, GONE = "running", "idle", "ended"
-"""A run's state, by when it last wrote anything this reads (its records in the ledger, and its feed where that can
-be read): within `QUIET` seconds it is running, within `SILENT` idle, and after that ended. No process
-is asked: a run may be on any machine."""
+"""A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds,
+and it is running (idle if it wrote nothing for `QUIET` seconds); none, and its process is gone: ended. An eval that
+played every start has ended; one a training run's schedule asked for, and not done, is as that run is. Otherwise by
+when it last wrote anything this reads (its records in the ledger, and its feed where that can be read): within
+`QUIET` seconds it is running, within `SILENT` idle, and after that ended. No process is asked: a run may be on any
+machine."""
 QUIET = 20 * 60
 SILENT = 3 * 3600
 FRESH = 5.0
@@ -261,6 +267,96 @@ class System:
         if launches is None or found is None or found.state not in OPEN:
             raise KeyError(f"there is no launch {id} going")
         return await launches.note(id, state=STOPPED if found.state == ASKED else STOPPING)
+
+    async def settings(self, run: str) -> dict[str, Any] | None:
+        """A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
+        start says, what is wanted of them now, those its newest step used, and each step that used other settings than
+        the one before, with what changed. None where there is no such run."""
+        if not await asyncio.to_thread(present, self._ledger):
+            return None
+        starts: Any = await self._ledger.read(table(run, STARTS))
+        if not starts:
+            return None
+        latest: Mapping[str, Any] = starts[max(starts, key=int)]
+        said: Mapping[str, Any] = latest.get("settings") or {}
+        changeable: dict[str, Any] = dict(said.get("changeable") or {})
+        steps: Any = await self._ledger.read(table(run, STEPS))
+        changes: list[dict[str, Any]] = []
+        before: Mapping[str, Any] = changeable
+        for key in sorted(steps, key=int):
+            used = steps[key].get("settings")
+            if not isinstance(used, dict):
+                continue
+            used = cast(dict[str, Any], used)
+            if differ := {name: value for name, value in used.items() if before.get(name) != value}:
+                changes.append({"step": int(key), "changed": differ})
+            before = used
+        store = desired_settings_of(self._ledger)
+        desired = await store.desired(run) if store is not None else None
+        return {
+            "run": run,
+            "kind": str(latest.get("kind") or "run"),
+            "fixed": dict(said.get("fixed") or {}),
+            "changeable": changeable,
+            "now": dict(before),
+            "desired": dict(desired.settings) if desired else {},
+            "changed": desired.changed if desired else None,
+            "changes": changes,
+        }
+
+    async def want(self, run: str, settings: Mapping[str, Any]) -> Desired:
+        """Want these of a run's changeable settings from its next step on. Raises `Taken` for a setting it does not
+        have or cannot change, or a value it cannot take (a suite there is not, say); `KeyError` where there is no such
+        run, or nowhere to keep what is wanted."""
+        found = await self.settings(run)
+        store = desired_settings_of(self._ledger)
+        if found is None or store is None:
+            raise KeyError(f"there is no run {run}" if found is None else "this ledger keeps no settings")
+        if not found["changeable"]:
+            raise Taken("this run's start says no settings it can change")
+        given: dict[str, JsonValue] = {}
+        for key, value in settings.items():
+            if key not in found["changeable"]:
+                fixed = "is fixed" if key in found["fixed"] else "is not one of its settings"
+                raise Taken(f"{key} {fixed}: these can change ({', '.join(found['changeable'])})")
+            if key.startswith(TRAINER) and not (value is None or isinstance(value, str | int | float | bool)):
+                raise Taken(f"{key} is a number, true or false, or text (not {value!r})")
+            try:
+                given[key] = checked_setting(key, value)
+            except ValueError as error:
+                raise Taken(str(error)) from None
+            if key == EVALS_SUITE and given[key] and await suite_of(self._ledger, str(given[key])) is None:
+                raise Taken(f"there is no suite {given[key]!r}")
+        return await store.want(run, given)
+
+    async def checkpoint_evals(self, checkpoint: str) -> dict[str, Any] | None:
+        """Every eval a checkpoint (by its id or the start of it) has had, by hand or by a schedule, newest first
+        (`rollout_train.monitor.scores.evals_of`); None where there is no such checkpoint."""
+        found = await self._checkpoint(checkpoint)
+        if found is None:
+            return None
+        tables, called = await self._tables(), await names(registry_of(self._ledger))
+        return {"checkpoint": found, "evals": await asyncio.to_thread(evals_of, tables, found, called)}
+
+    async def path(self, checkpoint: str) -> dict[str, Any] | None:
+        """A checkpoint's line from the base model, with each point's scores at each suite
+        (`rollout_train.monitor.scores.path_of`); None where there is no such checkpoint."""
+        found = await self._checkpoint(checkpoint)
+        if found is None:
+            return None
+        tables, called = await self._tables(), await names(registry_of(self._ledger))
+        made = {each.id: each for each in await checkpoints_in(self._ledger)}
+        return await asyncio.to_thread(path_of, tables, made, found, called)
+
+    async def _checkpoint(self, reference: str) -> str | None:
+        """A checkpoint's id, by the id or the start of one that no other begins with."""
+        if not await asyncio.to_thread(present, self._ledger):
+            return None
+        ids = [each.id for each in await checkpoints_in(self._ledger)]
+        if reference in ids:
+            return reference
+        starting = [each for each in ids if each.startswith(reference)]
+        return starting[0] if len(starting) == 1 else None
 
     def _registry(self) -> Registry:
         registry = registry_of(self._ledger)
@@ -496,9 +592,18 @@ class System:
             seen = self._read(run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run))
             begun: Any = starts[max(starts, key=int)] if starts else {}
             kind = str(begun.get("kind") or "run")
+            if kind == EVAL and own[GROUPS] and set(own[GROUPS]) <= set(own[RESULTS]):
+                seen |= {"state": GONE, "channels": []}  # (an eval that played every start has ended)
             runs.append(
-                listed | seen | {"played": played[run].counts(), "name": called["runs"].get(run, run), "kind": kind}
+                listed
+                | seen
+                | {"played": played[run].counts(), "name": called["runs"].get(run, run), "kind": kind}
+                | {"by": begun.get("by"), "by_step": begun.get("step")}
             )
+        states = {run["run"]: run["state"] for run in runs}
+        for run in runs:  # (an eval a training run's schedule asked for, not done, is played by that run's runner)
+            if run["kind"] == EVAL and run["state"] != GONE and run["by"] in states and run["run"] not in beaten:
+                run["state"] = states[run["by"]]
         rank = {RUNNING: 0, IDLE: 1, GONE: 2}
         runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
         return {
@@ -537,7 +642,8 @@ class System:
         and what its episodes' place adds (its groups in flight with their episodes); when it last wrote or beat,
         and so whether it is running."""
         latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
-        added: dict[str, Any] = {"channels": _channels(notes)}
+        beating = beaten is not None and now - beaten <= STALE
+        added: dict[str, Any] = {"channels": _channels(notes) if beating else []}  # (what a gone process served is not)
         written = newest([wrote, latest.get("started"), beaten])
         if isinstance(found, _Place):
             written = newest([written, found.written()])
@@ -545,9 +651,13 @@ class System:
             added |= {key: there[key] for key in ("open", "done") if key in there}
             written = newest([written, there.get("written")])
         quiet = now - written if written is not None else float("inf")
+        if beaten is not None:  # (its runners beat: whether its process is there is known)
+            state = (RUNNING if quiet < QUIET else IDLE) if beating else GONE
+        else:
+            state = RUNNING if quiet < QUIET else IDLE if quiet < SILENT else GONE
         return {
             **added,
-            "state": RUNNING if quiet < QUIET else IDLE if quiet < SILENT else GONE,
+            "state": state,
             "host": latest.get("host"),
             "address": latest.get("address"),
             "directory": latest.get("directory") or (str(found.directory) if isinstance(found, _Place) else None),

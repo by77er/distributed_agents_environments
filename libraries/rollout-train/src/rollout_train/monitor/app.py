@@ -56,6 +56,11 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
       what it reported (`System.episode`);
     - `/api/checkpoints?sample=1`: the checkpoints as a graph from their base models, with the trainers, the inference
       workers and evaluations (`System.lineage`; `sample` adds the fixture of the tables proposed for them);
+    - `/api/checkpoints/{id}/evals`: every eval a checkpoint has had (`System.checkpoint_evals`), and
+      `/api/checkpoints/{id}/path` its line from the base model with each point's scores (`System.path`);
+    - `/api/runs/{run}/settings`: a training run's settings, fixed and changeable, and what is wanted of them
+      (`System.settings`); `POST` (`{"settings": {KEY: VALUE}}`) wants changeable ones from its next step on
+      (`System.want`);
     - `/api/statistics`: every run of the ledger in figures and the engines' throughput (`System.statistics`);
     - `/api/runs`: every episode in the runs' feeds, summarised;
     - `/api/stream?topic=...`: server-sent events, a `version` event (`{"topic", "version"}`) for each topic at once
@@ -111,6 +116,29 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     async def checkpoints(request: Request) -> Response:
         sample = request.query_params.get("sample") in ("1", "true")
         return answered(request, await hub.read("checkpoints/sample" if sample else "checkpoints"))
+
+    async def checkpoint_evals(request: Request) -> Response:
+        return answered(request, await hub.read(f"checkpoint-evals/{request.path_params['id']}"))
+
+    async def path(request: Request) -> Response:
+        return answered(request, await hub.read(f"path/{request.path_params['id']}"))
+
+    async def settings(request: Request) -> Response:
+        run = request.path_params["run"]
+        if request.method == "GET":
+            return answered(request, await hub.read(f"settings/{run}"))
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        wanted: Any = cast(dict[str, Any], body).get("settings") if isinstance(body, dict) else None
+        if not isinstance(wanted, dict):
+            return JSONResponse({"error": 'say the settings wanted, as {"settings": {KEY: VALUE}}'}, status_code=400)
+
+        async def change() -> Any:
+            return {"desired": asdict(await system.want(run, cast(dict[str, Any], wanted)))}
+
+        return await written(change)
 
     async def figures(request: Request) -> Response:
         return answered(request, await hub.read("statistics"))
@@ -239,6 +267,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/groups/{run}/{number:int}", group),
         Route("/api/episodes/{run_id}", episode),
         Route("/api/checkpoints", checkpoints),
+        Route("/api/checkpoints/{id}/evals", checkpoint_evals),
+        Route("/api/checkpoints/{id}/path", path),
+        Route("/api/runs/{run}/settings", settings, methods=["GET", "POST"]),
         Route("/api/statistics", figures),
         Route("/api/runs", runs),
         Route("/api/stream", stream),

@@ -11,6 +11,9 @@ A topic is a thing the page shows, by name:
 - `statistics`: every run in figures (`System.statistics`, without the machines);
 - `checkpoints`, `checkpoints/sample`: the checkpoints as a graph, without or with the sample fixture
   (`System.lineage`);
+- `checkpoint-evals/ID`, `path/ID`: every eval a checkpoint has had, and its line with each point's scores
+  (`System.checkpoint_evals`, `System.path`);
+- `settings/RUN`: a training run's settings, and what is wanted of them (`System.settings`);
 - `group/RUN/NUMBER`: one group (`System.group`);
 - `episode/RUN_ID`: one episode's lines; its version is how many there are, where from and its state, and the page
   asks for the lines it lacks (`System.episode` with `after`).
@@ -116,6 +119,12 @@ class Hub:
             return figures
         if topic in ("checkpoints", "checkpoints/sample"):
             return await system.lineage(sample=topic.endswith("/sample"))
+        if topic.startswith("checkpoint-evals/"):
+            return await system.checkpoint_evals(topic.removeprefix("checkpoint-evals/"))
+        if topic.startswith("path/"):
+            return await system.path(topic.removeprefix("path/"))
+        if topic.startswith("settings/"):
+            return await system.settings(topic.removeprefix("settings/"))
         if topic.startswith("group/"):
             run, _, number = topic.removeprefix("group/").rpartition("/")
             return await system.group(run, int(number)) if number.isdigit() else None
