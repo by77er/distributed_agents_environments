@@ -384,9 +384,12 @@ gateway](../libraries/rollout-train/gateway.md#a-runner-served-by-the-gateway)):
   same code a replica runs, with no HTTP in between, recording in the profile's ledger and blob store. It tells the
   monitor's feed of the samples harnesses ask for, and listens for them at `serve`. With no keys given, it signs with
   a secret it makes when it starts.
-- **With `url`**, through the replicas there. Every channel of the profile has its engines elsewhere (a
-  `RemoteEngine` channel): the runner starts no engine, and the replicas sample the same servers. They hold the same
-  secrets as the runner (`keys`, or the environment).
+- **With `url`**, through the replicas there, and the runner starts no engine. A `RemoteEngine` channel is sampled
+  on its servers, which the replicas reach too; any other channel is hosted by the replicas, its engines started in
+  their processes, and the runner asks them what it guarantees ([a gateway elsewhere that hosts
+  channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels)). A hosted channel serves
+  the base model only. The replicas hold the same secrets as the runner (`keys`, or the environment), and share its
+  ledger and blob store.
 
 Either way the runner's episodes are assembled from the turns in the ledger, and an episode a runner started again
 adopts trains like any other.

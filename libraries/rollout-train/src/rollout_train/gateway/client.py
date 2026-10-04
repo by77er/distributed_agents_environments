@@ -8,11 +8,13 @@ gateway's address and such a key. When the run ends, `sessions` reads what each 
 
 The gateway is in this process (`GatewayEndpoints.of`: a sample is a call, as the gateway's own HTTP handlers make it)
 or elsewhere, at a URL. There, a sample is retried under its effect id when the gateway cannot be reached or a replica
-fails, so a replica that dies mid-turn costs a retry on another, never a second recorded turn.
+fails, so a replica that dies mid-turn costs a retry on another, never a second recorded turn. What a channel the
+gateway there hosts (its engines in the gateway's own processes) guarantees is what the gateway says of it (`hosted`).
 """
 
 import asyncio
-from collections.abc import Mapping
+import time
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -60,7 +62,8 @@ class GatewayEndpoints:
     """Implements `RecordedEndpoints` over a gateway: the one in this process (`gateway`), else the one at `url` (its
     base URL, without `/v1`), with keys signed by `keyring`; `store` is the turn store the gateway records in. What a
     channel guarantees is the gateway's to say, in this process; else, for a routed channel, what `routes` say of it
-    (the runner's view of the same servers), and for any other, `contracts`. `url` is also what a harness is handed:
+    (the runner's view of the same servers), and for any other, `contracts` (for a channel the gateway at `url` hosts,
+    what it says of it: `hosted`). `url` is also what a harness is handed:
     without one, a run cannot give a harness an address."""
 
     def __init__(
@@ -108,6 +111,34 @@ class GatewayEndpoints:
         routed: Mapping[str, object] = self.routes.routes if self.routes is not None else {}
         local = self.gateway.names if self.gateway is not None else list(self.contracts)
         return [*local, *(name for name in [*self.contracts, *routed] if name not in local)]
+
+    async def hosted(self, channels: Collection[str], *, patience: float = 60.0) -> None:
+        """Learn what the gateway at the URL guarantees of each of `channels`, which its own engines serve (its
+        `/v1/models` says each one's contract), asking again while it cannot be reached, for up to `patience` seconds.
+        Raises `ModelEndpointError` when it cannot be reached, or does not host one of them."""
+        if self.url is None:
+            raise ValueError("a gateway in this process says what its channels guarantee")
+        deadline, failure, wait = time.monotonic() + patience, "no attempt was made", self.backoff
+        while True:
+            try:
+                response = await self.http.get(f"{self.url}{SERVED_UNDER}/models")
+                if response.status_code == 200:
+                    break
+                failure = f"{response.status_code}: {response.text[:200]}"
+            except httpx.TransportError as error:
+                failure = f"{type(error).__name__}: {error}"
+            if time.monotonic() + wait > deadline:
+                raise ModelEndpointError(f"the gateway at {self.url} did not say its channels: {failure}")
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 5.0)
+        said: Any = response.json()
+        listed = cast(
+            list[dict[str, Any]], cast(dict[str, Any], said).get("data", []) if isinstance(said, dict) else []
+        )
+        contracts = {str(each.get("id")): each["contract"] for each in listed if isinstance(each.get("contract"), dict)}
+        if missing := sorted(set(channels) - set(contracts)):
+            raise ModelEndpointError(f"the gateway at {self.url} hosts no channel {', '.join(missing)}")
+        self.contracts |= {name: CapabilityContract.model_validate(contracts[name]) for name in channels}
 
     def admit(self, run_id: str, attempt: Attempt) -> None:
         """Say which attempt a program's run plays, before it starts (and again when the attempt is taken up anew)."""

@@ -35,7 +35,7 @@ app = create_app(gateway)               # serve with uvicorn, as many replicas a
 | `POST /v1/messages` | Anthropic's Messages |
 | `POST /v1/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer; nothing is recorded |
 | `POST /v1/samples` | a [`SampleRequest`](../../guide/reference.md#samplerequest), answered with a `SampleResult`, for programs in a runner |
-| `GET /v1/models` | the channels, as models |
+| `GET /v1/models` | the channels, as models; each whose engines are in the replica's process with its `contract` (`context_limit`, `max_output_tokens`) |
 | `GET /healthz` | 200 while the process serves |
 | `GET /readyz` | 200 when the ledger and the blob store answer; 503, saying which does not, otherwise |
 
@@ -200,7 +200,9 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
   by its id, as the model's name. Where a server has not loaded it yet, it asks for the newest one before it that the
   server has, no more than `max_lag` checkpoints behind (1, or what the profile's channel or the run says). With none
   close enough, a turn waits up to its patience, then fails as the endpoint failing does: 503.
-- **A channel whose engines are in the gateway's own process** samples whatever it serves.
+- **A channel whose engines are in the gateway's own process** (a channel the gateway hosts: vLLM on its machine, or
+  an engine that calls a hosted API, such as `TinkerEngine`) samples whatever it serves: the base model, unless
+  something in that process publishes to it.
 
 A turn's weights are chosen once, when it begins: both phases of its thinking ask for the same checkpoint. The turn
 records the checkpoint that served it (by id; the base model's name before the first checkpoint) and that
@@ -345,8 +347,31 @@ endpoints = GatewayEndpoints("https://models.example/gw", keyring, TurnStore(led
   servers have a checkpoint close enough), which the episode runner asks before claiming;
 - `sessions(run, run_id)` reads what each slot recorded, when the run ends.
 
-What a channel guarantees a session (its capability contract) is its channel's: in this process, or for a routed
-channel, as the runner sees its servers.
+What a channel guarantees a session (its capability contract) is its channel's: in this process, for a routed
+channel as the runner sees its servers, and for a channel the gateway elsewhere hosts, as that gateway says.
+
+### A gateway elsewhere that hosts channels
+
+A runner whose profile names `[gateway] url` starts no engine. Each channel of its profile is either routed (its
+engines are servers elsewhere, which the runner and the replicas both reach) or hosted by the replicas: their engines
+run in the replicas' own processes, which `rollout gateway PROFILE` starts from the same channel table. One profile
+serves both processes, and the two may run in different Python environments: the runner's needs the environments it
+plays, the gateway's the engine's SDK. Neither imports what only the other needs: the runner reads a hosted channel's
+`model` (what an eval of the base model names) and samples it by name.
+
+```bash
+uv run rollout gateway profile.toml                 # in the engine's environment: hosts the channel, records turns
+uv run rollout eval profile.toml SUITE --name NAME  # in the environment's: samples there, over HTTP, with signed keys
+```
+
+- **What it guarantees.** When it opens, the runner asks the gateway's `GET /v1/models` for each hosted channel's
+  `contract`, asking again for up to a minute while the gateway cannot be reached; a channel the gateway does not
+  host stops it from opening. A binding's thinking and answer room (a suite entry's limits) replace the channel's
+  own, as for any channel.
+- **What it samples.** The engines the gateway started, as they are: the base model. A hosted channel is not
+  trained, and an eval of a checkpoint cannot be served on one: the runner refuses both.
+- **What both need.** The same ledger and the same blob store (an explicit `[blobs]` table, since a runner's
+  `--directory` moves the default), and the same keys' secrets (`[gateway] keys`).
 
 **Hooks.** A program's samples reach the runner's hooks through its endpoints. A harness's go straight to the
 gateway: one in the runner's process tells the runner's hooks of each (`Gateway.hooks`), and the

@@ -151,8 +151,9 @@ class GatewaySpec:
 
     url: str | None = None
     """Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it); none: a runner
-    samples through a gateway in its own process. A runner that records through replicas elsewhere has every channel
-    routed (their engines serve elsewhere too)."""
+    samples through a gateway in its own process. A runner that records through replicas elsewhere starts no engine: a
+    routed channel is sampled on its servers, and any other is hosted by the replicas (its engines in their processes),
+    which say what it guarantees. A hosted channel samples what its engines serve: the base model, never trained."""
     listen: str = "127.0.0.1:8830"
     """`host:port` a replica serves on."""
     keys: str | None = None
@@ -294,6 +295,14 @@ class Profile:
             else None,
         )
 
+    @property
+    def hosted(self) -> list[str]:
+        """The channels the gateway at `[gateway] url` hosts, by name: with a URL, every channel not routed (a runner
+        starts none of their engines, and samples them there); without one, none."""
+        if self.gateway is None or self.gateway.url is None:
+            return []
+        return [name for name, channel in self.channels.items() if not channel.routed]
+
     @contextlib.asynccontextmanager
     async def open(self, *, training: bool = True, plays: Collection[str] | None = None) -> AsyncGenerator["Platform"]:
         """Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
@@ -401,6 +410,12 @@ class Platform:
         """What each channel's engines load: the profile's model; for the trained channel of a run that starts from a
         full checkpoint, or an adapter over one, that full checkpoint's files (the model its adapters, or its full
         weights, are trained over)."""
+        hosted = profile.hosted
+        if profile.trainer is not None and profile.trainer.channel in hosted and training and plays is None:
+            raise ValueError(
+                f"channels.{profile.trainer.channel}: a channel the gateway at [gateway] url hosts samples what its "
+                "own engines serve, so it cannot be trained"
+            )
         trained_here = profile.trainer is not None and not profile.channels[profile.trainer.channel].routed
         if self.origin is not None and profile.trainer is not None and trained_here:
             under = await self.checkpoints.under(await self.checkpoints.checkpoint(self.origin))
@@ -414,7 +429,7 @@ class Platform:
         if described is not None and training and plays is None:
             learner = named(described.kind)(models[described.channel], **described.settings)
         sequence = learner.budget.segment_tokens if learner is not None else None
-        self.channels = started_engines(profile, stack, models, sequence)
+        self.channels = started_engines(profile, stack, models, sequence, leaving=hosted)
         trained = described.channel if described is not None else None
         routes = {
             name: spec.route(named(spec.renderer)(spec.model), sequence if name == trained else None)
@@ -427,6 +442,8 @@ class Platform:
         feed = RunFeed(directory / FEED, **({"keep": profile.feed_runs} if profile.feed_runs else {}))
         stack.callback(feed.close)
         self.recorder = self._recording(feed)
+        if hosted:  # (what each guarantees, as the gateway that hosts it says)
+            await self.recorder.hosted(hosted)
         tool_sets: dict[str, ToolSet] = {}
         for name, where in profile.tools.items():
             if where.startswith(("http://", "https://")):
@@ -503,11 +520,6 @@ class Platform:
                 keyring = Keyring.parse([("local", secrets.token_urlsafe(32))])
         store = TurnStore(self.ledger, self.blobs)
         if spec.url is not None:
-            if unrouted := sorted(name for name, channel in profile.channels.items() if not channel.routed):
-                raise ValueError(
-                    f"channels {', '.join(unrouted)}: a runner that records through a gateway elsewhere "
-                    "([gateway] url) has every channel's engines serve elsewhere too"
-                )
             return GatewayEndpoints(spec.url, keyring, store, routes=self.routes, lifetime=spec.lifetime)
         models = {name: channel.model for name, channel in profile.channels.items()}
         self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed])
@@ -586,6 +598,11 @@ class Platform:
         serves (`rollout_train.serving`), and this returns the version given."""
         if channel not in self.channels and self.routes is not None and self.routes.routed(channel):
             return version or 0
+        if channel in self.profile.hosted:
+            raise ValueError(
+                f"the channel {channel!r} is hosted by the gateway at [gateway] url, which samples what its own "
+                "engines serve: it plays the base model only"
+            )
         served = await self.channels[channel].publish(adapter, path, version, full=full)
         with contextlib.suppress(Exception):  # (a beat missed is said at the next)
             await self.runner.beat()
@@ -624,17 +641,19 @@ def started_engines(
     sequence: int | None = None,
     *,
     servers: bool = False,
+    leaving: Collection[str] = (),
 ) -> dict[str, Channel]:
     """The channels whose engines serve in this process, by name, each engine started from `models[name]` and closed by
     `stack`, their processes noted in the directory (`PROCESSES`) for whoever must end them if this process is killed;
     with `servers`, those whose engines are servers elsewhere instead, as clients of them. `sequence` (the trainer's
-    longest segment) is the longest turn of the channel the profile's trainer trains."""
+    longest segment) is the longest turn of the channel the profile's trainer trains. The channels named in `leaving`
+    (those a gateway elsewhere hosts) are left out."""
     record = profile.directory / PROCESSES
     trained = profile.trainer.channel if profile.trainer is not None else None
     started: list[Engine] = []
     channels: dict[str, Channel] = {}
     for name, spec in profile.channels.items():
-        if spec.routed != servers:
+        if spec.routed != servers or name in leaving:
             continue
         reached = {"connection": Connection(**spec.connection)} if spec.routed else {}
         engines: list[Engine] = []

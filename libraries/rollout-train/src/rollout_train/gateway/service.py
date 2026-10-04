@@ -17,8 +17,8 @@ session: any replica answers any request, and a replica can die at any moment.
     POST {base}/v1/responses             OpenAI's Responses
     POST {base}/v1/messages              Anthropic's Messages
     POST {base}/v1/messages/count_tokens a Messages request's prompt, counted with the channel's renderer
-    POST {base}/v1/samples              a `SampleRequest`, answered with a `SampleResult` (for programs in a runner)
-    GET  {base}/v1/models                the channels, as models
+    POST {base}/v1/samples               a `SampleRequest`, answered with a `SampleResult` (for programs in a runner)
+    GET  {base}/v1/models                the channels, as models (each this process hosts with its `contract`)
     GET  {base}/healthz                  alive
     GET  {base}/readyz                   ready: the ledger and the blob store answer
 
@@ -251,10 +251,17 @@ class Gateway:
 def create_app(gateway: Gateway) -> Starlette:
     """Serve `gateway` over HTTP (behind a proxy that terminates TLS, or with uvicorn's own certificates)."""
 
+    def hosted(name: str) -> dict[str, Any]:
+        """For a channel whose engines are in this process, what it guarantees a session (`contract`): what a runner
+        that records through this gateway tells its programs of the channel."""
+        channel = gateway.channels.get(name)
+        return {"contract": contract_of(channel).model_dump(mode="json")} if channel is not None else {}
+
     async def models(request: Request) -> Response:
         names = gateway.names
         listed = [
             {"id": name, "object": "model", "type": "model", "display_name": name, "created": 0, "owned_by": "rollout"}
+            | hosted(name)
             for name in names
         ]
         page = {"has_more": False, "first_id": names[0] if names else None, "last_id": names[-1] if names else None}

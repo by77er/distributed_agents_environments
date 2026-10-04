@@ -616,9 +616,7 @@ class Memory
 - `def answer(self, result: str, *, others: str = 'Not done: only your first call of a turn counts.') -> None` — Close the latest turn with how its reply went: the result of its first tool call (further calls are
   answered with `others`), or, for a reply that called nothing, a note to the agent.
 - `def crowded(self, model: Model) -> bool` — Whether one more turn might leave the model less than its full room to reply (by what its last prompt
-  took, which the model reports, and by how much a turn has been seen to add). The room kept is the contract's
-  most output, up to a quarter of the context: a model with no output budget may reply up to its whole context,
-  which no compaction could keep free.
+  took, which the model reports, and by how much a turn has been seen to add).
 - `async def compact(self, model: Model, system: Message | None = None, *, keep: int | None = None) -> None` — Replace the oldest turns with what the agent says it needs to remember of them. The newest `keep` stay as
   they are (by default the newest third).
 - `async def sample(self, model: Model, *, system: Message | None = None, current: Sequence[Message] = (), tools: Sequence[ToolSpecification] = (), keep: int = 0) -> Message` — One reply to the context. If the model refuses the context as too long, memory is compacted and the reply
@@ -1258,7 +1256,7 @@ only a kind and parameters; a worker for an environment names a process, mounts,
 |---|---|---|---|
 | `kind` | `str` | required | The kind of sandbox (`minecraft`, say): the binding names the pool that serves each kind. |
 | `parameters` | `Mapping[str, JsonValue]` | `Field(default_factory=dict[str, JsonValue])` | What the pool makes it from: a task and its seeds, an image. |
-| `slots` | `FrozenSequence[str]` | `()` | Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, and `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_MODEL` (`harness_environment`), suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it expires or a newer attempt of its episode takes the episode's fence. |
+| `slots` | `FrozenSequence[str]` | `()` | Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it expires or a newer attempt of its episode takes the episode's fence. |
 | `process` | `Process \| None` | `None` |  |
 | `mounts` | `FrozenSequence[Mount]` | `()` |  |
 | `scratch` | `Scratch \| None` | `None` | Without it, the sandbox writes nowhere. |
@@ -2808,8 +2806,7 @@ to be resumed, and starting again adopts them (`prepare`).
   runs survive it, left to be resumed).
 - `async def beat(self) -> None` — Beat now, beside the beats every `beating` seconds: after what it says of itself changed (a channel serves
   a new checkpoint, say), so that whoever reads the beats does not wait for the next.
-- `async def open(self) -> list[Open]` — The episodes nobody plays now, of the runs this runner serves that are not paused, oldest group first. Which
-  of them are paused is noted, and said at once in a beat when it changed.
+- `async def open(self) -> list[Open]` — The episodes nobody plays now, of the runs this runner serves, oldest group first.
 
 ### `episodes_of`
 
@@ -3722,7 +3719,7 @@ One environment of a suite's version: what every subject plays of it, start for 
 | `seeds` | `list[int] \| None` | `None` |  |
 | `held_out` | `bool` | `False` | Whether every start is one of the environment's eval starts, which training never draws. |
 | `episodes` | `int` | `1` | Episodes of each start an eval plays, unless it is asked for another number. |
-| `thinking_tokens` | `int \| None` | `None` | Its episodes' tokens of thinking per turn, and of answer after it; none: the channel's own (which may be no budget). |
+| `thinking_tokens` | `int \| None` | `None` | Its episodes' tokens of thinking per turn, and of answer after it; none: the channel's own. |
 | `answer_tokens` | `int \| None` | `None` |  |
 
 **Methods**
@@ -3965,8 +3962,8 @@ What a turn may take, in tokens: the deployment's hardware decides, and code abo
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `thinking` | `int \| None` | `None` | Tokens of thinking per turn before it is closed by force; none: thinking runs until the model closes it, or until what the context leaves after the answer's room is spent. |
-| `answer` | `int \| None` | `None` | Room for the answer after the thinking; none: whatever room the turn has left. With neither budget, a turn is one generation that may fill what the context leaves (`rollout_train.recorder.sampling`). |
+| `thinking` | `int` | `1024` | Tokens of thinking per turn before it is closed by force. |
+| `answer` | `int` | `400` | Room for the answer after the thinking. |
 | `sequence` | `int \| None` | `None` | The longest turn (prompt and completion): the smaller of what the engines accept and what the trainer can train on. A long prompt leaves less room to think, so that every turn can be trained on. |
 
 ### `RemoteChannel`
@@ -4380,7 +4377,6 @@ its endpoints).
   `links` are those its harness declared besides the request's own. Raises `Refused`, or the endpoint's
   `ModelEndpointError` (`ContextOverflow` when the context is too long).
 - `def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None` — Tell the hooks of a sample a harness asked for, newly recorded.
-- `async def count(self, grant: Grant, prompt: Prompt) -> int` — How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold.
 - `async def ready(self) -> dict[str, str]` — What is not ready, by part (empty: ready): the ledger and the blob store must answer.
 
 ### `GatewayEndpoint`
@@ -4414,7 +4410,8 @@ class GatewayEndpoints
 Implements `RecordedEndpoints` over a gateway: the one in this process (`gateway`), else the one at `url` (its
 base URL, without `/v1`), with keys signed by `keyring`; `store` is the turn store the gateway records in. What a
 channel guarantees is the gateway's to say, in this process; else, for a routed channel, what `routes` say of it
-(the runner's view of the same servers), and for any other, `contracts`. `url` is also what a harness is handed:
+(the runner's view of the same servers), and for any other, `contracts` (for a channel the gateway at `url` hosts,
+what it says of it: `hosted`). `url` is also what a harness is handed:
 without one, a run cannot give a harness an address.
 
 **Methods**
@@ -4423,6 +4420,9 @@ without one, a run cannot give a harness an address.
 - `@classmethod def of(cls, gateway: Gateway, url: str | None = None, *, lifetime: float = LIFETIME) -> 'GatewayEndpoints'` — Endpoints over a gateway in this process; `url`, where it is also served over HTTP, for harnesses.
 - `@property def http(self) -> httpx.AsyncClient`
 - `@property def channels(self) -> list[str]` — The channels it samples, by name.
+- `async def hosted(self, channels: Collection[str], *, patience: float = 60.0) -> None` — Learn what the gateway at the URL guarantees of each of `channels`, which its own engines serve (its
+  `/v1/models` says each one's contract), asking again while it cannot be reached, for up to `patience` seconds.
+  Raises `ModelEndpointError` when it cannot be reached, or does not host one of them.
 - `def admit(self, run_id: str, attempt: Attempt) -> None` — Say which attempt a program's run plays, before it starts (and again when the attempt is taken up anew).
 - `def forget(self, run_id: str) -> None`
 - `def endpoint(self, binding: RecordedModel) -> 'GatewayEndpoint'`
@@ -4648,8 +4648,8 @@ class ChannelSpec
 | `renderer` | `str` | required | `module:name` of the model family's renderer, called with `model`. |
 | `engine` | `str` | required | `module:name` of what makes an engine, called with `model` and one entry of `engines`. |
 | `engines` | `tuple[Mapping[str, Any], ...]` | `({},)` | One entry per replica: what that engine is told (its share of a GPU, which device, where it listens). |
-| `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn before it is closed by force (`Limits.thinking`); none: no thinking budget. |
-| `answer_tokens` | `int \| None` | `None` | Room for the answer after the thinking (`Limits.answer`); none: whatever room the turn has left. With neither, a turn may fill what the context leaves. |
+| `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own. |
+| `answer_tokens` | `int \| None` | `None` |  |
 | `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
 | `max_lag` | `int` | `MAX_LAG` | For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`, each entry of `engines` a server's `address`): how many checkpoints behind what the channel should serve a sample may be, where its server does not have the newest yet. |
 | `via` | `str \| None` | `None` | For a channel whose engines serve elsewhere: the URL its runners send every request to (a router or a proxy in front of its servers); none: its servers' addresses. Its engine hosts load checkpoints at the addresses. |
@@ -4692,7 +4692,7 @@ replicas at `url`, or, with none, through a gateway in its own process (served t
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `url` | `str \| None` | `None` | Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it); none: a runner samples through a gateway in its own process. A runner that records through replicas elsewhere has every channel routed (their engines serve elsewhere too). |
+| `url` | `str \| None` | `None` | Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it); none: a runner samples through a gateway in its own process. A runner that records through replicas elsewhere starts no engine: a routed channel is sampled on its servers, and any other is hosted by the replicas (its engines in their processes), which say what it guarantees. A hosted channel samples what its engines serve: the base model, never trained. |
 | `listen` | `str` | `'127.0.0.1:8830'` | `host:port` a replica serves on. |
 | `keys` | `str \| None` | `None` | A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's, and for a gateway in a runner's own process with none there, a secret it makes when it starts. |
 | `lifetime` | `float` | `6 * 3600.0` | Seconds a key minted for a slot is good for. |
@@ -4774,9 +4774,9 @@ class Profile
 
 - `@classmethod def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
   `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
-  file has and a profile does not is an error: a misspelt guard would otherwise be no guard. A channel's
-  `thinking_tokens` or `answer_tokens` of `"none"` is no budget (TOML has no null: what a setting that removes
-  the file's budget says).
+  file has and a profile does not is an error: a misspelt guard would otherwise be no guard.
+- `@property def hosted(self) -> list[str]` — The channels the gateway at `[gateway] url` hosts, by name: with a URL, every channel not routed (a runner
+  starts none of their engines, and samples them there); without one, none.
 - `async def open(self, *, training: bool = True, plays: Collection[str] | None = None) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
   `training` (an eval), no trainer is made: the trained channel's engines still load what the trainer's `start`
   is served over. With `plays`, a runner and nothing else (`rollout runner`): see `Platform.start`.
@@ -4875,9 +4875,6 @@ class System
 - `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
   done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
   the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
-- `async def pause(self, run: str) -> Desired` — Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run.
-- `async def resume(self, run: str) -> Resumed` — Resume a run: in place, or by a launch (`rollout_train.resuming.resume`). Raises `Taken` for a run that
-  cannot be resumed, `KeyError` where there is no such run or no launcher alive offers what it needs.
 - `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
   run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
   `KeyError` when there is no such run (or no registry).
@@ -5354,7 +5351,6 @@ def qwen3(model: str | Tokenizer) -> Renderer
 ```
 
 Qwen3: JSON tool calls, and thinking the model opens. `model` is a checkpoint's name, or its tokenizer.
-A turn ends with `<|im_end|>`, or with the end of text, where the model stops too.
 
 ### `qwen35`
 
@@ -5365,7 +5361,6 @@ def qwen35(model: str | Tokenizer) -> Renderer
 ```
 
 Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer.
-A turn ends with `<|im_end|>`, or with the end of text, where the model stops too.
 
 ### `tokenizer_of` {#rollout_qwentokenizer_of}
 

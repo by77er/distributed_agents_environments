@@ -1,6 +1,7 @@
 """A profile, opened: engines, renderer, trainer and tool sets by name, with nothing on a GPU; and the profiles the
 documentation and the Minecraft environment give, which must load."""
 
+import functools
 import re
 import tomllib
 from collections.abc import Sequence
@@ -9,9 +10,11 @@ from typing import Any
 
 import pytest
 
+from rollout.contracts import ModelEndpointError
 from rollout.environment import binding_for
 from rollout_train import Budget, Files, Step, Weighted, train
 from rollout_train import testing as support
+from rollout_train.gateway import GatewayEndpoints
 from rollout_train.profile import Profile
 from rollout_train.trainer import WEIGHTS
 from tests.rollout_train.rollouts.games import words
@@ -150,13 +153,17 @@ async def test_a_profile_that_cannot_start_stops_what_it_started(tmp_path: Path)
     assert started.told[-1] == "close"
 
 
-async def test_a_runner_that_records_through_a_gateway_elsewhere_has_every_channel_routed(tmp_path: Path) -> None:
+async def test_a_runner_that_records_through_a_gateway_elsewhere_starts_none_of_the_engines_it_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     support.STARTED.clear()
-    elsewhere = Profile.load(write(tmp_path, PROFILE + '\n[gateway]\nurl = "http://gateway:8830"\n'))
-    with pytest.raises(ValueError, match="channels judge, policy: a runner that records through a gateway elsewhere"):
+    monkeypatch.setattr(GatewayEndpoints, "hosted", functools.partialmethod(GatewayEndpoints.hosted, patience=0.0))
+    elsewhere = Profile.load(write(tmp_path, PROFILE + '\n[gateway]\nurl = "http://gateway.invalid:8830"\n'))
+    assert elsewhere.hosted == ["policy", "judge"]
+    with pytest.raises(ModelEndpointError, match="did not say its channels"):  # (it asks the gateway what they are)
         async with elsewhere.open(training=False):
             pass
-    assert all(engine.told[-1] == "close" for engine in support.STARTED)
+    assert support.STARTED == []  # (tests/rollout_train/gateway/test_hosted.py plays through one that answers)
 
 
 def test_a_key_a_profile_does_not_have_is_an_error(tmp_path: Path) -> None:
