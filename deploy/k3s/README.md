@@ -76,13 +76,14 @@ kubectl create namespace rollout
 kubectl -n rollout create secret generic stores --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
   --from-literal=ROOT_ACCESS_KEY_ID=rollout --from-literal=ROOT_SECRET_ACCESS_KEY="$(openssl rand -hex 24)"
 kubectl -n rollout create secret generic gateway-keys --from-file=gateway.keys=$HOME/.config/rollout/gsm8k-tinker.keys
-kubectl -n rollout create secret generic tinker --from-file=credentials.json=$HOME/.tinker/credentials.json
-                                    # or --from-literal=TINKER_API_KEY=…
+kubectl -n rollout create secret generic tinker --from-file=credentials.json=$HOME/.tinker/credentials.json \
+  --from-literal=TINKER_API_KEY="$(python3 -c 'import json, os; d = json.load(open(os.path.expanduser("~/.tinker/credentials.json"))); print(d["keys"][d["default"]]["key"], end="")')"
 helm upgrade --install rollout deploy/chart/rollout -n rollout
 ```
 
-With `credentials.json` in `tinker`, Tinker's SDK reads the key from `/root/.tinker`, and `rollout cluster check` in a
-pod names `$TINKER_API_KEY` as not set; with `TINKER_API_KEY`, every secret the cluster config names resolves.
+The Secret `tinker` holds both what `tinker auth login` wrote, which Tinker's SDK reads from `/root/.tinker`, and its
+default key as `TINKER_API_KEY`, which the cluster config names; `rollout cluster check` in a pod then finds every
+secret resolved.
 
 Where `services.yaml` was applied before, the chart takes its stores over with their data: mark them as the release's
 and delete the bucket Job (the chart's runs at each install and upgrade), then install.

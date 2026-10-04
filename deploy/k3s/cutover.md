@@ -65,8 +65,7 @@ kubectl -n rollout exec postgres-0 -- psql -U rollout -c \
 kubectl -n rollout exec postgres-0 -- psql -U rollout -c "SELECT count(*) FROM ledger_records"
                                                 # what migrate.sh printed for ledger_records
 kubectl -n rollout exec deploy/launcher-minecraft -- rollout cluster check
-                                                # every secret and project resolves, except $TINKER_API_KEY where the
-                                                # Secret tinker holds credentials.json (Tinker's SDK reads that instead)
+                                                # every secret and project resolves
 kubectl -n rollout exec deploy/launcher-minecraft -- rollout checkpoints --cluster   # curriculum-9's 31 checkpoints
 curl -s -H 'Host: gateway.localhost' http://127.0.0.1/v1/models          # {"object":"list","data":[{"id":"policy",…
 curl -s -H 'Host: monitor.localhost' http://127.0.0.1/api/system | python3 -c \
