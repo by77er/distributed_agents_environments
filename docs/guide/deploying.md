@@ -415,6 +415,7 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 | `--ray` | a Ray cluster's job server (`http://127.0.0.1:8265`): each run is then a Ray job ([Ray](#ray)) |
 | `--gpus` | with `--ray`, the accelerators each run's Ray job asks for (1) |
 | `--as-job` | with `--ray`, submit the launcher itself as a Ray job, and return |
+| `--name` | what it beats as besides its host (`launcher/HOST/NAME`), where a machine has several launchers: one per project environment, say |
 
 It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,

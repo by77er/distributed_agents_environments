@@ -337,6 +337,7 @@ def _tail(path: Path) -> str:
         return ""
 
 
-def name_of(host: str | None = None) -> str:
-    """A launcher's name: `launcher/HOST`."""
-    return f"{LAUNCHER}/{host or socket.gethostname()}"
+def name_of(host: str | None = None, name: str | None = None) -> str:
+    """A launcher's name: `launcher/HOST`, or `launcher/HOST/NAME` for one of several on a machine."""
+    said = f"{LAUNCHER}/{host or socket.gethostname()}"
+    return f"{said}/{name}" if name else said
