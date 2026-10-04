@@ -9,7 +9,6 @@ processes outside the cluster keep using it.
 | `install-wsl.sh` | As root: installs NVIDIA's container toolkit with a CDI spec for WSL2's GPU (`/dev/dxg`), installs K3s with a kubeconfig your user can read, and moves containerd's stream server to port 9910, outside Ray's worker ports (10002-19999) |
 | `device-plugin.yaml` | Values for NVIDIA's device plugin chart: the node advertises its card as one `nvidia.com/gpu`, for one Ray worker pod, and Ray shares it among its actors with fractional `num_gpus` |
 | `build.yaml` | Building images in the cluster: a registry the node pulls from at `localhost:30500`, and BuildKit |
-| `ray-smoke.yaml` | A Ray cluster whose GPU worker group sits at zero pods until a task asks for a GPU; the autoscaler removes the worker after a minute idle |
 | `migrate.sh` | Copies the platform's state on this machine into the chart's stores and volume, reading the host's files only; `--dry-run` says what it would do |
 | `cutover.md` | Moving from the services on the host to the cluster, step by step, and back |
 
