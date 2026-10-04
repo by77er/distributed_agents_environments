@@ -7,8 +7,9 @@
   came from, and their files in a blob store.
 - `Algorithm`, `Batch`, `Grpo` (`algorithm`): what the loop asks of an algorithm, and
   group-relative policy optimisation over episodes.
-- `Trainer`, `Weighted`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a trainer is. `Colocated`:
-  the wrapper for one that shares its accelerator with the engines.
+- `Trainer`, `Weighted`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a trainer is; `Changeable`, one
+  that takes some of its settings between steps. `Colocated`: the wrapper for one that shares its accelerator with the
+  engines.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
 - `evaluate`, `make_suite`, `suite_for`, `suite_of`, `Suite`, `Schedule` (`evals`): a frozen suite of starts, an
   eval that plays it with one checkpoint, training nothing, and the evals a training run makes of its checkpoints.
@@ -24,12 +25,13 @@ from rollout_train.evals import Schedule, Suite, evaluate, make_suite, suite_for
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
 from rollout_train.record import Result, Trained, results, trained
-from rollout_train.trainer import Budget, Files, Step, StepFailed, Trainer, Weighted
+from rollout_train.trainer import Budget, Changeable, Files, Step, StepFailed, Trainer, Weighted
 
 __all__ = [
     "Algorithm",
     "Batch",
     "Budget",
+    "Changeable",
     "Checkpoint",
     "Checkpoints",
     "Colocated",

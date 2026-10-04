@@ -200,9 +200,9 @@ async def test_an_eval_that_played_every_start_has_ended_and_a_scheduled_one_is_
     await ledger.append(table("train", STARTS), "1", {"from": None, "started": now - 60}, fence)
     await an_eval(ledger, "done", None, [True, False])
     unfinished = await ledger.take(scope("going"))
-    begun: JsonValue = {"kind": EVAL, "suite": "words-v1", "by": "train", "step": 1, "started": now - 3 * 3600}
+    begun: JsonValue = {"kind": EVAL, "suite": "words-v1", "by": "train", "step": 1, "started": now - 5 * 3600}
     await ledger.append(table("going", STARTS), "1", begun, unfinished)
-    await ledger.append(table("going", GROUPS), "1", {"task": "say-yes", "episodes": 1, "decided": now - 3 * 3600},
+    await ledger.append(table("going", GROUPS), "1", {"task": "say-yes", "episodes": 1, "decided": now - 5 * 3600},
                         unfinished)  # fmt: skip
     beats = [Beat("here/train", now, {"run": "train"}, [])]
     (tmp_path / "ledger" / "presence.json").write_text(json.dumps([asdict(each) for each in beats]))

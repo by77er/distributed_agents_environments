@@ -169,6 +169,12 @@ class EpisodeRunner:
             with contextlib.suppress(Exception):  # (a beat missed is noticed only if many are)
                 await self._beat()
 
+    async def beat(self) -> None:
+        """Beat now, beside the beats every `beating` seconds: after what it says of itself changed (a channel serves
+        a new checkpoint, say), so that whoever reads the beats does not wait for the next."""
+        if self.presence is not None:
+            await self._beat()
+
     async def _beat(self) -> None:
         assert self.presence is not None
         said: Mapping[str, JsonValue] = await asyncio.to_thread(self.about) if self.about is not None else {}

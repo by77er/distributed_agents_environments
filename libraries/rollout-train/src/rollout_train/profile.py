@@ -395,8 +395,11 @@ class Platform:
         self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
     ) -> int:
         """Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
-        samples are stamped with (a checkpoint's depth)."""
-        return await self.recorder.publish(channel, adapter, path, version, full=full)
+        samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves."""
+        served = await self.recorder.publish(channel, adapter, path, version, full=full)
+        with contextlib.suppress(Exception):  # (a beat missed is said at the next)
+            await self.runner.beat()
+        return served
 
     def _about(self, record: Path) -> dict[str, JsonValue]:
         """What the runner says of this machine in each beat: its host, the run, its measurements, the engines'

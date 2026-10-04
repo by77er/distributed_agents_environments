@@ -582,6 +582,8 @@ class System:
         now = time.time()
         runs: list[dict[str, Any]] = []
         played: dict[str, _Played] = {}
+        finished: set[str] = set()
+        """The evals that played every start."""
         for run in named_runs(tables):
             starts: Any = tables.get(table(run, STARTS), {})
             found = self._source(run, starts, relayed)
@@ -594,6 +596,7 @@ class System:
             kind = str(begun.get("kind") or "run")
             if kind == EVAL and own[GROUPS] and set(own[GROUPS]) <= set(own[RESULTS]):
                 seen |= {"state": GONE, "channels": []}  # (an eval that played every start has ended)
+                finished.add(run)
             runs.append(
                 listed
                 | seen
@@ -602,7 +605,7 @@ class System:
             )
         states = {run["run"]: run["state"] for run in runs}
         for run in runs:  # (an eval a training run's schedule asked for, not done, is played by that run's runner)
-            if run["kind"] == EVAL and run["state"] != GONE and run["by"] in states and run["run"] not in beaten:
+            if run["kind"] == EVAL and run["run"] not in finished and run["by"] in states and run["run"] not in beaten:
                 run["state"] = states[run["by"]]
         rank = {RUNNING: 0, IDLE: 1, GONE: 2}
         runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
