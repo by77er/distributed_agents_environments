@@ -2,13 +2,17 @@
 
 An algorithm decides which segments to train on and how much each should count (`Weighted`). A trainer takes a
 batch, moves the policy, and says where the new weights are (`Step`). It also says what it can take (`Budget`): the
-longest segment, and how many a step can afford. Those come from its hardware, and nothing above it chooses them.
+longest segment, and how many a step can afford. Those come from its hardware, and nothing above it chooses them. A
+trainer may take some of its settings between steps (`Changeable`): a run's settings page changes them for the run's
+next step (`rollout_train.settings`).
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
+
+from pydantic import JsonValue
 
 from rollout_train.recorder import Segment
 
@@ -67,4 +71,20 @@ class Trainer(Protocol):
         """Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
         `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
         produced no weights."""
+        ...
+
+
+@runtime_checkable
+class Changeable(Protocol):
+    """A trainer that takes some of its settings between steps (its learning rate, say): those that change neither
+    what its weights are nor what it can take (`Budget`)."""
+
+    @property
+    def changeable(self) -> Mapping[str, JsonValue]:
+        """The settings it takes between steps, by its name for each, with their values now."""
+        ...
+
+    def change(self, settings: Mapping[str, JsonValue]) -> None:
+        """Take these settings (some of `changeable`) from its next step on. Raises `ValueError` for one it does not
+        take, or a value it cannot."""
         ...

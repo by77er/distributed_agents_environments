@@ -1,11 +1,13 @@
 """A trainer that shares an accelerator with the engines serving the policy: they take turns."""
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
-from rollout_train.trainer import Files, Step, Trainer, Weighted
+from pydantic import JsonValue
+
+from rollout_train.trainer import Changeable, Files, Step, Trainer, Weighted
 
 
 class Pausable(Protocol):
@@ -30,6 +32,16 @@ class Colocated:
         self._guard = guard
         self.budget = trainer.budget
         self.weights = trainer.weights
+
+    @property
+    def changeable(self) -> Mapping[str, JsonValue]:
+        """The settings the trainer it wraps takes between steps (`rollout_train.trainer.Changeable`), if any."""
+        return self._trainer.changeable if isinstance(self._trainer, Changeable) else {}
+
+    def change(self, settings: Mapping[str, JsonValue]) -> None:
+        if not isinstance(self._trainer, Changeable):
+            raise ValueError(f"the trainer takes no settings between steps (not {', '.join(settings)})")
+        self._trainer.change(settings)
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         started = time.monotonic()

@@ -4,6 +4,19 @@ from dataclasses import dataclass
 
 KINDS = ("policy_gradient", "likelihood")
 RATIOS = ("token", "segment")
+CHANGEABLE = (
+    "learning_rate",
+    "clip_low",
+    "clip_high",
+    "segment_clip_low",
+    "segment_clip_high",
+    "truncate",
+    "tokens_per_step",
+    "max_kl",
+    "max_gradient_norm",
+)
+"""The settings a trainer takes between steps: each step reads them afresh, and none changes what its weights are or
+what a step can hold."""
 
 
 @dataclass(frozen=True)

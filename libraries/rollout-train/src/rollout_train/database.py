@@ -11,7 +11,9 @@ replaced is refused (`Fenced`) whichever process it is in. SQLite serves one mac
 dataset's name and id); a database ledger's is its `registry`. `DatabasePresence` holds the runners' heartbeats
 (`rollout_train.presence`) in another, `presence`: a row per runner, changed in place; a database ledger's is its
 `presence`. `DatabaseLaunches` holds the runs asked for (`rollout_train.launches`) in another, `launches`; a database
-ledger's is its `launches`.
+ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of each run's settings
+(`rollout_train.settings`) in another, `run_settings`: a row per run, changed in place; a database ledger's is its
+`desired_settings`.
 """
 
 import asyncio
@@ -30,6 +32,7 @@ from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, new
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.presence import Beat, kept
 from rollout_train.registry import Bookmark, Entry, Named, Taken, checked, found, new_run_id, registry_of, valid
+from rollout_train.settings import Desired
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(
@@ -83,6 +86,13 @@ PRESENCE = sa.Table(
     sa.Column("at", sa.Float(), nullable=False),
     sa.Column("about", sa.Text, nullable=False),
     sa.Column("history", sa.Text, nullable=False),
+)
+RUN_SETTINGS = sa.Table(
+    "run_settings",
+    METADATA,
+    sa.Column("run", sa.Text, primary_key=True),
+    sa.Column("settings", sa.Text, nullable=False),
+    sa.Column("changed", sa.Float(), nullable=False),
 )
 
 
@@ -164,6 +174,11 @@ class DatabaseLedger:
     def presence(self) -> "DatabasePresence":
         """The runners' heartbeats, in this ledger's database."""
         return DatabasePresence(self.database)
+
+    @property
+    def desired_settings(self) -> "DatabaseDesiredSettings":
+        """What is wanted of each run's settings, in this ledger's database."""
+        return DatabaseDesiredSettings(self.database)
 
     def close(self) -> None:
         self.database.close()
@@ -331,6 +346,34 @@ class DatabasePresence:
         return [
             Beat(str(runner), float(at), json.loads(about), json.loads(history)) for runner, at, about, history in found
         ]
+
+
+class DatabaseDesiredSettings:
+    """`DesiredSettings` (`rollout_train.settings`) in the `run_settings` table of a database."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def desired(self, run: str) -> Desired | None:
+        def row(connection: Connection) -> tuple[Any, ...] | None:
+            return fetch_one(connection, "SELECT settings, changed FROM run_settings WHERE run = :run", {"run": run})
+
+        found = await asyncio.to_thread(self.database.read, row)
+        return Desired(run, json.loads(found[0]), float(found[1])) if found else None
+
+    async def want(self, run: str, settings: Mapping[str, JsonValue]) -> Desired:
+        def changed(connection: Connection) -> Desired:
+            row = fetch_one(connection, "SELECT settings FROM run_settings WHERE run = :run", {"run": run})
+            now = Desired(run, {**(json.loads(row[0]) if row else {}), **settings}, round(time.time(), 1))
+            sql(
+                connection,
+                "INSERT INTO run_settings (run, settings, changed) VALUES (:run, :settings, :changed) "
+                "ON CONFLICT (run) DO UPDATE SET settings = excluded.settings, changed = excluded.changed",
+                {"run": run, "settings": json.dumps(dict(now.settings)), "changed": now.changed},
+            )
+            return now
+
+        return await asyncio.to_thread(self.database.write, changed, exclusive=f"run_settings:{run}")
 
 
 def _runs(connection: Connection) -> list[Entry]:

@@ -66,11 +66,15 @@ async def _train(
     settings: dict[str, Any] | None = None,
 ) -> None:
     import dataclasses
+    from collections.abc import Mapping
+
+    from pydantic import JsonValue
 
     from rollout.environment import binding_for
     from rollout_train import train
     from rollout_train.evals import Schedule, suite_for
     from rollout_train.profile import Profile
+    from rollout_train.settings import changeable, desired_settings_of, fixed
 
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
     if described.trainer is None:
@@ -83,6 +87,21 @@ async def _train(
         assert platform.trainer is not None
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
         binding = binding_for(offered, channel, platform.tool_bindings)
+        wanting = desired_settings_of(platform.ledger)
+
+        async def scheduled(name: str, every: int, episodes: int) -> Schedule | None:
+            """The evals of a suite of the run's environment, by its name: the ledger's, or the environment's eval data
+            of that name, frozen on first use (`suite_for`); none for a suite neither has, or another environment's."""
+            try:
+                suite = await suite_for(platform.ledger, name, environment, offered)
+            except (KeyError, ValueError):
+                return None
+            return Schedule(suite, offered, platform.eval_run, every, episodes, binding)
+
+        async def desired() -> Mapping[str, JsonValue]:
+            found = await wanting.desired(platform.run.id) if wanting is not None else None
+            return found.settings if found is not None else {}
+
         schedule: Schedule | None = None
         if (asked := described.evals) is not None:  # (a suite not made yet is the environment's eval data of the name)
             try:
@@ -90,13 +109,18 @@ async def _train(
             except (KeyError, ValueError) as error:
                 raise SystemExit(error.args[0]) from None
             schedule = Schedule(suite, offered, platform.eval_run, asked.every, asked.episodes, binding)
+        started["settings"] = {
+            "fixed": fixed(described, platform.trainer, groups=groups, seed=seed),
+            "changeable": changeable(platform.trainer, groups_per_step=groups_per_step, evals=described.evals),
+        }
         await train(
             offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
             base=described.channels[channel].model,
             directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
             run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
-            reshard=platform.reshard if platform.layout else None, evals=schedule,
+            reshard=platform.reshard if platform.layout else None, evals=schedule, desired=desired,
+            scheduled=scheduled,
         )  # fmt: skip
 
 
