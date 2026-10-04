@@ -338,6 +338,14 @@ async def _registered(registry: Registry | None, id: str, name: str) -> Entry:
         return await registry.create(id, id)
 
 
+async def run_id(registry: Registry | None, who: str) -> str:
+    """The id of the run `who` names, by its name or its id. Raises `KeyError` for none (or no registry)."""
+    entry = found(await registry.runs(), who) if registry is not None else None
+    if entry is None:
+        raise KeyError(f"there is no run {who!r}")
+    return entry.id
+
+
 async def resolved(ledger: Ledger, registry: Registry | None, reference: str) -> str | None:
     """The checkpoint a reference says, by id; None for `base` (the base model). A reference is, in this order:
     `base`; a bookmark's name; `RUN:STEP`, the checkpoint a run (by its name or its id) made at a step; `RUN`, the

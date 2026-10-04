@@ -22,11 +22,12 @@ rollout gateway PROFILE             serve a replica of the gateway: it samples P
 
 import argparse
 import asyncio
+import functools
 import json
 import os
 import signal
 import sys
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,19 @@ async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
             raise
         return 128 + received[0]
     return 0
+
+
+def _user_errors[**P](work: Callable[P, Coroutine[Any, Any, None]]) -> Callable[P, Coroutine[Any, Any, None]]:
+    """A command whose `KeyError` or `ValueError` (a `Taken` too) is the user's to mend: it exits saying it."""
+
+    @functools.wraps(work)
+    async def said(*arguments: P.args, **options: P.kwargs) -> None:
+        try:
+            await work(*arguments, **options)
+        except (KeyError, ValueError) as error:
+            raise SystemExit(error.args[0] if error.args else str(error)) from None
+
+    return said
 
 
 async def _train(
@@ -291,6 +305,7 @@ async def _gateway(
         await uvicorn.Server(config).serve()
 
 
+@_user_errors
 async def _suite(
     command: str,
     where: str,
@@ -310,38 +325,35 @@ async def _suite(
     if command in ("make", "edit"):
         assert name is not None
         keys = [each.strip() for each in rows.split(",") if each.strip()] if rows else None
-        try:
-            numbers = [int(each) for each in seeds.split(",") if each.strip()]
-            current = await suite_of(ledger, name)
-            if command == "edit" and current is None:
-                raise KeyError(f"there is no suite {name!r}")
-            entries: list[SuiteEntry] = list(current.entries) if command == "edit" and current else []
-            if drop is not None:
-                entries = [each for each in entries if each.environment != drop]
-            if environment is None and command == "edit" and current is not None and len(current.entries) == 1:
-                environment = current.environments[0]  # (the one environment it has)
-            if environment is None and drop is None:
-                raise SystemExit("say the entry's environment (--environment)")
-            if environment is not None:
-                kept = current.entry(environment) if command == "edit" and current else None
-                counts: dict[str, Any] = {  # (an edit keeps what it does not change)
-                    "episodes": episodes or (kept.episodes if kept else 1),
-                    "thinking_tokens": thinking_tokens or (kept.thinking_tokens if kept else None),
-                    "answer_tokens": answer_tokens or (kept.answer_tokens if kept else None),
-                }
-                chosen: dict[str, Any] = {"rows": keys, "seeds": numbers} if numbers or keys else {}
-                if not chosen and data is None and kept is not None:
-                    chosen = {"starts": kept.starts}  # (its starts as they were)
-                chosen = chosen or {"eval_data": data or name}
-                made_entry = suite_entry(environment, named(environment), **chosen, **counts)
-                place = next((place for place, each in enumerate(entries) if each.environment == environment), None)
-                if place is None:
-                    entries.append(made_entry)
-                else:
-                    entries[place] = made_entry
-            made = await (make_suite if command == "make" else edit_suite)(ledger, name, entries)
-        except (KeyError, ValueError) as error:
-            raise SystemExit(error.args[0]) from None
+        numbers = [int(each) for each in seeds.split(",") if each.strip()]
+        current = await suite_of(ledger, name)
+        if command == "edit" and current is None:
+            raise KeyError(f"there is no suite {name!r}")
+        entries: list[SuiteEntry] = list(current.entries) if command == "edit" and current else []
+        if drop is not None:
+            entries = [each for each in entries if each.environment != drop]
+        if environment is None and command == "edit" and current is not None and len(current.entries) == 1:
+            environment = current.environments[0]  # (the one environment it has)
+        if environment is None and drop is None:
+            raise SystemExit("say the entry's environment (--environment)")
+        if environment is not None:
+            kept = current.entry(environment) if command == "edit" and current else None
+            counts: dict[str, Any] = {  # (an edit keeps what it does not change)
+                "episodes": episodes or (kept.episodes if kept else 1),
+                "thinking_tokens": thinking_tokens or (kept.thinking_tokens if kept else None),
+                "answer_tokens": answer_tokens or (kept.answer_tokens if kept else None),
+            }
+            chosen: dict[str, Any] = {"rows": keys, "seeds": numbers} if numbers or keys else {}
+            if not chosen and data is None and kept is not None:
+                chosen = {"starts": kept.starts}  # (its starts as they were)
+            chosen = chosen or {"eval_data": data or name}
+            made_entry = suite_entry(environment, named(environment), **chosen, **counts)
+            place = next((place for place, each in enumerate(entries) if each.environment == environment), None)
+            if place is None:
+                entries.append(made_entry)
+            else:
+                entries[place] = made_entry
+        made = await (make_suite if command == "make" else edit_suite)(ledger, name, entries)
         held = ", held out of training" if made.held_out else ""
         print(f"the suite {made.id}: {len(made.starts)} starts of {', '.join(made.environments)}{held}")
         return
@@ -522,6 +534,7 @@ async def _imitate(
           f"{json.dumps({key: round(value, 4) for key, value in checkpoint.metrics.items()})}")  # fmt: skip
 
 
+@_user_errors
 async def _dataset(
     command: str,
     where: str,
@@ -535,8 +548,7 @@ async def _dataset(
 ) -> None:
     from rollout_train.checkpoints import short
     from rollout_train.datasets import ALL, datasets_in, make_dataset, where_blobs_are
-    from rollout_train.record import runs_in
-    from rollout_train.registry import Taken, found
+    from rollout_train.registry import run_id
     from rollout_train.stores import FILES, opened
 
     ledger, registry = _registry_at(where)
@@ -557,13 +569,7 @@ async def _dataset(
     assert rule is not None and runs
     if name and any(each.name == name for each in await registry.datasets()):  # (before anything is made)
         raise SystemExit(f"another dataset is called {name!r}")
-    known = await runs_in(ledger)
-    ids: list[str] = []
-    for who in runs:
-        entry = found(entries, who)
-        if entry is None and who not in known:
-            raise SystemExit(f"there is no run {who!r}")
-        ids.append(entry.id if entry is not None else who)
+    ids = [await run_id(registry, who) for who in runs]
     if into is not None:
         kept = await asyncio.to_thread(lambda: into.expanduser().absolute())
         at: dict[str, Any] = {"kind": FILES, "directory": str(kept)}
@@ -573,13 +579,10 @@ async def _dataset(
 
         first: Any = next(iter((await ledger.read(f"runs/{ids[0]}/{EPISODES}")).values()), None)
         at = await where_blobs_are(ledger, ids[0], Record.from_json(first).trajectories if first else None)
-    try:
-        made = await make_dataset(ledger, rule, ids, into=opened(at), at=at, turns=turns or [ALL], cut=cut or [],
-                          per_task=per_task)  # fmt: skip
-        if name:
-            await registry.name_dataset(name, made.id)
-    except (ValueError, Taken) as error:
-        raise SystemExit(str(error)) from None
+    made = await make_dataset(ledger, rule, ids, into=opened(at), at=at, turns=turns or [ALL], cut=cut or [],
+                              per_task=per_task)  # fmt: skip
+    if name:
+        await registry.name_dataset(name, made.id)
     counts = ", ".join(f"{value} {key.replace('_', ' ')}" for key, value in made.counts.items())
     left = ", ".join(f"{value} {why}" for why, value in made.left_out.items()) or "none"
     print(f"made the dataset {made.id}{f' ({name})' if name else ''}: {counts}; left out: {left}")
@@ -686,6 +689,7 @@ def _as_job(ray: str, given: list[str]) -> None:
     print(f"the launcher runs as Ray job {job}: `ray job logs {job} --follow` shows its output")
 
 
+@_user_errors
 async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: str | None) -> None:
     from rollout.harness.blobs import FileBlobStore
     from rollout_train.checkpoints import Checkpoints
@@ -696,10 +700,7 @@ async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: 
     from rollout_train.stores import opened
 
     ledger, registry = _registry_at(where)
-    try:
-        lora = await resolved(ledger, registry, who)
-    except KeyError as error:
-        raise SystemExit(error.args[0]) from None
+    lora = await resolved(ledger, registry, who)
     if lora is None:
         raise SystemExit("the base model has no adapter to merge")
     made = await Checkpoints(ledger, FileBlobStore(Path(where) / BLOBS)).checkpoint(lora)  # (its record only)
@@ -716,36 +717,25 @@ async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: 
     print(f"merged {lora} into its base: {merged.id} (full weights, depth {merged.depth}, base {merged.base})")
 
 
+@_user_errors
 async def _rename(who: str, name: str, where: str) -> None:
-    from rollout_train.registry import Taken
-
     _, registry = _registry_at(where)
-    try:
-        entry = await registry.rename(who, name)
-    except (KeyError, Taken) as error:
-        raise SystemExit(error.args[0]) from None
+    entry = await registry.rename(who, name)
     print(f"the run {entry.id} is called {entry.name}")
 
 
+@_user_errors
 async def _pause_or_resume(command: str, who: str, where: str) -> None:
-    from rollout_train.record import runs_in
-    from rollout_train.registry import found, registry_of
+    from rollout_train.registry import registry_of, run_id
     from rollout_train.resuming import IN_PLACE, pause, resume
 
     ledger = _ledger_at(where)
-    registry = registry_of(ledger)
-    entry = found(await registry.runs(), who) if registry is not None else None
-    run = entry.id if entry is not None else who
-    if entry is None and who not in await runs_in(ledger):
-        raise SystemExit(f"there is no run {who!r}")
-    try:
-        if command == "pause":
-            await pause(ledger, run)
-            print(f"{who} is paused: what is playing plays out, and nothing new starts")
-            return
-        resumed = await resume(ledger, run)
-    except (KeyError, ValueError) as error:
-        raise SystemExit(error.args[0]) from None
+    run = await run_id(registry_of(ledger), who)
+    if command == "pause":
+        await pause(ledger, run)
+        print(f"{who} is paused: what is playing plays out, and nothing new starts")
+        return
+    resumed = await resume(ledger, run)
     if resumed.how == IN_PLACE:
         print(f"{who} goes on")
     else:
@@ -753,21 +743,19 @@ async def _pause_or_resume(command: str, who: str, where: str) -> None:
         print(f"{who} is asked to start again in {resumed.launch.asked.directory} ({resumed.launch.id})")
 
 
+@_user_errors
 async def _bookmark(name: str, reference: str | None, delete: bool, where: str) -> None:
-    from rollout_train.registry import Taken, resolved
+    from rollout_train.registry import resolved
 
     ledger, registry = _registry_at(where)
-    try:
-        if delete:
-            await registry.unbookmark(name)
-            print(f"no bookmark {name} any more")
-            return
-        checkpoint = await resolved(ledger, registry, reference or "")
-        if checkpoint is None:
-            raise SystemExit("a bookmark names a checkpoint, not the base model")
-        await registry.bookmark(name, checkpoint)
-    except (KeyError, Taken) as error:
-        raise SystemExit(error.args[0]) from None
+    if delete:
+        await registry.unbookmark(name)
+        print(f"no bookmark {name} any more")
+        return
+    checkpoint = await resolved(ledger, registry, reference or "")
+    if checkpoint is None:
+        raise SystemExit("a bookmark names a checkpoint, not the base model")
+    await registry.bookmark(name, checkpoint)
     print(f"{name} is {checkpoint}")
 
 
@@ -788,6 +776,12 @@ async def _checkpoints(where: str) -> None:
         kept = "" if checkpoint.weights is not None else "  (released)"
         bookmarked = f"  [{', '.join(marks[checkpoint.id])}]" if checkpoint.id in marks else ""
         print(f"{shown[checkpoint.id]:<8} depth {checkpoint.depth:<4} {origin}{at}  from {parents}{bookmarked}{kept}")
+
+
+def _over_a_ledger(command: argparse.ArgumentParser) -> None:
+    """A command over a ledger takes it as `--ledger`."""
+    where = "a run's directory, a ledger's directory, or a database's URL (by default this directory)"
+    command.add_argument("--ledger", default=".", help=where)
 
 
 def main() -> None:
@@ -847,13 +841,9 @@ def main() -> None:
     dataset_making.add_argument(
         "--blobs", type=Path, help="where to keep its manifest (by default beside the episodes)"
     )
-    dataset_making.add_argument(
-        "--ledger", default=".", help="a run's directory, a ledger's directory, or a database's URL"
-    )
+    _over_a_ledger(dataset_making)
     dataset_listing = dataset_commands.add_parser("list", help="every dataset, newest first")
-    dataset_listing.add_argument(
-        "--ledger", default=".", help="a run's directory, a ledger's directory, or a database's URL"
-    )
+    _over_a_ledger(dataset_listing)
     monitoring = commands.add_parser("monitor", help="serve the monitor's page over a ledger and every run in it")
     monitoring.add_argument("where", help="a run's directory, a ledger's directory, or a database's URL")
     monitoring.add_argument("--host", default="127.0.0.1")
@@ -864,24 +854,23 @@ def main() -> None:
     copying.add_argument("source", help="a run's directory, a directory of files, or a database's URL")
     copying.add_argument("target", help="a database's URL: sqlite:///path or postgresql://…")
     copying.add_argument("--point", action="store_true", help="make the source run's directory name the copy")
-    where = "a run's directory, a ledger's directory, or a database's URL (by default this directory)"
     renaming = commands.add_parser("rename", help="call a run something else (its id stays)")
     renaming.add_argument("who", help="the run, by its name or its id")
     renaming.add_argument("name", help="what it is called from now on")
-    renaming.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(renaming)
     pausing = commands.add_parser("pause", help="pause a run: what is playing plays out, and nothing new starts")
     pausing.add_argument("who", help="the run, by its name or its id")
-    pausing.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(pausing)
     resuming = commands.add_parser(
         "resume", help="resume a run: a paused one goes on; a stopped, failed or lost one is launched again"
     )
     resuming.add_argument("who", help="the run, by its name or its id")
-    resuming.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(resuming)
     marking = commands.add_parser("bookmark", help="name a checkpoint, move a bookmark, or take one away")
     marking.add_argument("name")
     marking.add_argument("checkpoint", nargs="?", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id or its start")
     marking.add_argument("--delete", action="store_true", help="take the bookmark away (the checkpoint stays)")
-    marking.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(marking)
     launching = commands.add_parser("launcher", help="start the training runs asked for that this machine can run")
     launching.add_argument("--ledger", required=True, help="the database's URL (or a ledger's directory)")
     launching.add_argument("--profiles", type=Path, required=True, help="a directory of profiles it offers")
@@ -897,7 +886,7 @@ def main() -> None:
     merging.add_argument("--base", help="the model to merge into (by default the one it was trained over)")
     merging.add_argument("--merger", default="rollout_lora.merge:merge", help="what folds the adapter in (module:name)")
     merging.add_argument("--bookmark", help="a bookmark to name the merged checkpoint")
-    merging.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(merging)
     evaluating = commands.add_parser(
         "eval", help="play a suite with a checkpoint (or the base model), training nothing"
     )
@@ -933,10 +922,10 @@ def main() -> None:
         each.add_argument("--episodes", type=int, help="episodes of each start an eval plays (1; an edit keeps them)")
         each.add_argument("--thinking-tokens", type=int, help="the entry's episodes' tokens of thinking per turn")
         each.add_argument("--answer-tokens", type=int, help="the entry's episodes' tokens of answer after thinking")
-        each.add_argument("--ledger", default=".", help=where)
+        _over_a_ledger(each)
     editing.add_argument("--drop", metavar="ENVIRONMENT", help="module:name: the entry left out of the next version")
     suite_listing = suite_commands.add_parser("list", help="every suite")
-    suite_listing.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(suite_listing)
     suite_listing.add_argument("--environment", help="module:name: its eval data not played yet too")
     environments = commands.add_parser("env", help="work with environments")
     environment_commands = environments.add_subparsers(dest="env_command", required=True)
@@ -961,7 +950,7 @@ def main() -> None:
     checking.add_argument("--seed", type=int, default=0)
     checking.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
-    listing.add_argument("--ledger", default=".", help=where)
+    _over_a_ledger(listing)
     hosting = commands.add_parser("engines", help="keep a profile's engines serving what a run says, and nothing else")
     hosting.add_argument("profile", type=Path)
     hosting.add_argument("--run", required=True, help="the run whose channels they serve, by its name or its id")

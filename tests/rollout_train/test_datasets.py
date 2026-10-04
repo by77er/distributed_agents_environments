@@ -283,6 +283,9 @@ def test_the_commands_make_list_and_train_on_a_dataset(
     played = Played(tmp_path / "played")
     checkpoints, (first, second) = asyncio.run(guesses(played, tmp_path))
     where = str(tmp_path / "played" / "ledger")
+    registry = registry_of(played.ledger)
+    assert registry is not None
+    asyncio.run(registry.create("train", "train"))  # (a run is found by the registry)
 
     def run(*arguments: str) -> str:
         monkeypatch.setattr("sys.argv", ["rollout", *arguments])
