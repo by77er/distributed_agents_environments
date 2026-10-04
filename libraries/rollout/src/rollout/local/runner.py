@@ -22,7 +22,7 @@ from rollout.harness.hooks import RunHooks, observed, publish
 from rollout.harness.imports import ToolSet
 from rollout.harness.observation import InvalidObservation
 from rollout.harness.program import Program
-from rollout.harness.remote import remote_tool_set
+from rollout.harness.remote import remote_pool, remote_tool_set
 from rollout.harness.runner import (
     Deployment,
     DirectModel,
@@ -34,6 +34,7 @@ from rollout.harness.runner import (
     RunStatus,
     instantiate,
 )
+from rollout.harness.sandboxes import Pool
 from rollout.local.context import LocalRunContext
 
 type EndpointFactory = Callable[[DirectModel], ModelEndpoint]
@@ -43,10 +44,18 @@ type EndpointFactory = Callable[[DirectModel], ModelEndpoint]
 class LocalRunHandle:
     """A run started by a `LocalRunner`. Its context is available for inspection in tests and tools."""
 
-    def __init__(self, run_id: str, specification: RunSpecification, conversation: ConversationKey | None) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        specification: RunSpecification,
+        conversation: ConversationKey | None,
+        lease: str | None = None,
+    ) -> None:
         self._run_id = run_id
         self.specification = specification
         self.conversation = conversation
+        self.lease = lease or run_id
+        """What the run's sandboxes are acquired under."""
         self.context: LocalRunContext
         self._task: asyncio.Task[None] | None = None
         self._outcome: RunOutcome | None = None
@@ -132,12 +141,15 @@ class LocalRunner(MessageRouter):
         blobs: Blobs | None = None,
         recorder: RecordedEndpoints | None = None,
         hooks: Sequence[RunHooks] = (),
+        pools: Mapping[str, Pool] | None = None,
     ) -> None:
-        """`recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `hooks`
-        watch every run: each event recorded and each model sample."""
+        """`recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `pools`
+        are the sandbox pools a binding names as `local`. `hooks` watch every run: each event recorded and each model
+        sample."""
         self._hooks = list(hooks)
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
+        self._pools = dict(pools or {})
         self._environment_service = environments
         self._blobs = blobs
         self._recorder = recorder
@@ -185,6 +197,7 @@ class LocalRunner(MessageRouter):
         run_id: str | None = None,
         conversation: ConversationKey | None = None,
         labels: Mapping[str, str] | None = None,
+        lease: str | None = None,
     ) -> LocalRunHandle:
         run_id = run_id or new_run_id()
         if run_id in self._runs:
@@ -193,7 +206,8 @@ class LocalRunner(MessageRouter):
         endpoints = resolve_endpoints(program, specification.binding, self._providers, self._recorder)
         endpoints = observed(endpoints, self._hooks, run_id)
         tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
-        handle = LocalRunHandle(run_id, specification, conversation)
+        pools = resolve_pools(program, specification.binding, self._pools)
+        handle = LocalRunHandle(run_id, specification, conversation, lease)
         handle.context = LocalRunContext(
             run_id,
             endpoints,
@@ -219,7 +233,7 @@ class LocalRunner(MessageRouter):
             ]
             handle.context.record_event(RunEventType.TOOLS_RESOLVED, {"specifications": resolved})
         self._runs[run_id] = handle
-        handle.attach(asyncio.create_task(self._execute(handle, program), name=f"run {run_id}"))
+        handle.attach(asyncio.create_task(self._execute(handle, program, pools), name=f"run {run_id}"))
         return handle
 
     async def cancel(self, run_id: str, *, reason: str) -> None:
@@ -265,9 +279,10 @@ class LocalRunner(MessageRouter):
 
     # Internals
 
-    async def _execute(self, handle: LocalRunHandle, program: Program) -> None:
+    async def _execute(self, handle: LocalRunHandle, program: Program, pools: Mapping[str, Pool]) -> None:
         context = handle.context
         try:
+            await context.acquire_sandboxes(program.sandboxes(), pools, handle.lease)
             await program.main(context)
             outcome = RunOutcome(status=RunStatus.COMPLETED)
             context.record_event(RunEventType.RUN_COMPLETED, {"outcome": "success"})
@@ -286,6 +301,7 @@ class LocalRunner(MessageRouter):
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
         if context.environments is not None:
             await context.environments.release_all()  # environments the run still owns
+        await context.release_sandboxes()
         handle.finish(outcome)
         self._leave_conversation(handle)
 
@@ -345,4 +361,21 @@ def resolve_tool_sets(program: Program, binding: RunBinding, tool_sets: Mapping[
         if tool_set is None:
             raise ValueError(f"no tool set registered as {tool_binding.local!r}")
         resolved[name] = tool_set
+    return resolved
+
+
+def resolve_pools(program: Program, binding: RunBinding, pools: Mapping[str, Pool]) -> dict[str, Pool]:
+    """The pool serving each kind of sandbox the program declares, from the binding and the registered pools."""
+    resolved: dict[str, Pool] = {}
+    for spec in program.sandboxes().values():
+        pool_binding = binding.pools.get(spec.kind)
+        if pool_binding is not None and pool_binding.url is not None:
+            resolved[spec.kind] = remote_pool(pool_binding.url)
+            continue
+        if pool_binding is None or pool_binding.local is None:
+            raise ValueError(f"the binding does not say which pool serves {spec.kind} sandboxes")
+        pool = pools.get(pool_binding.local)
+        if pool is None:
+            raise ValueError(f"no pool registered as {pool_binding.local!r}")
+        resolved[spec.kind] = pool
     return resolved

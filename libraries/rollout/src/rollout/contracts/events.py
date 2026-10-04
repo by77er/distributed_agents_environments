@@ -34,8 +34,9 @@ class RunEventType(StrEnum):
     # Conversations and messages
     MESSAGE_RECEIVED = "message.received"
     TURN_INTERRUPTED = "turn.interrupted"
-    # Tools
+    # Tools and sandboxes
     TOOLS_RESOLVED = "tools.resolved"
+    SANDBOXES_ACQUIRED = "sandboxes.acquired"
 
 
 TERMINAL_EVENT_TYPES = frozenset({RunEventType.RUN_COMPLETED, RunEventType.RUN_FAILED, RunEventType.RUN_CANCELLED})

@@ -25,6 +25,7 @@ from pydantic import JsonValue
 
 from rollout.harness.imports import ToolBinding
 from rollout.harness.runner import ProgramReference, RunBinding, bind, with_row
+from rollout.harness.sandboxes import PoolBinding
 
 __all__ = [
     "Description",
@@ -149,9 +150,15 @@ def train_start(environment: Environment, row: Row, rng: random.Random, held: Co
     raise ValueError(f"every start of {row.key} drawn was an eval start: training has none of it to draw")
 
 
-def binding_for(environment: Environment, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding:
-    """How an environment's runs are served: every model slot of its program from `channel`, and each of its imports
-    from the tool set of its own name, or where `tools` says. (A program says which slots and imports it has once
-    it is given a row: the environment's first.)"""
+def binding_for(
+    environment: Environment,
+    channel: str,
+    tools: Mapping[str, ToolBinding] | None = None,
+    pools: Mapping[str, PoolBinding] | None = None,
+) -> RunBinding:
+    """How an environment's runs are served: every model slot of its program from `channel`, each of its imports from
+    the tool set of its own name, or where `tools` says, and each kind of sandbox from the pool of its own name, or
+    where `pools` says. (A program says which slots, imports and sandboxes it has once it is given a row: the
+    environment's first.)"""
     first = with_row(environment.program, environment.start(environment.rows()[0], random.Random(0)))
-    return bind(first, channel, tools=tools)
+    return bind(first, channel, tools=tools, pools=pools)

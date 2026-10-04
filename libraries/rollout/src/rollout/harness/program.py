@@ -7,6 +7,7 @@ from rollout.harness.agent import Agent
 from rollout.harness.context import RunContext
 from rollout.harness.history import ContextHints
 from rollout.harness.loop import rollout
+from rollout.harness.sandboxes import SandboxSpec
 from rollout.harness.task import ModelSlot, Task
 
 
@@ -23,6 +24,11 @@ class Program:
     def imports(self) -> list[str]:
         """The imported tool sets the program needs; the run's binding says how each is served."""
         return []
+
+    def sandboxes(self) -> Mapping[str, SandboxSpec]:
+        """The sandboxes the program runs against, by name: the runner acquires each from the pool the binding names
+        for its kind before `main`, and releases it after; the program reaches it as `run.sandbox(name)`."""
+        return {}
 
     def tool_specifications(self) -> list[ToolSpecification]:
         """Tools the program itself defines (`@tool` methods), for the run's `tools.resolved` event."""
@@ -47,6 +53,9 @@ class AgentProgram(Program):
 
     def imports(self) -> list[str]:
         return list(self.task.imports)
+
+    def sandboxes(self) -> Mapping[str, SandboxSpec]:
+        return dict(self.task.sandboxes)
 
     def tool_specifications(self) -> list[ToolSpecification]:
         return [declared.specification for declared in self.task.declared_tools.values()]

@@ -10,6 +10,7 @@ from rollout.harness.context import RunContext
 from rollout.harness.conversations import Envelope
 from rollout.harness.history import ContextHints
 from rollout.harness.observation import End, Observation, WaitFor
+from rollout.harness.sandboxes import SandboxSpec
 from rollout.harness.tools import DeclaredTool, collect_tools, error_result, execute_tool, tool_message
 
 
@@ -31,6 +32,8 @@ class Task:
     """The model slots the task uses. The agent acts through `policy`."""
     imports: ClassVar[list[str]] = []
     """External tool sets, bound per run."""
+    sandboxes: ClassVar[dict[str, SandboxSpec]] = {}
+    """Sandboxes the task runs against, by name: acquired before `setup`, reached as `run.sandbox(name)`."""
     max_turns: ClassVar[int | None] = None
     """The loop truncates the episode after this many model turns."""
     context_hints: ClassVar[ContextHints] = ContextHints()

@@ -1,6 +1,7 @@
 """The in-process run context used by the `LocalRunner`: nothing persists, waits are in memory."""
 
 import asyncio
+import contextlib
 import random
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from rollout.harness.history import ContextHints, History, Turn
 from rollout.harness.imports import Tools, ToolSet
 from rollout.harness.model import EFFECT_ID_META, EndpointModel
 from rollout.harness.observation import Observation, WaitFor
+from rollout.harness.sandboxes import Pool, Sandbox, SandboxSpec, acquire, harness_environment
 
 GENERATION = 0
 """The generation in every `effect_id` (`{run_id}:{generation}:{ordinal}`): a run has one."""
@@ -81,6 +83,9 @@ class LocalRunContext:
         self._tools = Tools(tool_sets or {}, self)
         self._environments = Environments(environment_service, self) if environment_service is not None else None
         self._blobs = blobs
+        self._sandboxes: dict[str, Sandbox] = {}
+        self._leased: list[tuple[str, Pool]] = []
+        """The key of each sandbox the run acquired, or began to, and its pool: released there."""
 
         # Mailbox. `_held` keeps undelivered messages in arrival order with their delivery mode.
         self._held: list[tuple[Envelope, DeliveryMode]] = []
@@ -123,6 +128,11 @@ class LocalRunContext:
     @property
     def environments(self) -> Environments | None:
         return self._environments
+
+    def sandbox(self, name: str) -> Sandbox:
+        if name not in self._sandboxes:
+            raise KeyError(f"the run holds no sandbox {name!r}: a program declares its sandboxes in `sandboxes()`")
+        return self._sandboxes[name]
 
     @property
     def blobs(self) -> Blobs | None:
@@ -252,6 +262,29 @@ class LocalRunContext:
             self._acting.cancel()
         else:
             self._held.append((envelope, mode))
+
+    # Sandboxes, for the runner
+
+    async def acquire_sandboxes(self, specs: Mapping[str, SandboxSpec], pools: Mapping[str, Pool], lease: str) -> None:
+        """Acquire each declared sandbox from the pool of its kind, under `lease` and its name, giving a harness
+        inside it its slots' model addresses; then record them. Idempotent: a replay gets the same sandboxes."""
+        for name, spec in specs.items():
+            environment = harness_environment(spec.slots, lambda slot: self._models[slot].address())
+            pool, key = pools[spec.kind], f"{lease}/{name}"
+            self._leased.append((key, pool))
+            self._sandboxes[name] = Sandbox(name, await acquire(pool, spec, key, environment), pool, self)
+        if self._sandboxes:
+            leases: dict[str, JsonValue] = {
+                name: sandbox.lease.model_dump(mode="json") for name, sandbox in self._sandboxes.items()
+            }
+            self.record_event(RunEventType.SANDBOXES_ACQUIRED, {"sandboxes": leases})
+
+    async def release_sandboxes(self) -> None:
+        """Release every sandbox the run acquired, or began to: when the program has ended."""
+        leased, self._leased, self._sandboxes = self._leased, [], {}
+        for key, pool in leased:
+            with contextlib.suppress(Exception):  # (one that is not released ends with its lease)
+                await pool.release(key)
 
     # Effects
 

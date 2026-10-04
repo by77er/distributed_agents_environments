@@ -54,7 +54,8 @@ from rollout.harness.runner import (
     RunStatus,
     instantiate,
 )
-from rollout.local.runner import EndpointFactory, resolve_endpoints, resolve_tool_sets
+from rollout.harness.sandboxes import Pool
+from rollout.local.runner import EndpointFactory, resolve_endpoints, resolve_pools, resolve_tool_sets
 from rollout_durable.context import INBOX, INTERRUPT, DurableRunContext, RunCancelled, utc_now
 from rollout_durable.database import Database
 from rollout_durable.store import RunStore
@@ -77,14 +78,16 @@ async def run_workflow(
     conversation: dict[str, Any] | None,
     labels: dict[str, str],
     started_at: str,
+    lease: str | None = None,
 ) -> dict[str, Any]:
-    """One run. Re-executed from the start on recovery; recorded steps and receives return their recorded results."""
+    """One run. Re-executed from the start on recovery; recorded steps and receives return their recorded results,
+    and its sandboxes, acquired again under the same lease, are the same sandboxes."""
     runner = _runner()
     task = asyncio.current_task()
     if task is not None:
         runner.workflow_tasks[run_id] = task  # so eviction can unload it
     try:
-        result = await runner.execute(run_id, specification, conversation, labels, started_at)
+        result = await runner.execute(run_id, specification, conversation, labels, started_at, lease or run_id)
     finally:
         if runner.workflow_tasks.get(run_id) is task:
             del runner.workflow_tasks[run_id]
@@ -154,6 +157,7 @@ class DurableRunner(MessageRouter):
         runner_id: str | None = None,
         heartbeat_interval: float = 2.0,
         takeover_after: timedelta = timedelta(seconds=15),
+        pools: Mapping[str, Pool] | None = None,
     ) -> None:
         """`evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
         `eviction_interval`: how often, in seconds, to look for runs to evict or wake
@@ -164,6 +168,9 @@ class DurableRunner(MessageRouter):
         with its id puts its unfinished runs back on the queue at once, without waiting for a takeover.
         `takeover_after`: how long a runner's heartbeat may stop before another runner recovers its runs.
         `directory` holds local files either way.
+
+        `pools`: the sandbox pools a binding names as `local`. A run acquires its sandboxes each time it is executed
+        (recovered, or woken) under the same lease, and so gets the same ones back while their leases hold.
         """
         self._environment_service = environments
         self._blobs = blobs
@@ -190,6 +197,7 @@ class DurableRunner(MessageRouter):
         self.runner_id = runner_id or (f"runner-{uuid.uuid4().hex[:12]}" if self.database.shared else "local")
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
+        self._pools = dict(pools or {})
         self._deployments: dict[str, Deployment] = {}
         system_database = self.database.url if self.database.shared else f"sqlite:///{directory / 'dbos.sqlite'}"
         DBOS(config={"name": application, "system_database_url": system_database, "executor_id": self.runner_id})
@@ -266,18 +274,20 @@ class DurableRunner(MessageRouter):
         run_id: str | None = None,
         conversation: ConversationKey | None = None,
         labels: Mapping[str, str] | None = None,
+        lease: str | None = None,
     ) -> DurableRunHandle:
         run_id = run_id or new_run_id()
         program = instantiate(specification.program)  # a binding that leaves a slot or an import unserved is refused
         resolve_endpoints(program, specification.binding, self._providers, self._recorder)  # here, as it is locally
         resolve_tool_sets(program, specification.binding, self._tool_sets)
+        resolve_pools(program, specification.binding, self._pools)
         specification_json = specification.model_dump(mode="json", exclude_none=True)
         conversation_json = conversation.model_dump(mode="json", exclude_none=True) if conversation else None
         address = conversation.address if conversation else None
         self.store.create_run(run_id, specification_json, address, conversation_json)
         with SetWorkflowID(run_id):
             await DBOS.start_workflow_async(
-                run_workflow, run_id, specification_json, conversation_json, dict(labels or {}), utc_now()
+                run_workflow, run_id, specification_json, conversation_json, dict(labels or {}), utc_now(), lease
             )
         return DurableRunHandle(self, run_id)
 
@@ -302,6 +312,7 @@ class DurableRunner(MessageRouter):
         conversation_json: dict[str, Any] | None,
         labels: dict[str, str],
         started_at: str,
+        lease: str,
     ) -> dict[str, Any]:
         specification = RunSpecification.model_validate(specification_json)
         conversation = ConversationKey.model_validate(conversation_json) if conversation_json else None
@@ -331,6 +342,8 @@ class DurableRunner(MessageRouter):
             resolved: list[JsonValue] = [s.model_dump(mode="json", exclude_none=True) for s in specifications]
             context.record_event(RunEventType.TOOLS_RESOLVED, {"specifications": resolved})
         try:
+            pools = resolve_pools(program, specification.binding, self._pools)
+            await context.acquire_sandboxes(program.sandboxes(), pools, lease)
             await program.main(context)
             outcome = RunOutcome(status=RunStatus.COMPLETED)
             context.record_event(RunEventType.RUN_COMPLETED, {"outcome": "success"})
@@ -348,6 +361,7 @@ class DurableRunner(MessageRouter):
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
         if context.environments is not None:
             await context.environments.release_all()  # environments the run still owns
+        await context.release_sandboxes()  # (not when it is unloaded: it acquires them again when it resumes)
         undelivered = await context.undelivered()
         self.store.finish_run(run_id, outcome.status.value, outcome.model_dump(mode="json", exclude_none=True))
         return {"undelivered": [envelope.model_dump(mode="json") for envelope in undelivered]}

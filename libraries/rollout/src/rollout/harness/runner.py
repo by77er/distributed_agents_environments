@@ -21,6 +21,7 @@ from rollout.harness.conversations import (
 )
 from rollout.harness.imports import ToolBinding
 from rollout.harness.program import AgentProgram, Program
+from rollout.harness.sandboxes import PoolBinding
 from rollout.harness.task import Task
 
 
@@ -81,6 +82,8 @@ class RunBinding(ContractModel):
     """Model slot → how it is served."""
     imports: Mapping[str, ToolBinding] = Field(default_factory=dict[str, ToolBinding])
     """Import name → how the tool set is served."""
+    pools: Mapping[str, PoolBinding] = Field(default_factory=dict[str, PoolBinding])
+    """Sandbox kind → the pool its sandboxes are acquired from."""
     delivery: DeliveryPolicy = DeliveryPolicy()
 
 
@@ -164,7 +167,11 @@ class Runner(Protocol):
         run_id: str | None = None,
         conversation: ConversationKey | None = None,
         labels: Mapping[str, str] | None = None,
-    ) -> RunHandle: ...
+        lease: str | None = None,
+    ) -> RunHandle:
+        """Start a run. Its sandboxes are acquired under `lease` and each one's name (by default the `run_id`): an
+        episode's claim, say, so that they end with it."""
+        ...
 
     async def send(
         self,
@@ -302,13 +309,22 @@ def agent_program(
     )
 
 
-def bind(reference: ProgramReference, channel: str, *, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding:
-    """A binding that serves every model slot of a program from one recorded channel, and each of its imports from
-    the tool set registered under the import's own name (or as `tools` says)."""
+def bind(
+    reference: ProgramReference,
+    channel: str,
+    *,
+    tools: Mapping[str, ToolBinding] | None = None,
+    pools: Mapping[str, PoolBinding] | None = None,
+) -> RunBinding:
+    """A binding that serves every model slot of a program from one recorded channel, each of its imports from the
+    tool set registered under the import's own name (or as `tools` says), and each kind of sandbox it declares from
+    the pool registered under the kind's name (or as `pools` says)."""
     program = instantiate(reference)
     recorded = ModelBinding(recorded=RecordedModel(channel=channel))
     imports = {name: (tools or {}).get(name) or ToolBinding(local=name) for name in program.imports()}
-    return RunBinding(models=dict.fromkeys(program.model_slots(), recorded), imports=imports)
+    kinds = {spec.kind for spec in program.sandboxes().values()}
+    served = {kind: (pools or {}).get(kind) or PoolBinding(local=kind) for kind in sorted(kinds)}
+    return RunBinding(models=dict.fromkeys(program.model_slots(), recorded), imports=imports, pools=served)
 
 
 def with_row(reference: ProgramReference, row: JsonValue) -> ProgramReference:

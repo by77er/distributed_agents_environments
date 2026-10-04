@@ -1,9 +1,11 @@
-"""Test doubles for code built on the core: a model endpoint that replies from a script."""
+"""Test doubles for code built on the core: a model endpoint that replies from a script, and sandboxes that are only
+records."""
 
 import inspect
 import json
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import JsonValue
@@ -14,6 +16,7 @@ from rollout.contracts import (
     Message,
     ModelAddress,
     ModelEndpoint,
+    RetryClass,
     Role,
     RunEvent,
     RunEventType,
@@ -21,15 +24,20 @@ from rollout.contracts import (
     SampleResult,
     Text,
     ToolCall,
+    ToolResult,
+    ToolSpecification,
     Usage,
     address_of,
     new_run_id,
 )
 from rollout.harness.environments import EnvironmentService, EnvironmentSpecification, ExecutionResult
+from rollout.harness.sandboxes import Process, Reach, SandboxSpec
 from rollout.harness.task import Task
 from rollout.local.context import LocalRunContext
 
 __all__ = [
+    "FakeSandbox",
+    "FakeSandboxes",
     "LedgerEndpoint",
     "LedgerEnvironments",
     "ScriptedModelEndpoint",
@@ -152,6 +160,122 @@ class LedgerEnvironments:
 
     async def destroy(self, environment_id: str) -> None:
         await self._inner.destroy(environment_id)
+
+
+@dataclass
+class FakeSandbox:
+    """One of `FakeSandboxes`: what it was made from and given, the process it runs, and every operation asked of
+    it."""
+
+    handle: str
+    spec: SandboxSpec
+    environment: Mapping[str, str]
+    process: Process | None = None
+    """What its spec says to run, with the lease's environment added to the process's own."""
+    written: int = 0
+    """Bytes written to its scratch directory."""
+    calls: list[tuple[str, Mapping[str, JsonValue]]] = field(default_factory=list[tuple[str, Mapping[str, JsonValue]]])
+
+
+type Operation = Callable[[FakeSandbox, Mapping[str, JsonValue]], JsonValue | Awaitable[JsonValue]]
+"""What an operation of `FakeSandboxes` answers, given the sandbox and the call's arguments. One that raises
+`PermissionError` answers with an error: the sandbox's spec does not allow it."""
+
+
+def _describe(sandbox: FakeSandbox, arguments: Mapping[str, JsonValue]) -> JsonValue:
+    process = sandbox.process
+    return {
+        "handle": sandbox.handle,
+        "parameters": dict(sandbox.spec.parameters),
+        "environment": dict(sandbox.environment),
+        "process": {"command": list(process.command), "environment": dict(process.environment)} if process else None,
+    }
+
+
+def _write(sandbox: FakeSandbox, arguments: Mapping[str, JsonValue]) -> JsonValue:
+    path, size = str(arguments["path"]), int(str(arguments["bytes"]))
+    spec = sandbox.spec
+    if any(_under(path, mount.target) for mount in spec.mounts):
+        raise PermissionError(f"{path} is on a read-only mount")
+    if spec.scratch is None or not _under(path, spec.scratch.path):
+        raise PermissionError(f"{path} is not in the sandbox's scratch directory")
+    if sandbox.written + size > spec.scratch.mib * 2**20:
+        raise PermissionError(f"the scratch directory holds {spec.scratch.mib} MiB")
+    sandbox.written += size
+    return {"written": sandbox.written}
+
+
+def _fetch(sandbox: FakeSandbox, arguments: Mapping[str, JsonValue]) -> JsonValue:
+    host = str(arguments["host"])
+    if host not in sandbox.spec.network.allow:
+        raise PermissionError(f"the sandbox may not reach {host}")
+    return {"reached": host}
+
+
+def _under(path: str, directory: str) -> bool:
+    return path == directory or path.startswith(directory.rstrip("/") + "/")
+
+
+class FakeSandboxes:
+    """A sandbox `Provider` whose sandboxes are only records, honouring what their specs allow: at most `size` of
+    them, of `kind`. A spec's process is "launched" with the lease's environment added to its own, and the runner
+    reaches it at the address `process`. Its operations are `describe` (the sandbox's handle, parameters, environment
+    and process), `write` (`path`, `bytes`: only within its scratch directory and its size, never on a mount), `fetch`
+    (`host`: only a host its network allows), and any in `operations`; it keeps every sandbox it made and deleted.
+    Lease them out with `SandboxPool(FakeSandboxes())`."""
+
+    def __init__(self, kind: str = "fake", size: int = 4, operations: Mapping[str, Operation] | None = None) -> None:
+        self.kind = kind
+        self.size = size
+        self.performs: dict[str, Operation] = {
+            "describe": _describe,
+            "write": _write,
+            "fetch": _fetch,
+            **(operations or {}),
+        }
+        self.sandboxes: dict[str, FakeSandbox] = {}
+        """The sandboxes it has, by handle."""
+        self.made: list[str] = []
+        self.deleted: list[str] = []
+
+    def operations(self) -> Sequence[ToolSpecification]:
+        return [ToolSpecification(name=name, retry_class=RetryClass.PURE) for name in self.performs]
+
+    async def create(self, handle: str, spec: SandboxSpec, environment: Mapping[str, str]) -> Reach:
+        if handle not in self.sandboxes:
+            process = spec.process
+            if process is not None:
+                process = process.model_copy(update={"environment": {**process.environment, **environment}})
+            self.sandboxes[handle] = FakeSandbox(handle, spec, dict(environment), process)
+            self.made.append(handle)
+        addresses = {"fake": f"fake://{handle}"}
+        if spec.process is not None:
+            addresses["process"] = f"fake://{handle}/process"
+        return Reach(addresses=addresses)
+
+    async def delete(self, handle: str) -> None:
+        if self.sandboxes.pop(handle, None) is not None:
+            self.deleted.append(handle)
+
+    async def held(self) -> Sequence[str]:
+        return list(self.sandboxes)
+
+    async def call(
+        self, handle: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
+    ) -> ToolResult:
+        sandbox = self.sandboxes.get(handle)
+        if sandbox is None:
+            raise KeyError(f"there is no sandbox {handle}")
+        perform = self.performs.get(name)
+        if perform is None:
+            return ToolResult(content=[Text(text=f"unknown operation {name}")], is_error=True)
+        sandbox.calls.append((name, dict(arguments)))
+        try:
+            value = perform(sandbox, arguments)
+            answered: JsonValue = await value if inspect.isawaitable(value) else value  # pyright: ignore[reportUnknownVariableType]
+        except PermissionError as error:
+            return ToolResult(content=[Text(text=str(error))], is_error=True)
+        return ToolResult(content=[Text(text=json.dumps(answered))], structured=answered)
 
 
 def read_ledger(ledger: Path) -> list[dict[str, str]]:

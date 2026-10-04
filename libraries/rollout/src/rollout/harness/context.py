@@ -18,6 +18,7 @@ from rollout.harness.environments import Environments
 from rollout.harness.history import ContextHints, History
 from rollout.harness.imports import Tools
 from rollout.harness.observation import Observation, WaitFor
+from rollout.harness.sandboxes import Sandbox
 
 
 class Model(Protocol):
@@ -87,6 +88,11 @@ class RunContext(Protocol):
     @property
     def environments(self) -> Environments | None:
         """Creates environments the run owns; None when the runner has no environment backend."""
+        ...
+
+    def sandbox(self, name: str) -> Sandbox:
+        """A sandbox the program declared (`Program.sandboxes()`), acquired for this run: its addresses, its
+        environment, its operations. `KeyError` for a name the program did not declare."""
         ...
 
     @property
