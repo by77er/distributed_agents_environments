@@ -8,6 +8,7 @@ import { scale, sparkPoints } from "./components/charts";
 import { columnsOf, type Subject } from "./components/evals";
 import { slotHue } from "./lib/format";
 import { episodeClass, knownOf, lineOf, reported } from "./lib/model";
+import { titleOf } from "./layout/Shell";
 import { placeOf } from "./lib/places";
 import { pathChart } from "./lib/scores";
 import { evalsSettings, settingOf, wantedOf } from "./lib/settings";
@@ -72,6 +73,15 @@ describe("checkpoints", () => {
     expect([known.base(adapter.base), known.base("Qwen/Qwen3.5-9B"), known.base(null)]).toEqual(["mnop (first · S4)", "Qwen/Qwen3.5-9B", "the base model"]);
     expect(known.title(adapter.id)).toBe("nopqrstuvwxyzklm · depth 1\nrun_2 · S1, from mnop (first · S4)");
     expect(known.title(merged.id).split("\n")[0]).toBe("mnopqrstuvwxyzkl · depth 1 · full weights");
+  });
+});
+
+describe("the tab's title", () => {
+  it("names the place shown, and the run it is in when that alone says little", () => {
+    expect(titleOf([["Runs", "/runs"]])).toBe("Runs · Rollout");
+    expect(titleOf([["Runs", "/runs"], ["Run e2e-stacked", "/run/x"]])).toBe("Run e2e-stacked · Rollout");
+    expect(titleOf([["Runs", "/runs"], ["Run e2e-stacked", "/run/x"], ["Step 3", ""]])).toBe("Step 3 · Run e2e-stacked · Rollout");
+    expect(titleOf([["Checkpoints", "/checkpoints"], ["Checkpoint volr", ""]])).toBe("Checkpoint volr · Rollout");
   });
 });
 

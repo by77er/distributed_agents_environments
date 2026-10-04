@@ -93,6 +93,13 @@ function Live() {
 }
 
 /** Where one is: the page, then each place above the one shown. */
+/** The tab's title: the place shown, and where it is when that alone says little ("Step 3" of which run). */
+export function titleOf(crumbs: [string, string][]): string {
+  const [last] = crumbs[crumbs.length - 1];
+  const within = crumbs.length > 2 && /^(Step|Group|Episode|Rollout) /.test(last) ? crumbs[1][0] : null;
+  return [last, within, "Rollout"].filter(Boolean).join(" · ");
+}
+
 function Crumbs({ place }: { place: Place }) {
   const { data: system } = useSystem();
   const { data: episode } = useEpisode(place.kind === "episode" ? place.id : "", place.kind === "episode");
@@ -130,6 +137,8 @@ function Crumbs({ place }: { place: Place }) {
     if (played) crumbs.push([`Suite ${played.suite}`, suitePlace(played.suite)]);
     crumbs.push([`Eval ${played?.name ?? runName(place.run)}`, ""]);
   }
+  const title = titleOf(crumbs);
+  useEffect(() => { document.title = title; }, [title]);
   return (
     <div className="crumbs">
       {crumbs.map(([name, to], index) => (
