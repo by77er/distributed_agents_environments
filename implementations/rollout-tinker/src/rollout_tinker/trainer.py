@@ -2,9 +2,9 @@
 # (torch's annotations leave parts of autograd untyped.)
 """`TinkerTrainer`: a `Trainer` whose weights live at Thinking Machines.
 
-A step resumes its parent's training state there (or starts a LoRA run on the model), takes the same minibatches as
-`rollout_lora.step.PolicyStep` (the same filter, shuffle and cut), sends each as Tinker's loss, saves a training
-state and a sampler checkpoint named after the version, and leaves pointers to them (`rollout_tinker.weights`).
+A step resumes its parent's training state there (or starts a LoRA run on the model), takes the minibatches of
+`rollout_lora.step.PolicyStep` (its `Plan`: the same filter, shuffle and cut), sends each as Tinker's loss, saves a
+training state and a sampler checkpoint named after the version, and leaves pointers to them (`rollout_tinker.weights`).
 
 **The objective, exactly.** Tinker's built-in losses take one reference logprob per token; ours (`rollout_lora.
 objectives`) has two, the logprob at the step's start (`old`) and the one it was sampled at (`behavior`). Folding the
@@ -22,13 +22,13 @@ needed. The custom loss (Tinker computes logprobs, we compute the loss and its g
 on a linear stand-in with that gradient) costs a forward pass more than a built-in loss.
 
 Each minibatch's statistics are `terms` of the logprobs the forward-backward returns (the policy before that update),
-so a step's metrics are `PolicyStep`'s. A minibatch that finds the policy further than `max_kl` from where the step
-began stops the pass; its gradient has been accumulated where no call clears it, so that client is not used again.
+so a step's metrics are `PolicyStep`'s (`rollout_lora.step.metrics`). A minibatch that finds the policy further than
+`max_kl` from where the step began stops the pass; its gradient has been accumulated where no call clears it, so that
+client is not used again.
 """
 
 import asyncio
 import json
-import random
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -39,18 +39,16 @@ import torch
 from pydantic import JsonValue
 from tinker import AdamParams, Datum, ForwardBackwardOutput
 
-from rollout_lora.objectives import Terms, terms
-from rollout_lora.step import minibatches, sampled
+from rollout_lora.objectives import SUMS, tally, terms
+from rollout_lora.step import MINIBATCHES, Plan, line, metrics
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
 from rollout_tinker.settings import TinkerSettings
 from rollout_tinker.weights import checkpoint_name, pointer, write_pointer
 from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
 
-__all__ = ["MINIBATCHES", "TinkerTrainer"]
+__all__ = ["TinkerTrainer"]
 
-MINIBATCHES = "minibatches.jsonl"
-"""In a step's state: what each of its minibatches did, one line each (as `LoraTrainer` writes it)."""
 UNTRUNCATED = 1e9
 """`cispo`'s upper clip when the importance weight is not truncated."""
 
@@ -145,44 +143,33 @@ class TinkerTrainer:
         client is clean (no gradient left behind) to go on with."""
         started = time.monotonic()
         settings, objective = self.settings, self.settings.loss
-        longest = settings.segment_tokens
-        order = [
-            weighted
-            for weighted in batch
-            if (longest is None or len(weighted.segment.tokens) <= longest) and sampled(weighted)
-        ]
-        too_long = sum(1 for weighted in batch if longest is not None and len(weighted.segment.tokens) > longest)
-        shuffled = random.Random(seed)
-        shuffled.shuffle(order)
+        plan = Plan.of(batch, settings, seed)
         segments: dict[int, _Segment] = {}
-        for weighted in order:
+        for weighted in plan.segments:
             behavior = torch.tensor(weighted.segment.logprobs, dtype=torch.float64)
             if objective.reads_old and not bool(torch.isfinite(behavior).all()):
                 raise ValueError("a sampled token has no behavior logprob")
             segments[id(weighted)] = _Segment(weighted, rows(weighted), behavior)
-        passes = [order] + [shuffled.sample(order, len(order)) for _ in range(settings.passes - 1)]
-        plan = [each for one in passes for each in minibatches(one, settings.tokens_per_step)]
-        single = len(plan) == 1
+        updates = plan.minibatches(settings)
+        single = len(updates) == 1
         billed = 0.0
 
         # Where the step starts, when more than one update needs it: each sampled token's logprob on these weights.
-        if objective.reads_old and not single and order:
-            data = [datum(each.segment.tokens, [], {"weights": []}) for each in order]
+        if objective.reads_old and not single and plan.segments:
+            data = [datum(each.segment.tokens, [], {"weights": []}) for each in plan.segments]
             out = await (await client.forward_async(data, "cross_entropy"))
-            billed += sum(len(each.segment.tokens) - 1 for each in order)
-            for weighted, found in zip(order, out.loss_fn_outputs, strict=True):
+            billed += sum(len(each.segment.tokens) - 1 for each in plan.segments)
+            for weighted, found in zip(plan.segments, out.loss_fn_outputs, strict=True):
                 part = segments[id(weighted)]
                 part.old = _logprobs(found)[part.rows]
         started_pass = time.monotonic()
 
-        totals: dict[str, float] = dict.fromkeys(
-            ("loss", "units", "clipped", "truncated", "tokens", "ratio", "weight", "segments"), 0.0
-        )
-        moved: list[float] = []
+        totals = dict.fromkeys(SUMS, 0.0)
+        moved = 0.0
         optimizer: dict[str, list[float]] = {}
         lines: list[dict[str, float]] = []
         stopped = False
-        for update, minibatch in enumerate(plan):
+        for update, minibatch in enumerate(updates):
             parts = [segments[id(weighted)] for weighted in minibatch]
             units = sum(objective.units(part.weighted.segment.sampled) for part in parts)
             rate = settings.rate(len(lines), fresh=fresh)
@@ -191,65 +178,40 @@ class TinkerTrainer:
                 2 if objective.kind == "policy_gradient" and objective.ratio == "segment" else 1
             )
             if objective.reads_old and settings.max_kl is not None and update > 0:  # the distance, before the update
-                out = await pending
-                sums, distance = self._measured(parts, out)
-                if distance > settings.max_kl:
+                sums = self._measured(parts, await pending)
+                if sums["moved"] / max(sums["tokens"], 1.0) > settings.max_kl:
                     stopped = True
                     break
                 stepped = await (await client.optim_step_async(self._adam(rate)))
             else:  # the update sent at once, beside the forward-backward
                 optimizing = await client.optim_step_async(self._adam(rate))
-                out = await pending
+                sums = self._measured(parts, await pending)
                 stepped = await optimizing
-                sums, distance = self._measured(parts, out)
-            moved.append(distance)
+            moved = sums["moved"] / max(sums["tokens"], 1.0)
             for key, value in sums.items():
                 totals[key] += value
-            for key, value in (stepped.metrics or {}).items():
-                optimizer.setdefault(key, []).append(float(value))
-            lines.append(
-                {
-                    "segments": sums["segments"],
-                    "tokens": sums["tokens"],
-                    "loss": sums["loss"] / units,
-                    "clip_fraction": sums["clipped"] / max(sums["tokens"], 1.0),
-                    "kl": distance,
-                    "learning_rate": rate,
-                    **{f"optimizer_{key}": float(value) for key, value in (stepped.metrics or {}).items()},
-                }
-            )
+            reported = {key: float(value) for key, value in (stepped.metrics or {}).items()}
+            for key, value in reported.items():
+                optimizer.setdefault(key, []).append(value)
+            lines.append({**line(sums, units, rate), **{f"optimizer_{key}": value for key, value in reported.items()}})
 
-        tokens = max(totals["tokens"], 1.0)
-        starts = [part for part in segments.values() if part.old is not None]
-        start_tokens = max(sum(float(part.old.numel()) for part in starts if part.old is not None), 1.0)
-        floor = sum(float((part.behavior - part.old).sum()) for part in starts if part.old is not None)
-        mismatch = sum(float((part.behavior - part.old).abs().sum()) for part in starts if part.old is not None)
-        metrics = {
-            "loss": totals["loss"] / max(totals["units"], 1.0),
-            "clip_fraction": totals["clipped"] / tokens,
-            "mean_ratio": totals["ratio"] / tokens,
-            "kl_floor": floor / start_tokens,
-            "mean_mismatch": mismatch / start_tokens,
-            "mean_weight": totals["weight"] / tokens,
-            "truncated_fraction": totals["truncated"] / tokens,
-            "kl_moved": moved[-1] if moved else 0.0,
-            "tokens": totals["tokens"],
-            "segments": totals["segments"],
-            "segments_given": float(len(batch)),
-            "segments_too_long": float(too_long),
-            "longest_segment_tokens": float(max((len(weighted.segment.tokens) for weighted in order), default=0)),
-            "optimizer_steps": float(len(lines)),
-            "passes": float(settings.passes),
-            "learning_rate": settings.learning_rate,
-            "warmup_updates": float(settings.warmup_updates if fresh else 0),
-            "stopped_at_max_kl": float(stopped),
-            "billed_tokens": billed,
-            "start_seconds": started_pass - started,
-        }
+        said = metrics(
+            totals,
+            [(part.behavior, part.old) for part in segments.values() if part.old is not None],
+            plan=plan,
+            given=len(batch),
+            moved=moved,
+            updates=len(lines),
+            settings=settings,
+            fresh=fresh,
+            stopped=stopped,
+            start_seconds=started_pass - started,
+        )
+        said["billed_tokens"] = billed
         norms = next((values for key, values in optimizer.items() if "grad" in key and "norm" in key), None)
         if norms:  # (if Tinker reports it: before clipping, mean over the updates)
-            metrics["gradient_norm"] = sum(norms) / len(norms)
-        return metrics, lines, not stopped
+            said["gradient_norm"] = sum(norms) / len(norms)
+        return said, lines, not stopped
 
     async def _sent(self, client: Trainable, parts: list[_Segment], units: float, single: bool) -> Any:
         """A minibatch's forward-backward, sent: what awaits its output."""
@@ -302,30 +264,17 @@ class TinkerTrainer:
 
         return loss
 
-    def _measured(self, parts: list[_Segment], out: ForwardBackwardOutput) -> tuple[dict[str, float], float]:
-        """A minibatch's sums from the logprobs its forward-backward returned (the policy before its update), and
-        how far it found the policy from where the step began (nats per token)."""
+    def _measured(self, parts: list[_Segment], out: ForwardBackwardOutput) -> dict[str, float]:
+        """A minibatch's `SUMS`, from the logprobs its forward-backward returned (the policy before its update)."""
         objective = self.settings.loss
-        sums: dict[str, float] = dict.fromkeys(
-            ("loss", "units", "clipped", "truncated", "tokens", "ratio", "weight", "segments"), 0.0
-        )
-        distance = 0.0
+        sums = dict.fromkeys(SUMS, 0.0)
         for part, found in zip(parts, out.loss_fn_outputs, strict=True):
             now = _logprobs(found)[part.rows]
             if part.old is None and objective.reads_old:
                 part.old = now.clone()  # (one update: where the step starts is what the first pass found)
             with torch.no_grad():
-                said: Terms = terms(objective, now, part.weighted.advantage, part.old, part.behavior)
-            sums["loss"] += float(said.loss)
-            sums["units"] += objective.units(int(said.tokens))
-            sums["clipped"] += said.clipped
-            sums["truncated"] += said.truncated
-            sums["tokens"] += said.tokens
-            sums["ratio"] += said.ratio
-            sums["weight"] += said.weight
-            sums["segments"] += 1
-            distance += said.moved
-        return sums, distance / max(sums["tokens"], 1.0)
+                tally(sums, terms(objective, now, part.weighted.advantage, part.old, part.behavior), objective)
+        return sums
 
     def _datum(self, part: _Segment, **values: Sequence[float]) -> Datum:
         return datum(part.weighted.segment.tokens, part.rows, values)

@@ -26,7 +26,7 @@ import torch
 
 from rollout_lora.settings import Objective
 
-__all__ = ["Objective", "Terms", "terms"]
+__all__ = ["SUMS", "Objective", "Terms", "tally", "terms"]
 
 
 @dataclass
@@ -81,3 +81,20 @@ def terms(
             weight=float(capped.sum()),
             moved=float((old - logprobs).sum()),
         )
+
+
+SUMS: tuple[str, ...] = ("loss", "units", "clipped", "truncated", "tokens", "ratio", "weight", "moved", "segments")
+"""What a minibatch's segments' `Terms` add up to, for its statistics and the step's."""
+
+
+def tally(sums: dict[str, float], found: Terms, objective: Objective) -> None:
+    """Add one segment's `found` terms to `sums` (keyed by `SUMS`)."""
+    sums["loss"] += float(found.loss.detach())
+    sums["units"] += objective.units(int(found.tokens))
+    sums["clipped"] += found.clipped
+    sums["truncated"] += found.truncated
+    sums["tokens"] += found.tokens
+    sums["ratio"] += found.ratio
+    sums["weight"] += found.weight
+    sums["moved"] += found.moved
+    sums["segments"] += 1

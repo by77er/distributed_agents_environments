@@ -69,8 +69,6 @@ class TrainerProcess:
 
 OPTIMIZER = "optimizer.pt"
 """In a step's state: the optimizer's state after it."""
-MINIBATCHES = "minibatches.jsonl"
-"""In a step's state: what each of its minibatches did, one line each."""
 MEMORY_MARGIN = 256 * 2**20
 """GPU memory left free of what was free when a step started (other programs' use moves a little)."""
 
@@ -100,7 +98,7 @@ def _step(
         from rollout_lora.full import FullPolicy
         from rollout_lora.layers import load_adapter
         from rollout_lora.policy import Policy
-        from rollout_lora.step import PolicyStep
+        from rollout_lora.step import MINIBATCHES, PolicyStep
 
         policy: Policy | FullPolicy
         if weights == "full":  # every weight, from the parent's (or the model's own)
