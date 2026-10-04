@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
-from rollout_train.evals import subject_table, suite_of
+from rollout_train.evals import started_version, subject_table, suite_of
 from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import EVAL, OPEN, RUN, Asked, Launch, launches_of
 from rollout_train.ledger import Ledger
@@ -152,9 +152,9 @@ async def _asked(ledger: Ledger, run: str, newest: Mapping[str, Any], before: As
     if newest.get("kind") == EVAL:
         if before is not None:
             return before
-        version = str(newest.get("version") or newest.get("suite"))
-        suite = await suite_of(ledger, version)
         subject: Any = (await ledger.read(subject_table(str(newest.get("suite")), run, "subject"))).get("subject") or {}
+        version = started_version(newest, subject) or str(newest.get("suite"))
+        suite = await suite_of(ledger, version)
         return Asked(
             "", environment, await _name(ledger, run), start=newest.get("checkpoint"), kind=EVAL, suite=version,
             episodes=subject.get("episodes"), environments=suite.environments[1:] if suite is not None else (),

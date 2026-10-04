@@ -168,7 +168,8 @@ async def test_an_environment_of_another_project_is_listed_from_its_launchers_of
     offers it, and an eval there names it in its start."""
     ledger, gsm8k = FileLedger(tmp_path / "ledger"), "rollout_verifiers.environments:gsm8k"
     fence = await ledger.take(scope("gsm8k-base"))
-    start: Any = {"kind": "eval", "suite": "math", "environment": gsm8k, "version": "math@1", "started": time.time()}
+    start: Any = {"kind": "eval", "suite": "math", "suite_version": "math@1", "environment": gsm8k}
+    start |= {"version": "gsm8k 0.1.4", "started": time.time()}
     await ledger.append(table("gsm8k-base", STARTS), str(fence.number), start, fence)
     heartbeats = presence_of(ledger)
     assert heartbeats is not None
@@ -178,7 +179,7 @@ async def test_an_environment_of_another_project_is_listed_from_its_launchers_of
         (line,) = (await client.get("/api/environments")).json()["environments"]
         page = (await client.get(f"/api/environments/{gsm8k}")).json()
     assert (line["environment"], line["name"], line["offered"], line["runs"]) == (gsm8k, "gsm8k", True, [])
-    assert line["used"] == start["started"] and line["versions"] == []  # (an eval's version is its suite's)
+    assert line["used"] == start["started"] and line["versions"] == ["gsm8k 0.1.4"]  # (not its suite's)
     assert (page["loads"], page["offered"]) == (False, True) and "does not load here" in page["error"]
 
 

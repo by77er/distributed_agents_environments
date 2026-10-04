@@ -26,6 +26,7 @@ from rollout_train.evals import (
     NOTHING_TRAINED,
     Schedule,
     Suite,
+    edit_suite,
     evaluate,
     make_suite,
     subject_table,
@@ -43,6 +44,7 @@ from rollout_train.presence import presence_of
 from rollout_train.profile import Profile
 from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, STEPS, results, scope, table
 from rollout_train.registry import registry_of
+from rollout_train.resuming import _asked  # pyright: ignore[reportPrivateUsage]
 from rollout_train.rollouts import EpisodeRunner, Record, loaded, playing
 from rollout_train.rollouts.scheduler import EPISODES, episodes_of
 from tests.rollout_train.monitor.test_launching import OFFERED
@@ -172,6 +174,7 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
     assert (who["kind"], who["checkpoint"], who["episodes"], who["model"]) == ("checkpoint", subject.id, 2, "tiny")
     start: Any = next(iter((await ledger.read(table("eval-1", STARTS))).values()))
     assert (start["kind"], start["suite"], start["checkpoint"]) == (EVAL, "words-v1", subject.id)
+    assert (start["suite_version"], start["version"]) == ("words-v1@1", "1")  # (the suite's, and its environment's)
     lines: Any = await ledger.read(table("eval-1", RESULTS))
     assert sorted(lines) == ["1", "2"] and all(line["skipped"] == NOTHING_TRAINED for line in lines.values())
     assert await checkpoints.all() == [subject]  # nothing trained, nothing made
@@ -196,6 +199,20 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
     assert {each["run"]: each["kind"] for each in snapshot["runs"]} == {"eval-1": EVAL}
     (shown,) = snapshot["runs"]  # (what its environment's results say, as its start records it)
     assert shown["version"] == "1" and shown["description"] == words.description.to_json()
+
+
+async def test_an_eval_started_again_asks_for_the_version_it_played_whatever_its_start_says(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    first = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
+    await edit_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-no"], seeds=[1])])
+    fence = await ledger.take(scope("eval-1"))
+    who: JsonValue = {"kind": "model", "episodes": 2, "run": "eval-1", "version": first.id}
+    await ledger.append(subject_table("words-v1", "eval-1", "subject"), "subject", who, fence)
+    said: dict[str, Any] = {"kind": EVAL, "suite": "words-v1", "checkpoint": None, "environment": ENVIRONMENT}
+    # (a start written before starts said their suite's version: its environment's version is under `version`)
+    for start in ({**said, "version": "1"}, {**said, "version": "1", "suite_version": first.id}):
+        asked = await _asked(ledger, "eval-1", start, None)
+        assert (asked.kind, asked.suite, asked.episodes, asked.environment) == (EVAL, "words-v1@1", 2, ENVIRONMENT)
 
 
 async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:

@@ -23,7 +23,7 @@ from pydantic import JsonValue
 from rollout.curriculum import curriculum_of
 from rollout.environment import Environment
 from rollout_train.check import CHECK
-from rollout_train.evals import EVAL, parsed, suites_among, versions_in
+from rollout_train.evals import EVAL, parsed, started_version, subject_table, suites_among, versions_in
 from rollout_train.monitor.scores import evals_in
 from rollout_train.record import ENDS, GROUPS, RESULTS, STARTS, named_runs, table
 
@@ -71,8 +71,8 @@ def offered(read: Read) -> Iterable[Sighting]:
 
 
 def started(read: Read) -> Iterable[Sighting]:
-    """The environments runs were started on: each start's version (an eval's is its suite's, so not an environment's),
-    a training run on it, and when each start began. An eval that names no environment played its suite's version's;
+    """The environments runs were started on: each start's version of its environment, a training run on it, and when
+    each start began. An eval that names no environment played its suite's version's;
     one of several environments is seen in its parts."""
     found: list[Sighting] = []
     for run in named_runs(read.tables):
@@ -81,12 +81,11 @@ def started(read: Read) -> Iterable[Sighting]:
                 continue
             begun = cast(dict[str, Any], start)
             at = float(begun["started"]) if isinstance(begun.get("started"), int | float) else None
-            kind = begun.get("kind")
-            for environment in _played_by(begun, read.tables):
+            for environment in _played_by(begun, run, read.tables):
                 found.append(
                     Sighting(
                         environment,
-                        version=str(begun["version"]) if begun.get("version") is not None and kind != EVAL else None,
+                        version=str(begun["version"]) if begun.get("version") is not None else None,
                         run=run if _training(begun) else None,
                         at=at,
                     )
@@ -184,7 +183,7 @@ def page_of(
         mine: list[dict[str, Any]] = [
             cast(dict[str, Any], each)
             for each in (starts[key] for key in sorted(starts, key=lambda key: int(key) if key.isdigit() else 0))
-            if isinstance(each, dict) and environment in _played_by(cast(dict[str, Any], each), tables)
+            if isinstance(each, dict) and environment in _played_by(cast(dict[str, Any], each), run, tables)
         ]
         if not mine:
             continue
@@ -249,13 +248,14 @@ def _training(start: Mapping[str, Any]) -> bool:
     return bool(start.get("environment")) and start.get("kind") not in (EVAL, CHECK)
 
 
-def _played_by(start: Mapping[str, Any], tables: Mapping[str, Mapping[str, JsonValue]]) -> list[str]:
+def _played_by(start: Mapping[str, Any], run: str, tables: Mapping[str, Mapping[str, JsonValue]]) -> list[str]:
     """The environments a start plays: the one it names; else, for an eval, its suite's version's."""
     if start.get("environment"):
         return [str(start["environment"])]
     if start.get("kind") != EVAL or not start.get("suite"):
         return []
-    name, number = parsed(str(start.get("version") or start["suite"]))
+    subject: Any = tables.get(subject_table(str(start["suite"]), run, "subject"), {}).get("subject") or {}
+    name, number = parsed(started_version(start, subject) or str(start["suite"]))
     versions = versions_in(tables, name)
     found = next((each for each in versions if each.number == number), versions[-1] if versions else None)
     return [each for each in found.environments if each] if found is not None else []

@@ -27,18 +27,19 @@ editors at once make two versions, one after the other, and the name points to t
 
 An **eval** is one version of a suite played by one subject: a checkpoint (by any reference
 `rollout_train.registry.resolved` takes), or the base model. It is a run of its own, registered and fenced like any run,
-whose start says what it is (`kind: eval`, the suite, its version, the checkpoint). It serves the subject on the
-channel. Each entry is played by a run of its own: the eval's run, for a version of one entry; else a run for each
-entry (its **parts**), each with its own plan (the entry's program, and its binding: its tool sets, pools and limits),
-so a runner plays an entry only where it has what the entry's environment needs. A part's start says the eval it is
-part of (`part_of`). Each run asks for one group per start of its entry with that entry's episodes each (runners play
-them as they play any run's), and each group's result is written to that run's own `results`, so a part reads like any
-run. The eval records each episode's outcome under `evaluations/SUITE/EVAL/results` (`START-EPISODE`, the start by its
-number in the version), beside a record of the subject, the version it played and its parts
-(`evaluations/SUITE/EVAL/subject`; one recorded before suites had versions played version 1), and, once every start
-has been played, each entry's scores (`scores`, in the same table): episodes played, solved where its environment's
-results say it, and the mean reward. Entries are scored apart: environments' rewards do not compare. Started again, it
-goes on: what it decided and what it recorded are not done twice.
+whose start says what it is (`kind: eval`, the suite, its version as `suite_version`, the checkpoint; and, for a version
+of one entry, its environment's version and description, as a training run's start does). It serves the subject on the
+channel. Each entry is played by a run of its own: the eval's run, for a version of one entry; else a run for each entry
+(its **parts**), each with its own plan (the entry's program, and its binding: its tool sets, pools and limits), so a
+runner plays an entry only where it has what the entry's environment needs. A part's start says the eval it is part of
+(`part_of`). Each run asks for one group per start of its entry with that entry's episodes each (runners play them as
+they play any run's), and each group's result is written to that run's own `results`, so a part reads like any run. The
+eval records each episode's outcome under `evaluations/SUITE/EVAL/results` (`START-EPISODE`, the start by its number in
+the version), beside a record of the subject, the version it played and its parts (`evaluations/SUITE/EVAL/subject`; one
+recorded before suites had versions played version 1), and, once every start has been played, each entry's scores
+(`scores`, in the same table): episodes played, solved where its environment's results say it, and the mean reward.
+Entries are scored apart: environments' rewards do not compare. Started again, it goes on: what it decided and what it
+recorded are not done twice.
 
 A training run can evaluate its own checkpoints as it makes them (a `Schedule`): the loop plays the suite with the
 checkpoint of every `every`th step between that step and the next, on the channel that already serves it (the policy is
@@ -86,6 +87,9 @@ EVALUATIONS = "evaluations/"
 NOTHING_TRAINED = "an evaluation trains on nothing"
 FIRST = "suite"
 """The key of a suite's version 1 in its table; each later version's is its number."""
+SUITE_VERSION = "suite_version"
+"""What an eval's start says the version it plays under (by id); its `version` is its environment's, as a training
+run's start says."""
 SCORES = "scores"
 """The key of an eval's entries' scores in its subject's table, once every start has been played."""
 EVAL_DATA, DRAWN, GIVEN = "eval data", "rows and seeds", "starts"
@@ -118,6 +122,14 @@ def parsed(reference: str) -> tuple[str, int | None]:
     if not at:
         return reference, None
     return name, int(number) if number.isdigit() else 0
+
+
+def started_version(start: Mapping[str, Any], subject: Mapping[str, Any]) -> str | None:
+    """The version an eval's start played, by id: what it says (`suite_version`), else what its subject's record says
+    (a start written before it said so has its environment's version under `version`, as a training run's start
+    does)."""
+    found = start.get(SUITE_VERSION) or subject.get("version")
+    return str(found) if found else None
 
 
 def played_version(subject: Mapping[str, Any], suite: str) -> str:
@@ -629,7 +641,7 @@ async def evaluate(
     )
     fences = [fence] if not several else [await ledger.take(scope(each)) for each in runs]
     counts = [episodes or entry.episodes for entry in suite.entries]
-    here: dict[str, JsonValue] = {"kind": EVAL, "suite": suite.name, "version": suite.id, "checkpoint": subject}
+    here: dict[str, JsonValue] = {"kind": EVAL, "suite": suite.name, SUITE_VERSION: suite.id, "checkpoint": subject}
     here |= {"from": subject, "host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1)}
     first = loaded[suite.entries[0].environment]
     whole = {**here, **(described(first) if not several else {"parts": cast(JsonValue, runs)}), **(started or {})}
