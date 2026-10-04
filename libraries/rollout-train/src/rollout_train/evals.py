@@ -579,7 +579,6 @@ async def evaluate(
     asked_by: str = "by hand",
     reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None,
     hooks: Sequence[Hooks] = (),
-    served_by: str | None = None,
 ) -> dict[str, Any]:
     """Play `suite` (one version) with `subject` (a checkpoint's id; None: the base model, named `base`) served on
     `channel`, `episodes` episodes of each start (none: each entry's), as the run `run`. Returns how it went: `played`,
@@ -595,9 +594,7 @@ async def evaluate(
     newest checkpoint). `reshard` gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds
     its files on this machine. What the eval's channel serves is written down for each of its runs
     (`rollout_train.serving`), so that runners anywhere play it on replicas that serve `subject` and no other
-    checkpoint; `served_by` names the channel whose replicas serve it (`RUN/NAME`: the training run's, for an eval its
-    schedule asks for), where it is not the eval's own. Raises `KeyError` for an entry's environment that does not load
-    here."""
+    checkpoint. Raises `KeyError` for an entry's environment that does not load here."""
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
     loaded = environments_of(suite, environments)
     fence = await ledger.take(scope(run))
@@ -650,10 +647,10 @@ async def evaluate(
 
     serving: Serving
     if subject is None:  # (the model the channel's engines are started with)
-        serving = Serving(channel, model=base, served_by=served_by, max_lag=0)
+        serving = Serving(channel, model=base, max_lag=0)
     elif publish is None:  # (the channel serves it already)
         known = await checkpoints.checkpoint(subject)
-        serving = Serving(channel, known.id, known.depth, known.kind, model=base, served_by=served_by, max_lag=0)
+        serving = Serving(channel, known.id, known.depth, known.kind, model=base, max_lag=0)
     else:
         served = await checkpoints.checkpoint(subject)
         if served.weights is None:

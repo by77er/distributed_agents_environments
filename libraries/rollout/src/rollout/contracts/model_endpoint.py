@@ -144,17 +144,16 @@ class ModelEndpoint(Protocol):
 class AddressableEndpoint(ModelEndpoint, Protocol):
     """A model endpoint that also serves its slots over HTTP, to a harness that brings its own loop."""
 
-    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
-        """Where such a harness reaches the session's slot. What it samples there goes `through` an endpoint
-        wrapping this one, if one is given (a runner's, which reports samples to its hooks)."""
+    def address(self, session_id: str) -> ModelAddress:
+        """Where such a harness reaches the session's slot."""
         ...
 
 
-def address_of(endpoint: ModelEndpoint, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+def address_of(endpoint: ModelEndpoint, session_id: str) -> ModelAddress:
     """`AddressableEndpoint.address` of an endpoint; raises if the endpoint has no address."""
     if not isinstance(endpoint, AddressableEndpoint):
         raise RuntimeError("this model slot is not served over HTTP: a harness cannot be given an address")
-    return endpoint.address(session_id, through=through)
+    return endpoint.address(session_id)
 
 
 class ModelEndpointError(Exception):

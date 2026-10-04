@@ -50,9 +50,6 @@ class Serving:
     """The model the channel's line began from, by name."""
     sequence: int | None = None
     """The longest turn the trainer can train on (`Limits.sequence`), for every runner that samples the channel."""
-    served_by: str | None = None
-    """The channel whose engines serve this (`RUN/NAME`), where it is another run's: an eval played on the channel
-    of the training run whose checkpoint it plays. None: the channel's own."""
     max_lag: int | None = None
     """How many checkpoints behind this a sample may be, where the run says (0 for an eval, which plays one
     checkpoint); None: as the runner's channel says."""

@@ -81,8 +81,8 @@ class _ObservedEndpoint:
     def describe(self, session_id: str) -> CapabilityContract:
         return self._endpoint.describe(session_id)
 
-    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
-        return address_of(self._endpoint, session_id, through=through or self)  # (its samples reach the hooks too)
+    def address(self, session_id: str) -> ModelAddress:
+        return address_of(self._endpoint, session_id)
 
     async def cancel(self, effect_id: str) -> None:
         await self._endpoint.cancel(effect_id)

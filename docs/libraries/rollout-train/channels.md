@@ -108,7 +108,7 @@ run's `serving` table, under its fence and before it publishes to engines of its
 | `files`, `layout` | the manifest of what the engines load (the checkpoint's weights, or what they were [resharded](checkpoints.md#resharding) into), and that layout |
 | `over` | for an adapter over a full checkpoint, that checkpoint: the engines hold its weights first |
 | `model`, `sequence` | the model the line began from, by name, and the longest turn the trainer can train on, which every runner applies |
-| `served_by`, `max_lag` | for an eval its training run's schedule asks for, the training run's channel (`RUN/NAME`), whose engines serve its checkpoint, and 0: it plays that checkpoint and no other |
+| `max_lag` | how many checkpoints behind this a sample may be: 0 for an eval, which plays its checkpoint and no other |
 
 `wanted(ledger, run, channel)` is what a channel should serve now: its record of the greatest depth, as a channel
 never goes back. `record_serving(ledger, run, serving, fence)` appends one; one written before changes nothing.

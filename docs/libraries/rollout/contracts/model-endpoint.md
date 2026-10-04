@@ -82,7 +82,5 @@ harness that brings its own loop. `Model.address()` returns a
 name to send.
 
 - `address_of(endpoint, session_id)` returns the address, and raises `RuntimeError` for an endpoint that has none.
-- An endpoint may have what a harness samples at the address go `through` the endpoint the run holds, so that a
-  runner's [hooks](../hooks.md) see those samples too.
 - The gateway's endpoint is the addressable one ([harnesses over HTTP](../../rollout-train/harness-endpoint.md)). A
   harness's samples go to the gateway itself; one in the runner's own process tells the runner's hooks of them.

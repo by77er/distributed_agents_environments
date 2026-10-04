@@ -267,7 +267,7 @@ async def test_an_eval_plays_its_checkpoint_and_no_other(tmp_path: Path) -> None
     await serve(checkpoints, fence, first)
     second = await made(checkpoints, fence, tmp_path, first)
     evaluated = await checkpoints.ledger.take(scope("e"))  # (the eval of `second`, played on run r's servers)
-    eval_of = Serving("policy", second.id, second.depth, served_by=qualified("r", "policy"), max_lag=0)
+    eval_of = Serving("policy", second.id, second.depth, max_lag=0)
     await record_serving(checkpoints.ledger, "e", eval_of, evaluated)
     async with engine_host("gpu-1", checkpoints, "r", tmp_path / "gpu-1", presence) as host:
         await until(lambda: host.channel.serving == first.id)

@@ -28,10 +28,6 @@ export function startShare(subject: Subject, start: SuiteStart): number | null {
 /** Whether any subject's episodes say if they solved their starts. */
 export const anySolved = (subjects: Subject[]): boolean => subjects.some(subject => subject.solved != null);
 
-/** Who played: the checkpoint (opening its page), or the base model by its name. */
-export const SubjectName = ({ subject }: { subject: Subject }) =>
-  subject.kind === "model" ? <CheckpointTag id={null} base={subject.model} /> : <CheckpointTag id={subject.checkpoint} bare />;
-
 /** Who played, in a few words: the checkpoint's shortest id, or the base model's name. */
 export const subjectText = (subject: Subject, known: Known): string =>
   subject.kind === "model" ? `base ${subject.model?.split("/").at(-1) ?? "model"}` : known.short(subject.checkpoint);

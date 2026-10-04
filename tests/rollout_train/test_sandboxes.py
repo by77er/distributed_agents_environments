@@ -72,9 +72,9 @@ async def test_a_stale_claims_sandbox_is_deleted(tmp_path: Path, monkeypatch: py
     await beats.beat("elsewhere", {"places": 1})
     lease = await pool.acquire(BOX, "train/1/1/1/box")
     unclaimed = await pool.acquire(BOX, "by-hand/box")  # a run the ledger does not know: it ends when released
-    assert await sweep(pool, ledger, beats) == [] and len(sandboxes.sandboxes) == 2  # its claim holds: it beats
+    assert (await sweep(pool, ledger, beats))[0] == [] and len(sandboxes.sandboxes) == 2  # its claim holds: it beats
     monkeypatch.setattr(presence, "STALE", -1.0)  # its newest beat is now too old
-    assert await sweep(pool, ledger, beats) == [lease.key]
+    assert await sweep(pool, ledger, beats) == ([lease.key], {lease.key})
     assert sandboxes.deleted == [lease.handle] and [each.key for each in await pool.held()] == [unclaimed.key]
     assert [each.key for each in await FileLeases(ledger.directory).all()] == [unclaimed.key]  # beside the ledger
 

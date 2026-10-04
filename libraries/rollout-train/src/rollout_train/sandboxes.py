@@ -132,13 +132,18 @@ async def ending(keys: Collection[str], ledger: Ledger, presence: Presence | Non
     return released
 
 
-async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None) -> list[str]:
-    """Release the pool's leases whose claims have ended, ending the claims in the ledger first (`ending`), and delete
-    what no lease names; the keys released."""
+async def sweep(
+    pool: SandboxPool, ledger: Ledger, presence: Presence | None, *, lapsed: Collection[str] | None = None
+) -> tuple[list[str], set[str]]:
+    """Release the pool's leases whose claims have ended (given `lapsed`, only those whose claims were found ended the
+    look before too: the keys it holds), ending the claims in the ledger first (`ending`), and delete what no lease
+    names. Returns the keys released, and the keys of the leases whose claims were found ended now."""
     held = await pool.held()  # (before the claims are read: a lease is acquired after its claim is made)
     over = await ended(held, ledger, presence)
-    released = await ending([lease.key for lease in held if over(lease)], ledger, presence)
-    return await pool.sweep(lambda lease: lease.key in released)
+    now = {lease.key for lease in held if over(lease)}
+    due = [lease.key for lease in held if lease.key in now and (lapsed is None or lease.key in lapsed)]
+    released = await ending(due, ledger, presence)
+    return await pool.sweep(lambda lease: lease.key in released), now
 
 
 async def keep(
@@ -159,12 +164,7 @@ async def keep(
             if (await ledger.fences()).get(mine.scope) != mine.number:
                 logger.error("another process keeps the pool %s now: this one no longer sweeps it", pool.name)
                 return
-            held = await pool.held()
-            over = await ended(held, ledger, presence)
-            now = {lease.key for lease in held if over(lease)}
-            released = await ending(now & lapsed, ledger, presence)
-            gone = await pool.sweep(lambda lease, released=released: lease.key in released)
-            lapsed = now
+            gone, lapsed = await sweep(pool, ledger, presence, lapsed=lapsed)
             if gone:
                 logger.info("released the leases of claims that ended: %s", ", ".join(gone))
         except Exception:

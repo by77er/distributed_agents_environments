@@ -43,7 +43,6 @@ export const subjectPlace = (kind: SubjectKind, id: string) => `/evals/${kind}/$
 export const environmentsPlace = "/environments";
 export const environmentPlace = (environment: string) => `/environment/${encodeURIComponent(environment)}`;
 export const statisticsPlace = (section?: string | null) => `/statistics${section ? `/${section}` : ""}`;
-export const machinesPlace = "/machines";
 export const hostPlace = (host: string, role?: string | null) =>
   `/machines/${encodeURIComponent(host)}${role ? `/${encodeURIComponent(role)}` : ""}`;
 

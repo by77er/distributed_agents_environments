@@ -519,7 +519,7 @@ async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path:
     async with playing(zombie):
         await until(lambda: leased("train/1/1/1/box"))
         beat_at(ledger.directory, "zombie", time.time() - STALE - 10)  # paused (GC, a partition): no beats
-        assert await sweep(pool, ledger, beats) == ["train/1/1/1/box"]  # the keeper: its claim lapsed
+        assert (await sweep(pool, ledger, beats))[0] == ["train/1/1/1/box"]  # the keeper: its claim lapsed
         async with playing(fresh):
             await until(lambda: leased("train/1/1/2/box"))  # the episode's next attempt
             gate("train/1/1/1/box").set()  # the zombie resumes

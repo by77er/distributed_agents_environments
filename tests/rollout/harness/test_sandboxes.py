@@ -8,7 +8,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
-from rollout.contracts import ModelAddress, ModelEndpoint, RunEventType
+from rollout.contracts import ModelAddress, RunEventType
 from rollout.harness import (
     DirectModel,
     LeaseRefused,
@@ -137,7 +137,7 @@ async def test_a_pool_over_http_is_the_same_pool() -> None:
 class Addressed(ScriptedModelEndpoint):
     """A scripted endpoint that also says where a harness reaches each session."""
 
-    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
+    def address(self, session_id: str) -> ModelAddress:
         return ModelAddress(base_url="http://models/v1", api_key=f"key-{session_id}", model="scripted")
 
 

@@ -1425,7 +1425,7 @@ Types that cross layers: canonical content, identifiers, digests, effects, event
 *function* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
 
 ```python
-def address_of(endpoint: ModelEndpoint, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress
+def address_of(endpoint: ModelEndpoint, session_id: str) -> ModelAddress
 ```
 
 `AddressableEndpoint.address` of an endpoint; raises if the endpoint has no address.
@@ -1442,8 +1442,7 @@ A model endpoint that also serves its slots over HTTP, to a harness that brings 
 
 **Methods**
 
-- `def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress` — Where such a harness reaches the session's slot. What it samples there goes `through` an endpoint
-  wrapping this one, if one is given (a runner's, which reports samples to its hooks).
+- `def address(self, session_id: str) -> ModelAddress` — Where such a harness reaches the session's slot.
 
 ### `arguments_digest`
 
@@ -2644,7 +2643,7 @@ Wraps a model endpoint and appends every sample's `effect_id` to a file: to coun
 
 - `def __init__(self, inner: ModelEndpoint, ledger: Path) -> None`
 - `def describe(self, session_id: str) -> CapabilityContract`
-- `def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress`
+- `def address(self, session_id: str) -> ModelAddress`
 - `async def sample(self, request: SampleRequest) -> SampleResult`
 - `async def cancel(self, effect_id: str) -> None`
 
@@ -3073,11 +3072,12 @@ The scope whose fence a pool's keeper holds while it sweeps (`pools/NAME`).
 *function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
 
 ```python
-async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None) -> list[str]
+async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None, *, lapsed: Collection[str] | None = None) -> tuple[list[str], set[str]]
 ```
 
-Release the pool's leases whose claims have ended, ending the claims in the ledger first (`ending`), and delete
-what no lease names; the keys released.
+Release the pool's leases whose claims have ended (given `lapsed`, only those whose claims were found ended the
+look before too: the keys it holds), ending the claims in the ledger first (`ending`), and delete what no lease
+names. Returns the keys released, and the keys of the leases whose claims were found ended now.
 
 ## `rollout_train`
 
@@ -3284,7 +3284,7 @@ refuses.
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def evaluate(checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, environments: Mapping[str, Environment] | None = None, binding: Callable[[Environment], RunBinding] | None = None, parts: Callable[[int], Awaitable[str]] | None = None, episodes: int | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = (), served_by: str | None = None) -> dict[str, Any]
+async def evaluate(checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, environments: Mapping[str, Environment] | None = None, binding: Callable[[Environment], RunBinding] | None = None, parts: Callable[[int], Awaitable[str]] | None = None, episodes: int | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
 ```
 
 Play `suite` (one version) with `subject` (a checkpoint's id; None: the base model, named `base`) served on
@@ -3301,9 +3301,7 @@ checkpoint's weights, as `rollout eval` sees to); None: the channel serves `subj
 newest checkpoint). `reshard` gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds
 its files on this machine. What the eval's channel serves is written down for each of its runs
 (`rollout_train.serving`), so that runners anywhere play it on replicas that serve `subject` and no other
-checkpoint; `served_by` names the channel whose replicas serve it (`RUN/NAME`: the training run's, for an eval its
-schedule asks for), where it is not the eval's own. Raises `KeyError` for an entry's environment that does not load
-here.
+checkpoint. Raises `KeyError` for an entry's environment that does not load here.
 
 ### `Fence`
 
@@ -3610,7 +3608,6 @@ That a run's channel serves a checkpoint from now on (or, with no checkpoint, th
 | `over` | `str \| None` | `None` | For an adapter over a full checkpoint, that checkpoint, by id: the engines hold its weights first. |
 | `model` | `str \| None` | `None` | The model the channel's line began from, by name. |
 | `sequence` | `int \| None` | `None` | The longest turn the trainer can train on (`Limits.sequence`), for every runner that samples the channel. |
-| `served_by` | `str \| None` | `None` | The channel whose engines serve this (`RUN/NAME`), where it is another run's: an eval played on the channel of the training run whose checkpoint it plays. None: the channel's own. |
 | `max_lag` | `int \| None` | `None` | How many checkpoints behind this a sample may be, where the run says (0 for an eval, which plays one checkpoint); None: as the runner's channel says. |
 | `at` | `float` | `field(default_factory=lambda: round(time.time(), 1))` |  |
 
@@ -4402,8 +4399,8 @@ Implements `AddressableEndpoint` for one recorded binding, through the gateway.
 
 - `def __init__(self, endpoints: GatewayEndpoints, binding: RecordedModel) -> None`
 - `def describe(self, session_id: str) -> CapabilityContract`
-- `def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress` — The gateway, and a key for the session. What a harness samples there is recorded by the gateway, so it does
-  not go `through` the runner's endpoint (a gateway in this process tells the runner's hooks of it).
+- `def address(self, session_id: str) -> ModelAddress` — The gateway, and a key for the session. What a harness samples there is recorded by the gateway (a gateway
+  in this process tells the runner's hooks of it).
 - `async def cancel(self, effect_id: str) -> None` — Nothing to do: a turn whose sampling is cancelled in this process is not recorded, and a gateway elsewhere
   records the turn whether or not it is awaited.
 - `async def sample(self, request: SampleRequest) -> SampleResult`

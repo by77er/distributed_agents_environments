@@ -24,7 +24,6 @@ from rollout.contracts import (
     CapabilityContract,
     ContextOverflow,
     ModelAddress,
-    ModelEndpoint,
     ModelEndpointError,
     SampleRequest,
     SampleResult,
@@ -234,9 +233,9 @@ class GatewayEndpoint:
     def describe(self, session_id: str) -> CapabilityContract:
         return self._endpoints.contract(session_id, self._binding)
 
-    def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress:
-        """The gateway, and a key for the session. What a harness samples there is recorded by the gateway, so it does
-        not go `through` the runner's endpoint (a gateway in this process tells the runner's hooks of it)."""
+    def address(self, session_id: str) -> ModelAddress:
+        """The gateway, and a key for the session. What a harness samples there is recorded by the gateway (a gateway
+        in this process tells the runner's hooks of it)."""
         endpoints = self._endpoints
         if endpoints.url is None:
             raise RuntimeError("the gateway is not served over HTTP: a harness cannot be given an address")

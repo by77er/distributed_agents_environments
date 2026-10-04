@@ -96,7 +96,7 @@ from rollout_train.record import (
 from rollout_train.resharding import RESHARDED
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
-from rollout_train.serving import Serving, qualified, record_serving
+from rollout_train.serving import Serving, record_serving
 from rollout_train.settings import (
     EVALS_EPISODES,
     EVALS_EVERY,
@@ -327,7 +327,7 @@ async def train(
             directory=directory, publish=None, environments=schedule.environments, binding=schedule.binding,
             parts=part, episodes=schedule.episodes,
             started={"from": None, "by": run, "step": step},  # (whether its files are kept is the run's retention's)
-            asked_by="by its run's schedule", hooks=hooks, served_by=qualified(run, channel),
+            asked_by="by its run's schedule", hooks=hooks,
         )  # fmt: skip
         summary: dict[str, JsonValue] = {"played": said["played"], "solved": said["solved"], "reward": said["reward"]}
         record: dict[str, JsonValue] = {"suite": schedule.suite.name, "version": schedule.suite.id}
