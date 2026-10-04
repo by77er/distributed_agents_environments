@@ -36,6 +36,7 @@ from rollout_train import (
 )
 from rollout_train import loop as loop_module
 from rollout_train.checkpoints import Retention
+from rollout_train.ledger import Fenced
 from rollout_train.record import GROUPS, STARTS, STEPS, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, Hooks, Record, episodes_of, loaded, playing
@@ -418,3 +419,40 @@ async def test_a_run_draws_no_eval_start_follows_its_environments_curriculum_and
     assert {group["parameters"]["seed"] for group in groups.values()} <= {2, 3}
     (start,) = (await checkpoints.ledger.read(table("train", STARTS))).values()
     assert start["version"] == "1" and start["description"] == Words.description.to_json()  # type: ignore[index]
+
+
+async def test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes_and_bookmarks_nothing(
+    tmp_path: Path,
+) -> None:
+    recorder = answering()
+    checkpoints = checkpoints_in(tmp_path)
+    directory = tmp_path / "v"
+    written: list[Path] = []
+
+    class Noting(Counting):
+        async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+            written.append(into)
+            return await super().step(batch, seed=seed, parent=parent, into=into)
+
+    trainer = Noting()
+
+    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+        await asyncio.to_thread((directory / "theirs").mkdir)  # what the loop that replaces it keeps there
+        await checkpoints.ledger.take("runs/train")  # another loop takes the run while this one serves
+        return 1
+
+    bookmarked: list[Checkpoint] = []
+
+    async def made(checkpoint: Checkpoint) -> None:
+        bookmarked.append(checkpoint)
+
+    async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+        with pytest.raises(Fenced):
+            await train(
+                Words(), trainer, checkpoints, channel="policy", directory=directory, publish=publish, groups=2,
+                groups_per_step=2, made=made,
+            )  # fmt: skip
+    (checkpoint,) = await made_by(checkpoints)
+    assert written == [directory / "making" / "1" / checkpoint.id]  # the trainer wrote where only this loop does
+    assert (directory / checkpoint.id / WEIGHTS / "adapter.bin").exists()  # (then the checkpoint's own)
+    assert (directory / "theirs").exists() and bookmarked == []  # replaced, it deleted and moved nothing

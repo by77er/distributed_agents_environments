@@ -83,15 +83,30 @@ class FileBlobStore:
 
     async def link(self, reference: BlobReference, target: Path) -> bool:
         """Put the blob at `target`: a hard link to it where `target` is on the store's filesystem, else a copy.
-        Returns False, putting nothing, if the store does not have it."""
+        Returns False, putting nothing, if the store does not have it. Raises if the blob is not the one `reference`
+        names: its size is checked, and its hash too where it is small (`CHECKED`)."""
         source = self._path(reference.sha256)
         if not await asyncio.to_thread(source.exists):
             return False
+        await asyncio.to_thread(_checked, source, reference)
         await asyncio.to_thread(_linked_once, source, target)
         return True
 
     def _path(self, digest: str) -> Path:
         return self.directory / digest[:2] / digest
+
+
+CHECKED = 64 * 2**20
+"""Bytes up to which a blob linked out of a store of files has its hash checked (a larger one, its size only)."""
+
+
+def _checked(path: Path, reference: BlobReference) -> None:
+    """Raise if the file at `path` is not the blob `reference` names, as far as can be told cheaply. A blob linked in
+    from a working file is that file, read-only: a process that made it writable again (or wrote as root) could change
+    it in place."""
+    size = path.stat().st_size
+    if size != reference.size or (size <= CHECKED and _file_digest(path)[0] != reference.sha256):
+        raise ValueError(f"blob {reference.sha256} is corrupt")
 
 
 def _file_digest(path: Path) -> tuple[str, int]:

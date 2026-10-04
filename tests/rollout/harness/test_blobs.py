@@ -107,3 +107,19 @@ async def test_a_file_kept_by_linking_is_a_blob_put_now_and_outlives_the_blob(tm
     assert not there(kept) and held(made) == b"written long ago"  # (the working file is its own link)
     assert await store.put_file(made, "application/octet-stream") == reference  # and is kept again from it
     assert await store.read(reference) == b"written long ago"
+
+
+async def test_a_blob_changed_in_place_is_not_put_in_place(tmp_path: Path) -> None:
+    store = FileBlobStore(tmp_path / "blobs")
+    made = tmp_path / "made" / "adapter.bin"
+    made.parent.mkdir()
+    made.write_bytes(b"weights")
+    reference = await store.put_file(made, "application/octet-stream")
+    made.chmod(0o644)  # a trainer that made its working file writable again, and wrote it in place
+    made.write_bytes(b"WEIGHTS")
+    with pytest.raises(ValueError, match="corrupt"):  # (the same size: its hash tells)
+        await store.link(reference, tmp_path / "fetched" / "adapter.bin")
+    made.write_bytes(b"more weights")
+    with pytest.raises(ValueError, match="corrupt"):
+        await store.link(reference, tmp_path / "fetched" / "adapter.bin")
+    assert not (tmp_path / "fetched" / "adapter.bin").exists()

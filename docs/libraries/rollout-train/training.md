@@ -102,7 +102,12 @@ nothing, or the step that covers it has made its checkpoint or failed.
   the weights and trainer state of the newest two and of every twentieth by depth). Whatever is served, whatever any
   run starts from, and whatever `kept` says (the bookmarked checkpoints) keep theirs ([checkpoints](checkpoints.md#checkpoints)).
 - **One loop at a time.** Starting takes the run's fence, which its checkpoints are appended under too. A loop that was
-  replaced, and does not know it yet, has its next write refused.
+  replaced, and does not know it yet, has its next write refused. What it does outside the ledger it does only while
+  its fence is the newest: it looks before it publishes a checkpoint, before it deletes files in the run's directory,
+  and before it moves a bookmark (`made`), and stops (`Fenced`) once another loop took the run. Its trainer writes a
+  step's files into `DIRECTORY/making/FENCE/MAKES`, a directory of the loop's own, renamed to `DIRECTORY/MAKES` once
+  the checkpoint is appended: a loop replaced while its trainer ran never writes where its replacement does. A look
+  and the action after it are two steps, so a loop replaced between them still acts once.
 - **`groups` is how many groups this start plays**, those a stopped loop left unplayed among them; the loop ends
   once they are played and every one with something to train on has been in a step.
 

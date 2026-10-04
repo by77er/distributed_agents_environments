@@ -26,7 +26,11 @@ taken twice.
 | after the step | finds the checkpoint, serves it, and goes on |
 
 Taking the run's fence when it starts shuts out a loop it replaced: that one's next write is refused. The checkpoints it
-makes are appended under that fence.
+makes are appended under that fence. What it does outside the ledger, it does only while its fence is the newest: it
+looks before it publishes a checkpoint, before it deletes files in the run's directory, and before it moves a bookmark
+(`made`). Its trainer writes a step's files into a directory of the loop's own (`making/FENCE/MAKES`), renamed to the
+checkpoint's (`MAKES`) once the checkpoint is added, so a loop that was replaced while its trainer ran never writes
+where its replacement does.
 
 **What its channel serves is written down** (`rollout_train.serving`): each time it serves a checkpoint, it appends that
 the channel serves it from now on (the base model until the first), and then publishes it to the engines in its own
@@ -46,6 +50,7 @@ again after a stop uses those. Whether a checkpoint is evaluated is the evals it
 
 import asyncio
 import json
+import os
 import random
 import shutil
 import socket
@@ -65,7 +70,7 @@ from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.evals import Schedule, evaluate
 from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
-from rollout_train.ledger import Fence
+from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.record import (
     EVALS,
     FAILURES,
@@ -224,10 +229,12 @@ async def train(
             loaded = await checkpoints.files(manifest, directory / checkpoint.id / "resharded")
         else:
             loaded = (await files(checkpoint)).weights
+        await newest(ledger, fence)
         served_as = await publish(channel, checkpoint.id, str(loaded), checkpoint.depth, full=checkpoint.kind == "full")
         note("published", {"channel": channel, "adapter": checkpoint.id, "version": served_as})
         served = checkpoint
         keep = {checkpoint.id, checkpoint.parent}
+        await newest(ledger, fence)  # (a loop that was replaced deletes nothing of its replacement's)
         for old in await asyncio.to_thread(lambda: [each for each in directory.iterdir() if each.name not in keep]):
             await asyncio.to_thread(shutil.rmtree, old, ignore_errors=True)
 
@@ -416,8 +423,9 @@ async def train(
             parent = await checkpoints.checkpoint(parent_id) if parent_id else None
             # An adapter's first step over full weights begins a new adapter: the model it trains over is those weights.
             begin = await files(parent) if parent is not None and parent.kind == trainer.weights else None
-            into = directory / makes
+            into = directory / "making" / str(fence.number) / makes  # (its own: one it replaced may write its own)
             await asyncio.to_thread(shutil.rmtree, into, ignore_errors=True)  # (what a step that died left)
+            await asyncio.to_thread(into.parent.mkdir, parents=True, exist_ok=True)
             if isinstance(used := intent.get("settings"), dict):  # (the settings it was decided with, taken again too)
                 trained_with(_trainers(used))
             try:
@@ -448,9 +456,14 @@ async def train(
                 batch=BlobReference.model_validate(intent["batch"]),
                 metrics=step.metrics,
             )
+            # The checkpoint is this loop's (another's add under an older fence is refused since this one took its
+            # fence, and it was not there when the step began): its files are where the checkpoint's are looked for.
+            await newest(ledger, fence)
+            await asyncio.to_thread(_moved, into, directory / makes)
         failed_updates = 0
         await serve(checkpoint)
         if made is not None:
+            await newest(ledger, fence)  # (a loop that was replaced does not move a bookmark back)
             await made(checkpoint)
         await checkpoints.thin(fence, run, retention, await keeping())
         metrics: dict[str, JsonValue] = {name: round(value, 5) for name, value in checkpoint.metrics.items()}
@@ -510,6 +523,18 @@ async def _over(checkpoints: Checkpoints, checkpoint: Checkpoint) -> str | None:
     except ValueError:  # (released: whatever serves the adapter holds its weights already, or cannot)
         return checkpoint.base
     return under.id if under is not None else None
+
+
+async def newest(ledger: Ledger, fence: Fence) -> None:
+    """Raise `Fenced` unless `fence` is still its scope's newest: before a side effect outside the ledger."""
+    if (await ledger.fences()).get(fence.scope) != fence.number:
+        raise Fenced(f"{fence.scope} has a newer writer than fence {fence.number}")
+
+
+def _moved(source: Path, target: Path) -> None:
+    """Put the directory `source` at `target`, replacing what is there."""
+    shutil.rmtree(target, ignore_errors=True)
+    os.replace(source, target)
 
 
 async def _made(checkpoints: Checkpoints, step: dict[str, JsonValue]) -> bool:
