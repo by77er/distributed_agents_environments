@@ -24,20 +24,16 @@ export function Runs() {
   const states = (["running", "idle", "ended"] as const).map(name => [name, runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
   return (
     <>
-      <Head title={<span className="head-with-action">Runs<Link to={launchPlace} className="action">New run</Link></span>} sub="The runs in the ledger, running ones first. A run opens its steps, groups, episodes and rollouts.">
-        <Specs>
-          <Spec label="ledger">{system.ledger_at}</Spec>
-          {states.map(([name, count]) => <Spec key={name} label={name} kind={name === "running" ? "good" : name === "idle" ? "warm" : ""}>{count}</Spec>)}
-          <Spec label="this host">{system.host}</Spec>
-        </Specs>
+      <Head title={<span className="head-with-action">Runs<Link to={launchPlace} className="action">New run</Link></span>}>
+        {states.length ? (
+          <Specs>
+            {states.map(([name, count]) => <Spec key={name} label={name} kind={name === "running" ? "good" : name === "idle" ? "warm" : ""}>{count}</Spec>)}
+          </Specs>
+        ) : null}
       </Head>
       {launches.length ? <LaunchList launches={launches} system={system} /> : null}
-      {runs.length ? <div className="tiles wide-tiles">{runs.map(run => <RunTile key={run.run} run={run} host={system.host} />)}</div> : <Empty>The ledger has no run yet.</Empty>}
-      {others.length ? (
-        <Card title="Episodes outside a run" note={`${others.length} in the feeds`}>
-          <p className="muted small" style={{ margin: 0 }}><Link to="/episodes" className="linkish">Tests and programs run by hand</Link> that no training run asked for.</p>
-        </Card>
-      ) : null}
+      {runs.length ? <div className="tiles wide-tiles">{runs.map(run => <RunTile key={run.run} run={run} host={system.host} />)}</div> : <Empty>No run yet.</Empty>}
+      {others.length ? <Card title={<Link to="/episodes" className="linkish">Episodes outside a run</Link>} note={String(others.length)} /> : null}
     </>
   );
 }
@@ -61,7 +57,7 @@ const RunTile = memo(function RunTile({ run, host }: { run: Run; host: string })
       {run.done.length > 1 ? (
         <div>
           <Spark values={run.done.map(line => mean(line.rewards) ?? 0)} kind="s-accent" width={420} height={40} fill />
-          <div className="small muted">each group's mean reward, in order</div>
+          <div className="small muted">mean reward by group</div>
         </div>
       ) : null}
       <div className="facts">
@@ -78,7 +74,7 @@ export function Outside() {
   const others = (feeds ?? []).filter(run => !run.labels.run);
   return (
     <>
-      <Head title="Episodes outside a run" sub="Episodes in the feed that no training run asked for: evaluations, tests, programs run by hand." />
+      <Head title="Episodes outside a run" />
       {others.length ? (
         <div className="tiles">
           {others.map(run => (

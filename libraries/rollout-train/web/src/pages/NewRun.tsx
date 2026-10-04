@@ -38,7 +38,7 @@ export function NewRun() {
   const launchers = launched.launchers;
   return (
     <>
-      <Head title="New run" sub="A launcher alive on a training machine starts it, under one of the profiles it offers, with the settings you change." />
+      <Head title="New run" />
       {launchers.length ? <Form launchers={launchers} /> : <NoLauncher ledger={system.ledger_at} />}
     </>
   );
@@ -47,8 +47,7 @@ export function NewRun() {
 export function NoLauncher({ ledger }: { ledger: string }) {
   const command = `rollout launcher --ledger ${ledger.includes("://") ? ledger : `${ledger}`} --profiles DIR --catalog module:name --runs DIR`;
   return (
-    <Card title="No launcher is alive" note="a launcher beats every 15 s; one that has not for 90 s is taken to be gone">
-      <p className="muted" style={{ marginTop: 0 }}>Start one on a training machine: it offers every profile under <span className="mono">--profiles</span> that names a trainer, and makes each run's directory under <span className="mono">--runs</span>.</p>
+    <Card title="No launcher is alive">
       <pre className="command">{command}</pre>
     </Card>
   );
@@ -125,12 +124,11 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   return (
     <form className="launch-form" onSubmit={submit}>
       <div className="cols">
-        <Card title="The run" note="what it is called, what it trains on, where it starts">
+        <Card title="The run">
           <div className="fields">
             <label className="field">
               <span>Name</span>
               <input value={name} onChange={event => setName(event.target.value)} placeholder="a name for the run" required spellCheck={false} />
-              <small>shown everywhere; it can be changed later</small>
             </label>
             <label className="field">
               <span>Profile</span>
@@ -178,7 +176,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
                   </optgroup>
                 ) : null}
               </select>
-              <small>{full ? "its trainer trains every weight: it starts from full weights, so an adapter is merged first (rollout merge)" : "a checkpoint whose weights were deleted cannot be started from"}</small>
+              {full ? <small>its trainer trains every weight: an adapter is merged first (rollout merge)</small> : null}
             </label>
             <label className="field">
               <span>Carries a bookmark</span>
@@ -191,7 +189,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             </div>
           </div>
         </Card>
-        <Card title="Settings" note={`the profile's values; ${count ? `${count} changed` : "none changed"}`}>
+        <Card title="Settings" note={count ? `${count} changed` : ""}>
           <div className="settings-grid">
             {settingKeys.map(key => {
               const value = edits[key] ?? shown(defaults[key]);
@@ -206,7 +204,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             })}
             {settingKeys.length ? null : <p className="muted small">This profile offers no settings.</p>}
           </div>
-          <SectionTitle title="More trainer settings" note="any key its trainer takes" />
+          <SectionTitle title="More trainer settings" />
           <div className="settings-grid">
             {rows.map((row, index) => (
               <div key={index} className="setting extra">
@@ -217,7 +215,6 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             ))}
             <button type="button" className="linkish" onClick={() => setRows([...rows, { key: "trainer.", value: "" }])}>+ add a setting</button>
           </div>
-          <p className="small faint" style={{ marginBottom: 0 }}>Values are read as numbers, true/false, or JSON where they look like them; anything else is text.</p>
         </Card>
       </div>
       <div className="launch-submit">

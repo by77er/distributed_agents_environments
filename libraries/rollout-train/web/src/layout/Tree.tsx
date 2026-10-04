@@ -55,7 +55,6 @@ function RunsTree({ place, system }: { place: Place; system: System }) {
       {runs.map(run => (
         <RunBranch key={run.run} run={run} only={runs.length === 1} place={place} folds={folds} fold={fold} showing={showing} host={system.host} />
       ))}
-      <div className="label">Outside a run</div>
       <Node to="/episodes" current={place.kind === "outside"}>
         <span className="name">Episodes outside a run</span>
         <span className="tag">{others}</span>

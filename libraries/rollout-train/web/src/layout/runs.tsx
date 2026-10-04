@@ -46,7 +46,7 @@ export function Elsewhere({ run }: { run: Run }) {
     return (
       <div className="tile rail accent notice">
         <header><b>Episodes from the monitor on its machine</b><span className="what">{run.host ?? ""}</span></header>
-        <p className="muted small">Its directory is not on this machine: its groups in flight, its episodes and its engines are asked of {address}; the rest is the ledger's.</p>
+        <p className="muted small">Asked of {address}.</p>
       </div>
     );
   }
@@ -54,8 +54,8 @@ export function Elsewhere({ run }: { run: Run }) {
     <div className="tile rail warm notice">
       <header><b>Read from the ledger alone</b><span className="what">{run.directory ?? ""}</span></header>
       <p className="muted small">
-        {there ? <>Its directory is not on this machine, and the monitor on its machine ({address}) does not answer: its episodes are there.</>
-          : `Its directory is not on this machine${run.host ? ` (it was started on ${run.host})` : ""}, and its start names no monitor to ask: its episodes are not shown.`}
+        {there ? <>The monitor on its machine ({address}) does not answer.</>
+          : `Its directory is not on this machine${run.host ? ` (${run.host})` : ""}, and its start names no monitor.`}
       </p>
     </div>
   );

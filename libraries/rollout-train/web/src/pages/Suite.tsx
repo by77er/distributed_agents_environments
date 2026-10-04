@@ -29,7 +29,7 @@ export function Suite({ name }: { name: string }) {
   const seeds = [...new Set(suite.starts.map(start => String(start.seed)))];
   return (
     <>
-      <Head title={suite.suite} sub={<>{suite.starts.length} starts of {suite.catalog ?? "its catalog"}: {rows.length} rows, each with {seeds.length} seed{seeds.length === 1 ? "" : "s"}. It is never changed, so every subject plays the same starts.</>}>
+      <Head title={suite.suite}>
         <Specs>
           <Spec label="catalog">{suite.catalog ?? "–"}</Spec>
           <Spec label="rows">{rows.join(", ")}</Spec>
@@ -39,14 +39,14 @@ export function Suite({ name }: { name: string }) {
       </Head>
       <Kpis>
         <Kpi label="Starts" value={String(suite.starts.length)} />
-        <Kpi label="Played by" value={String(subjects.length)} note="checkpoints and base models" />
-        <Kpi label="Best" value={subjects[0] ? (said ? shareText(shareOf(subjects[0])) : figure(subjects[0].reward)) : "–"} note={subjects[0] ? <SubjectLabel subject={subjects[0]} /> : "none yet"} />
+        <Kpi label="Played by" value={String(subjects.length)} />
+        <Kpi label="Best" value={subjects[0] ? (said ? shareText(shareOf(subjects[0])) : figure(subjects[0].reward)) : "–"} note={subjects[0] ? <SubjectLabel subject={subjects[0]} /> : ""} />
         <Kpi label="Playing" value={String(playing.length)} note={playing.map(each => each.name).join(", ")} />
       </Kpis>
       {launched ? (launched.launchers.length ? <RunSuite suite={suite} launchers={launched.launchers} system={system} /> : <NoLauncher ledger={system.ledger_at} />) : null}
       {launches.length ? <LaunchList launches={launches} system={system} /> : null}
       {playing.length ? (
-        <Card title="Playing now" note="each an eval: its run shows its groups and episodes">
+        <Card title="Playing now">
           <Table
             heads={[["eval"], ["played by"], ["played", "n"], ["started"]]}
             keys={playing.map(each => each.run)}
@@ -55,8 +55,8 @@ export function Suite({ name }: { name: string }) {
           />
         </Card>
       ) : null}
-      <Card title="Start by start" note="each subject's episodes at each start, best in all first">
-        {subjects.length ? <SuiteMatrix suite={suite} subjects={subjects} /> : <p className="muted">No subject has played it yet.</p>}
+      <Card title="Start by start">
+        {subjects.length ? <SuiteMatrix suite={suite} subjects={subjects} /> : <p className="muted">None played yet.</p>}
       </Card>
       {subjects.length > 1 && said ? <Compare suite={suite} subjects={subjects} /> : null}
     </>
@@ -83,7 +83,7 @@ function Compare({ suite, subjects }: { suite: EvalSuite; subjects: Subject[] })
     <option key={subject.subject} value={subject.subject}>{subjectText(subject, known)}{subject.kind === "model" ? "" : ` · ${known.origin(subject.checkpoint)}`} · {shareText(shareOf(subject))}</option>
   );
   return (
-    <Card title="Compared" note="two subjects at the starts both played">
+    <Card title="Compared">
       <div className="field-row">
         <label className="field"><span>This</span><select value={a.subject} onChange={event => setFirst(event.target.value)}>{subjects.map(option)}</select></label>
         <label className="field"><span>against</span><select value={b.subject} onChange={event => setSecond(event.target.value)}>{subjects.map(option)}</select></label>
@@ -155,7 +155,7 @@ function RunSuite({ suite, launchers, system }: { suite: EvalSuite; launchers: L
   }
   return (
     <form onSubmit={submit}>
-      <Card title="Run this suite" note="a launcher plays every start with the checkpoint, and trains on nothing">
+      <Card title="Run this suite">
         <div className="fields">
           <div className="field-row">
             <label className="field">
@@ -177,7 +177,6 @@ function RunSuite({ suite, launchers, system }: { suite: EvalSuite; launchers: L
                   </optgroup>
                 ) : null}
               </select>
-              <small>a bookmark is read when the eval starts; a released checkpoint cannot play</small>
             </label>
             <label className="field">
               <span>Episodes a start</span>
@@ -191,18 +190,16 @@ function RunSuite({ suite, launchers, system }: { suite: EvalSuite; launchers: L
               <select value={chosen?.profile ?? ""} onChange={event => setProfile(event.target.value)}>
                 {offered.map(each => <option key={each.profile} value={each.profile}>{each.profile} · {each.model}</option>)}
               </select>
-              <small>its engines serve the checkpoint</small>
             </label>
             <label className="field">
               <span>Name</span>
               <input value={name} onChange={event => setName(event.target.value)} placeholder={named} spellCheck={false} />
-              <small>the eval's run is called this</small>
             </label>
           </div>
         </div>
         <div className="launch-submit">
           <button type="submit" disabled={launch.isPending || !chosen || Number(episodes) < 1}>{launch.isPending ? "asking…" : "Run this suite"}</button>
-          {launch.isError ? <span className="error-text">{launch.error.message}</span> : asked ? <span className="small muted">asked for {asked}: a launcher starts it</span> : null}
+          {launch.isError ? <span className="error-text">{launch.error.message}</span> : asked ? <span className="small muted">asked for {asked}</span> : null}
         </div>
       </Card>
     </form>

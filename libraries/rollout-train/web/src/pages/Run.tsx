@@ -26,7 +26,7 @@ export function Run({ name }: { name: string }) {
       <Elsewhere run={run} />
       <RunFigures run={run} made={made} />
       <InFlight run={run} />
-      <Card title="Rewards by group" note="each dot an episode; rewards are each task's own">
+      <Card title="Rewards by group">
         {run.done.length ? (
           <>
             <Sized>{width => <RewardsChart run={run} width={width} />}</Sized>
@@ -37,7 +37,7 @@ export function Run({ name }: { name: string }) {
               { name: "waits for a step", color: "var(--warm)" }, { name: "skipped", className: "hollow" }, { name: "no episode, or the step failed", color: "var(--bad)" },
             ]} />
           </>
-        ) : <Empty>No group is done with yet.</Empty>}
+        ) : <Empty>No group done yet.</Empty>}
       </Card>
       <div className="cols">
         <StepsCard run={run} />
@@ -87,16 +87,15 @@ const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made:
   return (
     <Kpis>
       <Kpi label="Started from" value={from ? known.short(from) : "base"} note={from ? known.origin(from) : <BaseName base={made[0]?.base} short />} />
-      <Kpi label="Now" value={newest ? newest.short : "–"} note={newest ? `depth ${newest.depth} · ${made.filter(each => each.weights).length} of ${made.length} kept` : "no step committed"} />
+      <Kpi label="Now" value={newest ? newest.short : "–"} note={newest ? `depth ${newest.depth} · ${made.filter(each => each.weights).length} of ${made.length} kept` : ""} />
       <Kpi label="Steps" value={`${run.steps.length}`} note={`${committed} committed · ${run.next.length} waiting`} />
       <Kpi label="Groups done" value={`${run.done.length}`} note={`${trained} trained on, of ${run.decided} decided`} />
       {said ? <Kpi label="Groups solved" value={`${all} · ${run.done.length - all - none} · ${none}`} note="all · some · none solved" /> : null}
       <Kpi label="Episodes" value={`${outcomes.length}`} note={said ? `${outcomes.filter(Boolean).length} solved · ${shareOf(outcomes)}` : ""} />
-      {said ? <Kpi label="Solved, early → late" value={run.done.length > 1 ? `${shareOf(solvedOf(run.done.slice(0, half)))} → ${shareOf(solvedOf(run.done.slice(half)))}` : "–"}
-        note={run.done.length > 1 ? `groups 1–${half}, then the ${run.done.length - half} after` : ""} /> : null}
-      <Kpi label="Mean reward" value={figure(mean(run.done.flatMap(line => line.rewards)))} note="over every episode done" />
-      <Kpi label="Rows unlocked" value={last ? `${last.unlocked}` : "–"} note="of the catalog" />
-      <Kpi label="Inference" value={measured.length ? `${figure(sum("tokens_per_second"))} tok/s` : "–"} note={measured.length ? `${figure(sum("mean_concurrency"))} requests at once` : "no measurement yet"} />
+      {said ? <Kpi label="Solved, early → late" value={run.done.length > 1 ? `${shareOf(solvedOf(run.done.slice(0, half)))} → ${shareOf(solvedOf(run.done.slice(half)))}` : "–"} /> : null}
+      <Kpi label="Mean reward" value={figure(mean(run.done.flatMap(line => line.rewards)))} />
+      <Kpi label="Rows unlocked" value={last ? `${last.unlocked}` : "–"} />
+      <Kpi label="Inference" value={measured.length ? `${figure(sum("tokens_per_second"))} tok/s` : "–"} note={measured.length ? `${figure(sum("mean_concurrency"))} requests at once` : ""} />
     </Kpis>
   );
 });
@@ -124,13 +123,13 @@ const InFlight = memo(function InFlight({ run }: { run: RunData }) {
           {stepping.map(step => <SteppingTile key={`s${step.step}`} run={run} step={step} groups={groups} />)}
           {waiting.length ? (
             <div className="tile rail warm">
-              <header><b>Toward the next step</b><span className="what">{waiting.length} recorded, waiting for a step</span></header>
+              <header><b>Toward the next step</b><span className="what">{waiting.length} recorded</span></header>
               <div className="members">{waiting.map(number => <Member key={number} run={run} number={number} groups={groups} />)}</div>
             </div>
           ) : null}
           {run.open.map(group => <OpenTile key={group.number} run={run.run} group={group} />)}
         </div>
-      ) : <Empty>Nothing is in flight.</Empty>}
+      ) : <Empty>Nothing in flight.</Empty>}
     </>
   );
 });
@@ -159,7 +158,7 @@ const StepsCard = memo(function StepsCard({ run }: { run: RunData }) {
   const known = useKnown();
   const recent = [...run.steps].reverse().slice(0, 10), groups = groupsOf(run);
   return (
-    <Card title="Steps" note="newest first">
+    <Card title="Steps">
       <Table
         heads={[["step"], ["made"], ["groups"], ["solved"], ["segments", "n"], ["moved", "n"], ["took", "n"]]}
         keys={recent.map(step => step.step)}

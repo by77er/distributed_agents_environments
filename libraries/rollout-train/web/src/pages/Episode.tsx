@@ -47,7 +47,7 @@ const Reported = memo(function Reported({ info }: { info: Record<string, unknown
   const nested = Object.entries(info).filter(([, value]) => value !== null && typeof value === "object") as [string, Record<string, unknown> | unknown[]][];
   const shown = (each: unknown) => (typeof each === "object" ? JSON.stringify(each) : figure(each));
   return (
-    <Card title="What the episode reported" note="the program's result">
+    <Card title="What the episode reported">
       <div className="cols" style={{ gap: 16 }}>
         <dl className="pairs">{scalars.map(([key, value]) => [<dt key={`k${key}`}>{key.replaceAll("_", " ")}</dt>, <dd key={`v${key}`}>{figure(value)}</dd>])}</dl>
         <div style={{ display: "grid", gap: 12 }}>
@@ -104,7 +104,7 @@ function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string
   const [whole, setWhole] = useStored("monitor.whole", false);
   const [full, setFull] = useState(false);
   if (!slots.size) {
-    return <Empty>{episode.source ? "No agent has taken a turn yet." : "Neither the feed nor the ledger has this episode's rollouts."}</Empty>;
+    return <Empty>{episode.source ? "No turn yet." : "Its rollouts are neither in the feed nor in the ledger."}</Empty>;
   }
   const slot = asked && slots.has(asked) ? asked : null;
   const shown: [string, SampleLine[]][] = slot ? [[slot, slots.get(slot)!]] : [...slots];
@@ -113,7 +113,7 @@ function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string
   const move = (delta: number) => { setTurn(Math.max(0, Math.min(turns - 1, turn + delta))); setFollow(false); };
   return (
     <>
-      <SectionTitle title="Rollouts" note={`${slots.size}, one per agent, each a trajectory to train on${folded ? ` · ${plural(folded, "sample")} offered no tools, folded under the turn before` : ""}`} />
+      <SectionTitle title="Rollouts" note={`${slots.size}${folded ? ` · ${plural(folded, "sample")} offered no tools` : ""}`} />
       <div className="segmented">
         <button type="button" className={`seg${slot ? "" : " current"}`} onClick={() => navigate(episodePlace(episode.run_id))}>All rollouts</button>
         {[...slots.keys()].map(each => (
@@ -203,7 +203,7 @@ const TurnCard = memo(function TurnCard({ slot, sample, next, beside, source, st
   return (
     <div className="turn">
       {header}
-      <section className="sees" ref={pre}><h3>Sees</h3>{sample.messages.length ? <Seen sample={sample} full={full} /> : <span className="none">kept only as tokens: the feed has let this episode go</span>}</section>
+      <section className="sees" ref={pre}><h3>Sees</h3>{sample.messages.length ? <Seen sample={sample} full={full} /> : <span className="none">kept only as tokens</span>}</section>
       <section className="thinks"><h3>Thinks</h3>{sample.reply.reasoning ? <p>{sample.reply.reasoning.trim()}</p> : <span className="none">nothing recorded</span>}</section>
       <section>
         <h3>Does</h3>
@@ -352,7 +352,7 @@ const Effects = memo(function Effects({ lines }: { lines: Line[] }) {
   ]);
   return (
     <details className="card" style={{ padding: "12px 18px" }}>
-      <summary>Tool calls the program made ({effects.length}; newest first)</summary>
+      <summary>Tool calls the program made ({effects.length})</summary>
       <div style={{ marginTop: 10 }}><Table heads={[["tool"], ["arguments"], ["returned"]]} rows={rows} /></div>
     </details>
   );

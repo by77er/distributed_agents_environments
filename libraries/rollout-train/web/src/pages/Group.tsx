@@ -38,12 +38,12 @@ export function StepView({ run: name, number }: { run: string; number: number })
       </Head>
       <Kpis>
         <Kpi label="Groups" value={`${step.groups.length}`} note={`${range(step.groups)}${step.skipped.length ? ` · ${step.skipped.length} gave nothing to train on` : ""}`} />
-        {reported(solved) ? <Kpi label="Solved" value={`${solved.filter(Boolean).length} of ${solved.length}`} note="episodes of its groups" /> : null}
-        <Kpi label="Segments" value={figure(step.segments)} note="trained on" />
-        <Kpi label="Moved" value={metrics?.kl_moved != null ? metrics.kl_moved.toFixed(4) : "–"} note="KL from its parent" />
-        <Kpi label="Took" value={metrics ? span(metrics.update_seconds ?? metrics.seconds) : step.state === "stepping" && step.decided ? <Ago at={step.decided} /> : "–"} note={step.state === "stepping" ? "so far" : ""} />
+        {reported(solved) ? <Kpi label="Solved" value={`${solved.filter(Boolean).length} of ${solved.length}`} /> : null}
+        <Kpi label="Segments" value={figure(step.segments)} />
+        <Kpi label="Moved" value={metrics?.kl_moved != null ? metrics.kl_moved.toFixed(4) : "–"} />
+        <Kpi label="Took" value={metrics ? span(metrics.update_seconds ?? metrics.seconds) : step.state === "stepping" && step.decided ? <Ago at={step.decided} /> : "–"} />
       </Kpis>
-      <SectionTitle title="Groups" note="what went into the step" />
+      <SectionTitle title="Groups" />
       <div className="tiles">
         {[...step.groups, ...step.skipped].map(each => {
           const group = groups.get(each), line = group?.line, skipped = step.skipped.includes(each);
@@ -61,7 +61,7 @@ export function StepView({ run: name, number }: { run: string; number: number })
         })}
       </div>
       <Card title="The update" note={checkpoint ? `${checkpoint.short}, from ${checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : known.base(checkpoint.base)}` : step.state === "failed" ? "the step failed" : "being taken"}>
-        {metrics ? <Pairs entries={updatePairs(metrics)} /> : step.error ? <p className="error-text">{step.error}</p> : <p className="muted">The trainer is working on it.</p>}
+        {metrics ? <Pairs entries={updatePairs(metrics)} /> : step.error ? <p className="error-text">{step.error}</p> : <p className="muted">Being taken.</p>}
       </Card>
     </>
   );
@@ -91,7 +91,7 @@ export function GroupView({ run: name, number }: { run: string; number: number }
       </Head>
       {run ? <Elsewhere run={{ ...run, episodes_at: group.episodes_at }} /> : null}
       <Kpis>
-        <Kpi label="Mean reward" value={rewards.length ? figure(mean(rewards)) : "–"} note={rewards.length ? rewards.map(figure).join("  ") : "no episode has ended"} />
+        <Kpi label="Mean reward" value={rewards.length ? figure(mean(rewards)) : "–"} note={rewards.map(figure).join("  ")} />
         {result ? reported(result.solved) ? <Kpi label="Solved" value={`${result.solved.filter(Boolean).length} of ${result.solved.length}`} note={result.failed ? `${result.failed} failed` : ""} />
           : result.failed ? <Kpi label="Failed" value={String(result.failed)} note={`of ${result.failed + result.rewards.length}`} /> : null
           : reported(group.episodes.map(each => each.solved)) ? <Kpi label="Solved" value={`${group.episodes.filter(each => each.solved).length} of ${group.count ?? "?"}`} /> : null}
@@ -108,7 +108,6 @@ export function GroupView({ run: name, number }: { run: string; number: number }
             <div key={`w${episode.episode}`} className="tile rail waiting">
               <header><b>Episode {episode.episode}</b><span className="what" /><Mark state="">not started</Mark></header>
               <div className="big"><span className="faint">–</span></div>
-              <div className="facts"><span>waits for room: at most so many episodes run at once</span></div>
             </div>
           ) : <EpisodeTile key={episode.run_id} episode={episode} />)}
         </div>
@@ -127,10 +126,10 @@ export function GroupView({ run: name, number }: { run: string; number: number }
               ["decided", group.step.decided ? <><Ago at={group.step.decided} /> ago</> : "–"],
             ]} />
           ) : result?.skipped ? <p className="muted">{result.skipped}</p>
-            : result ? <p className="muted">Recorded; it waits in the queue until enough groups are there for a step.</p>
-              : <p className="muted">The group is still being played.</p>}
+            : result ? <p className="muted">Waiting for a step.</p>
+              : <p className="muted">Playing.</p>}
         </Card>
-        <Card title="Start" note="what every episode of the group was given">
+        <Card title="Start">
           <Pairs entries={Object.entries(group.parameters ?? {}).map(([key, value]) => [key, figure(value)])} />
         </Card>
       </div>

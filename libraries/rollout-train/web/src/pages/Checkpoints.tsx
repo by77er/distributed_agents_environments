@@ -176,7 +176,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
         {laid.map(lane => {
           const toggle = () => fold(`lane:${lane.key}`, !lane.open);
           if (lane.outside) {
-            return <div key={lane.key} className="lane-label"><span /><b className="muted">Outside this ledger</b><small>{lane.outside.length} checkpoint{lane.outside.length === 1 ? "" : "s"} something here starts from</small></div>;
+            return <div key={lane.key} className="lane-label"><span /><b className="muted">Outside this ledger</b><small>{lane.outside.length} checkpoint{lane.outside.length === 1 ? "" : "s"}</small></div>;
           }
           if (lane.base) {
             return <div key={lane.key} className="lane-label base-label"><span /><b title={lane.base}>{short(lane.base)}</b><small>base model</small></div>;
@@ -325,13 +325,12 @@ function TrainerTile({ trainer, lineage, index }: { trainer: Trainer; lineage: L
       <header><b>{trainer.trainer}</b><span className="what">{trainer.weights === "full" ? "full weights" : trainer.weights === "lora" ? "LoRA" : "nothing made yet"}{trainer.base ? ` on ${index.checkpoints.has(trainer.base) ? index.shortOf(trainer.base) : short(trainer.base)}` : ""}</span>{trainer.sample ? <SampleChip /> : null}</header>
       <div className="facts">
         <span>{trainer.implicit ? "trains for " : trainer.weights === "full" ? "dedicated to " : "any adapter of its base: "}<b>{(trainer.runs ?? []).map(index.runOf).join(", ")}</b></span>
-        {trainer.colocated ? <span>shares the engines' accelerator: they sleep while it steps</span> : trainer.where ? <span>{trainer.where}</span> : null}
-        {trainer.implicit ? <span>not registered: the run's own, from its profile</span> : null}
+        {trainer.colocated ? <span>shares the engines' accelerator</span> : trainer.where ? <span>{trainer.where}</span> : null}
       </div>
       <div className="cells four">
         <div className={`cell ${taking.length ? "violet" : ""}`}><span>taking</span><b>{taking.length}</b><small className="mono">{taking[0] ? index.shortOf(taking[0].makes) : "idle"}</small></div>
-        <div className={`cell ${queued.length ? "warm" : "waiting"}`}><span>queued</span><b>{queued.length}</b><small>{queued.length ? `oldest ${ago(lineage, queued[0].queued)}` : "none"}</small></div>
-        <div className="cell"><span>waited</span><b>{waited.length && !trainer.implicit ? span(mean(waited)) : "–"}</b><small>{trainer.implicit ? "not recorded" : "mean, queued to taken"}</small></div>
+        <div className={`cell ${queued.length ? "warm" : "waiting"}`}><span>queued</span><b>{queued.length}</b><small>{queued.length ? `oldest ${ago(lineage, queued[0].queued)}` : ""}</small></div>
+        <div className="cell"><span>waited</span><b>{waited.length && !trainer.implicit ? span(mean(waited)) : "–"}</b><small>{trainer.implicit ? "" : "mean"}</small></div>
         <div className="cell good"><span>made</span><b>{trainer.queue.filter(entry => entry.state === "made").length}</b><small>checkpoints</small></div>
       </div>
       <div>
@@ -399,7 +398,7 @@ function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order:
   const said = anySolved(subjects);
   return (
     <section className="card">
-      <header><h2>Evaluation · {suite.sample ? suite.suite : <Link to={suitePlace(suite.suite)}>{suite.suite}</Link>}</h2><span>{suite.starts.length} fixed starts (row and seed), played by {subjects.length} subjects{suite.sample ? <> <SampleChip /></> : null}</span></header>
+      <header><h2>Evaluation · {suite.sample ? suite.suite : <Link to={suitePlace(suite.suite)}>{suite.suite}</Link>}</h2><span>{suite.starts.length} starts · {subjects.length} subjects{suite.sample ? <> <SampleChip /></> : null}</span></header>
       <div className="body">
         <div className="table">
           <table className="evals">
@@ -469,7 +468,7 @@ export function Checkpoints({ sample }: { sample: boolean }) {
   const waiting = lineage.routing.waiting ?? {}, totalWaiting = Object.values(waiting).reduce((sum, count) => sum + count, 0);
   return (
     <>
-      <Head title="Checkpoints" sub="Every checkpoint grows from a base model, along what it was trained from; each run makes a line of them, and a run that starts from another's checkpoint forks there. Below: what distillations do, what trains the checkpoints, what serves them, and how they play a fixed suite.">
+      <Head title="Checkpoints">
         <Specs>
           <Spec label="base models">{lineage.bases.length}</Spec>
           <Spec label="checkpoints">{lineage.checkpoints.length}</Spec>
@@ -488,43 +487,43 @@ export function Checkpoints({ sample }: { sample: boolean }) {
       {sample ? (
         <div className="tile rail warm notice">
           <header><b>Sample fixture</b><SampleChip /></header>
-          <p className="muted small">Everything marked sample comes from rollout_train/monitor/sample-lineage.json: the tables proposed in docs/research/policy-dag.md (a run's plan, trainers and their queues, resharding, inference workers and their loads, the router's waiting requests, evaluation suites). No run writes them yet. The rest is the ledger's, and the runs' feeds'.</p>
+          <p className="muted small">What is marked sample is from rollout_train/monitor/sample-lineage.json: tables no run writes yet.</p>
         </div>
       ) : null}
       <section className="card">
         <header>
           <h2>Lineage</h2>
-          <span>a lane per run under its base model, its checkpoints from the left; {opened ? `${opened} open` : "folded to the checkpoints something points at"} · <button type="button" className="linkish" onClick={() => all(true)}>open all</button> · <button type="button" className="linkish" onClick={() => all(false)}>fold all</button></span>
+          <span>{opened ? `${opened} open` : "folded"} · <button type="button" className="linkish" onClick={() => all(true)}>open all</button> · <button type="button" className="linkish" onClick={() => all(false)}>fold all</button></span>
         </header>
         {lineage.checkpoints.length || lineage.bases.length ? <Sized fallback={1100}>{width => <LineageGraph lineage={lineage} index={index} lanes={lanes} room={width} inLedger={inLedger} />}</Sized> : <Empty>The ledger has no checkpoint yet.</Empty>}
         <div className="legend dag-legend">
-          <span><i className="rule" style={{ background: "var(--quiet)" }} />trained from (a base model, or a checkpoint of another run: a fork)</span>
-          <span><i style={{ background: "var(--accent)" }} />trained by a run on its own groups</span>
-          <span><i style={{ background: "var(--warm)" }} />distilled off-policy: on its teachers' samples</span>
-          <span><i style={{ background: "var(--violet)" }} />distilled on-policy: it samples, its teachers score each token</span>
+          <span><i className="rule" style={{ background: "var(--quiet)" }} />trained from</span>
+          <span><i style={{ background: "var(--accent)" }} />trained on its own groups</span>
+          <span><i style={{ background: "var(--warm)" }} />distilled off-policy</span>
+          <span><i style={{ background: "var(--violet)" }} />distilled on-policy</span>
           <span><b className="t-accent">name</b> a bookmark</span>
-          <span><i className="hollow" />released (weights deleted)</span><span><i className="ring-good" />serving</span>
+          <span><i className="hollow" />released</span><span><i className="ring-good" />serving</span>
           <span><i className="ring-warm" />rolling out</span><span><i className="ring-violet" />resharding</span>
-          {lineage.evaluations.length ? <span><b className="t-good">9/16</b> solved of the suite played</span> : null}
+          {lineage.evaluations.length ? <span><b className="t-good">9/16</b> solved of a suite</span> : null}
         </div>
       </section>
       {lineage.runs.some(run => run.kind === "distill") ? (
         <>
-          <SectionTitle title="Distillations" note="a student learns from teachers; its mode says whose samples it is trained on" />
+          <SectionTitle title="Distillations" />
           <Distillations lineage={lineage} index={index} />
         </>
       ) : null}
-      <SectionTitle title="Trainers" note="finished groups collect into a step; a step waits in its trainer's queue" />
+      <SectionTitle title="Trainers" />
       <div className="tiles wide-tiles">{lineage.trainers.map(trainer => <TrainerTile key={trainer.trainer} trainer={trainer} lineage={lineage} index={index} />)}</div>
-      <SectionTitle title="Serving" note="a request names an exact checkpoint, or a run's latest; the router sends it to a worker that has it" />
+      <SectionTitle title="Serving" />
       <Kpis>
-        <Kpi label="Requests waiting" value={lineage.routing.history.length ? String(totalWaiting) : "–"} note={lineage.routing.history.length ? "by the checkpoint they name" : "the router notes none"} />
-        <Kpi label="Serving" value={String(moving.filter(checkpoint => checkpoint.life.state === "serving").length)} note="checkpoints on some worker" />
-        <Kpi label="Rolling out" value={String(moving.filter(checkpoint => checkpoint.life.state === "rolling out").length)} note="a run's latest, not yet on every worker" />
-        <Kpi label="Resharding" value={String(moving.filter(checkpoint => ["resharding", "resharded"].includes(checkpoint.life.state)).length)} note="full weights, for the engines' layout" />
+        <Kpi label="Requests waiting" value={lineage.routing.history.length ? String(totalWaiting) : "–"} />
+        <Kpi label="Serving" value={String(moving.filter(checkpoint => checkpoint.life.state === "serving").length)} />
+        <Kpi label="Rolling out" value={String(moving.filter(checkpoint => checkpoint.life.state === "rolling out").length)} />
+        <Kpi label="Resharding" value={String(moving.filter(checkpoint => ["resharding", "resharded"].includes(checkpoint.life.state)).length)} />
         <Kpi label="Workers" value={String(lineage.workers.length)} note={`${lineage.workers.filter(worker => worker.registered).length} registered`} />
       </Kpis>
-      <Card title="On their way to the engines, and served" note="newest first in each run's line">
+      <Card title="On their way to the engines, and served">
         <Table
           heads={[["checkpoint"], ["made by"], ["way"], ["workers"], ["waiting", "n"], ["latest of"], ["made", "n"]]}
           keys={moving.map(checkpoint => checkpoint.id)}
@@ -548,7 +547,7 @@ export function Checkpoints({ sample }: { sample: boolean }) {
         />
       </Card>
       <div className="tiles">{lineage.workers.map(worker => <WorkerTile key={worker.worker} worker={worker} lineage={lineage} index={index} />)}</div>
-      <Card title="Runs and distillations" note="what made each line">
+      <Card title="Runs and distillations">
         <Table
           heads={[["run"], ["kind"], ["from"], ["teachers"], ["trains on"], ["objective"], ["checkpoints"], ["latest"]]}
           keys={lineage.runs.map(run => run.run)}
@@ -564,8 +563,8 @@ export function Checkpoints({ sample }: { sample: boolean }) {
           to={lineage.runs.map(run => (inLedger.has(run.run) && !run.sample ? runPlace(run.run) : null))}
         />
       </Card>
-      <SectionTitle title="Evaluations" note={lineage.evaluations.length ? "a fixed suite of starts, played by checkpoints and by other models" : ""} />
-      {lineage.evaluations.length ? lineage.evaluations.map(suite => <SuiteCard key={suite.suite} suite={suite} index={index} order={checkpoint => order.get(laneOf(checkpoint)) ?? 99} />) : <Empty>No evaluation suite is in the ledger.</Empty>}
+      <SectionTitle title="Evaluations" />
+      {lineage.evaluations.length ? lineage.evaluations.map(suite => <SuiteCard key={suite.suite} suite={suite} index={index} order={checkpoint => order.get(laneOf(checkpoint)) ?? 99} />) : <Empty>No suite yet.</Empty>}
     </>
   );
 }

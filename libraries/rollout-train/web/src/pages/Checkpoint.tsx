@@ -31,8 +31,7 @@ export function Checkpoint({ id }: { id: string }) {
   ];
   return (
     <>
-      <Head title={<span className="mono" title={checkpoint.id}>{checkpoint.short}</span>}
-        sub={<>{known.origin(checkpoint.id)} · depth {checkpoint.depth} · from {checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : known.base(checkpoint.base)}</>}>
+      <Head title={<span className="mono" title={checkpoint.id}>{checkpoint.short}</span>}>
         <Specs>
           <Spec label="id">{checkpoint.id}</Spec>
           <Spec label="weights">{checkpoint.kind === "full" ? "full" : "LoRA adapter"}</Spec>
@@ -45,14 +44,14 @@ export function Checkpoint({ id }: { id: string }) {
       </Head>
       <Bookmarks checkpoint={checkpoint} all={system.bookmarks} />
       <Kpis>
-        <Kpi label="Depth" value={String(checkpoint.depth)} note="steps from its base model" />
-        <Kpi label="Moved" value={figure(checkpoint.metrics.kl_moved)} note="KL from its parent" />
+        <Kpi label="Depth" value={String(checkpoint.depth)} />
+        <Kpi label="Moved" value={figure(checkpoint.metrics.kl_moved)} />
         <Kpi label="Loss" value={figure(checkpoint.metrics.loss)} />
         <Kpi label="Took" value={span(checkpoint.metrics.update_seconds ?? checkpoint.metrics.seconds) || "–"} note={checkpoint.metrics.segments != null ? `${figure(checkpoint.metrics.segments)} segments` : ""} />
-        <Kpi label="Kept" value={checkpoint.weights ? bytes(size) : "released"} note={checkpoint.weights ? "weights and trainer state" : "its record stays"} />
-        <Kpi label="Grown from it" value={String(children.length)} note={children.length ? children.map(each => each.short).join(", ") : "nothing yet"} />
+        <Kpi label="Kept" value={checkpoint.weights ? bytes(size) : "released"} />
+        <Kpi label="Grown from it" value={String(children.length)} note={children.map(each => each.short).join(", ")} />
       </Kpis>
-      <Card title="Its line" note={`from ${known.base(line[0]?.base)}, first parent by first parent: how far each step moved it`}>
+      <Card title="Its line" note={`from ${known.base(line[0]?.base)}`}>
         {line.length > 1 ? (
           <Sized>{width => <BarChart values={line.map(each => each.metrics.kl_moved ?? 0)} labels={line.map(each => each.short)} width={width} height={150} onBar={index => navigate(placeOf(line[index]))} />}</Sized>
         ) : <p className="muted">It was trained from {checkpoint.base ? <BaseName base={checkpoint.base} /> : "the base model"}.</p>}
@@ -68,7 +67,7 @@ export function Checkpoint({ id }: { id: string }) {
             ] : [<span className="mono" title={key}>{key.slice(0, 12)}</span>, is, "–", "not in this ledger", "–", "–"])}
             to={related.map(([each]) => (each ? checkpointPlace(each.id) : null))}
           />
-        ) : <p className="muted">It was trained from the base model, and nothing has grown from it yet.</p>}
+        ) : <p className="muted">None.</p>}
       </Card>
       <Played id={checkpoint.id} />
     </>
@@ -81,7 +80,7 @@ function Played({ id }: { id: string }) {
   const played = (evals?.suites ?? []).flatMap(suite =>
     suite.subjects.filter(subject => subject.checkpoint === id).map(subject => ({ suite, subject })));
   return (
-    <Card title="Evals" note={<>the suites it played; <Link to={evalsPlace} className="linkish">play one with it</Link></>}>
+    <Card title="Evals" note={<Link to={evalsPlace} className="linkish">play one with it</Link>}>
       {played.length ? (
         <Table
           heads={[["suite"], ["starts", "n"], ["played", "n"], ["solved", "n"], ["mean reward", "n"]]}
@@ -92,7 +91,7 @@ function Played({ id }: { id: string }) {
           ])}
           to={played.map(({ suite }) => suitePlace(suite.suite))}
         />
-      ) : <p className="muted">It has played no suite yet.</p>}
+      ) : <p className="muted">None yet.</p>}
     </Card>
   );
 }
@@ -111,7 +110,7 @@ function Bookmarks({ checkpoint, all }: { checkpoint: CheckpointData; all: Recor
   const failed = bookmark.error ?? unbookmark.error;
   return (
     <section className="card bookmarks">
-      <header><h2>Bookmarks</h2><span>names for this checkpoint; a run told to carry one moves it to each checkpoint it makes</span></header>
+      <header><h2>Bookmarks</h2></header>
       <div className="body">
         <div className="chips">
           {checkpoint.bookmarks.length ? checkpoint.bookmarks.map(each => (
@@ -120,7 +119,7 @@ function Bookmarks({ checkpoint, all }: { checkpoint: CheckpointData; all: Recor
               <button type="button" aria-label={`take the bookmark ${each} away`} title="take this bookmark away (the checkpoint stays)"
                 disabled={unbookmark.isPending} onClick={() => unbookmark.mutate(each)}>×</button>
             </span>
-          )) : <span className="none">none: it is known by where it came from</span>}
+          )) : <span className="none">none</span>}
         </div>
         <form className="rename bookmark-form" onSubmit={submit}>
           <input value={name} onChange={event => setName(event.target.value)} placeholder="a bookmark's name" aria-label="a bookmark to name this checkpoint" spellCheck={false}

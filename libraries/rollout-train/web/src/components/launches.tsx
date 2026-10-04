@@ -85,7 +85,6 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
           <button type="button" className="danger" disabled={stop.isPending} onClick={() => stop.mutate(launch.id)}>
             {stop.isPending ? "stopping…" : launch.state === "asked" ? "cancel" : "stop"}
           </button>
-          {launch.state === "running" ? <span className="small faint">stops at the end of the group it is in, as on Ctrl-C</span> : null}
           {stop.isError ? <span className="error-text small">{stop.error.message}</span> : null}
         </div>
       ) : null}

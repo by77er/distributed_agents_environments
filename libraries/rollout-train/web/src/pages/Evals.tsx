@@ -15,8 +15,7 @@ import { runPlace, suitePlace } from "../lib/places";
 /** How to make a suite, for a ledger with none (or to make another). */
 export function MakeSuite({ ledger }: { ledger: string }) {
   return (
-    <Card title="Make a suite" note="a suite is never changed: make another for other starts">
-      <p className="muted" style={{ marginTop: 0 }}>A suite draws each row's start once for each seed, from a catalog a launcher offers, and keeps them in the ledger.</p>
+    <Card title="Make a suite">
       <pre className="command">{`rollout suite make NAME --catalog module:name --rows ROW,ROW --seeds 1,2,3 --ledger ${ledger}`}</pre>
     </Card>
   );
@@ -31,7 +30,7 @@ export function Evals() {
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind === "eval");
   return (
     <>
-      <Head title="Evals" sub="A suite is a frozen list of starts, each a catalog row's start with a seed of its own. An eval plays one suite with one checkpoint (or the base model), trains on nothing, and records how it did at each start, so that checkpoints compare start for start.">
+      <Head title="Evals">
         <Specs>
           <Spec label="suites">{evals.suites.length}</Spec>
           <Spec label="evals">{evals.evals.length}</Spec>
@@ -42,7 +41,7 @@ export function Evals() {
       {evals.suites.length ? (
         <div className="tiles">{evals.suites.map(suite => <SuiteTile key={suite.suite} suite={suite} />)}</div>
       ) : <MakeSuite ledger={system.ledger_at} />}
-      <Card title="Every eval" note="newest first; one opens its run">
+      <Card title="Every eval">
         {evals.evals.length ? (
           <Table
             heads={[["eval"], ["suite"], ["played by"], ["played", "n"], ["solved", "n"], ["started"], ["state"]]}
@@ -58,7 +57,7 @@ export function Evals() {
             ])}
             to={evals.evals.map(each => runPlace(each.run))}
           />
-        ) : <p className="muted">No eval has been played yet: open a suite to run it with a checkpoint.</p>}
+        ) : <p className="muted">None yet.</p>}
       </Card>
     </>
   );
@@ -74,7 +73,7 @@ function SuiteTile({ suite }: { suite: EvalSuite }) {
       <div className="cells">
         <div className="cell"><span>starts</span><b>{suite.starts.length}</b><small>{new Set(suite.starts.map(start => start.task)).size} rows</small></div>
         <div className="cell"><span>played by</span><b>{suite.subjects.length}</b><small>subjects</small></div>
-        <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : "none yet"}</small></div>
+        <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : ""}</small></div>
       </div>
       <div className="facts">{suite.made ? <span>made {clock(suite.made)}</span> : null}{suite.sample ? <span>sample</span> : null}</div>
     </Tile>
