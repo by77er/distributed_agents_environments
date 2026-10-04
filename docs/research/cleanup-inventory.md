@@ -18,6 +18,22 @@ The decisions this inventory assumes:
 - Suites are explicit, named bundles; `suite_for` stops freezing an environment's eval data into one.
 - Every run records through the gateway.
 
+## Where it stands
+
+The sections below describe the code at `0f90a2b`. Of the commits [section 6](#6-order-of-removal-commits) orders:
+
+| # | State | Made by |
+|---|---|---|
+| 1–6, 9–13, 15, 17 | made | `dc4ce7a`, `016e3a6`, `4ebaf02`, `5d98c88`, `cac3e19`, `92a9332`, `f9e6b6d`, `ecac1bd`, `77b6519`, `a580c26`, `07d609d`, `30ce139`, `77956aa` |
+| 7 | made but for `Control.spawn` and its Java route, which stay | `e8c4f62` |
+| 8 | made but for `scripts/train-with-memory-log.sh`, which the Minecraft docs still use | `07f9e78` |
+| 18 | in part: `@user_errors`, `--ledger` once, `registry.run_id`; no parent parsers or dispatch table | `ac758ae` |
+| 19 | in part: the harness's variables and the hooks rule said once | `151e85b` |
+| 21, 22 | made: rollout-tinker joined the workspace with the `tinker` SDK alone, and Ray is a dependency of rollout-train; rollout-verifiers stays a project of its own | `6fdda88`, `b54e4cf` |
+| 14, 16, 20, 23–32 | open: the [runtime design](runtime-design.md#8-the-implementation-sequence) carries most of them (profiles, `hosting.py`, the process backend, the in-process bridge path, the file ledger) | |
+
+The appendix's bug is fixed: an eval's start says its suite version as `suite_version` (`54d6827`).
+
 ## The fifteen items with the best payoff over risk
 
 | # | Item | Section | Lines | Risk |

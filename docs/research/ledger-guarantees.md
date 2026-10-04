@@ -15,8 +15,9 @@ Processes on one machine or many cooperate through three kinds of shared state:
 
 This page checks, guarantee by guarantee, what the code promises and whether it keeps the promise. Each section gives
 the claim, the mechanism, the assumptions it rests on, and the verdict, with file and line evidence. Where the
-guarantee fails, it gives a scenario and a proposed fix. The last section says what a proposed HTTP ledger service would
-have to guarantee for all of this to carry over.
+guarantee fails, it gives a scenario and a proposed fix. The last section says what the HTTP ledger service, which
+every role is to reach the ledger through ([runtime design](runtime-design.md#decisions-after-review)), must guarantee
+for all of this to carry over.
 
 The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 1, 2, 3, 4, 5, 6, 7, 8, 10, 11,
 12, 13 and 14 have since been fixed, and finding 9 in part: their sections say what the code does now, with line
@@ -143,7 +144,7 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 - **What the loser learns.** `append` answers only whether it wrote. `append_returning` answers `Appended(wrote,
   record)`, the record the table holds under the key, from the append itself: `DatabaseLedger` reads the row in the
   same transaction, `FileLedger` reads the key's line by its offset.
-  - `Checkpoints.add` reads back, and so does `reshard`.
+  - `Checkpoints.add` reads back, and so does a bridge (`bridges.bridged`), which returns what the first bridging made.
   - `make_suite` uses `append_returning` and plays the winner's suite (finding 8, fixed); `edit_suite` uses it to find its
     number taken, and tries the next.
   - `EpisodeRunner._ended` does not read back. That is intended: the loser's episode is dropped. Most losers are
@@ -497,10 +498,10 @@ through `FileBlobStore.read` still verifies its hash.
 names it and nothing put it in the last `Retention.grace` seconds, so a thinning may be repeated after a crash at any
 point, and a checkpoint added at the same moment keeps its blobs (checkpoints.md).
 
-**Mechanism.** `thin` appends releases, reads every checkpoint and every reshard, collects the hashes that unreleased
-checkpoints' weights and state, and what they were resharded into, name, and deletes the released checkpoints' other
-blobs with `delete(reference, unused_for=grace)`. Every put sets the blob's time to now, whether it writes the blob or
-finds it.
+**Mechanism.** `thin` appends releases, reads every checkpoint and what every bridge made
+(`checkpoints/resharded`), collects the hashes that unreleased checkpoints' weights and state, and what bridges made of
+them, name, and deletes the released checkpoints' other blobs with `delete(reference, unused_for=grace)`. Every put
+sets the blob's time to now, whether it writes the blob or finds it.
 
 **Crash safety: holds.** A release is recorded before any deletion, and every step is repeatable.
 
@@ -524,7 +525,7 @@ checkpoint forked from the one being thinned. Now the put in step 2 sets *B*'s t
   advisory lock would be held by a client for a whole upload of a checkpoint to S3, and an HTTP ledger would need a
   lease of its own. A blob's time lives with the blob, in every store: a file's modification time, an object's
   `LastModified`. It needs nothing beside the store, and it is what a service that alone deletes blobs would keep
-  ([HTTP](#10-a-proposed-http-ledger-service)).
+  ([HTTP](#10-the-http-ledger-service)).
 - **A store of files.** A put that finds a blob's file sets its modification time (`utime`); one that cannot (another
   user's file) writes it again as its own. A file kept by linking (`put_file`) is one inode with the trainer's working
   file, so the put sets the working file's time too; a link made new is set to now as well, since the working file
@@ -548,14 +549,14 @@ starts from a checkpoint after that read, or a bookmark set after it, does not k
 reads with no weights, and the run that starts from it fails loudly ("was released") when it fetches its files. A
 fix needs `thin` to read what keeps checkpoints after appending its releases, and a way to take a release back.
 
-**Do datasets, episodes and reshards count as names?**
+**Do datasets, episodes and bridges' files count as names?**
 
-- What checkpoints not released were resharded into counts: a reshard (not `verbatim`) can write a file that has the
-  bytes of a released checkpoint's file, a configuration file say.
+- What bridges made of checkpoints not released counts: a bridge (not `verbatim`) can write a file that has the bytes
+  of a released checkpoint's file, a configuration file say.
 - Datasets', episodes' and batches' blobs are never deleted, and do not count: only checkpoints' files are deleted.
   One of them would be lost only if a released checkpoint had a file of exactly its bytes.
-- A `verbatim` reshard of a released checkpoint names its weights' blobs; they go with the checkpoint, whose reshard is
-  of no use once it is released.
+- A `verbatim` bridge of a released checkpoint names its weights' blobs; they go with the checkpoint, whose bridged
+  files are of no use once it is released.
 
 ## 7. Launches and settings
 
@@ -613,8 +614,7 @@ suite of the name. `edit_suite` appends its version under the next number with `
 editor fenced out, or whose number another took, tries the next number (or, told the version it edited, is refused). The
 suite's name is ordinary state beside the ledger (the registry's suite names), moved only forward (`point_suite(…,
 forward=True)`), so the later of two edits is where it points whichever writes last. A name that points nowhere is its
-newest version in the ledger, so an edit that died between its append and the move is still read. A suite written before
-(a record, or a record and a table of starts by number) reads as its version 1.
+newest version in the ledger, so an edit that died between its append and the move is still read.
 
 Tests: `test_two_makers_of_one_suite_leave_one_of_their_suites` (the second maker takes the fence after the first and
 before its append: the first is fenced out, and the ledger holds the second's suite),
@@ -672,11 +672,13 @@ A replay's events that were already stored are dropped, which is what keeps the 
   - An exception after the terminal event (a failed environment destroy) skips `finish_run`, and the run stays
     running.
 
-## 10. A proposed HTTP ledger service
+## 10. The HTTP ledger service
 
-Under the proposal, runners use `HttpLedger(url, token)`, which implements `Ledger`, `Presence`, `Leases`, `Launches`
-and `DesiredSettings` against a service in front of the database. Every property above holds today because each
-operation is one transaction on one database, answered over a connection that either commits or fails. HTTP adds:
+Every role in a cluster is to reach the ledger through `HttpLedger(url, token)`, which implements `Ledger`, `Presence`,
+`Leases`, `Launches` and `DesiredSettings` against a service in front of the database
+([runtime design](runtime-design.md#decisions-after-review)); neither is built yet. Every property above holds today
+because each operation is one transaction on one database, answered over a connection that either commits or fails.
+HTTP adds:
 
 - lost responses;
 - retries;
