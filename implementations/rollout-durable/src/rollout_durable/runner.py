@@ -140,6 +140,9 @@ class DurableRunHandle:
 class DurableRunner(MessageRouter):
     """Implements `Runner` on DBOS. Call `await launch()` before use and `await close()` after."""
 
+    resumes = True
+    """Its runs survive it: started again over its state, it resumes the runs it had (an episode runner adopts them)."""
+
     def __init__(
         self,
         directory: Path,
@@ -332,6 +335,7 @@ class DurableRunner(MessageRouter):
             conversation=conversation,
             on_event=self._recorded,
             mark_attempt=self.store.mark_attempt,
+            last_seq=lambda: self.store.last_seq(run_id),
         )
         context.record_event(
             RunEventType.RUN_CREATED,

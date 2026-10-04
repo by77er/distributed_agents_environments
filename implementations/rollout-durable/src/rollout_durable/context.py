@@ -20,7 +20,14 @@ from datetime import UTC, datetime, timedelta
 from dbos import DBOS
 from pydantic import JsonValue
 
-from rollout.contracts import EffectKind, ModelEndpoint, OutcomeUnknown, RunEvent, RunEventType
+from rollout.contracts import (
+    TERMINAL_EVENT_TYPES,
+    EffectKind,
+    ModelEndpoint,
+    OutcomeUnknown,
+    RunEvent,
+    RunEventType,
+)
 from rollout.harness.blobs import Blobs
 from rollout.harness.context import Interrupted
 from rollout.harness.conversations import ConversationKey, DeliveryMode, Envelope
@@ -67,9 +74,11 @@ class DurableRunContext(LocalRunContext):
         conversation: ConversationKey | None = None,
         on_event: Callable[[RunEvent], None] | None = None,
         mark_attempt: Callable[[str], bool] = lambda effect_id: True,
+        last_seq: Callable[[], int | None] = lambda: None,
     ) -> None:
         self._clock = started_at
         self._mark_attempt = mark_attempt
+        self._last_seq = last_seq
         super().__init__(
             run_id,
             endpoints,
@@ -84,6 +93,13 @@ class DurableRunContext(LocalRunContext):
         self._cancel_reason: str | None = None
 
     # Time: the time of the latest recorded input, so a replay sees the same clock.
+
+    def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent:
+        """Events are stored by `seq`, and a replay's are the ones stored. A replay that took another way (a sandbox
+        refused, say) would give its terminal event a `seq` already taken; it comes after every stored event."""
+        if event_type in TERMINAL_EVENT_TYPES and (stored := self._last_seq()) is not None:
+            self._next_seq = max(self._next_seq, stored + 1)
+        return super().record_event(event_type, payload)
 
     def now(self) -> datetime:
         return self._clock

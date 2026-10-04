@@ -330,6 +330,13 @@ class RunStore:
         )
         self._notify(event.run_id)
 
+    def last_seq(self, run_id: str) -> int | None:
+        """The `seq` of a run's latest stored event; None when it has none."""
+        found = self.database.read(
+            lambda db: sql(db, "SELECT MAX(seq) FROM events WHERE run_id = :run_id", {"run_id": run_id}).scalar()
+        )
+        return int(found) if found is not None else None
+
     def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]:
         rows = self.database.read(
             lambda db: list(
