@@ -63,8 +63,8 @@ docs = [
 [tool.ruff]
 line-length = 120
 target-version = "py313"
-# Code in docs/ is illustrative and hand-aligned for reading.
-extend-exclude = ["docs"]
+# Code in docs/ is illustrative and hand-aligned for reading; .claude/ holds agents' working copies.
+extend-exclude = ["docs", ".claude"]
 src = ["libraries/*/src", "implementations/*/src", "products/*/src", "environments/minecraft", "."]
 
 [tool.ruff.lint]
