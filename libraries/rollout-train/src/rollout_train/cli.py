@@ -4,7 +4,9 @@ rollout train PROFILE ENVIRONMENT   the training loop: PROFILE is a TOML file (`
                                     names an environment as `module:name`
 rollout report RUN ENVIRONMENT      chart a run's progress and summarise it; post both to a Discord webhook
 rollout env check ENVIRONMENT       whether an environment holds together; with --profile, groups played by a model
-rollout imitate PROFILE             a supervised step on the run's solved episodes, without their guidance
+rollout imitate PROFILE             a supervised step on a dataset (--dataset), or on the run's solved episodes
+                                    without their guidance
+rollout dataset make RULE           make a dataset: examples chosen from runs' episodes (`rollout_train.datasets`)
 rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`
@@ -246,15 +248,30 @@ async def _check(
     return 0 if all(each.passed for each in found) else 1
 
 
-async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
+async def _imitate(
+    profile: Path,
+    directory: Path | None,
+    kinds: list[str],
+    limit: int | None,
+    seed: int,
+    dataset: str | None = None,
+    start_at: str | None = None,
+    name: str | None = None,
+) -> None:
+    import socket
+    import time
+
     from rollout.harness.blobs import FileBlobStore
     from rollout_train.checkpoints import Checkpoints
-    from rollout_train.imitation import examples, imitate
+    from rollout_train.datasets import dataset_of, resolved_dataset
+    from rollout_train.datasets import examples as dataset_examples
+    from rollout_train.imitation import IMITATION, examples, imitate
     from rollout_train.layout import BLOBS, LEDGER
     from rollout_train.ledger import opened
     from rollout_train.profile import Profile
-    from rollout_train.record import scope
+    from rollout_train.record import STARTS, scope, table
     from rollout_train.registry import registry_of, resolved, run_of
+    from rollout_train.stores import location
 
     described = Profile.load(profile, directory=directory)
     if described.trainer is None:
@@ -265,21 +282,110 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
     ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
     checkpoints, registry = Checkpoints(ledger, blobs), registry_of(ledger)
-    run = await run_of(described.directory, ledger, registry)
-    start = await resolved(ledger, registry, described.trainer.start) if described.trainer.start else None
-    taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
+    run = await run_of(described.directory, ledger, registry, name)
+    try:
+        reference = start_at or described.trainer.start
+        start = await resolved(ledger, registry, reference) if reference else None
+        made = await dataset_of(ledger, await resolved_dataset(ledger, registry, dataset)) if dataset else None
+    except KeyError as error:
+        raise SystemExit(error.args[0]) from None
+    if made is not None:
+        taught = await dataset_examples(ledger, made, renderer)
+    else:
+        taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
     if not taught.segments:
-        raise SystemExit("no solved episode of the run carried that guidance")
+        raise SystemExit("no solved episode of the run carried that guidance" if made is None else "no examples")
     print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out)", flush=True)
+    head = await checkpoints.head(run.id) or (await checkpoints.checkpoint(start) if start else None)
+    model = spec.model  # (an adapter from full weights is trained over them)
+    under = await checkpoints.under(head) if head is not None else None
+    kind = named(described.trainer.kind)
+    if under is not None and under.weights is not None and getattr(kind, "weights", "lora") == "lora":
+        model = str(await checkpoints.files(under.weights, described.directory / "bases" / under.id))
     settings = {**described.trainer.settings, "objective": "likelihood"}
-    trainer = named(described.trainer.kind)(spec.model, **settings)
+    trainer = kind(model, **settings)
     fence = await ledger.take(scope(run.id))  # (the run is stopped: imitation writes as it)
-    checkpoint = await imitate(
-        checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
-        directory=described.directory / "checkpoints",
-        limit=limit, seed=seed,
-    )  # fmt: skip
-    print(f"made {checkpoint.id}: {json.dumps({key: round(value, 4) for key, value in checkpoint.metrics.items()})}")
+    where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
+    started: Any = {
+        "kind": IMITATION, "from": head.id if head else None, "dataset": made.id if made else None,
+        "host": socket.gethostname(), "started": round(time.time(), 1), "directory": str(where),
+        "profile": str(profiled), "blobs": location(described.blobs, described.directory / BLOBS),
+    }  # fmt: skip
+    await ledger.append(table(run.id, STARTS), str(fence.number), started, fence)
+    try:
+        checkpoint = await imitate(
+            checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
+            directory=described.directory / "checkpoints",
+            limit=limit, seed=seed,
+        )  # fmt: skip
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    parents = ", ".join(checkpoint.parents) or "the base model"
+    print(f"made {checkpoint.id} (from {parents}): "
+          f"{json.dumps({key: round(value, 4) for key, value in checkpoint.metrics.items()})}")  # fmt: skip
+
+
+async def _dataset(
+    command: str,
+    where: str,
+    rule: str | None = None,
+    runs: list[str] | None = None,
+    turns: list[str] | None = None,
+    cut: list[str] | None = None,
+    per_task: int | None = None,
+    name: str | None = None,
+    into: Path | None = None,
+) -> None:
+    from rollout_train.checkpoints import short
+    from rollout_train.datasets import ALL, datasets_in, make, where_blobs_are
+    from rollout_train.record import runs_in
+    from rollout_train.registry import Taken, found
+    from rollout_train.stores import FILES, opened
+
+    ledger, registry = _registry_at(where)
+    entries = await registry.runs()
+    if command == "list":
+        every = await datasets_in(ledger)
+        shown, called = (
+            short(each.id for each in every),
+            {each.dataset: each.name for each in await registry.datasets()},
+        )
+        names = {entry.id: entry.name for entry in entries}
+        for each in sorted(every, key=lambda each: each.made, reverse=True):
+            label = shown[each.id] + (f" [{called[each.id]}]" if each.id in called else "")
+            sizes = f"{each.counts.get('turns', 0):>6} turns of {each.counts.get('episodes', 0):>4} episodes"
+            sources = ", ".join(names.get(run, run) for run in each.runs)
+            print(f"{label:<24} {each.rule:<16} {sizes}  turns: {', '.join(each.turns)}  from {sources}")
+        return
+    assert rule is not None and runs
+    if name and any(each.name == name for each in await registry.datasets()):  # (before anything is made)
+        raise SystemExit(f"another dataset is called {name!r}")
+    known = await runs_in(ledger)
+    ids: list[str] = []
+    for who in runs:
+        entry = found(entries, who)
+        if entry is None and who not in known:
+            raise SystemExit(f"there is no run {who!r}")
+        ids.append(entry.id if entry is not None else who)
+    if into is not None:
+        kept = await asyncio.to_thread(lambda: into.expanduser().absolute())
+        at: dict[str, Any] = {"kind": FILES, "directory": str(kept)}
+    else:  # beside the first run's episodes
+        from rollout_train.rollouts.episodes import Record
+        from rollout_train.rollouts.scheduler import EPISODES
+
+        first: Any = next(iter((await ledger.read(f"runs/{ids[0]}/{EPISODES}")).values()), None)
+        at = await where_blobs_are(ledger, ids[0], Record.from_json(first).trajectories if first else None)
+    try:
+        made = await make(ledger, rule, ids, into=opened(at), at=at, turns=turns or [ALL], cut=cut or [],
+                          per_task=per_task)  # fmt: skip
+        if name:
+            await registry.name_dataset(name, made.id)
+    except (ValueError, Taken) as error:
+        raise SystemExit(str(error)) from None
+    counts = ", ".join(f"{value} {key.replace('_', ' ')}" for key, value in made.counts.items())
+    left = ", ".join(f"{value} {why}" for why, value in made.left_out.items()) or "none"
+    print(f"made the dataset {made.id}{f' ({name})' if name else ''}: {counts}; left out: {left}")
 
 
 def _setting(given: str) -> tuple[str, Any]:
@@ -472,12 +578,42 @@ def main() -> None:
     reporting.add_argument("environment")
     reporting.add_argument("--watch", action="store_true", help="report again after every group, until interrupted")
     reporting.add_argument("--webhook", help="a Discord webhook (default: the environment's DISCORD_WEBHOOK_URL)")
-    imitating = commands.add_parser("imitate", help="a supervised step on solved episodes, without their guidance")
+    imitating = commands.add_parser(
+        "imitate", help="a supervised step on a dataset, or on the run's solved episodes without their guidance"
+    )
     imitating.add_argument("profile", type=Path)
     imitating.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
+    imitating.add_argument("--dataset", help="a dataset to train on, by its name or id (`rollout dataset make`)")
+    imitating.add_argument(
+        "--start", help="the checkpoint to train from, if the run made none (instead of the profile's)"
+    )
+    imitating.add_argument("--name", help="what a new run is called (by default its directory's name)")
     imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
     imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
     imitating.add_argument("--seed", type=int, default=0)
+    datasets = commands.add_parser("dataset", help="make or list datasets: examples chosen from runs' episodes")
+    dataset_commands = datasets.add_subparsers(dest="dataset_command", required=True)
+    dataset_making = dataset_commands.add_parser("make", help="make a dataset by an episode rule and turn filters")
+    dataset_making.add_argument("rule", choices=["solved-all", "best-of-group", "capped-per-task"])
+    dataset_making.add_argument("--run", action="append", required=True, help="a run, by name or id (repeatable)")
+    dataset_making.add_argument(
+        "--turns", action="append", help="a turn filter: all (the default) or module:name (repeatable: every one keeps)"
+    )
+    dataset_making.add_argument(
+        "--without", nargs="*", default=["way"], help="the kinds of guidance cut from the examples (way; none: empty)"
+    )
+    dataset_making.add_argument("--per-task", type=int, help="with capped-per-task: episodes of each task (3)")
+    dataset_making.add_argument("--name", help="a name for the dataset")
+    dataset_making.add_argument(
+        "--blobs", type=Path, help="where to keep its manifest (by default beside the episodes)"
+    )
+    dataset_making.add_argument(
+        "--ledger", default=".", help="a run's directory, a ledger's directory, or a database's URL"
+    )
+    dataset_listing = dataset_commands.add_parser("list", help="every dataset, newest first")
+    dataset_listing.add_argument(
+        "--ledger", default=".", help="a run's directory, a ledger's directory, or a database's URL"
+    )
     monitoring = commands.add_parser("monitor", help="serve the monitor's page over a ledger and every run in it")
     monitoring.add_argument("where", help="a run's directory, a ledger's directory, or a database's URL")
     monitoring.add_argument("--host", default="127.0.0.1")
@@ -630,8 +766,20 @@ def main() -> None:
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))
         return
     if arguments.command == "imitate":
-        work = _imitate(arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed)
+        work = _imitate(
+            arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed,
+            arguments.dataset, arguments.start, arguments.name,
+        )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command == "dataset":
+        if arguments.dataset_command == "list":
+            asyncio.run(_dataset("list", arguments.ledger))
+            return
+        asyncio.run(_dataset(
+            "make", arguments.ledger, arguments.rule, arguments.run, arguments.turns, arguments.without,
+            arguments.per_task, arguments.name, arguments.blobs,
+        ))  # fmt: skip
+        return
     if arguments.command == "report":
         from rollout_train.report import report
 

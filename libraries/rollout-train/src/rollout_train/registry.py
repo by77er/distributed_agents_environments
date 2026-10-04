@@ -11,6 +11,8 @@ beside a ledger of files (`FileRegistry`), tables in a database ledger's databas
   is started. A run recorded before there was a registry keeps its key as its id, and is registered under it.
 - A **bookmark** names a checkpoint, and is moved to another by whoever moves it: a run told to carry one moves it to
   each checkpoint it makes. A checkpoint needs none: it is shown by where it came from.
+- A **dataset's name** (`rollout_train.datasets`) names one dataset, for good: a dataset is never changed, so neither
+  is what its name says. A dataset needs none: it is found by its id.
 
 A name says neither `/`, `@` nor `:` (they are what a reference to a checkpoint is made of: `resolved`).
 """
@@ -53,6 +55,16 @@ class Bookmark:
     moved: float
 
 
+@dataclass(frozen=True)
+class Named:
+    """A dataset's name."""
+
+    name: str
+    dataset: str
+    """By id."""
+    named: float
+
+
 class Taken(ValueError):
     """A name that cannot be given: another has it, or it is no name."""
 
@@ -81,6 +93,14 @@ class Registry(Protocol):
 
     async def unbookmark(self, name: str) -> None:
         """Take a bookmark away (the checkpoint stays). Raises `KeyError` when there is no such bookmark."""
+        ...
+
+    async def datasets(self) -> list[Named]:
+        """Every dataset's name, by name."""
+        ...
+
+    async def name_dataset(self, name: str, dataset: str) -> Named:
+        """Call a dataset (by id) `name`. Raises `Taken` for a name that cannot be one, or that another dataset has."""
         ...
 
 
@@ -177,15 +197,38 @@ class FileRegistry:
 
         await asyncio.to_thread(taken)
 
+    async def datasets(self) -> list[Named]:
+        return await asyncio.to_thread(lambda: sorted(self._named(), key=lambda each: each.name))
+
+    async def name_dataset(self, name: str, dataset: str) -> Named:
+        def given() -> Named:
+            with self._locked():
+                runs, marks = self._read()
+                named = self._named()
+                entry = Named(valid(name), dataset, round(time.time(), 1))
+                if any(each.name == entry.name and each.dataset != dataset for each in named):
+                    raise Taken(f"another dataset is called {entry.name!r}")
+                self._write(runs, marks, [each for each in named if each.name != entry.name] + [entry])
+                return entry
+
+        return await asyncio.to_thread(given)
+
     def _read(self) -> tuple[list[Entry], list[Bookmark]]:
         if not self.path.exists():
             return [], []
         kept: Any = json.loads(self.path.read_text())
         return [Entry(**each) for each in kept["runs"]], [Bookmark(**each) for each in kept["bookmarks"]]
 
-    def _write(self, runs: list[Entry], marks: list[Bookmark]) -> None:
+    def _named(self) -> list[Named]:
+        kept: Any = json.loads(self.path.read_text()) if self.path.exists() else {}
+        return [Named(**each) for each in kept.get("datasets", [])]
+
+    def _write(self, runs: list[Entry], marks: list[Bookmark], named: list[Named] | None = None) -> None:
         staged = self.path.with_suffix(".staged")
-        kept = {"runs": [asdict(each) for each in runs], "bookmarks": [asdict(each) for each in marks]}
+        datasets = self._named() if named is None else named
+        kept: dict[str, Any] = {"runs": [asdict(each) for each in runs], "bookmarks": [asdict(each) for each in marks]}
+        if datasets:
+            kept["datasets"] = [asdict(each) for each in datasets]
         staged.write_text(json.dumps(kept, indent=1))
         staged.replace(self.path)
 

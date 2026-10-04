@@ -883,6 +883,7 @@ def _checkpoint(checkpoint: Checkpoint, shorter: Mapping[str, str]) -> dict[str,
         "state": {"files": len(checkpoint.state.files), "bytes": size(checkpoint.state)} if checkpoint.state else None,
         "released": checkpoint.released,
         "batch": checkpoint.batch is not None,
+        "dataset": checkpoint.dataset,
     }
 
 

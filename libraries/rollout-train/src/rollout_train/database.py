@@ -6,11 +6,12 @@ fence it was written under, and the record as JSON; a table has each key once) a
 of every scope). Taking a fence and appending run in transactions that hold the scope's lock, so a writer that was
 replaced is refused (`Fenced`) whichever process it is in. SQLite serves one machine; Postgres serves several.
 
-`DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in two tables of the same database: `runs`
-(each run's id and name, a name once) and `bookmarks` (each bookmark's name and checkpoint); a database ledger's is its
-`registry`. `DatabasePresence` holds the runners' heartbeats (`rollout_train.presence`) in a third, `presence`: a row
-per runner, changed in place; a database ledger's is its `presence`. `DatabaseLaunches` holds the runs asked for
-(`rollout_train.launches`) in a fourth, `launches`; a database ledger's is its `launches`.
+`DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in three tables of the same database: `runs`
+(each run's id and name, a name once), `bookmarks` (each bookmark's name and checkpoint) and `dataset_names` (each
+dataset's name and id); a database ledger's is its `registry`. `DatabasePresence` holds the runners' heartbeats
+(`rollout_train.presence`) in another, `presence`: a row per runner, changed in place; a database ledger's is its
+`presence`. `DatabaseLaunches` holds the runs asked for (`rollout_train.launches`) in another, `launches`; a database
+ledger's is its `launches`.
 """
 
 import asyncio
@@ -28,7 +29,7 @@ from rollout_durable.database import Connection, Database, fetch_all, fetch_one,
 from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, new_launch
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.presence import Beat, kept
-from rollout_train.registry import Bookmark, Entry, Taken, checked, found, new_run_id, registry_of, valid
+from rollout_train.registry import Bookmark, Entry, Named, Taken, checked, found, new_run_id, registry_of, valid
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(
@@ -59,6 +60,13 @@ BOOKMARKS = sa.Table(
     sa.Column("name", sa.Text, primary_key=True),
     sa.Column("checkpoint", sa.Text, nullable=False),
     sa.Column("moved", sa.Float(), nullable=False),
+)
+DATASET_NAMES = sa.Table(
+    "dataset_names",
+    METADATA,
+    sa.Column("name", sa.Text, primary_key=True),
+    sa.Column("dataset", sa.Text, nullable=False),
+    sa.Column("named", sa.Float(), nullable=False),
 )
 LAUNCHES = sa.Table(
     "launches",
@@ -221,6 +229,26 @@ class DatabaseRegistry:
 
         await asyncio.to_thread(self.database.write, taken, exclusive="registry")
 
+    async def datasets(self) -> list[Named]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            return fetch_all(connection, "SELECT name, dataset, named FROM dataset_names ORDER BY name")
+
+        return [Named(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+
+    async def name_dataset(self, name: str, dataset: str) -> Named:
+        entry = Named(valid(name), dataset, round(time.time(), 1))
+
+        def given(connection: Connection) -> Named:
+            row = fetch_one(connection, "SELECT dataset FROM dataset_names WHERE name = :name", {"name": entry.name})
+            if row is not None and row[0] != dataset:
+                raise Taken(f"another dataset is called {entry.name!r}")
+            if row is None:
+                sql(connection, "INSERT INTO dataset_names (name, dataset, named) VALUES (:name, :dataset, :named)",
+                    asdict(entry))  # fmt: skip
+            return entry
+
+        return await asyncio.to_thread(self.database.write, given, exclusive="registry")
+
 
 class DatabaseLaunches:
     """`Launches` (`rollout_train.launches`) in the `launches` table of a database."""
@@ -313,8 +341,8 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
     """Copy every table and fence of `source` (files, or another database) into `target`, which must have none of its
     tables yet; returns how many records. Records keep their keys and their order; each is noted under its scope's
     newest fence (the fence a record was written under is not read back through a ledger). A fence already in the
-    target is kept if it is newer. The runs and bookmarks registered beside `source` are registered beside `target`
-    too. To move to Postgres: copy, then point the profile's `[ledger] url` at it."""
+    target is kept if it is newer. The runs, bookmarks and dataset names registered beside `source` are registered
+    beside `target` too. To move to Postgres: copy, then point the profile's `[ledger] url` at it."""
     tables = await source.tables()
     there = set(await target.tables())
     if clash := sorted(there & set(tables)):
@@ -353,4 +381,6 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
             await target.registry.create(entry.name, entry.id)
         for mark in await registered.bookmarks():
             await target.registry.bookmark(mark.name, mark.checkpoint)
+        for each in await registered.datasets():
+            await target.registry.name_dataset(each.name, each.dataset)
     return count

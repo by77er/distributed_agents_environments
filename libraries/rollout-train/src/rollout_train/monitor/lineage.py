@@ -303,6 +303,7 @@ class _Reading:
                     "made": checkpoint.made,
                     "kept": checkpoint.weights is not None,
                     "released": checkpoint.released,
+                    "dataset": checkpoint.dataset,
                     "bookmarks": sorted(marks.get(checkpoint.id, [])),
                     "metrics": {
                         name: checkpoint.metrics[name] for name in ("kl_moved", "loss") if name in checkpoint.metrics

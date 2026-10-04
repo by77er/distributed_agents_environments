@@ -4,8 +4,9 @@ An environment may guide its agents (tell them the way to a goal, say) and repor
 guidance its prompts carried, word for word and by kind (`info["guidance"]`). The episodes that succeeded under
 guidance show the policy doing the task; taking the guidance back out of their prompts makes them examples of doing
 it unguided. `examples` reads such episodes from a run's episodes in the ledger and cuts the guidance out of every
-segment; `imitate`
-takes a supervised step on them (the trainer's likelihood objective) and commits the checkpoint it makes.
+segment; `imitate` takes a supervised step on them (the trainer's likelihood objective) and commits the checkpoint it
+makes. A dataset's examples (`rollout_train.datasets.examples`) are imitated the same way: the checkpoint the step makes
+then names the dataset, and its parents after the first are the checkpoints that sampled the examples it trained on.
 
 A segment is cut by its tokens: the fewest tokens before its first sampled one whose text holds the guidance, and
 which encode back to themselves, are decoded, the guidance is taken out, and the rest is encoded again; what the
@@ -17,7 +18,7 @@ import asyncio
 import json
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,6 +36,8 @@ from rollout_train.trainer import STATE, WEIGHTS, Files, Trainer, Weighted
 
 GUIDANCE = "guidance"
 """The entry of an episode's result that holds the guidance its prompts carried: by kind, word for word."""
+IMITATION = "imitation"
+"""The kind of a run's start that took a supervised step (`rollout imitate`), as its `starts` record says."""
 
 
 def without(segment: Segment, texts: Sequence[str], renderer: Renderer) -> Segment | None:
@@ -95,6 +98,10 @@ class Examples:
     """Episodes they came from."""
     left_out: int = 0
     """Segments whose prompt could not be cut exactly."""
+    dataset: str | None = None
+    """The dataset they are of, by id, if they are a dataset's."""
+    sampled_by: dict[str, str] = field(default_factory=dict[str, str])
+    """The checkpoint that sampled each segment, by its source, where that is known (not the base model)."""
 
 
 async def examples(
@@ -142,13 +149,17 @@ async def imitate(
     """One supervised step of `trainer` (whose objective is likelihood) on `taught`, from the newest checkpoint `run`
     made (else from `start`, a checkpoint's id, or the base model, named `base`), made as the run's next: started again,
     the run trains on from it. `limit` takes that many segments at random. `directory` holds the checkpoints' files on
-    this machine. `fence` is the run's."""
+    this machine. `fence` is the run's. The checkpoint's parents are the one it was trained from, then the checkpoints
+    that sampled the segments it trained on (`taught.sampled_by`), by depth; one trained from the base model has none.
+    An adapter's step from full weights begins a new adapter over them (`trainer` was made over those weights)."""
     chosen = list(taught.segments)
     if limit is not None and len(chosen) > limit:
         chosen = random.Random(seed).sample(chosen, limit)
     head = await checkpoints.head(run) or (await checkpoints.checkpoint(start) if start else None)
     parent: Files | None = None
-    if head is not None:
+    if head is not None and trainer.weights == "full" and head.kind != "full":
+        raise ValueError(f"{head.id} is an adapter: merge it (`rollout merge`) to train every weight from it")
+    if head is not None and head.kind == trainer.weights:
         here = directory / head.id
         if head.weights is None:
             raise ValueError(f"{head.id} was released: its weights are gone")
@@ -159,7 +170,13 @@ async def imitate(
     trained: list[JsonValue] = [[weighted.source, weighted.advantage] for weighted in chosen]
     batch = await checkpoints.blobs.put(json.dumps(trained).encode(), "application/json")
     step = await trainer.step(chosen, seed=seed, parent=parent, into=into)
-    metrics = {**step.metrics, "imitated_episodes": float(taught.episodes)}
+    metrics = {**step.metrics, "imitated_episodes": float(taught.episodes), "imitated_segments": float(len(chosen))}
+    learned: list[Checkpoint] = []
+    if head is not None:
+        for id in dict.fromkeys(taught.sampled_by[each.source] for each in chosen if each.source in taught.sampled_by):
+            if id != head.id:
+                learned.append(await checkpoints.checkpoint(id))
+    learned.sort(key=lambda checkpoint: (checkpoint.depth, checkpoint.made))
     return await checkpoints.add(
         fence,
         makes,
@@ -168,7 +185,8 @@ async def imitate(
         base=base,
         kind=trainer.weights,
         state=into / STATE if await asyncio.to_thread((into / STATE).exists) else None,
-        parents=[head.id] if head else [],
+        parents=[head.id, *(checkpoint.id for checkpoint in learned)] if head else [],
         batch=batch,
         metrics=metrics,
+        dataset=taught.dataset,
     )

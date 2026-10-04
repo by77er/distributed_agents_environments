@@ -78,6 +78,9 @@ class Checkpoint:
     batch: BlobReference | None = None
     """What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage."""
     metrics: Mapping[str, float] = field(default_factory=dict[str, float])
+    dataset: str | None = None
+    """The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its
+    parents after the first are then the checkpoints that sampled the dataset's examples."""
     made: float = 0.0
     """When, in seconds since the epoch."""
     released: float | None = None
@@ -172,6 +175,7 @@ class Checkpoints:
         parents: Sequence[str] = (),
         batch: BlobReference | None = None,
         metrics: Mapping[str, float] | None = None,
+        dataset: str | None = None,
     ) -> Checkpoint:
         """Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
         Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
@@ -192,6 +196,7 @@ class Checkpoints:
             state=await kept(state, self.blobs) if state is not None else None,
             batch=batch,
             metrics=dict(metrics or {}),
+            dataset=dataset,
             made=round(time.time(), 1),
         )
         record: Any = _VERSION.dump_python(checkpoint, mode="json")
