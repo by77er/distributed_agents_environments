@@ -24,7 +24,6 @@ import pytest
 from tinker import ModelInput, SamplingParams
 
 from rollout.contracts import Message, ToolSpecification
-from rollout_qwen import qwen35
 from rollout_tinker import TinkerEngine, TinkerTrainer
 from rollout_tinker.bridges import converted
 from rollout_tinker.data import datum
@@ -69,6 +68,8 @@ def service() -> Iterator[Service]:
 
 @pytest.fixture(scope="module")
 def renderer() -> Renderer:
+    from rollout_qwen import qwen35  # (the `gpu` extra's, not the `tinker` one's: imported only when the test runs)
+
     return qwen35(MODEL)
 
 
