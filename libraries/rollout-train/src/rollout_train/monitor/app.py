@@ -50,10 +50,12 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/api/machines`: every machine that beats and the roles on it, what each holds and how full it is
       (`System.machines`);
     - `/api/evals`: the suites, their versions and the evals that played them (`System.evals`); `POST
-      /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`), and
-      `/api/environments/{name}` says what the suites' forms need of an environment (`System.environment`);
-    - `/api/environments`: every environment the system knows of, with the versions seen and whether a launcher alive
-      offers it, for the pages' pickers (`System.environments`);
+      /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`);
+    - `/api/environments`: every environment the system knows of, with the versions seen, whether a launcher alive
+      offers it, its training runs and suites, and when a run last started on it (`System.environments`); and
+      `/api/environments/{name}` one environment's page: its rows, eval data and curriculum where it loads here, what
+      was played of each row, its runs, suites, evals and newest check (`System.environment`; 404 for one neither
+      known nor loading);
     - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run or an eval
       (`System.launch`), `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
@@ -245,13 +247,10 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         return await written(change)
 
     async def environments(request: Request) -> Response:
-        return JSONResponse(await system.environments())
+        return answered(request, await hub.read("environments"))
 
     async def environment(request: Request) -> Response:
-        try:
-            return JSONResponse(await system.environment(request.path_params["name"]))
-        except KeyError as error:
-            return JSONResponse({"error": str(error.args[0])}, status_code=404)
+        return answered(request, await hub.read(f"environment/{request.path_params['name']}"))
 
     async def launches(request: Request) -> Response:
         if request.method == "GET":

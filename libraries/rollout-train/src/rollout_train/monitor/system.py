@@ -47,8 +47,6 @@ from rollout_train.evals import (
     subject_table,
     suite_entry,
     suite_of,
-    suites_among,
-    versions_in,
 )
 from rollout_train.gateway.turns import TurnStore
 from rollout_train.inference.remote import ENGINES
@@ -70,6 +68,7 @@ from rollout_train.launches import (
 )
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
+from rollout_train.monitor.environments import Read, described, listed, page_of
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
 from rollout_train.monitor.machines import kind_of, machines
@@ -379,48 +378,30 @@ class System:
         return self._environments[environment]
 
     async def environments(self) -> dict[str, Any]:
-        """Every environment the system knows of, by `module:name`, for the pages' pickers: those the launchers alive
-        offer, those runs were started on and those suites' versions play; each with a readable `name`, the versions of
-        it seen (in runs' starts and suites' entries), and whether a launcher alive offers it (`offered`)."""
-        tables = await self._tables()
+        """Every environment the system knows of, by `module:name` (`rollout_train.monitor.environments.listed`): those
+        the launchers alive offer, those runs were started on and those suites' versions play; each with a readable
+        `name`, the versions of it seen (in runs' starts and suites' entries), whether a launcher alive offers it
+        (`offered`), its training runs and suites, and when a run last started on it (`used`)."""
+        return {"environments": await asyncio.to_thread(listed, await self._environments_read())}
+
+    async def environment(self, environment: str) -> dict[str, Any] | None:
+        """An environment's page (`rollout_train.monitor.environments.page_of`): what it says of itself where it loads
+        in this process (its version, rows, eval data, description and curriculum; else why it does not load) and what
+        the ledger has of it (each row played, its runs, suites, evals and newest check). None where it neither loads
+        nor is known."""
+        try:
+            said, error = await asyncio.to_thread(described, await self._loaded(environment)), None
+        except KeyError as failed:
+            said, error = None, str(failed.args[0])
+        return await asyncio.to_thread(page_of, await self._environments_read(), environment, said, error)
+
+    async def _environments_read(self) -> Read:
+        """What the environments' sources read: the tables, what the launchers alive offer, and the registry's names."""
         offered = {
             str(each) for beat in await self._beats() if beat.about.get("kind") == LAUNCHER and alive(beat)
             for each in cast(list[Any], beat.about.get("environments") or [])
         }  # fmt: skip
-        seen: dict[str, set[str]] = {each: set() for each in offered}
-        for run in named_runs(tables):
-            for start in tables.get(table(run, STARTS), {}).values():
-                if isinstance(start, dict) and start.get("environment"):
-                    found = seen.setdefault(str(start["environment"]), set())
-                    if start.get("version") is not None and start.get("kind") != EVAL:  # (an eval's is its suite's)
-                        found.add(str(start["version"]))
-        for suite in suites_among(tables):
-            for version in versions_in(tables, suite):
-                for entry in version.entries:
-                    if entry.environment:
-                        found = seen.setdefault(entry.environment, set())
-                        found |= {entry.environment_version} if entry.environment_version else set()
-        return {
-            "environments": [
-                {"environment": each, "name": _readable(each), "versions": sorted(versions), "offered": each in offered}
-                for each, versions in sorted(seen.items(), key=lambda item: (_readable(item[0]), item[0]))
-            ]
-        }
-
-    async def environment(self, environment: str) -> dict[str, Any]:
-        """What the forms that make and edit suites need of an environment: its version, its rows (each its key and
-        title) and its eval data (each list's name and how many starts). Raises `KeyError` where it does not load."""
-        loaded = await self._loaded(environment)
-
-        def described() -> dict[str, Any]:
-            return {
-                "environment": environment,
-                "version": loaded.version,
-                "rows": [{"key": row.key, "title": row.title} for row in loaded.rows()],
-                "evals": {name: len(starts) for name, starts in loaded.evals().items()},
-            }
-
-        return await asyncio.to_thread(described)
+        return Read(await self._tables(), frozenset(offered), await names(registry_of(self._ledger)))
 
     async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite:
         """Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,
@@ -1313,18 +1294,6 @@ def _given(environment: Environment, listed: Any) -> list[Start]:
         parameters = given["parameters"] if "parameters" in given else environment.start(row, random.Random(seed))
         made.append(Start(row.key, row.title, seed, parameters))
     return made
-
-
-GENERIC = {"environment", "env", "environments", "main"}
-"""Names an environment's object is often given, which say nothing of it."""
-
-
-def _readable(environment: str) -> str:
-    """An environment's `module:name`, in a word: its object's name, or its package's where that name says nothing."""
-    module, _, attribute = environment.partition(":")
-    if attribute and attribute.lower() not in GENERIC:
-        return attribute
-    return module.split(".")[0] or environment
 
 
 def _solved_count(results: Mapping[str, Any], episodes: Mapping[str, Any]) -> int | None:

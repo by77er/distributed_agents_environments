@@ -109,6 +109,13 @@ def path_of(
     return {"checkpoint": checkpoint, "points": points if line else [], "suites": suites}
 
 
+def evals_in(
+    tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Every eval in the tables, with its score and its score at each entry of the version it played (`entries`)."""
+    return _evals(tables, names or {})
+
+
 def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Every eval in the tables, with its score."""
     called: Mapping[str, str] = names.get("runs", {})

@@ -4885,11 +4885,14 @@ class System
   points to now, which the launch then names by id. A training run says the evals it makes (`_checked_evals`).
   Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have, no
   word of the evals), `KeyError` for what no launcher offers or a checkpoint no reference says.
-- `async def environments(self) -> dict[str, Any]` — Every environment the system knows of, by `module:name`, for the pages' pickers: those the launchers alive
-  offer, those runs were started on and those suites' versions play; each with a readable `name`, the versions of
-  it seen (in runs' starts and suites' entries), and whether a launcher alive offers it (`offered`).
-- `async def environment(self, environment: str) -> dict[str, Any]` — What the forms that make and edit suites need of an environment: its version, its rows (each its key and
-  title) and its eval data (each list's name and how many starts). Raises `KeyError` where it does not load.
+- `async def environments(self) -> dict[str, Any]` — Every environment the system knows of, by `module:name` (`rollout_train.monitor.environments.listed`): those
+  the launchers alive offer, those runs were started on and those suites' versions play; each with a readable
+  `name`, the versions of it seen (in runs' starts and suites' entries), whether a launcher alive offers it
+  (`offered`), its training runs and suites, and when a run last started on it (`used`).
+- `async def environment(self, environment: str) -> dict[str, Any] | None` — An environment's page (`rollout_train.monitor.environments.page_of`): what it says of itself where it loads
+  in this process (its version, rows, eval data, description and curriculum; else why it does not load) and what
+  the ledger has of it (each row played, its runs, suites, evals and newest check). None where it neither loads
+  nor is known.
 - `async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite` — Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,
   `edit_suite`): its `entries`, each its `environment` (`module:name`), how its starts are `chosen` (`eval data`,
   of the name `eval_data`; `rows and seeds`, `rows` (none: every row) and `seeds`; `starts`, each a row (`task`)
