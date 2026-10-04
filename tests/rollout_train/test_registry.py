@@ -12,6 +12,7 @@ from rollout_train.database import DatabaseLedger, copy
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.record import GROUPS, STEPS, scope, table
 from rollout_train.registry import BASE, Registry, Taken, found, names, registry_of, resolved, run_of
+from rollout_train.settings import desired_settings_of
 
 
 def ledger_of(tmp_path: Path, kind: str) -> Ledger:
@@ -129,11 +130,17 @@ async def test_a_reference_finds_a_version_by_bookmark_run_and_step_or_id(tmp_pa
         await resolved(ledger, registry, "idle")
 
 
-async def test_a_copy_into_a_database_keeps_the_runs_and_the_bookmarks(tmp_path: Path) -> None:
+async def test_a_copy_into_a_database_keeps_the_runs_the_bookmarks_the_suites_and_the_wanted_settings(
+    tmp_path: Path,
+) -> None:
     files, database = ledger_of(tmp_path, "files"), ledger_of(tmp_path, "database")
     registry = registered(files)
     run = await registry.create("copied")
     mark = await registry.bookmark("best", "kkkkkkkk")
+    await registry.point_suite("math", "math@2")
+    wanted = desired_settings_of(files)
+    assert wanted is not None
+    await wanted.want(run.id, {"groups_per_step": 8})
     fence = await files.take(scope(run.id))
     await files.append(table(run.id, GROUPS), "1", {"episodes": 1}, fence)
     assert isinstance(database, DatabaseLedger)
@@ -142,6 +149,9 @@ async def test_a_copy_into_a_database_keeps_the_runs_and_the_bookmarks(tmp_path:
     assert [(each.name, each.checkpoint) for each in await database.registry.bookmarks()] == [
         (mark.name, mark.checkpoint)
     ]
+    assert [(each.name, each.version) for each in await database.registry.suites()] == [("math", "math@2")]
+    copied = await database.desired_settings.desired(run.id)
+    assert copied is not None and copied.settings == {"groups_per_step": 8}
 
 
 def test_the_command_lists_versions_and_moves_bookmarks(

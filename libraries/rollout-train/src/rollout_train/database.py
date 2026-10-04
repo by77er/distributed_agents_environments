@@ -50,7 +50,7 @@ from rollout_train.registry import (
     valid,
     version_number,
 )
-from rollout_train.settings import Desired
+from rollout_train.settings import Desired, desired_settings_of
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(
@@ -524,7 +524,8 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
     tables yet; returns how many records. Records keep their keys and their order; each is noted under its scope's
     newest fence (the fence a record was written under is not read back through a ledger). A fence already in the
     target is kept if it is newer. The runs, bookmarks and dataset names registered beside `source` are registered
-    beside `target` too. To move to Postgres: copy, then point the profile's `[ledger] url` at it."""
+    beside `target` too, and so are the suites' names and what is wanted of each run's settings. To move to Postgres:
+    copy, then point the profile's `[ledger] url` at it."""
     tables = await source.tables()
     there = set(await target.tables())
     if clash := sorted(there & set(tables)):
@@ -565,4 +566,10 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
             await target.registry.bookmark(mark.name, mark.checkpoint)
         for each in await registered.datasets():
             await target.registry.name_dataset(each.name, each.dataset)
+        for suite in await registered.suites():
+            await target.registry.point_suite(suite.name, suite.version)
+        if (wanted := desired_settings_of(source)) is not None:
+            for entry in await registered.runs():
+                if (desired := await wanted.desired(entry.id)) is not None and desired.settings:
+                    await target.desired_settings.want(entry.id, desired.settings)
     return count
