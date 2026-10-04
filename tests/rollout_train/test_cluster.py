@@ -56,6 +56,16 @@ def test_the_example_describes_this_machine() -> None:
     assert cluster.guards.runs_gib == 6 and cluster.guards.training_gib == 4
 
 
+def test_the_cluster_configs_the_guide_shows_load() -> None:
+    import re
+
+    page = (ROOT / "docs" / "guide" / "cluster.md").read_text()
+    blocks = re.findall(r'^```toml title="cluster.toml"\n(.*?)^```$', page, re.MULTILINE | re.DOTALL)
+    assert blocks
+    for block in blocks:
+        assert cluster_of(block).inference
+
+
 def write(path: Path, text: str = SMALL) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)

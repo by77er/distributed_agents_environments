@@ -36,6 +36,12 @@ PUBLIC_MODULES = [
     ("rollout_train.profile", "A deployment, described and opened."),
     ("rollout_train.monitor", "A live web page over every run of a ledger."),
     ("rollout_train.pods", "GPU pods elsewhere: their identities, the training service's client."),
+    ("rollout_train.cluster", "The cluster config: infrastructure, found, read strictly, with secrets only by name."),
+    ("rollout_train.providers", "Inference providers and trainers: kinds, capabilities, auth, shared pools, routing."),
+    ("rollout_train.bridges", "Bridges between checkpoint formats, declared: the registry, paths, refused pairs."),
+    ("rollout_train.run_settings", "A run's settings: the schema, layers, flags and files, a full copy, diffs."),
+    ("rollout_train.presets", "Named, versioned run settings beside the ledger."),
+    ("rollout_train.validation", "One pure check of a run's settings against a cluster, with its rule table."),
     ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),
     # implementations
     ("rollout_durable", "A runner whose runs survive their process, on DBOS."),

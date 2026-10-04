@@ -21,6 +21,12 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
+- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`of_json`](#of_json), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
+- **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`OBJECTIVES`](#objectives), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
+- **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats, declared: the registry, paths, refused pairs. [`Bridge`](#bridge), [`BRIDGES`](#bridges), [`format_of`](#format_of), [`FORMATS`](#formats), [`NoBridge`](#nobridge), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused)
+- **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
+- **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#preset), [`Presets`](#presets), [`presets_of`](#presets_of)
+- **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -5085,6 +5091,1232 @@ class TrainerUnreachable(StepFailed)
 ```
 
 The training pod did not answer for as long as a step waits for it.
+
+## `rollout_train.cluster`
+
+The cluster config: infrastructure, found, read strictly, with secrets only by name.
+
+### `auth_problem`
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def auth_problem(where: str, auth: Auth, endpoints: Sequence[str]) -> str | None
+```
+
+Why a provider reached as `auth` at `endpoints` may not be, if it may not: with no auth, only on this
+machine.
+
+### `BlobsSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class BlobsSection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `str` | `'files'` | `files`, or `module:name` of the store. |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The store's settings (a `directory` for files), none of them a credential: those are the store's own, from its environment. |
+
+### `BridgeSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class BridgeSection
+```
+
+What a bridge's task asks for, where the cluster says more than the bridge declares (`[bridges."NAME"]`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `bridge` | `str` | required |  |
+| `cpus` | `float \| None` | `None` |  |
+| `memory_gib` | `float \| None` | `None` |  |
+
+### `Cluster`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class Cluster
+```
+
+A cluster, as its config describes it. It holds no secret, only references to secrets.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | What runs record as where they ran; the Ray namespace is `rollout-NAME`. |
+| `ledger` | `LedgerSection` | required |  |
+| `blobs` | `BlobsSection` | `field(default_factory=BlobsSection)` |  |
+| `scratch` | `str` | `'~/.cache/rollout/scratch'` | Node-local: checkpoints in use, fetched bases, bridge work, built Pythons. |
+| `ray` | `RaySection` | `field(default_factory=RaySection)` |  |
+| `tls` | `Tls \| None` | `None` |  |
+| `gateway` | `GatewaySection` | `field(default_factory=GatewaySection)` |  |
+| `monitor` | `MonitorSection` | `field(default_factory=MonitorSection)` |  |
+| `launcher` | `LauncherSection` | `field(default_factory=LauncherSection)` |  |
+| `runners` | `RunnersSection` | `field(default_factory=RunnersSection)` |  |
+| `guards` | `GuardsSection` | `field(default_factory=GuardsSection)` |  |
+| `inference` | `Mapping[str, InferenceProvider]` | `field(default_factory=dict[str, InferenceProvider])` |  |
+| `trainers` | `Mapping[str, TrainerProvider]` | `field(default_factory=dict[str, TrainerProvider])` |  |
+| `sandboxes` | `Mapping[str, SandboxesSection]` | `field(default_factory=dict[str, SandboxesSection])` |  |
+| `tools` | `Mapping[str, ToolsSection]` | `field(default_factory=dict[str, ToolsSection])` |  |
+| `environments` | `Mapping[str, EnvironmentSection]` | `field(default_factory=dict[str, EnvironmentSection])` |  |
+| `placement` | `Mapping[str, Mapping[str, float]]` | `field(default_factory=dict[str, Mapping[str, float]])` | Custom resources each role asks for, by role. |
+| `bridges` | `Mapping[str, BridgeSection]` | `field(default_factory=dict[str, BridgeSection])` |  |
+| `described` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue], repr=False, compare=False)` | The config as it was read (relative paths made absolute): what is handed on as JSON (`of_json`). |
+
+**Methods**
+
+- `@property def namespace(self) -> str`
+- `def secrets(self) -> dict[str, Secret]` — Every secret the config names, by where (`inference.tinker.auth.key`).
+
+### `ClusterError`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class ClusterError(ValueError)
+```
+
+A cluster config that cannot be used, and why.
+
+### `EnvironmentSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class EnvironmentSection
+```
+
+The Python an environment runs in (`[environments."NAME"]`): the platform's, or a uv project's lock built into a
+cached virtualenv.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str` | required |  |
+| `python` | `str \| None` | `'platform'` |  |
+| `project` | `str \| None` | `None` | A uv project's directory (relative paths are from the config file's). |
+
+### `find`
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def find(given: str | None = None, environ: Mapping[str, str] | None = None) -> Path
+```
+
+The cluster config's file: `given` (`--cluster`: a path, or a name under `~/.config/rollout/clusters`), else
+`ROLLOUT_CLUSTER` (the same), else `~/.config/rollout/cluster.toml`. Raises `ClusterError` where the file it
+names is not there, saying where it looked.
+
+### `GatewaySection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class GatewaySection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `url` | `str` | `'http://127.0.0.1:8830'` | How runners and harnesses reach it. |
+| `listen` | `str` | `'127.0.0.1:8830'` | `host:port` a replica serves on. |
+| `replicas` | `int` | `1` |  |
+| `keys` | `Secret \| None` | `None` | The secrets keys are signed with (`keys_file`, `keys_env`). |
+| `lifetime` | `float` | `21600.0` | Seconds a key minted for a slot is good for. |
+
+### `GuardsSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class GuardsSection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `runs_gib` | `float` | `0.0` | System memory a node must have free before a runner claims an episode. |
+| `training_gib` | `float` | `0.0` | And before a colocated step starts. |
+
+### `inspect`
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def inspect(cluster: Cluster, environ: Mapping[str, str] | None = None) -> list[str]
+```
+
+What is wrong with the cluster on this node, in words: each secret reference that does not resolve (by name,
+never by value), and each environment's project with no `uv.lock`. Empty: nothing.
+
+### `LauncherSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class LauncherSection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `at_once` | `int` | `1` | Runs it plays at once, beside what the cluster's resources allow. |
+
+### `LedgerSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class LedgerSection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `url` | `str \| None` | `None` | `sqlite:///…` on one machine, `postgresql://…` for several (with no password: that is `url_env`'s). |
+| `url_secret` | `Secret \| None` | `None` | The URL, named, where it holds a password (`url_env`, `url_file`). |
+
+### `load`
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def load(path: Path) -> Cluster
+```
+
+The cluster a config file describes, checked. Raises `ClusterError` saying what is wrong and where.
+
+### `MonitorSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class MonitorSection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `listen` | `str` | `'127.0.0.1:8765'` |  |
+| `feed_episodes` | `int` | `80` | Episodes kept in a run's live feed. |
+
+### `of_json`
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def of_json(described: Mapping[str, Any]) -> Cluster
+```
+
+The cluster a `Cluster.described` says: what a job or an actor is handed.
+
+### `parsed` {#rollout_trainclusterparsed}
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> Cluster
+```
+
+The cluster a config's table describes, checked; relative paths of environments' projects are from
+`relative_to`.
+
+### `RaySection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class RaySection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `address` | `str` | `'auto'` | The head this machine runs (`auto`), or `ray://host:port`. |
+| `jobs` | `str` | `'http://127.0.0.1:8265'` | The job server. |
+| `temp_dir` | `str` | `'~/.cache/ray'` | On disk: /tmp may be memory. |
+| `memory_threshold` | `float` | `0.85` | Ray's memory monitor kills a task past this share of the machine's memory. |
+| `python` | `str` | `'platform'` | The interpreter platform actors run in. |
+
+### `RunnersSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class RunnersSection
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `places` | `int` | `8` | Episodes one runner plays at once. |
+| `durable` | `bool` | `False` | Runs episodes so that they survive their process (`rollout_durable`). |
+| `database_url` | `str \| None` | `None` |  |
+| `database_secret` | `Secret \| None` | `None` | The durable runner's database (by default the ledger's). |
+
+### `SandboxesSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class SandboxesSection
+```
+
+A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `str` | required |  |
+| `provider` | `str` | required | `module:name` of what makes them. |
+| `python` | `str` | `'platform'` | `platform`, or the name of an environment whose Python the provider is in. |
+| `size` | `int` | `1` |  |
+| `cpus` | `float` | `1` |  |
+| `memory_gib` | `float` | `1` |  |
+| `pools` | `int` | `1` |  |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's own settings. |
+
+### `ToolsSection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class ToolsSection
+```
+
+A tool set served elsewhere, by name (`[tools.NAME]`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `url` | `str` | required |  |
+| `auth` | `Auth` | `field(default_factory=Auth)` |  |
+
+## `rollout_train.providers`
+
+Inference providers and trainers: kinds, capabilities, auth, shared pools, routing.
+
+### `Auth`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class Auth
+```
+
+How a provider is reached. `token` for `bearer`; `key` for `vendor` (what the vendor's SDK reads, named so that
+`rollout cluster check` can say whether it resolves); `trust` says whose CAs verify the server (`system` or
+`cluster`; by default the cluster's for `mtls`, the system's otherwise); `identity` is the SPIFFE identity the
+server's certificate must carry (`beats`: each server's own, from its heartbeat), in place of its host name.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `AuthKind` | `'none'` |  |
+| `token` | `Secret \| None` | `None` |  |
+| `key` | `Secret \| None` | `None` |  |
+| `trust` | `Literal['system', 'cluster'] \| None` | `None` |  |
+| `identity` | `str \| None` | `None` |  |
+
+**Methods**
+
+- `@property def trusts(self) -> Literal['system', 'cluster']` — Whose CAs verify the server.
+- `def connection(self, tls: Tls | None = None, *, identity: str | None = None) -> Connection` — The settings a client reaches the provider's servers with: the cluster's CA or the system's; a client
+  certificate only for `mtls`; the server's SPIFFE identity checked in place of its host name where one is said
+  (`identity`, the server's own from its heartbeat when `self.identity` is `beats`); else its host name. Raises
+  `ValueError` where the cluster has no `[tls]` it needs.
+
+### `AUTHS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+AUTHS: tuple[AuthKind, ...] = ('mtls', 'bearer', 'vendor', 'none')
+```
+
+How a provider is reached: mutual TLS with the cluster's CA, a bearer token, the vendor's SDK, or nothing (only on
+this machine).
+
+### `Capabilities`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class Capabilities
+```
+
+What an inference provider's kind can do.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `token_exact` | `bool` | required | Takes token ids and returns the exact sampled ids. |
+| `sampled_logprobs` | `bool` | required | Each sampled token's logprob, under the distribution it was sampled from. |
+| `prompt_logprobs` | `bool` | required | Logprobs of given tokens (scoring without sampling). |
+| `top_logprobs` | `int` | required | How many of the top logprobs it can return per position (0: none). |
+| `honours_sampling` | `bool` | required | Temperature and top-p are applied, so recorded logprobs describe what was sampled. |
+| `adapters` | `bool` | required | Serves LoRA adapters by name. |
+| `full_reload` | `bool` | required | Serves new full weights under a checkpoint's name. |
+| `streaming` | `bool` | required | Replies as a stream. |
+| `loads` | `frozenset[str]` | required | The checkpoint formats it serves (`peft`, `full`, `tinker`); none: base models only. |
+| `bills` | `Literal['none', 'tokens', 'hours']` | `'none'` | What it costs by: nothing, tokens (per model and token class), or hours of pods. |
+| `unchecked` | `frozenset[str]` | `frozenset()` | Capabilities declared as the SDK says but not yet confirmed by a live test: nothing relies on them until then (Tinker's prompt and top-k logprobs). |
+
+### `INFERENCE_KINDS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs', 'pool'), implementation='rollout_vllm:VllmEngine', shared=True), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs', 'pool'), implementation='rollout_train.inference:RemoteEngine', shared=True, remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=False, top_logprobs=0, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=None, fields=('endpoint',)), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca', 'max_logprobs', 'pool'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', shared=True, remote=True))}
+```
+
+Every kind of inference provider, by name.
+
+### `InferenceKind`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class InferenceKind
+```
+
+What a kind of inference provider is, whatever cluster it is in.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `capabilities` | `Capabilities` | required |  |
+| `auths` | `tuple[AuthKind, ...]` | required | The ways it may be reached. |
+| `auth` | `Auth \| None` | required | How it is reached when the cluster config does not say (none: the config must say). |
+| `fields` | `tuple[str, ...]` | required | The settings of its `[inference.NAME]` table beyond those every provider has. |
+| `secrets` | `tuple[str, ...]` | `()` | The secrets its table may name (`NAME_env`, `NAME_file`), beyond its auth's. |
+| `implementation` | `str \| None` | `None` | `module:name` of what samples it, where one module does. |
+| `shared` | `bool` | `False` | Whether runs share its servers as a pool (`SharedPool`). |
+| `remote` | `bool` | `False` | Whether its servers are reached at addresses (and so need an auth other than `none` unless local). |
+
+### `InferenceProvider`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class InferenceProvider
+```
+
+An inference provider as a cluster deploys it (`[inference.NAME]`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `kind` | `str` | required |  |
+| `capabilities` | `Capabilities` | required | The kind's, with this deployment's `max_logprobs`. |
+| `models` | `Mapping[str, ModelOffer]` | required |  |
+| `auth` | `Auth` | required |  |
+| `gpus` | `float` | `0` | Per replica. |
+| `replicas` | `int` | `1` | Per run channel, unless the run asks for more (`channels.NAME.replicas`). |
+| `pool` | `SharedPool \| None` | `None` | Set for a provider whose servers runs share. |
+| `endpoints` | `tuple[str, ...]` | `()` | Where its servers are reached (addresses, a router, where local engines listen). |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The rest of its table: its kind's own settings, none of them a secret. |
+| `secrets` | `Mapping[str, Secret]` | `field(default_factory=dict[str, Secret])` | The secrets its table names, beyond its auth's (RunPod's API key, Tinker's project). |
+
+**Methods**
+
+- `@property def local(self) -> bool` — Whether every endpoint it is reached at is on this machine.
+
+### `is_local`
+
+*function* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+def is_local(address: str) -> bool
+```
+
+Whether an address (a URL, or a host) is on this machine: `localhost` or a loopback address.
+
+### `ModelOffer`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class ModelOffer
+```
+
+A model a provider serves here.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `model` | `str` | required |  |
+| `context` | `int` | required | The longest sequence it takes, prompt and reply. |
+| `base` | `str \| None` | `None` | The model it was quantized from, if any: an adapter trained over the base can be served on it. |
+| `max_lora_rank` | `int \| None` | `None` | The highest adapter rank it loads (none: adapters are not limited here, or not served). |
+| `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens by token class (`input`, `cached_input`, `output`, `thinking`), or per hour (`hour`). |
+| `options` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What its engines are started with (`gpu_memory_utilization`, `max_num_seqs`, …). |
+
+### `OBJECTIVES`
+
+*constant* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+OBJECTIVES = ('policy_gradient/token', 'policy_gradient/segment', 'likelihood')
+```
+
+The objectives a trainer may take: the clipped policy gradient with a ratio per token (PPO) or per segment (GSPO),
+and likelihood (imitation).
+
+### `ROUTING`
+
+*constant* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+ROUTING = ('spill', 'weighted')
+```
+
+How turns are shared among a channel's providers: fill the first and spill the rest over to the next, or by
+weight.
+
+### `Routing`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class Routing
+```
+
+How a channel served by several providers shares its turns among them.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rule` | `Literal['spill', 'weighted']` | `'spill'` |  |
+| `providers` | `tuple[str, ...]` | `()` | In order: for `spill`, the first is filled before the next is asked. |
+| `weights` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | For `weighted`: each provider's weight. |
+
+### `Secret`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class Secret
+```
+
+A secret, named: an environment variable (`env`) or a file (`file`). The value is read where it is used, at the
+moment it is needed (`resolve`), and never kept.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `env` | `str \| None` | `None` |  |
+| `file` | `str \| None` | `None` |  |
+
+**Methods**
+
+- `def resolve(self, environ: Mapping[str, str] | None = None) -> str | None` — The secret's value, read now (none where the variable is unset or empty, or the file is missing).
+
+### `settings_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+def settings_of(kind: TrainerKind) -> tuple[SettingSpec, ...]
+```
+
+The settings a kind of trainer takes, by `trainer.FIELD`, with their types, defaults and whether they are
+changeable: read from its settings dataclass and the `CHANGEABLE` beside it (importing neither the trainer nor
+torch). Raises `ImportError` where the trainer's package is not installed here.
+
+### `SettingSpec`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class SettingSpec
+```
+
+One setting a trainer takes, read from its settings dataclass.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `key` | `str` | required | As a run names it: `trainer.FIELD`. |
+| `types` | `tuple[str, ...]` | required | The JSON types it takes: `int`, `float`, `bool`, `str`, `null`. |
+| `default` | `JsonValue` | required |  |
+| `changeable` | `bool` | required | Whether a running run takes it from its next step on. |
+
+**Methods**
+
+- `def accepts(self, value: JsonValue) -> bool` — Whether `value` is of a type it takes (a whole number is a float too; a bool is neither).
+
+### `SharedPool`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class SharedPool
+```
+
+A provider shared by several runs: its servers hold every bound run's live checkpoints as adapters side by
+side. A run joins when its rank fits the model's `max_lora_rank` and the pool has `max_lag + 1` free adapter slots
+for each channel it serves there; turns are shared among its runs by their `share`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `adapter_slots` | `int \| None` | `None` | Adapters its servers hold at once (none: not limited). |
+| `max_runs` | `int \| None` | `None` | Runs bound to it at once (none: as many as slots allow). |
+
+### `Tls`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class Tls
+```
+
+The cluster's own certificate authority and the client certificate its gateway and launcher present
+(the cluster config's `[tls]`): paths, never the keys themselves.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ca` | `str \| None` | `None` | The cluster CA's root certificate. |
+| `certificate` | `str \| None` | `None` |  |
+| `key` | `str \| None` | `None` | The client certificate and its key's file, for providers reached over mutual TLS. |
+| `identity` | `str` | `'spiffe://rollout/gateway'` | The SPIFFE identity the client certificate carries. |
+
+### `TRAINER_KINDS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none')), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_OBJECTIVE, True, frozenset({'tinker'})), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={'project': 'the cluster config says it ([trainers.NAME] project)', 'weights': 'the bridge says what files a channel loads'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',)))}
+```
+
+Every kind of trainer, by name.
+
+### `TrainerCapabilities`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class TrainerCapabilities
+```
+
+What a kind of trainer makes and takes.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `produces` | `Literal['lora', 'full']` | required |  |
+| `format` | `str` | required | The checkpoint format its files are in: `peft`, `full` or `tinker`. |
+| `objectives` | `frozenset[str]` | required | Among `OBJECTIVES`. |
+| `scores` | `bool` | required | Can compute logprobs of given tokens (for distillation, and supervised data without behaviour logprobs). |
+| `starts_from` | `frozenset[str]` | required | Checkpoint formats a run may start from (besides the base model). |
+
+### `TrainerKind`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class TrainerKind
+```
+
+What a kind of trainer is, whatever cluster it is in.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `capabilities` | `TrainerCapabilities` | required |  |
+| `implementation` | `str` | required | `module:name` of the trainer. |
+| `settings` | `str` | required | `module:name` of its settings dataclass: each field a setting `trainer.FIELD`, the module's `CHANGEABLE` the ones it takes between steps. |
+| `auths` | `tuple[AuthKind, ...]` | required |  |
+| `auth` | `Auth` | required |  |
+| `fields` | `tuple[str, ...]` | `()` | The settings of its `[trainers.NAME]` table beyond those every trainer has. |
+| `secrets` | `tuple[str, ...]` | `()` |  |
+| `not_settings` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Fields of its settings dataclass a run does not set, and why. |
+
+### `TrainerProvider`
+
+*class* · `libraries/rollout-train/src/rollout_train/providers.py`
+
+```python
+class TrainerProvider
+```
+
+A trainer as a cluster deploys it (`[trainers.NAME]`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `kind` | `str` | required |  |
+| `capabilities` | `TrainerCapabilities` | required |  |
+| `models` | `tuple[str, ...]` | required | The models it trains here. |
+| `auth` | `Auth` | required |  |
+| `segment_tokens` | `int \| None` | `None` | The longest segment this hardware trains on (none: any). |
+| `gpus` | `float` | `0` |  |
+| `colocate_with` | `str \| None` | `None` | A `vllm` provider whose GPU it shares: that provider's engines sleep while it steps. |
+| `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens trained (`train`), or per hour (`hour`). |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The rest of its table: its kind's own settings, none of them a secret. |
+| `secrets` | `Mapping[str, Secret]` | `field(default_factory=dict[str, Secret])` |  |
+
+**Methods**
+
+- `@property def runs(self) -> TrainerKind` — The kind of trainer its steps are taken by (for `runpod-trainer`, the one it names).
+
+## `rollout_train.bridges`
+
+Bridges between checkpoint formats, declared: the registry, paths, refused pairs.
+
+### `Bridge`
+
+*class* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+class Bridge
+```
+
+One bridge: from a format to another, the task that does it, and what the task needs.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `source` | `str` | required |  |
+| `target` | `str` | required |  |
+| `task` | `str \| None` | required | `module:name` of the function that writes the target's files from the source's; none: the files are served as they are, with nothing written. |
+| `says` | `str` | required |  |
+| `cpus` | `float` | `1` |  |
+| `memory_gib` | `float` | `1` |  |
+| `network` | `bool` | `False` | Whether the task fetches from outside the cluster (Tinker's archive). |
+| `rank_factors` | `tuple[tuple[str, int], ...]` | `()` | By model pattern (`fnmatch`): how many times the trained rank the provider sees. |
+| `explicit` | `bool` | `False` | Chosen only when the run asks for it (`channels.NAME.bridge`), never by the path search alone. |
+| `cost` | `int` | `1` | Its weight in the path search. |
+
+### `BRIDGES`
+
+*constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+BRIDGES: tuple[Bridge, ...] = (Bridge('none', 'tinker', 'tinker', None, "served as it is: Tinker's sampler reads the checkpoint's pointer", cost=0), Bridge('peft-from-tinker', 'tinker', 'peft', 'rollout_tinker.bridges:peft', "Tinker's adapter downloaded and written in PEFT's layout", cpus=2, network=True, rank_factors=(('Qwen/Qwen3.5-*', 3),)), Bridge('verbatim', 'peft', 'peft', 'rollout_train.resharding:verbatim', "the adapter's files, linked as they are"), Bridge('full-reload', 'full', 'full', 'rollout_train.resharding:verbatim', "the full weights' files, linked as they are and loaded under the checkpoint's name, replica by replica"), Bridge(MERGE_QUANTIZE, 'peft', 'full', 'rollout_lora.bridges:merge_quantize', "the adapter merged into its base and quantized as the provider's model is", cpus=8, memory_gib=48, explicit=True, cost=10))
+```
+
+Every bridge, by its pair of formats.
+
+### `format_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def format_of(files: Collection[str]) -> frozenset[str]
+```
+
+The formats a checkpoint's files are in, by their paths within it (a manifest's, with or without the leading
+`weights/`): `tinker.json` is `tinker`; `adapter_config.json` with `adapter_model.safetensors` is `peft`;
+`config.json` with safetensors weights is `full`. A checkpoint can be in two at once.
+
+### `FORMATS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+FORMATS = ('peft', 'full', 'tinker')
+```
+
+The checkpoint formats: an adapter in PEFT's layout, full weights (safetensors and a `config.json`), and pointers
+to Tinker's sampler checkpoint and state.
+
+### `NoBridge`
+
+*class* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+class NoBridge
+```
+
+A pair of formats with no path between them, and why.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `source` | `str` | required |  |
+| `target` | `str` | required |  |
+| `reason` | `str` | required |  |
+
+### `path`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def path(source: str, loads: Collection[str], *, wanted: str = AUTO) -> tuple[Bridge, ...] | NoBridge
+```
+
+The cheapest chain of bridges from `source` to one of the formats in `loads`. `wanted` is the run's
+`channels.NAME.bridge`: `auto`, or `merge-quantize` for a path through it (a bridge marked `explicit` is used
+only then).
+
+### `rank_factor`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def rank_factor(chain: Collection[Bridge], model: str) -> int
+```
+
+How many times the trained rank a provider sees, after the bridges of `chain`, for an adapter over `model`.
+
+### `REFUSED`
+
+*constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+REFUSED: tuple[NoBridge, ...] = (NoBridge('peft', 'tinker', _NO_UPLOAD), NoBridge('full', 'tinker', _NO_UPLOAD), NoBridge('full', 'peft', 'full weights are not an adapter: serve them on a provider that reloads full weights'))
+```
+
+Pairs refused on purpose, with the reason a run is told.
+
+## `rollout_train.run_settings`
+
+A run's settings: the schema, layers, flags and files, a full copy, diffs.
+
+### `Change`
+
+*class* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+class Change
+```
+
+One key that differs between two settings: `before` or `after` is absent where the key was not given.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `key` | `str` | required |  |
+| `before` | `JsonValue` | `None` |  |
+| `after` | `JsonValue` | `None` |  |
+| `added` | `bool` | `False` |  |
+| `removed` | `bool` | `False` |  |
+
+### `diff`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def diff(before: Mapping[str, JsonValue], after: Mapping[str, JsonValue]) -> list[Change]
+```
+
+What changed from `before` to `after`, key by key, in key order.
+
+### `flattened`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def flattened(table: Mapping[str, Any], prefix: str = '') -> dict[str, JsonValue]
+```
+
+Nested tables as dotted keys, down to a key the schema takes a table for (`channels.NAME.weights`).
+
+### `from_file`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def from_file(path: Path) -> dict[str, JsonValue]
+```
+
+Settings from a file: JSON (`.json`, where `null` unsets a key) or TOML, of dotted keys (`"trainer.rank" =
+16`) or tables (`[trainer] rank = 16`), or both.
+
+### `from_flags`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def from_flags(given: Sequence[str]) -> dict[str, JsonValue]
+```
+
+`--set KEY=VALUE` flags, in order (a later one wins). A value is read as JSON (`null`, `3e-5`, `true`,
+`["a", "b"]`, `"text"`), else as TOML (`{ a = 1 }`), else as the text it is (`rollout_qwen:qwen35`).
+
+### `is_trainers`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def is_trainers(key: str) -> bool
+```
+
+Whether `key` is one of the trainer's own settings (`trainer.rank`).
+
+### `Key`
+
+*class* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+class Key
+```
+
+One key of the schema.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `pattern` | `str` | required | Dotted, `*` for a part that names something (`channels.*.model`). |
+| `types` | `tuple[str, ...]` | required | The JSON types it takes: `int`, `float`, `bool`, `str`, `null`, `list`, `table`. |
+| `default` | `JsonValue` | required |  |
+| `changeable` | `bool` | required |  |
+| `kinds` | `frozenset[str]` | required |  |
+| `says` | `str` | required |  |
+| `least` | `float \| None` | `None` | The smallest number it takes. |
+| `choices` | `tuple[str, ...]` | `()` | The strings it takes, where it takes only some. |
+| `above` | `bool` | `False` | `least` itself is not taken (a share above 0). |
+
+**Methods**
+
+- `def problem(self, value: JsonValue) -> str | None` — What is wrong with `value` for this key, in words; none when nothing is.
+
+### `key_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def key_of(key: str) -> Key | None
+```
+
+The schema's key that `key` is (`channels.policy.model` is `channels.*.model`); none for a key that is not in
+it (a trainer's own setting among them).
+
+### `KEYS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('distill.channel', _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"), Key('distill.k', _I + _N, None, False, TRAINED, 'Top-k logprobs matched; none: the teacher scores', least=1), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True))
+```
+
+Every key a run takes, beside the trainer's own (`trainer.FIELD`).
+
+### `KINDS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+KINDS = ('train', 'eval', 'imitate', 'check')
+```
+
+The kinds of run: training, an eval of one subject, supervised steps on a dataset, an environment's check.
+
+### `layered`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def layered(*layers: Mapping[str, JsonValue] | None) -> RunSettings
+```
+
+Settings given in layers, each over the ones before (a preset's, a file's, the flags'): a key of a later layer
+replaces the same key of an earlier one.
+
+### `recorded`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def recorded(settings: RunSettings, trainer: Sequence[SettingSpec] = (), preset: str | None = None) -> dict[str, JsonValue]
+```
+
+What a run's start records of its settings: a full copy, fixed and changeable (every key with its value,
+defaults included), and, as provenance only, the preset version they came from (`NAME@N`).
+
+### `RunSettings`
+
+*class* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+class RunSettings
+```
+
+A run's settings, as given (`values`), answering with the schema's defaults for what was not.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `values` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+
+**Methods**
+
+- `def get(self, key: str, default: JsonValue = None) -> JsonValue` — A key's value: as given, else the schema's default, else `default` (a trainer's own setting).
+- `@property def kind(self) -> str`
+- `@property def trained(self) -> str | None` — The trained channel, for a training run.
+- `@property def channels(self) -> list[str]` — Every channel the settings name, in the order first named.
+- `def providers(self, channel: str) -> tuple[str, ...]` — The providers of a channel, in order (`providers`, or the one `provider`).
+- `@property def trainer_model(self) -> str | None` — What the trainer trains over: `trainer.model`, else the trained channel's model.
+- `def mode(self, channel: str) -> str` — `trained` for the trained channel, else its `mode` (`fixed` by default).
+- `def split(self, trainer: Sequence[SettingSpec] = ()) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]` — The settings in full (every key of the schema for the run's kind and channels, with defaults, and the
+  trainer's own with theirs), as fixed ones and changeable ones.
+
+### `shortcuts`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def shortcuts(*, model: str | None = None, provider: str | None = None, renderer: str | None = None, trainer: str | None = None, channel: str = 'policy') -> dict[str, JsonValue]
+```
+
+What `--model`, `--provider`, `--renderer` and `--trainer` set, for the channel `--channel` names.
+
+## `rollout_train.presets`
+
+Named, versioned run settings beside the ledger.
+
+### `DatabasePresets`
+
+*class* · `libraries/rollout-train/src/rollout_train/presets.py`
+
+```python
+class DatabasePresets
+```
+
+`Presets` in the `presets` table of a database (a row per version, keyed by name and version: inserting a
+version that is there fails, and the next number is tried).
+
+**Methods**
+
+- `def __init__(self, database: 'Database') -> None`
+- `async def all(self) -> list[Preset]`
+- `async def versions(self, name: str) -> list[Preset]`
+- `async def get(self, reference: str) -> Preset | None`
+- `async def save(self, name: str, settings: Mapping[str, JsonValue], note: str = '') -> Preset`
+- `async def delete(self, name: str) -> Preset`
+
+### `FilePresets`
+
+*class* · `libraries/rollout-train/src/rollout_train/presets.py`
+
+```python
+class FilePresets
+```
+
+`Presets` in a directory: `NAME/N.json` for each version, each written beside its place and linked into it
+only if no version N is there (the compare-and-set), so writers need no lock.
+
+**Methods**
+
+- `def __init__(self, directory: Path) -> None`
+- `async def all(self) -> list[Preset]`
+- `async def versions(self, name: str) -> list[Preset]`
+- `async def get(self, reference: str) -> Preset | None`
+- `async def save(self, name: str, settings: Mapping[str, JsonValue], note: str = '') -> Preset`
+- `async def delete(self, name: str) -> Preset`
+
+### `parsed` {#rollout_trainpresetsparsed}
+
+*function* · `libraries/rollout-train/src/rollout_train/presets.py`
+
+```python
+def parsed(reference: str) -> tuple[str, int | None]
+```
+
+`NAME` or `NAME@N`, as the name and the version (none: the newest).
+
+### `Preset`
+
+*class* · `libraries/rollout-train/src/rollout_train/presets.py`
+
+```python
+class Preset
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `version` | `int` | required | 1, 2, …: each save is a new version. |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+| `saved` | `float` | `0.0` |  |
+| `note` | `str` | `''` |  |
+| `deleted` | `bool` | `False` | A version that says the preset was deleted: its name points to nothing from here on. |
+
+**Methods**
+
+- `@property def id(self) -> str` — `NAME@N`: what a run records as where its settings came from.
+
+### `Presets`
+
+*class* · `libraries/rollout-train/src/rollout_train/presets.py`
+
+```python
+class Presets(Protocol)
+```
+
+**Methods**
+
+- `async def all(self) -> list[Preset]` — Every preset's newest version, by name, leaving out the deleted ones.
+- `async def versions(self, name: str) -> list[Preset]` — Every version of a preset saved, oldest first (deletions left out).
+- `async def get(self, reference: str) -> Preset | None` — A preset by name (its newest version, none if it was deleted) or one version (`NAME@N`).
+- `async def save(self, name: str, settings: Mapping[str, JsonValue], note: str = '') -> Preset` — Save settings as the preset's next version. Raises `ValueError` for a name that cannot be one, or a key a
+  preset cannot hold.
+- `async def delete(self, name: str) -> Preset` — Mark a preset deleted (its versions stay readable). Raises `KeyError` for a preset there is none of.
+
+### `presets_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/presets.py`
+
+```python
+def presets_of(ledger: object) -> Presets | None
+```
+
+The presets beside a ledger: a table in a database ledger's database, a directory beside a ledger of files
+(`presets`, in its directory); none beside any other.
+
+## `rollout_train.validation`
+
+One pure check of a run's settings against a cluster, with its rule table.
+
+### `check`
+
+*function* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+def check(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None = None, ledger: LedgerFacts | None = None) -> list[Finding]
+```
+
+Everything wrong with a run's settings on this cluster, given what is known of its environment and the ledger;
+empty when nothing is. A finding whose `refuses` is false is a note: the run may go.
+
+### `CheckpointFacts`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class CheckpointFacts
+```
+
+A checkpoint a run's settings name (its start, a fixed channel's), as the ledger has it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `reference` | `str` | required |  |
+| `exists` | `bool` | `True` |  |
+| `released` | `bool` | `False` | Its weights were deleted. |
+| `formats` | `frozenset[str]` | `frozenset()` | The formats its files are in (`rollout_train.bridges.format_of`). |
+| `model` | `str \| None` | `None` | The model it was trained over. |
+
+### `EnvironmentFacts`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class EnvironmentFacts
+```
+
+What the environment's worker says of it, asked beforehand.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `loads` | `bool` | `True` |  |
+| `why` | `str` | `''` | Why it does not load, where it does not. |
+| `sandboxes` | `frozenset[str]` | `frozenset()` | The sandbox kinds its programs need. |
+| `tool_sets` | `frozenset[str]` | `frozenset()` | The tool sets its programs import by name that are served elsewhere (`[tools.NAME]`). |
+| `slots` | `frozenset[str] \| None` | `None` | Its programs' slots (none: not known). |
+| `episodes_per_group` | `int \| None` | `None` |  |
+| `turns_per_episode` | `float \| None` | `None` |  |
+| `prompt_tokens` | `int \| None` | `None` | Prompt tokens of a turn, on average: with the two above, what a step's spend is estimated from. |
+
+### `estimated_spend`
+
+*function* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None
+```
+
+Dollars one step is estimated to cost, at most: the trained channel's sampled tokens (every turn filling its
+budgets) times the trainer's cost to train them and the dearest provider's to sample them, and the prompts' tokens
+times that provider's. None where it cannot be estimated: budgets or the environment's numbers unknown, or a
+provider or trainer that bills by the hour.
+
+### `Finding`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class Finding
+```
+
+One thing wrong with a run's settings: the rule, the key it is about (the field a form marks), and why.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rule` | `str` | required |  |
+| `key` | `str` | required |  |
+| `reason` | `str` | required |  |
+| `refuses` | `bool` | `True` | False: the run may go (it waits, or something could not be known); the finding is a note. |
+
+### `LedgerFacts`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class LedgerFacts
+```
+
+What the ledger, and the launchers' offers beside it, say, asked beforehand.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `checkpoints` | `Mapping[str, CheckpointFacts]` | `field(default_factory=dict[str, CheckpointFacts])` | Every checkpoint reference the settings name, looked up (one not here does not exist). |
+| `suites` | `Mapping[str, SuiteFacts]` | `field(default_factory=dict[str, SuiteFacts])` |  |
+| `names_taken` | `frozenset[str]` | `frozenset()` |  |
+| `pools` | `Mapping[str, PoolUse]` | `field(default_factory=dict[str, PoolUse])` | By provider. |
+| `gpus` | `float \| None` | `None` | GPUs the cluster has in all (none: not known). |
+| `gpus_free` | `float \| None` | `None` |  |
+
+### `PoolUse`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class PoolUse
+```
+
+A shared pool's use by the runs bound to it now.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `runs` | `int` | `0` |  |
+| `slots` | `int` | `0` | Adapter slots they hold. |
+| `shares` | `float` | `0.0` | The sum of their shares. |
+
+### `refusals`
+
+*function* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+def refusals(findings: list[Finding]) -> list[Finding]
+```
+
+The findings that refuse the run.
+
+### `Rule`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class Rule
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `refuses` | `str` | required | When it refuses a run, in words. |
+
+### `RULES`
+
+*constant* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact with sampled logprobs and honoured sampling"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'adapters for a provider without adapters, full weights for one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'an objective the trainer does not take'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'a teacher without the logprobs distillation needs, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', 'more GPUs than the cluster has'), Rule('pools', 'more adapter slots than a shared pool has'), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+```
+
+Every rule `check` applies, in the order it reports them.
+
+### `SuiteFacts`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class SuiteFacts
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `newest` | `int` | required | Its newest version's number. |
+| `environments` | `frozenset[str]` | `frozenset()` |  |
 
 ## `rollout_train.testing`
 

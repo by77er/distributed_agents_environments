@@ -27,6 +27,7 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 - [Models](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
 - [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
 - [Deploying](docs/guide/deploying.md): the profile file and the `rollout` command
+- [The cluster config and run settings](docs/guide/cluster.md): providers, trainers, bridges, run settings, presets, validation
 - [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
 
 ## Architecture

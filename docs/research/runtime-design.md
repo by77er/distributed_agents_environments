@@ -1092,6 +1092,43 @@ Where commits would collide, one owns the file:
 - `gateway/service.py`: 7, then 11.
 - `settings.py`: 5 only; `resharding.py`: 6 renames it, 13 removes its in-process path.
 
+### The declarations, and how later tracks use them
+
+The pure parts of 3, 4, 5 and 8 are in as modules of their own, wired into nothing
+([the cluster config and run settings](../guide/cluster.md)): `rollout_train.cluster` (the schema, `find`, `load`,
+secrets by name, `inspect`), `rollout_train.providers` (kinds, capabilities, `auth`, shared pools, routing,
+`settings_of`), `rollout_train.bridges` (the registry by format pair, `path`, `rank_factor`, `format_of`),
+`rollout_train.run_settings` (the schema `KEYS`, layers, `--set` and files, `recorded`, `diff`),
+`rollout_train.presets` (`FilePresets`, `DatabasePresets`, `presets_of`) and `rollout_train.validation` (`check`, its
+rule table, the facts it takes). They differ from the text above where later decisions moved them: each provider
+declares an `auth` (`mtls`, `bearer`, `vendor`, `none` only on this machine) instead of a `connection` table, and the
+cluster has a `[tls]` section for its CA and client certificate; trainers are named by kind (`lora`, `full`, `tinker`,
+`runpod-trainer`), not `module:name`; the gateway and the monitor have `listen` addresses, not Serve routes;
+`RunSettings` is in `run_settings.py`, beside `settings.py`'s desired settings; validation returns `Finding`s, each
+refusing or a note, rather than `Plan | Refused`.
+
+What later tracks take from them:
+
+- **4, the rest** (`Stores.open`, `rollout cluster check`): open the ledger and blobs from `Cluster.ledger` and
+  `Cluster.blobs`, resolving `Secret`s on the node; print `inspect(cluster)`.
+- **5, the rest** (`rollout preset`, `--settings`, `--set`, `--preset`): `presets_of(ledger)`, then
+  `layered(preset.settings, from_file(path), from_flags(sets) | shortcuts(...))`; a run's start records
+  `recorded(settings, settings_of(trainer.runs), preset.id)`.
+- **6** (bridges as tasks): fill in each `Bridge.task` (`rollout_tinker.bridges:peft`,
+  `rollout_lora.bridges:merge_quantize`), run the chain `path` chose, keyed `CHECKPOINT@BRIDGE`; `format_of` reads a
+  manifest's paths.
+- **10, 11** (engine hosts, the gateway): a channel's servers from `RunSettings.providers(channel)` and its `routing`;
+  each server's client from `provider.auth.connection(cluster.tls, identity=...)`; a `follows` channel reads the
+  followed channel's serving record `lag` checkpoints back; shared pools by `SharedPool.adapter_slots` and `share`.
+- **13** (runs as jobs): `limits.spend` by `estimated_spend` and the trainer's and providers' `cost`.
+- **14, 17** (the launcher, the monitor): gather `EnvironmentFacts` (from the environment worker) and `LedgerFacts`
+  (checkpoints the settings name with `format_of`, suites, names taken, pools' use, capacity), then
+  `check(settings, cluster, environment, ledger)`; refuse on `refusals(...)`, show notes as waiting; mark each
+  finding's `key` in the form. The offers JSON is the cluster's providers with their `capabilities` and
+  `path(...)` for each trainer and provider pair.
+- **19**: `deploy/clusters/example.toml` is the documented single-machine config; the profile-coverage test in
+  `tests/rollout_train/test_run_settings.py` goes with `profile.py`.
+
 ### What the acceptance run needs from each step
 
 **The run.** Trainer: Tinker LoRA on `Qwen/Qwen3.5-4B`. Inference: `local-vllm`, the same model unquantized on the

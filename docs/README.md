@@ -20,6 +20,7 @@ How to build with it. Runnable examples are part of the test suite.
 | [Runs and events](guide/runs-and-events.md) | What a run records: effects, identifiers, events; the local runner |
 | [Models](guide/models.md), [Testing](guide/testing.md) | Third-party models through the Responses API (`rollout-openai`); scripted models |
 | [Deploying](guide/deploying.md) | The profile file and the `rollout` command |
+| [The cluster config and run settings](guide/cluster.md) | Providers, trainers, bridges, run settings, presets, and the one check of a run |
 | [API reference](guide/reference.md) | Every public name, generated from the source |
 
 ## Architecture
