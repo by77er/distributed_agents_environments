@@ -105,7 +105,8 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 ## What can change while a run goes
 
 Some of a run's settings can change between two steps without breaking it, and are taken from its next step on:
-`groups_per_step`, the `evals` (`evals.suite`, `evals.every`, `evals.episodes`), and the settings its trainer takes
+`groups_per_step`, `max_lag` (how many checkpoints behind the newest a turn of the trained channel may begin; the
+channel's `max_lag` to start with), the `evals` (`evals.suite`, `evals.every`, `evals.episodes`), and the settings its trainer takes
 between steps (`trainer.learning_rate`, and for `rollout_lora`'s trainers the clips, `truncate`, `tokens_per_step`,
 `max_kl` and `max_gradient_norm`). The rest are fixed when it starts: the channels, their models and engines, the
 trainer's kind, what its weights are and its other settings (the adapter's `rank`, the longest segment), the runner,

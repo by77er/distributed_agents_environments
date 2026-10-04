@@ -31,10 +31,12 @@ from pydantic import JsonValue
 from rollout_train.ledger import FileLedger, Ledger
 
 GROUPS_PER_STEP = "groups_per_step"
+MAX_LAG = "max_lag"
+"""How many checkpoints behind the newest a turn of the trained channel may begin (0: only the newest)."""
 EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES = "evals.suite", "evals.every", "evals.episodes"
 TRAINER = "trainer."
 """The start of a setting the trainer takes (`trainer.learning_rate`): what follows is its name for it."""
-CHANGEABLE = (GROUPS_PER_STEP, EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES)
+CHANGEABLE = (GROUPS_PER_STEP, MAX_LAG, EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES)
 """The changeable settings every training run has; its trainer's (`trainer.…`) are beside them."""
 
 
@@ -71,6 +73,10 @@ def checked(key: str, value: JsonValue) -> JsonValue:
     if key in (GROUPS_PER_STEP, EVALS_EVERY, EVALS_EPISODES):
         if isinstance(value, bool) or not isinstance(value, int | float) or int(value) != value or value < 1:
             raise ValueError(f"{key} is a whole number, 1 at least (not {value!r})")
+        return int(value)
+    if key == MAX_LAG:
+        if isinstance(value, bool) or not isinstance(value, int | float) or int(value) != value or value < 0:
+            raise ValueError(f"{key} is a whole number, 0 at least (not {value!r})")
         return int(value)
     if key == EVALS_SUITE:
         if value is not None and not isinstance(value, str):
@@ -113,10 +119,11 @@ def fixed(profile: Any, trainer: Any, **loop: JsonValue) -> dict[str, JsonValue]
     return {key: _json(value) for key, value in said.items()}
 
 
-def changeable(trainer: Any, *, groups_per_step: int, evals: Any = None) -> dict[str, JsonValue]:
-    """A training run's changeable settings as it starts, by dotted key: the groups a step waits for, its evals (an
-    `rollout_train.profile.EvalsSpec`, or none), and the settings its trainer takes between steps with their values."""
-    said: dict[str, JsonValue] = {GROUPS_PER_STEP: groups_per_step}
+def changeable(trainer: Any, *, groups_per_step: int, max_lag: int, evals: Any = None) -> dict[str, JsonValue]:
+    """A training run's changeable settings as it starts, by dotted key: the groups a step waits for, how far behind
+    the newest checkpoint a turn may begin, its evals (an `rollout_train.profile.EvalsSpec`, or none), and the settings
+    its trainer takes between steps with their values."""
+    said: dict[str, JsonValue] = {GROUPS_PER_STEP: groups_per_step, MAX_LAG: max_lag}
     said |= {EVALS_SUITE: evals.suite if evals else None, EVALS_EVERY: evals.every if evals else 1}
     said |= {EVALS_EPISODES: evals.episodes if evals else 1}
     return said | {f"{TRAINER}{key}": _json(value) for key, value in _changeable_of(trainer).items()}

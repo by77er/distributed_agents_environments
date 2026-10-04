@@ -64,6 +64,7 @@ from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.evals import Schedule, evaluate
+from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
 from rollout_train.ledger import Fence
 from rollout_train.record import (
     EVALS,
@@ -83,7 +84,7 @@ from rollout_train.resharding import RESHARDED
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
 from rollout_train.serving import Serving, qualified, record_serving
-from rollout_train.settings import EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, GROUPS_PER_STEP, TRAINER, applied
+from rollout_train.settings import EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, GROUPS_PER_STEP, MAX_LAG, TRAINER, applied
 from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, StepFailed, Trainer, Weighted
 
 
@@ -114,6 +115,7 @@ async def train(
     algorithm: Algorithm | None = None,
     groups: int = 100,
     groups_per_step: int = 4,
+    max_lag: int = MAX_LAG_DEFAULT,
     episodes_at_once: int = 6,
     seed: int = 0,
     binding: RunBinding | None = None,
@@ -182,6 +184,7 @@ async def train(
     the last of one before it has ended)."""
     settings: dict[str, JsonValue] = {
         GROUPS_PER_STEP: groups_per_step,
+        MAX_LAG: max_lag,
         EVALS_SUITE: evals.suite.name if evals else None,
         EVALS_EVERY: evals.every if evals else 1,
         EVALS_EPISODES: evals.episodes if evals else 1,
@@ -214,6 +217,7 @@ async def train(
         wanted = Serving(
             channel, checkpoint.id, checkpoint.depth, checkpoint.kind, manifest, layout and layout.get("layout"),
             await _over(checkpoints, checkpoint), base, trainer.budget.segment_tokens,
+            max_lag=int(str(settings[MAX_LAG])),
         )  # fmt: skip
         await record_serving(ledger, run, wanted, fence)  # (whatever serves the channel elsewhere follows it)
         if reshard is not None:
@@ -307,7 +311,8 @@ async def train(
         await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
         await evaluated_with(now)  # (and one that died while evaluating it finishes the eval)
     else:  # (the base model, until the first checkpoint)
-        await record_serving(ledger, run, Serving(channel, model=base, sequence=trainer.budget.segment_tokens), fence)
+        first = Serving(channel, model=base, sequence=trainer.budget.segment_tokens, max_lag=max_lag)
+        await record_serving(ledger, run, first, fence)
 
     outstanding: dict[asyncio.Task[list[Episode]], int] = {}
     """Groups being played, by the task that waits for their episodes."""

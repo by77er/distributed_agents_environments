@@ -115,14 +115,20 @@ async def _train(
             schedule = Schedule(suite, offered, platform.eval_run, asked.every, asked.episodes, binding)
         started["settings"] = {
             "fixed": fixed(described, platform.trainer, groups=groups, seed=seed),
-            "changeable": changeable(platform.trainer, groups_per_step=groups_per_step, evals=described.evals),
+            "changeable": changeable(
+                platform.trainer,
+                groups_per_step=groups_per_step,
+                max_lag=described.channels[channel].max_lag,
+                evals=described.evals,
+            ),
         }
         async with ending(platform.ledger, platform.run.id):
             await train(
             offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
             base=described.channels[channel].model,
             directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
-            groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
+            groups_per_step=groups_per_step, max_lag=described.channels[channel].max_lag, seed=seed,
+            episodes_at_once=described.episodes_at_once, binding=binding,
             run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
             reshard=platform.reshard if platform.layout else None, evals=schedule, desired=desired,
             scheduled=scheduled,

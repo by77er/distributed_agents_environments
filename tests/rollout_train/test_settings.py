@@ -117,10 +117,11 @@ def test_a_runs_settings_are_its_profiles_split_into_fixed_and_changeable(tmp_pa
     assert said["model"] == "a-checkpoint" and said["weights"] == "lora" and said["trainer.segment_tokens"] == 900
     assert said["channels.policy.engines"] == 2 and said["episodes_at_once"] == 6 and said["groups"] == 40
     assert "trainer.learning_rate" not in said  # (the trainer takes it between steps)
-    assert changeable(trainer, groups_per_step=4, evals=EvalsSpec("words-v1", every=2)) == {
-        GROUPS_PER_STEP: 4, EVALS_SUITE: "words-v1", EVALS_EVERY: 2, "evals.episodes": 1, "trainer.learning_rate": 1e-4,
+    assert changeable(trainer, groups_per_step=4, max_lag=1, evals=EvalsSpec("words-v1", every=2)) == {
+        GROUPS_PER_STEP: 4, "max_lag": 1, EVALS_SUITE: "words-v1", EVALS_EVERY: 2, "evals.episodes": 1,
+        "trainer.learning_rate": 1e-4,
     }  # fmt: skip
-    assert set(changeable(Counting(), groups_per_step=4)) == set(CHANGEABLE)
+    assert set(changeable(Counting(), groups_per_step=4, max_lag=1)) == set(CHANGEABLE)
     wrapped = Colocated(trainer, [])
     assert isinstance(wrapped, Changeable) and wrapped.changeable == {"learning_rate": 1e-4}
     wrapped.change({"learning_rate": 5e-5})
@@ -162,10 +163,10 @@ async def test_a_running_loop_takes_the_changeable_settings_wanted_from_the_next
     steps: Any = await ledger.read(table("train", STEPS))
     used = [steps[key]["settings"] for key in sorted(steps, key=int)]
     assert len(used) >= 3
-    assert used[0] == {GROUPS_PER_STEP: 1, EVALS_SUITE: None, EVALS_EVERY: 1, "evals.episodes": 1,
+    assert used[0] == {GROUPS_PER_STEP: 1, "max_lag": 1, EVALS_SUITE: None, EVALS_EVERY: 1, "evals.episodes": 1,
                        "trainer.learning_rate": 1e-4}  # fmt: skip
     assert all(each == used[1] for each in used[1:])  # (taken from the step after the change, and kept)
-    assert used[1] == {GROUPS_PER_STEP: 2, EVALS_SUITE: "words-v1", EVALS_EVERY: 1, "evals.episodes": 1,
+    assert used[1] == {GROUPS_PER_STEP: 2, "max_lag": 1, EVALS_SUITE: "words-v1", EVALS_EVERY: 1, "evals.episodes": 1,
                        "trainer.learning_rate": 3e-5}  # fmt: skip
     assert trainer.rates == [1e-4] + [3e-5] * (len(used) - 1) and trainer.changes == [{"learning_rate": 3e-5}]
     groups = [len(steps[key]["groups"]) for key in sorted(steps, key=int)]

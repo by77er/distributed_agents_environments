@@ -197,7 +197,8 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 ## Changing a running run's settings
 
 A run's settings are named by dotted key, as a profile's are, and are of two kinds (`rollout_train.settings`).
-**Changeable** ones can change between two steps without breaking the run: `groups_per_step`, the evals it makes
+**Changeable** ones can change between two steps without breaking the run: `groups_per_step`, `max_lag` (written into what the channel should serve with each
+checkpoint it serves, so runners elsewhere take it with that checkpoint), the evals it makes
 (`evals.suite`, none for no evals; `evals.every`; `evals.episodes`), and its trainer's (`trainer.NAME` for each of its
 `changeable`). **Fixed** ones make what the run is: the model, the trainer's kind and what its weights are, the
 adapter's rank and the trainer's other settings, the channels and their engines, how many episodes it plays at once,
@@ -211,7 +212,7 @@ the keys given and keeps the others. The monitor's run page writes them ([a run'
 
 The loop (`train(desired=…, scheduled=…)`) reads them each time it is about to decide a step. Each one it has, with a
 value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `evals.every` and
-`evals.episodes`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the
+`evals.episodes`, 0 at least for `max_lag`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the
 trainer refuses leaves the trainer's as they were, noted to the hooks as a `settings` note with the error. A change is
 noted as a `settings` note with what changed. The step is decided with the settings then in effect, and its record in
 `steps` says them (`settings`); a step taken again after a stop is taken with those. Whether a step's checkpoint is
