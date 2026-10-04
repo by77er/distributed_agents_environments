@@ -1234,3 +1234,11 @@ The user settled the design's open questions on 2026-10-04:
   admits a run to a pool only when slots and share allow, else queues the launch or offers another provider. The
   Machines tab shows each pool's use by run (requests, tokens per second, queue, adapters loaded); a run's page shows
   its pools and share. This replaces starting engines per run as the default for LoRA runs.
+- **On Kubernetes, each run is a RayJob with a Ray cluster of its own.** The launcher starts a run's job through one
+  interface: on one machine it submits to the local Ray through the job API; on Kubernetes it creates a RayJob custom
+  resource, whose Ray cluster holds the run's trainer, runners and environment worker and goes when the job ends.
+  Within that cluster Ray restarts actors whose pod died; when the driver or the head is lost, the RayJob's
+  `backoffLimit` starts the job again on a new Ray cluster (the old one's state went with its head), which resumes
+  the run from the ledger and blob store under a new fence. Shared inference pools stay outside run clusters as
+  long-lived workloads, so a retry does not reload models. On a one-GPU node the run's trainer pod and a pool's
+  engine pod share the card by time-slicing into two, with the engine's memory share capped to leave the trainer room.
