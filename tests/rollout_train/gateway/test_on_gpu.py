@@ -1,6 +1,6 @@
 """The gateway over a real model: a replica started by `rollout gateway PROFILE` serves Qwen3-0.6B on vLLM, the
 official OpenAI client talks to it, and the turn it records holds the tokens the model sampled, with logprobs. Run only
-when asked (`ROLLOUT_GPU=1`), holding the machine's GPU lock (`~/.cache/rollout/gpu.lock`)."""
+when asked (`-m live`), holding the machine's GPU lock (`~/.cache/rollout/gpu.lock`)."""
 
 import contextlib
 import fcntl
@@ -21,7 +21,7 @@ from rollout_train.gateway import TurnStore
 from rollout_train.ledger import FileLedger
 from tests.rollout_train.gateway.support import SECRETS, grant, keyring
 
-pytestmark = pytest.mark.skipif(os.environ.get("ROLLOUT_GPU") != "1", reason="asks for the GPU (ROLLOUT_GPU=1)")
+pytestmark = pytest.mark.live
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = os.environ.get("ROLLOUT_SMALL_MODEL", "Qwen/Qwen3-0.6B")

@@ -70,6 +70,7 @@ def binding() -> RunBinding:
     )
 
 
+@pytest.mark.live
 @pytest.mark.skipif(shutil.which("java") is None or shutil.which("node") is None, reason="Java and Node are needed")
 @pytest.mark.parametrize("through", ["in process", "over HTTP"])
 async def test_a_scripted_team_picks_up_diamonds_and_shares_the_reward(through: str) -> None:

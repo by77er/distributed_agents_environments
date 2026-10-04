@@ -1,6 +1,6 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """A small text model on the GPU: an adapter, every weight, and an adapter folded in. Run only when asked
-(`ROLLOUT_GPU=1`), with nothing else on the card. `ROLLOUT_SMALL_MODEL` names it (Qwen3-0.6B by default)."""
+(`-m live`), with nothing else on the card. `ROLLOUT_SMALL_MODEL` names it (Qwen3-0.6B by default)."""
 
 import asyncio
 import json
@@ -18,9 +18,7 @@ from rollout_train.recorder import Segment, Span
 
 MODEL = os.environ.get("ROLLOUT_SMALL_MODEL", "Qwen/Qwen3-0.6B")
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("ROLLOUT_GPU") != "1" or not torch.cuda.is_available(), reason="asks for the GPU (ROLLOUT_GPU=1)"
-)
+pytestmark = [pytest.mark.live, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 
 def segments(score: object, count: int = 4, length: int = 600, sampled: int = 200) -> list[Weighted]:

@@ -214,8 +214,8 @@ One RTX 5080 (16 GB), `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32.
 `tests/rollout_lora/` needs torch and is collected only when it is installed. It covers the adapter's file format,
 the direction of the update, what each minibatch did, forced tokens, segments left out, the last minibatch, the KL
 stop, a missing logprob, the likelihood objective, the importance weight and its truncation, the token clip, and the
-segment ratio and its gradient. `test_merge.py` covers merging on the CPU. `test_small_on_gpu.py` runs only with
-`ROLLOUT_GPU=1` and nothing else on the card: on Qwen3-0.6B (`ROLLOUT_SMALL_MODEL` names another) it trains an
+segment ratio and its gradient. `test_merge.py` covers merging on the CPU. `test_small_on_gpu.py` runs only when asked
+(`-m live`), with nothing else on the card: on Qwen3-0.6B (`ROLLOUT_SMALL_MODEL` names another) it trains an
 adapter, takes two steps of every weight, and checks that a merged adapter gives what the adapter gave (an adapter
 that moved logprobs by 2.6 on average, merged, is 0.06 from it: bfloat16 rounds part of a small update away). Its
 steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.

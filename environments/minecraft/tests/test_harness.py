@@ -102,6 +102,7 @@ async def begin(world: World, start: Start, kit: Kit, seed: int = 7) -> tuple[Ta
     return chosen, await world.harness.observe("ada")
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_ore_in_sight_is_seen_and_hidden_ore_is_not(world: World) -> None:
     await build(task(Start.ORE_IN_SIGHT, Kit.IRON), world.control, CREW, random.Random(3))
@@ -118,6 +119,7 @@ async def test_ore_in_sight_is_seen_and_hidden_ore_is_not(world: World) -> None:
     assert await world.control.ores(x, y, z, radius=10)
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_an_agent_mines_ore_it_sees_and_the_team_holds_a_diamond(world: World) -> None:
     await build(task(Start.ORE_IN_SIGHT, Kit.IRON), world.control, CREW, random.Random(5))
@@ -148,6 +150,7 @@ def cell(local: dict[str, Any], dx: int, dy: int, dz: int) -> str | None:
     return None if index < 0 else str(local["palette"][index]["name"])
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_the_map_shows_the_room_and_nothing_behind_its_walls(world: World) -> None:
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=11)  # a 5 by 5 pocket; ore hidden nearby
@@ -162,6 +165,7 @@ async def test_the_map_shows_the_room_and_nothing_behind_its_walls(world: World)
     assert "Map of what you have seen within 6 blocks" in text and "(your feet):" in text
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_walking_digs_through_rock_and_items_are_tossed_eaten_and_found_in_chests(world: World) -> None:
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=13)
@@ -206,6 +210,7 @@ async def test_walking_digs_through_rock_and_items_are_tossed_eaten_and_found_in
     assert took["ok"] and (await world.control.state())["team_diamonds"] == 3, took
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_only_teammates_messages_reach_agents(world: World) -> None:
     outsider = await Harness.start()
@@ -223,6 +228,7 @@ async def test_only_teammates_messages_reach_agents(world: World) -> None:
         await outsider.close()
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_unseen_or_unknown_targets_are_refused(world: World) -> None:
     await build(task(Start.ORE_NEARBY, Kit.IRON), world.control, CREW, random.Random(9))
@@ -243,6 +249,7 @@ async def test_unseen_or_unknown_targets_are_refused(world: World) -> None:
     assert "unknown action" in (await world.harness.observe("dee"))["last_action"]["error"]
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_portal_is_built_lit_and_entered_and_the_milestone_is_scored(world: World) -> None:
     # Before any test that starts in the nether: a milestone counts only if it is earned after the episode's start.
@@ -275,6 +282,7 @@ async def test_a_portal_is_built_lit_and_entered_and_the_milestone_is_scored(wor
     assert solved(chosen, state) and score(chosen, state) >= 6
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_thrown_eye_of_ender_shows_the_way_to_the_stronghold(world: World) -> None:
     _, observation = await begin(world, Start.STRONGHOLD_AREA, Kit.EYES_READY)
@@ -288,6 +296,7 @@ async def test_a_thrown_eye_of_ender_shows_the_way_to_the_stronghold(world: Worl
     assert (toward["dx"] * dx + toward["dz"] * dz) / math.hypot(dx, dz) > 0.9, (thrown, dx, dz)
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_agents_fight_with_sword_and_bow_and_ground_truth_counts_the_hits(world: World) -> None:
     _, observation = await begin(world, Start.FORTRESS, Kit.FORTRESS_READY)
@@ -318,6 +327,7 @@ async def test_agents_fight_with_sword_and_bow_and_ground_truth_counts_the_hits(
     assert not [event for event in await world.control.events() if event["kind"] == "died"]
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_slow_block_is_mined_in_one_action_and_a_hopeless_one_is_refused(world: World) -> None:
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=17)
@@ -347,6 +357,7 @@ async def test_a_slow_block_is_mined_in_one_action_and_a_hopeless_one_is_refused
     assert not refused["ok"], refused
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(world: World) -> None:
     chosen = next(t for t in catalog() if t.objective is Objective.CRAFT and t.goal == "crafting_table")
@@ -385,6 +396,7 @@ async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(wor
     assert crafted == [f"{kind}_planks", "crafting_table"]
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_what_is_made_at_a_crafting_table_is_what_is_reported_and_a_long_message_is_cut_aloud(
     world: World,
@@ -416,6 +428,7 @@ async def test_what_is_made_at_a_crafting_table_is_what_is_reported_and_a_long_m
     assert said["ok"] and len(said["said"]) == LIMITS.chat_characters and said["cut_off"] == "the last 7 characters"
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_window_ends_when_a_creeper_closes_in_on_an_agent_standing_idle(world: World) -> None:
     x, z = -60, 60
@@ -442,6 +455,7 @@ async def test_a_window_ends_when_a_creeper_closes_in_on_an_agent_standing_idle(
     assert seen["self"]["health"] == 20 and creepers[0]["distance"] <= 7  # it came close, and went off on nobody
 
 
+@pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
 async def test_a_frozen_game_holds_players_as_they_were_and_nobody_starts_on_the_diamonds(world: World) -> None:
     _, observation = await begin(world, Start.ITEMS, Kit.NONE, seed=5)

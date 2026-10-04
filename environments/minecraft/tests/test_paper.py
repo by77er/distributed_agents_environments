@@ -44,6 +44,7 @@ def installation() -> Installation:
     return Installation()
 
 
+@pytest.mark.live
 async def test_a_server_freezes_steps_and_reports_ground_truth(installation: Installation) -> None:
     server = PaperServer(installation, seed=SEED)
     await server.start()

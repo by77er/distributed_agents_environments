@@ -105,5 +105,8 @@ typeCheckingMode = "strict"
 [tool.pytest.ini_options]
 testpaths = ["tests", "environments"]
 asyncio_mode = "auto"
-addopts = ["--import-mode=importlib"]
+addopts = ["--import-mode=importlib", "-m", "not live"]
+markers = [
+    "live: needs what a test cannot start alone, a Paper server (Java, and the network once) or the GPU; run with `-m live`",
+]
 pythonpath = ["."]  # (so that `tests.…` imports the shared test helpers, however the tests are collected)

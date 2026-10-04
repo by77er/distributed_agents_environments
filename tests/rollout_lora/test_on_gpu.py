@@ -1,5 +1,5 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""The policy step on the real checkpoint and the GPU: run only when asked (`ROLLOUT_GPU=1`), with nothing else on
+"""The policy step on the real checkpoint and the GPU: run only when asked (`-m live`), with nothing else on
 the card. `ROLLOUT_GPU_MODEL` names the checkpoint (the one-GPU profile's by default)."""
 
 import os
@@ -15,9 +15,7 @@ from rollout_train.recorder import Segment, Span
 
 MODEL = os.environ.get("ROLLOUT_GPU_MODEL", "cyankiwi/Qwen3.5-9B-AWQ-4bit")
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("ROLLOUT_GPU") != "1" or not torch.cuda.is_available(), reason="asks for the GPU (ROLLOUT_GPU=1)"
-)
+pytestmark = [pytest.mark.live, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 
 def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_sampled() -> None:

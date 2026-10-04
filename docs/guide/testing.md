@@ -157,3 +157,20 @@ model and flags the groups whose episodes all scored the same, which teach nothi
 | rewards per reply | `turn.observation.reward`, or `observation.recorded` events |
 | episode rewards | `run.rewards` |
 | effects, suspensions, interruptions | `events_of(run, RunEventType.…)` |
+
+## Live tests
+
+Tests that need what a test cannot start alone are marked `live`, and the workspace's pytest settings leave them out
+(`-m "not live"` in `pyproject.toml`). They are:
+
+| Where | Needs |
+|---|---|
+| `environments/minecraft/tests/test_paper.py`, `test_harness.py`, `test_episode.py` (the tests that start a world) | Java (and Node for the harness), and the network once, to fetch Paper |
+| `tests/rollout_lora/test_on_gpu.py`, `test_small_on_gpu.py`, `tests/rollout_train/gateway/test_on_gpu.py` | the GPU, with nothing else on it |
+
+Ask for them with `-m live`, by path:
+
+```bash
+uv run pytest environments/minecraft/tests -m live
+uv run pytest tests/rollout_lora -m live --basetemp ~/.cache/rollout/pytest-gpu   # (its steps write gigabytes)
+```
