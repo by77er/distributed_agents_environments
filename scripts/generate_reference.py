@@ -40,6 +40,7 @@ PUBLIC_MODULES = [
     ("rollout_train.providers", "Inference providers and trainers: kinds, capabilities, auth, shared pools, routing."),
     ("rollout_train.bridges", "Bridges between checkpoint formats, declared: the registry, paths, refused pairs."),
     ("rollout_train.run_settings", "A run's settings: the schema, layers, flags and files, a full copy, diffs."),
+    ("rollout_train.stores", "The ledger and the blob store a cluster config names, opened on this node."),
     ("rollout_train.presets", "Named, versioned run settings beside the ledger."),
     ("rollout_train.validation", "One pure check of a run's settings against a cluster, with its rule table."),
     ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),

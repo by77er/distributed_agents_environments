@@ -58,6 +58,8 @@ uv run rollout monitor RUN                     # the web page over RUN's ledger 
 uv run rollout report RUN minecraft_team.environment:environment --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
 uv run rollout checkpoints --ledger RUN                                 # every checkpoint: where it came from, its bookmarks
+uv run rollout checkpoints --cluster                                    # the same, over the cluster config's ledger
+uv run rollout cluster check                                            # what of the cluster config does not resolve here
 uv run rollout bookmark diamonds first:20 --ledger RUN               # name the checkpoint run "first" made at step 20
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout pause first --ledger URL                              # nothing new starts; what plays plays out

@@ -16,6 +16,11 @@ rollout runner PROFILE              play runs' episodes, and nothing else
 rollout pause RUN, rollout resume RUN
                                     pause a run, and resume it (in place, or launched again in its directory)
 rollout gateway PROFILE             serve a replica of the gateway: it samples PROFILE's channels and records every turn
+rollout cluster check               read the cluster config (`rollout_train.cluster`) and say what does not resolve here
+
+A command over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`) takes it
+as `--ledger WHERE`, or as the cluster config's with `--cluster [PATH or NAME]` (alone: `ROLLOUT_CLUSTER`, else
+`~/.config/rollout/cluster.toml`).
 
 `rollout COMMAND --help` lists each command's options.
 """
@@ -34,8 +39,10 @@ from typing import TYPE_CHECKING, Any
 from rollout.names import named
 
 if TYPE_CHECKING:
+    from rollout_train.cluster import Cluster
     from rollout_train.ledger import Ledger
     from rollout_train.registry import Registry
+    from rollout_train.stores import Stores
 
 
 async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
@@ -308,7 +315,7 @@ async def _gateway(
 @_user_errors
 async def _suite(
     command: str,
-    where: str,
+    where: "str | Stores",
     name: str | None,
     environment: str | None,
     rows: str | None,
@@ -539,7 +546,7 @@ async def _imitate(
 @_user_errors
 async def _dataset(
     command: str,
-    where: str,
+    where: "str | Stores",
     rule: str | None = None,
     runs: list[str] | None = None,
     turns: list[str] | None = None,
@@ -604,11 +611,13 @@ def _setting(given: str) -> tuple[str, Any]:
         return key.strip(), value
 
 
-def _ledger_at(where: str) -> "Ledger":
-    """A ledger by where it is: a database's URL, a run's directory (as its `ledger.json` says), or a directory of
-    files."""
+def _ledger_at(where: "str | Stores") -> "Ledger":
+    """A ledger by where it is: a cluster's stores, a database's URL, a run's directory (as its `ledger.json` says),
+    or a directory of files."""
     from rollout_train.ledger import LOCATION, FileLedger, of_run
 
+    if not isinstance(where, str):
+        return where.ledger
     if "://" in where:
         from rollout_train.database import DatabaseLedger
 
@@ -635,7 +644,7 @@ async def _copy_ledger(source: str, target: str, point: bool) -> None:
         await asyncio.to_thread(pointed)
 
 
-def _registry_at(where: str) -> "tuple[Ledger, Registry]":
+def _registry_at(where: "str | Stores") -> "tuple[Ledger, Registry]":
     from rollout_train.registry import registry_of
 
     ledger = _ledger_at(where)
@@ -692,8 +701,8 @@ def _as_job(ray: str, given: list[str]) -> None:
 
 
 @_user_errors
-async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: str | None) -> None:
-    from rollout.harness.blobs import FileBlobStore
+async def _merge(who: str, where: "str | Stores", base: str | None, merger: str, bookmark: str | None) -> None:
+    from rollout.harness.blobs import Blobs, FileBlobStore
     from rollout_train.checkpoints import Checkpoints
     from rollout_train.datasets import where_blobs_are
     from rollout_train.layout import BLOBS
@@ -705,12 +714,15 @@ async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: 
     lora = await resolved(ledger, registry, who)
     if lora is None:
         raise SystemExit("the base model has no adapter to merge")
-    made = await Checkpoints(ledger, FileBlobStore(Path(where) / BLOBS)).checkpoint(lora)  # (its record only)
-    here = await asyncio.to_thread(Path(where).expanduser)
+    if isinstance(where, str):
+        beside: Blobs = FileBlobStore(await asyncio.to_thread(lambda: Path(where).expanduser() / BLOBS))
+    else:
+        beside = where.blobs  # (the cluster's)
+    made = await Checkpoints(ledger, beside).checkpoint(lora)  # (its record only)
     try:
-        blobs = opened(await where_blobs_are(ledger, made.run)) if made.run else FileBlobStore(here / BLOBS)
-    except ValueError:  # (a run that does not say where its blobs are keeps them in the ledger's directory)
-        blobs = FileBlobStore(here / BLOBS)
+        blobs = opened(await where_blobs_are(ledger, made.run)) if made.run else beside
+    except ValueError:  # (a run that does not say where its blobs are keeps them beside its ledger)
+        blobs = beside
     fence = await ledger.take(SCOPE)
     scratch = Path.home() / ".cache" / "rollout" / "merging"  # (on disk: a merged model may be gigabytes)
     merged = await merge(Checkpoints(ledger, blobs), fence, lora, base=base, merger=merger, scratch=scratch)
@@ -720,14 +732,14 @@ async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: 
 
 
 @_user_errors
-async def _rename(who: str, name: str, where: str) -> None:
+async def _rename(who: str, name: str, where: "str | Stores") -> None:
     _, registry = _registry_at(where)
     entry = await registry.rename(who, name)
     print(f"the run {entry.id} is called {entry.name}")
 
 
 @_user_errors
-async def _pause_or_resume(command: str, who: str, where: str) -> None:
+async def _pause_or_resume(command: str, who: str, where: "str | Stores") -> None:
     from rollout_train.registry import registry_of, run_id
     from rollout_train.resuming import IN_PLACE, pause, resume
 
@@ -746,7 +758,7 @@ async def _pause_or_resume(command: str, who: str, where: str) -> None:
 
 
 @_user_errors
-async def _bookmark(name: str, reference: str | None, delete: bool, where: str) -> None:
+async def _bookmark(name: str, reference: str | None, delete: bool, where: "str | Stores") -> None:
     from rollout_train.registry import resolved
 
     ledger, registry = _registry_at(where)
@@ -761,7 +773,7 @@ async def _bookmark(name: str, reference: str | None, delete: bool, where: str) 
     print(f"{name} is {checkpoint}")
 
 
-async def _checkpoints(where: str) -> None:
+async def _checkpoints(where: "str | Stores") -> None:
     from rollout_train.checkpoints import checkpoints_in, short
     from rollout_train.registry import names
 
@@ -781,9 +793,66 @@ async def _checkpoints(where: str) -> None:
 
 
 def _over_a_ledger(command: argparse.ArgumentParser) -> None:
-    """A command over a ledger takes it as `--ledger`."""
+    """A command over a ledger takes it as `--ledger`, or the cluster config's as `--cluster` (`_ledger_of`)."""
     where = "a run's directory, a ledger's directory, or a database's URL (by default this directory)"
-    command.add_argument("--ledger", default=".", help=where)
+    given = command.add_mutually_exclusive_group()
+    given.add_argument("--ledger", help=where)
+    given.add_argument("--cluster", **_cluster_option("the cluster config whose ledger it is"))
+
+
+def _cluster_option(what: str) -> dict[str, Any]:
+    """`--cluster [PATH or NAME]`: alone, the cluster config is found as `rollout_train.cluster.find` finds it."""
+    return {
+        "nargs": "?", "const": "", "metavar": "PATH or NAME",
+        "help": f"{what}: a path, or a name under ~/.config/rollout/clusters (alone: ROLLOUT_CLUSTER, else "
+        "~/.config/rollout/cluster.toml)",
+    }  # fmt: skip
+
+
+def _cluster_of(given: str | None) -> "Cluster":
+    """The cluster config `--cluster` says (`""`: found as `rollout_train.cluster.find` finds it), read and checked;
+    exits saying what is wrong."""
+    from rollout_train.cluster import ClusterError, find, load
+
+    try:
+        return load(find(given or None))
+    except ClusterError as error:
+        raise SystemExit(str(error)) from None
+
+
+def _ledger_of(arguments: argparse.Namespace) -> "str | Stores":
+    """Where a command over a ledger finds it: the cluster config's stores (`--cluster`), else `--ledger`, else this
+    directory."""
+    if arguments.cluster is None:
+        return arguments.ledger or "."
+    from rollout_train.cluster import ClusterError
+    from rollout_train.stores import Stores
+
+    try:
+        return Stores.open(_cluster_of(arguments.cluster))
+    except ClusterError as error:
+        raise SystemExit(str(error)) from None
+
+
+def _check_cluster(given: str | None) -> int:
+    """Say what the cluster config holds and, on this node, what of it does not resolve; 1 if something does not."""
+    from rollout_train.cluster import ClusterError, find, inspect, load
+
+    try:
+        path = find(given or None)
+        cluster = load(path)
+    except ClusterError as error:
+        print(error)
+        return 1
+    print(f"{path}: the cluster {cluster.name} (Ray namespace {cluster.namespace})")
+    for kind, names in (("inference providers", cluster.inference), ("trainers", cluster.trainers),
+                        ("sandbox pools", cluster.sandboxes), ("environments", cluster.environments)):  # fmt: skip
+        print(f"  {kind}: {', '.join(names) or 'none'}")
+    problems = inspect(cluster)
+    for problem in problems:
+        print(f"  {problem}")
+    print(f"  {len(problems)} not resolved on this node" if problems else "  everything it names resolves on this node")
+    return 1 if problems else 0
 
 
 def main() -> None:
@@ -991,7 +1060,15 @@ def main() -> None:
     gateway.add_argument(
         "--proxied", default="127.0.0.1", help="addresses of proxies whose X-Forwarded-* headers are trusted ('*': any)"
     )
+    clusters = commands.add_parser("cluster", help="work with the cluster config")
+    cluster_commands = clusters.add_subparsers(dest="cluster_command", required=True)
+    cluster_checking = cluster_commands.add_parser(
+        "check", help="read the cluster config, and say which of its secrets and projects do not resolve on this node"
+    )
+    cluster_checking.add_argument("--cluster", **_cluster_option("the cluster config"))
     arguments = parser.parse_args()
+    if arguments.command == "cluster":
+        sys.exit(_check_cluster(arguments.cluster))
     if arguments.command == "train":
         work = _train(
             arguments.profile,
@@ -1007,7 +1084,7 @@ def main() -> None:
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "merge":
         asyncio.run(
-            _merge(arguments.checkpoint, arguments.ledger, arguments.base, arguments.merger, arguments.bookmark)
+            _merge(arguments.checkpoint, _ledger_of(arguments), arguments.base, arguments.merger, arguments.bookmark)
         )
         return
     if arguments.command == "eval":
@@ -1018,10 +1095,10 @@ def main() -> None:
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "suite":
         if arguments.suite_command == "list":
-            asyncio.run(_suite("list", arguments.ledger, None, arguments.environment, None, ""))
+            asyncio.run(_suite("list", _ledger_of(arguments), None, arguments.environment, None, ""))
             return
         asyncio.run(_suite(
-            arguments.suite_command, arguments.ledger, arguments.name, arguments.environment, arguments.rows,
+            arguments.suite_command, _ledger_of(arguments), arguments.name, arguments.environment, arguments.rows,
             arguments.seeds, arguments.episodes, arguments.thinking_tokens, arguments.answer_tokens, arguments.data,
             getattr(arguments, "drop", None),
         ))  # fmt: skip
@@ -1033,15 +1110,15 @@ def main() -> None:
             dict(_setting(each) for each in arguments.set), arguments.pools,
         )))  # fmt: skip
     if arguments.command == "rename":
-        asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
+        asyncio.run(_rename(arguments.who, arguments.name, _ledger_of(arguments)))
         return
     if arguments.command in ("pause", "resume"):
-        asyncio.run(_pause_or_resume(arguments.command, arguments.who, arguments.ledger))
+        asyncio.run(_pause_or_resume(arguments.command, arguments.who, _ledger_of(arguments)))
         return
     if arguments.command == "bookmark":
         if arguments.checkpoint is None and not arguments.delete:
             parser.error("bookmark: name a checkpoint, or --delete")
-        asyncio.run(_bookmark(arguments.name, arguments.checkpoint, arguments.delete, arguments.ledger))
+        asyncio.run(_bookmark(arguments.name, arguments.checkpoint, arguments.delete, _ledger_of(arguments)))
         return
     if arguments.command == "launcher":
         if arguments.as_job:
@@ -1064,7 +1141,7 @@ def main() -> None:
         work = host_engines(described, arguments.run, name=arguments.name)
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "checkpoints":
-        asyncio.run(_checkpoints(arguments.ledger))
+        asyncio.run(_checkpoints(_ledger_of(arguments)))
         return
     if arguments.command == "gateway":
         work = _gateway(arguments.profile, arguments.directory, arguments.listen, arguments.certificate,
@@ -1086,10 +1163,10 @@ def main() -> None:
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "dataset":
         if arguments.dataset_command == "list":
-            asyncio.run(_dataset("list", arguments.ledger))
+            asyncio.run(_dataset("list", _ledger_of(arguments)))
             return
         asyncio.run(_dataset(
-            "make", arguments.ledger, arguments.rule, arguments.run, arguments.turns, arguments.without,
+            "make", _ledger_of(arguments), arguments.rule, arguments.run, arguments.turns, arguments.without,
             arguments.per_task, arguments.name, arguments.blobs,
         ))  # fmt: skip
         return

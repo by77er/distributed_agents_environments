@@ -25,6 +25,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`OBJECTIVES`](#objectives), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats, declared: the registry, paths, refused pairs. [`Bridge`](#bridge), [`BRIDGES`](#bridges), [`format_of`](#format_of), [`FORMATS`](#formats), [`NoBridge`](#nobridge), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#preset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
@@ -6080,6 +6081,79 @@ def shortcuts(*, model: str | None = None, provider: str | None = None, renderer
 ```
 
 What `--model`, `--provider`, `--renderer` and `--trainer` set, for the channel `--channel` names.
+
+## `rollout_train.stores`
+
+The ledger and the blob store a cluster config names, opened on this node.
+
+### `FILES`
+
+*constant* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+FILES = 'rollout.harness.blobs:FileBlobStore'
+```
+
+The store of files in a directory (`{"kind": FILES, "directory": …}`).
+
+### `ledger_url`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def ledger_url(cluster: 'Cluster', environ: Mapping[str, str] | None = None) -> str
+```
+
+The URL of the ledger a cluster names: its `[ledger] url`, or the value of the secret it names, read now on
+this node. Raises `ClusterError` where the secret is not set here, or the URL is not a database's (saying where
+it came from, never the URL: it may hold a password).
+
+### `location`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def location(store: Mapping[str, Any], directory: Path) -> dict[str, Any]
+```
+
+Where a profile's blob store is (`store`: its `[blobs]` table, `kind` and the store's settings; empty: files
+under `directory`), without any setting that looks like a credential.
+
+### `opened`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def opened(where: Mapping[str, Any]) -> Blobs
+```
+
+The blob store a location names.
+
+### `Stores`
+
+*class* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+class Stores
+```
+
+The ledger and the blob store, opened, and where the blob store is (`location`: as any process opens it, for a
+run's `starts` record).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ledger` | `'Ledger'` | required |  |
+| `blobs` | `Blobs` | required |  |
+| `location` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+
+**Methods**
+
+- `@classmethod def open(cls, cluster: 'Cluster', environ: Mapping[str, str] | None = None) -> 'Stores'` — The stores a cluster's config names, opened on this node: the ledger from `[ledger]` (its URL read from the
+  secret it names, where it names one), the blob store from `[blobs]`. Raises `ClusterError` where the ledger's
+  URL is not set here or is not a database's.
+- `@property def checkpoints(self) -> 'Checkpoints'`
+- `@property def registry(self) -> 'Registry'` — Run names, bookmarks, and dataset and suite names, beside the ledger.
+- `@property def presets(self) -> 'Presets'`
 
 ## `rollout_train.presets`
 

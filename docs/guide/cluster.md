@@ -14,8 +14,16 @@ This page describes what these modules provide:
 - `rollout_train.presets`: named, versioned settings kept beside the ledger;
 - `rollout_train.validation`: `check`, with its rule table.
 
-They are declarations: none of them starts, imports or reaches anything. The `rollout` commands still take profiles
-([Deploying](deploying.md)); the [runtime design](../research/runtime-design.md) says how they move onto these.
+They are declarations: none of them starts, imports or reaches anything. What opens and reaches things from them:
+
+- `rollout_train.stores.Stores.open(cluster)` opens the ledger and the blob store the config names
+  ([below](#the-stores));
+- `rollout cluster check` reads the config and says what of it does not resolve on this node;
+- the commands over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`)
+  take the cluster's with `--cluster`, in place of `--ledger`.
+
+The commands that start runs still take profiles ([Deploying](deploying.md)); the
+[runtime design](../research/runtime-design.md) says how they move onto these.
 
 ## The cluster config
 
@@ -130,6 +138,29 @@ password. So the parsed `Cluster` holds no secret: its `repr` and its JSON (`Clu
 back for a job or an actor) are safe to show. A `Secret` is resolved where it is used, at the moment it is needed
 (`Secret.resolve`). `Cluster.secrets()` lists every reference. `inspect(cluster)` says, on this node, which
 references do not resolve (by name, never by value) and which environment projects have no `uv.lock`.
+
+### The stores
+
+`Stores.open(cluster)` opens, on this node:
+
+- **the ledger** `[ledger]` names, a database (`DatabaseLedger`): `sqlite:///…` (`~` is the home directory) or
+  `postgresql://…`. Where the config names the URL (`url_env`, `url_file`), it is read there and then; a name that is
+  not set here is an error that says the name, and the URL itself is never printed;
+- **the blob store** `[blobs]` names: files in `directory`, or `kind = "module:name"` called with the table's other
+  settings. An S3 store (or any S3-compatible service, such as versitygw) is
+  `kind = "rollout_s3:S3BlobStore"` with `bucket`, and optionally `prefix`, `endpoint_url` and `region`; its
+  credentials come from the node's `AWS_*` environment, never from the config.
+
+`Stores.location` is where the blob store is, as any process opens it: what a run's start records. The stores beside
+the ledger are reached through it: `checkpoints`, `registry` and `presets`.
+
+```bash
+rollout cluster check                      # the config found as above: its providers, trainers, pools, environments,
+                                           # and each secret or project that does not resolve here (exit 1 if any)
+rollout cluster check --cluster lab        # ~/.config/rollout/clusters/lab.toml
+rollout checkpoints --cluster              # a command over a ledger, on the cluster's ledger
+rollout bookmark diamonds first:20 --cluster lab
+```
 
 ## Inference providers
 

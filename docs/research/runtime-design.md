@@ -1135,6 +1135,12 @@ It differs from §2 in two places: the group's result names the channel and what
 since a turn records no provider until 11 adds one; and the imitation step records `supervision` on the checkpoint it
 makes (`Checkpoint.supervision`) as well as in its start.
 
+The rest of 4 is in. `Stores` is in `rollout_train.stores`, not `rollout_train.cluster`, so that the cluster config's
+module stays a declaration that opens nothing; `Stores.open(cluster)` opens a database ledger only (`sqlite:///…` or
+`postgresql://…`, the URL read from `url_env` or `url_file` on the node) and the blob store `[blobs]` names
+(`rollout_s3:S3BlobStore` with its `bucket`, credentials from `AWS_*`). The commands over a ledger take `--cluster`
+beside `--ledger` rather than in its place, until profiles are deleted (19).
+
 ### What the acceptance run needs from each step
 
 **The run.** Trainer: Tinker LoRA on `Qwen/Qwen3.5-4B`. Inference: `local-vllm`, the same model unquantized on the
