@@ -20,7 +20,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the catalog |
-| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the graph of versions, the ledger and the registry; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
+| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the graph of versions, the ledger and the registry; resharding; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-team` | An environment to train on |
@@ -53,6 +53,7 @@ profile names engines, renderers, trainers and tool sets as `module:name`, so `r
 | [`Catalog`](../guide/reference.md#catalog) | `rollout.catalog` | training → an environment's rows | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
 | [`RunHooks`](../libraries/rollout/hooks.md), `Hooks` | `rollout.harness`, `rollout_train.rollouts` | runners and runs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
 | `Presence`, `Launches` | `rollout_train.presence`, `rollout_train.launches` | runners and launchers → whoever watches or asks for runs | `FilePresence`, `DatabasePresence`; `FileLaunches`, `DatabaseLaunches` ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats), [launchers](../guide/deploying.md#launchers)) |
+| A layout (`module:name`) | `rollout_train.resharding` | versions → the files their engines load | `verbatim`; run in the run's process or as a Ray task (`on_ray`) ([resharding](../libraries/rollout-train/versions.md#resharding)) |
 
 Types that cross these boundaries are defined once, in [contracts](../libraries/rollout/contracts/README.md).
 

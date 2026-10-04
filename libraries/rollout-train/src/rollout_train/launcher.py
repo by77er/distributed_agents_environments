@@ -1,4 +1,4 @@
-"""A launcher: on a training machine, it starts the runs asked for (`rollout_train.launches`) that it can run.
+"""A launcher: it starts the runs asked for (`rollout_train.launches`) that it can run.
 
 `rollout launcher --ledger WHERE --profiles DIRECTORY --catalog module:name … --runs DIRECTORY` beats like a runner
 (`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that
@@ -6,6 +6,11 @@ loads and names a trainer), with the settings a launch may change and their valu
 whether it has room. It claims the oldest launch asked for one of its profiles while it plays fewer than `--at-once`,
 starts `rollout train` for it in a directory of its own under `--runs` (`NAME-ID`), and notes how it goes. A launch
 asked to stop is sent an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
+
+Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
+cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
+with room and supervises it, and the launcher follows the job until it ends (started again, it follows its jobs
+again). `rollout launcher … --ray ADDRESS --as-job` submits the launcher itself as a Ray job.
 """
 
 import asyncio

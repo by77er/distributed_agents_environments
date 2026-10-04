@@ -39,7 +39,8 @@ files = await versions.files(head.weights, cache / head.id)         # on any mac
 - **A fork is a run started from any version.** It shares its parent's blobs and costs nothing until it differs. Its
   versions continue its parent's depth and base.
 - **A run serves its newest version** on its channel, as the adapter named by its id; the version before stays
-  loaded until the turns that began under it finish. Runs on other channels serve their own.
+  loaded until the turns that began under it finish. Runs on other channels serve their own. When its channel names
+  a `reshard`, it serves the version's [resharded](#resharding) files, and waits for them.
 - **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
   and trainer state, of the versions a run made, but the newest `recent` and every `every`-th by depth. Whatever
   retention says, a version keeps its files while it is served (and its parent, for a turn in progress), while any
@@ -59,6 +60,32 @@ checkpoint, by their paths within it, to blobs.
   division reads its own files and no others.
 - **`files(manifest, directory)`** puts a manifest's files under a directory, from the blob store, if they are not
   there. The directory appears whole or not at all.
+
+## Resharding
+
+A trainer writes a version's weights in its own layout; the engines may load another (their division across devices,
+a merged checkpoint, a format of their own). `rollout_train.resharding` rewrites a version's files into its engines'
+layout, as a task of its own.
+
+- **A layout is a function**, named as `module:name`: `layout(weights, into)` writes the engines' files under `into`
+  from the trainer's under `weights`, and returns what it says about them. `verbatim` is the layout of engines that
+  load the trainer's files as they are, such as vLLM with a LoRA adapter: each file is linked (or copied) as it is,
+  so its blobs are the same.
+- **`reshard(versions, fence, version, layout, scratch)`** appends to `versions/resharding` when it begins (the
+  layout and the host), reads the version's weights to `scratch`, runs the layout, keeps the files it wrote in the
+  blob store, and appends what it made to `versions/resharded` (the layout, what it said, and the manifest of the
+  files), both under the fence of the run that made the version. A version resharded before is not resharded again:
+  `resharded(ledger, version)` is what it was resharded into. A released version cannot be resharded: its weights
+  were deleted. The scratch files are removed once the files are kept.
+- **As a Ray task.** `on_ray(ledger_at, blobs_at, fence, version, layout)` runs `reshard` as a Ray task of one CPU on
+  the cluster the process is connected to (`connect(address)`, `disconnect()`): the worker opens the ledger and the
+  blob store from where they are, and keeps its scratch files on disk under `~/.cache/rollout/resharding`. `connect`
+  tells Ray not to start workers through `uv run`, so they run in the cluster's own environment.
+
+A profile turns it on for a channel (`[channels.NAME] reshard = "rollout_train.resharding:verbatim"`); with `ray`, the
+run's reshards are Ray tasks, else they run in its process, with scratch under `directory/resharding`
+([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s versions graph shows a version resharding and
+resharded.
 
 ## The ledger
 

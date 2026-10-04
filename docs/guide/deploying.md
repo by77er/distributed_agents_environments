@@ -52,6 +52,8 @@ uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a ru
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 uv run rollout train profile.toml CATALOG --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
 uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS   # start runs asked for here
+uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS \
+    --ray http://127.0.0.1:8265 --as-job                             # the same, as a Ray job; each run a Ray job too
 ```
 
 `rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
@@ -69,8 +71,9 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | Part | What it decides | To scale it |
 |---|---|---|
 | `directory` | Where the run's state is kept. `rollout train --directory` replaces it: one profile, many runs | |
-| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
+| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own). `reshard` names the layout its engines load a version's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each version is then [resharded](../libraries/rollout-train/versions.md#resharding) before it is served. Without it, the engines load the trainer's files as they are | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the version a new run trains from, by any [reference](../libraries/rollout-train/versions.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest version. `bookmark` names a bookmark the run moves to each version it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
+| `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
@@ -109,17 +112,20 @@ async with Profile.load(Path("profile.toml")).open() as platform:
         base=platform.profile.channels["policy"].model,
         directory=platform.profile.directory / "versions", publish=platform.publish, binding=binding,
         run=platform.run.id, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
+        reshard=platform.reshard if platform.layout else None,
     )
 ```
 
-Opening starts, in order: the run (registered the first time: `run.json`) and the version it starts from; the
-engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
+Opening starts, in order: the run (registered the first time: `run.json`) and the version it starts from; with
+`ray`, the connection to the Ray cluster; the engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
 the trained one with the trainer's longest segment as its longest turn; the recorder; the monitor's feed in
 `directory/feed`; the tool sets; the blob store and the versions; the runner, and the
 [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
 listens there.
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
-run's newest version (else the one it starts from) on its channel when it starts.
+run's newest version (else the one it starts from) on its channel when it starts. `platform.layout` is the trained
+channel's `reshard`; `platform.reshard` reshards a version into it, as a Ray task when the profile names `ray`, else in
+this process, its scratch files under `directory/resharding`.
 
 `rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it
 and over every other run sharing its ledger (`rollout monitor` also takes the ledger itself: a database's URL or a
@@ -163,6 +169,9 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 | `--catalog` | a catalog it offers, as `module:name` (repeatable) |
 | `--runs` | where it makes each run's directory: the run's name in letters, digits and dashes, and the end of the launch's id |
 | `--at-once` | how many runs it plays at once: 1 on one GPU |
+| `--ray` | a Ray cluster's job server (`http://127.0.0.1:8265`): each run is then a Ray job ([Ray](#ray)) |
+| `--gpus` | with `--ray`, the accelerators each run's Ray job asks for (1) |
+| `--as-job` | with `--ray`, submit the launcher itself as a Ray job, and return |
 
 It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
@@ -181,8 +190,35 @@ with its output in the run's `train.log`. It notes how the launch goes: `claimed
 then `ended`, or `failed` with the end of the output. A launch asked to stop before it is claimed is `stopped` at
 once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). Launches are ordinary
 state beside the ledger: `launches.json` beside a ledger of files, the `launches` table in a database ledger's
-database. The runs a launcher started go on if the launcher stops, but nothing is left to note how they end: once the
-launcher stops beating, the monitor shows their launches as `lost`.
+database. The runs a launcher started go on if the launcher stops. Started again under its name, it follows its Ray
+jobs again; a run it started as a process of its own cannot be waited on by another process, so once that process is
+gone its launch is noted `ended`, its end unseen. While no launcher of that name beats, the monitor shows its launches
+going as `lost`.
+
+## Ray
+
+A launcher with `--ray` submits each run as a Ray job in place of starting a process: Ray places it on a node with
+`--gpus` accelerators and one CPU free, queues it until there is one, and supervises it. The job's command is the
+same `rollout train` command, run from the launcher's working directory, so every node needs the same checkout, the
+same environment and the same run directories. The launcher follows the job until it ends and writes its output to
+the run's `train.log`; the launch notes the job (`job`) in place of a process. Stop stops the job. `--as-job` submits
+the launcher itself as a long-lived Ray job and returns; it refuses when a launcher already runs as a Ray job on this
+host. A profile with `ray` connects its run to the cluster, and runs each version's reshard as a Ray task of one CPU
+([resharding](../libraries/rollout-train/versions.md#resharding)).
+
+Ray is the `ray` extra (`uv sync --all-extras` installs it). On a machine, start a head node, its temporary directory
+on disk (Ray writes its sessions and spilled objects there, and `/tmp` may be memory), and stop it with `ray stop`:
+
+```bash
+uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 --num-gpus 1 --temp-dir ~/.cache/ray
+uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" --profiles environments/minecraft/profiles \
+    --catalog minecraft_team.catalog:catalog --runs ~/.cache/rollout/runs --ray http://127.0.0.1:8265 --as-job
+uv run ray job list --address http://127.0.0.1:8265                 # the launcher, and each run it submitted
+uv run ray stop
+```
+
+Ray's workers run in the cluster's own environment: the run tells Ray not to start them through `uv run`, which would
+build each a fresh environment without the extras.
 
 ## Stopping
 

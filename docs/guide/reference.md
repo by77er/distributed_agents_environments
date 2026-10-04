@@ -2685,7 +2685,7 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(catalog: Catalog, trainer: Trainer, versions: Versions, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Version], Awaitable[object]] | None = None) -> None
+async def train(catalog: Catalog, trainer: Trainer, versions: Versions, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Version], Awaitable[object]] | None = None, reshard: Callable[[Version, Fence], Awaitable[Manifest]] | None = None) -> None
 ```
 
 Train from `start` (a version's id; else the base model, named `base`) on `catalog` until `groups` more groups
@@ -2704,7 +2704,8 @@ besides those, what is served, what any run starts from, and whatever `kept` say
 keep theirs. `started` is what the run's `starts` record says beside what the loop knows (where it starts from,
 this host, the time): where the run's directory is, where the monitor on its machine serves (`address`), and what
 profile started it, say. `hooks` are told of each result and step; `made` is called with each version made, once
-it is served (to move a bookmark, say).
+it is served (to move a bookmark, say). `reshard` gives the files the engines load for a version (in their
+layout: `rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's.
 
 ### `Trained`
 
@@ -3134,6 +3135,7 @@ class ChannelSpec
 | `engines` | `tuple[Mapping[str, Any], ...]` | `({},)` | One entry per replica: what that engine is told (its share of a GPU, which device, where it listens). |
 | `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own. |
 | `answer_tokens` | `int \| None` | `None` |  |
+| `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a version's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
 
 ### `NotEnoughMemory`
 
@@ -3161,6 +3163,9 @@ An open profile: its `run`, the version it trains from (`origin`), the `versions
 
 - `def __init__(self, profile: Profile) -> None`
 - `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> 'Platform'` — Start everything, registering with `stack` how each thing is stopped (the engines last).
+- `@property def layout(self) -> str | None` — The layout the trained channel's engines load versions in, if they are resharded.
+- `async def reshard(self, version: Version, fence: Fence) -> Manifest` — A version's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
+  cluster, else here.
 - `async def bookmarked(self) -> set[str]` — The versions bookmarks name (which keep their files).
 - `async def made(self, version: Version) -> None` — Carry the profile's bookmark, if it names one, to a version the run made.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel from now on; returns the version they are served as.
@@ -3188,6 +3193,7 @@ class Profile
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
 | `episodes_at_once` | `int` | `6` | The most episodes a run plays at once (whatever groups they are of): what the machine's engines and its memory for the programs' worlds can take. |
 | `feed_runs` | `int \| None` | `None` | Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are deleted). |
+| `ray` | `str \| None` | `None` | The Ray cluster to connect to (`auto`, or `ray://host:port`): reshards then run as Ray tasks on it. |
 | `name` | `str \| None` | `None` | What a run first started in `directory` is called (by default the directory's name). It is named again with `rollout rename`; its id, in the directory's `run.json`, never changes. |
 
 **Methods**
