@@ -30,7 +30,7 @@ from pydantic import JsonValue
 
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.layout import BLOBS, FEED, PROCESSES
+from rollout_train.layout import BLOBS, FEED, PROCESSES, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
@@ -39,6 +39,7 @@ from rollout_train.policies import Manifest, Version, named, parsed, policies_in
 from rollout_train.policies import scope as policy_scope
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
 from rollout_train.record import scope as run_scope
+from rollout_train.registry import POLICIES, RUNS, names, registry_of
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 
@@ -108,6 +109,8 @@ class System:
         """Where each run's episodes are, as it was last found."""
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
+        self._opened = _run_in(self.directory) if self.directory is not None else None
+        """The id of the run in the directory this was opened on."""
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
         """Episodes' records, as the page shows them, by run and key (`GROUP/EPISODE`): a record never changes."""
 
@@ -122,14 +125,14 @@ class System:
         """Where a run's episodes are seen (its feed, its episodes' events): the one place that decides.
 
         - its directory, where its newest start says, if that is on this machine; for a run that says nothing, the
-          directory this was opened on, if the run is named after it;
+          directory this was opened on, if the run is its (as its `run.json` says, or by its name);
         - else the monitor at the address its newest start names, which serves its machine's runs (unless this was
           asked by another monitor: then nothing more is asked of others);
         - else nowhere this can read: what is shown of the run is what the ledger has."""
         latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
         if latest.get("directory"):
             where: Path | None = Path(str(latest["directory"])).expanduser().resolve()
-        elif self.directory is not None and run == self.directory.name:
+        elif self.directory is not None and run == self._opened:
             where = self.directory
         else:
             where = None
@@ -157,7 +160,13 @@ class System:
                 kept = await versions_in(self._ledger, policy)
                 versions += kept
                 policies.append(_policy(policy, kept, fences.get(policy_scope(policy))))
-        return await asyncio.to_thread(self._assembled, tables, fences, policies, versions, relayed)
+        called = await names(registry_of(self._ledger))
+        for policy in policies:
+            policy["name"] = called[POLICIES].get(policy["policy"], policy["policy"])
+        snapshot = await asyncio.to_thread(self._assembled, tables, fences, policies, versions, relayed)
+        for run in snapshot["runs"]:
+            run["name"] = called[RUNS].get(run["run"], run["run"])
+        return snapshot | {"names": called}
 
     async def lineage(self, sample: bool = False) -> dict[str, Any]:
         """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
@@ -655,6 +664,12 @@ def _outcome(number: str, group: Mapping[str, Any], line: Mapping[str, Any]) -> 
     joined = asdict(Result.from_json(line, int(number), group))
     failures = list(dict.fromkeys(str(failure)[:300] for failure in joined["failures"]))
     return {**joined, "failures": failures}
+
+
+def _run_in(directory: Path) -> str:
+    """The id of the run in a directory: as its `run.json` says, or (a run from before the registry) its name."""
+    path = directory / RUN
+    return str(json.loads(path.read_text())["id"]) if path.exists() else directory.name
 
 
 def _policy(policy: str, versions: list[Version], fence: int | None) -> dict[str, Any]:

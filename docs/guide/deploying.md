@@ -44,11 +44,13 @@ uv run rollout train profile.toml minecraft_team.catalog:catalog --groups 100 --
 uv run rollout monitor RUN                     # the web page over RUN's ledger and its runs: http://localhost:8765
 uv run rollout report RUN minecraft_team.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
+uv run rollout rename run RUN "diamonds, unguided" --ledger RUN      # call a run (or a policy) something else
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 ```
 
 `rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
-profile or the command is told by name. `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
+profile or the command is told by name. `train --name NAME` names a new run (by default after its directory);
+`rename` names a run or a policy again, by its name or its id ([ids and names](../libraries/rollout-train/policies.md#ids-and-names)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
 of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)); `report` and
 `imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
 [imitation](../libraries/rollout-train/training.md#imitation).
@@ -65,7 +67,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
-| `ledger` | Where the run's tables and the policies' versions are kept ([policies](../libraries/rollout-train/policies.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. `[trainer] policy` names the policy to train (by default the run directory's name); a policy that has versions is gone on with | Runs that share a ledger and a blob store see each other's policies |
+| `ledger` | Where the run's tables and the policies' versions are kept ([policies](../libraries/rollout-train/policies.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. `[trainer] policy` names the policy to train, by its name or its id (by default one called what the run is); a policy that has versions is gone on with | Runs that share a ledger and a blob store see each other's policies |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the step stops with `NotEnoughMemory`) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
@@ -119,7 +121,7 @@ that a monitor on another machine asks it for the run's episodes ([monitor](../l
 
 Opening a profile starts an [episode runner](../libraries/rollout-train/rollouts.md#a-runner) named
 `HOST/DIRECTORY` (this machine's name and the run directory's), with `episodes_at_once` places and the profile's tool
-sets. It plays the episodes of the run named after its directory, claiming them in the ledger and recording them
+sets. It plays the episodes of the run in its directory, claiming them in the ledger and recording them
 there, with their trajectories and events in the blob store. Started again, it takes its fence anew, and what it had
 claimed is open to be played again.
 

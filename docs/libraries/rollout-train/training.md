@@ -17,7 +17,8 @@ await train(catalog, trainer, policies, policy="miner", channel="policy", direct
 `rollout train PROFILE CATALOG [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
 the profile opens into a trainer, the policies, a way to publish versions and a runner that plays the run's episodes,
 names the policy to train and the channel that serves it, and sets `episodes_at_once`
-([deploying](../../guide/deploying.md)). The run is named after its directory.
+([deploying](../../guide/deploying.md)). The run is the one in its directory: its id is in the directory's `run.json`,
+and its name is chosen with `--name` and changed with `rollout rename` ([names](policies.md#ids-and-names)).
 
 ## The loop
 
@@ -209,6 +210,6 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
 rollout imitate PROFILE [--without KIND ...] [--limit N]    # with the run stopped: it takes the policy's writer
 ```
 
-The command reads the episodes of the run named after the directory for guidance of the kinds given (`way` by default), steps
+The command reads the episodes of the run in the directory for guidance of the kinds given (`way` by default), steps
 the profile's trainer with `objective = "likelihood"`, and adds `imitated_episodes` to the version's metrics. Started
 again, the training loop serves the version imitation made and trains on from it.

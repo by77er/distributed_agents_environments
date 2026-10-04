@@ -49,7 +49,8 @@ of segments.
 | **Plan** | How a training run's episodes are played: its program and its binding, in the run's `plans` table. |
 | **Episode runner** | Claims the episodes runs ask for in the ledger, plays them on a runner and records them, at most as many at once as it has places. Several, on one machine or many, share the work. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
 | **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under. |
-| **Policy / version** | One line of training, by name / one of its versions, `policy@number`, which a step makes. See [policies](../libraries/rollout-train/policies.md). |
+| **Policy / version** | One line of training, by its id / one of its versions, `ID@number`, which a step makes. See [policies](../libraries/rollout-train/policies.md). |
+| **Id / name** | What a run or a policy is kept under, which never changes / what it is called, which can be chosen and changed, in the registry beside the ledger. See [ids and names](../libraries/rollout-train/policies.md#ids-and-names). |
 | **Ledger** | Append-only tables that hold a training run's decisions and results and the policies' versions, with fences so that one writer holds each. |
 | **Channel** | A trainable policy being served, by name: its engines, its limits, and the version it samples from. |
 | **Engine** | One replica serving a model: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` is one ([vLLM engine](../implementations/rollout-vllm.md)). |

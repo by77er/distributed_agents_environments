@@ -6,10 +6,11 @@ Code: `rollout_train.policies`, `rollout_train.ledger` · See [training](trainin
 
 What is being trained has an identity of its own, apart from the run that trains it.
 
-- A **policy** is one line of training, by name.
+- A **policy** is one line of training, under an id that never changes, with a name that can be changed
+  ([ids and names](#ids-and-names)).
 - Its **versions** are an append-only table. A version says which version it came from, where its weights are, what
   a trainer goes on from, and what it was trained on.
-- A version's **name**, `policy@number`, means the same in every process and on every machine. It is what a channel
+- A version's **name**, `ID@number` (the policy's id), means the same in every process and on every machine. It is what a channel
   serves, what a request to an engine names, and what the numbers stamped on sampled tokens count.
 
 ```python
@@ -68,8 +69,8 @@ Two ledgers are provided:
 | `DatabaseLedger(url)` (`rollout_train.database`, with the `durable` extra) | every table in two SQL tables, `ledger_records` and `ledger_fences` (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
 
 A profile says which (`ledger`), and an open profile writes where it is into the run's directory (`ledger.json`), so
-that the monitor, the report and imitation open the same one from the directory alone (`of_run`). A run is named
-after its directory, so the runs sharing a ledger keep apart.
+that the monitor, the report and imitation open the same one from the directory alone (`of_run`). Each run and policy
+is kept under its own id ([ids and names](#ids-and-names)), so the runs sharing a ledger keep apart.
 
 Moving a ledger to Postgres (or from files to SQLite) is a copy and a changed URL, with nothing writing to it:
 
@@ -80,9 +81,30 @@ rollout ledger copy ~/.cache/rollout/runs/curriculum-9 postgresql://trainer@db-1
 then the profile's `[ledger]` names the same `url`. `copy` (`rollout_train.database.copy`) takes any ledger, a run's
 directory, files or a database, into a database that has none of its tables yet: every record under its key, in the
 order it was appended, and every fence, so a writer from before the move is still shut out. `--point` makes the run's
-directory name the copy at once (an open profile writes the same when it starts).
+directory name the copy at once (an open profile writes the same when it starts). The runs and policies registered
+beside the source are registered beside the copy.
 
 A ledger also lists its tables and its scopes' fences: `runs_in` and `policies_in` read from the tables' names
 which runs and which policies it has, and the [monitor](monitor.md) shows them.
 The training loop's tables are described under [dying and starting again](training.md#dying-and-starting-again); a
-policy's versions are the table `policies/NAME/versions`.
+policy's versions are the table `policies/ID/versions`.
+
+## Ids and names
+
+Every run and policy has an id that never changes and a name that can be chosen and changed
+(`rollout_train.registry`). Everything kept of it is under its id: `runs/ID/...`, `policies/ID/...`, its versions
+`ID@N` and the adapters engines load. So naming it again moves nothing, and a version keeps meaning the same thing.
+
+The registry beside the ledger holds each one's id, its name and when it was made: `registry.json` beside a ledger of
+files, the `registry` table in a database ledger's database (`DatabaseRegistry`). It is ordinary state, changed in
+place, not part of the ledger's append-only record. A name is one no other of its kind has, as its name or as its
+id, so that either finds one thing, and it says neither `/` nor `@` (a version is shown as `NAME@N`).
+
+| | |
+|---|---|
+| A new run | `rollout train` registers it the first time it starts in a directory, under `--name` (by default the directory's name), with a new id (`run_` and a ULID) that the directory's `run.json` keeps (`run_of`) |
+| A policy | `[trainer] policy` names it by its name or its id; one that is not registered is registered under that as its name, with a new id (`policy_…`), and by default it is called what the run is (`policy_of`) |
+| Renaming | `rollout rename run WHO NAME --ledger WHERE` (or `policy`), where `WHO` is its name or its id and `WHERE` a run's directory, a ledger's directory or a database's URL; or `Registry.rename` |
+| From before the registry | a run or a policy recorded under a key before there was a registry keeps that key as its id, and is registered under it as its name the first time it is asked for |
+
+The [monitor](monitor.md) shows each run and policy by its name.

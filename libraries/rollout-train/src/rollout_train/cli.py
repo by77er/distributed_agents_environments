@@ -58,12 +58,15 @@ async def _train(
     groups_per_step: int,
     seed: int,
     monitor: str | None = None,
+    name: str | None = None,
 ) -> None:
+    import dataclasses
+
     from rollout.catalog import binding_for
     from rollout_train import train
     from rollout_train.profile import Profile
 
-    described = Profile.load(profile, directory=directory)
+    described = dataclasses.replace(Profile.load(profile, directory=directory), name=name)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
     channel, rows = described.trainer.channel, named(catalog)
@@ -76,7 +79,7 @@ async def _train(
             rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
             directory=described.directory / "versions", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
-            run=described.directory.name, started=started, hooks=[platform.feed],
+            run=platform.run.id, started=started, hooks=[platform.feed],
         )  # fmt: skip
 
 
@@ -87,6 +90,7 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     from rollout_train.ledger import opened
     from rollout_train.policies import Policies
     from rollout_train.profile import Profile
+    from rollout_train.registry import policy_of, registry_of, run_of
 
     described = Profile.load(profile, directory=directory)
     if described.trainer is None:
@@ -96,9 +100,10 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     store = dict(described.blobs)
     blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
     ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
-    policies = Policies(ledger, blobs)
-    policy = described.trainer.policy or described.directory.name
-    taught = await examples(ledger, described.directory.name, blobs, renderer, kinds=kinds)
+    policies, registry = Policies(ledger, blobs), registry_of(ledger)
+    run = await run_of(described.directory, ledger, registry)
+    policy = (await policy_of(ledger, registry, described.trainer.policy or run.name)).id
+    taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
     if not taught.segments:
         raise SystemExit("no solved episode of the run carried that guidance")
     print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out)", flush=True)
@@ -143,6 +148,19 @@ async def _copy_ledger(source: str, target: str, point: bool) -> None:
         await asyncio.to_thread(pointed)
 
 
+async def _rename(kind: str, who: str, name: str, where: str) -> None:
+    from rollout_train.registry import Taken, registry_of
+
+    registry = registry_of(_ledger_at(where))
+    if registry is None:
+        raise SystemExit(f"the ledger at {where} has no registry of names")
+    try:
+        entry = await registry.rename(kind, who, name)
+    except (KeyError, Taken) as error:
+        raise SystemExit(error.args[0]) from None
+    print(f"the {kind} {entry.id} is called {entry.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="rollout", description="Train on a catalog under a deployment profile.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -154,6 +172,7 @@ def main() -> None:
     training.add_argument("--groups-per-step", type=int, default=4, help="groups a step waits for (4)")
     training.add_argument("--seed", type=int, default=0)
     training.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
+    training.add_argument("--name", help="what a new run is called (by default its directory's name)")
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
     reporting.add_argument("catalog")
@@ -175,6 +194,11 @@ def main() -> None:
     copying.add_argument("source", help="a run's directory, a directory of files, or a database's URL")
     copying.add_argument("target", help="a database's URL: sqlite:///path or postgresql://…")
     copying.add_argument("--point", action="store_true", help="make the source run's directory name the copy")
+    renaming = commands.add_parser("rename", help="call a run or a policy something else (its id stays)")
+    renaming.add_argument("kind", choices=["run", "policy"])
+    renaming.add_argument("who", help="its name or its id")
+    renaming.add_argument("name", help="what it is called from now on")
+    renaming.add_argument("--ledger", default=".", help="a run's directory, a ledger's directory, or a database's URL")
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
     serving.add_argument("factory")
     serving.add_argument("--directory", type=Path, default=Path("."))
@@ -190,8 +214,12 @@ def main() -> None:
             arguments.groups_per_step,
             arguments.seed,
             arguments.monitor,
+            arguments.name,
         )
         sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command == "rename":
+        asyncio.run(_rename(arguments.kind, arguments.who, arguments.name, arguments.ledger))
+        return
     if arguments.command == "ledger":
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))
         return

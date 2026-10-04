@@ -1,5 +1,7 @@
 """Where a run keeps what, under its directory: an open profile writes there, and the monitor and the report read."""
 
+RUN = "run.json"
+"""Which run the directory is: its id in the registry (`rollout_train.registry`)."""
 LEDGER = "ledger"
 """The run's tables, the policies' versions and the fences, in files (unless the profile names another place)."""
 FEED = "feed"

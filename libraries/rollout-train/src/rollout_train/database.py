@@ -5,10 +5,15 @@ Two tables hold it: `ledger_records` (a row per record: its table's name, its ke
 fence it was written under, and the record as JSON; a table has each key once) and `ledger_fences` (the newest fence
 of every scope). Taking a fence and appending run in transactions that hold the scope's lock, so a writer that was
 replaced is refused (`Fenced`) whichever process it is in. SQLite serves one machine; Postgres serves several.
+
+`DatabaseRegistry` is the registry of runs and policies (`rollout_train.registry`) beside it, in a table of the same
+database (`registry`: a row per run or policy, its id and its name, a name once per kind); a database ledger's is
+its `registry`.
 """
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +22,7 @@ from pydantic import JsonValue
 
 from rollout_durable.database import Connection, Database, fetch_all, fetch_one, sql
 from rollout_train.ledger import Fence, Fenced, Ledger
+from rollout_train.registry import KINDS, Entry, Taken, checked, new_id, registry_of
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(
@@ -33,6 +39,15 @@ FENCES = sa.Table(
     METADATA,
     sa.Column("scope", sa.Text, primary_key=True),
     sa.Column("number", sa.BigInteger, nullable=False),
+)
+REGISTRY = sa.Table(
+    "registry",
+    METADATA,
+    sa.Column("kind", sa.Text, primary_key=True),
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("name", sa.Text, nullable=False),
+    sa.Column("created", sa.Float(), nullable=False),
+    sa.UniqueConstraint("kind", "name"),
 )
 
 
@@ -100,15 +115,68 @@ class DatabaseLedger:
 
         return {str(scope): int(number) for scope, number in await asyncio.to_thread(self.database.read, rows)}
 
+    @property
+    def registry(self) -> "DatabaseRegistry":
+        """The registry of runs and policies, in this ledger's database."""
+        return DatabaseRegistry(self.database)
+
     def close(self) -> None:
         self.database.close()
+
+
+class DatabaseRegistry:
+    """A `Registry` (`rollout_train.registry`) in the `registry` table of a database."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def entries(self, kind: str) -> list[Entry]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            query = "SELECT kind, id, name, created FROM registry WHERE kind = :kind ORDER BY created, id"
+            return fetch_all(connection, query, {"kind": kind})
+
+        return [Entry(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+
+    async def create(self, kind: str, name: str, id: str | None = None) -> Entry:
+        made = id or new_id(kind)
+
+        def created(connection: Connection) -> Entry:
+            if fetch_one(
+                connection, "SELECT 1 FROM registry WHERE kind = :kind AND id = :id", {"kind": kind, "id": made}
+            ):
+                raise Taken(f"there is a {kind} {made} already")
+            entry = Entry(kind, made, checked(kind, name, made, _entries(connection, kind)), round(time.time(), 1))
+            sql(connection, "INSERT INTO registry (kind, id, name, created) VALUES (:kind, :id, :name, :created)",
+                {"kind": kind, "id": made, "name": entry.name, "created": entry.created})  # fmt: skip
+            return entry
+
+        return await asyncio.to_thread(self.database.write, created, exclusive="registry")
+
+    async def rename(self, kind: str, who: str, name: str) -> Entry:
+        def renamed(connection: Connection) -> Entry:
+            entries = _entries(connection, kind)
+            found = next((e for e in entries if e.name == who), None) or next((e for e in entries if e.id == who), None)
+            if found is None:
+                raise KeyError(f"there is no {kind} {who!r}")
+            entry = Entry(kind, found.id, checked(kind, name, found.id, entries), found.created)
+            sql(connection, "UPDATE registry SET name = :name WHERE kind = :kind AND id = :id",
+                {"name": entry.name, "kind": kind, "id": found.id})  # fmt: skip
+            return entry
+
+        return await asyncio.to_thread(self.database.write, renamed, exclusive="registry")
+
+
+def _entries(connection: Connection, kind: str) -> list[Entry]:
+    query = "SELECT kind, id, name, created FROM registry WHERE kind = :kind"
+    return [Entry(*row) for row in fetch_all(connection, query, {"kind": kind})]
 
 
 async def copy(source: Ledger, target: DatabaseLedger) -> int:
     """Copy every table and fence of `source` (files, or another database) into `target`, which must have none of its
     tables yet; returns how many records. Records keep their keys and their order; each is noted under its scope's
     newest fence (the fence a record was written under is not read back through a ledger). A fence already in the
-    target is kept if it is newer. To move to Postgres: copy, then point the profile's `[ledger] url` at it."""
+    target is kept if it is newer. The runs and policies registered beside `source` are registered beside `target`
+    too. To move to Postgres: copy, then point the profile's `[ledger] url` at it."""
     tables = await source.tables()
     there = set(await target.tables())
     if clash := sorted(there & set(tables)):
@@ -141,4 +209,9 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
                 count += 1
         return count
 
-    return await asyncio.to_thread(target.database.write, copied, exclusive="ledger:copy")
+    count = await asyncio.to_thread(target.database.write, copied, exclusive="ledger:copy")
+    if (registered := registry_of(source)) is not None:
+        for kind in KINDS:
+            for entry in await registered.entries(kind):
+                await target.registry.create(kind, entry.name, entry.id)
+    return count

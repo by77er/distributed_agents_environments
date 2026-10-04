@@ -258,7 +258,7 @@ function runsTree(here) {
     const runKey = `run:${run.run}`, mine = here.run === run.run || showing?.run === run.run;
     const runOpen = folds[runKey] ?? (mine || system.runs.length === 1);
     nodes.push(node(runPlace(run.run), here.kind === "run" && here.run === run.run, twist(runKey, runOpen),
-      runDot(run), h("span", { class: "name" }, run.run),
+      runDot(run), h("span", { class: "name", title: run.run }, run.name ?? run.run),
       h("span", { class: "tag" }, running(run))));
     if (!runOpen) continue;
     const groups = groupsOf(run), children = [];
@@ -379,7 +379,7 @@ function drawRun(name) {
   const throughput = channel?.throughput.at(-1);
   const width = Math.max(300, document.getElementById("main").clientWidth - 100);
   const from = run.steps[0]?.parent, current = run.steps.findLast(step => step.state === "committed")?.makes;
-  const head = h("div", { class: "head" }, h("h1", {}, `Run ${run.run}`),
+  const head = h("div", { class: "head" }, h("h1", { title: run.run }, `Run ${run.name ?? run.run}`),
     specs(spec("state", `${running(run)} · ${wrote(run)}`, run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""), policy ? spec("trains", policy.policy, "violet") : null,
       spec("from", from ?? (run.steps.length ? "the base model" : "–")), current ? spec("now", current, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
       spec("fence", run.fence ?? "–"), spec("directory", run.directory ?? "–"), run.starts > 1 ? spec("started", `${run.starts} times`) : null));
@@ -1084,7 +1084,7 @@ function drawRuns() {
     const head = run.steps.findLast(step => step.state === "committed")?.makes;
     const trains = head?.split("@")[0] ?? run.policy;
     return link(runPlace(run.run), { class: `tile rail ${run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}` },
-      h("header", {}, runDot(run), h("b", {}, run.run), h("span", { class: "what" }, trains ? `trains ${trains}` : ""), h("span", { class: "faint small" }, running(run))),
+      h("header", {}, runDot(run), h("b", { title: run.run }, run.name ?? run.run), h("span", { class: "what" }, trains ? `trains ${trains}` : ""), h("span", { class: "faint small" }, running(run))),
       h("div", { class: "cells four" },
         h("div", { class: `cell ${run.open.length ? "accent" : "waiting"}` }, h("span", {}, "in flight"), h("b", {}, String(run.open.length)), h("small", {}, `${run.next.length} toward a step`)),
         h("div", { class: "cell" }, h("span", {}, "groups done"), h("b", {}, String(run.done.length)), h("small", {}, `of ${run.decided} decided`)),

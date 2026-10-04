@@ -77,7 +77,10 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         assert policy.limits.sequence == 900 and policy.limits.thinking == 64 and judge.limits.sequence is None
         assert platform.trainer is not None and platform.trainer.budget == Budget(900, 3)
         binding = binding_for(words, "policy", platform.tool_bindings)
-        assert platform.policy == "run"  # (the run directory's name, unless the profile names the policy)
+        assert platform.run.name == "run" and platform.run.id.startswith("run_")  # (named after its directory)
+        assert platform.registry is not None  # the policy is called what the run is, unless the profile names one
+        policies = await platform.registry.entries("policy")
+        assert [(each.id, each.name) for each in policies] == [(platform.policy, "run")]
         await train(
             words,
             platform.trainer,
@@ -86,13 +89,13 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
             channel="policy",
             directory=tmp_path / "run" / "versions",
             publish=platform.publish,
-            run="run",
+            run=platform.run.id,
             groups=2,
             binding=binding,
-        )  # fmt: skip  (the platform's runner plays the run named after its directory)
-        versions = await platform.policies.versions("run")
-        steps = await platform.ledger.read("runs/run/steps")
-        played = await platform.ledger.read("runs/run/episodes")
+        )  # fmt: skip  (the platform's runner plays the run in its directory)
+        versions = await platform.policies.versions(platform.policy)
+        steps = await platform.ledger.read(f"runs/{platform.run.id}/steps")
+        played = await platform.ledger.read(f"runs/{platform.run.id}/episodes")
         assert versions and [version.number for version in versions] == list(range(1, len(steps) + 1))
         assert policy.adapter == versions[-1].name and judge.version == 0  # served on the trained channel only
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them

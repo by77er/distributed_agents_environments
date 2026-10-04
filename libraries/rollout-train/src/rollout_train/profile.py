@@ -32,6 +32,7 @@ from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION, opened
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
+from rollout_train.registry import Entry, Registry, policy_of, registry_of, run_of
 from rollout_train.rollouts.scheduler import EpisodeRunner
 
 __all__ = ["ChannelSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
@@ -59,8 +60,8 @@ class TrainerSpec:
     channel: str
     """The channel that serves the policy it trains."""
     policy: str | None = None
-    """The policy it trains, by name (by default the run directory's name). A policy that has versions is gone on
-    with."""
+    """The policy it trains, by its name or its id (`rollout_train.registry`); by default one called what the run is.
+    A policy that has versions is gone on with; one that has none is registered under this as its name."""
     colocated: bool = False
     """Whether it shares the channels' accelerator: their engines then sleep while it steps."""
     settings: Mapping[str, Any] = field(default_factory=dict[str, Any])
@@ -119,6 +120,9 @@ class Profile:
     feed_runs: int | None = None
     """Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are
     deleted)."""
+    name: str | None = None
+    """What a run first started in `directory` is called (by default the directory's name). It is named again with
+    `rollout rename`; its id, in the directory's `run.json`, never changes."""
 
     @classmethod
     def load(cls, path: Path, *, directory: Path | None = None) -> "Profile":
@@ -173,8 +177,9 @@ def _only(table: dict[str, Any], where: str, *known: str) -> dict[str, Any]:
 
 
 class Platform:
-    """An open profile: the `policies` it trains, a `trainer` to step, `publish` to serve a version, and a `runner` that
-    plays the episodes its run asks for (`rollout_train.rollouts.scheduler.EpisodeRunner`)."""
+    """An open profile: its `run` and the `policy` it trains (by their ids), the `policies`' versions, a `trainer` to
+    step, `publish` to serve a version, and a `runner` that plays the episodes its run asks for
+    (`rollout_train.rollouts.scheduler.EpisodeRunner`)."""
 
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
@@ -183,8 +188,12 @@ class Platform:
         self.ledger: Ledger = opened(self.location)
         self.policies: Policies
         """The policies' versions, in the ledger and the blob store."""
-        self.policy = (profile.trainer.policy if profile.trainer else None) or profile.directory.name
-        """The policy the profile's trainer trains."""
+        self.registry: Registry | None = registry_of(self.ledger)
+        """What the runs and policies of the ledger are called."""
+        self.run: Entry
+        """The run in the profile's directory."""
+        self.policy: str
+        """The id of the policy the profile's trainer trains."""
         self.channels: dict[str, Channel] = {}
         self.recorder: Recorder
         self.runner: EpisodeRunner
@@ -205,6 +214,9 @@ class Platform:
         directory = profile.directory
         directory.mkdir(parents=True, exist_ok=True)
         (directory / LOCATION).write_text(json.dumps(self.location))
+        self.run = await run_of(directory, self.ledger, self.registry, profile.name)
+        wanted = (profile.trainer.policy if profile.trainer else None) or self.run.name
+        self.policy = (await policy_of(self.ledger, self.registry, wanted)).id
         record = directory / PROCESSES
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
@@ -270,7 +282,7 @@ class Platform:
             self.blobs,
             places=profile.episodes_at_once,
             imports=list(tool_sets),
-            runs=[directory.name],
+            runs=[self.run.id],
             hooks=[feed],
             guard=_needs(profile.runs_gib, "to run more episodes"),
         )

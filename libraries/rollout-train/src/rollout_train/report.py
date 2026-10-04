@@ -20,6 +20,7 @@ from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Ledger, of_run
 from rollout_train.policies import Version, policies_in, versions_in
 from rollout_train.record import Result, Trained, results, trained
+from rollout_train.registry import registry_of, run_of
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
@@ -212,10 +213,11 @@ async def report(
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
     `watch`, again after every new group, until interrupted. The run's results, steps and versions are read from
-    `ledger` (by default the run's own, wherever its directory says it is); the run is `run`, by default named
-    after its directory."""
+    `ledger` (by default the run's own, wherever its directory says it is); the run is `run` (its id), by default the
+    one in the directory."""
     ledger = ledger or of_run(directory)
-    run = run or directory.name
+    entry = await run_of(directory, ledger, registry_of(ledger))
+    run, title = run or entry.id, entry.name
     reported: tuple[int, int] = (-1, -1)
     while True:
         lines = await results(ledger, run)
@@ -226,9 +228,8 @@ async def report(
             curriculum = Curriculum(rows)
             for line in lines:
                 curriculum.recorded(line)
-            text = summary(directory.name, lines, curriculum, steps, {version.name: version for version in versions})
-            title = f"{directory.name}: climb through the curriculum"
-            image = chart(lines, rows, versions, title=title) if lines else None
+            text = summary(title, lines, curriculum, steps, {version.name: version for version in versions})
+            image = chart(lines, rows, versions, title=f"{title}: climb through the curriculum") if lines else None
             (directory / "progress.md").write_text(text + "\n")
             if image is not None:
                 (directory / "progress.png").write_bytes(image)

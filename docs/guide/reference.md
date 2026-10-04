@@ -3120,8 +3120,9 @@ Stopping is better than exhausting the machine (a host may shut down rather than
 class Platform
 ```
 
-An open profile: the `policies` it trains, a `trainer` to step, `publish` to serve a version, and a `runner` that
-plays the episodes its run asks for (`rollout_train.rollouts.scheduler.EpisodeRunner`).
+An open profile: its `run` and the `policy` it trains (by their ids), the `policies`' versions, a `trainer` to
+step, `publish` to serve a version, and a `runner` that plays the episodes its run asks for
+(`rollout_train.rollouts.scheduler.EpisodeRunner`).
 
 **Methods**
 
@@ -3152,6 +3153,7 @@ class Profile
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
 | `episodes_at_once` | `int` | `6` | The most episodes a run plays at once (whatever groups they are of): what the machine's engines and its memory for the programs' worlds can take. |
 | `feed_runs` | `int \| None` | `None` | Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are deleted). |
+| `name` | `str \| None` | `None` | What a run first started in `directory` is called (by default the directory's name). It is named again with `rollout rename`; its id, in the directory's `run.json`, never changes. |
 
 **Methods**
 
@@ -3171,7 +3173,7 @@ class TrainerSpec
 |---|---|---|---|
 | `kind` | `str` | required | `module:name` of what makes the trainer, called with the channel's model and `settings`. |
 | `channel` | `str` | required | The channel that serves the policy it trains. |
-| `policy` | `str \| None` | `None` | The policy it trains, by name (by default the run directory's name). A policy that has versions is gone on with. |
+| `policy` | `str \| None` | `None` | The policy it trains, by its name or its id (`rollout_train.registry`); by default one called what the run is. A policy that has versions is gone on with; one that has none is registered under this as its name. |
 | `colocated` | `bool` | `False` | Whether it shares the channels' accelerator: their engines then sleep while it steps. |
 | `settings` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` |  |
 
