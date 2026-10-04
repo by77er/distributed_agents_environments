@@ -94,9 +94,10 @@ async def _train(
         binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
         wanting = desired_settings_of(platform.ledger)
 
-        async def scheduled(name: str, every: int, episodes: int) -> Schedule | None:
-            """The evals of a suite of the run's environment, by its name: the ledger's, or the environment's eval data
-            of that name, frozen on first use (`suite_for`); none for a suite neither has, or another environment's."""
+        async def scheduled(name: str, every: int, episodes: int | None) -> Schedule | None:
+            """The evals of a suite of the run's environment, by its name (the version it points to now) or a version's
+            id: the ledger's, or the environment's eval data of that name, frozen on first use (`suite_for`); none for a
+            suite neither has, or another environment's."""
             try:
                 suite = await suite_for(platform.ledger, name, environment, offered)
             except (KeyError, ValueError):
@@ -113,7 +114,7 @@ async def _train(
                 suite = await suite_for(platform.ledger, asked.suite, environment, offered)
             except (KeyError, ValueError) as error:
                 raise SystemExit(error.args[0]) from None
-            schedule = Schedule(suite, offered, platform.eval_run, asked.every, asked.episodes, binding)
+            schedule = Schedule(suite, offered, platform.eval_run, asked.every, asked.episodes, binding, asked.suite)
         started["settings"] = {
             "fixed": fixed(described, platform.trainer, groups=groups, seed=seed),
             "changeable": changeable(
@@ -140,7 +141,7 @@ async def _evaluate(
     profile: Path,
     suite_name: str,
     reference: str | None,
-    episodes: int,
+    episodes: int | None,
     directory: Path | None,
     monitor: str | None = None,
     name: str | None = None,
@@ -151,7 +152,9 @@ async def _evaluate(
     import shutil
 
     from rollout.environment import binding_for
-    from rollout_train.evals import evaluate, suite_for, suite_of
+    from rollout_train.evals import Suite, evaluate, suite_for, suite_of
+    from rollout_train.layout import LEDGER
+    from rollout_train.ledger import opened
     from rollout_train.profile import Profile
     from rollout_train.record import ending
     from rollout_train.registry import resolved
@@ -161,19 +164,28 @@ async def _evaluate(
         trainer = dataclasses.replace(described.trainer, start=reference, bookmark=None)
         described = dataclasses.replace(described, trainer=trainer)
     channel = described.trainer.channel if described.trainer else next(iter(described.channels))
+    ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
+    try:  # (the suite before the engines: its limits are the channel's)
+        found: Suite | None
+        if environment is not None:  # (its eval data of that name is frozen as the suite, if it is not yet)
+            found = await suite_for(ledger, suite_name, environment, named(environment))
+        elif (found := await suite_of(ledger, suite_name)) is None:
+            raise KeyError(f"there is no suite {suite_name!r}: name its environment (--environment), or make one")
+        suite: Suite = found
+    except (KeyError, ValueError) as error:
+        raise SystemExit(error.args[0]) from None
+    finally:
+        if (closing := getattr(ledger, "close", None)) is not None:
+            closing()
+    if suite.limits:
+        channels = dict(described.channels)
+        channels[channel] = dataclasses.replace(channels[channel], **suite.limits)
+        described = dataclasses.replace(described, channels=channels)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
     try:
         async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
             try:
-                if environment is not None:  # (its eval data of that name is frozen as the suite, if it is not yet)
-                    suite = await suite_for(platform.ledger, suite_name, environment, named(environment))
-                elif (found := await suite_of(platform.ledger, suite_name)) is not None:
-                    suite = found
-                else:
-                    raise KeyError(
-                        f"there is no suite {suite_name!r}: name its environment (--environment), or make one"
-                    )
                 subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
             except (KeyError, ValueError) as error:
                 raise SystemExit(error.args[0]) from None
@@ -185,13 +197,13 @@ async def _evaluate(
                     base=described.channels[channel].model, channel=channel,
                     directory=described.directory / "checkpoints", publish=platform.publish, episodes=episodes,
                     binding=binding_for(played, channel, platform.tool_bindings, platform.pool_bindings),
-                    started=started,
+                    started=started, limits=suite.limits,
                     reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
                 )  # fmt: skip
     finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
         for fetched in ("bases", "checkpoints", "resharding"):
             await asyncio.to_thread(shutil.rmtree, described.directory / fetched, ignore_errors=True)
-    print(f"{suite_name}: solved {said['solved']} of {said['played']} episodes (mean reward {said['reward']})")
+    print(f"{suite.id}: solved {said['solved']} of {said['played']} episodes (mean reward {said['reward']})")
 
 
 async def _pool(factory: str, directory: Path, where: str | None, name: str | None, host: str, port: int) -> None:
@@ -257,32 +269,59 @@ async def _gateway(
 
 
 async def _suite(
-    command: str, where: str, name: str | None, environment: str | None, rows: str | None, seeds: str
+    command: str,
+    where: str,
+    name: str | None,
+    environment: str | None,
+    rows: str | None,
+    seeds: str,
+    episodes: int | None = None,
+    thinking_tokens: int | None = None,
+    answer_tokens: int | None = None,
+    data: str | None = None,
 ) -> None:
-    from rollout_train.evals import make_suite, suite_for, suite_of, suites_in
+    from rollout_train.evals import edit_suite, make_suite, suite_of, suites_in, versions_of
 
     ledger = _ledger_at(where)
-    if command == "make":
-        assert name is not None and environment is not None
+    if command in ("make", "edit"):
+        assert name is not None
         keys = [each.strip() for each in rows.split(",") if each.strip()] if rows else None
         try:
             numbers = [int(each) for each in seeds.split(",") if each.strip()]
-            if numbers or keys:  # (by hand, of rows and seeds)
-                made = await make_suite(ledger, name, environment, named(environment), rows=keys, seeds=numbers)
-            elif await suite_of(ledger, name) is not None:
-                raise ValueError(f"there is a suite {name!r} already: a suite is never changed, make another")
-            else:  # (the environment's eval data of that name)
-                made = await suite_for(ledger, name, environment, named(environment))
+            current = await suite_of(ledger, name)
+            if command == "edit" and current is None:
+                raise KeyError(f"there is no suite {name!r}")
+            kept = current if command == "edit" else None  # (an edit keeps what it does not change)
+            counts: dict[str, Any] = {
+                "episodes": episodes or (kept.episodes if kept else 1),
+                "thinking_tokens": thinking_tokens or (kept.thinking_tokens if kept else None),
+                "answer_tokens": answer_tokens or (kept.answer_tokens if kept else None),
+            }
+            environment = environment or (current.environment if current else None)
+            if environment is None:
+                raise SystemExit("say the suite's environment (--environment)")
+            chosen: dict[str, Any] = {"rows": keys, "seeds": numbers} if numbers or keys else {}
+            chosen = chosen or {"eval_data": data or name}
+            if command == "make":
+                made = await make_suite(ledger, name, environment, named(environment), **chosen, **counts)
+            else:
+                same = not (numbers or keys or data)
+                made = await edit_suite(
+                    ledger, name, environment, named(environment), **({} if same else chosen), same_starts=same,
+                    **counts,
+                )  # fmt: skip
         except (KeyError, ValueError) as error:
             raise SystemExit(error.args[0]) from None
         held = ", held out of training" if made.held_out else ""
-        print(f"the suite {made.name}: {len(made.starts)} starts of {environment}{held}")
+        print(f"the suite {made.id}: {len(made.starts)} starts of {environment}{held}")
         return
     listed = await suites_in(ledger)
     for each in listed:
         found = await suite_of(ledger, each)
         assert found is not None
-        print(f"{each:<24} {len(found.starts):>4} starts  {found.environment}")
+        count = len(await versions_of(ledger, each))
+        more = f"  ({count} versions)" if count > 1 else ""
+        print(f"{found.id:<24} {len(found.starts):>4} starts  {found.environment}{more}")
     if environment is not None:  # (its eval data, frozen as a suite the first time it is played)
         for each, starts in named(environment).evals().items():
             if each not in listed:
@@ -792,7 +831,7 @@ def main() -> None:
     evaluating.add_argument(
         "--checkpoint", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id (none: the base model)"
     )
-    evaluating.add_argument("--episodes", type=int, default=1, help="episodes of each start (1)")
+    evaluating.add_argument("--episodes", type=int, help="episodes of each start (by default the suite's)")
     evaluating.add_argument(
         "--environment", help="module:name: a suite not made yet is its eval data of that name, frozen now"
     )
@@ -800,16 +839,23 @@ def main() -> None:
     evaluating.add_argument("--name", help="what the eval is called (by default its directory's name)")
     evaluating.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
     evaluating.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
-    suites = commands.add_parser("suite", help="make or list evaluation suites")
+    suites = commands.add_parser("suite", help="make, edit or list evaluation suites")
     suite_commands = suites.add_subparsers(dest="suite_command", required=True)
-    making = suite_commands.add_parser("make", help="make a suite: a start of each row for each seed, frozen")
-    making.add_argument("name")
-    making.add_argument("--environment", required=True, help="module:name")
-    making.add_argument("--rows", help="row keys, comma-separated (by default every row)")
-    making.add_argument(
-        "--seeds", default="", help="seeds, comma-separated: each row started once with each (none: its eval data NAME)"
-    )
-    making.add_argument("--ledger", default=".", help=where)
+    making = suite_commands.add_parser("make", help="make a suite: its eval data, or a start of each row for each seed")
+    editing = suite_commands.add_parser("edit", help="make a suite's next version, and point its name to it")
+    for each in (making, editing):
+        each.add_argument("name")
+        each.add_argument("--environment", required=each is making, help="module:name")
+        each.add_argument("--rows", help="row keys, comma-separated (by default every row)")
+        each.add_argument(
+            "--seeds", default="",
+            help="seeds, comma-separated: each row started once with each (none: its eval data, see --data)",
+        )  # fmt: skip
+        each.add_argument("--data", help="the environment's eval data its starts are (by default the suite's name)")
+        each.add_argument("--episodes", type=int, help="episodes of each start an eval plays (1; an edit keeps them)")
+        each.add_argument("--thinking-tokens", type=int, help="the eval channel's tokens of thinking per turn")
+        each.add_argument("--answer-tokens", type=int, help="the eval channel's tokens of answer after its thinking")
+        each.add_argument("--ledger", default=".", help=where)
     suite_listing = suite_commands.add_parser("list", help="every suite")
     suite_listing.add_argument("--ledger", default=".", help=where)
     suite_listing.add_argument("--environment", help="module:name: its eval data not played yet too")
@@ -901,10 +947,12 @@ def main() -> None:
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "suite":
-        made = arguments.suite_command == "make"
+        if arguments.suite_command == "list":
+            asyncio.run(_suite("list", arguments.ledger, None, arguments.environment, None, ""))
+            return
         asyncio.run(_suite(
-            arguments.suite_command, arguments.ledger, arguments.name if made else None,
-            arguments.environment, arguments.rows if made else None, arguments.seeds if made else "",
+            arguments.suite_command, arguments.ledger, arguments.name, arguments.environment, arguments.rows,
+            arguments.seeds, arguments.episodes, arguments.thinking_tokens, arguments.answer_tokens, arguments.data,
         ))  # fmt: skip
         return
     if arguments.command == "env":

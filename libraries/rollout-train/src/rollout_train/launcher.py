@@ -5,8 +5,9 @@
 loads and names a trainer), with what its trainer makes (`lora` or `full` weights) and the settings a launch may change
 and their values in the profile; the environments; and whether it has room. It claims the oldest launch asked for one of
 its profiles while it plays fewer than `--at-once`, starts `rollout train` for it in a directory of its own under
-`--runs` (`NAME-ID`), and notes how it goes. A launch asked to stop is sent an interrupt: the run stops as it does on
-Ctrl-C, at a group boundary of the ledger.
+`--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said so, as `evals.suite=""`, so
+that the profile's `[evals]` is not used), and notes how it goes. A launch asked to stop is sent an interrupt: the run
+stops as it does on Ctrl-C, at a group boundary of the ledger.
 
 Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
 cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
@@ -44,6 +45,7 @@ from rollout_train.launches import (
 from rollout_train.machine import alive, measured
 from rollout_train.presence import Presence
 from rollout_train.ray_cluster import prepare
+from rollout_train.settings import EVALS_SUITE
 
 LAUNCHER = "launcher"
 """What a launcher's heartbeat says it is (`about["kind"]`)."""
@@ -168,6 +170,8 @@ class Launcher:
         if asked.kind != EVAL:  # (an eval's checkpoint is what plays, not where training starts)
             settings |= {"trainer.start": asked.start} if asked.start else {}
             settings |= {"trainer.bookmark": asked.bookmark} if asked.bookmark else {}
+        if asked.kind != EVAL and EVALS_SUITE in settings and not settings[EVALS_SUITE]:
+            settings[EVALS_SUITE] = ""  # (no evals, said so: the profile's `[evals]` is not used)
         changed = [
             argument for key, value in settings.items() if value is not None
             for argument in ("--set", f"{key}={json.dumps(value)}")
@@ -175,7 +179,8 @@ class Launcher:
         if asked.kind == EVAL:
             command = [
                 sys.executable, "-m", "rollout_train.cli", "eval", profile["path"], str(asked.suite),
-                "--directory", str(directory), "--name", asked.name, "--episodes", str(asked.episodes),
+                "--directory", str(directory), "--name", asked.name,
+                *(["--episodes", str(asked.episodes)] if asked.episodes else []),
                 *(["--environment", asked.environment] if asked.environment else []),
                 *(["--checkpoint", asked.start] if asked.start else []), *changed,
             ]  # fmt: skip

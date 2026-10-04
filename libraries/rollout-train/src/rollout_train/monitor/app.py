@@ -48,7 +48,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
     - `/api/system`: where every run stands (`System.snapshot`);
     - `/api/machines`: every runner's machine as its heartbeats say, now and over its recent beats;
-    - `/api/evals`: the suites and the evals that played them (`System.evals`);
+    - `/api/evals`: the suites, their versions and the evals that played them (`System.evals`); `POST
+      /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`), and
+      `/api/environments/{name}` says what the suites' forms need of an environment (`System.environment`);
     - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run or an eval
       (`System.launch`), `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
@@ -73,7 +75,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     Each JSON answer carries its topic's version as its ETag: a request that names it (`If-None-Match`) is answered
     304, with nothing. A run whose directory is on another machine has its episodes asked of the monitor its start
     names (`System._source`); what one monitor asks another, the other answers from its own machine (`RELAYED`),
-    directly and in full. It reads, and writes names (a run's, bookmarks); the runs' own processes write the rest."""
+    directly and in full. It reads, and writes names (a run's, bookmarks, suites') and suites' versions; the runs' own
+    processes write the rest."""
     system = watched(where)
     hub = Hub(system, beat)
 
@@ -223,6 +226,27 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     async def evals(request: Request) -> Response:
         return answered(request, await hub.read("evals"))
 
+    async def suite(request: Request) -> Response:
+        name = request.path_params["name"]
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "say the suite, as JSON"}, status_code=400)
+
+        async def change() -> Any:
+            made = await system.save_suite(name, cast(dict[str, Any], body))
+            return {"suite": made.name, "version": made.id, "number": made.number}
+
+        return await written(change)
+
+    async def environment(request: Request) -> Response:
+        try:
+            return JSONResponse(await system.environment(request.path_params["name"]))
+        except KeyError as error:
+            return JSONResponse({"error": str(error.args[0])}, status_code=404)
+
     async def launches(request: Request) -> Response:
         if request.method == "GET":
             return answered(request, await hub.read("launches"))
@@ -271,6 +295,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/machines", machines),
         Route("/api/launches", launches, methods=["GET", "POST"]),
         Route("/api/evals", evals),
+        Route("/api/suites/{name}", suite, methods=["POST"]),
+        Route("/api/environments/{name}", environment),
         Route("/api/launches/{id}/stop", stop, methods=["POST"]),
         Route("/api/groups/{run}/{number:int}", group),
         Route("/api/episodes/{run_id}", episode),

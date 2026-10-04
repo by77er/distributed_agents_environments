@@ -19,8 +19,8 @@ proposed in docs/research/policy-dag.md, and nothing appends them yet:
   when it began each;
 - `workers/NAME/registered`, `workers/NAME/loaded`, `workers/NAME/unloaded`: an inference worker (what it holds, its
   adapter slots), and each checkpoint it loaded and unloaded;
-- `evaluations/SUITE/starts`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`: a fixed suite
-  of starts, and how a checkpoint (or another model) played it.
+- `evaluations/SUITE/suite`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`: a suite's
+  versions (`rollout_train.evals`), and how a checkpoint (or another model) played one of them.
 
 The router's `routing` notes in the feed (requests waiting, by the checkpoint they name) are proposed there too.
 `SAMPLE` holds such tables and notes as a fixture, so that the view can be seen with them; it is read only when
@@ -37,7 +37,7 @@ from typing import Any, cast
 from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
-from rollout_train.evals import starts_in, suites_among
+from rollout_train.evals import Suite, played_version, start_identity, suites_among, version_id, versions_in
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
 
@@ -461,14 +461,22 @@ class _Reading:
         }
 
     def evaluations(self) -> list[dict[str, Any]]:
-        """Each suite: its starts, and each subject that played it (a checkpoint, or another model), with how it did
-        at each start."""
+        """Each suite: the version its name points to (`version`, by id; where the registry's `names` say, else its
+        newest) with that version's starts, every version (`versions`, oldest first, each with its starts), and each
+        subject that played it (a checkpoint, or another model), with the version it played and how it did at each
+        start (by the start's number in that version)."""
         suites: list[dict[str, Any]] = []
+        pointed: Mapping[str, str] = self.names.get("suites", {})
         for suite in suites_among(self.tables):
-            starts = starts_in(self.tables, suite)
+            versions = versions_in(self.tables, suite)
+            if not versions:
+                continue
+            current = next((each for each in versions if each.id == pointed.get(suite)), versions[-1])
+            sizes = {each.id: len(each.starts) for each in versions}
             subjects: list[dict[str, Any]] = []
             for subject in self.named(f"{_EVALUATIONS}{suite}/", "/results"):
                 about = self.record(f"{_EVALUATIONS}{suite}/{subject}/subject", "subject")
+                version = played_version(about, suite)
                 by_start: dict[str, list[dict[str, Any]]] = {}
                 episodes = self.read(f"{_RUNS}{subject}/episodes")  # (an eval's subject is its run)
                 for key, result in self.read(f"{_EVALUATIONS}{suite}/{subject}/results").items():
@@ -488,6 +496,8 @@ class _Reading:
                         "model": about.get("model"),
                         "episodes": int(about.get("episodes") or 1),
                         "asked_by": about.get("asked_by"),
+                        "version": version,
+                        "starts": sizes.get(version, 0),
                         "results": by_start,
                         "played": len(played),
                         "solved": sum(solved) if solved or not played else None,
@@ -498,15 +508,46 @@ class _Reading:
             suites.append(
                 {
                     "suite": suite,
-                    "starts": [
-                        {"start": key, **{name: record.get(name) for name in ("task", "title", "seed")}}
-                        for key, record in sorted(starts.items(), key=lambda item: int(item[0]))
-                    ],
+                    "version": current.id,
+                    "number": current.number,
+                    "starts": _starts(current),
+                    "versions": [_described(each) for each in versions],
                     "subjects": subjects,
                     "sample": bool({f"{_EVALUATIONS}{suite}/{part}" for part in ("suite", "starts")} & self.sampled),
                 }
             )
         return suites
+
+
+def _starts(suite: Suite) -> list[dict[str, Any]]:
+    """A version's starts as the page shows them: each by its number in the version, its row, title and seed, and what
+    it is in every version that has it (`identity`)."""
+    return [
+        {"start": str(number), "task": start.task, "title": start.title, "seed": start.seed}
+        | {"identity": start_identity({"task": start.task, "parameters": start.parameters})}
+        for number, start in enumerate(suite.starts, start=1)
+    ]
+
+
+def _described(suite: Suite) -> dict[str, Any]:
+    """A version as the page shows it: what it is, and its starts."""
+    return {
+        "id": suite.id,
+        "number": suite.number,
+        "environment": suite.environment or None,
+        "environment_version": suite.environment_version,
+        "made": suite.made or None,
+        "chosen": suite.chosen,
+        "eval_data": suite.eval_data,
+        "rows": suite.rows,
+        "seeds": suite.seeds,
+        "held_out": suite.held_out,
+        "episodes": suite.episodes,
+        "thinking_tokens": suite.thinking_tokens,
+        "answer_tokens": suite.answer_tokens,
+        "edited_from": version_id(suite.name, suite.edited_from) if suite.edited_from else None,
+        "starts": _starts(suite),
+    }
 
 
 def _state(life: Mapping[str, Any], older: set[str]) -> str:

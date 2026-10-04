@@ -8,8 +8,9 @@ its episodes, and the share solved where its episodes say whether they solved th
 
 A checkpoint's line (`path_of`) is its first parents back to the root, and the root's base model before it: the model
 every checkpoint on it builds on. It crosses runs (a run that starts from another's checkpoint), merges (a full
-checkpoint made from an adapter) and forks. Each point on it has its score at each suite, pooled over every eval of it
-on that suite; the base model's are the evals of that model by name.
+checkpoint made from an adapter) and forks. Each point on it has its score at each version of a suite, pooled over every
+eval of it on that version (scores of two versions do not compare); the base model's are the evals of that model by
+name.
 """
 
 from collections.abc import Mapping
@@ -18,7 +19,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoint, short
-from rollout_train.evals import starts_in
+from rollout_train.evals import parsed, played_version, starts_in
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
 from rollout_train.record import EVALS, GROUPS, STARTS, table
@@ -31,8 +32,9 @@ BY_HAND, BY_SCHEDULE = "by hand", "schedule"
 def evals_of(
     tables: Mapping[str, Mapping[str, JsonValue]], checkpoint: str, names: Mapping[str, Any] | None = None
 ) -> list[dict[str, Any]]:
-    """Every eval whose subject is `checkpoint` (by id), newest first: the suite, the eval's run, who asked for it
-    (by hand, or the training run and step whose schedule did), episodes of each start, how far it got and its score."""
+    """Every eval whose subject is `checkpoint` (by id), newest first: the suite and the version it played, the eval's
+    run, who asked for it (by hand, or the training run and step whose schedule did), episodes of each start, how far
+    it got and its score."""
     found = [each for each in _evals(tables, names or {}) if each["checkpoint"] == checkpoint]
     return [
         {key: value for key, value in each.items() if key != "rewards"}  # (each episode's reward stays here)
@@ -47,8 +49,10 @@ def path_of(
     names: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """A checkpoint's line, from the base model to it along first parents (`points`, by depth: the base model at 0),
-    each point with what it is (its run, step, weights and bookmarks) and its score at each suite (`scores`, pooled
-    over every eval of it there); and the suites any point was evaluated on, with their environments."""
+    each point with what it is (its run, step, weights and bookmarks) and its score at each version of a suite
+    (`scores`, by the version's id, pooled over every eval of it there); and the versions any point was evaluated on
+    (`suites`), each with its suite's name, its number, its environment, and how the page labels it (the name, and
+    the version where the line has more than one of that suite)."""
     said = names or {}
     called: Mapping[str, str] = said.get("runs", {})
     marks: dict[str, list[str]] = {}
@@ -91,12 +95,15 @@ def path_of(
                 "scores": _pooled([found for found in evals if found["checkpoint"] == each.id]),
             }
         )
-    suites = sorted({suite for point in points for suite in point["scores"]})
-    return {
-        "checkpoint": checkpoint,
-        "points": points if line else [],
-        "suites": [{"suite": suite, "environment": _environment(tables, suite)} for suite in suites],
-    }
+    versions = sorted({version for point in points for version in point["scores"]}, key=_by_number)
+    named = [parsed(version)[0] for version in versions]
+    suites: list[dict[str, Any]] = []
+    for version in versions:
+        name, number = parsed(version)
+        label = name if named.count(name) == 1 else f"{name} v{number}"
+        suites.append({"suite": version, "name": name, "number": number, "label": label}
+                      | {"environment": _environment(tables, name)})  # fmt: skip
+    return {"checkpoint": checkpoint, "points": points if line else [], "suites": suites}
 
 
 def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -121,15 +128,17 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
         episodes = cast(dict[str, Any], tables.get(table(run, "episodes"), {}))
         results = cast(dict[str, Any], tables.get(f"{EVALUATIONS}{suite}/{run}/results", {}))
         by, step = scheduled.get(run, (begun.get("by"), begun.get("step")))
+        version = played_version(about, suite)
         said = [result for key, result in results.items() if reported(episodes.get(key.replace("-", "/", 1)))]
         rewards = [float(result["reward"]) for result in results.values() if result.get("reward") is not None]
         each_start = int(about.get("episodes") or 1)
         expected = sum(int(group.get("episodes") or 0) for group in groups.values()) or each_start * len(
-            starts_in(tables, suite)
+            starts_in(tables, suite, parsed(version)[1] or 1)
         )
         found.append(
             {
                 "suite": suite,
+                "version": version,
                 "run": run,
                 "name": called.get(run, run),
                 "kind": about.get("kind", "checkpoint"),
@@ -156,13 +165,19 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
     return found
 
 
+def _by_number(version: str) -> tuple[str, int]:
+    """A version's id in the order versions are listed: by suite, then by number."""
+    name, number = parsed(version)
+    return name, number or 0
+
+
 def _pooled(evals: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Each suite's score over these evals together: the mean reward of every episode, the share solved of those that
-    say, how many episodes, and which evals."""
+    """Each version's score over these evals together, by the version's id: the mean reward of every episode, the share
+    solved of those that say, how many episodes, and which evals."""
     by_suite: dict[str, list[dict[str, Any]]] = {}
     for each in evals:
         if each["played"]:
-            by_suite.setdefault(each["suite"], []).append(each)
+            by_suite.setdefault(each["version"], []).append(each)
     pooled: dict[str, dict[str, Any]] = {}
     for suite, listed in by_suite.items():
         rewards = [reward for each in listed for reward in each["rewards"]]

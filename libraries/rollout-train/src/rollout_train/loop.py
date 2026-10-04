@@ -45,7 +45,8 @@ loop finishes an eval it left unfinished before it decides anything.
 **Its changeable settings can change while it runs** (`rollout_train.settings`): how many groups a step waits for, its
 evals, and the settings its trainer takes between steps. Each time it is about to decide a step it reads what is wanted
 of them (`desired`), and decides the step with them; the step's record says which settings it used, and a step taken
-again after a stop uses those. Whether a checkpoint is evaluated is the evals its step was decided with.
+again after a stop uses those. Whether a checkpoint is evaluated is the evals its step was decided with, and the
+version of the suite its name pointed to then (`rollout_train.evals`): an edit of the suite applies from the next step.
 """
 
 import asyncio
@@ -133,7 +134,7 @@ async def train(
     reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None,
     evals: Schedule | None = None,
     desired: Callable[[], Awaitable[Mapping[str, JsonValue]]] | None = None,
-    scheduled: Callable[[str, int, int], Awaitable[Schedule | None]] | None = None,
+    scheduled: Callable[[str, int, int | None], Awaitable[Schedule | None]] | None = None,
 ) -> None:
     """Train from `start` (a checkpoint's id; else the base model, named `base`) on `environment` until `groups` more
     groups have been played (those a stopped loop left unplayed among them) and every group played has been trained on,
@@ -157,8 +158,9 @@ async def train(
     it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
     and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
     `groups_per_step`, `evals.…`, `trainer.…`), each time a step is about to be decided; `scheduled` makes the schedule
-    of evals they name (a suite by name, every, episodes; None for a suite the run cannot play), without which only
-    `evals`' suite can be played."""
+    of evals they name (a suite by name or a version by id, every, episodes; None for a suite the run cannot play),
+    without which only `evals`' suite can be played. A suite named by its name is played in the version its name points
+    to when each step is decided: the step's record says which (`suite_version`)."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
@@ -190,13 +192,13 @@ async def train(
     settings: dict[str, JsonValue] = {
         GROUPS_PER_STEP: groups_per_step,
         MAX_LAG: max_lag,
-        EVALS_SUITE: evals.suite.name if evals else None,
+        EVALS_SUITE: (evals.named or evals.suite.name) if evals else None,
         EVALS_EVERY: evals.every if evals else 1,
-        EVALS_EPISODES: evals.episodes if evals else 1,
+        EVALS_EPISODES: evals.episodes if evals else None,
     }
     settings |= {f"{TRAINER}{key}": value for key, value in _changeable(trainer).items()}
     """The changeable settings in effect: those the next step is decided with."""
-    schedules: dict[tuple[str, int, int], Schedule | None] = {}
+    schedules: dict[tuple[str, int, int | None], Schedule | None] = {}
 
     def note(kind: str, payload: Mapping[str, JsonValue]) -> None:
         event: dict[str, JsonValue] = {"kind": kind, "run": run, "at": round(time.time(), 3), **payload}
@@ -252,19 +254,39 @@ async def train(
         serving = {served.id, *served.parents} if served is not None else set[str]()
         return begun | serving | set(await kept() if kept is not None else ())
 
+    def cadence(said: Mapping[str, JsonValue]) -> tuple[int, int | None]:
+        """How often and how many episodes of each start the evals in `said` play (none: the suite's)."""
+        episodes = said.get(EVALS_EPISODES)
+        return int(str(said.get(EVALS_EVERY) or 1)), int(str(episodes)) if episodes else None
+
+    async def schedule_for(suite: str, every: int, episodes: int | None) -> Schedule | None:
+        """The evals of a suite (by name: the version its name points to now; or a version, by id)."""
+        if evals is not None and (
+            suite == evals.suite.id or (scheduled is None and suite in (evals.named, evals.suite.name))
+        ):
+            return replace(evals, every=every, episodes=episodes)
+        return await scheduled(suite, every, episodes) if scheduled is not None else None
+
+    async def pinned() -> str | None:
+        """The version of the suite the evals in effect name, as its name points now: what the step about to be decided
+        is evaluated with."""
+        if not settings.get(EVALS_SUITE):
+            return None
+        schedule = await schedule_for(str(settings[EVALS_SUITE]), *cadence(settings))
+        return schedule.suite.id if schedule is not None else None
+
     async def schedule_of(step: int) -> Schedule | None:
-        """The evals a step was decided with (those of `evals` for a step whose record says no settings)."""
+        """The evals a step was decided with (those of `evals` for a step whose record says no settings): the version
+        its record names (a step decided before suites had versions names the suite)."""
         said = steps.get(step, {}).get("settings")
         if not isinstance(said, dict):
             return evals
         if not said.get(EVALS_SUITE):
             return None
-        key = (str(said[EVALS_SUITE]), int(str(said.get(EVALS_EVERY) or 1)), int(str(said.get(EVALS_EPISODES) or 1)))
+        version = str(steps[step].get("suite_version") or said[EVALS_SUITE])
+        key = (version, *cadence(said))
         if key not in schedules:
-            if evals is not None and key[0] == evals.suite.name:
-                schedules[key] = replace(evals, every=key[1], episodes=key[2])
-            else:
-                schedules[key] = await scheduled(*key) if scheduled is not None else None
+            schedules[key] = await schedule_for(*key)
         return schedules[key]
 
     async def evaluated_with(checkpoint: Checkpoint) -> None:
@@ -284,7 +306,8 @@ async def train(
             asked_by="by its run's schedule", hooks=hooks, served_by=qualified(run, channel),
         )  # fmt: skip
         summary: dict[str, JsonValue] = {"played": said["played"], "solved": said["solved"], "reward": said["reward"]}
-        record: dict[str, JsonValue] = {"suite": schedule.suite.name, "checkpoint": checkpoint.id, "run": eval_run}
+        record: dict[str, JsonValue] = {"suite": schedule.suite.name, "version": schedule.suite.id}
+        record |= {"checkpoint": checkpoint.id, "run": eval_run}
         record |= summary | {"at": round(time.time(), 1)}
         await ledger.append(table(run, EVALS), str(step), record, fence)
         evaluated[step] = record
@@ -411,6 +434,7 @@ async def train(
                 "batch": manifest.model_dump(mode="json"),
                 "seed": key,
                 "settings": dict(settings),
+                "suite_version": await pinned(),
             }
             await ledger.append(table(run, STEPS), str(key), decision, fence)  # before the trainer is called
             steps[key] = decision

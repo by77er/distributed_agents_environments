@@ -61,7 +61,7 @@ async def test_a_bookmark_names_a_version_and_moves(tmp_path: Path, kind: str) -
     await registry.unbookmark("alpha")
     with pytest.raises(KeyError):
         await registry.unbookmark("alpha")
-    assert await names(registry) == {"runs": {}, "bookmarks": {"best": "mmmmmmmm"}}
+    assert await names(registry) == {"runs": {}, "bookmarks": {"best": "mmmmmmmm"}, "suites": {}}
 
 
 async def test_a_runs_directory_says_which_run_it_is_whatever_it_is_called(tmp_path: Path) -> None:

@@ -734,6 +734,9 @@ async def test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped(
 class Versioned:
     version: str = "1"
 
+    def evals(self) -> dict[str, list[Start]]:
+        return {}
+
 
 def _starts(seed: int) -> list[Start]:
     return [Start(task="t", title="T", seed=seed + index, parameters={"seed": seed + index}) for index in range(3)]

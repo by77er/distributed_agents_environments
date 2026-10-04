@@ -122,15 +122,16 @@ class EvalsSpec:
     """Evals a training run makes of its checkpoints as it makes them (`rollout_train.evals.Schedule`)."""
 
     suite: str
-    """The suite each plays, by name: the environment's eval data of that name (frozen on first use), or a suite made
-    by hand (`rollout suite make`)."""
+    """The suite each plays: by name, the version its name points to when each step is decided (the environment's eval
+    data of that name, frozen on first use, or a suite made by hand: `rollout suite make`); or one version, by id
+    (`NAME@N`)."""
     every: int = 1
     """The checkpoint of every `every`th step is evaluated."""
-    episodes: int = 1
-    """Episodes of each of the suite's starts."""
+    episodes: int | None = None
+    """Episodes of each of the suite's starts; none: the suite's own."""
 
     def __post_init__(self) -> None:
-        if self.every < 1 or self.episodes < 1:
+        if self.every < 1 or (self.episodes is not None and self.episodes < 1):
             raise ValueError("evals: `every` and `episodes` are 1 at least")
 
 
@@ -261,7 +262,7 @@ class Profile:
             **memory,
             blobs=blobs,
             channels=channels,
-            evals=EvalsSpec(**evals) if evals else None,
+            evals=EvalsSpec(**evals) if evals.get("suite") else None,  # (`suite = ""`: no evals)
             gateway=GatewaySpec(**gateway) if gateway else None,
             trainer=TrainerSpec(
                 kind=trainer.pop("kind"),

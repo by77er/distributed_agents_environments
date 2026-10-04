@@ -5,8 +5,9 @@ A training run's settings are named by dotted key, as a profile's are (`rollout_
 ones are fixed when it starts: the model, the trainer's kind and what its weights are (`lora`, `full`), the adapter's
 rank, the channels and their engines, how many episodes it plays at once (`fixed`). Changeable ones can change between
 two steps without breaking it (`CHANGEABLE`): how many groups a step waits for (`groups_per_step`), the evals it makes
-of its checkpoints (`evals.suite`, `evals.every`, `evals.episodes`), and whatever settings its trainer says it takes
-between steps (`trainer.learning_rate`, say: `rollout_train.trainer.Changeable`).
+of its checkpoints (`evals.suite`: a suite by name, which follows its newest version, or one version by id, `NAME@N`;
+`evals.every`; `evals.episodes`, none for the suite's own), and whatever settings its trainer says it takes between
+steps (`trainer.learning_rate`, say: `rollout_train.trainer.Changeable`).
 
 A run's desired settings are ordinary state, changed in place, not part of the ledger's append-only record: a file
 beside a ledger of files (`FileDesiredSettings`), a table in a database ledger's database
@@ -70,6 +71,8 @@ def desired_settings_of(ledger: Ledger) -> DesiredSettings | None:
 def checked(key: str, value: JsonValue) -> JsonValue:
     """A changeable setting's value, as a run takes it; raises `ValueError` for one it cannot take (`evals.every`
     below 1, say). A trainer's own settings are checked by the trainer."""
+    if key == EVALS_EPISODES and value is None:  # (the suite's own)
+        return None
     if key in (GROUPS_PER_STEP, EVALS_EVERY, EVALS_EPISODES):
         if isinstance(value, bool) or not isinstance(value, int | float) or int(value) != value or value < 1:
             raise ValueError(f"{key} is a whole number, 1 at least (not {value!r})")
@@ -80,7 +83,7 @@ def checked(key: str, value: JsonValue) -> JsonValue:
         return int(value)
     if key == EVALS_SUITE:
         if value is not None and not isinstance(value, str):
-            raise ValueError(f"{key} names a suite, or is null for no evals (not {value!r})")
+            raise ValueError(f"{key} names a suite or one of its versions, or is null for no evals (not {value!r})")
         return value or None
     return value
 
@@ -125,7 +128,7 @@ def changeable(trainer: Any, *, groups_per_step: int, max_lag: int, evals: Any =
     its trainer takes between steps with their values."""
     said: dict[str, JsonValue] = {GROUPS_PER_STEP: groups_per_step, MAX_LAG: max_lag}
     said |= {EVALS_SUITE: evals.suite if evals else None, EVALS_EVERY: evals.every if evals else 1}
-    said |= {EVALS_EPISODES: evals.episodes if evals else 1}
+    said |= {EVALS_EPISODES: evals.episodes if evals else None}
     return said | {f"{TRAINER}{key}": _json(value) for key, value in _changeable_of(trainer).items()}
 
 

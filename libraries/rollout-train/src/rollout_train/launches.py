@@ -70,13 +70,15 @@ class Asked:
     groups_per_step: int = 4
     seed: int = 0
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """What it changes of its profile, by dotted key: `trainer.learning_rate`, `episodes_at_once`, say."""
+    """What it changes of its profile, by dotted key: `trainer.learning_rate`, `episodes_at_once`, say. A training run
+    says the evals it makes (`evals.suite`: a suite, or null for none), unless its profile's `[evals]` says them."""
     kind: str = RUN
     """`run` (a training run) or `eval` (a suite played by `start`, the checkpoint; none: the base model)."""
     suite: str | None = None
-    """For an eval: the suite it plays (its environment is the suite's)."""
-    episodes: int = 1
-    """For an eval: episodes of each of the suite's starts."""
+    """For an eval: the suite it plays, by name (the version its name points to) or a version's id (its environment is
+    the suite's)."""
+    episodes: int | None = None
+    """For an eval: episodes of each of the suite's starts; none: the suite's own."""
 
 
 @dataclass(frozen=True)

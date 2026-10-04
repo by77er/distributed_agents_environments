@@ -8,9 +8,10 @@ replaced is refused (`Fenced`) whichever process it is in. An append holds its t
 record after the table's last, so records are numbered one each, in the order they commit, whichever scopes append to
 the table. SQLite serves one machine; Postgres serves several.
 
-`DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in three tables of the same database: `runs`
-(each run's id and name, a name once), `bookmarks` (each bookmark's name and checkpoint) and `dataset_names` (each
-dataset's name and id); a database ledger's is its `registry`. `DatabasePresence` holds the runners' heartbeats
+`DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in four tables of the same database: `runs`
+(each run's id and name, a name once), `bookmarks` (each bookmark's name and checkpoint), `dataset_names` (each
+dataset's name and id) and `suite_names` (each suite's name and the version it points to); a database ledger's is its
+`registry`. `DatabasePresence` holds the runners' heartbeats
 (`rollout_train.presence`) in another, `presence`: a row per runner, changed in place; a database ledger's is its
 `presence`. `DatabaseLaunches` holds the runs asked for (`rollout_train.launches`) in another, `launches`; a database
 ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of each run's settings
@@ -35,7 +36,19 @@ from rollout_durable.database import Connection, Database, fetch_all, fetch_one,
 from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, changed, new_launch
 from rollout_train.ledger import Appended, Fence, Fenced, Ledger
 from rollout_train.presence import Beat, kept
-from rollout_train.registry import Bookmark, Entry, Named, Taken, checked, found, new_run_id, registry_of, valid
+from rollout_train.registry import (
+    Bookmark,
+    Entry,
+    Named,
+    SuiteName,
+    Taken,
+    checked,
+    found,
+    new_run_id,
+    registry_of,
+    valid,
+    version_number,
+)
 from rollout_train.settings import Desired
 
 METADATA = sa.MetaData()
@@ -74,6 +87,13 @@ DATASET_NAMES = sa.Table(
     sa.Column("name", sa.Text, primary_key=True),
     sa.Column("dataset", sa.Text, nullable=False),
     sa.Column("named", sa.Float(), nullable=False),
+)
+SUITE_NAMES = sa.Table(
+    "suite_names",
+    METADATA,
+    sa.Column("name", sa.Text, primary_key=True),
+    sa.Column("version", sa.Text, nullable=False),
+    sa.Column("moved", sa.Float(), nullable=False),
 )
 LAUNCHES = sa.Table(
     "launches",
@@ -214,7 +234,8 @@ class DatabaseLedger:
 
 
 class DatabaseRegistry:
-    """A `Registry` (`rollout_train.registry`) in the `runs` and `bookmarks` tables of a database."""
+    """A `Registry` (`rollout_train.registry`) in the `runs`, `bookmarks`, `dataset_names` and `suite_names` tables of a
+    database."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -292,6 +313,30 @@ class DatabaseRegistry:
             return entry
 
         return await asyncio.to_thread(self.database.write, given, exclusive="registry")
+
+    async def suites(self) -> list[SuiteName]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            return fetch_all(connection, "SELECT name, version, moved FROM suite_names ORDER BY name")
+
+        return [SuiteName(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+
+    async def point_suite(self, name: str, version: str, *, forward: bool = False) -> SuiteName:
+        entry = SuiteName(valid(name), version, round(time.time(), 1))
+
+        def pointed(connection: Connection) -> SuiteName:
+            row = fetch_one(connection, "SELECT name, version, moved FROM suite_names WHERE name = :name",
+                            {"name": entry.name})  # fmt: skip
+            if forward and row is not None and version_number(str(row[1])) >= version_number(version):
+                return SuiteName(*row)
+            sql(
+                connection,
+                "INSERT INTO suite_names (name, version, moved) VALUES (:name, :version, :moved) "
+                "ON CONFLICT (name) DO UPDATE SET version = excluded.version, moved = excluded.moved",
+                asdict(entry),
+            )
+            return entry
+
+        return await asyncio.to_thread(self.database.write, pointed, exclusive="registry")
 
 
 class DatabaseLaunches:

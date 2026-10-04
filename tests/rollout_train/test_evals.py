@@ -1,5 +1,6 @@
-"""Evaluations: a frozen suite of starts, played by a checkpoint (or the base model) with nothing trained; asked for
-from the page and started by a launcher; and made by a training run of its own checkpoints, between its steps."""
+"""Evaluations: a suite (an eval configuration, kept in versions), played by a checkpoint (or the base model) with
+nothing trained; asked for from the page and started by a launcher; and made by a training run of its own checkpoints,
+between its steps."""
 
 import asyncio
 import functools
@@ -19,7 +20,9 @@ from rollout_train import testing as support
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints, new_id
 from rollout_train.evals import (
+    DRAWN,
     EVAL,
+    EVAL_DATA,
     NOTHING_TRAINED,
     Schedule,
     Suite,
@@ -61,7 +64,7 @@ def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
-async def test_a_suite_is_a_frozen_list_of_starts_of_an_environments_rows(tmp_path: Path) -> None:
+async def test_a_suite_is_a_list_of_starts_of_an_environments_rows(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     made = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1, 2])
     assert [(start.task, start.seed) for start in made.starts] == [
@@ -71,7 +74,9 @@ async def test_a_suite_is_a_frozen_list_of_starts_of_an_environments_rows(tmp_pa
     assert again is not None and again.starts == made.starts and again.environment == ENVIRONMENT
     assert again.rows == ["say-yes", "say-no"] and again.seeds == [1, 2]
     assert await suites_in(ledger) == ["words-v1"]
-    with pytest.raises(ValueError, match="never changed"):
+    assert (again.id, again.number, again.chosen, again.episodes) == ("words-v1@1", 1, DRAWN, 1)
+    assert again.held_out  # (seeds 1 and 2 of these rows are its eval data's starts: training never draws them)
+    with pytest.raises(ValueError, match="already: edit it"):
         await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=None, seeds=[3])
     with pytest.raises(ValueError, match="no row say-perhaps"):
         await make_suite(ledger, "other", ENVIRONMENT, words, rows=["say-perhaps"], seeds=[1])
@@ -85,16 +90,17 @@ async def test_an_environments_eval_data_is_frozen_as_a_suite_the_first_time_it_
     ledger = FileLedger(tmp_path / "ledger")
     assert await suite_of(ledger, "words-held-out") is None
     made = await suite_for(ledger, "words-held-out", ENVIRONMENT, words)
-    assert made.starts == list(words.evals()["words-held-out"]) and made.held_out and made.version == "1"
+    assert made.starts == list(words.evals()["words-held-out"]) and made.held_out and made.environment_version == "1"
+    assert (made.id, made.chosen, made.eval_data) == ("words-held-out@1", EVAL_DATA, "words-held-out")
     again = await suite_of(ledger, "words-held-out")
-    assert again is not None and (again.starts, again.held_out, again.version) == (made.starts, True, "1")
+    assert again is not None and (again.starts, again.held_out, again.environment_version) == (made.starts, True, "1")
     assert (await suite_for(ledger, "words-held-out", ENVIRONMENT, words)).made == made.made  # (frozen: not again)
     with pytest.raises(ValueError, match="is of"):
         await suite_for(ledger, "words-held-out", "other:environment", words)
     with pytest.raises(KeyError, match="no eval data of that name"):
         await suite_for(ledger, "words-v9", ENVIRONMENT, words)
-    by_hand = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
-    assert not by_hand.held_out and by_hand.version == "1"
+    by_hand = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[5])
+    assert not by_hand.held_out and by_hand.environment_version == "1"
 
 
 async def test_a_suite_made_as_a_catalogs_reads_as_its_environments(tmp_path: Path) -> None:
@@ -281,21 +287,27 @@ def test_the_command_makes_and_lists_suites(
         return capsys.readouterr().out
 
     made = run("make", "words-v1", "--environment", ENVIRONMENT, "--rows", "say-yes, say-no", "--seeds", "1,2,3")
-    assert made == f"the suite words-v1: 6 starts of {ENVIRONMENT}\n"
-    assert run("list").split() == ["words-v1", "6", "starts", ENVIRONMENT]
-    with pytest.raises(SystemExit, match="never changed"):
+    assert made == f"the suite words-v1@1: 6 starts of {ENVIRONMENT}\n"
+    assert run("list").split() == ["words-v1@1", "6", "starts", ENVIRONMENT]
+    with pytest.raises(SystemExit, match="already: edit it"):
         run("make", "words-v1", "--environment", ENVIRONMENT, "--seeds", "4")
     with pytest.raises(SystemExit, match="invalid literal"):
         run("make", "other", "--environment", ENVIRONMENT, "--seeds", "one")
     unplayed = run("list", "--environment", ENVIRONMENT).splitlines()
     assert unplayed[-1].split() == ["words-held-out", "6", "starts", ENVIRONMENT, "(not", "played", "yet)"]
     held = run("make", "words-held-out", "--environment", ENVIRONMENT)
-    assert held == f"the suite words-held-out: 6 starts of {ENVIRONMENT}, held out of training\n"
+    assert held == f"the suite words-held-out@1: 6 starts of {ENVIRONMENT}, held out of training\n"
     assert [line.split()[0] for line in run("list", "--environment", ENVIRONMENT).splitlines()] == [
-        "words-held-out", "words-v1",
+        "words-held-out@1", "words-v1@1",
     ]  # fmt: skip
-    with pytest.raises(SystemExit, match="no eval data of that name"):
+    with pytest.raises(SystemExit, match="no eval data 'words-v9'"):
         run("make", "words-v9", "--environment", ENVIRONMENT)
+    edited = run("edit", "words-v1", "--rows", "say-yes", "--seeds", "7", "--episodes", "3")
+    assert edited == f"the suite words-v1@2: 1 starts of {ENVIRONMENT}\n"
+    assert run("edit", "words-v1", "--thinking-tokens", "64") == f"the suite words-v1@3: 1 starts of {ENVIRONMENT}\n"
+    assert run("list").splitlines()[-1].split() == ["words-v1@3", "1", "starts", ENVIRONMENT, "(3", "versions)"]
+    with pytest.raises(SystemExit, match="nothing changed"):
+        run("edit", "words-v1", "--thinking-tokens", "64", "--episodes", "3")
 
 
 class Unmade:
@@ -323,7 +335,7 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     with pytest.raises(SystemExit) as exited:
         main()
     assert exited.value.code == 0
-    assert capsys.readouterr().out.startswith("words-v1: solved ")
+    assert capsys.readouterr().out.startswith("words-v1@1: solved ")
     policy = support.STARTED[0]
     assert policy.told[0].startswith(f"started {directory / 'bases' / made['merged']}")  # (what the adapter is over)
     assert f"load {made['stacked']}" in policy.told

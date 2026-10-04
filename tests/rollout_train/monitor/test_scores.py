@@ -132,10 +132,12 @@ async def test_a_checkpoints_line_runs_from_the_base_model_through_merges_with_e
     assert [point["kind"] for point in points] == ["model", "lora", "lora", "full", "lora"]
     assert [point["run"] for point in points] == [None, "lora-run", "lora-run", None, "stacked-run"]
     assert points[0]["model"] == "tiny" and points[3]["bookmarks"] == ["merged"]
-    scores = [point["scores"].get("words-v1") for point in points]
+    scores = [point["scores"].get("words-v1@1") for point in points]  # (by version: two do not compare)
     assert [score["solved"] if score else None for score in scores] == [0.0, 0.5, 0.75, None, 1.0]
     assert scores[2]["played"] == 4 and sorted(scores[2]["evals"]) == ["eval-second", "eval-second-again"]  # (pooled)
-    assert path["suites"] == [{"suite": "words-v1", "environment": ENVIRONMENT}]
+    assert path["suites"] == [
+        {"suite": "words-v1@1", "name": "words-v1", "number": 1, "label": "words-v1", "environment": ENVIRONMENT}
+    ]
     alone = path_of({}, {made["first"].id: made["first"]}, made["first"].id)
     assert alone["points"][0]["short"] == "base" and alone["suites"] == []
 

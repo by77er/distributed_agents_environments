@@ -121,12 +121,13 @@ async def test_a_run_is_asked_for_from_the_page_with_its_settings_and_stopped(tm
     async with client:
         listed = (await client.get("/api/launches")).json()
         assert listed["launches"] == [] and [each["launcher"] for each in listed["launchers"]] == ["launcher/far"]
+        settings = {"trainer.learning_rate": 3e-5, "evals.suite": None}  # (no evals, said so)
         asked = {"profile": "one-gpu", "environment": "c:c", "name": "diamonds, again", "start": "best",
-                 "settings": {"trainer.learning_rate": 3e-5}, "groups": 40}  # fmt: skip
+                 "settings": settings, "groups": 40}  # fmt: skip
         answer = await client.post("/api/launches", json=asked)
         assert answer.status_code == 200
         made = answer.json()["launch"]
-        assert made["state"] == ASKED and made["asked"]["settings"] == {"trainer.learning_rate": 3e-5}
+        assert made["state"] == ASKED and made["asked"]["settings"] == settings
         assert made["asked"]["groups"] == 40
         older = {**{key: value for key, value in asked.items() if key != "environment"}, "catalog": "c:c"}
         older["name"] = "asked as a catalog"  # (a page that says `catalog` asks for that environment)
@@ -137,7 +138,8 @@ async def test_a_run_is_asked_for_from_the_page_with_its_settings_and_stopped(tm
             "unknown environment": ({**asked, "environment": "other:environment"}, 404),
             "taken name": ({**asked, "name": "taken name"}, 409),
             "no name": ({**asked, "name": " "}, 409),
-            "unknown setting": ({**asked, "settings": {"episodes_at_onc": 2}}, 409),
+            "unknown setting": ({**asked, "settings": {"episodes_at_onc": 2, "evals.suite": None}}, 409),
+            "no word of its evals": ({**asked, "settings": {"trainer.learning_rate": 3e-5}}, 409),
             "no such checkpoint": ({**asked, "start": "nothing-like-it"}, 404),
             "missing fields": ({"profile": "one-gpu"}, 409),
         }
