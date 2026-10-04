@@ -61,6 +61,7 @@ Each implements one interface a library defines.
 | [Project assistant](products/project-assistant.md) | A long-lived conversational agent about one code repository |
 | [Agent sessions](products/agent-sessions.md) | Independent agents with their own computers, which create and message each other |
 | [Minecraft team](products/minecraft-team.md) | One to four agents in a Minecraft world: an environment to train on |
+| [Gridworld](products/gridworld.md) | Two to four agents share out the plates of a grid level over chat: a small environment to train on |
 
 ## Development
 
@@ -87,6 +88,7 @@ Each implements one interface a library defines.
 | `products/project-assistant` | `project_assistant` | A conversational agent about one repository | |
 | `products/agent-sessions` | `agent_sessions` (and `agent_sessions.coordination`) | Agents with their own computers, and their coordination | |
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
+| `environments/gridworld` | `gridworld` | Two to four agents on a grid level, with plates, doors, a gate and a lever; depends on `rollout` only | `Environment` |
 
 `uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
 `rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone). `implementations/rollout-verifiers` is a project of

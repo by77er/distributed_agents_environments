@@ -105,6 +105,7 @@ nav:
       - "Project assistant": products/project-assistant.md
       - "Agent sessions": products/agent-sessions.md
       - "Minecraft team": products/minecraft-team.md
+      - "Gridworld": products/gridworld.md
   - Development:
       - "Local services": development/local-services.md
   - Research:

@@ -74,6 +74,7 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 
 - [Project assistant](docs/products/project-assistant.md), [agent sessions](docs/products/agent-sessions.md)
 - [Minecraft team](docs/products/minecraft-team.md): one to four agents in a Minecraft world, trained on a curriculum
+- [Gridworld](docs/products/gridworld.md): two to four agents share out the plates of a grid level, talking it over
 
 ## Everything else
 
