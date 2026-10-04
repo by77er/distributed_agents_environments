@@ -1,0 +1,75 @@
+# A project of its own, locked apart from the workspace: tinker-cookbook (whose weight tools turn Tinker's adapters into
+# PEFT's) pins transformers<=5.5.4, and the platform's vLLM and Gemma renderers need 5.10 or later. It resolves here,
+# with the platform's versions of what both use, and never in the workspace's lock.
+#   uv sync                  the trainer and the engine, the Minecraft environment, the Qwen renderers, the tests
+#   uv sync --group local    with vLLM: Tinker trains, this machine serves (`weights = "peft"`)
+[project]
+name = "rollout-tinker"
+version = "0.0.0"
+description = "A Trainer and an Engine on Thinking Machines' Tinker"
+requires-python = ">=3.13"
+dependencies = [
+    "rollout",
+    "rollout-train",
+    "rollout-lora",  # the objective, its minibatches, and the merge (pure torch: none of its GPU code is imported)
+    "tinker==0.32.0",
+    "tinker-cookbook==0.5.7",
+    "torch>=2.10",
+    "safetensors>=0.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "ruff>=0.14",
+    "pyright>=1.1.407",
+]
+minecraft = [
+    "rollout-train[http,durable]",  # (durable: the database ledger)
+    "rollout-qwen",
+    "minecraft-team",
+]
+local = [
+    "rollout-vllm",
+]
+
+[tool.uv]
+default-groups = ["dev", "minecraft"]
+# tinker-cookbook pins transformers<=5.5.4; its weight tools read a model's configuration and its safetensors headers
+# only, and run here on the platform's transformers (tests/test_weights.py).
+override-dependencies = ["transformers==5.17.0"]
+constraint-dependencies = ["torch==2.13.0", "vllm==0.30.0", "openai==3.19.2"]  # the platform's
+
+[tool.uv.sources]
+rollout = { path = "../../libraries/rollout", editable = true }
+rollout-train = { path = "../../libraries/rollout-train", editable = true }
+rollout-durable = { path = "../rollout-durable", editable = true }
+rollout-lora = { path = "../rollout-lora", editable = true }
+rollout-qwen = { path = "../rollout-qwen", editable = true }
+rollout-vllm = { path = "../rollout-vllm", editable = true }
+minecraft-team = { path = "../../environments/minecraft", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = ["--import-mode=importlib", "-m", "not tinker"]
+pythonpath = ["."]  # (so that `tests.support` imports)
+markers = ["tinker: calls Tinker (needs a key, and spends a few cents): run with -m tinker"]
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+src = ["src", ".", "../../libraries/*/src", "../../implementations/*/src", "../../environments/minecraft"]
+
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rollout_tinker"]
