@@ -37,7 +37,7 @@ Interfaces, and what runs with no implementation beyond this process.
 | Package | Pages |
 |---|---|
 | `rollout` | [Harness](libraries/rollout/README.md): the loop, programs and runners. [Sandboxes](libraries/rollout/sandboxes.md), [determinism](libraries/rollout/determinism.md), [hooks](libraries/rollout/hooks.md), [memory](libraries/rollout/memory.md). [Contracts](libraries/rollout/contracts/README.md): [identifiers](libraries/rollout/contracts/identifiers.md), [canonical content](libraries/rollout/contracts/canonical-content.md), [run events](libraries/rollout/contracts/run-events.md), [effects](libraries/rollout/contracts/effects.md), the [model endpoint](libraries/rollout/contracts/model-endpoint.md) |
-| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [checkpoints, runs and the ledger](libraries/rollout-train/checkpoints.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [channels](libraries/rollout-train/channels.md), [recording](libraries/rollout-train/recorder.md), the [gateway](libraries/rollout-train/gateway.md) and [harnesses over HTTP](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
+| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [checkpoints, runs and the ledger](libraries/rollout-train/checkpoints.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [evals](libraries/rollout-train/evals.md), [datasets](libraries/rollout-train/datasets.md), [channels](libraries/rollout-train/channels.md), [recording](libraries/rollout-train/recorder.md), the [gateway](libraries/rollout-train/gateway.md) and [harnesses over HTTP](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
 
 ## Implementations
 
@@ -93,12 +93,12 @@ Each implements one interface a library defines.
 | `environments/gridworld` | `gridworld` | Two to four agents on a grid level, with plates, doors, a gate and a lever; depends on `rollout` only | `Environment` |
 
 `uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
-`rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone). `implementations/rollout-verifiers` is a project of
+`rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone), and `rollout-tinker` (`--extra tinker`). `implementations/rollout-verifiers` is a project of
 its own, with its own lock, outside the workspace.
 
 ## Research
 
-Proposals: what could be built, and the records it would need.
+Proposals and designs (what could be built, and the records it would need), and measurements.
 
 | Page | What it covers |
 |---|---|
@@ -106,6 +106,10 @@ Proposals: what could be built, and the records it would need.
 | [Curricula](research/curricula.md) | Building training curricula and frozen evaluation suites from a run's data |
 | [Thinking Machines' API](research/thinking-machines.md) | Training and sampling through Tinker as a trainer and an engine of their own |
 | [Prime Intellect's verifiers](research/prime-compat.md) | verifiers environments run here: what maps, a spike on a Hub environment, how stable the API is, and exporting ours |
+| [Runtime design](research/runtime-design.md) | One cluster config, run settings and presets, providers and the bridges between their formats, every role on Ray, one gateway: the design being carried out, and the order of its commits |
+| [Ledger guarantees](research/ledger-guarantees.md) | What the ledger promises its writers and readers (fences, claims, retries), each guarantee with the test that holds it |
+| [SFT datasets](research/sft-datasets.md) | Datasets made by rejection sampling from a run's episodes: the rules measured on one ledger, and the one recommended |
+| [Cleanup inventory](research/cleanup-inventory.md) | What to remove and what to factor out, ranked, and the order of the removal commits |
 | [RunPod pods as providers](research/runpod-providers.md) | GPU pods on RunPod serving a channel or taking training steps: the images, the follower and training service on the pods, mutual TLS with step-ca certificates, the security model, and how they become provider kinds |
 
 ## Conventions

@@ -190,3 +190,6 @@ Ask for them with `-m live`, by path:
 uv run pytest environments/minecraft/tests -m live
 uv run pytest tests/rollout_lora -m live --basetemp ~/.cache/rollout/pytest-gpu   # (its steps write gigabytes)
 ```
+
+A test that spends money is skipped unless asked for in the environment: `tests/rollout_tinker/test_live.py` runs with
+`ROLLOUT_TINKER=1` and a Tinker key ([Tinker](../implementations/rollout-tinker.md)).

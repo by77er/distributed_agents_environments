@@ -247,6 +247,9 @@ VLLM_ALLOW_RUNTIME_LORA_UPDATING=True uv run vllm serve Qwen/Qwen3-0.6B --host 0
     --api-key "$ROLLOUT_ENGINES_TOKEN"            # (optional: TLS with --ssl-certfile, --ssl-keyfile, --ssl-ca-certs)
 ```
 
+`--max-loras` must cover the adapters every run it serves keeps loaded: `max_lag + 1` each (2 here, for one run with
+`max_lag = 1`).
+
 A request names the checkpoint it samples from as its `model`: the base model by its own name, a LoRA checkpoint by
 its id. It completes the prompt's token ids (`/v1/completions` with `return_token_ids` and `logprobs`), so the tokens
 and their logprobs come back exactly as sampled, the stop token among them, and the answer names the model that
@@ -517,8 +520,9 @@ a long-lived Ray cluster (KubeRay: a head, and a GPU group and a CPU group the a
 launchers (each with `--ray`, submitting every run it claims to that cluster as a Ray job), the gateway and the
 monitors (Deployments, each behind a Service and an Ingress). Its profiles name the ledger and the blob store at their
 addresses in the cluster, and every pod mounts one volume for run directories and other local state. On this machine
-it runs in K3s; `deploy/k3s/README.md` installs it, `deploy/k3s/migrate.sh` copies a machine's ledger, blobs and run
-directories into it, and `deploy/k3s/cutover.md` moves the services over.
+it runs in K3s; `deploy/k3s/README.md` installs it (its Volumes section says where the volumes are kept, how they are
+kept when their claims go, and to back them up before uninstalling K3s), `deploy/k3s/migrate.sh` copies a machine's
+ledger, blobs and run directories into it, and `deploy/k3s/cutover.md` moves the services over.
 
 ## Stopping
 

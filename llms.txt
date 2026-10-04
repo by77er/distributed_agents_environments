@@ -1,15 +1,16 @@
 # rollout
 
 > Durable, scalable agents and environments for agent products and reinforcement learning. A uv workspace of Python
-> 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (rollout jobs,
-> episodes with token trajectories, the training loop, policies, channels, the gateway that records every turn, deployment profiles, the
-> `rollout` command), one package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Qwen and
-> Gemma renderers, computers, an OpenAI endpoint, an S3 blob store), two products and one environment. The
-> documentation describes the code as built.
+> 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (episode runners,
+> episodes with token trajectories, the training loop, checkpoints and the ledger, evals, channels, the gateway that
+> records every turn, bridges, deployment profiles, the cluster config, the `rollout` command, the monitor), one
+> package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Tinker's trainer and engine, Qwen and
+> Gemma renderers, computers, an OpenAI endpoint, an S3 blob store, RunPod pods), two products and two environments.
+> The documentation describes the code as built.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
 are frozen pydantic models; type names are never abbreviated. In the guide, a block tagged exactly `python` runs in
-the test suite and a block tagged `python fragment` does not. The API reference is generated from the source.
+the test suite and a block tagged `py` does not. The API reference is generated from the source.
 
 ## Guide
 
@@ -46,20 +47,23 @@ the test suite and a block tagged `python fragment` does not. The API reference 
   [canonical content](docs/libraries/rollout/contracts/canonical-content.md),
   [run events](docs/libraries/rollout/contracts/run-events.md), [effects](docs/libraries/rollout/contracts/effects.md),
   the [model endpoint](docs/libraries/rollout/contracts/model-endpoint.md)
-- [Rollouts](docs/libraries/rollout-train/rollouts.md): jobs, tickets, the stream of episodes, publishing weights
-- [Policies and the ledger](docs/libraries/rollout-train/policies.md): policy versions, manifests, append-only
-  tables and fences
+- [Rollouts](docs/libraries/rollout-train/rollouts.md): what runs and runners write, claims and fences, episode runners,
+  heartbeats, environments
+- [Checkpoints, runs and the ledger](docs/libraries/rollout-train/checkpoints.md): checkpoints, manifests, bridges,
+  append-only tables and fences, the registry
+- [Evals](docs/libraries/rollout-train/evals.md) and [datasets](docs/libraries/rollout-train/datasets.md): suites and
+  their versions, evals of checkpoints; examples chosen from episodes to imitate
 - [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
 - [Training](docs/libraries/rollout-train/training.md): the loop, its steps over groups, group-relative advantages,
   the curriculum, the trainer protocol
 - [Channels](docs/libraries/rollout-train/channels.md) and [recording](docs/libraries/rollout-train/recorder.md):
-  engines, limits, publishing weights, token recording
-- [Harnesses over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the OpenAI-compatible endpoint for
-  harnesses that bring their own loop
+  engines, limits, what a channel should serve, engine hosts; the thinking budget, segments, renderers
+- [Harnesses over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the gateway's OpenAI and Anthropic APIs
+  for harnesses that bring their own loop
 - [The gateway](docs/libraries/rollout-train/gateway.md): a stateless service that samples channels for programs and
   harnesses with signed keys, and records every turn in the ledger and the blob store: how every run records
-- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a run's directory: its steps, groups,
-  episodes and every agent's turns
+- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a ledger and every run in it: steps, groups,
+  episodes and every agent's turns, checkpoints, evals, environments, statistics, machines
 
 ## Implementations
 
@@ -67,8 +71,11 @@ the test suite and a block tagged `python fragment` does not. The API reference 
   [evicting idle runs](docs/implementations/rollout-durable/eviction.md),
   [several runners](docs/implementations/rollout-durable/runners.md) on one Postgres
 - [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
+  [Tinker trainer and engine](docs/implementations/rollout-tinker.md),
   [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md):
   what a profile names
+- [verifiers environments](docs/implementations/rollout-verifiers.md): Prime Intellect's verifiers environments,
+  their harnesses reaching the gateway
 - [Computers](docs/implementations/rollout-computers.md): environment backends and shell and file tools
 
 ## Products and environments
