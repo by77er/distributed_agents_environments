@@ -96,7 +96,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the tool set should live |
 | `pools` | Each sandbox pool, by the kind of sandbox it serves ([sandboxes](../libraries/rollout/sandboxes.md)): `module:name` of the provider that makes them in this process, or a table whose `kind` is that and whose other keys are its settings (`size`: how many at once), or a URL. A pool in this process is named `KIND@HOST/DIRECTORY`, keeps its leases beside the ledger and has a keeper that ends them with their claims | Run `rollout pool` where the sandboxes should live, and give its URL |
 | `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, the launches, what is wanted of each run's settings, and the sandboxes' leases | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
-| `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
+| `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say). Retention deletes a released checkpoint's files an hour at the earliest after they were last put ([checkpoints](../libraries/rollout-train/checkpoints.md#checkpoints)) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
 | `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
@@ -394,7 +394,21 @@ python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name N
 then `ended`, or `failed` with the end of the output. A launch asked to stop before it is claimed is `stopped` at
 once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). Launches are ordinary
 state beside the ledger: `launches.json` beside a ledger of files, the `launches` table in a database ledger's
-database. The runs a launcher started go on if the launcher stops. Started again under its name, it follows its Ray
+database.
+
+Every change of a launch's state compares and sets, in the store: it is made only if the launch is in the state its
+writer expects, and may go where it is sent (`rollout_train.launches.MOVES`):
+
+| From | To |
+|---|---|
+| `asked` | `claimed`, `stopped` |
+| `claimed` | `running`, `stopping`, `stopped`, `ended`, `failed` |
+| `running` | `stopping`, `stopped`, `ended`, `failed` |
+| `stopping` | `stopped`, `ended`, `failed` |
+
+A finished launch (`ended`, `failed`, `stopped`) goes nowhere. So a stop asked for while the launcher starts the run
+stays `stopping` (the launcher's `running` is refused) and the launcher interrupts the run it started; a stop of a
+launch the page saw `asked` that a launcher claimed meanwhile becomes `stopping`, not `stopped`. The runs a launcher started go on if the launcher stops. Started again under its name, it follows its Ray
 jobs again; a run it started as a process of its own cannot be waited on by another process, so once that process is
 gone its launch is noted `ended`, its end unseen. While no launcher of that name beats, the monitor shows its launches
 going as `lost`.

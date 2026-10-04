@@ -18,10 +18,12 @@ the claim, the mechanism, the assumptions it rests on, and the verdict, with fil
 guarantee fails, it gives a scenario and a proposed fix. The last section says what a proposed HTTP ledger service would
 have to guarantee for all of this to carry over.
 
-The analysis is of `main` at `6ec3721`. Line numbers are of that commit.
+The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 3, 4, 7, 8, 11, 12 and 14 have
+since been fixed: their sections say what the code does now, without line numbers.
 
-**Evidence.** Each violation found has a test marked `xfail(strict=True)`: the suite stays green, and a fix turns the
-test into a failure until its mark is removed. Tests that pass show a guarantee holding under real concurrency:
+**Evidence.** Each violation still open has a test marked `xfail(strict=True)`: the suite stays green, and a fix turns
+the test into a failure until its mark is removed. A fixed violation's test passes, unmarked. Tests that pass show a
+guarantee holding under real concurrency:
 
 - several processes sharing a `FileLedger`;
 - threads, each with a connection pool of its own, on SQLite;
@@ -37,22 +39,22 @@ wrapped to do so. Every step in them is the code's own.
 Safety means wrong recorded state, lost data, or two holders of one thing. Liveness means work stalls, is redone or
 leaks.
 
-| # | Kind | Finding | Test |
-|---|---|---|---|
-| 1 | Safety | A runner whose claim lapsed (it paused) still records its episode. The keeper deleted its sandbox when the claim lapsed, so its run fails, and that failure, made by the platform, becomes the episode's outcome and drops the newer attempt's result | `test_a_runner_whose_claim_lapsed_does_not_record_the_episode` |
-| 2 | Safety | Two claims of one episode hold at once: a lapsed claim holds again when its runner beats again, and an adoption races a new attempt | `test_a_lapsed_claim_does_not_hold_again_beside_a_newer_attempt`, `test_an_adoption_and_a_new_attempt_never_both_hold` |
-| 3 | Safety | Retention can delete a blob that a checkpoint added at the same moment names (content addressing finds it stored and does not write it again) | `test_thin_never_deletes_a_blob_a_concurrent_add_names` |
-| 4 | Safety | `FileLedger`: after a writer dies mid-line, the next acknowledged append is lost, and its key then accepts a second, different record | `test_an_append_after_a_torn_line_is_kept` |
-| 5 | Safety | Staleness and wall-time limits compare wall clocks. A runner whose clock is 90 s behind looks dead while it plays (finding 1, everywhere at once), and a clock stepped forward ends sandbox leases early | `test_a_live_runner_whose_clock_is_behind_keeps_its_claims`, `test_a_clock_stepped_forward_does_not_end_a_lease_early` |
-| 6 | Safety | Durable runner: a run replayed after its terminal event was stored appends a second terminal event (introduced by `42e324d`) | `test_a_run_replayed_after_it_ended_has_one_terminal_event` |
-| 7 | Safety | Launch states are overwritten unconditionally: a stop asked for while a run starts is lost, and a stop racing a claim marks a running launch `stopped` | `test_a_stop_asked_for_while_a_run_starts_stops_it`, `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` |
-| 8 | Safety | Two makers of one suite leave a suite that neither made | `test_two_makers_of_one_suite_leave_one_of_their_suites` |
-| 9 | Safety | Two loops of one run (a replaced one that has not noticed yet) share unfenced side effects: the run's directory, the trainer, the bookmark | none (analysis) |
-| 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all its durable runs on its next start | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
-| 11 | Liveness | `FileLedger`: a crash while taking a fence leaves `fences.json` empty, and the ledger is unusable until repaired by hand | `test_a_crash_while_taking_a_fence_leaves_the_ledger_usable` |
-| 12 | Liveness | `FileLedger` blocks the event loop on its lock and rereads whole tables on every append, which can delay beats | none (analysis) |
-| 13 | Liveness | The keeper decides from a read and releases afterwards: a lease whose claim was adopted in between is released, and its run is played again | none (analysis) |
-| 14 | Documentation | "A table's records … in the order they were appended" does not hold on Postgres for tables that several scopes write | `test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres` |
+| # | Kind | Finding | Status | Test |
+|---|---|---|---|---|
+| 1 | Safety | A runner whose claim lapsed (it paused) still records its episode. The keeper deleted its sandbox when the claim lapsed, so its run fails, and that failure, made by the platform, becomes the episode's outcome and drops the newer attempt's result | open | `test_a_runner_whose_claim_lapsed_does_not_record_the_episode` |
+| 2 | Safety | Two claims of one episode hold at once: a lapsed claim holds again when its runner beats again, and an adoption races a new attempt | open | `test_a_lapsed_claim_does_not_hold_again_beside_a_newer_attempt`, `test_an_adoption_and_a_new_attempt_never_both_hold` |
+| 3 | Safety | Retention can delete a blob that a checkpoint added at the same moment names (content addressing finds it stored and does not write it again) | fixed: a grace period, and a put that finds a blob sets its time ([6](#6-retention-and-blobs)) | `test_thin_never_deletes_a_blob_a_concurrent_add_names` |
+| 4 | Safety | `FileLedger`: after a writer dies mid-line, the next acknowledged append is lost, and its key then accepts a second, different record | fixed: the next append removes the unfinished line first, and appends are on disk before they are acknowledged | `test_an_append_after_a_torn_line_is_kept` |
+| 5 | Safety | Staleness and wall-time limits compare wall clocks. A runner whose clock is 90 s behind looks dead while it plays (finding 1, everywhere at once), and a clock stepped forward ends sandbox leases early | open | `test_a_live_runner_whose_clock_is_behind_keeps_its_claims`, `test_a_clock_stepped_forward_does_not_end_a_lease_early` |
+| 6 | Safety | Durable runner: a run replayed after its terminal event was stored appends a second terminal event (introduced by `42e324d`) | open | `test_a_run_replayed_after_it_ended_has_one_terminal_event` |
+| 7 | Safety | Launch states are overwritten unconditionally: a stop asked for while a run starts is lost, and a stop racing a claim marks a running launch `stopped` | fixed: every state change compares and sets ([7](#7-launches-and-settings)) | `test_a_stop_asked_for_while_a_run_starts_stops_it`, `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` |
+| 8 | Safety | Two makers of one suite leave a suite that neither made | fixed: a suite is one record ([8](#8-suites-finding-8)) | `test_two_makers_of_one_suite_leave_one_of_their_suites` |
+| 9 | Safety | Two loops of one run (a replaced one that has not noticed yet) share unfenced side effects: the run's directory, the trainer, the bookmark | open | none (analysis) |
+| 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all its durable runs on its next start | open | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
+| 11 | Liveness | `FileLedger`: a crash while taking a fence leaves `fences.json` empty, and the ledger is unusable until repaired by hand | fixed: `fences.json` is replaced whole | `test_a_crash_while_taking_a_fence_leaves_the_ledger_usable` |
+| 12 | Liveness | `FileLedger` blocks the event loop on its lock and rereads whole tables on every append, which can delay beats | fixed: it waits in a thread, and keeps each table's keys | `test_a_ledger_of_files_does_not_hold_up_the_event_loop_while_another_holds_its_lock` |
+| 13 | Liveness | The keeper decides from a read and releases afterwards: a lease whose claim was adopted in between is released, and its run is played again | open | none (analysis) |
+| 14 | Documentation | "A table's records … in the order they were appended" does not hold on Postgres for tables that several scopes write | fixed: an append holds its table's lock while it numbers its record | `test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres` |
 
 The [durable runner](#9-the-durable-runner) section lists further problems found by reading `rollout_durable`. Only
 finding 6 among them is tested.
@@ -78,25 +80,27 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
   - The directory is on a local Linux filesystem. `flock` across machines on NFS, and on WSL's `/mnt/c`, is
     unverified, and the docs say a ledger of files serves one machine.
   - No process writes the files except through `FileLedger`.
-- **Not durable against crashes.** These do not break fencing, but break the ledger:
-  - **A torn line loses the next append (finding 4).** `_read` skips a line that does not parse (`ledger.py:118-123`),
-    on the grounds that "a line a dying writer left half written … was never appended". The next `append` opens the
-    file in append mode and writes its line directly after the torn bytes, with no newline between
-    (`ledger.py:94-95`). Both are now one unparsable line: the new record is dropped, although `append` returned
-    True. Its key is free again, so a second, different record is accepted as the first. For a claim, that means two
-    runners play one attempt.
-    - A torn line needs a writer killed between two `write` system calls of one record (a record larger than the 8 KiB
-      buffer), or a full disk.
-    - **Fix:** under the lock, if the file does not end in `\n`, truncate it to its last newline (or write a newline)
-      before appending; `fsync` the file before returning True.
-  - **A crash while taking a fence (finding 11).** `fences.json` is rewritten in place (`write_text`, `ledger.py:83`).
-    A crash between the truncate and the write leaves an empty or partial file, so every later `take` and `append`
-    raises `JSONDecodeError`. This fails loudly rather than unfencing, because truncated JSON never parses.
-    - **Fix:** write a temporary file, `fsync` it, then `os.replace`. `FilePresence`, `FileLeases` and `FileLaunches`
-      already write this way (`presence.py:87-89`).
-  - Nothing is `fsync`ed. After a power loss, a take may be lost while an append made under the new fence survives.
-    The fence would then go back to *n − 1*, and the replaced writer could write again. Unverified: it depends on the
-    filesystem's ordering of writes to two files.
+- **Durable against crashes: holds.**
+  - **A torn line (finding 4, fixed).** A torn line is what a writer killed between two `write` system calls of one
+    record (a record larger than the 8 KiB buffer) leaves, or a full disk. Readers skip a line that does not parse:
+    it was never acknowledged. Under the lock, before it writes, an append reads its table's file as far as it grew
+    since it last looked. An unfinished last line is cut off (`ftruncate` to the last newline), or, if it holds a
+    whole record whose newline was lost, ended with a newline (readers had already counted it). The new line is
+    therefore never glued to torn bytes, and the torn record's key stays free only because that record was never
+    appended. An append that fails partway (a full disk) cuts off what it wrote before raising.
+    - Tests: `test_an_append_after_a_torn_line_is_kept`; in `tests/rollout_train/test_ledger.py`, a file cut short
+      mid-line with `os.truncate` and a record whose newline was cut off.
+  - **A crash while taking a fence (finding 11, fixed).** `fences.json` is written beside itself to a temporary file,
+    put on disk (`fsync`), renamed over the old one (`os.replace`), and the directory is put on disk. A crash at any
+    point leaves either the old fences or the new. `test_a_crash_while_taking_a_fence_leaves_the_ledger_usable` kills
+    the take after the new fences are written and before the rename: the old fences stand and the ledger goes on.
+  - **On disk before acknowledged.** An append calls `fsync` on its table's file before it returns True, and on the
+    directory when it made the file. A take is on disk before it returns its number, so a power loss cannot lose a take
+    while keeping an append made under the fence it gave: the fence never goes back.
+- **Not blocking (finding 12, fixed).** Every operation waits for the lock and does its file work in a thread
+  (`asyncio.to_thread`), so a beat is not held up behind another process's append. Each process keeps, per table,
+  which file it read (device and inode), how far, and where each key's line begins. An append reads only what other
+  processes appended since, or the whole file if it is another file or shorter. A read still reads the whole table.
 
 ### `DatabaseLedger` on SQLite: holds
 
@@ -133,28 +137,36 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 - `FileLedger`: the key check and the write happen under the directory lock (`ledger.py:90-96`).
 - `DatabaseLedger`: the table's primary key is `(name, key)`, and the insert is `ON CONFLICT (name, key) DO NOTHING`
   (`database.py:40-48,143-150`). This is atomic on both databases, whatever the locks.
-- **Callers that ignore the answer.** A caller that loses an append learns nothing about the winner unless it reads
-  back:
-  - `Checkpoints.add` reads back (`checkpoints.py:203-204`), and so does `reshard` (`resharding.py:82-83`).
-  - `make_suite` does not (`evals.py:103-106`), which gives finding 8.
-  - `EpisodeRunner._ended` does not (`scheduler.py:494`). That is intended: the loser's episode is dropped.
+- **What the loser learns.** `append` answers only whether it wrote. `appended(ledger, …)` answers `Appended(wrote,
+  record)`, the record the table holds under the key: both ledgers say so from the append itself
+  (`append_returning`: `DatabaseLedger` reads the row in the same transaction, `FileLedger` reads the key's line by
+  its offset), and of any other ledger the table is read back.
+  - `Checkpoints.add` reads back, and so does `reshard`.
+  - `make_suite` uses `appended` and plays the winner's suite (finding 8, fixed).
+  - `EpisodeRunner._ended` does not read back. That is intended: the loser's episode is dropped.
 
-### Order of records: does not hold on Postgres (finding 14)
+### Order of records: holds (finding 14, fixed)
 
-- **Claim.** `read` returns "a table's records by key, in the order they were appended" (`ledger.py:52-53`).
-- **Mechanism.** Each insert computes `position` as `MAX(position) + 1` for its table (`database.py:146`). It does so
-  under the lock of its fence's scope, not of its table.
-- **What breaks.** Several scopes write one table: every runner writes `runs/RUN/claims`, `episodes`, `interrupted`
-  and `adopted`, and every run writes `checkpoints`. On Postgres, two such appends at once both read the same `MAX`,
-  and both get the same position. Ties then come back in any order. Nothing has a unique index on `position`.
-- **Evidence.** `test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres` runs the second append
-  while the first transaction is open, and gets positions `[1, 1]`.
-- **Scope.** SQLite serializes every write, so it is unaffected. Nothing found depends on the order of these tables
-  except what is displayed. The same `MAX` scan also makes each append cost O(rows of the table), since there is no
-  index on `(name, position)`.
-- **Fix.** Take the position from a sequence or an identity column (commit order still differs from position order,
-  which matters for streams: see [HTTP](#10-a-proposed-http-ledger-service)). Or lock on `ledger-table:NAME` as well.
-  Or say "in an order consistent with each scope's appends".
+- **Claim.** `read` returns a table's records by key, in the order their appends took effect, whichever scopes made
+  them.
+- **Mechanism.** Each insert computes `position` as `MAX(position) + 1` for its table. On Postgres, the append takes a
+  transaction lock on its table (`pg_advisory_xact_lock(hashtextextended('table:NAME', 0))`) after its scope's lock
+  and before the insert, and holds it until it commits. The next append to the table waits for that commit, and its
+  insert statement's fresh snapshot (READ COMMITTED) sees it, so positions are unique and in commit order. SQLite runs
+  one write at a time. An index on `(name, position)` makes the `MAX` and the ordered read cheap; a database made before
+  it gets it when a `DatabaseLedger` opens it.
+- **Locks.** Every append takes its scope's lock, then its table's; a take, only its scope's. No transaction takes a
+  table's lock and then a scope's, so the two cannot deadlock. Appends to one table, from any scopes, run one at a time.
+- **Readers that depend on order.** `checkpoints_in` (oldest first), claim and attempt order, and the monitor's lists
+  read tables in position order, which is now commit order on every database. Positions written before (on Postgres,
+  possibly tied) read in `(position, key)` order.
+- **Evidence.**
+  - `test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres` runs the second append while the
+    first transaction is open: the second waits, and the positions are `1` for the first to commit and `2` for the
+    second.
+  - `test_writers_of_scopes_of_their_own_appending_to_one_table_take_positions_one_after_another`: four threads, each
+    with a connection pool and a scope of its own, append 25 records each to one table, on SQLite and on Postgres. The
+    positions are 1 to 100, and each writer's records read in the order it appended them.
 
 ## 2. Claims and episodes
 
@@ -405,47 +417,69 @@ append keeps doing everything else:
 
 ## 6. Retention and blobs
 
-**Claim.** "A release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no
-checkpoint still names it, so this may be repeated after a crash at any point" (`checkpoints.py:209-211`, checkpoints.md).
+**Claim.** A release is appended to the ledger before its blobs are deleted, and a blob is deleted only if nothing
+names it and nothing put it in the last `Retention.grace` seconds, so a thinning may be repeated after a crash at any
+point, and a checkpoint added at the same moment keeps its blobs (checkpoints.md).
 
-**Mechanism.** `thin` appends releases, reads every checkpoint, collects the hashes that unreleased checkpoints name,
-and deletes the released checkpoints' blobs outside that set (`checkpoints.py:207-233`).
+**Mechanism.** `thin` appends releases, reads every checkpoint and every reshard, collects the hashes that unreleased
+checkpoints' weights and state, and what they were resharded into, name, and deletes the released checkpoints' other
+blobs with `delete(reference, unused_for=grace)`. Every put sets the blob's time to now, whether it writes the blob or
+finds it.
 
 **Crash safety: holds.** A release is recorded before any deletion, and every step is repeatable.
 
-**Atomicity against a concurrent `add`: does not hold (finding 3).** The check and the delete are separate, and `add`
-writes nothing when the blob is already there: `_write_once` and `_linked_once` return early (`blobs.py:91-92,107-108`),
-and so does `S3BlobStore._put_once` (`store.py:68-70`).
+**Against a concurrent `add`: holds, given the grace (finding 3, fixed).** The race was:
 
 1. `thin` (run X) reads the names. Blob *B* is named only by a checkpoint it just released.
-2. `add` (run Y, or a merge, imitation, or a replaced loop) finds *B* stored and appends a checkpoint naming it.
+2. `add` (run Y, or a merge, imitation, or a replaced loop) finds *B* stored, writes nothing, and appends a checkpoint
+   naming it.
 3. `thin` deletes *B*.
 
-Y's checkpoint now names a blob that is gone. `test_thin_never_deletes_a_blob_a_concurrent_add_names` does exactly
-this. A file whose bytes recur across checkpoints is what makes it happen: a configuration file, a tokenizer, or a
-checkpoint forked from the one being thinned. The same race exists against what `keep` lists:
+A file whose bytes recur across checkpoints is what makes it happen: a configuration file, a tokenizer, or a
+checkpoint forked from the one being thinned. Now the put in step 2 sets *B*'s time, so step 3 spares it.
 
-- `keeping()` reads the runs' starts and the bookmarks before `thin` (`loop.py:218-225,431`);
-- a run that starts from a checkpoint after that read, or a bookmark set after it, does not keep it;
-- a run's `start` is checked for `weights is None` only when its files are fetched.
+- **Why it holds.** Let `thin` read the names at *t₃* and delete at *t₄*, and let `add` put *B* at *t₂* and append at
+  *t₅*. If *t₅* < *t₃*, `thin` sees the name. Otherwise *t₄* − *t₂* < (*t₄* − *t₃*) + (*t₅* − *t₂*): when a thinning's
+  span from reading to its last delete, and an add's from its first put to its append, are together shorter than the
+  grace (an hour by default), *B* is younger than the grace when `thin` looks, and is spared. A blob spared is deleted
+  by a later thinning of any run, which looks at every released checkpoint's blobs again.
+- **Why a grace period, not a lock.** One lock spanning an add's puts and its append, and a thinning's read and its
+  deletes, would have to live where every writer of a blob store reaches: a file lock serves one machine, a Postgres
+  advisory lock would be held by a client for a whole upload of a checkpoint to S3, and an HTTP ledger would need a
+  lease of its own. A blob's time lives with the blob, in every store: a file's modification time, an object's
+  `LastModified`. It needs nothing beside the store, and it is what a service that alone deletes blobs would keep
+  ([HTTP](#10-a-proposed-http-ledger-service)).
+- **A store of files.** A put that finds a blob's file sets its modification time (`utime`); one that cannot (another
+  user's file) writes it again as its own. A file kept by linking (`put_file`) is one inode with the trainer's working
+  file, so the put sets the working file's time too; a link made new is set to now as well, since the working file
+  keeps the time it was written at. To delete, `thin` looks at the time, moves the file aside (`rename`, atomic) and
+  looks again there: a put that found the file in between set the inode's time (the file is linked back, unless a put
+  wrote it again meanwhile), and a put after the move finds no file and writes it. Deleting a blob unlinks it from
+  the store only: a working copy linked to it keeps its bytes, and a later `put_file` of it links it back.
+  - `test_thin_never_deletes_a_blob_a_concurrent_add_names` (on a ledger of files and on SQLite) ages every blob by two
+    hours, then runs another run's `add` just before `thin`'s first delete: the shared blob is kept, and the blob only
+    the released checkpoint named is deleted.
+  - `test_a_put_that_finds_a_blob_as_it_is_being_deleted_keeps_it` runs a put between the look and the move.
+- **An S3 store.** A put that finds an object copies it onto itself (`CopyObject` with `MetadataDirective=REPLACE`),
+  which sets its `LastModified`, unless it was set in the last minute (`refresh_after`: one copy a minute of a blob put
+  often). Ages are judged by the service's clock, the `Date` of its answer. To delete, `thin` asks the object's time
+  (`HeadObject`), then deletes it: a put that finds the object between those two requests, and whose add appends before
+  that delete, is not seen. The window is one request long; S3's conditional delete does not apply, since copying an
+  object onto itself keeps its ETag.
+
+**What is still open.** `keeping()` reads the runs' starts and the bookmarks before `thin` (in `loop.py`). A run that
+starts from a checkpoint after that read, or a bookmark set after it, does not keep the checkpoint: it is released,
+reads with no weights, and the run that starts from it fails loudly ("was released") when it fetches its files. A
+fix needs `thin` to read what keeps checkpoints after appending its releases, and a way to take a release back.
 
 **Do datasets, episodes and reshards count as names?**
 
-- No: only checkpoints' `weights` and `state` count (`checkpoints.py:223-225`).
-- Today that is safe, because only those blobs are ever deleted, and episode, dataset and batch blobs do not share
-  bytes with them.
-- A `verbatim` reshard's manifest names the same blobs as its checkpoint's weights (`resharding.py:73`). It loses them
-  with its checkpoint, which is then released anyway.
-- A future deletion of other blobs would need every manifest counted.
-
-**Fix.**
-
-- Keep a grace period: a blob is deleted only if no checkpoint names it, and it is older than *G* (much longer than any
-  `add` takes).
-- `put` of a blob that exists refreshes its time: a `utime` for files, a copy-in-place for S3.
-- Or put deletion behind one lock (`blobs`) that `add` holds from its first `put` to its append, and that `thin` holds
-  from reading the names to its last delete.
-- Behind a service, deletion belongs to the service alone (see HTTP).
+- What checkpoints not released were resharded into counts: a reshard (not `verbatim`) can write a file that has the
+  bytes of a released checkpoint's file, a configuration file say.
+- Datasets', episodes' and batches' blobs are never deleted, and do not count: only checkpoints' files are deleted.
+  One of them would be lost only if a released checkpoint had a file of exactly its bytes.
+- A `verbatim` reshard of a released checkpoint names its weights' blobs; they go with the checkpoint, whose reshard is
+  of no use once it is released.
 
 ## 7. Launches and settings
 
@@ -454,29 +488,33 @@ checkpoint forked from the one being thinned. The same race exists against what 
 - A launcher claims a launch asked for. The claim is atomic in both stores: `FileLaunches.claim` under the directory
   lock, and `DatabaseLaunches.claim` with `WHERE state = 'asked'` under an exclusive lock (`launches.py:154-164`,
   `database.py:306-316`). **This holds.**
-- "A launch asked to stop is stopped by its launcher" (`launches.py:8`), and `stop` on one not started yet stops it at
-  once (`monitor/system.py:262-269`).
+- "A launch asked to stop is stopped by its launcher", and `stop` on one not started yet stops it at once. **This
+  holds (finding 7, fixed).**
 
-**Mechanism.** `note(id, **changes)` overwrites whatever state is there (`launches.py:166-174`, `database.py:318-327`).
-The launcher sends the stop signal only to launches it finds in `stopping` (`launcher.py:133-139`).
+**Mechanism.** `note(id, expect=STATES, **changes)` compares and sets in one step of the store: under the directory
+lock for `FileLaunches`, and in one transaction under the `launches` lock for `DatabaseLaunches`, whose `UPDATE` also
+says `WHERE state = <the state read>`. The changes are written only if the launch is in a state of `expect` (any, if
+none is given) and may go to the state they name. Either way it returns the launch as it then is, and the writer
+compares the state it gets with the state it asked for. The moves are written down once (`launches.MOVES`):
 
-**What does not hold (finding 7).**
+- `asked → claimed | stopped`;
+- `claimed → running | stopping | stopped | ended | failed`;
+- `running → stopping | stopped | ended | failed`;
+- `stopping → stopped | ended | failed`.
 
-- **The launcher's `running` overwrites a stop.** It writes `running` after starting the process
-  (`launcher.py:191`). A stop written between the claim and that write is overwritten, and the run is never signalled.
-  Test: `test_a_stop_asked_for_while_a_run_starts_stops_it`.
-  - The Ray path checks `state == claimed` before writing `running` (`launcher.py:252-253`), but in a separate read,
-    so the same race remains.
-- **The monitor's `stop` reads, then writes.** It writes `stopped` for a launch it read as `asked`. A launcher that
-  claims and starts it in between leaves a launch marked `stopped`, a final state, whose process runs on unsignalled.
-  `_watch` later overwrites it with `ended`. Test: `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped`.
-- **Fix.** Make every transition a compare-and-set in the store, for example `note(id, expect={CLAIMED},
-  state=RUNNING)`, which returns the launch as it is when the expectation fails. Encode the state machine once:
-  - `asked → claimed | stopped`;
-  - `claimed → running | stopping | failed`;
-  - `running → stopping | ended | failed`;
-  - `stopping → stopped | ended | failed`.
-  The launcher, on finding `stopping` where it expected `claimed`, signals the process it just started.
+A finished launch goes nowhere, and nothing goes back. `claimed → ended | stopped` and `running → stopped` are a Ray
+job that succeeded, or was stopped from outside, before its launcher saw it run.
+
+- **The launcher.** It notes `running` expecting `claimed`. Refused (a stop came while the process started), it notes
+  the process's directory and pid without changing the state, and its next step interrupts the process, as it does
+  every launch it plays that is `stopping`. The Ray path notes `running` expecting `claimed` the same way. A process
+  that ends is noted `stopped` expecting `stopping`, else `ended` or `failed`.
+- **The monitor.** `stop` of a launch it read as `asked` notes `stopped` expecting `asked`. Refused (a launcher claimed
+  it meanwhile), it notes `stopping` expecting `claimed`, `running` or `stopping`, as for a run going, using the
+  answer of the refused note rather than reading again.
+- Tests: `test_a_stop_asked_for_while_a_run_starts_stops_it` and
+  `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` run the races with the real launcher and monitor;
+  `tests/rollout_train/test_launches.py` checks the moves on both stores, and concurrent stops and starts.
 
 **Run settings: hold.** `want` merges under a lock (`database.py:380-392`). The loop reads the settings between steps
 only, and records what each step used. A change written mid-step applies to the next step, as documented.
@@ -486,25 +524,19 @@ wins (see finding 9).
 
 ## 8. Suites (finding 8)
 
-**Claim.** A suite is "written once under the suite's fence (`suites/NAME`) and never changed" (`evals.py:6-9`).
+**Claim.** A suite is written once under the suite's fence (`suites/NAME`) and never changed, and two makers of one
+suite at once leave one of their suites whole. **This holds (finding 8, fixed).**
 
-**Mechanism.** `make_suite` checks that the name is free, takes the fence, then appends the suite's record and each
-start under keys of their own (`evals.py:92-106`). `suite_for` calls it on first use.
+**Mechanism.** `make_suite` checks that the name is free, takes the fence, and appends the whole suite as one record
+(`evaluations/SUITE/suite`: what it is and its starts in order) with `appended`. A maker whose fence was taken after
+its own raises `Fenced`; a maker whose append finds a record there returns the suite in that record, and plays it.
+With one record, there is nothing for a second maker to finish: the suite in the ledger is one maker's. `suite_for`,
+which makes an environment's eval data on first use, tries again after `Fenced` until it finds a suite of the name.
+A suite written before (a record and a table of starts by number) reads the same.
 
-**What breaks.**
-
-1. Maker A and maker B both find no suite `s`.
-2. A takes fence 1, appends the record and start 1.
-3. B takes fence 2. A's next append raises `Fenced`.
-4. B's record and start 1 already exist: its appends return False, unread. Starts 2 and 3 are B's.
-
-The ledger now holds A's record (A's seeds) with starts `[A1, B2, B3]`, a suite neither made, and B plays its own list.
-Test: `test_two_makers_of_one_suite_leave_one_of_their_suites`.
-
-For an environment's own eval data, both makers draw the same starts, so this is harmless. It bites only on
-`make_suite` by hand with different rows or seeds, or when environment versions differ.
-
-**Fix:** one record holding the whole suite, or read back after appending and return what the ledger holds.
+Tests: `test_two_makers_of_one_suite_leave_one_of_their_suites` (the second maker takes the fence after the first and
+before its append: the first is fenced out, and the ledger holds the second's suite) and
+`test_a_maker_that_finds_the_suite_made_meanwhile_plays_that_one`.
 
 ## 9. The durable runner
 
@@ -587,7 +619,10 @@ Below is what each operation must keep.
   The claim holds as long as the runner beats, so the episode never ends: a stall for the whole group, and so for the
   run.
 - The service must answer with whether this request wrote the record. It stores the request id with the record, or
-  compares the stored record with the one sent, and returns the stored record when they differ.
+  compares the stored record with the one sent, and returns the stored record when they differ. The client side of
+  that answer exists: `append_returning` returns `Appended(wrote, record)`, and `appended(ledger, …)` asks for it
+  (both ledgers answer it today; a caller that needs the winner, such as `make_suite`, uses it). `append` stays as it
+  is, `wrote` alone, for every other caller.
 - The fence check and the insert must be one transaction under the scope's lock, as today. The check must happen when
   the append is applied, not when the request arrives, so that an append delayed past a newer take is refused.
 
@@ -620,11 +655,11 @@ transaction-scoped.
 
 **Change streams instead of polling.**
 
-- A stream needs a position in commit order. `position` is neither unique (finding 14) nor in commit order. A
-  sequence is assigned at insert, so a row numbered 11 can commit before row 10, and a consumer resuming "after 11"
-  never sees 10.
-- The service must use one of:
-  - positions assigned under a per-table lock in the inserting transaction (serial per table);
+- A stream needs a position in commit order. `position` is that, per table: it is assigned under the table's lock in
+  the inserting transaction ([order of records](#order-of-records-holds-finding-14-fixed)). A sequence would not be:
+  it is assigned at insert, so a row numbered 11 can commit before row 10, and a consumer resuming "after 11" never
+  sees 10.
+- Other ways, if appends to one table must not wait for each other:
   - Postgres logical decoding (commit LSN);
   - a resume rule that re-reads from the oldest position still in flight (`pg_snapshot_xmin`).
 - Delivery is then at least once, resumable with an opaque token, and in order per table. Records are immutable and
@@ -703,7 +738,10 @@ What the client must do:
 ## Unverified
 
 - `flock` across machines (NFS) and on WSL's `/mnt/c`, for `FileLedger`.
-- What a power loss does to a `FileLedger` without `fsync` (whether a fence can go back).
+- Whether the filesystems a `FileLedger` or a store of files runs on keep what `fsync` put on disk across a power loss
+  (WSL's virtual disk, network filesystems).
+- Clocks for retention's grace: a store of files on a filesystem shared by machines compares a file's time, set by the
+  machine that put it, with the thinning machine's clock. Skew much smaller than the grace (an hour) is assumed.
 - Whether a trainer writes its working files in place after `kept` has hard-linked them, and whether any deployment
   runs trainers as root (which would let such a write reach the blob).
 - Pools of one name in two processes with a real provider (Minecraft worlds).

@@ -124,10 +124,12 @@ class Blobs(Protocol)
 
 **Methods**
 
-- `async def put(self, data: bytes, media_type: str) -> BlobReference` — Store bytes, or find them already stored; either way return their reference.
+- `async def put(self, data: bytes, media_type: str) -> BlobReference` — Store bytes, or find them already stored; either way return their reference. Either way the blob's time
+  is now: it is not deleted for a while (`delete`).
 - `async def read(self, reference: BlobReference) -> bytes`
-- `async def delete(self, reference: BlobReference) -> None` — Remove a blob if it is there. Whoever stored the same bytes holds the same blob: delete only what nothing
-  else names.
+- `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None` — Remove a blob if it is there, and was not put (written or found) in the last `unused_for` seconds.
+  Whoever stored the same bytes holds the same blob: delete only what nothing else names, and with `unused_for`
+  longer than any writer takes from putting a blob to naming it.
 
 ### `Capacity`
 
@@ -455,17 +457,21 @@ class ExecutionResult(ContractModel)
 class FileBlobStore
 ```
 
-Implements `Blobs` in a directory: one file per blob, named by its SHA-256.
+Implements `Blobs` in a directory: one file per blob, named by its SHA-256. A blob's time is its file's
+modification time: a put that finds the file sets it to now. Deleting with `unused_for` moves the file aside first
+and looks at its time again there, so a put that found it just before is seen (the file is put back), and a put
+just after finds no file and writes it again.
 
 **Methods**
 
 - `def __init__(self, directory: Path) -> None`
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
-- `async def delete(self, reference: BlobReference) -> None`
+- `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None`
 - `async def put_file(self, path: Path, media_type: str) -> BlobReference` — Store the file at `path`, or find it already stored, without copying its bytes where the store is on the
-  same filesystem: the blob is then a hard link to the file, and both are made read-only, since they are one file.
-  Elsewhere the file is copied. The file is read in pieces, never whole.
+  same filesystem: the blob is then a hard link to the file, and both are made read-only, since they are one file
+  (and share one modification time: the put's). Elsewhere the file is copied. The file is read in pieces, never
+  whole.
 - `async def link(self, reference: BlobReference, target: Path) -> bool` — Put the blob at `target`: a hard link to it where `target` is on the store's filesystem, else a copy.
   Returns False, putting nothing, if the store does not have it.
 
@@ -3144,8 +3150,11 @@ Every checkpoint, in a ledger, and their files in a blob store.
   decided before) gets the checkpoint that is there.
 - `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
   nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
-  release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no checkpoint
-  still names it, so this may be repeated after a crash at any point.
+  release is appended to the ledger before its blobs are deleted, and a blob is deleted only if nothing still
+  names it (a checkpoint that was not released, or what one was resharded into), so this may be repeated after a
+  crash at any point. Nor is a blob deleted that was put in the last `retention.grace` seconds: a checkpoint being
+  added at the same moment, which found the blob stored and has not appended itself yet, names it next. A blob
+  spared so is deleted by a later thinning, of this run or any other.
 - `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
   appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint. A file this
   store lacks is read from the store of any run that has it (a checkpoint made by a run that kept its blobs
@@ -3258,13 +3267,22 @@ class FileLedger
 ```
 
 A `Ledger` in a directory: a table is `<table>.jsonl`, one `{"key", "fence", "record"}` per line. Processes
-on one machine may share it: every operation holds a lock on the directory.
+on one machine may share it: every operation holds a lock on the directory, in a thread (the event loop never
+waits on the lock).
+
+An append is on disk (`fsync`) before it is acknowledged. A last line left unfinished (by a writer that died
+mid-record, or a full disk) was never acknowledged: the next append removes it before writing (or ends it, where it
+holds a whole record), so that nothing is glued to it. `fences.json` is replaced whole (written beside it and put on
+disk, then renamed over it), so a crash while taking a fence leaves the fences as they were. Which keys a table has
+is kept in memory, and read again only as far as its file grew since (other processes' appends), or whole if the
+file was replaced.
 
 **Methods**
 
 - `def __init__(self, directory: Path) -> None`
 - `async def take(self, scope: str) -> Fence`
 - `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool`
+- `async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended` — `append`, saying what the table holds under `key` too.
 - `async def read(self, table: str) -> dict[str, JsonValue]`
 - `async def tables(self) -> list[str]`
 - `async def fences(self) -> dict[str, int]`
@@ -3347,7 +3365,8 @@ class Ledger(Protocol)
 - `async def take(self, scope: str) -> Fence` — Take a scope's fence. Whoever held it can no longer write within the scope.
 - `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool` — Append a record under `key`, unless the table has that key: then nothing changes and False is returned.
   Raises `Fenced` if `fence` is not its scope's newest.
-- `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended.
+- `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended: the order their appends took effect in, whichever
+  scopes made them.
 - `async def tables(self) -> list[str]` — The tables that have records, by name.
 - `async def fences(self) -> dict[str, int]` — The newest fence of every scope that has been taken.
 
@@ -3453,12 +3472,15 @@ class Retention
 
 Which of a run's checkpoints keep their files, their weights and their trainer state (what can be served, and
 what a step can go on from): the newest `recent`, and every `every`-th by depth, so that saves thin out with
-age.
+age. A blob put in the last `grace` seconds is not deleted yet (`Checkpoints.thin`): `grace` must be longer than
+a checkpoint takes from its first file's put to its append, and a thinning from reading what is named to its
+last delete, together.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `recent` | `int` | `2` |  |
 | `every` | `int` | `20` |  |
+| `grace` | `float` | `3600.0` |  |
 
 **Methods**
 
@@ -3582,7 +3604,8 @@ use). Raises `KeyError` when neither has it, `ValueError` when the ledger's is a
 async def suite_of(ledger: Ledger, name: str) -> Suite | None
 ```
 
-A suite, if there is one by that name.
+A suite, if there is one by that name: one record (`suite`) holding all of it, or, for a suite made before
+suites were, a record of what it is and its starts in a table of their own.
 
 ### `train`
 
@@ -5139,8 +5162,8 @@ Implements `Blobs` in an S3 bucket.
 
 **Methods**
 
-- `def __init__(self, bucket: str, *, prefix: str = 'blobs/', endpoint_url: str | None = None, region: str | None = None, client: 'S3Client | None' = None) -> None` — `client` replaces the boto3 client this store would create (e.g. with custom credentials).
+- `def __init__(self, bucket: str, *, prefix: str = 'blobs/', endpoint_url: str | None = None, region: str | None = None, client: 'S3Client | None' = None, refresh_after: float = REFRESH_AFTER) -> None` — `client` replaces the boto3 client this store would create (e.g. with custom credentials).
 - `@classmethod def from_url(cls, url: str, **options: Any) -> 'S3BlobStore'` — A store for `s3://bucket/prefix`.
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
-- `async def delete(self, reference: BlobReference) -> None`
+- `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None`

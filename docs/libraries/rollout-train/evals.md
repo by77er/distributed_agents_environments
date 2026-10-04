@@ -25,12 +25,17 @@ environment's eval data of that name, frozen now; a suite in the ledger of anoth
 is refused. `make_suite(ledger, name, environment_name, environment, rows=…, seeds=…)` makes one by hand (or, with
 `starts=`, of given starts) under the fence `suites/NAME`. A name that is taken, a row the environment does not have,
 or no seeds is refused. `suite_of(ledger, name)` reads one back, and `suites_in(ledger)` lists every suite's name. The
-suite is kept in two tables:
+suite is kept as one record:
 
 | Table | Key | Holds |
 |---|---|---|
-| `evaluations/SUITE/suite` | `suite` | its environment (`module:name`) and its `version` then, when it was made, its rows and seeds, and whether it is `held_out` (the environment's eval data) |
-| `evaluations/SUITE/starts` | `1` to `N` | each start: the row's key (`task`) and title, the seed, and the start's `parameters` |
+| `evaluations/SUITE/suite` | `suite` | its environment (`module:name`) and its `version` then, when it was made, its rows and seeds, whether it is `held_out` (the environment's eval data), and its `starts` in order: each the row's key (`task`) and title, the seed, and the start's `parameters` |
+
+Two makers of one suite at once leave one of their suites whole. The second to take the fence shuts the first out
+(`Fenced`); a maker whose record finds the suite's already there plays the one there, not its own. `suite_for` makes
+the environment's eval data again after a `Fenced` until it finds a suite of the name, and plays that one. A suite made
+before suites were one record keeps its starts in a table of their own (`evaluations/SUITE/starts`, by number from 1),
+and reads the same.
 
 ## An eval
 

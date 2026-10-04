@@ -53,8 +53,24 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   retention says, a checkpoint keeps its files while it is served (and its parent, for a turn in progress), while any
   run starts from it, and while a bookmark names it (`keep`). A kept checkpoint can be served, compared, forked and
   trained on from where it was; a released one keeps its record (where it came from, what it was trained on, its
-  metrics). A release is appended to `checkpoints/released` before its blobs are deleted, and a blob is deleted only if
-  no checkpoint still names it. A released checkpoint reads with no `weights`, no `state` and the time it was `released`.
+  metrics). A release is appended to `checkpoints/released` before its blobs are deleted. A released checkpoint reads
+  with no `weights`, no `state` and the time it was `released`.
+- **A blob is deleted only if nothing names it, and nothing put it lately.** What names a blob: a checkpoint that was
+  not released (its weights and state), or what one was [resharded](#resharding) into. A checkpoint being added at the
+  same moment may have found a blob already stored (content addressing: it is not written again) and not have appended
+  itself yet, so `thin` also spares every blob put in the last `Retention.grace` seconds (an hour by default). Every
+  put of a blob, one that writes it or one that finds it, sets the blob's time to now: a store of files sets the file's
+  modification time (with a hard-linked file, the working copy's time too, since they are one file), and an S3 store
+  copies the object onto itself, at most once a minute. A blob spared so is deleted by a later `thin`, of this run or
+  any other. The grace must be longer than a checkpoint takes from its first file's put to its append, and a `thin`
+  from reading what is named to its last delete, together.
+  - A store of files moves a blob's file aside before deleting it and looks at its time again there: a put that found
+    it in between is seen (the file is put back), and a put just after finds no file and writes it again.
+  - An S3 store looks at an object's time and deletes it in two requests: a put that finds the object between the two
+    is not seen.
+  - Datasets', episodes' and batches' blobs are never deleted, and do not count as names: only checkpoints' files are
+    deleted. One of them would be lost only if a released checkpoint had a file of exactly its bytes (a trajectory, a
+    dataset's examples, a batch's list of segments).
 
 ## Full weights and merges
 
@@ -133,6 +149,12 @@ starting again reads it back.
 |---|---|
 | Keys | A record is appended under a key, and a table has each key once. Appending under a key that is there changes nothing and says so. An action that is written down before it is taken can be taken again after a crash without being done twice. |
 | Fences | Whoever means to write takes the fence of a scope: a number higher than any taken before. An append that carries an older fence is refused (`Fenced`). |
+| Order | A table reads in the order its appends took effect, whichever scopes made them (every runner appends to a run's claims, every run to `checkpoints`). |
+
+An append answers whether it wrote its record. `appended(ledger, table, key, record, fence)` says also what the table
+holds under the key when it did not (`Appended(wrote, record)`): both ledgers answer that from the append itself
+(`append_returning`), and of any other ledger the table is read back. A maker that loses uses the winner's record, as a
+suite's second maker does ([evals](evals.md)).
 
 Two ledgers are provided:
 
@@ -140,6 +162,16 @@ Two ledgers are provided:
 |---|---|---|
 | `FileLedger(directory)` | each table as a file of JSON lines | the processes of one machine |
 | `DatabaseLedger(url)` (`rollout_train.database`, with the `durable` extra) | every table in two SQL tables, `ledger_records` and `ledger_fences` (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
+
+- **`FileLedger`** holds a lock on its directory for every operation, in a thread, so the event loop goes on while it
+  waits. An append is on disk (`fsync`) before it is acknowledged. A last line left unfinished, by a writer that died
+  mid-record or a full disk, was never acknowledged: the next append removes it first (or ends it, if it holds a whole
+  record), so nothing is glued to it. `fences.json` is replaced whole: written beside it, put on disk, and renamed over
+  it, so a crash while taking a fence leaves the fences as they were. Each process keeps which keys a table has, and
+  reads a table's file again only as far as it grew since (or whole, if the file was replaced).
+- **`DatabaseLedger`** takes a fence and appends in transactions that hold the scope's lock. An append on Postgres
+  holds its table's lock too, while it numbers its record after the table's last: records are numbered in the order
+  they commit, one number each. SQLite runs one write at a time.
 
 A profile says which (`ledger`), and an open profile writes where it is into the run's directory (`ledger.json`), so
 that the monitor, the report and imitation open the same one from the directory alone (`of_run`). Each run is kept
