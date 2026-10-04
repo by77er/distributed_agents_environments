@@ -20,8 +20,9 @@ monitor's launches show none `running`. Then:
 deploy/k3s/stop-host.sh
 ```
 
-It stops the GSM8K launcher, the gateway on 127.0.0.1:8900, the monitors on 8765 and 8766, the Minecraft launcher,
-and the host's Ray head with its workers (one process session), then lists anything left. It leaves tests' own Ray
+It asks the GSM8K launcher, the gateway on 127.0.0.1:8900, the monitors on 8765 and 8766, the Minecraft launcher,
+and the host's Ray head with its workers (one process session) to stop, terminates what still runs after 30
+seconds, and lists anything left. It leaves tests' own Ray
 sessions (under `~/.cache/rollout/ray-tests`) and the cluster's containers running; `ray stop` would stop those too.
 
 ## 2. Run the final migration
