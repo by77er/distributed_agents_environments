@@ -3437,6 +3437,8 @@ class Ledger(Protocol)
 - `async def take(self, scope: str) -> Fence` — Take a scope's fence. Whoever held it can no longer write within the scope.
 - `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool` — Append a record under `key`, unless the table has that key: then nothing changes and False is returned.
   Raises `Fenced` if `fence` is not its scope's newest.
+- `async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended` — Append as `append` does, and say what the table holds under `key`: whether this call wrote `record`, and if
+  it did not, the record appended first.
 - `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended: the order their appends took effect in, whichever
   scopes made them.
 - `async def tables(self) -> list[str]` — The tables that have records, by name.

@@ -35,7 +35,7 @@ from rollout_train.checkpoints import Checkpoints, Retention, new_id
 from rollout_train.evals import make_suite, suite_entry, suite_of
 from rollout_train.launcher import Launcher
 from rollout_train.launches import CLAIMED, STOPPED, STOPPING, Asked, FileLaunches, Launch
-from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
+from rollout_train.ledger import Appended, Fence, Fenced, FileLedger, Ledger
 from rollout_train.presence import STALE, FilePresence, Presence
 from rollout_train.record import scope, table
 from rollout_train.rollouts import EpisodeRunner, playing
@@ -128,6 +128,12 @@ class Hooked:
         if (hook := self.after_append.pop((table, key), None)) is not None:
             await hook()
         return appended
+
+    async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended:
+        said = await self.inner.append_returning(table, key, record, fence)
+        if (hook := self.after_append.pop((table, key), None)) is not None:
+            await hook()
+        return said
 
     async def read(self, table: str) -> dict[str, JsonValue]:
         found = await self.inner.read(table)

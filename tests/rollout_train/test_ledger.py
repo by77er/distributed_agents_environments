@@ -6,11 +6,10 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from rollout_train.ledger import Appended, Fence, Fenced, FileLedger, Ledger, appended
+from rollout_train.ledger import Appended, Fence, Fenced, FileLedger, Ledger
 
 
 def in_files(directory: Path) -> Ledger:
@@ -143,35 +142,9 @@ async def test_an_append_says_whether_it_wrote_and_what_the_table_holds(
 ) -> None:
     ledger = opened(tmp_path)
     fence = await ledger.take("run")
-    assert await appended(ledger, "groups", "1", {"row": "a"}, fence) == Appended(True, {"row": "a"})
-    assert await appended(ledger, "groups", "1", {"row": "b"}, fence) == Appended(False, {"row": "a"})
+    assert await ledger.append_returning("groups", "1", {"row": "a"}, fence) == Appended(True, {"row": "a"})
+    assert await ledger.append_returning("groups", "1", {"row": "b"}, fence) == Appended(False, {"row": "a"})
     assert await ledger.read("groups") == {"1": {"row": "a"}}
-
-
-async def test_a_ledger_without_appends_that_say_what_is_there_is_read_back(tmp_path: Path) -> None:
-    class Plain:  # (a `Ledger` with only the protocol's operations)
-        def __init__(self) -> None:
-            self.inner = FileLedger(tmp_path)
-
-        async def take(self, scope: str) -> Fence:
-            return await self.inner.take(scope)
-
-        async def append(self, table: str, key: str, record: Any, fence: Fence) -> bool:
-            return await self.inner.append(table, key, record, fence)
-
-        async def read(self, table: str) -> dict[str, Any]:
-            return await self.inner.read(table)
-
-        async def tables(self) -> list[str]:
-            return await self.inner.tables()
-
-        async def fences(self) -> dict[str, int]:
-            return await self.inner.fences()
-
-    ledger = Plain()
-    fence = await ledger.take("run")
-    assert await appended(ledger, "groups", "1", 1, fence) == Appended(True, 1)
-    assert await appended(ledger, "groups", "1", 2, fence) == Appended(False, 1)
 
 
 async def test_a_ledger_in_postgres_is_shared_and_fenced_as_in_sqlite(postgres: str) -> None:

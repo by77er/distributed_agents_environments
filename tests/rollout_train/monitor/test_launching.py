@@ -126,10 +126,6 @@ async def test_a_run_is_asked_for_from_the_page_with_its_settings_and_stopped(tm
         made = answer.json()["launch"]
         assert made["state"] == ASKED and made["asked"]["settings"] == settings
         assert made["asked"]["groups"] == 40
-        older = {**{key: value for key, value in asked.items() if key != "environment"}, "catalog": "c:c"}
-        older["name"] = "asked as a catalog"  # (a page that says `catalog` asks for that environment)
-        said = (await client.post("/api/launches", json=older)).json()["launch"]
-        assert said["asked"]["environment"] == "c:c" and "catalog" not in said["asked"]
         refused = {
             "unknown profile": ({**asked, "profile": "eight-gpu"}, 404),
             "unknown environment": ({**asked, "environment": "other:environment"}, 404),

@@ -60,7 +60,7 @@ from rollout.harness.runner import RunBinding
 from rollout.names import named
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.launches import EVAL
-from rollout_train.ledger import Fence, Fenced, Ledger, appended, between
+from rollout_train.ledger import Fence, Fenced, Ledger, between
 from rollout_train.record import (
     ENDS,
     FINISHED,
@@ -300,7 +300,7 @@ async def make_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry]) -
         raise ValueError(f"there is a suite {name!r} already: edit it (a version of its own), or make another")
     made = _version(name, 1, entries)
     fence = await ledger.take(f"suites/{name}")
-    there = await appended(ledger, suite_table(name, FIRST), FIRST, made.record(), fence)
+    there = await ledger.append_returning(suite_table(name, FIRST), FIRST, made.record(), fence)
     if there.wrote:
         return made
     return _as_suite(name, 1, _mapping(there.record))  # (another maker's, made meanwhile)
@@ -325,7 +325,7 @@ async def edit_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry], *
             raise ValueError(f"that is {current.id} as it is: nothing changed")
         fence = await ledger.take(f"suites/{name}")
         try:
-            there = await appended(ledger, suite_table(name, FIRST), str(made.number), made.record(), fence)
+            there = await ledger.append_returning(suite_table(name, FIRST), str(made.number), made.record(), fence)
         except Fenced:  # another editor took the suite's fence after this one did
             await asyncio.sleep(0.05 * (attempt + 1))
             continue

@@ -22,7 +22,6 @@ from rollout_train.launches import (
     STOPPED,
     STOPPING,
     Asked,
-    as_launch,
     launches_of,
 )
 from rollout_train.ledger import FileLedger, Ledger
@@ -103,11 +102,6 @@ async def test_concurrent_stops_and_starts_leave_a_launch_stopping_or_stopped_ne
         )
         (now,) = [each for each in await launches.all() if each.id == asked.id]
         assert now.state == STOPPING  # (whichever came first: a stop is never overwritten by RUNNING)
-
-
-def test_a_launch_asked_for_as_a_catalog_reads_as_its_environment() -> None:
-    written = {"id": "launch_1", "at": 1.0, "asked": {"profile": "one-gpu", "catalog": "c:c", "name": "older"}}
-    assert as_launch(written).asked == Asked("one-gpu", "c:c", "older")
 
 
 def test_a_launcher_offers_the_profiles_that_train_with_the_settings_a_launch_may_change(tmp_path: Path) -> None:

@@ -116,17 +116,8 @@ class Launch:
 
 def as_launch(data: Mapping[str, Any]) -> Launch:
     fields: dict[str, Any] = dict(data)
-    fields["asked"] = Asked(**as_asked(fields["asked"]))
+    fields["asked"] = Asked(**fields["asked"])
     return Launch(**fields)
-
-
-def as_asked(given: Mapping[str, Any]) -> dict[str, Any]:
-    """What a launch asks, with its environment under `environment` (a launch asked for as a `catalog` says it so)."""
-    asked = dict(given)
-    if "catalog" in asked:
-        named = asked.pop("catalog")
-        asked.setdefault("environment", named)
-    return asked
 
 
 class Launches(Protocol):

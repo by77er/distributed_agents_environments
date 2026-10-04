@@ -140,12 +140,11 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 - `FileLedger`: the key check and the write happen under the directory lock (`ledger.py:90-96`).
 - `DatabaseLedger`: the table's primary key is `(name, key)`, and the insert is `ON CONFLICT (name, key) DO NOTHING`
   (`database.py:40-48,143-150`). This is atomic on both databases, whatever the locks.
-- **What the loser learns.** `append` answers only whether it wrote. `appended(ledger, …)` answers `Appended(wrote,
-  record)`, the record the table holds under the key: both ledgers say so from the append itself
-  (`append_returning`: `DatabaseLedger` reads the row in the same transaction, `FileLedger` reads the key's line by
-  its offset), and of any other ledger the table is read back.
+- **What the loser learns.** `append` answers only whether it wrote. `append_returning` answers `Appended(wrote,
+  record)`, the record the table holds under the key, from the append itself: `DatabaseLedger` reads the row in the
+  same transaction, `FileLedger` reads the key's line by its offset.
   - `Checkpoints.add` reads back, and so does `reshard`.
-  - `make_suite` uses `appended` and plays the winner's suite (finding 8, fixed); `edit_suite` uses it to find its
+  - `make_suite` uses `append_returning` and plays the winner's suite (finding 8, fixed); `edit_suite` uses it to find its
     number taken, and tries the next.
   - `EpisodeRunner._ended` does not read back. That is intended: the loser's episode is dropped. Most losers are
     refused before that: an older attempt's record raises `Fenced` once a newer attempt took the episode's fence.
@@ -606,11 +605,11 @@ makers of one suite at once leave one of their suites whole, and two editors at 
 suite's name at the later. **This holds (finding 8, fixed).**
 
 **Mechanism.** `make_suite` checks that the name is free, takes the fence, and appends the whole of version 1 as one
-record (`evaluations/SUITE/suite`, key `suite`: its entries, each with its starts in order) with `appended`. A maker
+record (`evaluations/SUITE/suite`, key `suite`: its entries, each with its starts in order) with `append_returning`. A maker
 whose fence was taken after its own raises `Fenced`; a maker whose append finds a record there returns the suite in that
 record, and plays it. With one record, there is nothing for a second maker to finish: the suite in the ledger is one
 maker's. `suite_for`, which makes an environment's eval data on first use, tries again after `Fenced` until it finds a
-suite of the name. `edit_suite` appends its version under the next number with `appended`, under the same fence; an
+suite of the name. `edit_suite` appends its version under the next number with `append_returning`, under the same fence; an
 editor fenced out, or whose number another took, tries the next number (or, told the version it edited, is refused). The
 suite's name is ordinary state beside the ledger (the registry's suite names), moved only forward (`point_suite(…,
 forward=True)`), so the later of two edits is where it points whichever writes last. A name that points nowhere is its
@@ -707,8 +706,8 @@ Below is what each operation must keep.
   run.
 - The service must answer with whether this request wrote the record. It stores the request id with the record, or
   compares the stored record with the one sent, and returns the stored record when they differ. The client side of
-  that answer exists: `append_returning` returns `Appended(wrote, record)`, and `appended(ledger, …)` asks for it
-  (both ledgers answer it today; a caller that needs the winner, such as `make_suite`, uses it). `append` stays as it
+  that answer exists: `append_returning` returns `Appended(wrote, record)` (both ledgers answer it today; a caller
+  that needs the winner, such as `make_suite`, uses it). `append` stays as it
   is, `wrote` alone, for every other caller.
 - The fence check and the insert must be one transaction under the scope's lock, as today. The check must happen when
   the append is applied, not when the request arrives, so that an append delayed past a newer take is refused.

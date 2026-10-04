@@ -61,6 +61,11 @@ class Ledger(Protocol):
         Raises `Fenced` if `fence` is not its scope's newest."""
         ...
 
+    async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended:
+        """Append as `append` does, and say what the table holds under `key`: whether this call wrote `record`, and if
+        it did not, the record appended first."""
+        ...
+
     async def read(self, table: str) -> dict[str, JsonValue]:
         """A table's records by key, in the order they were appended: the order their appends took effect in, whichever
         scopes made them."""
@@ -73,19 +78,6 @@ class Ledger(Protocol):
     async def fences(self) -> dict[str, int]:
         """The newest fence of every scope that has been taken."""
         ...
-
-
-async def appended(ledger: Ledger, table: str, key: str, record: JsonValue, fence: Fence) -> Appended:
-    """Append as `Ledger.append` does, and say what the table holds under `key`: whether this call wrote `record`, and
-    if it did not, the record appended first. A ledger that says so in the same call (`append_returning`, as
-    `FileLedger` and `DatabaseLedger` do) is asked; any other is read back after an append that wrote nothing."""
-    returning = getattr(ledger, "append_returning", None)
-    if returning is not None:
-        said: Appended = await returning(table, key, record, fence)
-        return said
-    if await ledger.append(table, key, record, fence):
-        return Appended(True, record)
-    return Appended(False, (await ledger.read(table)).get(key))
 
 
 def between(table: str, before: str, after: str) -> str | None:

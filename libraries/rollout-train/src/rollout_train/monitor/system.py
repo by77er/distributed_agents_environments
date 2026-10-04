@@ -59,7 +59,6 @@ from rollout_train.launches import (
     STOPPING,
     Asked,
     Launch,
-    as_asked,
     launches_of,
 )
 from rollout_train.launches import RUN as TRAINING
@@ -307,7 +306,7 @@ class System:
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
-        given = as_asked(body)  # (a page that asks for a `catalog` asks for that environment)
+        given = dict(body)
         if given.get("kind") == EVAL:  # (an eval plays its suite's environments)
             named_suite = str(given.get("suite") or "")
             found = await suite_of(self._ledger, named_suite)
