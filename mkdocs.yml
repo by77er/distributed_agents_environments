@@ -104,3 +104,4 @@ nav:
   - Research:
       - "The policy graph": research/policy-dag.md
       - "Curricula": research/curricula.md
+      - "Thinking Machines' API": research/thinking-machines.md
