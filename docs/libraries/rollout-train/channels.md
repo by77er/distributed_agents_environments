@@ -79,8 +79,9 @@ depth ([checkpoints](checkpoints.md)), or one more than the last when none is gi
 adapter by the checkpoint's id. Publishing what is being served changes
 nothing.
 
-- The adapter before stays loaded, so that a turn in progress (a thought, then its answer) finishes under the
-  weights it began with. The one before that is dropped.
+- The adapters before stay loaded, so that a turn in progress (a thought, then its answer) finishes under the
+  weights it began with: `Channel.keep` in all with the one served (two by default; a follower sets it to its
+  run's `max_lag + 1`, `keeping(n)`). Older ones are dropped.
 - Every sampled span records the version it was sampled at
   ([what a session exports](recorder.md#what-a-session-exports)).
 - `publish(…, full=True)` serves a full checkpoint ([full weights](checkpoints.md#full-weights-and-merges)): the
@@ -89,8 +90,11 @@ nothing.
   adapter or full weights.
 - Callers publish through a profile's platform (`Platform.publish`, which the loop is handed as `publish`), naming
   the channel.
-- `Channel.loaded` names the adapters loaded: the one served, and the one before. `Channel.held` names the full
-  checkpoint the engines hold, if they hold one.
+- `Channel.loaded` names the adapters loaded: the one served, and those before it. `Channel.held` names the full
+  checkpoint the engines hold, if they hold one; `adapters()` lists both with the version each was published as.
+- `Channel.sample(prompt, …, name=)` samples what is served under a name, as a server elsewhere is asked: an
+  adapter, the full checkpoint held, or the model's own (`Channel.model`). A name not served here is `NotLoaded`,
+  decided once a load in progress ends, so a turn caught by a full checkpoint's load is sampled again.
 
 ## What a channel should serve
 
@@ -113,13 +117,58 @@ run's `serving` table, under its fence and before it publishes to engines of its
 `wanted(ledger, run, channel)` is what a channel should serve now: its record of the greatest depth, as a channel
 never goes back. `record_serving(ledger, run, serving, fence)` appends one; one written before changes nothing.
 
-A `Follower` (`rollout_train.following`) keeps a process's channels serving what a run says: every two seconds it
-reads `wanted`, and for a channel that serves something older reads the files from the blob store (hard links, where
-the store is files on the same disk) under its directory and publishes them, named by the checkpoint's id; the files of
-what is no longer loaded are deleted. An adapter over a full checkpoint has that checkpoint's weights published first.
-A load that fails is tried again at the next look. With a `Presence`, it beats (kind `engines`, `follows`: the run)
-with what each channel serves and how fast, each engine's address (for a server elsewhere) and why a load failed, if
-one did; at once when something changed, every 15 seconds otherwise.
+A `Follower` (`rollout_train.following`) keeps runs' channels serving what each run says: every two seconds it
+reads `wanted` for each, and for a channel that serves something older reads the files from the blob store (hard
+links, where the store is files on the same disk) under its directory and publishes them, named by the checkpoint's
+id; the files of what is no longer loaded are deleted. An adapter over a full checkpoint has that checkpoint's weights
+published first. A load that fails is tried again at the next look.
+
+- **What it serves can change while it runs.** Given a run and its channels, it serves those. Given `bindings` (the
+  `(run, channel)` pairs it serves now, asked at each look) and `opened` (a channel for a pair new to it), it serves
+  whatever they say: a pair it no longer serves has its adapters removed. Each pair is a channel of its own over
+  engines that may be shared, so several runs' adapters sit side by side on one engine.
+- **Each channel keeps its run's window**: `max_lag + 1` adapters (from the newest `Serving.max_lag`; two when the
+  record does not say), following changes to it.
+- **Full weights load replica by replica.** A follower that is replica `i` of `n` loads a channel's new full
+  checkpoint only once every replica before it that still beats holds it, so the others serve the checkpoint before
+  meanwhile.
+- **It holds its view to what a server says it has**, where an engine can say (`models()`: a vLLM server's
+  `/v1/models`, which lists each adapter with its `parent`): an adapter the server lost (it started again) is loaded
+  again; one no channel knows of (loaded before the follower started again) is removed, unless a channel should
+  serve it now. `RemoteEngine.load_adapter` takes a name the server holds already as loaded.
+
+With a `Presence`, it beats (kind `engines`; `runs`, and `follows` where it serves one run; its `replica`) with what
+each channel serves and how fast, why a load failed, if one did, and each engine's address (for a server elsewhere)
+with every adapter it holds, each with its run, channel, checkpoint and depth, so that a turn can go to an engine that
+holds its checkpoint; at once when something changed, every 15 seconds otherwise.
+
+## Engine hosts
+
+Code: `rollout_train.inference.hosts` · See [`EngineHost`](../../guide/reference.md#enginehost),
+[`HostServer`](../../guide/reference.md#hostserver)
+
+An `EngineHost` is one replica's engines as a Ray actor (`started(name, spec, ledger_at, blobs_at, bound=…)`): its
+engine (`module:name`, made with the model and its options), and a follower that keeps it serving what the runs bound
+to it should. It shares nothing with whoever trains but the ledger and the blob store: no placement group, no Ray
+cluster. So the same actor is a run's own replica, started by the run's job, or a replica of a long-lived pool
+(`detached`) serving every run bound to it; `bind(run, channel)` and `unbind` change what it serves while it runs.
+
+| Member | Does |
+|---|---|
+| `models()` | what it holds, by name, as vLLM's `/v1/models` lists it: the model (unless full weights replaced it), each adapter (its `parent` the model), each full checkpoint, with the depth each was published as |
+| `generate(prompt, …, adapter=)` | samples the checkpoint named (None: the model); `NotLoaded` where it does not hold it once a load in progress ends |
+| `pause`, `resume`, `sleep`, `wake` | hold its requests back, and free and take back the GPU, for a trainer that shares it |
+| `bind`, `unbind`, `bound`, `follow`, `served`, `about` | what it serves, a look now, what its beats say |
+
+`host_spec(cluster, provider, model, settings=)` says what a host of a `vllm` provider's model asks for: the kind's
+engine, the model's options, a replica's `gpus` (half of them where the run's trainer shares the provider's card,
+`colocate_with`), and the custom resources `[placement.engines]` names. Ray places it by those: on Kubernetes, a GPU
+share no node has free makes KubeRay's autoscaler start a GPU worker. Ray starts a host again when it dies
+(`max_restarts=-1`); its engines start afresh and its follower loads what the serving records say again.
+
+`HostServer(handle, address)` is a `CheckpointServer` over a host's handle, for a `RemoteChannel` in the same Ray
+cluster: a host that does not answer is `Unreachable`. `HostPausable(handle)` is what [`Colocated`](#sharing-an-accelerator)
+pauses and puts to sleep.
 
 ## Engines elsewhere
 
@@ -146,14 +195,16 @@ down), a CA bundle, a client certificate. A server must give logprobs of the dis
 
 A `RemoteChannel` is one run's channel as a runner samples it: what the gateway samples from in place of a `Channel`
 (`Sampler`: a name, a renderer, limits, a context limit, `weights(session)` and `generate`). Its servers are one URL
-(a router, a proxy, a server) or a list. Every `every` seconds (2) it reads every checkpoint the run has said the
+(a router, a proxy, a server) or a list, of URLs or of any `CheckpointServer` (`models()` and `generate` by
+checkpoint name: `RemoteEngine`, or an engine host's `HostServer`). Every `every` seconds (2) it reads every checkpoint the run has said the
 channel serves (`serving_of`) and asks each server which models it has; then:
 
 - **Each turn asks for the checkpoint the run says**, by name: `weights(session)` gives it and its depth, the version
   the turn's tokens are stamped with. Where the session's server does not have it yet, the newest one before it that
   the server has, no more than `max_lag` checkpoints behind (`Serving.max_lag` where the run says: 0 for an eval). A
   server that answers that it does not have a model (`NotLoaded`) is asked for the one before, from the start of the
-  turn, and for the newest again at the next look. A full checkpoint is never asked for.
+  turn, and for the newest again at the next look. A full checkpoint is asked for where a server lists it (an engine
+  host does; a vLLM server never does, serving full weights only under its model's name).
 - **A session's turns go to one server**, where there is a list: of those that answer and have a checkpoint close
   enough, the one a hash of the session and the server's address ranks first. Nothing is kept per session.
 - **A turn waits** while no server has a checkpoint close enough, for five minutes at most (`NoReplica`); a server that

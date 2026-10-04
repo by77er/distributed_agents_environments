@@ -15,7 +15,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
-- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
+- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
+- **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#refused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -3402,19 +3403,24 @@ A checkpoint's files on this machine: what a step starts from.
 class Follower
 ```
 
-Keeps `channels` serving what `run` says each should (by the channel's name within the run), checking every
-`every` seconds, with each checkpoint's files under `directory` while they are served. With `presence`, it beats as
-`name` every `beating` seconds, and at once when a channel serves something new: what `about` says of the machine,
-and what each channel serves.
+Keeps runs' channels serving what each run says they should, checking every `every` seconds, with each
+checkpoint's files under `directory` while they are served.
+
+Given `run` and `channels`, it serves those channels of that one run (by their names within it). Given `bindings`
+(what it serves now, asked at each look) and `opened` (the channel for a binding new to it), it serves whatever
+`bindings` says, and a binding it no longer says has its adapters removed. `replica` is this follower's index among
+the replicas of its channels and how many there are. With `presence`, it beats as `name` every `beating` seconds,
+and at once when a channel serves something new: what `about` says of the machine, and what each channel serves.
 
 **Methods**
 
-- `def __init__(self, name: str, checkpoints: Checkpoints, run: str, channels: Mapping[str, Channel], directory: Path, *, presence: Presence | None = None, about: Callable[[], Mapping[str, JsonValue]] | None = None, every: float = 2.0, beating: float = 15.0) -> None`
+- `def __init__(self, name: str, checkpoints: Checkpoints, run: str | None, channels: Mapping[str, Channel], directory: Path, *, bindings: Callable[[], Awaitable[Collection[Binding]]] | None = None, opened: Callable[[str, str], Channel] | None = None, replica: tuple[int, int] = (0, 1), presence: Presence | None = None, about: Callable[[], Mapping[str, JsonValue]] | None = None, every: float = 2.0, beating: float = 15.0) -> None`
+- `@property def channels(self) -> dict[str, Channel]` — The channels it serves, by `RUN/CHANNEL`.
 - `async def serve(self) -> None` — Follow until cancelled.
-- `async def follow(self) -> bool` — Give every channel what the run says it should serve, if it serves something older; whether any changed.
+- `async def follow(self) -> bool` — Give every channel what its run says it should serve, if it serves something older; whether any changed.
 - `async def beat(self) -> None`
 - `def served(self) -> list[JsonValue]` — What each channel serves, how fast since the last call, and each of its engines: its address (where it is a
-  server elsewhere) and what it serves.
+  server elsewhere), what it serves, and every adapter it holds for any channel.
 
 ### `group_advantages`
 
@@ -3888,6 +3894,8 @@ class Channel
 | `serving` | `str \| None` | `None` | What is served, by name: the adapter, or the full checkpoint the engines hold (None: the model's own). |
 | `version` | `int` | `0` | How many times weights have been published; recorded with every sampled token. |
 | `held` | `str \| None` | `None` | The full checkpoint the engines hold, by name (None: the model's own). |
+| `keep` | `int` | `KEEP` | Adapters kept loaded: the one served and those before it a turn may still sample from (a run's `max_lag + 1`). |
+| `model` | `str \| None` | `None` | The model the engines were started with, by the name a request asks for it (`resolved`). |
 
 **Methods**
 
@@ -3895,21 +3903,59 @@ class Channel
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
   beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
   the request) are for samplers elsewhere: this process's own callers read what it publishes.
+- `async def sample(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], name: str | None, session: str = '') -> Generation` — Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
+  elsewhere is asked (`rollout_train.inference.remote.CheckpointServer`): `NotLoaded` where it is not served here
+  once a load in progress has ended (a turn caught by a full checkpoint's load is sampled again). The answer
+  names what sampled it.
+- `def resolved(self, name: str | None) -> str | None` — The adapter the engines are asked for to sample what is served under `name`: the adapter itself, or None
+  for the full checkpoint they hold or the model's own (`model`, or None); `NotLoaded` for anything else.
 - `async def weights(self, session: str) -> tuple[str | None, int]` — The adapter a session's next turn samples from (None: the weights the engines hold), and the version its
   tokens are stamped with: the same for every session, as this process publishes to every engine at once.
-- `@property def loaded(self) -> list[str]` — The adapters loaded on the engines, oldest first: the one served, and the one before.
+- `@property def loaded(self) -> list[str]` — The adapters loaded on the engines, oldest first: the one served, and those before it (`keep` in all).
+- `def adapters(self) -> list[tuple[str, int, bool]]` — What the engines hold for this channel, oldest first: each adapter, and the full checkpoint held, by name,
+  with the version it was published as and whether it is full weights.
 - `async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
   checkpoint's weights there, which the engines load in place of what they hold. Returns the version it is
   served as: `version` if one is given (the checkpoint's depth, which means the same in every process), or
-  one more than the last. An adapter before stays loaded, so that a turn in progress finishes under the
-  weights it began with; the one before that is dropped. Full weights replace the engines' at once, and the
-  adapters trained on the weights before go with them. Publishing what is being served changes nothing.
+  one more than the last. The adapters before stay loaded, `keep` in all with this one, so that a turn in
+  progress finishes under the weights it began with; older ones are dropped. Full weights replace the engines'
+  at once, and the adapters trained on the weights before go with them. Publishing what is being served
+  changes nothing.
+- `async def keeping(self, keep: int) -> None` — Keep `keep` adapters loaded from now on (at least one), dropping the oldest past it.
+- `async def dropped(self) -> None` — Remove every adapter of this channel from the engines (other channels' on the same engines stay).
+- `def forget(self, names: Collection[str]) -> None` — Take it that the engines no longer hold the adapters `names` (a server elsewhere that started again): they
+  are loaded again when they are next published.
 - `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
 - `def resume(self) -> None`
 - `async def sleep(self) -> None`
 - `async def wake(self) -> None`
 - `def take(self) -> dict[str, float]` — What passed through since the last call: requests, tokens in and out, and throughput.
   `tokens_per_second` is everything generated over the time the channel was generating.
+- `def close(self) -> None`
+
+### `CheckpointServer`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
+
+```python
+class CheckpointServer(Protocol)
+```
+
+What a `RemoteChannel` samples on: a server that holds checkpoints by name and samples the one a request names.
+`RemoteEngine` is one (a vLLM server elsewhere); `rollout_train.inference.hosts.HostServer` is another (an engine
+host actor).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `address` | `str` | required | How it is known: a URL, or an actor's name. |
+| `max_model_len` | `int` | required | The longest sequence it accepts, as it last said (`models`); 0 until it has. |
+
+**Methods**
+
+- `async def models(self, within: float = 2.0) -> dict[str, Any]` — The checkpoints it holds, by name (each a card as vLLM's `/v1/models` lists it); `Unreachable` if it does
+  not answer `within` seconds.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
+  hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`).
 - `def close(self) -> None`
 
 ### `Connection`
@@ -3995,6 +4041,16 @@ What a turn may take, in tokens: the deployment's hardware decides, and code abo
 | `answer` | `int \| None` | `None` | Room for the answer after the thinking; none: whatever room the turn has left. With neither budget, a turn is one generation that may fill what the context leaves (`rollout_train.recorder.sampling`). |
 | `sequence` | `int \| None` | `None` | The longest turn (prompt and completion): the smaller of what the engines accept and what the trainer can train on. A long prompt leaves less room to think, so that every turn can be trained on. |
 
+### `NotLoaded`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
+
+```python
+class NotLoaded(Unserved)
+```
+
+The server does not have the model a request names (yet).
+
 ### `RemoteChannel`
 
 *class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
@@ -4015,17 +4071,20 @@ again.
 
 The channel's servers are one URL (a router, a proxy, or a single server), or a list: a session's turns then go to
 one of those that answer and have a checkpoint close enough, worked out from the session's id alone, so that nothing
-is kept per session. What the run says and what each server has are asked again every `every` seconds.
+is kept per session. A server is a URL (a vLLM server, reached as `connection` says) or any `CheckpointServer` (an
+engine host's, say), which stays the caller's to close. What the run says and what each server has are asked again
+every `every` seconds.
 
 **Methods**
 
-- `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence[str], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0) -> None`
+- `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence['str | CheckpointServer'], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0) -> None`
 - `@property def limits(self) -> Limits` — The profile's limits; the longest turn the trainer can train on, as the run says, unless they say one.
 - `@property def context_limit(self) -> int`
 - `@property def bound(self) -> int` — How many checkpoints behind what the channel should serve a sample may be.
 - `def name_of(self, said: Serving) -> str` — The model a server serves a checkpoint as: its id; the base model's name for none.
 - `def choices(self) -> list[Serving]` — The checkpoints a turn may sample from now, newest first: what the channel should serve, and those before it
-  no more than `bound` behind (a full checkpoint, which a server cannot serve under its own name, is none).
+  no more than `bound` behind. A server that cannot serve a full checkpoint under its own name (a vLLM server)
+  never lists it, so it is never offered there.
 - `def offered(self, address: str) -> Serving | None` — What a server would sample a turn from now: the newest of the `choices` it has.
 - `def server_of(self, session: str) -> str | None` — The server a session's turns go to now (none while none has a checkpoint close enough): of those that do,
   the one a hash of the session and its address ranks first.
@@ -4066,7 +4125,8 @@ under a name of their own by the server: `load_weights` refuses.
 - `async def models(self, within: float = 2.0) -> dict[str, Any]` — The models the server has (`/v1/models`), by name; `Unreachable` if it does not answer `within` seconds.
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
   the logprob of each, how it ended, and the model the server says sampled it.
-- `async def load_adapter(self, name: str, path: str) -> None`
+- `async def load_adapter(self, name: str, path: str) -> None` — Load the adapter at `path` (read on the server's machine) under `name`. One the server holds under that name
+  already (loaded before a follower started again) is taken as loaded.
 - `async def remove_adapter(self, name: str) -> None`
 - `async def load_weights(self, path: str) -> None`
 - `async def sleep(self) -> None` — Free the server's accelerator (it must allow it: `VLLM_SERVER_DEV_MODE=1`).
@@ -4146,6 +4206,126 @@ class Unserved(Exception)
 
 The checkpoint a turn began with is not served where it is asked for (not loaded yet, dropped, or another
 answered), or the server cannot be reached: the turn is sampled again, from what is served then.
+
+## `rollout_train.inference.hosts`
+
+Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint.
+
+### `EngineHost`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
+
+```python
+class EngineHost
+```
+
+One replica's engines and the follower that keeps them serving what the runs bound to it should: started as a
+Ray actor (`started`), named `name`. `ledger_at` and `blobs_at` say where the ledger and the blob store are (as
+`rollout_train.ledger.opened` and `rollout_train.stores.opened` read them); `engine` (`module:name`) makes the
+engine with `model` and `options`. `bound` is the runs' channels it serves at first, `(run, channel)`. `replica`
+is its index among the replicas of what it serves, and how many there are. It keeps checkpoints' files under
+`directory`, and looks at what to serve every `every` seconds.
+
+**Methods**
+
+- `def __init__(self, name: str, ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], engine: str, model: str, options: Mapping[str, JsonValue] | None = None, *, bound: Collection[Binding] = (), replica: tuple[int, int] = (0, 1), directory: str = SCRATCH, every: float = 2.0, beating: float = 15.0) -> None`
+- `async def about(self) -> Mapping[str, JsonValue]` — What its beats say of it: its machine, its model, and when it started.
+- `async def bind(self, run: str, channel: str) -> None` — Serve a run's channel too, from the next look on.
+- `async def unbind(self, run: str, channel: str) -> None` — Serve a run's channel no more: its adapters are removed at the next look.
+- `async def bound(self) -> list[Binding]` — The runs' channels it serves, `(run, channel)`.
+- `async def follow(self) -> bool` — Look at what to serve now, as the follower does every few seconds; whether anything changed.
+- `async def models(self) -> dict[str, Any]` — What it holds, by name, each as a card of vLLM's `/v1/models`: the model it was started with (unless full
+  weights replaced it), each adapter (its `parent` the model), each full checkpoint, with the depth each was
+  published as.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
+  not hold it (once a load in progress has ended).
+- `async def served(self) -> list[JsonValue]` — What each channel serves, as its beats say (`Follower.served`).
+- `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
+- `async def resume(self) -> None`
+- `async def sleep(self) -> None` — Free the GPU (for a trainer that shares it); requests should be held back first (`pause`).
+- `async def wake(self) -> None`
+- `async def close(self) -> None` — Stop following and end the engines (before the actor is ended).
+
+### `host_spec`
+
+*function* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
+
+```python
+def host_spec(cluster: 'Cluster', provider: str, model: str, *, settings: 'RunSettings | None' = None) -> HostSpec
+```
+
+An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
+engine host, `vllm`): its kind's engine, the model's options, a replica's GPUs, and `[placement.engines]`. A run
+whose trainer shares the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the
+replica's GPUs, and its trainer for the other half.
+
+### `HostPausable`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
+
+```python
+class HostPausable
+```
+
+`rollout_train.colocated.Pausable` over an engine host actor's handle: a colocated trainer holds the host's
+requests back and puts its engines to sleep while it steps.
+
+**Methods**
+
+- `def __init__(self, handle: Any) -> None`
+- `async def pause(self) -> None`
+- `def resume(self) -> None`
+- `async def sleep(self) -> None`
+- `async def wake(self) -> None`
+
+### `HostServer`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
+
+```python
+class HostServer
+```
+
+A `CheckpointServer` over an engine host actor's handle, for a `RemoteChannel` in the Ray cluster it runs in:
+each call is an actor call. A host that does not answer (it died, or is starting again) is `Unreachable`.
+
+**Methods**
+
+- `def __init__(self, handle: Any, address: str) -> None`
+- `async def models(self, within: float = 2.0) -> dict[str, Any]`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation`
+- `def close(self) -> None`
+
+### `HostSpec`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
+
+```python
+class HostSpec
+```
+
+What starts an engine host of a provider's model: its engine (`module:name`), model and options, and what it
+asks Ray for.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `engine` | `str` | required |  |
+| `model` | `str` | required |  |
+| `options` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+| `gpus` | `float` | `0.0` | GPUs it asks for: a fraction shares a card. |
+| `resources` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Custom resources it asks for (`[placement.engines]`), which steer it to the nodes that have them. |
+
+### `started`
+
+*function* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
+
+```python
+def started(name: str, spec: HostSpec, ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], *, bound: Collection[Binding] = (), replica: tuple[int, int] = (0, 1), namespace: str | None = None, detached: bool = False, directory: str = SCRATCH, every: float = 2.0, beating: float = 15.0) -> Any
+```
+
+An engine host started as a Ray actor named `name` on the cluster this process is connected to, asking for
+what `spec` says and started again whenever it dies; its handle. A run's own host goes with the job that started it;
+a pool's is `detached`, and lives until it is ended.
 
 ## `rollout_train.recorder`
 
@@ -6669,7 +6849,8 @@ def sample_request(messages: list[Message], effect_id: str = 'r_1:0:0', *, sessi
 def scripted_engine(model: str, **options: Any) -> ScriptedEngine
 ```
 
-An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start.
+An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `loading` is
+how many seconds its full weights take to load.
 
 ### `ScriptedEngine`
 
@@ -6680,7 +6861,8 @@ class ScriptedEngine
 ```
 
 Answers each generate with the next scripted (text, finish reason), or with `always` once the script is
-spent; logprobs are -0.5 per token. Keeps what it was asked and told.
+spent; logprobs are -0.5 per token. Keeps what it was asked and told. Full weights take `loading` seconds to
+load.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -6689,7 +6871,7 @@ spent; logprobs are -0.5 per token. Keeps what it was asked and told.
 
 **Methods**
 
-- `def __init__(self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = ()) -> None`
+- `def __init__(self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = (), loading: float = 0.0) -> None`
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
 - `async def load_adapter(self, name: str, path: str) -> None`
 - `async def remove_adapter(self, name: str) -> None`

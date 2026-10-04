@@ -2,6 +2,7 @@
 read, and a gateway in this process that records what they sample. With them an environment, an algorithm or a whole
 profile can be tried without a model or a GPU."""
 
+import asyncio
 import json
 from collections.abc import Sequence
 from typing import Any, cast
@@ -44,15 +45,22 @@ SECRETS = [("tests", "a-secret-that-only-tests-sign-with")]
 
 class ScriptedEngine:
     """Answers each generate with the next scripted (text, finish reason), or with `always` once the script is
-    spent; logprobs are -0.5 per token. Keeps what it was asked and told."""
+    spent; logprobs are -0.5 per token. Keeps what it was asked and told. Full weights take `loading` seconds to
+    load."""
 
     max_model_len = 32_768
     processes: Sequence[int] = ()
 
     def __init__(
-        self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = ()
+        self,
+        tokenizer: Tokenizer,
+        script: Sequence[tuple[str, str]] = (),
+        *,
+        always: Sequence[tuple[str, str]] = (),
+        loading: float = 0.0,
     ) -> None:
         self.tokenizer = tokenizer
+        self.loading = loading
         self.script = list(script)
         self.always = list(always)
         self.prompts: list[list[int]] = []
@@ -88,6 +96,7 @@ class ScriptedEngine:
         self.told.append(f"remove {name}")
 
     async def load_weights(self, path: str) -> None:
+        await asyncio.sleep(self.loading)
         self.told.append(f"weights {path}")
 
     async def sleep(self) -> None:
@@ -230,10 +239,12 @@ STARTED: list[ScriptedEngine] = []
 
 
 def scripted_engine(model: str, **options: Any) -> ScriptedEngine:
-    """An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start."""
+    """An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `loading` is
+    how many seconds its full weights take to load."""
     if options.get("fails"):
         raise RuntimeError("no such device")
-    engine = ScriptedEngine(cast(Tokenizer, Characters()), always=[("yes\n", "stop"), ("no\n", "stop")])
+    always = [("yes\n", "stop"), ("no\n", "stop")]
+    engine = ScriptedEngine(cast(Tokenizer, Characters()), always=always, loading=float(options.get("loading", 0.0)))
     engine.told.append(f"started {model} {sorted(options.items())}")
     STARTED.append(engine)
     return engine

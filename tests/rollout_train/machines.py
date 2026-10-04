@@ -168,6 +168,10 @@ def fake_vllm(engine: ScriptedEngine, *, model: str = MODEL, token: str | None =
         if (refusal := refused(request)) is not None:
             return refusal
         body = await request.json()
+        if body["lora_name"] in loaded:  # (as vLLM refuses a name it holds already)
+            message = f"The lora adapter '{body['lora_name']}' has already been loaded."
+            refusal = {"message": message, "type": "BadRequestError", "code": 400}
+            return JSONResponse({"error": refusal}, status_code=400)
         await engine.load_adapter(body["lora_name"], body["lora_path"])
         loaded[body["lora_name"]] = body["lora_path"]
         return PlainTextResponse(f"Success: LoRA adapter '{body['lora_name']}' added successfully.")

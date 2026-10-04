@@ -42,8 +42,9 @@ class LocalRay:
 
 @contextmanager
 def started() -> Generator[LocalRay]:
-    """Ray started in this process: 4 CPUs, a small object store, the dashboard on (jobs need it), its files in
-    `RAY_TESTS/session_DATE_PID`, removed on the way out. `address="local"` starts a new instance, even where this
+    """Ray started in this process: 4 CPUs and one GPU (counted only: tests run scripted engines in what asks for it), a
+    small object store, the dashboard on (jobs need it), its files in `RAY_TESTS/session_DATE_PID`, removed on the way
+    out. `address="local"` starts a new instance, even where this
     machine runs a cluster already; its dashboard and the agent that runs its jobs listen on free ports, not on
     Ray's defaults, which a cluster already running holds (`ray.init` does not take the agent's port, so the
     parameters it starts the node with are given it)."""
@@ -57,7 +58,7 @@ def started() -> Generator[LocalRay]:
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(parameter, "RayParams", Parameters)
         context: Any = ray.init(
-            address="local", num_cpus=4, num_gpus=0, object_store_memory=100 * 2**20, include_dashboard=True,
+            address="local", num_cpus=4, num_gpus=1, object_store_memory=100 * 2**20, include_dashboard=True,
             dashboard_host="127.0.0.1", dashboard_port=free_port(), log_to_driver=False, _temp_dir=str(RAY_TESTS),
         )  # fmt: skip
     directory = Path(str(context.address_info["session_dir"]))

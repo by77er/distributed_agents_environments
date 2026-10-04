@@ -16,7 +16,7 @@ def test_the_sessions_ray_is_its_own_local_instance(local_ray: LocalRay) -> None
 
     assert local_ray.directory.parent == RAY_TESTS and local_ray.directory.is_dir()
     assert local_ray.directory.name.endswith(f"_{os.getpid()}")  # (a session's own)
-    assert ray.cluster_resources()["CPU"] == 4
+    assert ray.cluster_resources()["CPU"] == 4 and ray.cluster_resources()["GPU"] == 1
     context = ray.get_runtime_context()
     assert context.gcs_address == local_ray.address
     (node,) = ray.nodes()

@@ -6,18 +6,22 @@
 - `Engine`: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` runs vLLM in this process's care;
   `RemoteEngine` is a vLLM server elsewhere, over its OpenAI-compatible API (`remote`).
 - `remote`: `RemoteChannel`, one run's channel sampled on servers elsewhere as a runner samples it, each request naming
-  the checkpoint it samples from.
+  the checkpoint it samples from; the servers are `CheckpointServer`s.
+- `hosts`: `EngineHost`, one replica's engines as a Ray actor that follows what the runs bound to it serve, and
+  `HostServer`, a `CheckpointServer` over its handle.
 """
 
-from rollout_train.inference.channel import Channel, Engine, Generation, Limits, Sampler, Unserved
-from rollout_train.inference.remote import Connection, RemoteChannel, RemoteEngine, Route, Routes
+from rollout_train.inference.channel import Channel, Engine, Generation, Limits, NotLoaded, Sampler, Unserved
+from rollout_train.inference.remote import CheckpointServer, Connection, RemoteChannel, RemoteEngine, Route, Routes
 
 __all__ = [
     "Channel",
+    "CheckpointServer",
     "Connection",
     "Engine",
     "Generation",
     "Limits",
+    "NotLoaded",
     "RemoteChannel",
     "RemoteEngine",
     "Route",

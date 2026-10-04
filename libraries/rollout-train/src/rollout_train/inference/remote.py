@@ -30,13 +30,13 @@ import zlib
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import httpx
 from pydantic import JsonValue
 
 from rollout_train.http import error_of
-from rollout_train.inference.channel import Generation, Limits, Throughput, Unserved
+from rollout_train.inference.channel import Generation, Limits, NotLoaded, Throughput, Unserved
 from rollout_train.ledger import Ledger
 from rollout_train.record import table
 from rollout_train.serving import SERVING, Serving, qualified
@@ -60,6 +60,40 @@ class Unreachable(Unserved):
 class NoReplica(Exception):
     """No server has a checkpoint of a run's channel close enough to what it should serve, and none did for as long as
     a turn waits."""
+
+
+class CheckpointServer(Protocol):
+    """What a `RemoteChannel` samples on: a server that holds checkpoints by name and samples the one a request names.
+    `RemoteEngine` is one (a vLLM server elsewhere); `rollout_train.inference.hosts.HostServer` is another (an engine
+    host actor)."""
+
+    address: str
+    """How it is known: a URL, or an actor's name."""
+    max_model_len: int
+    """The longest sequence it accepts, as it last said (`models`); 0 until it has."""
+
+    async def models(self, within: float = 2.0) -> dict[str, Any]:
+        """The checkpoints it holds, by name (each a card as vLLM's `/v1/models` lists it); `Unreachable` if it does
+        not answer `within` seconds."""
+        ...
+
+    async def generate(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        adapter: str | None,
+        session: str = "",
+        request: str | None = None,
+    ) -> Generation:
+        """Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
+        hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`)."""
+        ...
+
+    def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -203,7 +237,13 @@ class RemoteEngine:
         return Generation(tokens=tokens, logprobs=[float(each) for each in logprobs], finish_reason=finish, model=model)
 
     async def load_adapter(self, name: str, path: str) -> None:
-        await self._call("POST", "/v1/load_lora_adapter", {"lora_name": name, "lora_path": path}, answer=False)
+        """Load the adapter at `path` (read on the server's machine) under `name`. One the server holds under that name
+        already (loaded before a follower started again) is taken as loaded."""
+        try:
+            await self._call("POST", "/v1/load_lora_adapter", {"lora_name": name, "lora_path": path}, answer=False)
+        except RuntimeError as error:
+            if "has already been loaded" not in str(error):
+                raise
 
     async def remove_adapter(self, name: str) -> None:
         await self._call("POST", "/v1/unload_lora_adapter", {"lora_name": name}, answer=False)
@@ -241,10 +281,6 @@ class RemoteEngine:
         return _answer(response) if answer else {}
 
 
-class NotLoaded(Unserved):
-    """The server does not have the model a request names (yet)."""
-
-
 def _accepted(listing: Mapping[str, Any], model: str) -> int:
     """The longest sequence a `/v1/models` listing says the server accepts for `model` (or its first model)."""
     listed: list[Any] = listing.get("data") or []
@@ -279,7 +315,9 @@ class RemoteChannel:
 
     The channel's servers are one URL (a router, a proxy, or a single server), or a list: a session's turns then go to
     one of those that answer and have a checkpoint close enough, worked out from the session's id alone, so that nothing
-    is kept per session. What the run says and what each server has are asked again every `every` seconds."""
+    is kept per session. A server is a URL (a vLLM server, reached as `connection` says) or any `CheckpointServer` (an
+    engine host's, say), which stays the caller's to close. What the run says and what each server has are asked again
+    every `every` seconds."""
 
     def __init__(
         self,
@@ -288,7 +326,7 @@ class RemoteChannel:
         limits: Limits,
         *,
         model: str,
-        servers: Sequence[str],
+        servers: Sequence["str | CheckpointServer"],
         wanted: Callable[[], Awaitable[Sequence[Serving]]],
         max_lag: int = MAX_LAG,
         connection: Connection | None = None,
@@ -306,7 +344,13 @@ class RemoteChannel:
         self._every = EVERY if every is None else every
         self._patience = patience
         self._http = (connection or Connection()).client()
-        self._engines = {address: RemoteEngine(model, address=address, client=self._http) for address in servers}
+        self._engines: dict[str, CheckpointServer] = {
+            each.address: each
+            for each in (
+                RemoteEngine(model, address=server, client=self._http) if isinstance(server, str) else server
+                for server in servers
+            )
+        }
         self._said: list[Serving] = []
         """What the run said the channel should serve, each checkpoint once, deepest first."""
         self._has: dict[str, set[str]] = {}
@@ -342,11 +386,12 @@ class RemoteChannel:
 
     def choices(self) -> list[Serving]:
         """The checkpoints a turn may sample from now, newest first: what the channel should serve, and those before it
-        no more than `bound` behind (a full checkpoint, which a server cannot serve under its own name, is none)."""
+        no more than `bound` behind. A server that cannot serve a full checkpoint under its own name (a vLLM server)
+        never lists it, so it is never offered there."""
         if not self._said:
             return [Serving(self.name, model=self.model)]  # (the run said nothing: the base model)
         newest = self._said[0].depth
-        return [said for said in self._said if newest - said.depth <= self.bound and said.kind != "full"]
+        return [said for said in self._said if newest - said.depth <= self.bound]
 
     def offered(self, address: str) -> Serving | None:
         """What a server would sample a turn from now: the newest of the `choices` it has."""

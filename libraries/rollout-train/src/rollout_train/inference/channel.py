@@ -7,8 +7,8 @@ trains publishes new weights to it; whoever deploys decides which engines stand 
 import asyncio
 import time
 import zlib
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -71,6 +71,15 @@ class Engine(Protocol):
 class Unserved(Exception):
     """The checkpoint a turn began with is not served where it is asked for (not loaded yet, dropped, or another
     answered), or the server cannot be reached: the turn is sampled again, from what is served then."""
+
+
+class NotLoaded(Unserved):
+    """The server does not have the model a request names (yet)."""
+
+
+KEEP = 2
+"""Adapters a channel keeps loaded unless it is told otherwise: the one served, and the one before (a run's
+`max_lag` of one, plus one)."""
 
 
 @dataclass(frozen=True)
@@ -143,7 +152,13 @@ class Channel:
     """How many times weights have been published; recorded with every sampled token."""
     held: str | None = None
     """The full checkpoint the engines hold, by name (None: the model's own)."""
+    keep: int = KEEP
+    """Adapters kept loaded: the one served and those before it a turn may still sample from (a run's
+    `max_lag + 1`)."""
+    model: str | None = None
+    """The model the engines were started with, by the name a request asks for it (`resolved`)."""
     _loaded: list[str] = field(default_factory=list[str])
+    _depths: dict[str, int] = field(default_factory=dict[str, int])
     _open: asyncio.Event = field(default_factory=asyncio.Event)
     _idle: asyncio.Event = field(default_factory=asyncio.Event)
     _in_flight: int = 0
@@ -177,8 +192,59 @@ class Channel:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
         beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
         the request) are for samplers elsewhere: this process's own callers read what it publishes."""
+        return await self._sampled(
+            prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
+            adapter=lambda: adapter, session=session,
+        )  # fmt: skip
+
+    async def sample(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        name: str | None,
+        session: str = "",
+    ) -> Generation:
+        """Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
+        elsewhere is asked (`rollout_train.inference.remote.CheckpointServer`): `NotLoaded` where it is not served here
+        once a load in progress has ended (a turn caught by a full checkpoint's load is sampled again). The answer
+        names what sampled it."""
+        generation = await self._sampled(
+            prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
+            adapter=lambda: self.resolved(name), session=session,
+        )  # fmt: skip
+        return replace(generation, model=name or self.model)
+
+    def resolved(self, name: str | None) -> str | None:
+        """The adapter the engines are asked for to sample what is served under `name`: the adapter itself, or None
+        for the full checkpoint they hold or the model's own (`model`, or None); `NotLoaded` for anything else."""
+        if name is not None and name in self._loaded:
+            return name
+        if name is not None and name == self.held:
+            return None
+        if self.held is None and name in (None, self.model):
+            return None
+        raise NotLoaded(f"{name or 'the model'} is not served here")
+
+    async def _sampled(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        adapter: Callable[[], str | None],
+        session: str,
+    ) -> Generation:
+        """Sample on the session's engine from the adapter `adapter` says, asked once the gate is open (what a load in
+        progress left)."""
         while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
             await self._open.wait()
+        chosen = adapter()
         engine = self.engines[zlib.crc32(session.encode()) % len(self.engines)]
         started = time.monotonic()
         if self._in_flight == 0:
@@ -192,7 +258,7 @@ class Channel:
                 temperature=temperature,
                 top_p=top_p,
                 stop_token_ids=stop_token_ids,
-                adapter=adapter,
+                adapter=chosen,
             )
         finally:
             self._in_flight -= 1
@@ -209,18 +275,26 @@ class Channel:
 
     @property
     def loaded(self) -> list[str]:
-        """The adapters loaded on the engines, oldest first: the one served, and the one before."""
+        """The adapters loaded on the engines, oldest first: the one served, and those before it (`keep` in all)."""
         return list(self._loaded)
+
+    def adapters(self) -> list[tuple[str, int, bool]]:
+        """What the engines hold for this channel, oldest first: each adapter, and the full checkpoint held, by name,
+        with the version it was published as and whether it is full weights."""
+        held = [(self.held, self._depths.get(self.held, 0), True)] if self.held is not None else []
+        return [*held, *((name, self._depths.get(name, 0), False) for name in self._loaded)]
 
     async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
         """Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
         checkpoint's weights there, which the engines load in place of what they hold. Returns the version it is
         served as: `version` if one is given (the checkpoint's depth, which means the same in every process), or
-        one more than the last. An adapter before stays loaded, so that a turn in progress finishes under the
-        weights it began with; the one before that is dropped. Full weights replace the engines' at once, and the
-        adapters trained on the weights before go with them. Publishing what is being served changes nothing."""
+        one more than the last. The adapters before stay loaded, `keep` in all with this one, so that a turn in
+        progress finishes under the weights it began with; older ones are dropped. Full weights replace the engines'
+        at once, and the adapters trained on the weights before go with them. Publishing what is being served
+        changes nothing."""
         if adapter == self.serving:
             return self.version
+        served_as = self.version + 1 if version is None else version
         if full:
             await self.pause()  # (no turn may be half sampled when the weights under it change)
             try:
@@ -228,19 +302,41 @@ class Channel:
                 self.held = adapter
             finally:
                 self.resume()
-            for dropped in self._loaded:
-                await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
-            self._loaded.clear()
-            self.adapter = None
+            await self.dropped()
         else:
             await asyncio.gather(*(engine.load_adapter(adapter, path) for engine in self.engines))
             self.adapter = adapter
             self._loaded.append(adapter)
-            while len(self._loaded) > 2:
-                dropped = self._loaded.pop(0)
-                await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
-        self.serving, self.version = adapter, self.version + 1 if version is None else version
+        self._depths[adapter] = served_as
+        await self.keeping(self.keep)
+        self.serving, self.version = adapter, served_as
         return self.version
+
+    async def keeping(self, keep: int) -> None:
+        """Keep `keep` adapters loaded from now on (at least one), dropping the oldest past it."""
+        self.keep = max(keep, 1)
+        while len(self._loaded) > self.keep:
+            dropped = self._loaded.pop(0)
+            self._depths.pop(dropped, None)
+            await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
+
+    async def dropped(self) -> None:
+        """Remove every adapter of this channel from the engines (other channels' on the same engines stay)."""
+        for name in self._loaded:
+            self._depths.pop(name, None)
+            await asyncio.gather(*(engine.remove_adapter(name) for engine in self.engines))
+        self._loaded.clear()
+        self.adapter = None
+
+    def forget(self, names: Collection[str]) -> None:
+        """Take it that the engines no longer hold the adapters `names` (a server elsewhere that started again): they
+        are loaded again when they are next published."""
+        for name in names:
+            if name in self._loaded:
+                self._loaded.remove(name)
+                self._depths.pop(name, None)
+        if self.serving is not None and self.serving in names:
+            self.serving, self.adapter = None, None
 
     async def pause(self) -> None:
         """Hold new requests back, and wait for those in flight to finish."""

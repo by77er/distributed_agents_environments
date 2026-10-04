@@ -287,8 +287,8 @@ uv run rollout engines engines.toml --run first --name gpu-1
 It reads what the run (`--run`, by name or id) says each of its channels (by name) should serve every two seconds, and
 when a channel serves something older, fetches the checkpoint's files under its directory (hard links, from a blob
 store of files on the same disk) and loads them into each server (`/v1/load_lora_adapter`, named by the checkpoint's
-id). The adapter before stays loaded, so that a turn begun under it finishes under it; the one before that is
-unloaded, and its files deleted. It beats as `--name` (by default this machine's name; kind `engines`) with the run it
+id). The adapters before stay loaded, the run's `max_lag + 1` in all, so that a turn begun under one finishes
+under it; older ones are unloaded, and their files deleted. It beats as `--name` (by default this machine's name; kind `engines`) with the run it
 follows, its machine, and for each channel what it serves, each server's address, and why a load failed, if one did.
 
 ### A channel whose engines are elsewhere

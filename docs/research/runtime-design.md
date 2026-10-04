@@ -1029,7 +1029,7 @@ shared code changes (the loop, the gateway, contracts).
 | 7 | Turns say what they were sampled with | `TurnRecord.sampled_with`; segments carry it; the algorithm refuses segments without behaviour logprobs, with the reason in the group's result; datasets record `supervision`; imitation records it | 3 | `tests/rollout_train/gateway/test_turns.py`, `training/test_algorithm.py`, `test_datasets.py`, `training/test_imitation.py` | S, ~250 |
 | 8 | Validation | `rollout_train.validation.validate` with every rule of §6; `Plan` and `Refused` | 3, 4, 5, 6 | `tests/rollout_train/test_validation.py` (pure; one test per rule; the acceptance run's settings validate; `local-lora` + `openai` refused with its reason) | M, ~600 |
 | 9 | The environment worker | `rollout_train.environments`: the worker actor, `EnvironmentClient` (an `Environment`), Python builds (`project` → cached venv, `py_executable`), curricula per run rebuilt from the ledger; `loop.train`, `evaluate`, `check`, `suite make` take a client | 2, 4 | `tests/rollout_train/test_environment_worker.py` (Ray: the toy games through the worker; a curriculum rebuilt after the worker is killed; a build in a project venv with a stub environment) | L, ~800 |
-| 10 | Engine hosts and checkpoint servers | `EngineHost` actor (engines, `Follower`, sleep and wake), `HostServer`; `RemoteChannel` over `CheckpointServer`; full weights under a checkpoint's name, replica by replica | 2, 3 | `tests/rollout_train/inference/test_remote.py`, `test_engine_hosts.py` (Ray, scripted engines: follow, lag, replica-by-replica full loads, restart reloads) | L, ~650 |
+| 10 | Engine hosts and checkpoint servers (**done**) | `EngineHost` actor (engines, `Follower`, sleep and wake), `HostServer`; `RemoteChannel` over `CheckpointServer`; full weights under a checkpoint's name, replica by replica | 2, 3 | `tests/rollout_train/inference/test_remote.py`, `test_engine_hosts.py` (Ray, scripted engines: follow, lag, replica-by-replica full loads, restart reloads) | L, ~650 |
 | 11 | One gateway on Serve | The Serve deployment; `ChannelDirectory` from runs' starts; `TinkerServer`; `EndpointSampler`; `rollout gateway` and `deployed` removed | 1, 4, 7, 10 | `tests/rollout_train/gateway/*` (Ray Serve: a run's channel built from its start, `served_by`, a Tinker channel over the fake service, an `api` channel recorded with `sampled_with = []`, replicas and restarts) | L, ~750 |
 | 12 | Runners, pools and the feed as actors | Runner actors (`EpisodeRunner` with the run predicate), pool actors with keepers, `ActorPool`, the feed actor; `rollout pool`, `rollout runner`, `rollout tools`, `rollout engines` removed | 2, 4, 9 | `tests/rollout_train/rollouts/test_scheduler.py`, `test_sandboxes.py`, `test_adoption.py` (Ray: a runner restarted adopts, a pool's lease ends with its claim) | M, ~550 |
 | 13 | Runs as Ray jobs | `rollout_train.jobs` (train, evaluate, imitate, check), `RunActors`, the trainer actor, `Colocated` over host handles, placement groups, `limits.spend`; `publish` removed from the loop and evals; `Platform`, `Profile.open`, run directories removed | 5, 6, 8, 9, 10, 11, 12 | `tests/rollout_train/training/test_loop.py`, `test_evals.py`, `test_full_weights.py`, `test_pausing.py` (Ray: a run with scripted engines end to end; a colocated run sleeps its host; spend ends a run) | L, ~1000 |
@@ -1170,6 +1170,23 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   `reshard` names a bridge (`verbatim`, `peft-from-tinker`). `merge-quantize` merges into the base and writes full
   weights that a provider quantizing as it loads (fp8) serves; a provider model quantized beforehand (AWQ) is refused,
   since nothing here quantizes offline. `rollout merge` of a Tinker checkpoint folds in its bridged PEFT files.
+- **10** (engine hosts): `rollout_train.inference.hosts` ([engine hosts](../libraries/rollout-train/channels.md#engine-hosts)).
+  Following the decisions after review, an `EngineHost` shares nothing with the trainer but the ledger and the blob
+  store: no placement group. It asks Ray for its own fractional `num_gpus` (`host_spec`: a replica's GPUs from the
+  provider, halved where the run's trainer is colocated, and `[placement.engines]`), which on Kubernetes is what makes
+  the autoscaler add a GPU worker; the placement groups of §4 are not used. The same actor is a run's replica or a
+  pool's (`detached`), and what it serves changes while it runs (`bind`, `unbind`; the follower's `bindings`), so pool
+  bindings in the ledger can feed it later. Each `(run, channel)` is a `Channel` of its own over shared engines, keeping
+  `max_lag + 1` adapters from the newest serving record (the window followed as `max_lag` changes). Beats list every
+  adapter each engine holds, with its run, channel, checkpoint and depth, and a follower over vLLM servers holds its
+  view to `/v1/models` (reloading what a server lost, removing strays). Full weights load replica by replica through the
+  beats: replica `i` loads once the replicas before it beat that they hold the checkpoint. `HostServer` is a
+  `CheckpointServer` over an actor handle, for callers in the host's Ray cluster; the gateway, outside Ray, needs the
+  host reachable over HTTP, which is 11's to add (the host answering the `/v1/models` and `/v1/completions` subset
+  `RemoteEngine` speaks). vLLM's `--max-loras` (adapters one batch mixes on the GPU) must cover the sum of the bound
+  runs' windows, with `--max-cpu-loras` as the cache above it: the inference image takes both from
+  `VLLM_MAX_LORAS` and `VLLM_MAX_CPU_LORAS`. The session's Ray has one GPU in its accounting, so hosts' shares are
+  scheduled in tests as on a GPU node.
 
 ### What the acceptance run needs from each step
 

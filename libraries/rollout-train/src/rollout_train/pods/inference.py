@@ -40,7 +40,7 @@ from rollout_train.inference import Channel, RemoteEngine
 from rollout_train.pods.environment import listening, public_address, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.presence import Presence, presence_of
-from rollout_train.serving import wanted
+from rollout_train.serving import qualified, wanted
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -81,6 +81,7 @@ class InferencePod(Follower):
         super().__init__(name, checkpoints, run, {channel: served}, directory, presence=presence, about=self.about_pod,
                          every=every, beating=beating)  # fmt: skip
         self.channel = served
+        self.followed = run
         self.model = model
         self.identity = pod_identity(name)
         self.address = address
@@ -100,13 +101,14 @@ class InferencePod(Follower):
         """Whether the server answers and has what the channel should serve now."""
         try:
             has = await self.engine.models()
-            said = await wanted(self.checkpoints.ledger, self.run, self.channel.name)
+            said = await wanted(self.checkpoints.ledger, self.followed, self.channel.name)
         except Exception as error:  # (looked at again at the next look)
             self.ready, self.why = False, f"{type(error).__name__}: {error}"
         else:
             name = said.checkpoint if said is not None and said.checkpoint is not None else self.model
             self.ready = name in has and (name == self.model or name == self.channel.serving)
-            self.why = "" if self.ready else self.errors.get(self.channel.name) or f"{name} is not served yet"
+            error = self.errors.get(qualified(self.followed, self.channel.name))
+            self.why = "" if self.ready else error or f"{name} is not served yet"
         self.looked = time.monotonic()
 
     def healthy(self, stale: float = STALE) -> bool:

@@ -14,8 +14,9 @@ from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
 from rollout.testing import until
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
+from rollout_train.following import Follower
 from rollout_train.gateway import GatewayEndpoints
-from rollout_train.inference import Connection, RemoteEngine, Route, Routes
+from rollout_train.inference import Channel, Connection, RemoteEngine, Route, Routes
 from rollout_train.inference.remote import ENGINES, NotLoaded
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.presence import FilePresence
@@ -144,7 +145,32 @@ async def test_a_follower_loads_what_the_run_says_into_its_server_and_beats(tmp_
         assert beat.about["kind"] == ENGINES and beat.about["follows"] == "r"
         (entry,) = cast(list[dict[str, object]], beat.about["channels"])
         assert (entry["channel"], entry["adapter"], entry["version"]) == ("policy", third.id, 3)
-        assert entry["engines"] == [{"address": host.address, "serving": third.id, "version": 3}]
+        adapters = [
+            {"run": "r", "channel": "policy", "checkpoint": first.id, "depth": 1},
+            {"run": "r", "channel": "policy", "checkpoint": third.id, "depth": 3},
+        ]  # (every adapter the server holds, so that the gateway can send a turn to one that holds its checkpoint)
+        assert entry["engines"] == [{"address": host.address, "serving": third.id, "version": 3, "adapters": adapters}]
+
+
+async def test_a_follower_holds_its_view_to_what_its_server_says_it_has(tmp_path: Path) -> None:
+    checkpoints, presence = shared(tmp_path)
+    fence = await checkpoints.ledger.take(scope("r"))
+    async with engine_host("gpu-1", checkpoints, "r", tmp_path / "gpu-1", presence, following=False) as host:
+        first = await made(checkpoints, fence, tmp_path)
+        await serve(checkpoints, fence, first)
+        assert await host.follower.follow()
+        behind = RemoteEngine(MODEL, address=host.address)
+        await behind.remove_adapter(first.id)  # the server lost it (it started again): loaded again at the next look
+        assert await host.follower.follow() and host.engine.told[-2:] == [f"remove {first.id}", f"load {first.id}"]
+        await behind.load_adapter("strayadapter", str(tmp_path))  # one nobody serves (a follower before this one's)
+        assert not await host.follower.follow() and host.engine.told[-1] == "remove strayadapter"
+
+        # A follower started again finds the server holding what the run serves: it is kept, and taken as loaded.
+        channel = Channel("policy", [behind], cast(Renderer, PlainRenderer()))
+        again = Follower("gpu-1", checkpoints, "r", {"policy": channel}, tmp_path / "again", presence=presence)
+        assert await again.follow() and channel.serving == first.id
+        assert set(await behind.models()) == {MODEL, first.id} and host.engine.told[-1] == "remove strayadapter"
+        behind.close()
 
 
 async def test_turns_sample_the_newest_checkpoint_a_server_has_within_bounds_and_go_on_where_one_dies(

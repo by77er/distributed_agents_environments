@@ -27,6 +27,8 @@ Beside those every pod reads ([deploy/images](../README.md#the-variables-both-po
 | `ROLLOUT_CHECKPOINTS` | Where checkpoints' files are kept while they are served (default `/workspace/checkpoints`) |
 | `ROLLOUT_HEALTH` | Where `/healthz` and `/readyz` are served (default `127.0.0.1:8081`) |
 | `VLLM_MAX_LORA_RANK` | The largest adapter rank vLLM takes (default 32) |
+| `VLLM_MAX_LORAS` | Adapters one batch may mix (default 2): at least the sum of the windows of the runs it serves, each run's `max_lag + 1` |
+| `VLLM_MAX_CPU_LORAS` | Adapters held in CPU memory above those, to load again quickly (default: vLLM's, as many as `VLLM_MAX_LORAS`) |
 | `VLLM_ARGS` | More of `vllm serve`'s options, split on spaces (`--max-model-len 8192 --gpu-memory-utilization 0.9`) |
 
 ## Building
