@@ -15,6 +15,7 @@ from rollout_train import presence
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import Beat, FilePresence
 from rollout_train.record import GROUPS, scope, table
+from rollout_train.recorder import Segment
 from rollout_train.rollouts import Outcome, Plan, Record, episodes_of, events_of, plan
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, ended
 from tests.rollout_train.rollouts.games import GATES, Gated, Guess
@@ -118,6 +119,31 @@ async def test_an_episode_its_runner_cut_short_is_claimed_again_and_played_once(
     GATES.setdefault("closing", asyncio.Event()).set()
     async with served(again):
         (episode,) = await episodes_of(ledger, again.blobs, "train", 1, 1, every=0.01)
+    assert episode.outcome is Outcome.COMPLETED
+    assert sorted(await ledger.read(table("train", CLAIMS))) == ["1/1/1", "1/1/2"]
+
+
+async def test_an_episode_its_runner_closes_on_after_its_run_ended_is_noted_and_claimed_by_another(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, recorder, _ = runner(tmp_path, "yes")
+    ledger = first.ledger
+    await ask(ledger, "train", {1: ({"word": "yes"}, 1)})
+    reading = asyncio.Event()
+
+    async def stalled(run: str, run_id: str) -> dict[str, list[Segment]]:
+        reading.set()
+        return await asyncio.get_running_loop().create_future()  # (never: what its run sampled is being read)
+
+    monkeypatch.setattr(recorder, "sessions", stalled)
+    async with served(first):
+        async with asyncio.timeout(10):
+            await reading.wait()
+    assert sorted(await ledger.read(table("train", INTERRUPTED))) == ["1/1/1"]  # noted though its run had ended
+
+    other, _, _ = runner(tmp_path, "yes", name="other")  # (the first is never started again)
+    async with served(other):
+        (episode,) = await episodes_of(ledger, other.blobs, "train", 1, 1, every=0.01)
     assert episode.outcome is Outcome.COMPLETED
     assert sorted(await ledger.read(table("train", CLAIMS))) == ["1/1/1", "1/1/2"]
 

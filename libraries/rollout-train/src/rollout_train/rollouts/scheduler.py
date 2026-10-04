@@ -478,11 +478,17 @@ class EpisodeRunner:
             "at": round(time.time(), 1),
             "run_id": run_id,
         }
-        if not await self.ledger.append(table(each.run, CLAIMS), key, claim, self._fence):
-            return False  # another runner claimed this attempt first
-        # Only the claim's winner takes its episode's fence: no attempt before this one can record the episode now.
-        fence = await self.ledger.take(episode_scope(each.run, f"{each.group}/{each.number}"))
-        self._follow(key, self._play(each, key, run_id, fence))
+        appending = asyncio.ensure_future(self.ledger.append(table(each.run, CLAIMS), key, claim, self._fence))
+        try:
+            if not await asyncio.shield(appending):
+                return False  # another runner claimed this attempt first
+        except asyncio.CancelledError:  # the runner is closing: a claim it made is noted cut short, as in `_play`
+            if not self.resumes:
+                with contextlib.suppress(Exception):
+                    if await appending:
+                        await self._interrupt(each, key, CLOSED)
+            raise
+        self._follow(key, self._play(each, key, run_id))
         return True
 
     def _follow(self, key: str, work: Coroutine[Any, Any, None]) -> None:
@@ -544,22 +550,37 @@ class EpisodeRunner:
             await self.runner.cancel(run_id, reason=LAPSED)
         self.recorder.forget(run_id)
 
-    async def _play(self, each: Open, key: str, run_id: str, fence: Fence) -> None:
-        plans = await self.ledger.read(table(each.run, PLANS))
-        played = Plan.from_json(newest_record(plans))
-        group = mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
-        specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=played.binding)
-        labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
-        self.recorder.admit(run_id, Attempt(each.run, fence, f"{each.group}/{each.number}", each.attempt))
+    async def _play(self, each: Open, key: str, run_id: str) -> None:
+        """Play a claimed attempt to its record. Cut short by the runner closing, anywhere until it is recorded, the
+        attempt is noted and played again by someone; over a runner whose runs survive it, the run is left to be
+        adopted."""
         try:
-            handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")
-        except Exception as error:  # a run that cannot start is a failed episode like any other
+            # Only the claim's winner takes its episode's fence: no attempt before this one can record the episode now.
+            fence = await self.ledger.take(episode_scope(each.run, f"{each.group}/{each.number}"))
+            plans = await self.ledger.read(table(each.run, PLANS))
+            played = Plan.from_json(newest_record(plans))
+            group = mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
+            program = with_row(played.program, group["parameters"])
+            specification = RunSpecification(program=program, binding=played.binding)
+            labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
+            self.recorder.admit(run_id, Attempt(each.run, fence, f"{each.group}/{each.number}", each.attempt))
+            try:
+                handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")
+            except Exception as error:  # a run that cannot start is a failed episode like any other
+                self.recorder.forget(run_id)
+                detail = f"{type(error).__name__}: {error}"
+                failed = Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail)
+                await self._ended(each, key, failed, [], fence)
+                return
+            await self._watch(each, key, handle, fence)
+        except asyncio.CancelledError:  # the runner is closing
+            if self.resumes:  # (the run is resumed when the runner starts again, and adopted)
+                raise
+            with contextlib.suppress(Exception):
+                await self.runner.cancel(run_id, reason=CLOSED)
             self.recorder.forget(run_id)
-            detail = f"{type(error).__name__}: {error}"
-            failed = Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail)
-            await self._ended(each, key, failed, [], fence)
-            return
-        await self._watch(each, key, handle, fence)
+            await self._interrupt(each, key, CLOSED)  # the attempt is noted, and played again by someone
+            raise
 
     async def _watch(self, each: Open, key: str, handle: RunHandle, fence: Fence, *, adopted: bool = False) -> None:
         """Follow a run to its end, and record its episode under its episode's `fence`, with what the gateway recorded
@@ -567,18 +588,7 @@ class EpisodeRunner:
         is cut short, to be played again."""
         assert self._fence is not None
         self._tell("started", run=each.run, group=each.group, episode=each.number, run_id=handle.run_id)
-        events: list[RunEvent] = []
-        try:
-            async for event in handle.events():
-                events.append(event)
-        except asyncio.CancelledError:  # the runner is closing
-            if self.resumes:  # (the run is resumed when the runner starts again, and adopted)
-                raise
-            with contextlib.suppress(Exception):
-                await self.runner.cancel(handle.run_id, reason=CLOSED)
-            self.recorder.forget(handle.run_id)
-            await self._interrupt(each, key, CLOSED)  # the attempt is noted, and played again by someone
-            raise
+        events: list[RunEvent] = [event async for event in handle.events()]
         try:
             segments = await self.recorder.sessions(each.run, handle.run_id)
         finally:

@@ -76,7 +76,8 @@ async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded
     assert (won[0].reward, lost[0].reward) == (1.0, 0.0) and won[0].info == {"solved": True}
     (segment,) = won[0].trajectories["policy"].segments  # what the harness sampled is the slot's trajectory
     assert "".join(chr(token) for token in segment.tokens) == "user: Say the word.\nassistant: yes\n"
-    assert len(seen.samples) == 2 and seen.samples[0].run_id == won[0].run_id and seen.samples[0].slot == "policy"
+    assert sorted(sample.run_id for sample in seen.samples) == sorted([won[0].run_id, lost[0].run_id])  # (in any order)
+    assert all(sample.slot == "policy" for sample in seen.samples)
 
     ledger, blobs = FileLedger(tmp_path / "alone" / "ledger"), FileBlobStore(tmp_path / "alone" / "blobs")
     unserved = recording(channel, ledger=ledger, blobs=blobs)  # not served over HTTP: nothing to hand out
