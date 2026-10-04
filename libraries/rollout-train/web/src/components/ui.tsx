@@ -93,12 +93,14 @@ export function Table({ heads, rows, to, keys }: { heads: [string, string?][]; r
   );
 }
 
-export function Meter({ name, used, total, says }: { name: string; used: number; total: number; says: string }) {
-  const share = total ? used / total : 0;
+/** How much of something is used, as a bar: one nearly full is warm, then bad, unless being full is what it is for
+ * (`warns` false: a runner's places, a pool's sandboxes). */
+export function Meter({ name, used, total, says, warns = true }: { name: string; used: number; total: number; says: string; warns?: boolean }) {
+  const share = total ? Math.min(used / total, 1) : 0;
   return (
     <div className="meter">
       <div><span>{name}</span><b>{says}</b></div>
-      <div className={`track${share > 0.93 ? " bad" : share > 0.85 ? " warm" : ""}`}><i style={{ width: `${(100 * share).toFixed(1)}%` }} /></div>
+      <div className={`track${!warns ? "" : share > 0.93 ? " bad" : share > 0.85 ? " warm" : ""}`}><i style={{ width: `${(100 * share).toFixed(1)}%` }} /></div>
     </div>
   );
 }

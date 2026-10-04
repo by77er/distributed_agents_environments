@@ -25,7 +25,8 @@ function watched(place: Place, system: System | undefined): Topic[] {
   if (place.kind === "launch") found.push(topics.evals());
   if (place.kind === "group") found.push(topics.group(place.run, place.number));
   if (place.kind === "episode") found.push(topics.episode(place.id));
-  if (place.kind === "statistics") found.push(topics.statistics(), topics.machines());
+  if (place.kind === "statistics") found.push(topics.statistics());
+  if (place.page === "machines") found.push(topics.machines());
   if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches());
   if (place.kind === "checkpoints") found.push(topics.checkpoints(place.sample));
   if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());
@@ -44,7 +45,8 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setOpen(false);
     const section = place.kind === "statistics" ? place.section : null;
-    const target = section ? document.getElementById(`section-${section}`) : null;
+    const role = place.kind === "host" ? place.role : null;
+    const target = section ? document.getElementById(`section-${section}`) : role ? document.getElementById(`role-${role}`) : null;
     if (target) target.scrollIntoView({ block: "start" });
     else main.current?.scrollTo({ top: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,6 +134,7 @@ function Crumbs({ place }: { place: Place }) {
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
   else if (place.kind === "checkpoints" && place.sample) crumbs.push(["Sample fixture", ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
+  else if (place.kind === "host") crumbs.push([place.host, ""]);
   else if (place.kind === "eval") {
     const played = evals?.evals.find(each => each.run === place.run);
     if (played) crumbs.push([`Suite ${played.suite}`, suitePlace(played.suite)]);

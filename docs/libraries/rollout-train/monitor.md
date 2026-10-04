@@ -4,7 +4,7 @@ Code: `rollout_train.monitor` (the service), `libraries/rollout-train/web` (the 
 [`RunFeed`](../../guide/reference.md#runfeed), [hooks](../rollout/hooks.md), [rollouts](rollouts.md#watching)
 
 The monitor is a web page over a ledger and every run in it: one monitor shows all the runs that share a ledger,
-on whichever machines they run. It has three pages, switched along the top:
+on whichever machines they run. Its pages are switched along the top:
 
 - **Runs**: every run, running ones first, and each run laid out as it runs: the **run**, which plays groups and
   takes steps on them; a **step**, one update over the groups queued when it was taken, and the checkpoint it made; a **group**, one start of one row of the environment, played as a number of **episodes**; an **episode**, one
@@ -12,8 +12,9 @@ on whichever machines they run. It has three pages, switched along the top:
   episode, turn by turn: what it was sent, what it thought, what it did and what came back. Each rollout becomes a
   **trajectory**, the tokens the trainer learns from;
 - **Checkpoints**: every checkpoint, each alone and all of them as a graph growing from their base models;
-- **Statistics**: figures across the runs, a series for each, and the machines that run things (as their runners' and
-  launchers' heartbeats say), the engines, the runners and the ledger.
+- **Statistics**: figures across the runs, a series for each, what each channel serves, and the ledger;
+- **Machines**: every machine that beats and the roles on it (runners, sandbox pools, engine hosts, launchers and
+  gateways), with what each holds and how full it is ([the machines](#the-machines)).
 
 ```bash
 rollout monitor RUN                                   # http://localhost:8765: RUN's ledger, and every run in it
@@ -81,8 +82,9 @@ them ([rollouts](rollouts.md)), and the checkpoints. Each run keeps the rest in 
 |---|---|---|
 | the ledger | each run's `starts`, `groups`, `results`, `steps` and `failures`; its `episodes`, `claims` and `interrupted`; the `checkpoints`; the fences ([checkpoints](checkpoints.md)) | every run, its steps, groups and their stages, the episodes that ended and what each reported, which runner plays what, outcomes, checkpoints, the statistics |
 | the registry | each run's id and name, and the bookmarks ([the registry](checkpoints.md#the-registry)) | what each run is called, and the bookmarks that name each checkpoint |
-| the heartbeats | each runner's and launcher's newest beat, with its recent beats' measurements (`rollout_train.presence`) | the machines (memory, accelerators, disk, the engines' processes), each channel's checkpoint and throughput, whether a run is running, which launchers are alive and what they offer |
-| the launches | the runs and evals asked for and how each goes (`rollout_train.launches`) | the launches on Runs and Evals, the New run form, and a suite's Run this suite form |
+| the heartbeats | each runner's, pool's, engine host's, launcher's and gateway's newest beat, with its recent beats' measurements (`rollout_train.presence`) | the machines and the roles on them (memory, accelerators, disk, places, pools, what each channel serves and how fast), whether a run is running, which launchers are alive and what they offer |
+| the launches | the runs and evals asked for and how each goes (`rollout_train.launches`) | the launches on Runs and Evals, the New run form, a suite's Run this suite form, and each launcher's launches going |
+| the sandboxes' leases | each pool's leases, by key (`rollout_train.sandboxes`) | each pool's leases on the Machines page: the episode each was acquired for, how long it has been held, its time limit |
 | `evaluations/` | each suite's versions, and each eval's subject (with the version it played) and results ([evals](evals.md)) | the Evals page, a suite's page, and the suites a checkpoint played |
 | the registry's suite names | the version each suite's name points to ([versions](evals.md#versions)) | which version a suite's page, its tile and the forms take as its newest |
 | a run's `feed` | what is happening now, written by `RunFeed` | episodes still running, their rollouts turn by turn |
@@ -236,8 +238,8 @@ runners' heartbeats; every chart is drawn to scale and says each series' value u
 | `steps` | the trainer's statistics over the steps, a chart each: KL moved, KL floor, clip fraction, mean mismatch, mean weight, truncated fraction, loss, the step's time and its start time (as far as each checkpoint says them) |
 | `pace` | episodes and groups an hour (counted when each group's result was written); what was done with each group (trained on, in a step being taken, waiting for a step, nothing to train on, no episode or a failed step, in flight); why groups gave nothing to train on |
 | `queue` | how many groups were in flight (decided, their result not written), and how many waited for a step (recorded with something to train on, no step begun over them), over time |
-| `inference` | each run's engines: tokens a second and requests at once, a measurement each beat while they are busy |
-| `machines` | a card for each runner's and launcher's machine, as its heartbeats say: its host, alive or gone (no beat for 90 seconds), memory, accelerators and disk now and over its recent beats, its engines' processes, what each channel serves and how fast, and a launcher's profiles; then each channel's throughput, each runner in the ledger (what it plays now, the claims it has made, its fence), the ledger's fences (but [episodes'](rollouts.md#each-episodes-fence), one per episode claimed) and tables (`#/system` opens it) |
+| `inference` | each run's engines: tokens a second and requests at once, a measurement each beat while they are busy; then each channel, what it serves and how fast now |
+| `ledger` | each runner that took its fence in the ledger (its fence, the claims it has made, how many hold, when it last claimed), the ledger's fences (but [episodes'](rollouts.md#each-episodes-fence), one per episode claimed) and tables |
 
 An episode's reward is summed as the trainer sums it ([rewards](episodes.md#rewards)): the mean of its slots'. One
 still playing is shown with its reward so far, read from its feed the same way, and each slot's where they differ.
@@ -247,6 +249,35 @@ monitor serves `solved` as null for an episode that did not say, and, in a group
 writes as true or false for each episode), for each episode of a group none of whose episodes said; an eval's results
 and counts likewise. Where nothing says, the page shows no solve figures (no share solved, no solve rate, no solved and
 not-solved colors) and the mean reward in their place.
+
+### The machines
+
+The Machines page (`#/machines`; `#/system` opens it too) shows every process that beats beside the ledger
+([heartbeats](rollouts.md#heartbeats)) by what its beat says it is, beside what the ledger says of it
+(`rollout_train.monitor.machines`). A process is alive while its newest beat is younger than 90 seconds by the clock of
+the store that keeps the beats; when it last beat is shown by the monitor's clock. The page has a section for each
+kind present, alive ones as cards and the gone ones in a table under them:
+
+| Section | Each card shows |
+|---|---|
+| Runners | its places, how many it plays and how many are free; its machine's memory, accelerators and disk; the episodes its claims hold (each run, group, episode and attempt, linked, and since when); what its channels serve and how fast |
+| Sandbox pools | the kind of sandbox, the runner it is in (a runner's pool is `KIND@RUNNER`) or its own name, how many sandboxes are leased of how many and how many are free; each lease in the `sandboxes` table: the run's episode it was acquired for (linked), the sandbox's name, how long it has been held, its time limit and what is left of it, and whether its claim holds, has lapsed, or its sandbox is lost |
+| Engine hosts | the run it follows, its machine; for each channel, what it serves, what the run wants it to (the checkpoint of the greatest depth in the run's `serving` table), tokens a second and requests at once, and each engine's address, the checkpoint it serves and how many checkpoints behind the wanted one it is |
+| Launchers | how many launches it plays of how many at once, the profiles and environments it offers, and its launches going (claimed, running or stopping) |
+| Gateways | where it listens, and what each channel it samples serves and how fast |
+
+The sidebar lists the machines (by the host each beat names), alive ones first, each opening to its roles; a role
+opens its card on its machine's page (`#/machines/HOST/NAME`). A machine's page has everything on that host: its
+memory, accelerators and disk now, and memory and accelerator memory in use, how busy each accelerator was and disk in
+use over its recent beats (the last hour, at one beat every 15 seconds), then its roles.
+
+`/api/machines` answers `{"now", "hosts", "runners", "pools", "engines", "launchers", "gateways"}`. Each role has its
+`name` among the beats, its `host`, `alive` and `at` (when it last beat), and what its kind adds: a runner its `run`,
+`places`, `playing`, `free`, `claims`, `pools` and `channels`; a pool its `kind`, `runner`, `size`, `leased`, `free` and
+`leases`; an engine host what it `follows` and its `channels`, each with `wanted`, `behind` and its `engines`; a
+launcher its `profiles`, `environments`, `at_once`, `playing` and `launches`; a gateway where it `listen`s and its
+`channels`. Each host has `alive`, `at`, its newest measurements (`machine`), their `history`, and its `roles`
+(`{"kind", "name", "alive"}`).
 
 ### An episode's rollouts
 
@@ -266,7 +297,7 @@ replies and tool calls are there, and what each model was sent is not (it is kep
 
 `System(directory)` reads a run's directory and its ledger, and `System(ledger=…)` a ledger alone: `snapshot()`
 (where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds),
-`lineage(sample)` (the checkpoints view), `evals()` (every suite, its versions, and every eval), `statistics()` (with each run's name), `machines()` (the heartbeats),
+`lineage(sample)` (the checkpoints view), `evals()` (every suite, its versions, and every eval), `statistics()` (with each run's name), `machines()` (every machine that beats and the roles on it),
 `launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, checkpoint)`, `unbookmark(name)`,
 `environment(name)` (what the suites' forms need of an environment) and `save_suite(name, body)`. `create_app(where)` serves them,
 the stream and the page; its routes are listed in `rollout_train.monitor.app`.

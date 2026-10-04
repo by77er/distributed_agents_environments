@@ -13,6 +13,7 @@ import { Checkpoints } from "./pages/Checkpoints";
 import { Evals } from "./pages/Evals";
 import { EvalRun } from "./pages/EvalRun";
 import { Suite } from "./pages/Suite";
+import { MachineHost, Machines } from "./pages/Machines";
 
 function View() {
   const place = usePlace();
@@ -30,6 +31,8 @@ function View() {
     case "suite": return <Suite name={place.suite} />;
     case "eval": return <EvalRun run={place.run} />;
     case "statistics": return <Statistics />;
+    case "machines": return <Machines />;
+    case "host": return <MachineHost host={place.host} />;
     default: return <Runs />;
   }
 }

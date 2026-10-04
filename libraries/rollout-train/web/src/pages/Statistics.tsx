@@ -1,12 +1,12 @@
 // Statistics across every run: each run in its own color, read from the ledger (and from its runners' heartbeats for
-// its engines); then the machines that run things, as their heartbeats say, the engines, the runners and the ledger.
+// its engines); then what each channel serves now, and the ledger.
 
 import { memo, useMemo } from "react";
-import { useKnown, useMachines, useStatistics, useSystem } from "../api/queries";
-import type { Machine, StatisticsGroup, StatisticsRun, System } from "../api/types";
+import { useKnown, useStatistics, useSystem } from "../api/queries";
+import type { StatisticsGroup, StatisticsRun, System } from "../api/types";
 import { ColumnChart, LineChart, type Series, Sized, spansOf } from "../components/charts";
-import { Card, Dots, Empty, Head, Kpi, Kpis, Legend, Meter, SectionTitle, Share, Table } from "../components/ui";
-import { bytes, clock, figure, mean, percent, span, tick, tickSpan } from "../lib/format";
+import { Card, Dots, Empty, Head, Kpi, Kpis, Legend, SectionTitle, Share, Table } from "../components/ui";
+import { bytes, clock, figure, mean, percent, span, tickSpan } from "../lib/format";
 import { reported } from "../lib/model";
 import { groupPlace } from "../lib/places";
 import { useStored } from "../lib/stored";
@@ -14,6 +14,7 @@ import { SECTIONS, useHidden } from "../layout/Tree";
 import { Ago, useRunColor } from "../layout/runs";
 
 const DAY = 86400;
+const LastAgo = ({ at }: { at: number }) => <><Ago at={at} /> ago</>;
 const sectionName = (key: string) => SECTIONS.find(([each]) => each === key)![1];
 /** The share of the groups' episodes that solved their rows (none where none of them says). */
 const solvedShare = (groups: StatisticsGroup[]): number | null => {
@@ -54,7 +55,8 @@ export function Statistics() {
       <>
         <Head title="Statistics" />
         <Empty>{figures.runs.length ? "Every run is left out." : "No run yet."}</Empty>
-        <MachineSection system={system} />
+        {title("ledger", sectionName("ledger"))}
+        <LedgerCard system={system} />
       </>
     );
   }
@@ -248,118 +250,52 @@ export function Statistics() {
         </Halves>
       ) : <Empty>No measurement yet.</Empty>}
 
-      <MachineSection system={system} />
+      <ChannelCards system={system} />
+
+      {title("ledger", sectionName("ledger"))}
+      <LedgerCard system={system} />
     </>
   );
 }
 
-const LastAgo = ({ at }: { at: number }) => <><Ago at={at} /> ago</>;
-
-const gib = (value: number) => value / 2 ** 30;
-
-/** Every runner's and launcher's machine, as its heartbeats say (memory, accelerators and disk, now and over its
- * recent beats; its engines' processes and channels), the engines, the runners in the ledger, the fences and tables. */
-const MachineSection = memo(function MachineSection({ system }: { system: System }) {
-  const { data: found } = useMachines();
+/** What each run's channels serve now and how fast. */
+const ChannelCards = memo(function ChannelCards({ system }: { system: System }) {
   const known = useKnown();
-  const machines = found?.machines ?? [];
+  if (!system.channels.length) return null;
   return (
-    <>
-      <SectionTitle id="section-machines" title="Machines" />
-      {found === undefined ? <Empty>Reading the heartbeats…</Empty>
-        : machines.length ? <div className="cols">{machines.map(machine => <MachineCard key={machine.runner} machine={machine} />)}</div>
-        : <Empty>No heartbeat yet.</Empty>}
-      <div className="cols">
-        {system.channels.map(channel => {
-          const last = channel.throughput.at(-1);
-          return (
-            <Card key={`${channel.run}${channel.channel}`} title={`Channel ${channel.channel}`} note={`${known.run(channel.run)} · ${channel.adapter ? `serving ${known.short(channel.adapter)} (${known.origin(channel.adapter)}) since ${clock(channel.published)}` : "serving the model its engines started with"}`}>
-              {last ? (
-                <Kpis style={{ marginBottom: 12 }}>
-                  <Kpi label="tokens a second" value={figure(last.tokens_per_second)} />
-                  <Kpi label="requests at once" value={figure(last.mean_concurrency)} />
-                  <Kpi label="each" value={`${figure(last.tokens_per_second_per_stream)} tok/s`} />
-                </Kpis>
-              ) : <p className="muted">No request has been measured yet.</p>}
-            </Card>
-          );
-        })}
-        {system.runners.map(runner => (
-          <Card key={runner.runner} title={`Runner ${runner.runner}`} note={runner.last ? <>last claimed <Ago at={runner.last} /> ago</> : "has claimed nothing"}>
-            <Kpis style={{ marginBottom: 12 }}>
-              <Kpi label="playing" value={String(runner.playing.length)} />
-              <Kpi label="claims" value={String(runner.claims)} />
-              <Kpi label="fence" value={String(runner.fence ?? "–")} />
-            </Kpis>
-            {runner.playing.length ? (
-              <Table heads={[["run"], ["group", "n"], ["episode", "n"], ["attempt", "n"], ["since", "n"]]}
-                rows={runner.playing.map(claim => [known.run(claim.run), `#${claim.group}`, `E${claim.episode}`, String(claim.attempt), <Ago at={claim.at} />])}
-                to={runner.playing.map(claim => (claim.group != null ? groupPlace(claim.run, claim.group) : null))} />
-            ) : null}
+    <div className="cols" style={{ marginTop: 22 }}>
+      {system.channels.map(channel => {
+        const last = channel.throughput.at(-1);
+        return (
+          <Card key={`${channel.run}${channel.channel}`} title={`Channel ${channel.channel}`} note={`${known.run(channel.run)} · ${channel.adapter ? `serving ${known.short(channel.adapter)} (${known.origin(channel.adapter)}) since ${clock(channel.published)}` : "serving the model its engines started with"}`}>
+            {last ? (
+              <Kpis>
+                <Kpi label="tokens a second" value={figure(last.tokens_per_second)} />
+                <Kpi label="requests at once" value={figure(last.mean_concurrency)} />
+                <Kpi label="each" value={`${figure(last.tokens_per_second_per_stream)} tok/s`} />
+              </Kpis>
+            ) : <p className="muted">No request has been measured yet.</p>}
           </Card>
-        ))}
-        <Card title="Ledger" note={`${system.ledger_at} · ${bytes(system.kept.checkpoints)} of checkpoints and ${bytes(system.kept.episodes)} of episodes kept`}>
-          <Table heads={[["scope"], ["fence", "n"]]} rows={Object.entries(system.ledger.fences)} keys={Object.keys(system.ledger.fences)} />
-          <div style={{ height: 14 }} />
-          <Table heads={[["table"], ["records", "n"]]} rows={Object.entries(system.ledger.tables)} keys={Object.keys(system.ledger.tables)} />
-        </Card>
-      </div>
-    </>
+        );
+      })}
+    </div>
   );
 });
 
-/** One machine, as a runner's or a launcher's heartbeats say: alive or not, its meters now, and its memory and
- * accelerators over its recent beats; its engines' processes and what its channels serve. */
-const MachineCard = memo(function MachineCard({ machine }: { machine: Machine }) {
-  const known = useKnown();
-  const latest = machine.machine;
-  const history = machine.history.filter(each => each.machine).map(each => ({ ...each.machine!, at: each.at }));
-  const accelerators = (latest?.accelerators ?? []).map((each, place) => ({ name: each.name, color: `var(--series-${place + 1})`, place }));
-  const launcher = machine.kind === "launcher";
-  const what = launcher
-    ? `launcher · ${machine.profiles?.length ?? 0} profile${machine.profiles?.length === 1 ? "" : "s"} · ${machine.playing ?? 0} of ${machine.at_once ?? 1} playing`
-    : `runner${machine.run ? ` of ${known.run(machine.run)}` : ""} · ${machine.playing ?? 0} of ${machine.places ?? "?"} places`;
+/** The ledger: the runners that took their fences in it and the claims each made, the fences and the tables. */
+const LedgerCard = memo(function LedgerCard({ system }: { system: System }) {
   return (
-    <Card className={`machine${machine.alive ? "" : " stale"}`}
-      title={<span className="machine-title"><span className={`dot ${machine.alive ? "alive" : "gone"}`} />{machine.host ?? machine.runner}</span>}
-      note={<>{what} · {machine.alive ? "beat" : "gone: last beat"} <LastAgo at={machine.at} /></>}>
-      <div className="small faint mono machine-name" title={machine.runner}>{machine.runner}</div>
-      {latest ? (
+    <Card title="Ledger" note={`${system.ledger_at} · ${bytes(system.kept.checkpoints)} of checkpoints and ${bytes(system.kept.episodes)} of episodes kept`}>
+      {system.runners.length ? (
         <>
-          {latest.memory.total ? <Meter name="memory" used={latest.memory.total - (latest.memory.available ?? 0)} total={latest.memory.total} says={`${bytes(latest.memory.available)} available of ${bytes(latest.memory.total)}`} /> : null}
-          {latest.accelerators.map(each => <Meter key={each.name} name={each.name} used={each.used} total={each.total} says={`${bytes(each.used)} of ${bytes(each.total)} · ${Math.round(100 * each.busy)}% busy`} />)}
-          {latest.disk ? <Meter name="disk" used={latest.disk.total - latest.disk.free} total={latest.disk.total} says={`${bytes(latest.disk.free)} free`} /> : null}
+          <Table heads={[["runner"], ["fence", "n"], ["claims", "n"], ["playing", "n"], ["last claimed", "n"]]} keys={system.runners.map(runner => runner.runner)}
+            rows={system.runners.map(runner => [runner.runner, String(runner.fence ?? "–"), String(runner.claims), String(runner.playing.length), runner.last ? <><Ago at={runner.last} /> ago</> : "–"])} />
+          <div style={{ height: 14 }} />
         </>
-      ) : <p className="muted small">Its beats measure nothing.</p>}
-      {history.length > 1 ? (
-        <Sized>{width => (
-          <LineChart width={width} height={150} time label="memory in use" dots={false} yTick={value => `${tick(value)} GiB`} format={value => `${value.toFixed(1)} GiB`}
-            series={[
-              ...(history.some(each => each.memory.total) ? [{ name: "memory", color: "var(--quiet)", points: history.filter(each => each.memory.total).map(each => [each.at, gib(each.memory.total! - (each.memory.available ?? 0))] as [number, number]) }] : []),
-              ...accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, gib(one.accelerators[each.place].used)] as [number, number]) })),
-            ]} />
-        )}</Sized>
       ) : null}
-      {history.length > 1 && accelerators.length ? (
-        <Sized>{width => (
-          <LineChart width={width} height={120} time label="accelerators busy" dots={false} y={{ min: 0, max: 1 }} yTick={percent} format={percent}
-            series={accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, one.accelerators[each.place].busy] as [number, number]) }))} />
-        )}</Sized>
-      ) : null}
-      {history.length > 1 ? <Legendary series={[...(history.some(each => each.memory.total) ? [{ name: "memory", color: "var(--quiet)" }] : []), ...accelerators]} /> : null}
-      {machine.channels?.length ? (
-        <Table heads={[["channel"], ["serving"], ["tok/s", "n"], ["at once", "n"]]}
-          rows={machine.channels.map(channel => [channel.channel, channel.adapter ? `${known.short(channel.adapter)} · ${known.origin(channel.adapter)}` : "the model it started with", figure(channel.tokens_per_second), figure(channel.mean_concurrency)])}
-          keys={machine.channels.map(channel => channel.channel)} />
-      ) : null}
-      {machine.processes?.started.length ? (
-        <Table heads={[["process"], ["pid", "n"], ["state"]]}
-          rows={machine.processes.started.map(each => [each.name, String(each.pid), { text: each.alive ? "running" : "gone", kind: each.alive ? "t-good" : "t-bad" }])}
-          keys={machine.processes.started.map(each => each.pid)} />
-      ) : null}
-      {launcher && machine.profiles?.length ? (
-        <div className="facts">{machine.profiles.map(profile => <span key={profile.profile} className="chip">{profile.profile}</span>)}{(machine.environments ?? []).map(each => <span key={each} className="chip mono">{each}</span>)}</div>
-      ) : null}
+      <Table heads={[["scope"], ["fence", "n"]]} rows={Object.entries(system.ledger.fences)} keys={Object.keys(system.ledger.fences)} />
+      <div style={{ height: 14 }} />
+      <Table heads={[["table"], ["records", "n"]]} rows={Object.entries(system.ledger.tables)} keys={Object.keys(system.ledger.tables)} />
     </Card>
   );
 });

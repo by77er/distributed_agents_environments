@@ -217,26 +217,6 @@ export interface Measurement {
   disk: { free: number; total: number } | null;
 }
 
-/** A channel as a heartbeat says it: what it serves, and what passed through it since the beat before. */
-export interface BeatChannel {
-  channel: string;
-  adapter?: string | null;
-  version?: number | null;
-  requests?: number;
-  generated_tokens?: number;
-  tokens_per_second?: number;
-  tokens_per_second_per_stream?: number;
-  mean_concurrency?: number;
-}
-
-/** What a runner's (or launcher's) earlier beats measured. */
-export interface Beaten {
-  at: number;
-  machine?: Measurement;
-  channels?: BeatChannel[];
-  playing?: number;
-}
-
 /** A profile a launcher can run: by its name, with the settings a launch may change and their values in it. */
 export interface OfferedProfile {
   profile: string;
@@ -247,29 +227,153 @@ export interface OfferedProfile {
   settings: Record<string, unknown>;
 }
 
-/** A runner's or a launcher's machine, as its heartbeats say: alive or not, what it said last, its recent beats. */
-export interface Machine {
-  runner: string;
-  at: number;
+/** What every role on a machine shares: its name among the beats, its machine, whether it beats (within 90 s by the
+ * store's clock) and when it last did, by the monitor's clock. */
+export interface Role {
+  name: string;
+  host: string | null;
   alive: boolean;
-  /** `launcher` for a launcher; nothing for an episode runner. */
-  kind?: string;
-  host?: string;
-  run?: string;
-  directory?: string;
-  machine?: Measurement;
-  processes?: { owner: number; started: { pid: number; name: string; alive: boolean }[] } | null;
-  channels?: BeatChannel[];
-  places?: number;
-  playing?: number;
-  at_once?: number;
-  profiles?: OfferedProfile[];
-  environments?: string[];
-  history: Beaten[];
+  at: number | null;
 }
 
+/** A channel as a beat says it: what it serves, and what passed through it since the beat before. */
+export interface RoleChannel {
+  channel: string;
+  serving: string | null;
+  version: number | null;
+  requests: number | null;
+  generated_tokens: number | null;
+  tokens_per_second: number | null;
+  tokens_per_second_per_stream: number | null;
+  mean_concurrency: number | null;
+  /** A routed channel's servers: each one's address, what it would sample from now, and how far behind. */
+  servers?: { address: string; serving: string | null; version: number | null; behind: number | null; answers?: boolean }[];
+}
+
+/** An episode a runner's claim holds. */
+export interface Claimed {
+  run: string;
+  group: number;
+  episode: number;
+  attempt: number;
+  at: number | null;
+  run_id: string | null;
+}
+
+export interface RunnerRole extends Role {
+  /** The run it serves, where it serves one. */
+  run: string | null;
+  places: number;
+  playing: number;
+  free: number;
+  claims: Claimed[];
+  /** Its pools, by name. */
+  pools: string[];
+  channels: RoleChannel[];
+  processes: { owner: number; started: { pid: number; name: string; alive: boolean }[] } | null;
+}
+
+/** A sandbox held under a key, as the `sandboxes` table says. */
+export interface LeaseHeld {
+  key: string;
+  kind: string;
+  sandbox: string;
+  /** The run's episode it was acquired for, where its key names one. */
+  run: string | null;
+  group?: number;
+  episode?: number;
+  attempt?: number;
+  run_id?: string | null;
+  /** Whether that claim holds; none where its key names no claim the ledger has. */
+  holds: boolean | null;
+  /** When it was made, by the pool's clock. */
+  at: number;
+  /** How long it may last. */
+  seconds: number | null;
+  /** Its sandbox is gone. */
+  lost: boolean;
+}
+
+export interface PoolRole extends Role {
+  /** The kind of sandbox it makes. */
+  kind: string;
+  /** The runner it is within, if it is; else it beats on a machine of its own (or not at all). */
+  runner: string | null;
+  size: number | null;
+  leased: number | null;
+  free: number | null;
+  leases: LeaseHeld[];
+}
+
+/** One of an engine host's engines: its address, what it serves, how far behind what its run wants. */
+export interface EngineServed {
+  address: string | null;
+  serving: string | null;
+  version: number | null;
+  behind: number | null;
+}
+
+export interface EngineChannel extends RoleChannel {
+  wanted: string | null;
+  wanted_version: number | null;
+  behind: number | null;
+  error: string | null;
+  engines: EngineServed[];
+}
+
+export interface EngineRole extends Role {
+  follows: string | null;
+  channels: EngineChannel[];
+}
+
+/** A launch its launcher is playing. */
+export interface LaunchGoing {
+  id: string;
+  state: string;
+  at: number;
+  updated: number;
+  name: string;
+  kind: string;
+  profile: string;
+  environment: string;
+  suite: string | null;
+}
+
+export interface LauncherRole extends Role {
+  profiles: { profile: string; model: string; weights: string | null }[];
+  environments: string[];
+  launches: LaunchGoing[];
+  at_once: number | null;
+  playing: number | null;
+  backend: string | null;
+}
+
+export interface GatewayRole extends Role {
+  listen: string | null;
+  channels: RoleChannel[];
+}
+
+export type RoleKind = "runners" | "pools" | "engines" | "launchers" | "gateways";
+
+/** A machine: alive while any of its roles is, its newest measurements and their history, and its roles. */
+export interface Host {
+  host: string;
+  alive: boolean;
+  at: number | null;
+  machine: Measurement | null;
+  history: { at: number; machine: Measurement }[];
+  roles: { kind: RoleKind; name: string; alive: boolean }[];
+}
+
+/** Every machine that beats and the roles on it (`/api/machines`). */
 export interface Machines {
-  machines: Machine[];
+  now: number;
+  hosts: Host[];
+  runners: RunnerRole[];
+  pools: PoolRole[];
+  engines: EngineRole[];
+  launchers: LauncherRole[];
+  gateways: GatewayRole[];
 }
 
 /** What a run is asked to be (`rollout_train.launches.Asked`). */

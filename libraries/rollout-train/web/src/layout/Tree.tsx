@@ -1,6 +1,6 @@
 // The hierarchy, on the left, for the page shown: the runs (each run, its steps, their groups, their episodes and
-// the episodes' rollouts), the checkpoints, the suites and the evals playing, or the statistics' sections and the runs
-// drawn. What is folded is remembered
+// the episodes' rollouts), the checkpoints, the suites and the evals playing, the statistics' sections and the runs
+// drawn, or the machines and the roles on each. What is folded is remembered
 // in this browser.
 
 import { memo, type ReactNode } from "react";
@@ -15,9 +15,10 @@ import { episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPl
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
 import { RunDot, running, useRunColor } from "./runs";
+import { MachinesTree } from "./MachinesTree";
 
 /** A row of the tree: it opens its place. */
-function Node({ to, current, className = "", children }: { to: string; current?: boolean; className?: string; children: ReactNode }) {
+export function Node({ to, current, className = "", children }: { to: string; current?: boolean; className?: string; children: ReactNode }) {
   const navigate = useNavigate();
   return (
     <div
@@ -38,7 +39,7 @@ export function Tree({ place }: { place: Place }) {
   return (
     <nav className="tree" aria-label="hierarchy">
       {place.page === "checkpoints" ? <CheckpointsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} />
-        : place.page === "evals" ? <EvalsTree place={place} /> : <RunsTree place={place} system={system} />}
+        : place.page === "evals" ? <EvalsTree place={place} /> : place.page === "machines" ? <MachinesTree place={place} /> : <RunsTree place={place} system={system} />}
     </nav>
   );
 }
@@ -258,7 +259,7 @@ function EvalsTree({ place }: { place: Place }) {
 }
 
 export const SECTIONS: [string, string][] = [
-  ["outcomes", "Outcomes"], ["rows", "Rows"], ["steps", "Steps"], ["pace", "Pace"], ["queue", "Queue"], ["inference", "Inference"], ["machines", "Machines"],
+  ["outcomes", "Outcomes"], ["rows", "Rows"], ["steps", "Steps"], ["pace", "Pace"], ["queue", "Queue"], ["inference", "Inference"], ["ledger", "Ledger"],
 ];
 
 /** The runs left out of the statistics, as this browser remembers them. */

@@ -460,6 +460,11 @@
   .machine.stale { opacity: .72; }
   .machine-title { display: inline-flex; align-items: center; gap: 8px; }
   .machine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -6px; }
+  .machine .meter { margin-bottom: 0; }
+  .machine-title { min-width: 0; overflow-wrap: anywhere; }
+  .engine-channel { display: grid; gap: 6px; }
+  .engine-channel b { color: var(--ink); font-weight: 600; }
+  .facts-line { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 
   @media (max-width: 900px) {
     html, body, #root { height: auto; }
