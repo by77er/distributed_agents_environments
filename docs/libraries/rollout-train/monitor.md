@@ -236,7 +236,9 @@ label opens it (what is open is remembered in the browser). A checkpoint opens i
 
 - from a **base model** to the first checkpoint of each line trained from it;
 - a **fork**: a checkpoint trained from another run's checkpoint;
-- **learned from**: a checkpoint's other parents (dashed);
+- **learned from**: a checkpoint's other parents (dashed): a distillation's teachers, or the checkpoints that sampled
+  the [dataset](datasets.md) a supervised step trained on, which the checkpoint names (`dataset`, served with each
+  checkpoint here and at `/api/system`);
 - a **distillation**: a diamond in its student's lane, before the checkpoints it made, with an edge from each teacher
   and, dashed, from the checkpoint the student starts from. Its mode is said in words on its lane and in the
   distillations below the graph: off-policy, the student is trained on its teachers' samples; on-policy, the student
