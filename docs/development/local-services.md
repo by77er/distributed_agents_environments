@@ -2,7 +2,8 @@
 
 Code: `deploy/local`
 
-Runners that share state need two services: Postgres for the ledger and object storage for blobs. `deploy/local/compose.yaml` runs both:
+Runners that share state need two services: Postgres for the ledger and object storage for blobs.
+`deploy/local/compose.yaml` runs both, and the tests can use them too:
 
 | Service | Image | Port | Credentials |
 |---|---|---|---|

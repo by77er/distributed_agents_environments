@@ -1,13 +1,14 @@
 [project]
 name = "rollout-train"
 version = "0.0.0"
-description = "Reinforcement learning on rollout: the training loop, the scheduler, versions, channels, the recorder, deployment profiles, the monitor"
+description = "Reinforcement learning on rollout: episode runners, the training loop, checkpoints and the ledger, channels, the gateway, the cluster config, the rollout command, the monitor"
 requires-python = ">=3.13"
 dependencies = [
     "rollout",
     "ray[default]>=2.59",  # every role runs on Ray: runs as jobs, engine hosts as actors, bridges as tasks
     "sqlalchemy>=2",  # the ledger in a database: SQLite on one machine, Postgres for several
     "psycopg[binary]>=3.2",
+    "httpx>=0.28",  # clients: the gateway, remote engines, the pods, the monitor
 ]
 
 [project.scripts]
