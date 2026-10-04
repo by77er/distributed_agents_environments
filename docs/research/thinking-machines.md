@@ -700,7 +700,8 @@ its `llms-full.txt` and OpenAPI spec), the live inference model list, and the `p
   `Harness.launch(ctx, trace, runtime, endpoint, ...)` could run our program against Prime's interception server.
   Tokens and logprobs would then be rebuilt by Prime's renderers from chat-completions traffic, not recorded by ours.
   Whether hosted environments can reach our tool servers or a Minecraft server is *unverified* (the docs warn some
-  external APIs may not be reachable).
+  external APIs may not be reachable). The other direction, verifiers environments played here with our recorder
+  recording the tokens, is [Prime Intellect's verifiers](prime-compat.md).
 
 | | Tinker | Prime Intellect |
 |---|---|---|
