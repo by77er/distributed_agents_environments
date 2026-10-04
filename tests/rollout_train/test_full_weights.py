@@ -1,6 +1,7 @@
 """Full weights: checkpoints of every weight, served in place of the engines' own; an adapter folded into its base;
 and a run that starts from a full checkpoint loading its files as the model it serves and trains."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -226,3 +227,16 @@ async def test_a_checkpoint_kept_in_another_runs_blob_store_is_read_from_there(t
         await Checkpoints(FileLedger(tmp_path / "other"), FileBlobStore(tmp_path / "my-blobs")).files(
             made.weights, tmp_path / "again"
         )
+
+
+async def test_a_checkpoints_files_are_kept_and_fetched_without_a_copy_of_their_bytes(tmp_path: Path) -> None:
+    checkpoints = await checkpoints_in(tmp_path)
+    fence = await checkpoints.ledger.take(scope("run"))
+    made = files(tmp_path, "w")
+    added = await checkpoints.add(fence, "wwww" * 4, weights=made, run="run", base="a-checkpoint")
+    assert added.weights is not None
+    (reference,) = added.weights.files.values()
+    blob = Path(reference.uri.removeprefix("file://"))
+    assert os.path.samefile(blob, made / "model.safetensors")  # noqa: ASYNC240 (what the trainer wrote is the blob)
+    fetched = await checkpoints.files(added.weights, tmp_path / "elsewhere" / "weights")
+    assert os.path.samefile(blob, fetched / "model.safetensors")  # noqa: ASYNC240

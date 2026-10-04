@@ -82,6 +82,10 @@ checkpoint, by their paths within it, to blobs.
 
 - **Nothing is packed.** Each file is a blob of its own, as the trainer wrote it, so whoever needs a checkpoint
   reads the files it needs and loads them as they are.
+- **Nothing is stored twice on one machine.** With a blob store of files (`FileBlobStore`) on the same filesystem, a
+  checkpoint's files are kept as hard links to what the trainer wrote, and fetched as hard links to the blobs: the
+  run's working copy and the blob are one file. A kept file is read-only from then on, since changing it would change
+  the blob. Files are read and written one at a time, never a whole checkpoint in memory.
 - **`layout`** says how the weights are divided among the files, where they are divided. A reader with the same
   division reads its own files and no others.
 - **`files(manifest, directory)`** puts a manifest's files under a directory, from the blob store, if they are not

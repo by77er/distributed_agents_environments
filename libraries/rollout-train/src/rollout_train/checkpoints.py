@@ -32,7 +32,7 @@ from typing import Any
 from pydantic import JsonValue, TypeAdapter
 
 from rollout.contracts import BlobReference
-from rollout.harness.blobs import Blobs
+from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.stores import opened
 
@@ -234,9 +234,24 @@ class Checkpoints:
         elsewhere, or a merge of one), as each run's start says where its store is."""
         if await asyncio.to_thread(directory.exists):
             return directory
-        contents = {relative: await self._read(reference) for relative, reference in manifest.files.items()}
-        await asyncio.to_thread(_written, contents, directory)
+        await asyncio.to_thread(directory.parent.mkdir, parents=True, exist_ok=True)
+        staging = Path(await asyncio.to_thread(tempfile.mkdtemp, dir=directory.parent, prefix=".fetching-"))
+        try:
+            for relative, reference in manifest.files.items():
+                await self._fetched(reference, staging / relative)
+            await asyncio.to_thread(os.replace, staging, directory)
+        finally:
+            await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
         return directory
+
+    async def _fetched(self, reference: BlobReference, target: Path) -> None:
+        """One file of a manifest at `target`: linked from a store of files on this machine where one has it (no copy
+        of its bytes on the same filesystem), else read and written."""
+        for store in (self.blobs, *await self._elsewhere()):
+            if isinstance(store, FileBlobStore) and await store.link(reference, target):
+                return
+        data = await self._read(reference)
+        await asyncio.to_thread(_written_file, target, data)
 
     async def _read(self, reference: BlobReference) -> bytes:
         try:
@@ -275,17 +290,9 @@ def _base(first: Checkpoint | None, kind: str, base: str | None) -> str | None:
     return first.base or base
 
 
-def _written(contents: Mapping[str, bytes], directory: Path) -> None:
-    directory.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(dir=directory.parent, prefix=".fetching-"))
-    try:
-        for relative, data in contents.items():
-            target = staging / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        os.replace(staging, directory)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+def _written_file(target: Path, data: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
 
 
 @dataclass(frozen=True)
@@ -321,10 +328,15 @@ def _as_released(checkpoint: Checkpoint, released: Mapping[str, JsonValue]) -> C
 
 
 async def kept(path: Path, blobs: Blobs) -> Manifest:
-    """Keep a file, or every file under a directory, in `blobs`, each as a blob of its own."""
+    """Keep a file, or every file under a directory, in `blobs`, each as a blob of its own. A store of files on the
+    same filesystem links each file rather than copying it (`FileBlobStore.put_file`): the files are then read-only,
+    the store's own."""
     files: dict[str, BlobReference] = {}
     for relative, each in await asyncio.to_thread(_listed, path):
-        files[relative] = await blobs.put(await asyncio.to_thread(each.read_bytes), "application/octet-stream")
+        if isinstance(blobs, FileBlobStore):
+            files[relative] = await blobs.put_file(each, "application/octet-stream")
+        else:
+            files[relative] = await blobs.put(await asyncio.to_thread(each.read_bytes), "application/octet-stream")
     return Manifest(files)
 
 

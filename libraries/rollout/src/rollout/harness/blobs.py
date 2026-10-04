@@ -8,6 +8,7 @@ a replay that stores the same bytes gets the same reference.
 import asyncio
 import hashlib
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Protocol
@@ -58,8 +59,48 @@ class FileBlobStore:
     async def delete(self, reference: BlobReference) -> None:
         await asyncio.to_thread(self._path(reference.sha256).unlink, missing_ok=True)
 
+    async def put_file(self, path: Path, media_type: str) -> BlobReference:
+        """Store the file at `path`, or find it already stored, without copying its bytes where the store is on the
+        same filesystem: the blob is then a hard link to the file, and both are made read-only, since they are one file.
+        Elsewhere the file is copied. The file is read in pieces, never whole."""
+        digest, size = await asyncio.to_thread(_file_digest, path)
+        target = self._path(digest)
+        await asyncio.to_thread(_linked_once, path, target)
+        return BlobReference(uri=target.as_uri(), sha256=digest, size=size, media_type=media_type)
+
+    async def link(self, reference: BlobReference, target: Path) -> bool:
+        """Put the blob at `target`: a hard link to it where `target` is on the store's filesystem, else a copy.
+        Returns False, putting nothing, if the store does not have it."""
+        source = self._path(reference.sha256)
+        if not await asyncio.to_thread(source.exists):
+            return False
+        await asyncio.to_thread(_linked_once, source, target)
+        return True
+
     def _path(self, digest: str) -> Path:
         return self.directory / digest[:2] / digest
+
+
+def _file_digest(path: Path) -> tuple[str, int]:
+    with path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest(), os.fstat(file.fileno()).st_size
+
+
+def _linked_once(source: Path, target: Path) -> None:
+    """`target` as a hard link to `source` (read-only, as both now are), or a copy across filesystems."""
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(dir=target.parent)) / target.name
+    try:
+        try:
+            os.link(source, temporary)
+            os.chmod(temporary, 0o444)
+        except OSError:  # (another filesystem, or one without hard links)
+            shutil.copyfile(source, temporary)
+        os.replace(temporary, target)  # atomic: a reader never sees a partial file
+    finally:
+        shutil.rmtree(temporary.parent, ignore_errors=True)
 
 
 def _write_once(path: Path, data: bytes) -> None:

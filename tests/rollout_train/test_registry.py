@@ -92,7 +92,7 @@ async def made(
 ) -> list[Checkpoint]:
     """`steps` checkpoints a run made, each at a step of its own (recorded as its loop records them)."""
     checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / "blobs"))
-    weights = tmp_path / "weights.bin"
+    weights = tmp_path / f"weights-{run}.bin"  # (a kept file is the store's: read-only)
     weights.write_text("w")
     fence = await ledger.take(scope(run))
     line: list[Checkpoint] = []

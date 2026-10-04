@@ -253,4 +253,7 @@ async def test_a_loop_that_was_replaced_cannot_write(tmp_path: Path) -> None:
     with pytest.raises(Fenced):
         await checkpoints.ledger.append(table("train", GROUPS), "9", {}, stale)
     with pytest.raises(Fenced):  # its checkpoints are the run's, appended under its fence
-        await checkpoints.add(stale, new_id(), weights=tmp_path / "ledger", run="train")
+        weights = tmp_path / "stale-weights"
+        weights.mkdir()
+        (weights / "adapter.bin").write_bytes(b"stale")
+        await checkpoints.add(stale, new_id(), weights=weights, run="train")

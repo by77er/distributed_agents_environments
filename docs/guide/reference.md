@@ -441,6 +441,11 @@ Implements `Blobs` in a directory: one file per blob, named by its SHA-256.
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
 - `async def delete(self, reference: BlobReference) -> None`
+- `async def put_file(self, path: Path, media_type: str) -> BlobReference` — Store the file at `path`, or find it already stored, without copying its bytes where the store is on the
+  same filesystem: the blob is then a hard link to the file, and both are made read-only, since they are one file.
+  Elsewhere the file is copied. The file is read in pieces, never whole.
+- `async def link(self, reference: BlobReference, target: Path) -> bool` — Put the blob at `target`: a hard link to it where `target` is on the store's filesystem, else a copy.
+  Returns False, putting nothing, if the store does not have it.
 
 ### `History`
 
