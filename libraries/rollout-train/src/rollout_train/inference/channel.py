@@ -8,7 +8,7 @@ import asyncio
 import time
 import zlib
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import JsonValue
@@ -24,6 +24,11 @@ class Generation:
     """Of each sampled token, under the distribution it was sampled from."""
     finish_reason: str
     """`stop` (a stop token, included in `tokens`) or `length`."""
+    version: int | None = None
+    """The version of the weights that sampled it, where a replica elsewhere says (`rollout_train.inference.remote`):
+    the recorder checks that it is the version it stamps the tokens with."""
+    replica: str | None = None
+    """The replica that sampled it, where one elsewhere says."""
 
 
 class Engine(Protocol):
@@ -119,8 +124,10 @@ class Sampler(Protocol):
         adapter: str | None,
         session: str = "",
         version: int | None = None,
+        request: str | None = None,
     ) -> Generation:
-        """Sample on the session's replica; `Unserved` if it does not serve `adapter` at `version` (or is gone)."""
+        """Sample on the session's replica; `Unserved` if it does not serve `adapter` at `version` (or is gone).
+        `request` names the request, so that one sent again (a retry, through a proxy say) is answered once."""
         ...
 
 
@@ -171,16 +178,19 @@ class Channel:
         adapter: str | None,
         session: str = "",
         version: int | None = None,
+        request: str | None = None,
         replica: int | None = None,
     ) -> Generation:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
         beginnings are cached. `version` is the version the caller stamps the tokens with. A request addressed to one
         engine from elsewhere names it (`replica`, by its place among them; `rollout_train.inference.remote`), and is
         refused with `Unserved` if the weights `adapter` names are not served at `version` there: what that caller
-        knows of the engine may be out of date, while this process's own callers read what it publishes."""
+        knows of the engine may be out of date, while this process's own callers read what it publishes. `request`
+        names a request for a server that answers each once; this process's own callers do not send twice."""
         while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
             await self._open.wait()
-        if replica is not None and version is not None and self.version_of(adapter) != version:
+        served_as = self.version_of(adapter)  # (what is served cannot change while a request is in flight)
+        if replica is not None and version is not None and served_as != version:
             raise Unserved(f"{self.name} does not serve {adapter or 'the weights it holds'} at version {version}")
         engine = self.engines[zlib.crc32(session.encode()) % len(self.engines) if replica is None else replica]
         started = time.monotonic()
@@ -203,7 +213,7 @@ class Channel:
             if self._in_flight == 0:
                 self._idle.set()
         self._throughput.counted(len(prompt), len(generation.tokens))
-        return generation
+        return generation if replica is None else replace(generation, version=served_as)
 
     async def weights(self, session: str) -> tuple[str | None, int]:
         """The adapter a session's next turn samples from (None: the weights the engines hold), and the version its

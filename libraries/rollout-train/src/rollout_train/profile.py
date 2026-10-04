@@ -16,7 +16,7 @@ import json
 import math
 import socket
 import tomllib
-from collections.abc import AsyncGenerator, Callable, Coroutine, Mapping
+from collections.abc import AsyncGenerator, Callable, Collection, Coroutine, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,9 @@ from rollout.harness.sandboxes import MemoryLeases, Pool, PoolBinding, SandboxPo
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
-from rollout_train.inference import Channel, Engine, Limits
+from rollout_train.following import Follower
+from rollout_train.inference import Channel, Connection, Engine, Limits, Replica, Route, Routes
+from rollout_train.inference.remote import MAX_LAG
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION
 from rollout_train.ledger import opened as ledger_at
@@ -63,6 +65,46 @@ class ChannelSpec:
     reshard: str | None = None
     """`module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the
     trainer's files as they are, with no reshard."""
+    replicas: str | None = None
+    """For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`): `heartbeats`, its replicas are found
+    from the beats of the engine hosts that follow the run's channel; none, each entry of `engines` names one
+    (`address`, `replica`)."""
+    max_lag: int = MAX_LAG
+    """Checkpoints a replica serving elsewhere may be behind what the channel should serve and still be given turns."""
+    via: str | None = None
+    """A URL every request to a replica serving elsewhere goes to, naming its replica (a proxy); none: the replica's
+    own address."""
+    connection: Mapping[str, str] = field(default_factory=dict[str, str])
+    """How replicas serving elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`,
+    `key`."""
+
+    @property
+    def routed(self) -> bool:
+        """Whether its engines serve elsewhere, and its sessions are routed to them (said by name: an engine's module
+        is not imported to load a profile)."""
+        return self.engine in REMOTE
+
+    def route(self, renderer: Any, sequence: int | None = None) -> Route:
+        """How a runner samples it, its sessions routed to replicas elsewhere; `sequence`, the trainer's longest turn,
+        where this process trains it."""
+        limits = {"thinking": self.thinking_tokens, "answer": self.answer_tokens}
+        fixed = None
+        if self.replicas != HEARTBEATS:
+            fixed = tuple(Replica(str(each["address"]), str(each["replica"])) for each in self.engines)
+        return Route(
+            renderer,
+            Limits(**{key: value for key, value in limits.items() if value is not None}, sequence=sequence),
+            replicas=fixed,
+            max_lag=self.max_lag,
+            via=self.via,
+            connection=Connection(**self.connection),
+        )
+
+
+HEARTBEATS = "heartbeats"
+"""A routed channel's `replicas`: found from engine hosts' beats."""
+REMOTE = ("rollout_train.inference:RemoteEngine", "rollout_train.inference.remote:RemoteEngine")
+"""What a channel whose engines serve elsewhere names as its `engine`."""
 
 
 @dataclass(frozen=True)
@@ -177,10 +219,15 @@ class Profile:
             place[key] = value
         channels: dict[str, ChannelSpec] = {}
         for name, channel in _table(described, "channels").items():
-            known = ("model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens", "reshard")
+            known = (
+                "model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens", "reshard", "replicas",
+                "max_lag", "via", "connection",
+            )  # fmt: skip
             given = _only(dict(channel), f"channels.{name}", *known)
             engines = tuple(given.pop("engines", [{}]))
             channels[name] = ChannelSpec(**given, engines=engines)
+            if channels[name].routed and channels[name].replicas not in (None, HEARTBEATS):
+                raise ValueError(f"channels.{name}.replicas is {HEARTBEATS!r}, or each entry of engines names one")
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
@@ -212,12 +259,21 @@ class Profile:
         )
 
     @contextlib.asynccontextmanager
-    async def open(self, *, training: bool = True) -> AsyncGenerator["Platform"]:
+    async def open(self, *, training: bool = True, plays: Collection[str] | None = None) -> AsyncGenerator["Platform"]:
         """Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
         `training` (an eval), no trainer is made: the trained channel's engines still load what the trainer's `start`
-        is served over."""
+        is served over. With `plays`, a runner and nothing else (`rollout runner`): see `Platform.start`."""
         async with contextlib.AsyncExitStack() as stack:
-            yield await Platform.start(self, stack, training=training)
+            yield await Platform.start(self, stack, training=training, plays=plays)
+
+    @contextlib.asynccontextmanager
+    async def engines(self) -> AsyncGenerator[dict[str, Channel]]:
+        """Start the engines of the channels whose engines serve in this process, and nothing else (`rollout
+        engines`), and close them on the way out."""
+        async with contextlib.AsyncExitStack() as stack:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            end_orphans(self.directory / PROCESSES)  # an engine a killed process left behind holds its accelerator
+            yield started_engines(self, stack, {name: spec.model for name, spec in self.channels.items()})
 
 
 def _table(described: dict[str, Any], name: str) -> dict[str, Any]:
@@ -245,10 +301,15 @@ class Platform:
         self.registry: Registry | None = registry_of(self.ledger)
         """What the runs are called, and the bookmarks."""
         self.run: Entry
-        """The run in the profile's directory."""
+        """The run in the profile's directory (none for a runner and nothing else: `plays`)."""
+        self.plays: Collection[str] | None = None
+        """For a runner and nothing else, the runs it plays (none named: every run whose channels it reaches)."""
         self.origin: str | None = None
         """The checkpoint a new run trains from, by id (None: the base model)."""
         self.channels: dict[str, Channel] = {}
+        """The channels whose engines serve in this process."""
+        self.routes: Routes | None = None
+        """The channels whose engines serve elsewhere, each run's routed to the replicas that serve it."""
         self.recorder: Recorder
         self.runner: EpisodeRunner
         self.feed: Any
@@ -266,21 +327,33 @@ class Platform:
         """The runs whose episodes the runner plays: the profile's, and its evals'."""
 
     @classmethod
-    async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack, *, training: bool = True) -> "Platform":
+    async def start(
+        cls,
+        profile: Profile,
+        stack: contextlib.AsyncExitStack,
+        *,
+        training: bool = True,
+        plays: Collection[str] | None = None,
+    ) -> "Platform":
         """Start everything (the trainer only with `training`), registering with `stack` how each thing is stopped
-        (the engines last)."""
+        (the engines last). With `plays`, a runner and nothing else (`rollout runner`): no run is registered in the
+        directory and no trainer is made; the runner plays those runs (by id), or with none named every run whose
+        channels it reaches, and the channels whose engines serve in this process follow what the one run named says
+        they should serve (`rollout_train.following`)."""
         from rollout_train.monitor import RunFeed
 
         self = cls(profile)
+        self.plays = plays
         directory = profile.directory
         directory.mkdir(parents=True, exist_ok=True)
         (directory / LOCATION).write_text(json.dumps(self.location))
         if profile.ray:  # (reshards run as Ray tasks on that cluster)
             await asyncio.to_thread(connect, profile.ray)
             stack.callback(disconnect)
-        self.run = await run_of(directory, self.ledger, self.registry, profile.name)
-        self._runs.add(self.run.id)
-        if profile.trainer is not None and profile.trainer.start is not None:
+        if plays is None:
+            self.run = await run_of(directory, self.ledger, self.registry, profile.name)
+            self._runs.add(self.run.id)
+        if plays is None and profile.trainer is not None and profile.trainer.start is not None:
             self.origin = await resolved(self.ledger, self.registry, profile.trainer.start)
         self.blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(directory / BLOBS)
         self.blobs_at = location(profile.blobs, directory / BLOBS)
@@ -289,7 +362,8 @@ class Platform:
         """What each channel's engines load: the profile's model; for the trained channel of a run that starts from a
         full checkpoint, or an adapter over one, that full checkpoint's files (the model its adapters, or its full
         weights, are trained over)."""
-        if self.origin is not None and profile.trainer is not None:
+        trained_here = profile.trainer is not None and not profile.channels[profile.trainer.channel].routed
+        if self.origin is not None and profile.trainer is not None and trained_here:
             under = await self.checkpoints.under(await self.checkpoints.checkpoint(self.origin))
             if under is not None and under.weights is not None:
                 fetched = await self.checkpoints.files(under.weights, directory / "bases" / under.id)
@@ -298,30 +372,22 @@ class Platform:
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
         learner: Trainer | None = None
-        if described is not None and training:
+        if described is not None and training and plays is None:
             learner = named(described.kind)(models[described.channel], **described.settings)
-        started: list[Engine] = []
-        for name, spec in profile.channels.items():
-            engines: list[Engine] = []
-            for options in spec.engines:
-                engine: Engine = named(spec.engine)(models[name], **options)
-                stack.callback(engine.close)
-                engines.append(engine)
-                started.append(engine)
-                note_processes(record, [pid for each in started for pid in each.processes])
-            trained = learner if described is not None and described.channel == name else None
-            limits = {"thinking": spec.thinking_tokens, "answer": spec.answer_tokens}
-            self.channels[name] = Channel(
-                name,
-                engines,
-                named(spec.renderer)(models[name]),
-                Limits(
-                    **{key: value for key, value in limits.items() if value is not None},
-                    sequence=trained.budget.segment_tokens if trained is not None else None,
-                ),
-            )
+        sequence = learner.budget.segment_tokens if learner is not None else None
+        self.channels = started_engines(profile, stack, models, sequence)
+        trained = described.channel if described is not None else None
+        routes = {
+            name: spec.route(named(spec.renderer)(spec.model), sequence if name == trained else None)
+            for name, spec in profile.channels.items()
+            if spec.routed
+        }
+        if routes:
+            self.routes = Routes(routes, self.ledger, presence_of(self.ledger))
+            stack.callback(self.routes.close)
         address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
-        self.recorder = Recorder(self.channels, base_url=f"{address}{SERVED_UNDER}" if address else None)
+        base_url = f"{address}{SERVED_UNDER}" if address else None
+        self.recorder = Recorder(self.channels, base_url=base_url, routes=self.routes)
         feed = RunFeed(directory / FEED, **({"keep": profile.feed_runs} if profile.feed_runs else {}))
         stack.callback(feed.close)
         tool_sets: dict[str, ToolSet] = {}
@@ -363,7 +429,7 @@ class Platform:
             places=profile.episodes_at_once,
             imports=list(tool_sets),
             pools=pools,
-            runs=self._runs,
+            runs=self._runs if plays is None else (set(plays) or None),
             hooks=[feed],
             guard=_needs(profile.runs_gib, "to run more episodes"),
             presence=presence_of(self.ledger),
@@ -373,6 +439,11 @@ class Platform:
         await runner.launch()
         stack.push_async_callback(runner.close)
         _background(stack, self.runner.serve())
+        if plays is not None and len(plays) == 1 and self.channels:  # (its own engines serve what that run says)
+            (followed,) = plays
+            name = f"{socket.gethostname()}/{directory.name}"
+            follower = Follower(name, self.checkpoints, followed, self.channels, directory / "checkpoints")
+            _background(stack, follower.serve())
         self.trainer = learner
         if learner is not None and described is not None and described.colocated:
             ready = _needs(profile.training_gib, "to train")
@@ -440,7 +511,11 @@ class Platform:
         self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
     ) -> int:
         """Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
-        samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves."""
+        samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves. A
+        channel whose engines serve elsewhere is served there: they follow what the training loop wrote down that it
+        serves (`rollout_train.serving`), and this returns the version given."""
+        if channel not in self.channels and self.routes is not None and self.routes.routed(channel):
+            return version or 0
         served = await self.recorder.publish(channel, adapter, path, version, full=full)
         with contextlib.suppress(Exception):  # (a beat missed is said at the next)
             await self.runner.beat()
@@ -448,26 +523,18 @@ class Platform:
 
     def _about(self, record: Path) -> dict[str, JsonValue]:
         """What the runner says of this machine in each beat: its host, the run, its measurements, the engines'
-        processes, and what each channel serves and how fast since the beat before."""
-        processes: Any = None
-        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
-            noted = json.loads(record.read_text())
-            started = [
-                {"pid": int(pid), "name": str(name), "alive": alive(int(pid))}
-                for pid, name in noted["processes"].items()
-            ]
-            processes = {"owner": int(noted["owner"]), "started": started}
-        return {
-            "host": socket.gethostname(),
-            "run": self.run.id,
-            "directory": str(self.profile.directory),
-            "machine": measured(self.profile.directory),
-            "processes": processes,
-            "channels": [
-                {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
-                for name, channel in self.channels.items()
-            ],
-        }
+        processes, what each channel serves and how fast since the beat before, and each run's routed channel
+        (`RUN/NAME`) with the replicas it routes to."""
+        said = machine_of(self.profile.directory, record)
+        channels: list[JsonValue] = [
+            {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
+            for name, channel in self.channels.items()
+        ]
+        routed = self.routes.channels() if self.routes is not None else {}
+        for name, channel in routed.items():
+            replicas: list[JsonValue] = list(channel.replicas())
+            channels.append({"channel": name, **channel.take(), "replicas": replicas})
+        return {**said, **({"run": self.run.id} if self.plays is None else {}), "channels": channels}
 
     async def _serve(self, address: str) -> None:
         """The harness endpoint, over HTTP."""
@@ -479,6 +546,57 @@ class Platform:
         host, _, port = address.rpartition(":")
         app = Starlette(routes=list(harness_endpoint(self.recorder).routes))
         await uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning")).serve()
+
+
+def started_engines(
+    profile: Profile, stack: contextlib.AsyncExitStack, models: Mapping[str, str], sequence: int | None = None
+) -> dict[str, Channel]:
+    """The channels whose engines serve in this process, by name, each engine started from `models[name]` and closed by
+    `stack`, their processes noted in the directory (`PROCESSES`) for whoever must end them if this process is killed.
+    `sequence` (the trainer's longest segment) is the longest turn of the channel the profile's trainer trains."""
+    record = profile.directory / PROCESSES
+    trained = profile.trainer.channel if profile.trainer is not None else None
+    started: list[Engine] = []
+    channels: dict[str, Channel] = {}
+    for name, spec in profile.channels.items():
+        if spec.routed:
+            continue
+        engines: list[Engine] = []
+        for options in spec.engines:
+            engine: Engine = named(spec.engine)(models[name], **options)
+            stack.callback(engine.close)
+            engines.append(engine)
+            started.append(engine)
+            note_processes(record, [pid for each in started for pid in each.processes])
+        limits = {"thinking": spec.thinking_tokens, "answer": spec.answer_tokens}
+        channels[name] = Channel(
+            name,
+            engines,
+            named(spec.renderer)(models[name]),
+            Limits(
+                **{key: value for key, value in limits.items() if value is not None},
+                sequence=sequence if name == trained else None,
+            ),
+        )
+    return channels
+
+
+def machine_of(directory: Path, record: Path) -> dict[str, JsonValue]:
+    """What a process says of its machine in each beat: its host, its directory, the machine's measurements, and the
+    engines' processes noted in `record` and whether each is alive."""
+    processes: Any = None
+    with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+        noted = json.loads(record.read_text())
+        started = [
+            {"pid": int(pid), "name": str(name), "alive": alive(int(pid))} for pid, name in noted["processes"].items()
+        ]
+        processes = {"owner": int(noted["owner"]), "started": started}
+    return {
+        "host": socket.gethostname(),
+        "directory": str(directory),
+        "machine": measured(directory),
+        "processes": processes,
+    }
 
 
 def _needs(gib: float, purpose: str) -> Callable[[], None] | None:

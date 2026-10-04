@@ -10,18 +10,30 @@
 """
 
 from rollout_train.inference.channel import Channel, Engine, Generation, Limits, Sampler, Unserved
-from rollout_train.inference.remote import RemoteChannel, RemoteEngine, Route, Routes, serve_engines
+from rollout_train.inference.remote import (
+    Connection,
+    RemoteChannel,
+    RemoteEngine,
+    Replica,
+    Route,
+    Routes,
+    replica_id,
+    serve_engines,
+)
 
 __all__ = [
     "Channel",
+    "Connection",
     "Engine",
     "Generation",
     "Limits",
     "RemoteChannel",
     "RemoteEngine",
+    "Replica",
     "Route",
     "Routes",
     "Sampler",
     "Unserved",
+    "replica_id",
     "serve_engines",
 ]

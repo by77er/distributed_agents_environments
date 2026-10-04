@@ -11,6 +11,8 @@ rollout monitor WHERE               the web page over a ledger and every run in 
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`
 rollout pool FACTORY                serve a pool of an environment's sandboxes over HTTP: FACTORY makes their provider
+rollout engines PROFILE --run RUN   serve a profile's engines to other machines, serving what the run says
+rollout runner PROFILE              play runs' episodes, and nothing else
 
 `rollout COMMAND --help` lists each command's options.
 """
@@ -796,6 +798,25 @@ def main() -> None:
     checking.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
+    hosting = commands.add_parser("engines", help="serve a profile's engines to other machines, following a run")
+    hosting.add_argument("profile", type=Path)
+    hosting.add_argument("--run", required=True, help="the run whose channels they serve, by its name or its id")
+    hosting.add_argument("--directory", type=Path, help="where fetched checkpoints are kept (instead of the profile's)")
+    hosting.add_argument("--host", default="127.0.0.1")
+    hosting.add_argument("--port", type=int, default=8820)
+    hosting.add_argument("--address", help="the URL others reach it at (by default the host and port)")
+    hosting.add_argument("--name", help="the server's name, the start of its replicas' ids (by default HOST-PORT)")
+    hosting.add_argument("--token-env", help="an environment variable holding the bearer token requests must carry")
+    hosting.add_argument("--token-file", help="a file holding the bearer token requests must carry")
+    hosting.add_argument("--certificate", help="serve TLS with this certificate (and --key)")
+    hosting.add_argument("--key", help="the certificate's private key")
+    hosting.add_argument("--ca", help="ask clients for certificates this CA bundle signed")
+    playing = commands.add_parser("runner", help="play runs' episodes, and nothing else")
+    playing.add_argument("profile", type=Path)
+    playing.add_argument(
+        "--run", action="append", default=[], help="a run it plays, by name or id (repeatable; none: all it reaches)"
+    )
+    playing.add_argument("--directory", type=Path, help="the runner's directory (instead of the profile's)")
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
     serving.add_argument("factory")
     serving.add_argument("--directory", type=Path, default=Path("."))
@@ -867,6 +888,20 @@ def main() -> None:
         work = _launcher(
             arguments.ledger, arguments.profiles, arguments.environment, arguments.runs, arguments.at_once,
             arguments.ray, arguments.gpus,
+        )  # fmt: skip
+        sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command in ("engines", "runner"):
+        from rollout_train.hosting import host_engines, run_episodes
+        from rollout_train.inference import Connection
+        from rollout_train.profile import Profile
+
+        described = Profile.load(arguments.profile, directory=arguments.directory)
+        if arguments.command == "runner":
+            sys.exit(asyncio.run(until_signalled(run_episodes(described, arguments.run))))
+        token = Connection(token_env=arguments.token_env, token_file=arguments.token_file).token()
+        work = host_engines(
+            described, arguments.run, host=arguments.host, port=arguments.port, address=arguments.address,
+            name=arguments.name, token=token, certificate=arguments.certificate, key=arguments.key, ca=arguments.ca,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "checkpoints":

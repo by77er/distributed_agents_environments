@@ -12,7 +12,7 @@ it serves and how fast, with each replica's address where its engines are served
 (`rollout_train.inference.remote.serve_engines`). Runners find a run's replicas from these beats.
 
 A replica behind what it should serve keeps serving what it has while it loads the newest: every sample is stamped
-with the version that made it, and a runner gives it no new session once it is more than `max_lag` checkpoints behind
+with the version that made it, and a runner gives it no turn once it is more than `max_lag` checkpoints behind
 (`rollout_train.inference.remote.RemoteChannel`).
 """
 
@@ -28,7 +28,7 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.inference import Channel
-from rollout_train.inference.remote import ENGINES, replica_address
+from rollout_train.inference.remote import ENGINES, replica_id
 from rollout_train.presence import Presence
 from rollout_train.serving import Serving, wanted
 from rollout_train.trainer import WEIGHTS
@@ -38,7 +38,8 @@ class Follower:
     """Keeps `channels` serving what `run` says each should (by the channel's name within the run), checking every
     `every` seconds, with each checkpoint's files under `directory` while they are served. With `presence`, it beats as
     `name` every `beating` seconds, and at once when a channel serves something new: what `about` says of the machine,
-    and what each channel serves, each replica reached at `address` (where `serve_engines` serves them) if given."""
+    and what each channel serves; where `serve_engines` serves them, under the server name `server`, at `address` as
+    others reach it, each replica's id and that address."""
 
     def __init__(
         self,
@@ -49,6 +50,7 @@ class Follower:
         directory: Path,
         *,
         address: str | None = None,
+        server: str | None = None,
         presence: Presence | None = None,
         about: Callable[[], Mapping[str, JsonValue]] | None = None,
         every: float = 2.0,
@@ -60,6 +62,7 @@ class Follower:
         self.channels = dict(channels)
         self.directory = directory
         self.address = address
+        self.server = server or name
         self.presence = presence
         self.about = about
         self.every = every
@@ -97,12 +100,13 @@ class Follower:
         await self.presence.beat(self.name, {**said, "kind": ENGINES, "follows": self.run, "channels": self.served()})
 
     def served(self) -> list[JsonValue]:
-        """What each channel serves, how fast since the last call, and each of its replicas with its address."""
+        """What each channel serves, how fast since the last call, and each of its replicas with its id and address."""
         listed: list[JsonValue] = []
         for name, channel in self.channels.items():
             replicas: list[JsonValue] = [
                 {
-                    "address": replica_address(self.address, name, index) if self.address else None,
+                    "replica": replica_id(self.server, name, index),
+                    "address": self.address,
                     "adapter": channel.adapter,
                     "serving": channel.serving,
                     "version": channel.version,

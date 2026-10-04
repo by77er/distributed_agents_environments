@@ -144,7 +144,9 @@ async def episodes_of(
 
 
 class Recorded(Protocol):
-    """What a runner needs of the recorder: each run's segments, and the channels it serves."""
+    """What a runner needs of the recorder: each run's segments, and the channels it serves. A recorder that routes
+    channels to replicas elsewhere (`rollout_train.recorder.Recorder` with `routes`) also says whether it reaches a
+    run's (`reaches`), and names them within the run in its binding (`for_run`)."""
 
     channels: Mapping[str, Any]
 
@@ -294,7 +296,7 @@ class EpisodeRunner:
             if self.runs is not None and run not in self.runs:
                 continue
             plans = await self.ledger.read(table(run, PLANS))
-            if not plans or not self._serves(Plan.from_json(_mapping(plans[max(plans, key=int)]))):
+            if not plans or not await self._serves(run, Plan.from_json(_mapping(plans[max(plans, key=int)]))):
                 continue
             groups = await self.ledger.read(table(run, GROUPS))
             results = await self.ledger.read(table(run, RESULTS))
@@ -321,11 +323,16 @@ class EpisodeRunner:
                     found.append(Open(run, int(key), number, max((a for a, _ in made), default=0) + 1, decided))
         return sorted(found, key=lambda each: (each.decided, each.run, each.group, each.number))
 
-    def _serves(self, played: Plan) -> bool:
-        channels = {binding.recorded.channel for binding in played.binding.models.values() if binding.recorded}
+    async def _serves(self, run: str, played: Plan) -> bool:
         local = {binding.local for binding in played.binding.imports.values() if binding.local}
         pools = {binding.local for binding in played.binding.pools.values() if binding.local}
-        return channels <= set(self.recorder.channels) and local <= set(self.imports) and pools <= set(self.pools)
+        if not (local <= set(self.imports) and pools <= set(self.pools)):
+            return False
+        reaches = getattr(self.recorder, "reaches", None)  # (a channel routed elsewhere: whether a replica serves it)
+        if reaches is not None:
+            return await reaches(run, played.binding)
+        channels = {binding.recorded.channel for binding in played.binding.models.values() if binding.recorded}
+        return channels <= set(self.recorder.channels)
 
     async def _needs(self, each: Open, plans: dict[str, Plan]) -> Counter[str]:
         """The sandboxes an episode's run will acquire, as how many from each pool (by its binding: a local name or
@@ -444,7 +451,9 @@ class EpisodeRunner:
         plans = await self.ledger.read(table(each.run, PLANS))
         played = Plan.from_json(_mapping(plans[max(plans, key=int)]))
         group = _mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
-        specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=played.binding)
+        for_run = getattr(self.recorder, "for_run", None)  # (its routed channels named within the run: `RUN/NAME`)
+        binding = for_run(each.run, played.binding) if for_run is not None else played.binding
+        specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=binding)
         labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
         try:
             handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")

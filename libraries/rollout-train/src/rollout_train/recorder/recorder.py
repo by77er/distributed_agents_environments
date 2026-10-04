@@ -246,14 +246,16 @@ class RecordedEndpoint:
         prompt = renderer.render(request.context.append, request.tools)
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                return await self._sampled(request, prompt)
+                return await self._sampled(request, prompt, attempt)
             except Unserved:  # (the weights the turn began with are gone, or so is its replica: from the start again)
                 if attempt == ATTEMPTS:
                     raise
         raise AssertionError(channel.name)  # (unreachable: the last attempt returns or raises)
 
-    async def _sampled(self, request: SampleRequest, prompt: list[int]) -> SampleResult:
-        """One turn sampled and recorded, from the weights its session samples from when it begins."""
+    async def _sampled(self, request: SampleRequest, prompt: list[int], attempt: int = 1) -> SampleResult:
+        """One turn sampled and recorded, from the weights its session samples from when it begins. Each request to the
+        channel is named by the effect, the attempt and the phase, so that one sent again is answered once; one whose
+        replica says it sampled at another version than the turn is stamped with is refused (`Unserved`)."""
         channel, renderer = self._channel, self._channel.renderer
         adapter, version = await channel.weights(request.session_id)  # (where it is routed, the replica is chosen)
         limits = channel.limits
@@ -280,7 +282,10 @@ class RecordedEndpoint:
             mask.extend([False] * len(forced))
             logprobs.extend([math.nan] * len(forced))
 
+        phases: list[int] = []
+
         async def generate(context: Sequence[int], room: int, stop: Sequence[int]) -> str:
+            phases.append(len(phases) + 1)
             generation = await channel.generate(
                 context,
                 max_tokens=room,
@@ -290,7 +295,10 @@ class RecordedEndpoint:
                 adapter=adapter,
                 session=request.session_id,
                 version=version,
+                request=f"{request.effect_id}/{attempt}/{phases[-1]}",
             )
+            if generation.version is not None and generation.version != version:  # (a replica elsewhere says)
+                raise Unserved(f"{generation.replica} sampled at version {generation.version}, not {version}")
             completion.extend(generation.tokens)
             mask.extend([True] * len(generation.tokens))
             logprobs.extend(generation.logprobs)
