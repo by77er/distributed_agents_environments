@@ -339,7 +339,18 @@ one URL that passes requests on. What makes either safe:
 - **A retry is safe.** A request sent again through a proxy may be sampled again by the server; the gateway keeps the
   answer it was given, under the turn's effect, once.
 - **Authentication is the deployment's.** A bearer token (vLLM's `--api-key`, or the proxy's own) and TLS with a CA
-  bundle and a client certificate, read from where `connection` says.
+  bundle and a client certificate, read from where `connection` says. A server reached by its address alone is known
+  by the identity its certificate carries: `connection = { identity = "spiffe://rollout/pod/NAME", … }` checks that
+  URI SAN in the handshake in place of the host name.
+
+### Pods on RunPod
+
+Pods rented on RunPod run an image of their own: `deploy/images/inference` (a stock vLLM server, the follower beside
+it, Envoy in front) or `deploy/images/trainer` (the training service a run reaches with
+`rollout_train.pods.RemoteTrainer`). Each is reached at a public TCP port over mutual TLS, with certificates from the
+cluster's step-ca; the launcher's side is `rollout_runpod` (RunPod's API, one-time tokens, revocation). What is built,
+the security model, and how they become provider kinds are in
+[RunPod pods as inference and training providers](../research/runpod-providers.md).
 
 ### A layout
 

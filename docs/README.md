@@ -84,6 +84,7 @@ Each implements one interface a library defines.
 | `implementations/rollout-computers` | `rollout_computers` | Computers for tasks, and the tools that act on them | `EnvironmentService` |
 | `implementations/rollout-openai` | `rollout_openai` | The OpenAI Responses API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
+| `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod (the pods API), and certificates for them from step-ca | |
 | `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the gateway | `Environment` |
 | `products/project-assistant` | `project_assistant` | A conversational agent about one repository | |
 | `products/agent-sessions` | `agent_sessions` (and `agent_sessions.coordination`) | Agents with their own computers, and their coordination | |
@@ -104,6 +105,7 @@ Proposals: what could be built, and the records it would need.
 | [Curricula](research/curricula.md) | Building training curricula and frozen evaluation suites from a run's data |
 | [Thinking Machines' API](research/thinking-machines.md) | Training and sampling through Tinker as a trainer and an engine of their own |
 | [Prime Intellect's verifiers](research/prime-compat.md) | verifiers environments run here: what maps, a spike on a Hub environment, how stable the API is, and exporting ours |
+| [RunPod pods as providers](research/runpod-providers.md) | GPU pods on RunPod serving a channel or taking training steps: the images, the follower and training service on the pods, mutual TLS with step-ca certificates, the security model, and how they become provider kinds |
 
 ## Conventions
 
