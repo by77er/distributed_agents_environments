@@ -7,9 +7,10 @@
   group (its episodes, its step, its outcome), each episode (what it reported, and its rollouts: one per agent, each
   a trajectory to train on), the policies as a graph (`rollout_train.monitor.lineage`) and statistics across the runs
   (`rollout_train.monitor.statistics`).
-- `create_app(where)`: a web page over a ledger (or a run's directory and its ledger), in three pages: the runs,
-  each organised the same way, down to each episode's rollouts, turn by turn; the policies; and statistics, with the
-  machine. `rollout monitor WHERE` serves it.
+- `create_app(where)` (`app`): a web page over a ledger (or a run's directory and its ledger), in three pages: the
+  runs, each organised the same way, down to each episode's rollouts, turn by turn; the policies; and statistics,
+  with the machine. It serves the page (built from libraries/rollout-train/web into `static`), what the page reads,
+  and a stream that says when each thing it reads changed (`stream`). `rollout monitor WHERE` serves it.
 """
 
 from rollout_train.monitor.feed import FeedReader, RunFeed, plain

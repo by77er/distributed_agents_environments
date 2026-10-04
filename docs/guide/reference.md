@@ -3283,11 +3283,18 @@ class System
 - `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
   done with and the ones that are), the versions (each with where it came from and the bookmarks that name it),
   the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
+- `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
+  run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
+  `KeyError` when there is no such run (or no registry).
+- `async def bookmark(self, name: str, version: str) -> Bookmark` — Make a bookmark name the version `version` says (its id, the start of one, `RUN:STEP`, `RUN` or another
+  bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
+  says no version (or no registry).
+- `async def unbookmark(self, name: str) -> None` — Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark.
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
   beside the ledger.
 - `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
-  throughput from its feed, and the machine's measurements.
+  throughput from its feed, what the runs are called, and the machine's measurements.
 - `async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
   its step and the version it made, and its outcome.
 - `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the

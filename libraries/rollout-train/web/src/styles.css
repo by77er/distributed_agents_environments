@@ -1,12 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Runs monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-<style>
   :root {
     --ground: #f3f4f1; --panel: #ffffff; --raised: #f7f8f6; --line: #e1e3de; --line-strong: #c9ccc4; --grid: rgba(16, 24, 20, .035);
     --ink: #13171a; --quiet: #5b636b; --faint: #949b9f; --code: #f1f2ef;
@@ -28,8 +19,9 @@
     }
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--sans); display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  html, body, #root { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  .shell { height: 100%; display: flex; flex-direction: column; }
   .frame { flex: 1; display: flex; min-height: 0; }
   a { color: inherit; text-decoration: none; }
   button { font: inherit; color: inherit; }
@@ -91,6 +83,7 @@
   .bar { display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--line); background: var(--panel); min-height: 42px; }
   .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font: 12px var(--mono); color: var(--quiet); flex: 1; min-width: 0; }
   .crumbs a:hover { color: var(--ink); } .crumbs .sep { color: var(--line-strong); } .crumbs b { color: var(--ink); font-weight: 600; }
+  .crumb { display: inline-flex; align-items: center; gap: 8px; }
   .live { display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--quiet); white-space: nowrap; text-transform: uppercase; letter-spacing: .06em; }
   main { flex: 1; overflow-y: auto; padding: 28px 32px 56px;
          background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
@@ -349,8 +342,47 @@
   .fate .stack { display: flex; gap: 2px; height: 14px; } .fate .stack i { display: block; min-width: 2px; border-radius: 2px; }
   .fate-count { grid-column: 2; color: var(--quiet); font: 11px var(--mono); }
 
+  /* A name, and the control that changes it */
+  .named { display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .rename-open { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; opacity: .55; }
+  .named:hover .rename-open, .rename-open:focus-visible { opacity: 1; }
+  .rename { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; vertical-align: middle; }
+  .rename input { font: inherit; letter-spacing: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong);
+                  border-radius: 3px; padding: 0 8px; min-width: 0; width: min(22ch, 70vw); }
+  .rename input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .rename button { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; border: 1px solid var(--line-strong);
+                   background: var(--raised); border-radius: 2px; padding: 4px 10px; cursor: pointer; }
+  .rename button[type=submit] { border-color: var(--accent); color: var(--accent); }
+  .rename button:disabled { opacity: .5; cursor: default; }
+  .rename .faint, .rename .error-text { font: 11px var(--mono); letter-spacing: 0; text-transform: none; }
+  a.seg { display: inline-flex; align-items: center; }
+
+  /* A version, said by where it came from and the start of its id, with its bookmarks */
+  .version-tag { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
+  .version-tag a, .version-tag > span:first-child { display: inline-flex; align-items: baseline; gap: 6px; }
+  .version-tag .origin { color: var(--quiet); font-weight: 500; }
+  .version-tag b.mono { color: inherit; }
+  .chip.bookmark { font-size: 11px; padding: 0 6px; }
+  .cell .chip, .kpi .chip { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .chip.removable { display: inline-flex; align-items: center; gap: 4px; padding-right: 2px; }
+  .chip.removable button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 4px; font: 600 12px var(--mono); border-radius: 2px; }
+  .chip.removable button:hover { background: var(--accent-soft); }
+  .bookmarks .body { display: grid; gap: 12px; }
+  .bookmark-form input { font: 13px var(--mono); padding: 3px 8px; width: min(26ch, 60vw); }
+
+  /* The versions' graph: base models as roots, and what a distillation's mode means, in words */
+  .dag-drawing text.base-name { fill: var(--ink); font-weight: 600; font-size: 11px; }
+  .lane-label.base-label b { font-family: var(--mono); font-size: 12.5px; }
+  .lane-label.base-label small { white-space: normal; line-height: 1.3; }
+  .head h1 .mono { font: inherit; font-family: var(--mono); letter-spacing: -.01em; }
+  .lane-label small.says { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+  .distills { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 14px; }
+  .distills .says-text { margin: 0; font-size: 14px; font-weight: 500; color: var(--ink); }
+  .diamond { width: 10px; height: 10px; transform: rotate(45deg); flex: none; border-radius: 1px; }
+
   @media (max-width: 900px) {
-    body { display: block; height: auto; }
+    html, body, #root { height: auto; }
+    .shell { display: block; height: auto; }
     .frame { display: block; }
     .top { position: sticky; top: 0; z-index: 6; flex-wrap: wrap; }
     .top .brand { width: auto; border-right: 0; padding: 10px 12px; } .top .brand small { display: none; }
@@ -358,7 +390,8 @@
     .pages { order: 3; flex-basis: 100%; padding: 0; border-top: 1px solid var(--line); overflow-x: auto; }
     .pages a { padding: 10px 14px; }
     aside { position: fixed; inset: 0 auto 0 0; z-index: 10; transform: translateX(-100%); transition: transform .2s; box-shadow: 6px 0 0 var(--line); }
-    body.open aside { transform: none; }
+    .shell.open aside { transform: none; }
+    .shell:not(.open) aside { box-shadow: none; }
     .content { min-height: 100vh; }
     main { padding: 18px 16px; overflow: visible; }
     .bar { padding: 0 16px; }
@@ -367,22 +400,3 @@
     .scrub { top: 50px; }
     .spec { padding: 0 12px; }
   }
-</style>
-</head>
-<body>
-<header class="top">
-  <button class="menu" id="menu" aria-label="show the sidebar">☰</button>
-  <a class="brand" href="#/runs"><div class="mark-logo">R</div><div style="min-width:0"><b>Runs monitor</b><small id="where">connecting…</small></div></a>
-  <nav class="pages" id="pages" aria-label="pages"></nav>
-  <div class="live" id="live"></div>
-</header>
-<div class="frame">
-  <aside><nav class="tree" id="tree"></nav></aside>
-  <div class="content">
-    <div class="bar"><div class="crumbs" id="crumbs"></div></div>
-    <main id="main"><div class="empty">Reading the run…</div></main>
-  </div>
-</div>
-<script src="monitor.js"></script>
-</body>
-</html>

@@ -1,0 +1,257 @@
+// The hierarchy, on the left, for the page shown: the runs (each run, its steps, their groups, their episodes and
+// the episodes' rollouts), the policies, or the statistics' sections and the runs drawn. What is folded is remembered
+// in this browser.
+
+import { memo, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useEpisode, useFeeds, useKnown, useSystem } from "../api/queries";
+import type { GroupEpisode, Run, System } from "../api/types";
+import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
+import { byNumber, figure } from "../lib/format";
+import { asked, episodeClass, groupsOf, madeBy, nameOf, range } from "../lib/model";
+import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, versionPlace, versionsPlace } from "../lib/places";
+import { type Folds, useFolds, useStored } from "../lib/stored";
+import { RunDot, running, useRunColor } from "./runs";
+
+/** A row of the tree: it opens its place. */
+function Node({ to, current, className = "", children }: { to: string; current?: boolean; className?: string; children: ReactNode }) {
+  const navigate = useNavigate();
+  return (
+    <div
+      className={`node ${className}${current ? " current" : ""}`}
+      role="link"
+      tabIndex={0}
+      onClick={() => navigate(to)}
+      onKeyDown={event => { if (event.key === "Enter") navigate(to); }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function Tree({ place }: { place: Place }) {
+  const { data: system } = useSystem();
+  if (!system) return null;
+  return (
+    <nav className="tree" aria-label="hierarchy">
+      {place.page === "versions" ? <VersionsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} /> : <RunsTree place={place} system={system} />}
+    </nav>
+  );
+}
+
+function RunsTree({ place, system }: { place: Place; system: System }) {
+  const [folds, fold] = useFolds();
+  const { data: feeds } = useFeeds();
+  const episodeId = place.kind === "episode" ? place.id : "";
+  const { data: episode } = useEpisodeLabels(episodeId);
+  const showing = place.kind === "episode" ? episode : undefined;
+  const others = (feeds ?? []).filter(run => !run.labels.run).length;
+  return (
+    <>
+      <Link to="/runs" className={`label${place.kind === "runs" ? " here" : ""}`}>Runs · {system.runs.length}</Link>
+      {system.runs.map(run => (
+        <RunBranch key={run.run} run={run} only={system.runs.length === 1} place={place} folds={folds} fold={fold} showing={showing} host={system.host} />
+      ))}
+      <div className="label">Outside a run</div>
+      <Node to="/episodes" current={place.kind === "outside"}>
+        <span className="name">Episodes outside a run</span>
+        <span className="tag">{others}</span>
+      </Node>
+    </>
+  );
+}
+
+/** The labels of the episode shown, if one is (to open the run and group it is of). */
+function useEpisodeLabels(id: string): { data: Record<string, string> | undefined } {
+  const { data } = useEpisode(id, Boolean(id));
+  return { data: id ? data?.labels : undefined };
+}
+
+interface BranchProps {
+  run: Run;
+  only: boolean;
+  place: Place;
+  folds: Folds;
+  fold: (key: string, open: boolean) => void;
+  showing: Record<string, string> | undefined;
+  host: string;
+}
+
+const RunBranch = memo(function RunBranch({ run, only, place, folds, fold, showing, host }: BranchProps) {
+  const known = useKnown();
+  const runKey = `run:${run.run}`;
+  const here = "run" in place ? place.run : undefined;
+  const mine = here === run.run || showing?.run === run.run;
+  const runOpen = folds[runKey] ?? (mine || only);
+  const groups = groupsOf(run);
+  const inGroup = (number: number) =>
+    (place.kind === "group" && place.run === run.run && place.number === number) || (showing?.run === run.run && Number(showing?.group) === number);
+  const groupRows = (number: number, skipped: boolean) => {
+    const group = groups.get(number);
+    if (!group) return null;
+    const key = `group:${run.run}:${number}`, open = folds[key] ?? inGroup(number);
+    const tag = group.open ? group.open.stage : skipped ? "skipped" : group.line!.rewards.length
+      ? `${group.line!.solved.filter(Boolean).length}/${group.line!.rewards.length}` : "failed";
+    const sorted = [...group.episodes].sort((a, b) => byNumber(String(a.episode), String(b.episode)));
+    return (
+      <div key={`g${number}`}>
+        <Node to={groupPlace(run.run, number)} current={place.kind === "group" && place.run === run.run && place.number === number} className="group">
+          <Twist open={open} has={group.episodes.length > 0} onToggle={() => fold(key, !open)} />
+          <span className="num">#{number}</span>
+          <span className="name">{group.task}</span>
+          {group.line && !group.episodes.length ? <Dots line={group.line} /> : <EpisodeDots episodes={group.open ? asked(group.open) : group.episodes} />}
+          <span className="tag">{tag}</span>
+        </Node>
+        {open && sorted.length ? (
+          <div className="children">{sorted.map(each => <EpisodeRow key={each.run_id} each={each} place={place} folds={folds} fold={fold} />)}</div>
+        ) : null}
+      </div>
+    );
+  };
+  const children: ReactNode[] = [];
+  if (runOpen) {
+    if (run.next.length) {
+      const key = `next:${run.run}`, open = folds[key] ?? true;
+      children.push(
+        <Node key="next" to={runPlace(run.run)} className="step">
+          <Twist open={open} onToggle={() => fold(key, !open)} />
+          <span className="num">next</span>
+          <span className="name">toward a step</span>
+          <span className="tag">{run.next.length} group{run.next.length === 1 ? "" : "s"}</span>
+        </Node>,
+      );
+      if (open) children.push(<div key="next-children" className="children">{[...run.next].reverse().map(number => groupRows(number, false))}</div>);
+    }
+    const newest = run.steps.at(-1)?.step;
+    for (const step of [...run.steps].reverse()) {
+      const key = `step:${run.run}:${step.step}`, members = [...step.groups, ...step.skipped];
+      const current = place.kind === "step" && place.run === run.run && place.number === step.step;
+      const open = folds[key] ?? (step.step === newest || members.some(inGroup) || current);
+      children.push(
+        <Node key={`s${step.step}`} to={stepPlace(run.run, step.step)} current={current} className="step">
+          <Twist open={open} has={members.length > 0} onToggle={() => fold(key, !open)} />
+          <span className="num">S{step.step}</span>
+          <span className="name mono">{step.state === "committed" ? known.short(step.makes) : `${known.short(step.makes)} ${step.state}`}</span>
+          <span className="tag">{range(step.groups)}</span>
+        </Node>,
+      );
+      if (open) {
+        children.push(
+          <div key={`s${step.step}-children`} className="children">
+            {[...step.groups].reverse().map(number => groupRows(number, false))}
+            {[...step.skipped].reverse().map(number => groupRows(number, true))}
+          </div>,
+        );
+      }
+    }
+  }
+  return (
+    <>
+      <Node to={runPlace(run.run)} current={place.kind === "run" && place.run === run.run}>
+        <Twist open={runOpen} onToggle={() => fold(runKey, !runOpen)} />
+        <RunDot run={run} host={host} />
+        <span className="name" title={`id: ${run.run}`}>{nameOf(run)}</span>
+        <span className="tag">{running(run, host)}</span>
+      </Node>
+      {runOpen ? <div className="children">{children}</div> : null}
+    </>
+  );
+});
+
+function EpisodeRow({ each, place, folds, fold }: { each: GroupEpisode; place: Place; folds: Folds; fold: (key: string, open: boolean) => void }) {
+  const key = `episode:${each.run_id}`, slots = each.slots ?? [];
+  const isHere = place.kind === "episode" && place.id === each.run_id;
+  const open = folds[key] ?? (isHere && Boolean(place.kind === "episode" && place.slot));
+  return (
+    <>
+      <Node to={episodePlace(each.run_id)} current={isHere && place.kind === "episode" && !place.slot} className="episode">
+        <Twist open={open} has={slots.length > 0} onToggle={() => fold(key, !open)} />
+        <span className="num">E{each.episode ?? "?"}</span>
+        <span className="dots"><i className={episodeClass(each)} /></span>
+        <span className="name">{each.interrupted ? "interrupted" : each.outcome ?? (each.state === "running" ? `${each.samples ?? 0} samples` : each.state)}</span>
+        <span className="tag">{each.outcome || each.state === "completed" ? figure(each.reward) : ""}</span>
+      </Node>
+      {open && slots.length ? (
+        <div className="children">
+          {slots.map(slot => (
+            <Node key={slot} to={episodePlace(each.run_id, slot)} current={isHere && place.kind === "episode" && place.slot === slot} className="rollout">
+              <Avatar name={slot} />
+              <span className="name">rollout {slot}</span>
+            </Node>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** The versions: the graph of them all, with or without the sample fixture; then those bookmarks name, and each run's
+ * newest. */
+function VersionsTree({ place, system }: { place: Place; system: System }) {
+  const known = useKnown();
+  const heads = system.runs.map(run => madeBy(system.versions, run.run).at(-1)).filter(each => each !== undefined);
+  const bookmarked = system.versions.filter(version => version.bookmarks.length);
+  const row = (id: string, tag: string, key: string) => (
+    <Node key={key} to={versionPlace(id)} current={place.kind === "version" && place.id === id}>
+      <span className="name mono" title={known.title(id)}>{known.short(id)}</span>
+      <span className="tag">{tag}</span>
+    </Node>
+  );
+  return (
+    <>
+      <Link to={versionsPlace(false)} className={`label${place.kind === "versions" && !place.sample ? " here" : ""}`}>Versions · {system.versions.length}</Link>
+      {bookmarked.length ? <div className="label">Bookmarks</div> : null}
+      {bookmarked.map(version => row(version.id, version.bookmarks.join(", "), `b${version.id}`))}
+      {heads.length ? <div className="label">Each run's newest</div> : null}
+      {heads.map(version => row(version.id, known.origin(version.id), `h${version.id}`))}
+      {system.versions.length ? null : <div className="empty">No version yet.</div>}
+      <div className="label">Proposed</div>
+      <Node to={versionsPlace(true)} current={place.kind === "versions" && place.sample}>
+        <span className="name">Sample fixture</span>
+        <SampleChip />
+      </Node>
+    </>
+  );
+}
+
+export const SECTIONS: [string, string][] = [
+  ["outcomes", "Outcomes"], ["rows", "Rows"], ["steps", "Steps"], ["pace", "Pace"], ["queue", "Queue"], ["inference", "Inference"], ["machine", "Machine"],
+];
+
+/** The runs left out of the statistics, as this browser remembers them. */
+export const useHidden = () => useStored<string[]>("monitor.hidden", []);
+
+/** The statistics: its sections, and the runs drawn (each in its color; a click leaves it out or takes it back). */
+function StatisticsTree({ place, system }: { place: Place; system: System }) {
+  const [hidden, setHidden] = useHidden();
+  const colorOf = useRunColor();
+  const toggle = (run: string) => setHidden(hidden.includes(run) ? hidden.filter(each => each !== run) : [...hidden, run]);
+  return (
+    <>
+      <div className="label">Sections</div>
+      {SECTIONS.map(([key, name]) => (
+        <Node key={key} to={statisticsPlace(key)} current={place.kind === "statistics" && place.section === key}><span className="name">{name}</span></Node>
+      ))}
+      <div className="label">Runs · {system.runs.filter(run => !hidden.includes(run.run)).length} of {system.runs.length}</div>
+      {system.runs.map(run => {
+        const off = hidden.includes(run.run);
+        return (
+          <div
+            key={run.run}
+            className={`node${off ? " off" : ""}`}
+            role="checkbox"
+            tabIndex={0}
+            aria-checked={!off}
+            title={off ? "draw this run" : "leave this run out"}
+            onClick={() => toggle(run.run)}
+            onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(run.run); } }}
+          >
+            <span className="swatch" style={{ background: colorOf(run.run) }} />
+            <span className="name">{nameOf(run)}</span>
+            <span className="tag">{running(run, system.host)}</span>
+          </div>
+        );
+      })}
+    </>
+  );
+}

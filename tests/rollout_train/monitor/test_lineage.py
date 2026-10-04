@@ -250,8 +250,8 @@ async def test_the_page_asks_for_the_graph_with_or_without_the_sample(tmp_path: 
 
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
-        plain = (await client.get("/api/policies")).json()
-        sampled = (await client.get("/api/policies?sample=1")).json()
+        plain = (await client.get("/api/versions")).json()
+        sampled = (await client.get("/api/versions?sample=1")).json()
     assert plain["versions"] == [] and plain["bases"] == [] and not plain["sample"]
     assert sampled["sample"] and sampled["versions"] and all(each["sample"] for each in sampled["versions"])
     assert not (tmp_path / "ledger").exists()  # (a reader makes no ledger where none is)

@@ -1,0 +1,31 @@
+// Which view a place shows, inside the frame that stays put.
+
+import { Shell } from "./layout/Shell";
+import { usePlace } from "./lib/places";
+import { Episode } from "./pages/Episode";
+import { GroupView, StepView } from "./pages/Group";
+import { Run } from "./pages/Run";
+import { Outside, Runs } from "./pages/Runs";
+import { Statistics } from "./pages/Statistics";
+import { Version } from "./pages/Version";
+import { Versions } from "./pages/Versions";
+
+function View() {
+  const place = usePlace();
+  switch (place.kind) {
+    case "run": return <Run name={place.run} />;
+    case "step": return <StepView run={place.run} number={place.number} />;
+    case "group": return <GroupView run={place.run} number={place.number} />;
+    // (an episode's view is its own while one moves between its rollouts; another episode starts afresh)
+    case "episode": return <Episode key={place.id} id={place.id} slot={place.slot} />;
+    case "outside": return <Outside />;
+    case "versions": return <Versions sample={place.sample} />;
+    case "version": return <Version id={place.id} />;
+    case "statistics": return <Statistics />;
+    default: return <Runs />;
+  }
+}
+
+export function App() {
+  return <Shell><View /></Shell>;
+}

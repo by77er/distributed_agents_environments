@@ -35,9 +35,9 @@ from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
 from rollout_train.monitor.statistics import newest, statistics
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, runs_in, table
 from rollout_train.record import scope as run_scope
-from rollout_train.registry import names, registry_of
+from rollout_train.registry import Bookmark, Entry, Registry, found, names, registry_of, resolved
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.versions import Manifest, Version, short, versions_in
@@ -159,6 +159,35 @@ class System:
         snapshot = await asyncio.to_thread(self._assembled, tables, fences, versions, called, relayed)
         return snapshot | {"names": called}
 
+    async def rename(self, who: str, name: str) -> Entry:
+        """Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
+        run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
+        `KeyError` when there is no such run (or no registry)."""
+        registry = self._registry()
+        if found(await registry.runs(), who) is None and who in await runs_in(self._ledger):
+            await registry.create(who, id=who)
+        return await registry.rename(who, name)
+
+    async def bookmark(self, name: str, version: str) -> Bookmark:
+        """Make a bookmark name the version `version` says (its id, the start of one, `RUN:STEP`, `RUN` or another
+        bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
+        says no version (or no registry)."""
+        registry = self._registry()
+        found_version = await resolved(self._ledger, registry, version)
+        if found_version is None:
+            raise KeyError("a bookmark names a version, not the base model")
+        return await registry.bookmark(name, found_version)
+
+    async def unbookmark(self, name: str) -> None:
+        """Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark."""
+        await self._registry().unbookmark(name)
+
+    def _registry(self) -> Registry:
+        registry = registry_of(self._ledger)
+        if registry is None:
+            raise KeyError("this ledger has no registry")
+        return registry
+
     async def lineage(self, sample: bool = False) -> dict[str, Any]:
         """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
         With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
@@ -171,11 +200,13 @@ class System:
 
     async def statistics(self) -> dict[str, Any]:
         """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
-        throughput from its feed, and the machine's measurements."""
+        throughput from its feed, what the runs are called, and the machine's measurements."""
         tables = await self._tables()
         notes = await asyncio.to_thread(self._notes, tables)
         figures = await asyncio.to_thread(statistics, tables, notes)
-        return {**figures, "machine": await asyncio.to_thread(self.machine.shown)}
+        called = await names(registry_of(self._ledger))
+        machine = await asyncio.to_thread(self.machine.shown)
+        return {**figures, "names": {"runs": called["runs"]}, "machine": machine}
 
     async def _tables(self) -> dict[str, dict[str, JsonValue]]:
         """Every table of the ledger, by name (none where there is no ledger: reading makes none)."""
@@ -268,7 +299,7 @@ class System:
             source, lines = "archive", (await self._archived(place, run_id, ended["events"]))[after:]
         else:
             source, lines = None, []
-        labels: Any = (summary or {}).get("labels") or (ended or {}).get("labels") or {}
+        labels: Any = (ended or {}).get("labels") or (summary or {}).get("labels") or {}  # (the record's, once kept)
         return {
             "run_id": run_id,
             "labels": labels,

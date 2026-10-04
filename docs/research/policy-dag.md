@@ -4,9 +4,9 @@ Code: `rollout_train.monitor.lineage` (the draft view) · See [policies, version
 [training](../libraries/rollout-train/training.md), [the monitor](../libraries/rollout-train/monitor.md#the-policies-view)
 
 **A proposal.** It describes a view of every policy as a graph, and the records behind it: training, distillation,
-trainers and their queues, the way from written weights to served ones, and evaluations. The monitor's policies view
-(`#/policies`) draws the graph from what a ledger has today. Every table marked *proposed* below is a proposal: no
-code writes it. The view reads them all, and `#/policies/sample` shows it with a fixture of them
+trainers and their queues, the way from written weights to served ones, and evaluations. The monitor's versions view
+(`#/versions`) draws the graph from what a ledger has today. Every table marked *proposed* below is a proposal: no
+code writes it. The view reads them all, and `#/versions/sample` shows it with a fixture of them
 (`rollout_train/monitor/sample-lineage.json`). The router that sends requests to inference workers has a design of
 its own; this page uses only what the graph needs of it.
 
@@ -202,7 +202,7 @@ every version with an evaluation not yet done.
 
 ## What the monitor reads
 
-`System.lineage(sample)` reads every table of the ledger and the feed's job lines, and `/api/policies` serves it.
+`System.lineage(sample)` reads every table of the ledger and the feed's notes, and `/api/versions` serves it.
 
 | Read from | Drawn as |
 |---|---|

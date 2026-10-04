@@ -1,6 +1,7 @@
 """Where a run stands, read from its ledger and its directory: the monitor's system view."""
 
 import itertools
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -72,8 +73,10 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         system = (await client.get("/api/system")).json()
+        machine = (await client.get("/api/machine")).json()
         group = (await client.get("/api/groups/train/1")).json()
-        assert "monitor.js" in (await client.get("/")).text and (await client.get("/monitor.js")).status_code == 200
+        script = re.search(r'src="\./(assets/[^"]+\.js)"', (await client.get("/")).text)
+        assert script and (await client.get(f"/{script.group(1)}")).status_code == 200  # (the page, as built)
         assert (await client.get("/api/groups/train/9")).status_code == 404
         episode = (await client.get(f"/api/episodes/{group['episodes'][0]['run_id']}")).json()
     assert group["number"] == 1 and group["stage"] == "done" and group["outcome"]["group"] == 1
@@ -128,7 +131,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert system["ledger"]["fences"] == {scope("train"): 1, runner_scope("here"): 1}
     assert system["ledger"]["tables"][table("train", GROUPS)] == 3
     assert system["kept"]["versions"] > 0 and system["kept"]["episodes"] > 0
-    assert system["machine"]["now"]["disk"]["total"] > 0 and system["written"] <= system["at"]
+    assert machine["now"]["disk"]["total"] > 0 and system["written"] <= system["at"]
 
 
 async def ended(ledger: Ledger, run: str, group: int, number: int, run_id: str, runner: str = "here") -> None:

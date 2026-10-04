@@ -265,6 +265,8 @@ class _Summary:
             if line["slot"] not in self.slots:
                 self.slots.append(line["slot"])
             return
+        if line.get("kind") != "event" or "type" not in line:
+            return  # (a line that is neither: not of a run)
         payload: Any = line.get("payload") or {}
         match line["type"]:
             case RunEventType.RUN_CREATED:
