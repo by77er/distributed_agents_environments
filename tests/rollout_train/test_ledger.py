@@ -17,7 +17,6 @@ def in_files(directory: Path) -> Ledger:
 
 
 def in_a_database(directory: Path) -> Ledger:
-    pytest.importorskip("rollout_durable")
     from rollout_train.database import DatabaseLedger
 
     return DatabaseLedger(f"sqlite:///{directory / 'ledger.db'}")
@@ -166,7 +165,6 @@ async def test_a_runs_directory_says_where_its_ledger_is(tmp_path: Path) -> None
     from rollout_train.ledger import LOCATION, of_run, opened, present
 
     assert isinstance(of_run(tmp_path), FileLedger) and not present(of_run(tmp_path))  # files, by default
-    pytest.importorskip("rollout_durable")
     location = {"kind": "rollout_train.database:DatabaseLedger", "url": f"sqlite:///{tmp_path / 'shared.db'}"}
     fence = await opened(location).take("runs/a")
     await opened(location).append("runs/a/groups", "1", {"task": "t1"}, fence)

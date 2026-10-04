@@ -5061,8 +5061,10 @@ name = "rollout-train"
 version = "0.0.0"
 source = { editable = "libraries/rollout-train" }
 dependencies = [
+    { name = "psycopg", extra = ["binary"] },
     { name = "ray", extra = ["default"] },
     { name = "rollout" },
+    { name = "sqlalchemy" },
 ]
 
 [package.optional-dependencies]
@@ -5080,9 +5082,11 @@ report = [
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'report'", specifier = ">=3.9" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "ray", extras = ["default"], specifier = ">=2.59" },
     { name = "rollout", editable = "libraries/rollout" },
     { name = "rollout-durable", marker = "extra == 'durable'", editable = "implementations/rollout-durable" },
+    { name = "sqlalchemy", specifier = ">=2" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]

@@ -130,7 +130,6 @@ async def test_a_runner_serves_only_runs_whose_pools_it_has(tmp_path: Path) -> N
 
 
 async def test_leases_beside_a_database_ledger_outlive_the_pool_that_made_them(tmp_path: Path) -> None:
-    pytest.importorskip("rollout_durable")
     from rollout_train.database import DatabaseLedger
 
     ledger = DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")

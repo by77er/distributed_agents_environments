@@ -6,6 +6,8 @@ requires-python = ">=3.13"
 dependencies = [
     "rollout",
     "ray[default]>=2.59",  # every role runs on Ray: runs as jobs, engine hosts as actors, bridges as tasks
+    "sqlalchemy>=2",  # the ledger in a database: SQLite on one machine, Postgres for several
+    "psycopg[binary]>=3.2",
 ]
 
 [project.scripts]

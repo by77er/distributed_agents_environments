@@ -92,7 +92,7 @@ def relocated(url: str, relocation: Relocation) -> dict[str, int]:
     """Rewrite the database ledger at `url` as `relocation` says; returns how many rows of each table changed."""
     import sqlalchemy as sa
 
-    from rollout_durable.database import Connection, Database, fetch_all, sql
+    from rollout_train.sql import Connection, Database, fetch_all, sql
 
     database = Database(url)
     try:

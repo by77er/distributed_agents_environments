@@ -31,7 +31,7 @@ from rollout_train.registry import valid
 from rollout_train.run_settings import is_trainers, key_of
 
 if TYPE_CHECKING:
-    from rollout_durable.database import Connection, Database
+    from rollout_train.sql import Connection, Database
 
 __all__ = ["DatabasePresets", "FilePresets", "Preset", "Presets", "parsed", "presets_of"]
 
@@ -195,7 +195,7 @@ class DatabasePresets:
 
     async def all(self) -> list[Preset]:
         def rows(connection: "Connection") -> list[tuple[Any, ...]]:
-            from rollout_durable.database import fetch_all
+            from rollout_train.sql import fetch_all
 
             return fetch_all(
                 connection,
@@ -225,7 +225,7 @@ class DatabasePresets:
 
     async def _versions(self, name: str) -> list[Preset]:
         def rows(connection: "Connection") -> list[tuple[Any, ...]]:
-            from rollout_durable.database import fetch_all
+            from rollout_train.sql import fetch_all
 
             return fetch_all(
                 connection,
@@ -239,7 +239,7 @@ class DatabasePresets:
         from sqlalchemy.exc import IntegrityError
 
         def appended(connection: "Connection") -> Preset:
-            from rollout_durable.database import fetch_one, sql
+            from rollout_train.sql import fetch_one, sql
 
             row = fetch_one(connection, "SELECT MAX(version) FROM presets WHERE name = :name", {"name": name})
             number = (int(row[0]) if row and row[0] is not None else 0) + 1

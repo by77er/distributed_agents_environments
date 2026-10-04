@@ -30,8 +30,9 @@ from rollout.environment import Start
 from rollout.harness import Program, RunContext, SandboxPool, SandboxSpec, register
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout.testing import FakeSandboxes
+from rollout.testing import FakeSandboxes, until
 from rollout_train.checkpoints import Checkpoints, Retention, new_id
+from rollout_train.database import DatabaseLedger
 from rollout_train.evals import make_suite, suite_entry, suite_of
 from rollout_train.launcher import Launcher
 from rollout_train.launches import CLAIMED, STOPPED, STOPPING, Asked, FileLaunches, Launch
@@ -44,10 +45,6 @@ from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUP
 from rollout_train.sandboxes import admits, leases_of, sweep
 from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.support import ask_boxed
-
-pytest.importorskip("rollout_durable")
-from rollout.testing import until
-from rollout_train.database import DatabaseLedger
 
 BOX = SandboxSpec(kind="fake")
 GATES: dict[str, asyncio.Event] = {}
@@ -232,7 +229,7 @@ async def _fences_in_order(url: str) -> list[int]:
     try:
 
         def rows(connection: Any) -> list[tuple[Any, ...]]:
-            from rollout_durable.database import fetch_all
+            from rollout_train.sql import fetch_all
 
             return fetch_all(connection, "SELECT fence FROM ledger_records WHERE name = 'records' ORDER BY position")
 
@@ -331,7 +328,7 @@ async def test_a_crash_while_taking_a_fence_leaves_the_ledger_usable(
 
 
 def _positions(url: str, name: str) -> list[int]:
-    from rollout_durable.database import Database, fetch_all
+    from rollout_train.sql import Database, fetch_all
 
     database = Database(url)
     try:
@@ -342,7 +339,7 @@ def _positions(url: str, name: str) -> list[int]:
 
 
 def _keys_by_position(url: str, name: str) -> list[tuple[int, str]]:
-    from rollout_durable.database import Database, fetch_all
+    from rollout_train.sql import Database, fetch_all
 
     database = Database(url)
     try:

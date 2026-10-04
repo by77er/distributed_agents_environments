@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from rollout.harness import Blobs, FileBlobStore
-from rollout_durable.database import create_database, temporary_postgres
+from rollout_train.sql import create_database, temporary_postgres
 from tests.local_ray import LocalRay, free_port, isolated, started
 
 isolated()  # (before anything imports Ray)

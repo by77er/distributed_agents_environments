@@ -1,5 +1,5 @@
-"""`DatabaseLedger`: the ledger in SQL tables, which every run and machine using the database shares (it needs the
-`durable` extra: the database is `rollout_durable`'s).
+"""`DatabaseLedger`: the ledger in SQL tables, which every run and machine using the database shares (on
+`rollout_train.sql`).
 
 Two tables hold it: `ledger_records` (a row per record: its table's name, its key, the order it was appended in, the
 fence it was written under, and the record as JSON; a table has each key once) and `ledger_fences` (the newest fence
@@ -33,7 +33,6 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease
-from rollout_durable.database import Connection, Database, fetch_all, fetch_one, sql
 from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, changed, new_launch
 from rollout_train.ledger import Appended, Fence, Fenced, Ledger
 from rollout_train.presence import Beat, kept
@@ -51,6 +50,7 @@ from rollout_train.registry import (
     version_number,
 )
 from rollout_train.settings import Desired, desired_settings_of
+from rollout_train.sql import Connection, Database, fetch_all, fetch_one, sql
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(

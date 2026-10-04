@@ -59,7 +59,6 @@ class Rated(Counting):
 
 
 def database(tmp_path: Path) -> Ledger:
-    pytest.importorskip("rollout_durable")
     from rollout_train.database import DatabaseLedger
 
     return DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")

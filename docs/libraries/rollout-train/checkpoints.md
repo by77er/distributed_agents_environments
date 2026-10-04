@@ -176,7 +176,7 @@ Two ledgers are provided:
 | Ledger | Keeps | Shared by |
 |---|---|---|
 | `FileLedger(directory)` | each table as a file of JSON lines | the processes of one machine |
-| `DatabaseLedger(url)` (`rollout_train.database`, with the `durable` extra) | every table in two SQL tables, `ledger_records` and `ledger_fences` (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
+| `DatabaseLedger(url)` (`rollout_train.database`) | every table in two SQL tables, `ledger_records` and `ledger_fences` (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
 
 - **`FileLedger`** holds a lock on its directory for every operation, in a thread, so the event loop goes on while it
   waits. An append is on disk (`fsync`) before it is acknowledged. A last line left unfinished, by a writer that died
