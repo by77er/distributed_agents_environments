@@ -12,11 +12,14 @@
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
 - `evaluate`, `make_suite`, `suite_for`, `suite_of`, `Suite`, `Schedule` (`evals`): a frozen suite of starts, an
   eval that plays it with one checkpoint, training nothing, and the evals a training run makes of its checkpoints.
+- `make_dataset`, `dataset_of`, `Dataset` (`datasets`): examples chosen from runs' episodes by a rule and turn filters,
+  made once, which a supervised step (`imitation`) trains on.
 """
 
 from rollout_train.algorithm import Algorithm, Batch, Grpo, group_advantages
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention
 from rollout_train.colocated import Colocated
+from rollout_train.datasets import Dataset, dataset_of, make_dataset
 from rollout_train.evals import Schedule, Suite, evaluate, make_suite, suite_for, suite_of
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
@@ -30,6 +33,7 @@ __all__ = [
     "Checkpoint",
     "Checkpoints",
     "Colocated",
+    "Dataset",
     "Fence",
     "Fenced",
     "FileLedger",
@@ -46,8 +50,10 @@ __all__ = [
     "Trained",
     "Trainer",
     "Weighted",
+    "dataset_of",
     "evaluate",
     "group_advantages",
+    "make_dataset",
     "make_suite",
     "results",
     "suite_for",

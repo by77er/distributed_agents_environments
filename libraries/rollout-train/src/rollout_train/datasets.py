@@ -170,6 +170,7 @@ class Dataset:
     """A dataset's record (`DATASETS`): how its examples were chosen, what came of it, and where its manifest is."""
 
     id: str
+    """Sixteen random letters, like a checkpoint's."""
     rule: str
     """The episode rule, by name (`RULES`)."""
     runs: list[str]
@@ -179,18 +180,20 @@ class Dataset:
     cut: list[str]
     """The kinds of guidance cut from its examples' prompts when they are made."""
     manifest: BlobReference
+    """One JSON line per example, compressed (`manifest_of` reads it)."""
     blobs: Mapping[str, JsonValue]
     """Where the manifest is kept, as any process opens it (`rollout_train.stores`)."""
     per_task: int | None = None
     """For `capped-per-task`: the most episodes of each task."""
     counts: Mapping[str, int] = field(default_factory=dict[str, int])
-    """Of its examples: `episodes`, `groups`, `tasks`, `turns`, `sampled_tokens` and `context_tokens`; and
-    `turns_seen`, every turn of its episodes."""
+    """`episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; and of its
+    examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens`."""
     left_out: Mapping[str, int] = field(default_factory=dict[str, int])
     """Turns of its episodes that are no examples, by why."""
     checkpoints: list[str] = field(default_factory=list[str])
     """The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none)."""
     made: float = 0.0
+    """When, in seconds since the epoch."""
     by: str = ""
     """Who made it: `user@host`."""
 
@@ -198,7 +201,7 @@ class Dataset:
 _DATASET = TypeAdapter(Dataset)
 
 
-async def make(
+async def make_dataset(
     ledger: Ledger,
     rule: str,
     runs: Sequence[str],

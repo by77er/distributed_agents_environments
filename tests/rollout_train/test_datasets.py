@@ -19,7 +19,7 @@ from rollout_train.datasets import (
     dataset_of,
     datasets_in,
     examples,
-    make,
+    make_dataset,
     manifest_of,
     resolved_dataset,
     served_at,
@@ -70,7 +70,7 @@ class Played:
 
 
 async def picked(played: Played, rule: str, per_task: int | None = None) -> list[str]:
-    made = await make(played.ledger, rule, [played.run], into=played.blobs, at=played.at, per_task=per_task)
+    made = await make_dataset(played.ledger, rule, [played.run], into=played.blobs, at=played.at, per_task=per_task)
     return [str(line["source"]).rsplit("/", 2)[0] for line in await manifest_of(made)]
 
 
@@ -108,7 +108,7 @@ async def test_turn_filters_keep_the_turns_every_one_keeps_and_say_why_the_other
     turns = [segment(f"user: turn {n}\nassistant: ", "move", 0) for n in range(5)]
     turns.insert(2, Segment([ord("x")] * 4, [], []))  # (a segment that sampled nothing)
     await played.group(1, "t1", {"solved": True, "segments": turns})
-    made = await make(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at,
+    made = await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at,
                       turns=["all", "tests.rollout_train.test_datasets:even_turns"])  # fmt: skip
     lines = await manifest_of(made)
     assert [line["source"] for line in lines] == ["train/1/1/policy/0", "train/1/1/policy/4"]
@@ -118,7 +118,7 @@ async def test_turn_filters_keep_the_turns_every_one_keeps_and_say_why_the_other
     with pytest.raises(ValueError, match="no turn filter"):
         turn_filter("worked")
     with pytest.raises(ValueError, match="no turn"):  # nothing is kept: no dataset
-        await make(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at,
+        await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at,
                    turns=["tests.rollout_train.test_datasets:no_turns"])  # fmt: skip
 
 
@@ -134,7 +134,7 @@ async def test_a_dataset_is_a_record_and_a_manifest_that_read_back(tmp_path: Pat
     assert await served_at(played.ledger, "train") == {1: first.id, 2: second.id}
     at_depth = [segment("user: a\nassistant: ", "apple", version) for version in (0, 1, 2)]
     await played.group(1, "t1", {"solved": True, "reward": 1.0, "segments": at_depth, "guidance": {"way": WAY}})
-    made = await make(played.ledger, "best-of-group", ["train"], into=played.blobs, at=played.at, by="me@here")
+    made = await make_dataset(played.ledger, "best-of-group", ["train"], into=played.blobs, at=played.at, by="me@here")
     assert await dataset_of(played.ledger, made.id) == made and await datasets_in(played.ledger) == [made]
     assert made.checkpoints == [first.id, second.id] and made.by == "me@here" and made.cut == ["way"]
     assert made.counts == {"episodes": 1, "groups": 1, "tasks": 1, "turns": 3, "sampled_tokens": 15,
@@ -175,7 +175,7 @@ async def guesses(played: Played, tmp_path: Path) -> tuple[Checkpoints, list[str
 async def test_a_step_on_a_dataset_learns_from_the_checkpoints_that_sampled_it(tmp_path: Path) -> None:
     played = Played(tmp_path)
     checkpoints, (first, second) = await guesses(played, tmp_path)
-    made = await make(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at)
+    made = await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at)
     taught = await examples(played.ledger, made, plain_renderer("plain"))
     assert (taught.dataset, taught.episodes, taught.left_out) == (made.id, 1, 0)
     assert [each.source for each in taught.segments] == [f"train/1/1/policy/{index}" for index in range(3)]
@@ -261,7 +261,8 @@ def test_the_commands_make_list_and_train_on_a_dataset(
     assert said.startswith("made the dataset ") and "(guesses): 1 episodes, 1 groups, 1 tasks, 3 turns" in said
     (made,) = asyncio.run(datasets_in(played.ledger))
     assert made.blobs == played.at  # (beside the episodes)
-    assert run("dataset", "list", "--ledger", where).split()[:4] == [made.id[:4], "[guesses]", "best-of-group", "3"]
+    listed = run("dataset", "list", "--ledger", where).split()
+    assert listed[:3] == [made.id[:4], "best-of-group", "3"] and listed[-2:] == ["train", "[guesses]"]
     with pytest.raises(SystemExit, match="no run"):
         run("dataset", "make", "solved-all", "--run", "nobody", "--ledger", where)
     with pytest.raises(SystemExit, match="another dataset"):

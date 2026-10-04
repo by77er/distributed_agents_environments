@@ -337,7 +337,7 @@ async def _dataset(
     into: Path | None = None,
 ) -> None:
     from rollout_train.checkpoints import short
-    from rollout_train.datasets import ALL, datasets_in, make, where_blobs_are
+    from rollout_train.datasets import ALL, datasets_in, make_dataset, where_blobs_are
     from rollout_train.record import runs_in
     from rollout_train.registry import Taken, found
     from rollout_train.stores import FILES, opened
@@ -352,10 +352,10 @@ async def _dataset(
         )
         names = {entry.id: entry.name for entry in entries}
         for each in sorted(every, key=lambda each: each.made, reverse=True):
-            label = shown[each.id] + (f" [{called[each.id]}]" if each.id in called else "")
+            label = f"  [{called[each.id]}]" if each.id in called else ""
             sizes = f"{each.counts.get('turns', 0):>6} turns of {each.counts.get('episodes', 0):>4} episodes"
             sources = ", ".join(names.get(run, run) for run in each.runs)
-            print(f"{label:<24} {each.rule:<16} {sizes}  turns: {', '.join(each.turns)}  from {sources}")
+            print(f"{shown[each.id]:<8} {each.rule:<16} {sizes}  turns: {', '.join(each.turns)}  from {sources}{label}")
         return
     assert rule is not None and runs
     if name and any(each.name == name for each in await registry.datasets()):  # (before anything is made)
@@ -377,7 +377,7 @@ async def _dataset(
         first: Any = next(iter((await ledger.read(f"runs/{ids[0]}/{EPISODES}")).values()), None)
         at = await where_blobs_are(ledger, ids[0], Record.from_json(first).trajectories if first else None)
     try:
-        made = await make(ledger, rule, ids, into=opened(at), at=at, turns=turns or [ALL], cut=cut or [],
+        made = await make_dataset(ledger, rule, ids, into=opened(at), at=at, turns=turns or [ALL], cut=cut or [],
                           per_task=per_task)  # fmt: skip
         if name:
             await registry.name_dataset(name, made.id)
