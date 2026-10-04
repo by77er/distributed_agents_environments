@@ -3,14 +3,14 @@
 Code: `rollout_train.inference` · See [`Channel`](../../guide/reference.md#channel),
 [`Engine`](../../guide/reference.md#engine), [`Limits`](../../guide/reference.md#limits), [recorder](recorder.md)
 
-A **channel** is a policy being served, by name. Task code never sees one: a run's binding names a channel for a
-model slot, and the recorder samples from it. Whoever trains publishes new weights to it; whoever deploys decides
-which engines stand behind it. An **engine** is one replica serving the channel's model.
+A **channel** is a trainable model being served, by name. Task code never sees one: a run's binding names a channel
+for a model slot, and the recorder samples from it. Whoever trains publishes new weights to it; whoever deploys
+decides which engines stand behind it. An **engine** is one replica serving the channel's model.
 
 ```python
 channel = Channel("policy", engines=[engine_a, engine_b], renderer=renderer, limits=Limits(sequence=8000))
 generation = await channel.generate(prompt, max_tokens=64, ..., adapter=channel.adapter, session="r_1/ada")
-version = await channel.publish("miner@3", "/versions/miner@3/weights", 3)
+version = await channel.publish("kpqxwlmrtsnvoyzu", "/versions/kpqxwlmrtsnvoyzu/weights", 3)  # by id, at depth 3
 ```
 
 A deployment describes its channels in a profile: the model, its renderer, its limits, and one entry per engine
@@ -58,8 +58,9 @@ for the answer after it, and the longest turn.
 ## Publishing weights
 
 `Channel.publish(adapter, path, version)` loads the adapter on every engine of the channel, samples from it from
-then on, and returns the version it is served as: the number given, which is the policy's own
-([policies](policies.md)), or one more than the last when none is given. Publishing what is being served changes
+then on, and returns the version it is served as: the number given, which the training loop gives as the version's
+depth ([versions](versions.md)), or one more than the last when none is given. The training loop names the adapter by
+the version's id. Publishing what is being served changes
 nothing.
 
 - The adapter before stays loaded, so that a turn in progress (a thought, then its answer) finishes under the

@@ -1,78 +1,178 @@
-"""The registry: every run and policy has an id that never changes, and a name that can be chosen and changed."""
+"""The registry: a run's id never changes and its name can be chosen and changed; bookmarks name versions; and a
+reference to a version finds one by a bookmark, by the run and step that made it, or by its id."""
 
 import json
 from pathlib import Path
 
 import pytest
 
+from rollout.harness.blobs import FileBlobStore
 from rollout_train.database import DatabaseLedger, copy
 from rollout_train.ledger import FileLedger, Ledger
-from rollout_train.record import GROUPS, scope, table
-from rollout_train.registry import POLICIES, RUNS, Registry, Taken, find, policy_of, registry_of, run_of
+from rollout_train.record import GROUPS, STEPS, scope, table
+from rollout_train.registry import BASE, Registry, Taken, found, names, registry_of, resolved, run_of
+from rollout_train.versions import Version, Versions
 
 
-def ledgers(tmp_path: Path) -> list[Ledger]:
-    return [FileLedger(tmp_path / "files"), DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")]
+def ledger_of(tmp_path: Path, kind: str) -> Ledger:
+    return FileLedger(tmp_path / "files") if kind == "files" else DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")
+
+
+def registered(ledger: Ledger) -> Registry:
+    registry = registry_of(ledger)
+    assert registry is not None
+    return registry
 
 
 @pytest.mark.parametrize("kind", ["files", "database"])
-async def test_a_name_is_chosen_changed_and_unique_while_the_id_stays(tmp_path: Path, kind: str) -> None:
-    ledger = ledgers(tmp_path)[0 if kind == "files" else 1]
-    registry = registry_of(ledger)
-    assert registry is not None
-    first = await registry.create(RUNS, "diamonds")
+async def test_a_runs_name_is_chosen_changed_and_unique_while_its_id_stays(tmp_path: Path, kind: str) -> None:
+    registry = registered(ledger_of(tmp_path, kind))
+    first = await registry.create("diamonds")
     assert first.id.startswith("run_") and first.name == "diamonds"
-    renamed = await registry.rename(RUNS, "diamonds", "diamonds, unguided")
-    assert renamed.id == first.id and (await find(registry, RUNS, first.id)) == renamed
-    assert await find(registry, RUNS, "diamonds") is None  # the old name is free again
-    other = await registry.create(RUNS, "diamonds")
-    for taken in ("diamonds, unguided", first.id, " ", "a/b", "v@2"):  # another's name or id, or no name at all
+    renamed = await registry.rename("diamonds", "diamonds, unguided")
+    assert renamed.id == first.id and found(await registry.runs(), first.id) == renamed
+    assert found(await registry.runs(), "diamonds") is None  # the old name is free again
+    other = await registry.create("diamonds")
+    for taken in ("diamonds, unguided", first.id, " ", "a/b", "v@2", "run:3", BASE):  # another's, or no name at all
         with pytest.raises(Taken):
-            await registry.rename(RUNS, other.id, taken)
-    assert (await registry.create(POLICIES, "diamonds")).name == "diamonds"  # a policy is named apart from runs
+            await registry.rename(other.id, taken)
+    assert (await registry.rename(other.id, "diamonds")).name == "diamonds"  # (its own name again: allowed)
     with pytest.raises(KeyError):
-        await registry.rename(RUNS, "nobody", "someone")
-    assert [each.name for each in await registry.entries(RUNS)] == ["diamonds, unguided", "diamonds"]
+        await registry.rename("nobody", "someone")
+    with pytest.raises(Taken):
+        await registry.create("anything", first.id)  # an id is had once
+    assert [each.name for each in await registry.runs()] == ["diamonds, unguided", "diamonds"]
+
+
+@pytest.mark.parametrize("kind", ["files", "database"])
+async def test_a_bookmark_names_a_version_and_moves(tmp_path: Path, kind: str) -> None:
+    registry = registered(ledger_of(tmp_path, kind))
+    assert await registry.bookmarks() == []
+    first = await registry.bookmark("best", "kkkkkkkk")
+    moved = await registry.bookmark("best", "mmmmmmmm")
+    await registry.bookmark("alpha", "kkkkkkkk")
+    assert first.version == "kkkkkkkk" and moved.version == "mmmmmmmm"
+    assert [(mark.name, mark.version) for mark in await registry.bookmarks()] == [
+        ("alpha", "kkkkkkkk"),
+        ("best", "mmmmmmmm"),
+    ]
+    with pytest.raises(Taken):
+        await registry.bookmark("a:b", "kkkkkkkk")
+    await registry.unbookmark("alpha")
+    with pytest.raises(KeyError):
+        await registry.unbookmark("alpha")
+    assert await names(registry) == {"runs": {}, "bookmarks": {"best": "mmmmmmmm"}}
 
 
 async def test_a_runs_directory_says_which_run_it_is_whatever_it_is_called(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    registry = registry_of(ledger)
+    registry = registered(ledger)
     directory = tmp_path / "curriculum-10"
     run = await run_of(directory, ledger, registry)
     assert run.name == "curriculum-10" and run.id.startswith("run_")
     assert json.loads((directory / "run.json").read_text()) == {"id": run.id}
-    assert registry is not None
-    await registry.rename(RUNS, run.id, "the long one")
+    await registry.rename(run.id, "the long one")
     again = await run_of(directory, ledger, registry)  # started again, after a rename
     assert (again.id, again.name) == (run.id, "the long one")
-    named = await run_of(tmp_path / "elsewhere", ledger, registry, "chosen")
-    assert named.name == "chosen"
+    assert (await run_of(tmp_path / "elsewhere", ledger, registry, "chosen")).name == "chosen"
+    alone = await run_of(tmp_path / "unregistered", ledger, None)  # (no registry: the directory's name)
+    assert (alone.id, alone.name) == ("unregistered", "unregistered")
 
 
-async def test_runs_and_policies_from_before_the_registry_keep_their_keys_as_ids(tmp_path: Path) -> None:
+async def test_a_run_from_before_the_registry_keeps_its_key_as_its_id(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    registry: Registry | None = registry_of(ledger)
     fence = await ledger.take(scope("curriculum-9"))
     await ledger.append(table("curriculum-9", GROUPS), "1", {"episodes": 4}, fence)
-    old = await run_of(tmp_path / "curriculum-9", ledger, registry)
+    old = await run_of(tmp_path / "curriculum-9", ledger, registry_of(ledger))
     assert (old.id, old.name) == ("curriculum-9", "curriculum-9")
-    policies = FileLedger(tmp_path / "ledger")
-    writer = await policies.take("policies/curriculum-9")
-    await policies.append("policies/curriculum-9/versions", "1", {"name": "curriculum-9@1"}, writer)
-    policy = await policy_of(ledger, registry, "curriculum-9")
-    assert (policy.id, policy.name) == ("curriculum-9", "curriculum-9")
-    fresh = await policy_of(ledger, registry, "miner")
-    assert fresh.id.startswith("policy_") and (await policy_of(ledger, registry, fresh.id)) == fresh
 
 
-async def test_a_copy_into_a_database_keeps_the_names(tmp_path: Path) -> None:
-    files, database = ledgers(tmp_path)
-    registry = registry_of(files)
-    assert registry is not None
-    run = await registry.create(RUNS, "copied")
+async def made(ledger: Ledger, tmp_path: Path, run: str, steps: int, after: Version | None = None) -> list[Version]:
+    """`steps` versions a run made, each at a step of its own (recorded as its loop records them)."""
+    versions = Versions(ledger, FileBlobStore(tmp_path / "blobs"))
+    weights = tmp_path / "weights.bin"
+    weights.write_text("w")
+    fence = await ledger.take(scope(run))
+    line: list[Version] = []
+    for step in range(1, steps + 1):
+        parent = line[-1] if line else after
+        version = await versions.add(
+            fence, f"{run[0] * 4}{'klmnopqrstuvwxyz'[step]}{'z' * 11}", weights=weights, run=run, step=step,
+            parents=[parent.id] if parent else [],
+        )  # fmt: skip
+        await ledger.append(table(run, GROUPS), str(step), {"episodes": 1}, fence)
+        await ledger.append(table(run, STEPS), str(step), {"makes": version.id, "groups": [step]}, fence)
+        line.append(version)
+    return line
+
+
+async def test_a_reference_finds_a_version_by_bookmark_run_and_step_or_id(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    registry = registered(ledger)
+    named = await registry.create("scout")
+    scout = await made(ledger, tmp_path, named.id, 3)
+    fork = await made(ledger, tmp_path, "nnnn-fork", 1, after=scout[1])
+    await registry.bookmark("best", scout[1].id)
+    assert await resolved(ledger, registry, BASE) is None
+    assert await resolved(ledger, registry, "best") == scout[1].id
+    assert await resolved(ledger, registry, "scout:3") == scout[2].id  # by its name
+    assert await resolved(ledger, registry, f"{named.id}:1") == scout[0].id  # or its id
+    assert await resolved(ledger, registry, "scout") == scout[2].id  # its newest
+    assert await resolved(ledger, registry, "nnnn-fork") == fork[0].id  # (a run from before the registry)
+    assert await resolved(ledger, registry, scout[0].id) == scout[0].id
+    assert await resolved(ledger, registry, scout[0].id[:6]) == scout[0].id  # a start no other id shares
+    for unknown, says in [
+        ("scout:9", "no version at step 9"),
+        (scout[0].id[:4], "more than one version"),  # every scout version begins the same
+        ("xx", "no version"),
+        (fork[0].id[:2], "too short"),
+        ("nothing-like-it", "no version"),
+    ]:
+        with pytest.raises(KeyError, match=says):
+            await resolved(ledger, registry, unknown)
+    await registry.create("idle")
+    with pytest.raises(KeyError, match="has made no version"):
+        await resolved(ledger, registry, "idle")
+
+
+async def test_a_copy_into_a_database_keeps_the_runs_and_the_bookmarks(tmp_path: Path) -> None:
+    files, database = ledger_of(tmp_path, "files"), ledger_of(tmp_path, "database")
+    registry = registered(files)
+    run = await registry.create("copied")
+    mark = await registry.bookmark("best", "kkkkkkkk")
     fence = await files.take(scope(run.id))
     await files.append(table(run.id, GROUPS), "1", {"episodes": 1}, fence)
     assert isinstance(database, DatabaseLedger)
     await copy(files, database)
-    assert await database.registry.entries(RUNS) == [run]
+    assert await database.registry.runs() == [run]
+    assert await database.registry.bookmarks() == [mark]
+
+
+def test_the_command_lists_versions_and_moves_bookmarks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from rollout_train.cli import main
+
+    ledger = FileLedger(tmp_path / "ledger")
+
+    async def set_up() -> list[Version]:
+        named = await registered(ledger).create("scout")
+        return await made(ledger, tmp_path, named.id, 2)
+
+    line = asyncio.run(set_up())
+
+    def run(*arguments: str) -> str:
+        monkeypatch.setattr("sys.argv", ["rollout", *arguments, "--ledger", str(tmp_path / "ledger")])
+        main()
+        return capsys.readouterr().out
+
+    assert run("bookmark", "best", "scout:1") == f"best is {line[0].id}\n"
+    listed = run("versions").splitlines()
+    assert len(listed) == 2 and "scout:1" in listed[1] and "[best]" in listed[1] and "the base model" in listed[1]
+    assert "scout:2" in listed[0] and "from " + line[0].id[:5] in listed[0]
+    assert "is called scouting" in run("rename", "scout", "scouting")
+    assert run("bookmark", "best", "--delete") == "no bookmark best any more\n"
+    with pytest.raises(SystemExit, match="says no version"):
+        run("bookmark", "best", "nothing-like-it")

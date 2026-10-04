@@ -1,14 +1,17 @@
-"""What runs and policies are called: each has an id that never changes, and a name that can be chosen and changed.
+"""What runs and versions are called: a run's name, which can be chosen and changed, and bookmarks, names for versions.
 
-Everything a ledger keeps of a run or a policy is under its id (`runs/ID/...`, `policies/ID/...`, its versions
-`ID@N`, the adapters engines load), so naming it again moves nothing. The registry beside the ledger holds each one's
-id and name: a file beside a ledger of files (`FileRegistry`), a table in a database ledger's database
-(`rollout_train.database.DatabaseRegistry`). A name is one no other of its kind has, as its name or as its id, so
-that either finds one thing; it says neither `/` nor `@` (a version is called `NAME@N`).
+Everything a ledger keeps of a run is under its id (`runs/ID/...`), and a version is its id
+(`rollout_train.versions`), so naming either moves nothing. The registry beside the ledger holds the names: a file
+beside a ledger of files (`FileRegistry`), tables in a database ledger's database
+(`rollout_train.database.DatabaseRegistry`). It is ordinary state, changed in place.
 
-A run's directory says which run it is (`run.json`); `run_of` finds it, or registers the run the first time it is
-started. `policy_of` does the same for the policy a profile names. A run or policy recorded before there was a
-registry keeps its key as its id, and is registered under it as its name the first time it is asked for.
+- A **run** has an id and a name. A name is one no other run has, as its name or as its id, so that either finds one
+  run. A run's directory says which run it is (`run.json`); `run_of` finds it, or registers the run the first time it
+  is started. A run recorded before there was a registry keeps its key as its id, and is registered under it.
+- A **bookmark** names a version, and is moved to another by whoever moves it: a run told to carry one moves it to
+  each version it makes. A version needs none: it is shown by where it came from.
+
+A name says neither `/`, `@` nor `:` (they are what a reference to a version is made of: `resolved`).
 """
 
 import asyncio
@@ -20,72 +23,96 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from rollout.contracts import new_ulid
 from rollout_train.layout import RUN
 from rollout_train.ledger import FileLedger, Ledger
-from rollout_train.policies import policies_in
-from rollout_train.record import runs_in
+from rollout_train.record import STEPS, runs_in, table
+from rollout_train.versions import SHORTEST, versions_in
 
-RUNS, POLICIES = "run", "policy"
-KINDS = (RUNS, POLICIES)
+BASE = "base"
+"""The reference to the base model: no version."""
 
 
 @dataclass(frozen=True)
 class Entry:
-    kind: str
+    """A run: its id, and what it is called."""
+
     id: str
     name: str
     created: float
 
 
+@dataclass(frozen=True)
+class Bookmark:
+    name: str
+    version: str
+    """By id."""
+    moved: float
+
+
 class Taken(ValueError):
-    """A name that cannot be given: another of its kind has it, or it is no name."""
+    """A name that cannot be given: another has it, or it is no name."""
 
 
 class Registry(Protocol):
-    async def entries(self, kind: str) -> list[Entry]:
-        """Every run (or policy) registered, oldest first."""
+    async def runs(self) -> list[Entry]:
+        """Every run registered, oldest first."""
         ...
 
-    async def create(self, kind: str, name: str, id: str | None = None) -> Entry:
-        """Register a run (or policy) under `name`, with `id` (a new one by default). Raises `Taken`."""
+    async def create(self, name: str, id: str | None = None) -> Entry:
+        """Register a run under `name`, with `id` (a new one by default). Raises `Taken`."""
         ...
 
-    async def rename(self, kind: str, who: str, name: str) -> Entry:
-        """Call the run (or policy) that `who` is (its name or its id) `name` from now on. Raises `Taken`, and
-        `KeyError` when there is no such one."""
+    async def rename(self, who: str, name: str) -> Entry:
+        """Call the run that `who` is (its name or its id) `name` from now on. Raises `Taken`, and `KeyError` when
+        there is no such run."""
+        ...
+
+    async def bookmarks(self) -> list[Bookmark]:
+        """Every bookmark, by name."""
+        ...
+
+    async def bookmark(self, name: str, version: str) -> Bookmark:
+        """Make a bookmark name `version`, or move it there. Raises `Taken` for a name that cannot be one."""
+        ...
+
+    async def unbookmark(self, name: str) -> None:
+        """Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark."""
         ...
 
 
-async def find(registry: Registry, kind: str, who: str) -> Entry | None:
-    """The run (or policy) that `who` is: its name, or its id."""
-    entries = await registry.entries(kind)
-    return next((each for each in entries if each.name == who), None) or next(
-        (each for each in entries if each.id == who), None
-    )
+def new_run_id() -> str:
+    """A new run's id: `run_` and a ULID."""
+    return f"run_{new_ulid()}"
 
 
-def new_id(kind: str) -> str:
-    """A new run's (or policy's) id: its kind and a ULID (`run_01K...`)."""
-    return f"{kind}_{new_ulid()}"
-
-
-def checked(kind: str, name: str, id: str, entries: list[Entry]) -> str:
-    """`name`, stripped, if the run (or policy) `id` can be called it among `entries`; else raises `Taken`."""
-    if kind not in KINDS:
-        raise ValueError(f"{kind!r} is not a kind that is named: {' or '.join(KINDS)}")
+def valid(name: str) -> str:
+    """`name`, stripped, if it can be a name; else raises `Taken`."""
     name = name.strip()
-    if not name or "/" in name or "@" in name:
-        raise Taken(f"{name!r} cannot be a name: it must say something, and neither '/' nor '@'")
-    if any(each.id != id and name in (each.id, each.name) for each in entries):
-        raise Taken(f"another {kind} is called {name!r}")
+    if not name or any(mark in name for mark in "/@:") or name == BASE:
+        raise Taken(f"{name!r} cannot be a name: it must say something, and none of '/', '@', ':' (nor be {BASE!r})")
     return name
 
 
+def checked(name: str, id: str, runs: list[Entry]) -> str:
+    """`name`, stripped, if the run `id` can be called it among `runs`; else raises `Taken`."""
+    name = valid(name)
+    if any(each.id != id and name in (each.id, each.name) for each in runs):
+        raise Taken(f"another run is called {name!r}")
+    return name
+
+
+def found(runs: list[Entry], who: str) -> Entry | None:
+    """The run that `who` is: its name, or its id."""
+    return next((each for each in runs if each.name == who), None) or next(
+        (each for each in runs if each.id == who), None
+    )
+
+
 def registry_of(ledger: Ledger) -> Registry | None:
-    """The registry beside a ledger: a file beside a ledger of files, a table in a database ledger's database."""
+    """The registry beside a ledger: a file beside a ledger of files, tables in a database ledger's database."""
     if isinstance(ledger, FileLedger):
         return FileRegistry(ledger.directory)
     return getattr(ledger, "registry", None)
@@ -98,43 +125,67 @@ class FileRegistry:
         self.directory = directory
         self.path = directory / "registry.json"
 
-    async def entries(self, kind: str) -> list[Entry]:
-        return await asyncio.to_thread(lambda: [each for each in self._read() if each.kind == kind])
+    async def runs(self) -> list[Entry]:
+        return await asyncio.to_thread(lambda: self._read()[0])
 
-    async def create(self, kind: str, name: str, id: str | None = None) -> Entry:
+    async def create(self, name: str, id: str | None = None) -> Entry:
         def created() -> Entry:
             with self._locked():
-                entries = self._read()
-                made = id or new_id(kind)
-                if any(each.kind == kind and each.id == made for each in entries):
-                    raise Taken(f"there is a {kind} {made} already")
-                ours = [each for each in entries if each.kind == kind]
-                entry = Entry(kind, made, checked(kind, name, made, ours), round(time.time(), 1))
-                self._write([*entries, entry])
+                runs, marks = self._read()
+                made = id or new_run_id()
+                if any(each.id == made for each in runs):
+                    raise Taken(f"there is a run {made} already")
+                entry = Entry(made, checked(name, made, runs), round(time.time(), 1))
+                self._write([*runs, entry], marks)
                 return entry
 
         return await asyncio.to_thread(created)
 
-    async def rename(self, kind: str, who: str, name: str) -> Entry:
+    async def rename(self, who: str, name: str) -> Entry:
         def renamed() -> Entry:
             with self._locked():
-                entries = self._read()
-                ours = [each for each in entries if each.kind == kind]
-                found = next((e for e in ours if e.name == who), None) or next((e for e in ours if e.id == who), None)
-                if found is None:
-                    raise KeyError(f"there is no {kind} {who!r}")
-                entry = Entry(kind, found.id, checked(kind, name, found.id, ours), found.created)
-                self._write([entry if each == found else each for each in entries])
+                runs, marks = self._read()
+                if (was := found(runs, who)) is None:
+                    raise KeyError(f"there is no run {who!r}")
+                entry = Entry(was.id, checked(name, was.id, runs), was.created)
+                self._write([entry if each == was else each for each in runs], marks)
                 return entry
 
         return await asyncio.to_thread(renamed)
 
-    def _read(self) -> list[Entry]:
-        return [Entry(**each) for each in json.loads(self.path.read_text())] if self.path.exists() else []
+    async def bookmarks(self) -> list[Bookmark]:
+        return await asyncio.to_thread(lambda: sorted(self._read()[1], key=lambda mark: mark.name))
 
-    def _write(self, entries: list[Entry]) -> None:
+    async def bookmark(self, name: str, version: str) -> Bookmark:
+        def moved() -> Bookmark:
+            with self._locked():
+                runs, marks = self._read()
+                mark = Bookmark(valid(name), version, round(time.time(), 1))
+                self._write(runs, [each for each in marks if each.name != mark.name] + [mark])
+                return mark
+
+        return await asyncio.to_thread(moved)
+
+    async def unbookmark(self, name: str) -> None:
+        def taken() -> None:
+            with self._locked():
+                runs, marks = self._read()
+                if not any(each.name == name for each in marks):
+                    raise KeyError(f"there is no bookmark {name!r}")
+                self._write(runs, [each for each in marks if each.name != name])
+
+        await asyncio.to_thread(taken)
+
+    def _read(self) -> tuple[list[Entry], list[Bookmark]]:
+        if not self.path.exists():
+            return [], []
+        kept: Any = json.loads(self.path.read_text())
+        return [Entry(**each) for each in kept["runs"]], [Bookmark(**each) for each in kept["bookmarks"]]
+
+    def _write(self, runs: list[Entry], marks: list[Bookmark]) -> None:
         staged = self.path.with_suffix(".staged")
-        staged.write_text(json.dumps([asdict(each) for each in entries], indent=1))
+        kept = {"runs": [asdict(each) for each in runs], "bookmarks": [asdict(each) for each in marks]}
+        staged.write_text(json.dumps(kept, indent=1))
         staged.replace(self.path)
 
     @contextmanager
@@ -155,14 +206,13 @@ async def run_of(directory: Path, ledger: Ledger, registry: Registry | None, nam
     path = directory / RUN
     if await asyncio.to_thread(path.exists):
         id = str(json.loads(await asyncio.to_thread(path.read_text))["id"])
-        entry = next((each for each in await registry.entries(RUNS) if each.id == id), None) if registry else None
-        return entry or await _registered(registry, RUNS, id, name or directory.name)
+        return await _registered(registry, id, name or directory.name)
     if registry is None:
-        return Entry(RUNS, directory.name, directory.name, 0.0)
+        return Entry(directory.name, directory.name, 0.0)
     if directory.name in await runs_in(ledger):  # (recorded before there was a registry)
-        entry = await _registered(registry, RUNS, directory.name, directory.name)
+        entry = await _registered(registry, directory.name, directory.name)
     else:
-        entry = await registry.create(RUNS, name or directory.name)
+        entry = await registry.create(name or directory.name)
 
     def noted() -> None:
         directory.mkdir(parents=True, exist_ok=True)
@@ -174,33 +224,58 @@ async def run_of(directory: Path, ledger: Ledger, registry: Registry | None, nam
     return entry
 
 
-async def policy_of(ledger: Ledger, registry: Registry | None, who: str) -> Entry:
-    """The policy `who` is (its name or its id); one that is not registered is registered under `who` as its name,
-    keeping `who` as its id if the ledger has versions of a policy by that key (recorded before there was a
-    registry). Without a registry, the policy is `who`."""
+async def _registered(registry: Registry | None, id: str, name: str) -> Entry:
+    """The run `id`, registered under `name` if it is not yet (or, if that name is another's, under its id)."""
     if registry is None:
-        return Entry(POLICIES, who, who, 0.0)
-    if (found := await find(registry, POLICIES, who)) is not None:
-        return found
-    if who in await policies_in(ledger):
-        return await _registered(registry, POLICIES, who, who)
-    return await registry.create(POLICIES, who)
-
-
-async def _registered(registry: Registry | None, kind: str, id: str, name: str) -> Entry:
-    """The entry of `id`, registered under `name` if it is not yet (or, if that name is another's, under its id)."""
-    if registry is None:
-        return Entry(kind, id, name, 0.0)
-    if (found := next((each for each in await registry.entries(kind) if each.id == id), None)) is not None:
-        return found
+        return Entry(id, name, 0.0)
+    if (entry := next((each for each in await registry.runs() if each.id == id), None)) is not None:
+        return entry
     try:
-        return await registry.create(kind, name, id)
+        return await registry.create(name, id)
     except Taken:
-        return await registry.create(kind, id, id)
+        return await registry.create(id, id)
 
 
-async def names(registry: Registry | None) -> dict[str, dict[str, str]]:
-    """Every registered run's and policy's name, by kind and id."""
+async def resolved(ledger: Ledger, registry: Registry | None, reference: str) -> str | None:
+    """The version a reference says, by id; None for `base` (the base model). A reference is, in this order:
+    `base`; a bookmark's name; `RUN:STEP`, the version a run (by its name or its id) made at a step; `RUN`, the newest
+    version a run made; or a version's id, or the start of one (at least `SHORTEST` characters) that no other id
+    begins with. Raises `KeyError` for one that says no version, or more than one."""
+    if reference == BASE:
+        return None
+    marks = {mark.name: mark.version for mark in await registry.bookmarks()} if registry else {}
+    if reference in marks:
+        return marks[reference]
+    runs = await registry.runs() if registry else []
+    who, _, step = reference.partition(":")
+    run = found(runs, who) or (Entry(who, who, 0.0) if who in await runs_in(ledger) else None)
+    versions = await versions_in(ledger)
+    if run is not None:
+        if step:
+            intent: Any = (await ledger.read(table(run.id, STEPS))).get(step)
+            made = str(intent.get("makes")) if intent else None
+            if made is None or not any(version.id == made for version in versions):
+                raise KeyError(f"the run {who!r} made no version at step {step}")
+            return made
+        ours = [version for version in versions if version.run == run.id]
+        if not ours:
+            raise KeyError(f"the run {who!r} has made no version")
+        return max(ours, key=lambda version: (version.depth, version.made)).id
+    if any(version.id == reference for version in versions):
+        return reference
+    starting = [version.id for version in versions if version.id.startswith(reference)]
+    if len(reference) >= SHORTEST and len(starting) == 1:
+        return starting[0]
+    if len(starting) == 1:
+        raise KeyError(f"{reference!r} is too short to say a version: at least {SHORTEST} characters")
+    raise KeyError(f"{reference!r} says {'more than one version' if starting else 'no version'}")
+
+
+async def names(registry: Registry | None) -> dict[str, Any]:
+    """Every registered run's name, by id, and every bookmark's version, by name."""
     if registry is None:
-        return {kind: {} for kind in KINDS}
-    return {kind: {each.id: each.name for each in await registry.entries(kind)} for kind in KINDS}
+        return {"runs": {}, "bookmarks": {}}
+    return {
+        "runs": {each.id: each.name for each in await registry.runs()},
+        "bookmarks": {mark.name: mark.version for mark in await registry.bookmarks()},
+    }

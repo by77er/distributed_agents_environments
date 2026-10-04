@@ -1,7 +1,7 @@
 """Where every run of a ledger stands: what the monitor shows.
 
 A ledger (`rollout_train.ledger`) may be shared by many runs. It holds what each training loop decided and what happened
-(`rollout_train.record`), where and when each run was started, the policies' versions and the fences. Each run's
+(`rollout_train.record`), where and when each run was started, the versions and the fences. Each run's
 episodes are in the ledger too, as runners claim, play and record them (`rollout_train.rollouts.scheduler`). Each run
 keeps the rest in its own directory, as an open profile lays it out (`rollout_train.layout`): the feed (what is
 happening now) and the episodes' events. A run's `starts` record says where its directory is and where the monitor on
@@ -35,13 +35,12 @@ from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
 from rollout_train.monitor.statistics import newest, statistics
-from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
-from rollout_train.policies import scope as policy_scope
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
 from rollout_train.record import scope as run_scope
-from rollout_train.registry import POLICIES, RUNS, names, registry_of
+from rollout_train.registry import names, registry_of
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
+from rollout_train.versions import Manifest, Version, short, versions_in
 
 WAITING = "waiting"
 """Asked for; no runner has claimed any of its episodes."""
@@ -147,25 +146,17 @@ class System:
 
     async def snapshot(self, relayed: bool = False) -> dict[str, Any]:
         """Where everything stands now: every run (where it is and whether it is running; its groups that are not
-        done with and the ones that are), the policies' versions, the runners and what they play, what each channel
-        serves and how fast, the machine, and what is kept."""
+        done with and the ones that are), the versions (each with where it came from and the bookmarks that name it),
+        the runners and what they play, what each channel serves and how fast, the machine, and what is kept."""
         tables: dict[str, dict[str, JsonValue]] = {}
         fences: dict[str, int] = {}
-        policies: list[dict[str, Any]] = []
         versions: list[Version] = []
         if await asyncio.to_thread(present, self._ledger):
             fences = await self._ledger.fences()
             tables = await self._tables()
-            for policy in await policies_in(self._ledger):
-                kept = await versions_in(self._ledger, policy)
-                versions += kept
-                policies.append(_policy(policy, kept, fences.get(policy_scope(policy))))
+            versions = await versions_in(self._ledger)
         called = await names(registry_of(self._ledger))
-        for policy in policies:
-            policy["name"] = called[POLICIES].get(policy["policy"], policy["policy"])
-        snapshot = await asyncio.to_thread(self._assembled, tables, fences, policies, versions, relayed)
-        for run in snapshot["runs"]:
-            run["name"] = called[RUNS].get(run["run"], run["run"])
+        snapshot = await asyncio.to_thread(self._assembled, tables, fences, versions, called, relayed)
         return snapshot | {"names": called}
 
     async def lineage(self, sample: bool = False) -> dict[str, Any]:
@@ -175,7 +166,8 @@ class System:
         tables = await self._tables()
         notes = await asyncio.to_thread(self._notes, tables)
         every = [note for each in notes.values() for note in each]
-        return await asyncio.to_thread(lineage, tables, every, sample=sample)
+        called = await names(registry_of(self._ledger))
+        return await asyncio.to_thread(lineage, tables, every, names=called, sample=sample)
 
     async def statistics(self) -> dict[str, Any]:
         """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
@@ -212,11 +204,7 @@ class System:
         found = await asyncio.to_thread(self._source, run, tables[STARTS], relayed)
         if isinstance(found, _Remote) and (answer := await asyncio.to_thread(found.group, run, number)) is not None:
             return answer | {"episodes_at": found.address}
-        versions = {
-            version.name: version
-            for policy in await policies_in(self._ledger)
-            for version in await versions_in(self._ledger, policy)
-        }
+        versions = {version.id: version for version in await versions_in(self._ledger)}
         fences = await self._ledger.fences()
         return await asyncio.to_thread(self._group, run, str(number), record, tables, fences, versions, found)
 
@@ -245,7 +233,7 @@ class System:
             if group["stage"] == DONE and result
             else None,
             "result": _outcome(number, record, result) if result else None,
-            "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
+            "version": _version(made, short(versions)) if made else None,
         }
 
     def feeds(self, relayed: bool = False) -> list[dict[str, Any]]:
@@ -318,12 +306,16 @@ class System:
         self,
         tables: Mapping[str, Mapping[str, JsonValue]],
         fences: Mapping[str, int],
-        policies: list[dict[str, Any]],
         versions: list[Version],
+        called: Mapping[str, Any],
         relayed: bool,
     ) -> dict[str, Any]:
-        made = {version.name: version for version in versions}
-        blobs = {digest: size for policy in policies for digest, size in policy.pop("blobs")}  # (each kept once)
+        made = {version.id: version for version in versions}
+        shorter = short(made)
+        blobs = {digest: size for version in versions for digest, size in _blobs(version)}  # (each kept once)
+        marks: dict[str, list[str]] = {}
+        for mark, version in called["bookmarks"].items():
+            marks.setdefault(str(version), []).append(mark)
         now = time.time()
         runs: list[dict[str, Any]] = []
         played: dict[str, _Played] = {}
@@ -335,7 +327,7 @@ class System:
             played[run] = _Played(run, own, fences, self._records)
             listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
             seen = self._read(run, starts, found, listed["wrote"], now)
-            runs.append(listed | seen | {"played": played[run].counts()})
+            runs.append(listed | seen | {"played": played[run].counts(), "name": called["runs"].get(run, run)})
         rank = {RUNNING: 0, IDLE: 1, GONE: 2}
         runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
         read = list(self._places.values())
@@ -348,7 +340,10 @@ class System:
             "written": newest(run["written"] for run in runs),
             "processes": _processes(self.directory / PROCESSES) if self.directory else None,
             "runs": runs,
-            "policies": policies,
+            "versions": [
+                _version(version, shorter) | {"bookmarks": sorted(marks.get(version.id, []))} for version in versions
+            ],
+            "bookmarks": dict(called["bookmarks"]),
             "runners": _runners(fences, played),
             "channels": [
                 channel | {"directory": str(place.directory)}
@@ -387,7 +382,7 @@ class System:
             "episodes_at": "here" if isinstance(found, _Place) else found.address if found else None,
             "reached": found.reached if isinstance(found, _Remote) else None,
             "profile": latest.get("profile"),
-            "policy": latest.get("policy"),
+            "from": latest.get("from"),
             "started": latest.get("started"),
             "starts": len(starts),
             "written": written,
@@ -599,10 +594,10 @@ def _done(
     began = float(group.get("decided") or result.get("time") or 0.0)
     return {
         **line,
-        "adapter": made.name if made else None,
+        "adapter": made.id if made else None,
         "step": step.get("step") if step else None,
         "step_state": step.get("state") if step else None,
-        "version": made.number if made else None,
+        "version": made.depth if made else None,
         "update": dict(made.metrics) if made else None,
         "segments_trained": int(step.get("segments") or 0) if made and step else 0,
         "error": error,
@@ -622,9 +617,9 @@ def _covers(step: Mapping[str, Any]) -> list[int]:
 
 
 def _makes(step: Mapping[str, Any]) -> str | None:
-    """The version a step's decision names."""
-    policy = step.get("policy") or (parsed(step["parent"])[0] if step.get("parent") else None)
-    return named(policy, int(step["number"])) if policy else None
+    """The version a step's decision names, by id."""
+    makes = step.get("makes")
+    return str(makes) if makes else None
 
 
 def _replayed(events: list[RunEvent]) -> list[dict[str, Any]]:
@@ -672,35 +667,32 @@ def _run_in(directory: Path) -> str:
     return str(json.loads(path.read_text())["id"]) if path.exists() else directory.name
 
 
-def _policy(policy: str, versions: list[Version], fence: int | None) -> dict[str, Any]:
+def _version(version: Version, shorter: Mapping[str, str]) -> dict[str, Any]:
+    """A version as the page shows it: where it came from, what it was trained on, and what is kept of it."""
+
     def size(manifest: Manifest | None) -> int:
         return sum(blob.size for blob in manifest.files.values()) if manifest else 0
 
-    def blobs(manifest: Manifest | None) -> list[tuple[str, int]]:
-        return [(blob.sha256, blob.size) for blob in manifest.files.values()] if manifest else []
-
     return {
-        "policy": policy,
-        "fence": fence,
-        "head": versions[-1].name if versions else None,
-        "versions": [
-            {
-                "name": version.name,
-                "number": version.number,
-                "parent": version.parent,
-                "made": version.made,
-                "metrics": dict(version.metrics),
-                "weights": {"files": len(version.weights.files), "bytes": size(version.weights)}
-                if version.weights
-                else None,
-                "state": {"files": len(version.state.files), "bytes": size(version.state)} if version.state else None,
-                "released": version.released,
-                "batch": version.batch is not None,
-            }
-            for version in versions
-        ],
-        "blobs": [each for version in versions for each in blobs(version.weights) + blobs(version.state)],
+        "id": version.id,
+        "short": shorter.get(version.id, version.id),
+        "depth": version.depth,
+        "parents": list(version.parents),
+        "base": version.base,
+        "run": version.run,
+        "step": version.step,
+        "made": version.made,
+        "metrics": dict(version.metrics),
+        "weights": {"files": len(version.weights.files), "bytes": size(version.weights)} if version.weights else None,
+        "state": {"files": len(version.state.files), "bytes": size(version.state)} if version.state else None,
+        "released": version.released,
+        "batch": version.batch is not None,
     }
+
+
+def _blobs(version: Version) -> list[tuple[str, int]]:
+    return [(blob.sha256, blob.size) for manifest in (version.weights, version.state) if manifest
+            for blob in manifest.files.values()]  # fmt: skip
 
 
 def _channels(job: list[dict[str, Any]]) -> list[dict[str, Any]]:

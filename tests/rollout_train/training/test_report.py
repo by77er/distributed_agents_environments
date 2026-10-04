@@ -9,10 +9,12 @@ from pydantic import JsonValue
 
 from rollout.catalog import Row
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Curriculum, FileLedger, Policies, Result, Trained, Version, results, trained
+from rollout_train import Curriculum, FileLedger, Result, Trained, Version, Versions, results, trained
 from rollout_train.record import GROUPS, RESULTS, STEPS, table
 from rollout_train.report import chart, hours, post, report, summary
 
+MADE = "kmnopqrstuvwxyzk"
+"""The version the run's step made."""
 ROWS = [Row(f"r{number}", f"row {number}") for number in range(1, 8)]
 METRICS = {
     "loss": -0.002,
@@ -38,7 +40,7 @@ def groups() -> list[dict[str, Any]]:
 
 
 async def run(tmp_path: Path) -> tuple[Path, list[Result], Curriculum, dict[int, Trained], dict[str, Version]]:
-    """A run's directory with two groups in its ledger, the second trained on in a step that made run-1@1; its
+    """A run's directory with two groups in its ledger, the second trained on in a step that made a version; its
     results and what was done with them; and the curriculum they fold to."""
     directory = tmp_path / "run-1"
     ledger = FileLedger(directory / "ledger")
@@ -52,26 +54,26 @@ async def run(tmp_path: Path) -> tuple[Path, list[Result], Curriculum, dict[int,
             name: value for name, value in line.items() if name not in ("group", "task", "title", "rollout_seconds")
         }
         await ledger.append(table("train", RESULTS), key, kept, fence)
-    step: JsonValue = {"groups": [2], "policy": "run-1", "parent": None, "number": 1, "segments": 384, "seed": 1}
+    step: JsonValue = {"groups": [2], "parent": None, "makes": MADE, "segments": 384, "seed": 1}
     await ledger.append(table("train", STEPS), "1", step, fence)
-    policies = Policies(ledger, FileBlobStore(directory / "blobs"))
+    versions = Versions(ledger, FileBlobStore(directory / "blobs"))
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")
-    version = await policies.add(await policies.writer("run-1"), "run-1", 1, weights=weights, metrics=METRICS)
+    version = await versions.add(fence, MADE, weights=weights, run="train", step=1, metrics=METRICS)
     lines = await results(ledger)
     curriculum = Curriculum(ROWS)
     for line in lines:
         curriculum.recorded(line)
-    return directory, lines, curriculum, await trained(ledger), {version.name: version}
+    return directory, lines, curriculum, await trained(ledger), {version.id: version}
 
 
 async def test_the_summary_gives_the_latest_group_what_was_done_with_it_and_each_rows_record(tmp_path: Path) -> None:
     _, lines, curriculum, steps, versions = await run(tmp_path)
     assert [line.group for line in lines] == [1, 2] and hours(lines) == [0.5, 1.0]
     text = summary("run-1", lines, curriculum, steps, versions)
-    assert "**run-1** — group 2, 1.0 h in, 1 updates (serving run-1@1)" in text
+    assert f"**run-1** — group 2, 1.0 h in, 1 updates (serving {MADE})" in text
     assert "rewards 0 / 2 / 10 / 11 (mean 5.75, sd 4.82); solved 3/4" in text
-    assert "run-1@1, 384 of 680 segments, 6800 sampled tokens" in text
+    assert "kmnopqrs (depth 1), 384 of 680 segments, 6800 sampled tokens" in text
     assert "moved the policy by KL ≈ 0.0123 (floor 0.0009), 9 steps" in text and "clipped 0.4%" in text
     assert "**Rows:** 7 of 7 unlocked" in text
     assert "`r1` row 1 — 1 groups, solved 100%, mean reward 9.0" in text
@@ -89,7 +91,7 @@ async def test_a_report_writes_the_summary_and_the_chart_into_the_runs_directory
     await report(directory, ROWS, None, run="train")
     assert (directory / "progress.png").read_bytes().startswith(b"\x89PNG")
     written = (directory / "progress.md").read_text()
-    assert "`r3` row 3 — 1 groups, solved 75%" in written and "(serving run-1@1)" in written  # (from the ledger)
+    assert "`r3` row 3 — 1 groups, solved 75%" in written and f"(serving {MADE})" in written  # (from the ledger)
 
 
 async def test_a_report_is_posted_with_the_chart_attached() -> None:

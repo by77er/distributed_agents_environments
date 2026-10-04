@@ -25,7 +25,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout_train.ledger import Ledger, between
-from rollout_train.policies import named, versions_in
+from rollout_train.versions import versions_in
 
 
 @dataclass
@@ -122,7 +122,7 @@ class Trained:
 
     step: int
     version: str | None = None
-    """By name, once made."""
+    """By id, once made."""
     error: str | None = None
 
 
@@ -130,17 +130,14 @@ async def trained(ledger: Ledger, run: str = "train") -> dict[int, Trained]:
     """For each group a step covers: that step, and its outcome if it has one."""
     steps = await ledger.read(table(run, STEPS))
     failures: Any = await ledger.read(table(run, FAILURES))
-    made: dict[str, set[str]] = {}
+    made = {version.id for version in await versions_in(ledger)}
     covered: dict[int, Trained] = {}
     for key, record in steps.items():
         intent: Any = record
-        policy = str(intent.get("policy"))
-        if policy not in made:
-            made[policy] = {version.name for version in await versions_in(ledger, policy)}
-        name = named(policy, int(intent["number"]))
+        makes = str(intent.get("makes"))
         error = failures[key].get("error") if key in failures else None
-        outcome = Trained(int(key), name if error is None and name in made[policy] else None, error)  # (a failed
-        # step made nothing: the next one makes the version it would have)
+        outcome = Trained(int(key), makes if error is None and makes in made else None, error)  # (a failed step made
+        # nothing: the next one makes a version of its own)
         listed: list[Any] = intent.get("groups") or []
         for group in listed:
             covered[int(group)] = outcome

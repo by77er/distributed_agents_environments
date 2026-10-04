@@ -12,8 +12,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#events_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Policies`](#policies), [`Result`](#result), [`results`](#results), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Version`](#version), [`Weighted`](#weighted)
-- **[`rollout_train.inference`](#rollout_traininference)** — Channels: policies being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Version`](#version), [`Versions`](#versions), [`Weighted`](#weighted)
+- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -2578,7 +2578,7 @@ class Ledger(Protocol)
 
 ### `Manifest`
 
-*class* · `libraries/rollout-train/src/rollout_train/policies.py`
+*class* · `libraries/rollout-train/src/rollout_train/versions.py`
 
 ```python
 class Manifest
@@ -2590,32 +2590,6 @@ The files of a checkpoint, by their paths within it, each kept as a blob.
 |---|---|---|---|
 | `files` | `Mapping[str, BlobReference]` | required |  |
 | `layout` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | How the weights are divided among the files, where they are divided: whoever wrote them says, so that a reader with the same division reads its own files and no others. |
-
-### `Policies`
-
-*class* · `libraries/rollout-train/src/rollout_train/policies.py`
-
-```python
-class Policies
-```
-
-The versions of every policy, in a ledger, and their files in a blob store.
-
-**Methods**
-
-- `def __init__(self, ledger: Ledger, blobs: Blobs) -> None`
-- `async def writer(self, policy: str) -> Fence` — Become the one that may add versions to a policy: whoever was is shut out.
-- `async def versions(self, policy: str) -> list[Version]` — A policy's versions, oldest first.
-- `async def head(self, policy: str) -> Version | None` — A policy's newest version, if it has one.
-- `async def version(self, name: str) -> Version` — The version a name says.
-- `async def add(self, fence: Fence, policy: str, number: int, *, weights: Path, state: Path | None = None, parent: str | None = None, batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Version` — Keep a checkpoint's files and append the version that names them. The append is what makes the version
-  exist: a writer that dies before it has made nothing, and one that repeats it (the same number) gets the
-  version that is there.
-- `async def thin(self, fence: Fence, policy: str, retention: 'Retention') -> list[str]` — Let go of the files (weights and trainer state) of the versions `retention` does not keep, and return their
-  names. A release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no
-  version still names it, so this may be repeated after a crash at any point.
-- `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
-  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
 ### `Result`
 
@@ -2658,6 +2632,27 @@ async def results(ledger: Ledger, run: str = 'train') -> list[Result]
 
 How a run's groups went, by their numbers.
 
+### `Retention`
+
+*class* · `libraries/rollout-train/src/rollout_train/versions.py`
+
+```python
+class Retention
+```
+
+Which of a run's versions keep their files, their weights and their trainer state (what can be served, and
+what a step can go on from): the newest `recent`, and every `every`-th by depth, so that saves thin out with
+age.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `recent` | `int` | `2` |  |
+| `every` | `int` | `20` |  |
+
+**Methods**
+
+- `def kept(self, depths: list[int]) -> set[int]`
+
 ### `Step`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -2685,23 +2680,26 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = ()) -> None
+async def train(catalog: Catalog, trainer: Trainer, versions: Versions, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Version], Awaitable[object]] | None = None) -> None
 ```
 
-Train `policy` on `catalog` until `groups` more groups have been played (those a stopped loop left unplayed
-among them) and every group played has been trained on, serving it on `channel`. A step is taken over the groups
-queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
+Train from `start` (a version's id; else the base model, named `base`) on `catalog` until `groups` more groups
+have been played (those a stopped loop left unplayed among them) and every group played has been trained on, serving
+each version made on `channel`; a run started again goes on from the newest version it made. A step is taken over
+the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
 `directory` is where versions' files are kept on this machine while they are in use: the one being served and
 the one before it (a turn in progress finishes under the weights it began with); every version's files are in
 the blob store; `publish` serves a version on `channel`. `algorithm` is `Grpo()` unless given. `episodes_at_once` is
 how many episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once
 as each has places). `binding` says how the program's model slots and imports are
 served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
-one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
-files (weights and trainer state) once a newer one is served (`Retention()` unless given). `started` is what the
-run's `starts` record says beside what the loop knows (the policy, this host, the time): where the run's directory
-is, where the monitor on its machine serves (`address`), and what profile started it, say. `hooks` are told of each
-result and step.
+one that has recorded nothing: the run's results are folded into it. `retention` says which of the versions the
+run made keep their files (weights and trainer state) once a newer one is served (`Retention()` unless given);
+besides those, what is served, what any run starts from, and whatever `kept` says (the bookmarked versions, say)
+keep theirs. `started` is what the run's `starts` record says beside what the loop knows (where it starts from,
+this host, the time): where the run's directory is, where the monitor on its machine serves (`address`), and what
+profile started it, say. `hooks` are told of each result and step; `made` is called with each version made, once
+it is served (to move a bookmark, say).
 
 ### `Trained`
 
@@ -2716,7 +2714,7 @@ What was done with a group: the step that covered it, and the version that step 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `step` | `int` | required |  |
-| `version` | `str \| None` | `None` | By name, once made. |
+| `version` | `str \| None` | `None` | By id, once made. |
 | `error` | `str \| None` | `None` |  |
 
 ### `trained`
@@ -2752,7 +2750,7 @@ where its files go, so any trainer can take any step of any policy.
 
 ### `Version`
 
-*class* · `libraries/rollout-train/src/rollout_train/policies.py`
+*class* · `libraries/rollout-train/src/rollout_train/versions.py`
 
 ```python
 class Version
@@ -2760,19 +2758,49 @@ class Version
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `policy` | `str` | required |  |
-| `number` | `int` | required | From 1, in the order the policy's versions were made. |
-| `weights` | `Manifest \| None` | required | None once it was released (`Policies.thin`). |
-| `parent` | `str \| None` | `None` | The version it was trained from, by name: of this policy, or of another (a fork). None: from the base. |
+| `id` | `str` | required |  |
+| `weights` | `Manifest \| None` | required | None once it was released (`Versions.thin`). |
+| `parents` | `tuple[str, ...]` | `()` | What it was made from, by id: first the version it was trained from, then any others it learned from (the teachers of a distillation, say). None: from the base model. |
+| `depth` | `int` | `1` | Steps from the base model along its first parents: its first parent's depth and one. |
+| `base` | `str \| None` | `None` | The model it adapts, by name (`Qwen/Qwen3.5-9B`, say): its first parent's, or the one its line began from. |
+| `run` | `str \| None` | `None` | The run that made it, by id. |
+| `step` | `int \| None` | `None` | The run's step that made it (none for a version made outside a run's steps, such as by imitation). |
 | `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
-| `released` | `float \| None` | `None` | When its files were let go (`Policies.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
+| `released` | `float \| None` | `None` | When its files were let go (`Versions.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
 
 **Methods**
 
-- `@property def name(self) -> str`
+- `@property def parent(self) -> str | None` — The version it was trained from, if any.
+
+### `Versions`
+
+*class* · `libraries/rollout-train/src/rollout_train/versions.py`
+
+```python
+class Versions
+```
+
+Every version, in a ledger, and their files in a blob store.
+
+**Methods**
+
+- `def __init__(self, ledger: Ledger, blobs: Blobs) -> None`
+- `async def all(self) -> list[Version]` — Every version, oldest first.
+- `async def version(self, id: str) -> Version` — The version an id says.
+- `async def head(self, run: str) -> Version | None` — The newest version a run made, if it made one.
+- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Version` — Keep a checkpoint's files and append the version that names them, under `fence` (the run's that makes it).
+  Its base is its first parent's; `base` names it for a version made from the base model. The append is what makes
+  the version exist: a writer that dies before it has made nothing, and one that repeats it (the same id, decided
+  before) gets the version that is there.
+- `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Let go of the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
+  nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
+  release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no version
+  still names it, so this may be repeated after a crash at any point.
+- `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
+  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
 ### `Weighted`
 
@@ -2792,7 +2820,7 @@ A segment to train on, and its advantage: every token the policy sampled in it c
 
 ## `rollout_train.inference`
 
-Channels: policies being served, and what they ask of an engine.
+Channels: trainable models being served, and what they ask of an engine.
 
 ### `Channel`
 
@@ -3120,14 +3148,16 @@ Stopping is better than exhausting the machine (a host may shut down rather than
 class Platform
 ```
 
-An open profile: its `run` and the `policy` it trains (by their ids), the `policies`' versions, a `trainer` to
-step, `publish` to serve a version, and a `runner` that plays the episodes its run asks for
+An open profile: its `run`, the version it trains from (`origin`), the `versions`, a `trainer` to step,
+`publish` to serve a version, and a `runner` that plays the episodes its run asks for
 (`rollout_train.rollouts.scheduler.EpisodeRunner`).
 
 **Methods**
 
 - `def __init__(self, profile: Profile) -> None`
 - `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> 'Platform'` — Start everything, registering with `stack` how each thing is stopped (the engines last).
+- `async def bookmarked(self) -> set[str]` — The versions bookmarks name (which keep their files).
+- `async def made(self, version: Version) -> None` — Carry the profile's bookmark, if it names one, to a version the run made.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel from now on; returns the version they are served as.
 
 ### `Profile`
@@ -3147,7 +3177,7 @@ class Profile
 | `serve` | `str \| None` | `None` | `host:port` to serve the model endpoint for harnesses on. |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
-| `ledger` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a ledger see each other's policies. |
+| `ledger` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a ledger see each other's versions. |
 | `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
 | `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
@@ -3173,7 +3203,8 @@ class TrainerSpec
 |---|---|---|---|
 | `kind` | `str` | required | `module:name` of what makes the trainer, called with the channel's model and `settings`. |
 | `channel` | `str` | required | The channel that serves the policy it trains. |
-| `policy` | `str \| None` | `None` | The policy it trains, by its name or its id (`rollout_train.registry`); by default one called what the run is. A policy that has versions is gone on with; one that has none is registered under this as its name. |
+| `start` | `str \| None` | `None` | The version a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a version's id or the start of one); by default the base model. A run started again goes on from the newest version it made. |
+| `bookmark` | `str \| None` | `None` | A bookmark the run carries: moved to each version it makes. |
 | `colocated` | `bool` | `False` | Whether it shares the channels' accelerator: their engines then sleep while it steps. |
 | `settings` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` |  |
 
@@ -3250,8 +3281,8 @@ class System
   monitors on other machines for their runs' episodes.
 - `@property def ledger(self) -> str` — Where the ledger is: its directory, or its database's URL.
 - `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
-  done with and the ones that are), the policies' versions, the runners and what they play, what each channel
-  serves and how fast, the machine, and what is kept.
+  done with and the ones that are), the versions (each with where it came from and the bookmarks that name it),
+  the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
   beside the ledger.

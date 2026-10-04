@@ -1,7 +1,7 @@
 # Hosted training: Thinking Machines' Tinker, and Prime Intellect for contrast
 
 See [training](../libraries/rollout-train/training.md), [channels and engines](../libraries/rollout-train/channels.md),
-[policies](../libraries/rollout-train/policies.md), [deploying](../guide/deploying.md),
+[policies](../libraries/rollout-train/versions.md), [deploying](../guide/deploying.md),
 [LoRA trainer](../implementations/rollout-lora.md), [the policy graph](policy-dag.md)
 
 **A proposal.** This page asks how this system could train and sample through Thinking Machines' hosted API (Tinker)

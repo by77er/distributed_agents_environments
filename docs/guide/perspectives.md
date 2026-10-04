@@ -59,8 +59,9 @@ group = {"parameters": catalog.start(row, rng), "episodes": 4, "task": row.key}
 await ledger.append(table("miner-1", GROUPS), "12", group, fence)      # runners play it from here
 episodes = await episodes_of(ledger, blobs, "miner-1", 12, 4)          # when all four have ended
 batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
-await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path("versions/miner@3"))
-await publish("policy", "miner@3", "versions/miner@3/weights", 3)
+makes = new_id()                                            # the version's id, chosen before the step
+await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path(f"versions/{makes}"))
+await publish("policy", makes, f"versions/{makes}/weights", 3)  # served under its id, at depth 3
 ```
 
 - A run asks for a **group** of episodes in the ledger, and **runners**, wherever they are, claim them, play them

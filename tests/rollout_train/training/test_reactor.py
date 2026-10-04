@@ -14,13 +14,14 @@ from pydantic import JsonValue
 
 from rollout.contracts import BlobReference
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Checkpoint, Fence, Fenced, FileLedger, Policies, Step, Weighted, results, train, trained
+from rollout_train import Checkpoint, Fence, Fenced, FileLedger, Step, Versions, Weighted, results, train, trained
 from rollout_train.record import GROUPS, STEPS, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.testing import ScriptedEngine, plain_channel
+from rollout_train.versions import new_id
 from tests.rollout_train.rollouts.games import Words
-from tests.rollout_train.training.test_loop import Counting, answering, here, quickly
+from tests.rollout_train.training.test_loop import Counting, answering, here, made_by, quickly
 
 __all__ = ["quickly"]  # (the loop looks for its episodes often here too)
 
@@ -111,13 +112,13 @@ async def attempt(directory: Path, at: int | None, steps: list[str], *, hard: bo
     recorder = answering()
     # (The loop's own writes are the points it can die at. The runner's are in the same stores, and die with it.)
     runners = DeadAfterwards(directory / "ledger")
-    policies = Policies(DyingLedger(directory / "ledger", fuse), DyingBlobs(directory / "blobs", fuse))
-    done = len(await results(policies.ledger))
+    versions = Versions(DyingLedger(directory / "ledger", fuse), DyingBlobs(directory / "blobs", fuse))
+    done = len(await results(versions.ledger))
     try:
         async with here(runners, recorder, FileBlobStore(directory / "blobs")):
             try:
                 await train(
-                    Words(), DyingTrainer(fuse, steps), policies, policy="words", channel="policy",
+                    Words(), DyingTrainer(fuse, steps), versions, base="words-base", channel="policy",
                     directory=directory / "versions", publish=recorder.publish, groups=TOTAL - done,
                     groups_per_step=2, seed=3,
                 )  # fmt: skip
@@ -126,9 +127,9 @@ async def attempt(directory: Path, at: int | None, steps: list[str], *, hard: bo
                 raise
     except Killed:
         return False
-    head = await policies.head("words")
+    head = await versions.head("train")
     channel = recorder.channels["policy"]
-    assert head is None or (channel.adapter, channel.version) == (head.name, head.number)  # it serves the newest
+    assert head is None or (channel.adapter, channel.version) == (head.id, head.depth)  # it serves the newest
     return True
 
 
@@ -160,20 +161,20 @@ async def test_episodes_a_runner_was_playing_when_it_died_are_claimed_again(tmp_
     engine.generate = slowly
     recorder = Recorder({"policy": channel})
     runners = DeadAfterwards(tmp_path / "ledger")
-    policies = Policies(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
+    versions = Versions(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
     steps: list[str] = []
-    async with here(runners, recorder, policies.blobs):
+    async with here(runners, recorder, versions.blobs):
         playing = train(
-            Words(), DyingTrainer(Fuse(None), steps), policies, policy="words", channel="policy",
+            Words(), DyingTrainer(Fuse(None), steps), versions, base="words-base", channel="policy",
             directory=tmp_path / "versions", publish=recorder.publish, groups=TOTAL, groups_per_step=2, seed=3,
         )  # fmt: skip
         loop = asyncio.create_task(playing)
-        while not await policies.ledger.read(table("train", CLAIMS)):  # noqa: ASYNC110 (the runner writes)
+        while not await versions.ledger.read(table("train", CLAIMS)):  # noqa: ASYNC110 (the runner writes)
             await asyncio.sleep(0.01)
         runners.dead = True  # killed outright, with episodes playing: nothing more of it reaches the disk
         loop.cancel()
         await asyncio.gather(loop, return_exceptions=True)
-    assert not await policies.ledger.read(table("train", EPISODES))
+    assert not await versions.ledger.read(table("train", EPISODES))
     assert await attempt(tmp_path, None, steps, hard=True), "started again, it runs to the end"
     assert await check(tmp_path, steps)  # what it was playing, its runner started again claimed anew
 
@@ -181,28 +182,30 @@ async def test_episodes_a_runner_was_playing_when_it_died_are_claimed_again(tmp_
 async def check(directory: Path, steps: list[str]) -> int:
     """Checks a run that ended; returns how many of its episodes were claimed again (their first claim's runner
     died)."""
-    policies = Policies(FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs"))
-    ledger = policies.ledger
+    store = Versions(FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs"))
+    ledger = store.ledger
     lines = await results(ledger)
     assert [line.group for line in lines] == list(range(1, TOTAL + 1))  # every group played and recorded, once
     assert sorted(map(int, await ledger.read(table("train", GROUPS)))) == list(range(1, TOTAL + 1))
     # Every group with something to train on is in one step, and every step made one version, each from the one
     # before; no version is an orphan.
-    versions = await policies.versions("words")
+    versions = await made_by(store)
+    ids = sorted(version.id for version in versions)
     covered = await trained(ledger)
     assert sorted(covered) == [line.group for line in lines if line.segments]
     assert all(outcome.version is not None for outcome in covered.values())
-    assert sorted({str(outcome.version) for outcome in covered.values()}) == [version.name for version in versions]
-    assert [version.parent for version in versions] == [None, *[version.name for version in versions[:-1]]]
+    assert sorted({str(outcome.version) for outcome in covered.values()}) == ids
+    assert [version.parents for version in versions] == [(), *[(version.id,) for version in versions[:-1]]]
+    assert [version.depth for version in versions] == list(range(1, len(versions) + 1))
     intents = await ledger.read(table("train", STEPS))
-    assert sorted(f"words@{intent['number']}" for intent in intents.values()) == [v.name for v in versions]  # type: ignore[index]
+    assert sorted(str(cast(dict[str, Any], intent)["makes"]) for intent in intents.values()) == ids
     # A step is taken again only if the loop died before its version was written down: never once it was.
-    assert set(steps) == {version.name for version in versions}
-    assert all(steps.count(version.name) <= 2 for version in versions)
+    assert set(steps) == set(ids)
+    assert all(steps.count(version.id) <= 2 for version in versions)
     for version in versions:
-        assert version.batch is not None and json.loads(await policies.blobs.read(version.batch))
+        assert version.batch is not None and json.loads(await store.blobs.read(version.batch))
         assert version.weights is not None
-        fetched = await policies.files(version.weights, directory / "fetched" / version.name)
+        fetched = await store.files(version.weights, directory / "fetched" / version.id)
         assert sorted(path.name for path in fetched.iterdir()) == ["adapter.bin"]  # whole: no half-written file
     # Each group's four episodes were recorded, once each. An episode was claimed again only when the claim
     # before was cut short (its runner closed) or its runner died (a runner started again holds a new fence).
@@ -224,7 +227,7 @@ async def check(directory: Path, steps: list[str]) -> int:
     trained_on: list[set[str]] = []
     for version in versions:
         assert version.batch is not None
-        sources = json.loads(await policies.blobs.read(version.batch))
+        sources = json.loads(await store.blobs.read(version.batch))
         trained_on.append({"/".join(source.split("/")[:3]) for source, _ in sources})
     assert sum(len(each) for each in trained_on) == len(set[str]().union(*trained_on))
     return again
@@ -232,21 +235,19 @@ async def check(directory: Path, steps: list[str]) -> int:
 
 async def test_a_loop_that_was_replaced_cannot_write(tmp_path: Path) -> None:
     recorder = answering()
-    policies = Policies(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    stale = await policies.ledger.take("runs/train")
-    stale_writer = await policies.writer("words")
-    async with here(policies.ledger, recorder, policies.blobs):
+    versions = Versions(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
+    stale = await versions.ledger.take("runs/train")
+    async with here(versions.ledger, recorder, versions.blobs):
         await train(
             Words(),
             Counting(),
-            policies,
-            policy="words",
+            versions,
             channel="policy",
             directory=tmp_path / "v",
             publish=recorder.publish,
             groups=1,
-        )  # (another loop takes the run and the policy)
+        )  # (another loop takes the run)
     with pytest.raises(Fenced):
-        await policies.ledger.append(table("train", GROUPS), "9", {}, stale)
-    with pytest.raises(Fenced):
-        await policies.add(stale_writer, "words", 9, weights=tmp_path / "ledger")
+        await versions.ledger.append(table("train", GROUPS), "9", {}, stale)
+    with pytest.raises(Fenced):  # its versions are the run's, appended under its fence
+        await versions.add(stale, new_id(), weights=tmp_path / "ledger", run="train")

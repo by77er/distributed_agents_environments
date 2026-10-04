@@ -32,7 +32,7 @@ own directory, as an open [profile](../../guide/deploying.md) lays it out (`roll
 
 | | Holds | The page reads it for |
 |---|---|---|
-| the ledger | each run's `starts`, `groups`, `results`, `steps` and `failures`; the policies' versions; the fences ([policies](policies.md)) | every run, its steps, groups and their stages, outcomes, versions, the statistics |
+| the ledger | each run's `starts`, `groups`, `results`, `steps` and `failures`; the policies' versions; the fences ([policies](versions.md)) | every run, its steps, groups and their stages, outcomes, versions, the statistics |
 | a run's `jobs` | each job's tickets, ended episodes and acknowledged cursor ([rollouts](rollouts.md)) | which episodes of a group have ended, and what each reported |
 | a run's `feed` | what is happening now, written by `RunFeed` | episodes still running, their rollouts turn by turn, the engines' throughput |
 | a run's `blobs` | each ended episode's events | the rollouts of episodes the feed has let go |

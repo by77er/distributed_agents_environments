@@ -31,7 +31,7 @@ Beyond the guide:
 | Runs that survive their process | [Durable runner](../implementations/rollout-durable/README.md) |
 | Computers for tasks: shell and file tools on an environment | [Computers](../implementations/rollout-computers.md) |
 | Long episodes in a context that fits any model | [Memory](../libraries/rollout/memory.md) |
-| Training: episode runners, episodes, the training loop, policies, recorded channels | [Rollouts](../libraries/rollout-train/rollouts.md), [episodes](../libraries/rollout-train/episodes.md), [training](../libraries/rollout-train/training.md), [policies](../libraries/rollout-train/policies.md), [channels](../libraries/rollout-train/channels.md), [recorder](../libraries/rollout-train/recorder.md) |
+| Training: episode runners, episodes, the training loop, versions, recorded channels | [Rollouts](../libraries/rollout-train/rollouts.md), [episodes](../libraries/rollout-train/episodes.md), [training](../libraries/rollout-train/training.md), [versions](../libraries/rollout-train/versions.md), [channels](../libraries/rollout-train/channels.md), [recorder](../libraries/rollout-train/recorder.md) |
 | What a profile names: an engine, a trainer, a model family's renderer | [vLLM engine](../implementations/rollout-vllm.md), [LoRA trainer](../implementations/rollout-lora.md), [Qwen renderers](../implementations/rollout-qwen.md), [Gemma renderers](../implementations/rollout-gemma.md) |
 
 ## Concepts in one place
@@ -52,9 +52,10 @@ The [glossary](../architecture/glossary.md) defines every term; these are the on
 | **Run event** | A typed record of something that happened in a run, in a gapless sequence. |
 | **Catalog** | What an environment offers to train on: rows, easiest first, and how to draw a start of one. |
 | **Group** | One start of one row, played as several episodes that are compared with each other. |
-| **Step** | One update of the policy by the trainer, over several groups. |
+| **Step** | One update by the trainer, over several groups: it makes a version from the one before. |
+| **Version** | Weights a step made: a node of a graph that grows from a base model, with an id, its parents, and the run and step that made it. A **bookmark** can name one. |
 | **Episode** | A finished run as training sees it: labels, outcome, result, and each model slot's trajectory of segments. |
-| **Channel** | A trainable policy being served, by name. A binding names one for a model slot; training publishes weights to it. |
+| **Channel** | A trainable model being served, by name. A binding names one for a model slot; training publishes weights to it. |
 
 ## Where things live
 
@@ -68,7 +69,7 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 | `rollout.catalog` | `rollout` | `Catalog`, `Row`, `binding_for` |
 | `rollout.testing` | `rollout` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
 | `rollout_train.rollouts` | `rollout-train` | `EpisodeRunner`, `Plan`, `plan`, `episodes_of`, `playing`, `Hooks`, `Episode`, `Record` |
-| `rollout_train` | `rollout-train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `Colocated`, `Policies`, `FileLedger` |
+| `rollout_train` | `rollout-train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `Colocated`, `Versions`, `FileLedger` |
 | `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Segment`, `Renderer` |
 | `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
 | `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |

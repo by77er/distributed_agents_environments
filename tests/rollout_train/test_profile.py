@@ -37,6 +37,7 @@ engine = "rollout_train.testing:scripted_engine"
 kind = "tests.rollout_train.test_profile:Steps"
 channel = "policy"
 colocated = true
+bookmark = "best"
 segment_tokens = 900
 segments_per_step = 3
 """
@@ -65,6 +66,7 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
     support.STARTED.clear()
     profile = Profile.load(write(tmp_path))
     assert profile.trainer is not None and profile.trainer.settings == {"segment_tokens": 900, "segments_per_step": 3}
+    assert profile.trainer.bookmark == "best" and profile.trainer.start is None
     async with profile.open() as platform:
         policy, judge = platform.channels["policy"], platform.channels["judge"]
         assert len(policy.engines) == 2 and len(judge.engines) == 1  # one engine per entry, each told its own
@@ -78,30 +80,56 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         assert platform.trainer is not None and platform.trainer.budget == Budget(900, 3)
         binding = binding_for(words, "policy", platform.tool_bindings)
         assert platform.run.name == "run" and platform.run.id.startswith("run_")  # (named after its directory)
-        assert platform.registry is not None  # the policy is called what the run is, unless the profile names one
-        policies = await platform.registry.entries("policy")
-        assert [(each.id, each.name) for each in policies] == [(platform.policy, "run")]
+        assert platform.origin is None  # (a new run trains from the base model unless the profile says)
         await train(
             words,
             platform.trainer,
-            platform.policies,
-            policy=platform.policy,
+            platform.versions,
+            start=platform.origin,
+            base="a-checkpoint",
             channel="policy",
             directory=tmp_path / "run" / "versions",
             publish=platform.publish,
             run=platform.run.id,
             groups=2,
             binding=binding,
+            kept=platform.bookmarked,
+            made=platform.made,
         )  # fmt: skip  (the platform's runner plays the run in its directory)
-        versions = await platform.policies.versions(platform.policy)
+        versions = [version for version in await platform.versions.all() if version.run == platform.run.id]
         steps = await platform.ledger.read(f"runs/{platform.run.id}/steps")
         played = await platform.ledger.read(f"runs/{platform.run.id}/episodes")
-        assert versions and [version.number for version in versions] == list(range(1, len(steps) + 1))
-        assert policy.adapter == versions[-1].name and judge.version == 0  # served on the trained channel only
+        assert versions and [version.depth for version in versions] == list(range(1, len(steps) + 1))
+        assert all(version.base == "a-checkpoint" for version in versions)
+        assert policy.adapter == versions[-1].id and judge.version == 0  # served on the trained channel only
+        assert platform.registry is not None  # the bookmark the profile names went with each version made
+        assert [(mark.name, mark.version) for mark in await platform.registry.bookmarks()] == [
+            ("best", versions[-1].id)
+        ]
+        assert await platform.bookmarked() == {versions[-1].id}
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
     assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_notes.jsonl").exists()
     assert len(played) == 8 and any((tmp_path / "run" / "blobs").iterdir())  # every episode, and its trajectories
+
+
+async def test_a_new_run_starts_from_the_version_its_profile_names(tmp_path: Path) -> None:
+    support.STARTED.clear()
+    shared = f'ledger = "{tmp_path / "ledger"}"\n'  # (the two runs share a ledger, and so its versions)
+    first = Profile.load(write(tmp_path, shared + PROFILE))
+    async with first.open() as platform:
+        assert platform.trainer is not None
+        binding = binding_for(words, "policy", platform.tool_bindings)
+        await train(
+            words, platform.trainer, platform.versions, channel="policy", directory=tmp_path / "run" / "versions",
+            publish=platform.publish, run=platform.run.id, groups=1, binding=binding, made=platform.made,
+        )  # fmt: skip
+        (made,) = await platform.versions.all()
+    forked = (shared + PROFILE).replace('bookmark = "best"', 'start = "best"').format(directory=tmp_path / "fork")
+    path = tmp_path / "fork.toml"
+    path.write_text(forked)
+    async with Profile.load(path).open() as platform:
+        assert platform.origin == made.id and platform.run.name == "fork"
 
 
 async def test_a_profile_that_cannot_start_stops_what_it_started(tmp_path: Path) -> None:

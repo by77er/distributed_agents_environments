@@ -17,9 +17,8 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
-from rollout_train.ledger import between
-from rollout_train.policies import named, parsed
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, named_runs, table
+from rollout_train.versions import VERSIONS
 
 STEP_METRICS = (
     "kl_moved",
@@ -69,19 +68,13 @@ def statistics(
 
 
 def _versions(tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, dict[str, Any]]:
-    """Every version's record, by its name."""
-    found: dict[str, dict[str, Any]] = {}
-    for name, records in tables.items():
-        if policy := between(name, "policies/", "/versions"):
-            for record in records.values():
-                version = cast(dict[str, Any], record)
-                found[named(policy, int(version["number"]))] = version
-    return found
+    """Every version's record, by its id."""
+    return {key: cast(dict[str, Any], record) for key, record in tables.get(VERSIONS, {}).items()}
 
 
 def _makes(step: Mapping[str, Any]) -> str | None:
-    policy = step.get("policy") or (parsed(step["parent"])[0] if step.get("parent") else None)
-    return named(str(policy), int(step["number"])) if policy else None
+    makes = step.get("makes")
+    return str(makes) if makes else None
 
 
 def _run(run: str, tables: Mapping[str, Mapping[str, Any]], made: Mapping[str, dict[str, Any]]) -> dict[str, Any]:

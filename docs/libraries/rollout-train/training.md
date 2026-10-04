@@ -4,26 +4,28 @@ Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md),
 [API reference](../../guide/reference.md#rollout_train)
 
 The training loop, what it asks of an algorithm and of a trainer, and the curriculum. The loop is written against
-the [ledger](policies.md#the-ledger), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and
-[`Policies`](policies.md) only: it asks for each group's episodes in the ledger, and [runners](rollouts.md) play them,
+the [ledger](versions.md#the-ledger), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and
+[`Versions`](versions.md) only: it asks for each group's episodes in the ledger, and [runners](rollouts.md) play them,
 wherever they are. The same loop runs with everything in one process and with the runners, the engines and the
 trainer on machines of their own.
 
 ```python
-await train(catalog, trainer, policies, policy="miner", channel="policy", directory=versions,
-            publish=recorder.publish, run="miner-1", groups=100)
+await train(catalog, trainer, versions, start=None, base="Qwen/Qwen3.5-9B", channel="policy",
+            directory=cache, publish=recorder.publish, run=run.id, groups=100)
 ```
 
 `rollout train PROFILE CATALOG [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
-the profile opens into a trainer, the policies, a way to publish versions and a runner that plays the run's episodes,
-names the policy to train and the channel that serves it, and sets `episodes_at_once`
-([deploying](../../guide/deploying.md)). The run is the one in its directory: its id is in the directory's `run.json`,
-and its name is chosen with `--name` and changed with `rollout rename` ([names](policies.md#ids-and-names)).
+the profile opens into a trainer, the versions, a way to publish versions and a runner that plays the run's
+episodes, says the version a new run starts from (`[trainer] start`, by default the base model) and the channel that
+serves what it trains, and sets `episodes_at_once` ([deploying](../../guide/deploying.md)). The run is the one in its
+directory: its id is in the directory's `run.json`, and its name is chosen with `--name` and changed with
+`rollout rename` ([runs](versions.md#runs)).
 
 ## The loop
 
-[`train`](../../guide/reference.md#train) trains one [policy](policies.md) on a catalog and serves it on one
-channel, which `publish` serves versions on. Unless a `binding` says otherwise, every model slot of the catalog's
+[`train`](../../guide/reference.md#train) trains a line of [versions](versions.md) on a catalog, from `start` (a
+version's id, of this run or another: a fork; the base model, named `base`, if None), and serves each version it makes
+on one channel, which `publish` serves versions on. Unless a `binding` says otherwise, every model slot of the catalog's
 program is served from that channel. When it starts it writes the run's [plan](rollouts.md#what-a-run-writes): the
 catalog's program and that binding.
 
@@ -38,26 +40,27 @@ catalog's program and that binding.
   (`skipped`); the others join a queue.
 - **A step is taken over the queue** once at least `groups_per_step` groups are in it (4 by default, so that no
   step leans toward one task), over every group queued by then, while play goes on; at the end of the run, over
-  whatever is left. The trainer's segment budget is spread over the groups. The step starts from the policy's
-  newest version; the version it makes is added to the policy and served on the channel. Tokens sampled under an
+  whatever is left. The trainer's segment budget is spread over the groups. The step starts from the newest
+  version the run made (its first, from `start`); the version it makes is appended under the run's fence and served
+  on the channel, and `made` is told of it (a profile's carried bookmark moves there). Tokens sampled under an
   older version are corrected for by the trainer's objective. One step is taken at a time.
-- **A step that fails** (`StepFailed`) is written down with its `error`, its groups are done with, and the policy
-  stays as it was. `FAILED_UPDATES` in a row stop the loop.
+- **A step that fails** (`StepFailed`) is written down with its `error`, its groups are done with, and the weights
+  stay as they were. `FAILED_UPDATES` in a row stop the loop.
 
 ## Dying and starting again
 
 The loop can be killed at any moment and started again. It keeps nothing it cannot read back: what it decides and
-what happens are appended to four tables in the [ledger](policies.md#the-ledger), and every action is one that can
+what happens are appended to four tables in the [ledger](versions.md#the-ledger), and every action is one that can
 be taken twice.
 
 | Table | Keyed by | Written | Holds |
 |---|---|---|---|
 | `runs/RUN/groups` | group | when a group is decided: runners play it from there | the row, the start every episode of the group is given, and how many episodes it asks for |
 | `runs/RUN/results` | group | when its last episode ends | how it went: a [`Result`](../../guide/reference.md#result) |
-| `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the policy, the version it starts from, the number of the one it will make, the batch (a blob) and how many segments it has, the seed, when it was decided |
+| `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the version it starts from (`parent`), the id of the one it will make (`makes`), the batch (a blob) and how many segments it has, the seed, when it was decided |
 | `runs/RUN/failures` | step | when a step's trainer fails | its error |
 
-A step's outcome is the version it makes, in the policy's table. A group is done with once its result trains on
+A step's outcome is the version it makes, in the ledger's `versions` table. A group is done with once its result trains on
 nothing, or the step that covers it has made its version or failed.
 
 | It died | Started again, it |
@@ -74,11 +77,12 @@ nothing, or the step that covers it has made its version or failed.
   unfinished step still needs. What a step trains on is the algorithm's batch of those episodes, the same each time
   it is computed.
 - **The version is the commit.** A step's files are kept in the blob store and then the version is appended to the
-  policy's table. A step that died before the append made nothing.
-- **Saves thin out.** Once a version is served, the policy is thinned to `retention` (`Retention()`: the weights and
-  trainer state of the newest two versions and of every twentieth; [policies](policies.md#versions)).
-- **One loop at a time.** Starting takes the run's fence and the policy's. A loop that was replaced, and does not
-  know it yet, has its next write refused.
+  `versions` table, under the id the step's decision chose. A step that died before the append made nothing.
+- **Saves thin out.** Once a version is served, the versions the run made are thinned to `retention` (`Retention()`:
+  the weights and trainer state of the newest two and of every twentieth by depth). Whatever is served, whatever any
+  run starts from, and whatever `kept` says (the bookmarked versions) keep theirs ([versions](versions.md#versions)).
+- **One loop at a time.** Starting takes the run's fence, which its versions are appended under too. A loop that was
+  replaced, and does not know it yet, has its next write refused.
 - **`groups` is how many groups this start plays**, those a stopped loop left unplayed among them; the loop ends
   once they are played and every one with something to train on has been in a step.
 
@@ -126,7 +130,7 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
 ## The trainer
 
 A [`Trainer`](../../guide/reference.md#trainer) takes a batch and makes new weights from given ones. It keeps
-nothing between steps that it cannot be given again, so any trainer can take any step of any policy.
+nothing between steps that it cannot be given again, so any trainer can take any step from any version.
 
 - **`budget`** ([`Budget`](../../guide/reference.md#budget)) is what the trainer can take: the longest segment, and
   how many segments a step can afford. It comes from the trainer's hardware, and nothing above the trainer chooses
@@ -136,7 +140,7 @@ nothing between steps that it cannot be given again, so any trainer can take any
   segments, starting from a [`Checkpoint`](../../guide/reference.md#checkpoint) (a version's files on this
   machine; none means the base model). It leaves the new weights in `into/weights`, as engines load them, and what
   a later step starts from (an optimizer's state, say) in `into/state`. It returns its metrics.
-- **`StepFailed`** means the step produced no weights: the policy is as it was, and a later step may succeed.
+- **`StepFailed`** means the step produced no weights: the weights are as they were, and a later step may succeed.
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
@@ -147,8 +151,8 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 ## The record
 
-When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the policy, the
-host, when, and what `train(started=…)` adds; `rollout train` adds the run's directory, the profile and, with
+When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the version it
+starts from (`from`), the host, when, and what `train(started=…)` adds; `rollout train` adds the run's directory, the profile and, with
 `--monitor URL`, where the monitor on that machine serves (`address`), as other machines reach it. A run started
 again appends another. That is how a [monitor](monitor.md) over a shared ledger finds every run, and where each keeps
 its episodes.
@@ -166,7 +170,7 @@ What was done with a group is read by joining: `trained(ledger, run)` gives, for
 and the version it made or why it failed (a [`Trained`](../../guide/reference.md#trained)); the version's record
 has the trainer's metrics. The report and the [monitor](monitor.md) read `results(ledger, run)` and that join.
 
-With the run's [episodes](rollouts.md#the-record) and the policy's [versions](policies.md), that is the whole run:
+With the run's [episodes](rollouts.md#the-record) and its [versions](versions.md), that is the whole run:
 every episode, what each step was trained on, and the weights and the trainer's state after it.
 
 ## Reporting
@@ -192,7 +196,7 @@ the loop over it. For tasks and agents alone, see [guide: testing](../../guide/t
 
 ## Imitation
 
-`rollout_train.imitation` trains a policy to do, without being told how, what it did when it was told. An
+`rollout_train.imitation` trains a model to do, without being told how, what it did when it was told. An
 environment that guides its agents reports, in each episode's result, the guidance its prompts carried, word for
 word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
 
@@ -203,13 +207,14 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   does.) A segment where no such stretch is found is left out.
 - **`examples(ledger, run, blobs, renderer, kinds=...)`** reads a run's episodes for those that carried guidance
   of those kinds and solved their task, and gives their segments, cut, each weighted 1.
-- **`imitate(policies, trainer, examples, ...)`** takes one step of a trainer whose objective is likelihood
-  ([LoRA trainer](../../implementations/rollout-lora.md)) from the policy's newest version, and commits the next.
+- **`imitate(versions, trainer, examples, fence=..., run=..., start=...)`** takes one step of a trainer whose
+  objective is likelihood ([LoRA trainer](../../implementations/rollout-lora.md)) from the newest version the run
+  made (else from `start`), and appends the version it makes as the run's (with no step).
 
 ```bash
-rollout imitate PROFILE [--without KIND ...] [--limit N]    # with the run stopped: it takes the policy's writer
+rollout imitate PROFILE [--without KIND ...] [--limit N]    # with the run stopped: it takes the run's fence
 ```
 
 The command reads the episodes of the run in the directory for guidance of the kinds given (`way` by default), steps
 the profile's trainer with `objective = "likelihood"`, and adds `imitated_episodes` to the version's metrics. Started
-again, the training loop serves the version imitation made and trains on from it.
+again, the training loop serves the version imitation made (the run's newest) and trains on from it.

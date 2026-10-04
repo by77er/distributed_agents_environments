@@ -28,7 +28,7 @@ PUBLIC_MODULES = [
     # libraries/rollout-train
     ("rollout_train.rollouts", "Episodes a run asks for in the ledger, claimed and played by runners, and read back."),
     ("rollout_train", "The training loop, the group algorithm, the curriculum, and what they ask of a trainer."),
-    ("rollout_train.inference", "Channels: policies being served, and what they ask of an engine."),
+    ("rollout_train.inference", "Channels: trainable models being served, and what they ask of an engine."),
     ("rollout_train.recorder", "The model endpoint for trainable channels: token-exact recording."),
     ("rollout_train.profile", "A deployment, described and opened."),
     ("rollout_train.monitor", "A live web page over every run of a ledger."),

@@ -22,7 +22,7 @@ async def started(ledger: Ledger, run: str, at: float, **where: JsonValue) -> No
     """A run that started at `at` and played one group, with its result written then."""
     fence = await ledger.take(scope(run))
     await ledger.append(
-        table(run, STARTS), str(fence.number), {"policy": run, "host": "here", "started": at, **where}, fence
+        table(run, STARTS), str(fence.number), {"from": None, "host": "here", "started": at, **where}, fence
     )
     await ledger.append(table(run, GROUPS), "1", {"task": "t1", "title": "one", "decided": at, "episodes": 1}, fence)
     result: JsonValue = {"time": at + 1, "rewards": [1.0], "solved": [True], "segments": 0, "skipped": "alone"}

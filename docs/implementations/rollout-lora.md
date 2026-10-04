@@ -56,8 +56,8 @@ A step is told where its files go (`into`) and leaves:
 | `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, KL estimate, gradient norm |
 
 The trainer keeps nothing of its own between steps: a step starts from the adapter and the optimizer's state of
-the version it is given, so any `LoraTrainer` can take any step of any policy. A run keeps each step's files as a
-[version](../libraries/rollout-train/policies.md) of the policy it trains.
+the version it is given, so any `LoraTrainer` can take any step from any version. A run keeps each step's files as a
+[version](../libraries/rollout-train/versions.md), named by its id, whose parent is the version the step began from.
 
 ## A fresh process per step
 

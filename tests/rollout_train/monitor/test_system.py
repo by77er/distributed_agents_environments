@@ -1,5 +1,6 @@
 """Where a run stands, read from its ledger and its directory: the monitor's system view."""
 
+import itertools
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -10,13 +11,14 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import Budget, Checkpoint, FileLedger, Policies, Step, Weighted, train
+from rollout_train import Budget, Checkpoint, FileLedger, Step, Versions, Weighted, train
 from rollout_train.layout import BLOBS, FEED, LEDGER
 from rollout_train.ledger import Ledger
 from rollout_train.monitor import FeedReader, RunFeed, System
 from rollout_train.monitor.system import DONE, ENDED, PLAYING, WAITING
 from rollout_train.record import GROUPS, RESULTS, STARTS, STEPS, scope, table
 from rollout_train.recorder import Recorder
+from rollout_train.registry import registry_of
 from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
 from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPTED, runner_scope
@@ -50,17 +52,22 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
     blobs = FileBlobStore(tmp_path / BLOBS)
     ledger = FileLedger(tmp_path / LEDGER)
-    policies = Policies(ledger, blobs)
+    versions = Versions(ledger, blobs)
     local = LocalRunner(recorder=recorder, hooks=[feed])
     runner = EpisodeRunner("here", ledger, local, recorder, blobs, places=4, hooks=[feed], every=0.05)
     async with playing(runner):
         await train(
-            Words(), Trains(), policies, policy="words", channel="policy", directory=tmp_path / "versions",
+            Words(), Trains(), versions, base="tiny", channel="policy", directory=tmp_path / "versions",
             publish=recorder.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
             started={"directory": str(tmp_path)},
         )  # fmt: skip
     await local.close()
     feed.close()
+    registry = registry_of(ledger)
+    assert registry is not None
+    head = await versions.head("train")
+    assert head is not None
+    await registry.bookmark("best", head.id)
 
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
@@ -88,7 +95,8 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     (run,) = system["runs"]
     assert run["run"] == "train" and run["fence"] == 1 and run["decided"] == 3 and run["open"] == []
     # The loop wrote down where it ran; its directory is the one opened, whose feed is read.
-    assert run["starts"] == 1 and run["policy"] == "words" and run["host"] and run["started"] <= system["at"]
+    assert run["starts"] == 1 and run["from"] is None and run["host"] and run["started"] <= system["at"]
+    assert run["name"] == "train"  # (no registry entry: called by its id)
     assert run["episodes_at"] == "here" and run["state"] == "running"
     assert run["played"] == {**run["played"], "episodes": 12, "outcomes": {"completed": 12}, "playing": 0}
     assert run["played"]["sampled"] > 0
@@ -101,21 +109,23 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert sorted([*members, *run["next"]]) == [1, 2, 3]
     # (groups play at once: a step covers every group queued when it begins, one or more)
     assert sorted(number for step in run["steps"] for number in step["groups"]) == [line["group"] for line in trained]
-    assert all(line["adapter"] == f"words@{line['step']}" for line in trained)
+    made = {step["step"]: step["makes"] for step in run["steps"]}
+    assert all(line["adapter"] == made[line["step"]] for line in trained)
 
-    (policy,) = system["policies"]
-    assert policy["policy"] == "words" and policy["fence"] == 1 and policy["head"] == f"words@{len(run['steps'])}"
-    assert [version["name"] for version in policy["versions"]] == [step["makes"] for step in run["steps"]]
-    first = policy["versions"][0]
-    assert (
-        first["parent"] is None and first["weights"]["files"] == 1 and first["state"]["files"] == 1 and first["batch"]
-    )
+    shown = system["versions"]
+    assert [version["id"] for version in shown] == [step["makes"] for step in run["steps"]]
+    first, last = shown[0], shown[-1]
+    assert first["parents"] == [] and first["base"] == "tiny" and first["depth"] == 1 and first["run"] == "train"
+    assert first["weights"]["files"] == 1 and first["state"]["files"] == 1 and first["batch"]
+    assert all(each["parents"] == [before["id"]] for before, each in itertools.pairwise(shown))
+    assert last["id"] == head.id and last["depth"] == len(shown) and last["bookmarks"] == ["best"]
+    assert system["bookmarks"] == {"best": head.id} and last["short"] and head.id.startswith(last["short"])
 
     (runner_seen,) = system["runners"]
     assert runner_seen == {**runner_seen, "runner": "here", "fence": 1, "playing": [], "claims": 12}
     (channel,) = system["channels"]
-    assert channel["channel"] == "policy" and channel["adapter"] == policy["head"]
-    assert system["ledger"]["fences"] == {scope("train"): 1, "policies/words": 1, runner_scope("here"): 1}
+    assert channel["channel"] == "policy" and channel["adapter"] == head.id
+    assert system["ledger"]["fences"] == {scope("train"): 1, runner_scope("here"): 1}
     assert system["ledger"]["tables"][table("train", GROUPS)] == 3
     assert system["kept"]["versions"] > 0 and system["kept"]["episodes"] > 0
     assert system["machine"]["now"]["disk"]["total"] > 0 and system["written"] <= system["at"]
@@ -133,9 +143,8 @@ async def ended(ledger: Ledger, run: str, group: int, number: int, run_id: str, 
 
 async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_it_at(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / LEDGER)
-    policies = Policies(ledger, FileBlobStore(tmp_path / BLOBS))
+    versions = Versions(ledger, FileBlobStore(tmp_path / BLOBS))
     fence = await ledger.take(scope("train"))
-    writer = await policies.writer("miner")
     feed = RunFeed(tmp_path / FEED)
     system = System(tmp_path, FeedReader(tmp_path / FEED))
 
@@ -148,7 +157,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
         assert found is not None
         return found
 
-    start: JsonValue = {"policy": "miner", "host": "here", "started": 5.0, "directory": str(tmp_path)}
+    start: JsonValue = {"from": None, "host": "here", "started": 5.0, "directory": str(tmp_path)}
     await ledger.append(table("train", STARTS), str(fence.number), start, fence)
     decided: JsonValue = {"task": "t003", "title": "chests", "decided": 5.0, "episodes": 2}
     await ledger.append(table("train", GROUPS), "1", decided, fence)
@@ -195,9 +204,8 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
     step: dict[str, JsonValue] = {
         "groups": [1],
-        "policy": "miner",
         "parent": None,
-        "number": 1,
+        "makes": "minerone",
         "segments": 8,
         "batch": {"uri": "…"},
         "seed": 1,
@@ -208,7 +216,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     assert stepping["step"] == {
         **{key: value for key, value in step.items() if key != "batch"},
         "step": 1,
-        "makes": "miner@1",
+        "makes": "minerone",
         "state": "stepping",
     }
     (run,) = (await system.snapshot())["runs"]
@@ -217,16 +225,16 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")
-    await policies.add(writer, "miner", 1, weights=weights)  # the step's version: the group is done with
+    await versions.add(fence, "minerone", weights=weights, run="train", step=1)  # the step's version: it is done
     (run,) = (await system.snapshot())["runs"]
     (done,) = run["done"]
     assert run["open"] == [] and {key: done[key] for key in ("group", "task", "failures", "adapter")} == {
         "group": 1,
         "task": "t003",
         "failures": ["x"],
-        "adapter": "miner@1",
+        "adapter": "minerone",
     }
-    assert run["steps"] == [{**run["steps"][0], "step": 1, "groups": [1], "state": "committed", "makes": "miner@1"}]
+    assert run["steps"] == [{**run["steps"][0], "step": 1, "groups": [1], "state": "committed", "makes": "minerone"}]
     assert [(each["run_id"], each["interrupted"]) for each in done["episodes"]] == [
         ("r_one", False),
         ("r_cut", True),
@@ -237,7 +245,8 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
 async def test_a_directory_that_is_no_run_has_nothing_to_show_and_is_left_as_it_is(tmp_path: Path) -> None:
     system = await System(tmp_path, FeedReader(tmp_path / FEED)).snapshot()
-    assert system["runs"] == system["policies"] == system["runners"] == system["channels"] == []
+    assert system["runs"] == system["versions"] == system["runners"] == system["channels"] == []
+    assert system["bookmarks"] == {}
     assert system["written"] is None and system["processes"] is None
     assert not (tmp_path / LEDGER).exists()  # (reading makes no ledger)
 

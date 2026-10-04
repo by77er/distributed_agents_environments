@@ -25,13 +25,13 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import Blobs
 from rollout_train.ledger import Fence, Ledger
-from rollout_train.policies import Policies, Version
 from rollout_train.record import table
 from rollout_train.recorder.recorder import Segment, Span
 from rollout_train.recorder.renderers import Renderer
 from rollout_train.rollouts.episodes import Episode, Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, Trainer, Weighted
+from rollout_train.versions import Version, Versions, new_id
 
 GUIDANCE = "guidance"
 """The entry of an episode's result that holds the guidance its prompts carried: by kind, word for word."""
@@ -127,43 +127,47 @@ async def examples(
 
 
 async def imitate(
-    policies: Policies,
+    versions: Versions,
     trainer: Trainer,
     taught: Examples,
     *,
     fence: Fence,
-    policy: str,
+    run: str,
+    start: str | None,
+    base: str | None = None,
     directory: Path,
     limit: int | None = None,
     seed: int = 0,
 ) -> Version:
-    """One supervised step of `trainer` (whose objective is likelihood) on `taught`, from `policy`'s newest version,
-    committed as its next. `limit` takes that many segments at random. `directory` holds the versions' files on
-    this machine. `fence` is the policy's writer's."""
+    """One supervised step of `trainer` (whose objective is likelihood) on `taught`, from the newest version `run`
+    made (else from `start`, a version's id, or the base model, named `base`), made as the run's next: started again,
+    the run trains on from it. `limit` takes that many segments at random. `directory` holds the versions' files on this
+    machine. `fence` is the run's."""
     chosen = list(taught.segments)
     if limit is not None and len(chosen) > limit:
         chosen = random.Random(seed).sample(chosen, limit)
-    head = await policies.head(policy)
+    head = await versions.head(run) or (await versions.version(start) if start else None)
     parent: Checkpoint | None = None
     if head is not None:
-        here = directory / head.name
+        here = directory / head.id
         if head.weights is None:
-            raise ValueError(f"{head.name} was released: its weights are gone")
-        weights = await policies.files(head.weights, here / WEIGHTS)
-        parent = Checkpoint(weights, await policies.files(head.state, here / STATE) if head.state else None)
-    number = (head.number if head else 0) + 1
-    into = directory / f"{policy}@{number}"
+            raise ValueError(f"{head.id} was released: its weights are gone")
+        weights = await versions.files(head.weights, here / WEIGHTS)
+        parent = Checkpoint(weights, await versions.files(head.state, here / STATE) if head.state else None)
+    makes = new_id()
+    into = directory / makes
     trained: list[JsonValue] = [[weighted.source, weighted.advantage] for weighted in chosen]
-    batch = await policies.blobs.put(json.dumps(trained).encode(), "application/json")
+    batch = await versions.blobs.put(json.dumps(trained).encode(), "application/json")
     step = await trainer.step(chosen, seed=seed, parent=parent, into=into)
     metrics = {**step.metrics, "imitated_episodes": float(taught.episodes)}
-    return await policies.add(
+    return await versions.add(
         fence,
-        policy,
-        number,
+        makes,
         weights=into / WEIGHTS,
+        run=run,
+        base=base,
         state=into / STATE if await asyncio.to_thread((into / STATE).exists) else None,
-        parent=head.name if head else None,
+        parents=[head.id] if head else [],
         batch=batch,
         metrics=metrics,
     )

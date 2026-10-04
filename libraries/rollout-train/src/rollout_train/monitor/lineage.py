@@ -1,19 +1,20 @@
-"""The policies as a graph, with what trains, serves and evaluates them: what the monitor's policies view draws.
+"""The versions as a graph, with what trains, serves and evaluates them: what the monitor's lineage view draws.
 
-A policy is a line of versions (`rollout_train.policies`). Each version was made by a step of some run: a run's
-`steps` table names the version each step makes. A version whose parent is another policy's is a fork. Beside the
-graph stand the trainers that take the steps, the inference workers and what each serves, and evaluations.
+Every version grows from a base model, along its parents (`rollout_train.versions`): its first parent is what it was
+trained from, any others what it learned from beside (a distillation's teachers). A version with no parent was
+trained from its base model, which is the root its line hangs from. Each version was made by a step of some run, and
+says which. A run that starts from another run's version forks there. Beside the graph stand the trainers that take
+the steps, the inference workers and what each serves, and evaluations.
 
-What a ledger has today is read as it is: the policies' versions, the runs' steps (which stand for their trainer's
-queue: a run takes one step at a time) and the `published` notes in the feed (which stand for what the run's engines
+What a ledger has today is read as it is: the versions, the runs' steps (which stand for their trainer's queue: a run
+takes one step at a time), bookmarks, and the `published` notes in the feed (which stand for what the run's engines
 serve). The other tables read here are proposed in docs/research/policy-dag.md, and nothing appends them yet:
 
 - `runs/RUN/plan`, `runs/RUN/published`: what a run was set up to do (a distillation's teachers, whose samples it
   trains on, its objective), and the version a request for the run's latest goes to, from when;
 - `trainers/NAME/registered`, `trainers/NAME/queue`, `trainers/NAME/taken`: a trainer, the steps queued for it, and
   when it began each;
-- `policies/NAME/definition`, `policies/NAME/resharding`, `policies/NAME/resharded`: what a policy's weights are,
-  and a version's files rewritten as the engines load them;
+- `versions/resharding`, `versions/resharded`: a full-weight version's files rewritten as the engines load them;
 - `workers/NAME/registered`, `workers/NAME/loaded`, `workers/NAME/unloaded`: an inference worker (what it holds, its
   adapter slots), and each version it loaded and let go;
 - `evaluations/SUITE/starts`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`: a fixed suite
@@ -34,16 +35,24 @@ from typing import Any, cast
 from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.ledger import between
-from rollout_train.policies import Version, named, parsed
+from rollout_train.versions import RELEASED, VERSIONS, Version, short
 
 SAMPLE = Path(__file__).with_name("sample-lineage.json")
-"""A fixture of the proposed tables: two more LoRA policies sharing a trainer, a full-weight one with a trainer of its
-own, two distillations (off and on policy), a queue, resharding and a roll-out in progress, inference workers with
-requests waiting, an evaluation suite."""
+"""A fixture of the proposed tables: two more LoRA runs sharing a trainer, a full-weight run with a trainer of its
+own, two distillations (one on the student's own samples, one on its teachers'), a queue, resharding and a roll-out in
+progress, inference workers with requests waiting, an evaluation suite."""
 TIMES = ("made", "decided", "at", "began", "released", "time")
 """Fields that say when: in the fixture, written as seconds before now (negative), so it looks current when shown."""
 
 ON_POLICY, OFF_POLICY, MIXED = "on-policy", "off-policy", "mixed"
+SAYS = {
+    ON_POLICY: "on-policy: the student samples, and its teachers score every token it sampled",
+    OFF_POLICY: "off-policy: the student is trained on its teachers' samples",
+    MIXED: "mixed: the student is trained on its own samples and on its teachers'",
+}
+"""What a distillation's mode means, in words, for whoever reads the graph."""
+STUDENT = "student"
+"""Whose samples a distillation trains on: the student's own (`data.sampled_by`), else its teachers' by version."""
 QUEUED, TAKING, MADE, FAILED = "queued", "taking", "made", "failed"
 WRITTEN, RESHARDING, RESHARDED, ROLLING, SERVING, SUPERSEDED = (
     "written",
@@ -58,26 +67,36 @@ they need to be), loaded by workers one by one once it is its run's latest (or a
 let go of."""
 
 _VERSION = TypeAdapter(Version)
-_POLICIES, _RUNS, _TRAINERS, _WORKERS, _EVALUATIONS = "policies/", "runs/", "trainers/", "workers/", "evaluations/"
+_RUNS, _TRAINERS, _WORKERS, _EVALUATIONS = "runs/", "trainers/", "workers/", "evaluations/"
 
 
 def lineage(
     tables: Mapping[str, Mapping[str, JsonValue]],
     notes: Sequence[Mapping[str, Any]] = (),
     *,
+    names: Mapping[str, Any] | None = None,
     sample: bool = False,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """The graph a ledger's tables (by name) describe, with the feed's notes (`notes`). With `sample`, the
-    fixture's tables and notes are read beside them (a table of the ledger's own is never replaced)."""
+    """The graph a ledger's tables (by name) describe, with the feed's notes (`notes`) and the registry's `names`
+    (`rollout_train.registry.names`: the runs' names and the bookmarks). With `sample`, the fixture's tables, notes
+    and names are read beside them (a table or record of the ledger's own is never replaced); what is read from it is
+    marked `sample`."""
     now = time.time() if now is None else now
+    names = dict(names or {"runs": {}, "bookmarks": {}})
     sampled: set[str] = set()
     if sample:
         fixture: dict[str, Any] = _moved(json.loads(SAMPLE.read_text()), now)
-        sampled = set(fixture["tables"]) - set(tables)
+        own = set(tables.get(VERSIONS, {}))
+        sampled = (set(fixture["tables"]) - set(tables)) | {
+            f"{VERSIONS}/{key}" for key in fixture["tables"][VERSIONS] if key not in own
+        }
         tables = {**fixture["tables"], **tables}
+        for name in (VERSIONS, RELEASED):
+            tables[name] = {**fixture["tables"].get(name, {}), **tables.get(name, {})}
         notes = [*notes, *fixture["notes"]]
-    return _Reading(tables, sampled, notes, now).payload()
+        names = {kind: {**fixture["names"].get(kind, {}), **names.get(kind, {})} for kind in ("runs", "bookmarks")}
+    return _Reading(tables, sampled, notes, names, now).payload()
 
 
 def _moved(value: Any, now: float) -> Any:
@@ -94,25 +113,30 @@ def _moved(value: Any, now: float) -> Any:
     return value
 
 
-def mode(student: str, sampled_by: Iterable[str]) -> str:
-    """Whether a distillation is on policy or off it, by whose samples it trains on (policies or versions, by name):
-    the student's own, the others', or both."""
-    policies = {name.rpartition("@")[0] if "@" in name else name for name in sampled_by}
-    if policies == {student}:
+def mode(sampled_by: Iterable[str]) -> str:
+    """Whether a distillation is on policy or off it, by whose samples it trains on: the student's own (`student`),
+    its teachers' (by version), or both."""
+    whose = set(sampled_by) or {STUDENT}
+    if whose == {STUDENT}:
         return ON_POLICY
-    return MIXED if student in policies else OFF_POLICY
+    return MIXED if STUDENT in whose else OFF_POLICY
 
 
 class _Reading:
     def __init__(
-        self, tables: Mapping[str, Mapping[str, JsonValue]], sampled: set[str], notes: Sequence[Any], now: float
+        self,
+        tables: Mapping[str, Mapping[str, JsonValue]],
+        sampled: set[str],
+        notes: Sequence[Any],
+        names: Mapping[str, Any],
+        now: float,
     ) -> None:
-        self.tables, self.sampled, self.now = tables, sampled, now
-        self.published = [note for note in notes if note.get("kind") == "published" and "@" in str(note.get("adapter"))]
+        self.tables, self.sampled, self.names, self.now = tables, sampled, names, now
+        self.published = [note for note in notes if note.get("kind") == "published" and note.get("adapter")]
         self.routing = [note for note in notes if note.get("kind") == "routing"]
 
     def named(self, before: str, after: str) -> list[str]:
-        """What the tables' names hold between `before` and `after`: which policies, runs, trainers have them."""
+        """What the tables' names hold between `before` and `after`: which runs, trainers, workers have them."""
         return sorted({each for table in self.tables if (each := between(table, before, after))})
 
     def read(self, table: str) -> dict[str, Any]:
@@ -123,21 +147,22 @@ class _Reading:
         return cast(dict[str, Any], self.tables.get(table, {}).get(key) or {})
 
     def payload(self) -> dict[str, Any]:
-        versions = self.versions()
-        made = {version.name: version for line in versions.values() for version in line}
+        made = self.versions()
         runs = self.runs(made)
-        by = {name: run for run in runs for name in run["versions"]}
         loads = self.loads()
         waiting: dict[str, int] = self.routing[-1]["waiting"] if self.routing else {}
-        policies = [self.policy(policy, line, by, runs, loads, waiting) for policy, line in versions.items()]
-        edges, outside = self.edges(policies, runs, made)
+        versions = self.shown(made, runs, loads, waiting)
+        edges, outside = self.edges(made, runs)
+        bases = sorted({version.base or "the base model" for version in made.values() if not version.parents})
         return {
             "now": round(self.now, 1),
             "sample": bool(self.sampled),
-            "policies": policies,
+            "bases": bases,
+            "versions": versions,
             "outside": outside,
             "runs": runs,
             "edges": edges,
+            "bookmarks": dict(self.names.get("bookmarks", {})),
             "trainers": self.trainers(runs, made),
             "workers": self.workers(loads),
             "routing": {
@@ -147,31 +172,32 @@ class _Reading:
             "evaluations": self.evaluations(),
         }
 
-    def versions(self) -> dict[str, list[Version]]:
-        lines: dict[str, list[Version]] = {}
-        for policy in self.named(_POLICIES, "/versions"):
-            released = self.read(f"{_POLICIES}{policy}/released")
-            lines[policy] = [
-                replace(version, weights=None, state=None, released=float(released[key]["at"]))
-                if key in released
-                else version
-                for key, record in self.read(f"{_POLICIES}{policy}/versions").items()
-                if (version := _VERSION.validate_python(record))
-            ]
-        return lines
+    def versions(self) -> dict[str, Version]:
+        """Every version, by id, oldest first."""
+        released = self.read(RELEASED)
+        return {
+            key: replace(version, weights=None, state=None, released=float(released[key]["at"]))
+            if key in released
+            else version
+            for key, record in self.read(VERSIONS).items()
+            if (version := _VERSION.validate_python(record))
+        }
 
     def runs(self, made: Mapping[str, Version]) -> list[dict[str, Any]]:
         """Every run that decided steps: what it was set up to do (a training run, unless its plan says otherwise),
-        its steps, the versions they made, and its latest (what a request for the run's latest goes to)."""
+        what it started from, its steps, the versions they made, and its latest (what a request for the run's latest
+        goes to)."""
         runs: list[dict[str, Any]] = []
+        called: Mapping[str, str] = self.names.get("runs", {})
         for run in self.named(_RUNS, "/steps"):
             plan = self.record(f"{_RUNS}{run}/plan", "plan")
             failures = self.read(f"{_RUNS}{run}/failures")
             steps = sorted(self.read(f"{_RUNS}{run}/steps").items(), key=lambda item: int(item[0]))
-            policy = str(plan.get("student") or next((step.get("policy") for _, step in steps), "") or "")
+            starts = self.read(f"{_RUNS}{run}/starts")
+            begun = starts[max(starts, key=int)].get("from") if starts else None
             listed: list[dict[str, Any]] = []
             for key, step in steps:
-                makes = named(str(step.get("policy") or policy), int(step["number"]))
+                makes = str(step.get("makes"))
                 listed.append(
                     {
                         "step": int(key),
@@ -188,18 +214,20 @@ class _Reading:
             data: dict[str, Any] = plan.get("data") or {}
             published = self.read(f"{_RUNS}{run}/published")
             latest = max(published, key=lambda name: float(published[name]["at"])) if published else None
-            fed = [note for note in self.published if note.get("job") == run]
+            fed = [note for note in self.published if note.get("run") == run]
+            distilled = mode(data.get("sampled_by") or []) if kind == "distill" else None
             runs.append(
                 {
                     "run": run,
+                    "name": called.get(run, run),
                     "kind": kind,
-                    "policy": policy,
-                    "from": plan.get("from"),
+                    "from": plan.get("from") or begun or (listed[0]["parent"] if listed else None),
                     "teachers": [str(each) for each in cast(list[Any], plan.get("teachers") or [])],
                     "data": data,
                     "objective": plan.get("objective"),
                     "evaluate": plan.get("evaluate"),
-                    "mode": mode(policy, data.get("sampled_by") or [policy]) if kind == "distill" else None,
+                    "mode": distilled,
+                    "says": SAYS[distilled] if distilled else None,
                     "steps": listed,
                     "versions": [step["makes"] for step in listed if step["state"] == MADE],
                     "latest": latest or (str(fed[-1]["adapter"]) if fed else None),
@@ -223,93 +251,90 @@ class _Reading:
                 changes.append((float(covered), -1))
         return _series(changes)
 
-    def policy(
+    def shown(
         self,
-        policy: str,
-        line: list[Version],
-        by: Mapping[str, dict[str, Any]],
+        made: Mapping[str, Version],
         runs: list[dict[str, Any]],
         loads: Mapping[str, dict[str, dict[str, Any]]],
         waiting: Mapping[str, int],
-    ) -> dict[str, Any]:
-        definition = self.record(f"{_POLICIES}{policy}/definition", "definition") or None
-        lora = definition is None or definition.get("weights") == "lora"
-        latests = sorted(
-            (parsed(run["latest"])[1], run["run"]) for run in runs if run["latest"] in {each.name for each in line}
-        )
-        latest = {named(policy, latests[-1][0]): latests[-1][1]} if latests else {}
-        """The newest version a request for some run's latest goes to (several runs may go on with one policy)."""
-        versions: list[dict[str, Any]] = []
-        for version in line:
-            older = {
+    ) -> list[dict[str, Any]]:
+        """Every version as the graph shows it: where it came from (its parents, its base, the run and step that made
+        it), the bookmarks that name it, and where it is on its way to the engines."""
+        shorter = short(made)
+        by = {run["run"]: run for run in runs}
+        marks: dict[str, list[str]] = {}
+        for mark, version in self.names.get("bookmarks", {}).items():
+            marks.setdefault(str(version), []).append(mark)
+        latest = {run["latest"]: run["run"] for run in runs if run["latest"]}
+        """The version a request for each run's latest goes to."""
+        shown: list[dict[str, Any]] = []
+        for version in made.values():
+            run = by.get(version.run or "")
+            older = {  # workers serving an older version of the same run in this one's place
                 worker
-                for each in line
-                if each.number < version.number
-                for worker, span in loads.get(each.name, {}).items()
+                for each in made.values()
+                if each.run == version.run and each.depth < version.depth
+                for worker, span in loads.get(each.id, {}).items()
                 if span["until"] is None
             }
-            run = by.get(version.name)
-            step = next((each for each in run["steps"] if each["makes"] == version.name), None) if run else None
-            key = str(version.number)
+            full = (self.record(f"{_RUNS}{version.run}/plan", "plan").get("weights") or "lora") == "full"
             life: dict[str, Any] = {
-                "reshard": not lora,
-                "resharding": self.record(f"{_POLICIES}{policy}/resharding", key).get("at"),
-                "resharded": self.record(f"{_POLICIES}{policy}/resharded", key).get("at"),
-                "latest_of": latest.get(version.name),
-                "workers": loads.get(version.name, {}),
-                "waiting": waiting.get(version.name, 0),
+                "reshard": full,
+                "resharding": self.record("versions/resharding", version.id).get("at"),
+                "resharded": self.record("versions/resharded", version.id).get("at"),
+                "latest_of": latest.get(version.id),
+                "workers": loads.get(version.id, {}),
+                "waiting": waiting.get(version.id, 0),
             }
             life["state"] = _state(life, older)
-            versions.append(
+            shown.append(
                 {
-                    "name": version.name,
-                    "number": version.number,
-                    "parent": version.parent,
+                    "id": version.id,
+                    "short": shorter[version.id],
+                    "depth": version.depth,
+                    "parents": list(version.parents),
+                    "base": version.base,
                     "made": version.made,
                     "kept": version.weights is not None,
                     "released": version.released,
+                    "bookmarks": sorted(marks.get(version.id, [])),
                     "metrics": {
                         name: version.metrics[name] for name in ("kl_moved", "loss") if name in version.metrics
                     },
-                    "by": {"run": run["run"], "kind": run["kind"], "step": step["step"] if step else None}
-                    if run
+                    "by": {
+                        "run": version.run,
+                        "name": run["name"] if run else self.names.get("runs", {}).get(version.run, version.run),
+                        "kind": run["kind"] if run else None,
+                        "step": version.step,
+                    }
+                    if version.run
                     else None,
                     "life": life,
+                    "sample": f"{VERSIONS}/{version.id}" in self.sampled,
                 }
             )
-        return {
-            "policy": policy,
-            "definition": definition,
-            "fork": line[0].parent if line and line[0].parent and parsed(line[0].parent)[0] != policy else None,
-            "head": line[-1].name if line else None,
-            "versions": versions,
-            "sample": f"{_POLICIES}{policy}/versions" in self.sampled,
-        }
+        return shown
 
-    def edges(
-        self, policies: list[dict[str, Any]], runs: list[dict[str, Any]], made: Mapping[str, Version]
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Forks (a version whose parent is another policy's), and each distillation's teachers and the version its
-        student starts from; with the versions they name that this ledger does not have."""
+    def edges(self, made: Mapping[str, Version], runs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+        """What each version grew from: its first parent (`trained`), or its base model (`base`, from `base:MODEL`);
+        its other parents (`learned`); and each distillation's teachers and what its student starts from, each with
+        what the distillation's mode means. With the versions they name that this ledger does not have."""
         edges: list[dict[str, Any]] = []
-        distilled = {name: run for run in runs if run["kind"] == "distill" for name in run["versions"]}
-        for policy in policies:
-            for version in policy["versions"]:
-                parent = version["parent"]
-                if not parent or parsed(parent)[0] == policy["policy"]:
-                    continue
-                run = distilled.get(version["name"])
-                if run is None or run["from"] != parent:  # (a distillation's start is drawn into the distillation)
-                    edges.append({"kind": "fork", "from": parent, "to": version["name"]})
+        for version in made.values():
+            if not version.parents:
+                edges.append({"kind": "base", "from": f"base:{version.base or 'the base model'}", "to": version.id})
+            for index, parent in enumerate(version.parents):
+                edges.append({"kind": "trained" if index == 0 else "learned", "from": parent, "to": version.id})
         for run in runs:
             if run["kind"] != "distill":
                 continue
-            edges += [
-                {"kind": "teach", "from": teacher, "to": run["run"], "mode": run["mode"]} for teacher in run["teachers"]
-            ]
+            said = {"mode": run["mode"], "says": run["says"]}
+            edges += [{"kind": "teach", "from": teacher, "to": run["run"], **said} for teacher in run["teachers"]]
             if run["from"]:
-                edges.append({"kind": "start", "from": run["from"], "to": run["run"], "mode": run["mode"]})
-        outside = sorted({edge["from"] for edge in edges if edge["from"] not in made})
+                edges.append({"kind": "start", "from": run["from"], "to": run["run"], **said})
+        outside = sorted(
+            {edge["from"] for edge in edges if edge["from"] not in made and not edge["from"].startswith("base:")}
+        )
         return edges, outside
 
     def loads(self) -> dict[str, dict[str, dict[str, Any]]]:
@@ -324,7 +349,7 @@ class _Reading:
                 loads.setdefault(version, {})[worker] = {"since": record["at"], "until": until}
         by_run: dict[str, list[Mapping[str, Any]]] = {}
         for note in self.published:
-            by_run.setdefault(f"{note.get('job') or note['channel']} engines", []).append(note)
+            by_run.setdefault(f"{note.get('run') or note['channel']} engines", []).append(note)
         for worker, notes in by_run.items():
             for index, note in enumerate(notes):
                 until = notes[index + 1]["at"] if index + 1 < len(notes) else None
@@ -332,7 +357,7 @@ class _Reading:
         return loads
 
     def workers(self, loads: Mapping[str, dict[str, dict[str, Any]]]) -> list[dict[str, Any]]:
-        """Each inference worker: what it holds (a base, with slots for adapters, or one full-weight policy), and the
+        """Each inference worker: what it holds (a base, with slots for adapters, or one full-weight model), and the
         versions it serves now."""
         serving: dict[str, list[str]] = {}
         for version, spans in loads.items():
@@ -378,11 +403,10 @@ class _Reading:
         for run in runs:
             if run["kind"] != "train" or any(step["trainer"] for step in run["steps"]):
                 continue
-            line = [version for name, version in made.items() if name in run["versions"]]
+            line = [version for id, version in made.items() if id in run["versions"]]
             queue = [
                 self.entry(
-                    {"run": run["run"], "step": step["step"], "policy": run["policy"], "makes": step["makes"]}
-                    | {"at": step["decided"]},
+                    {"run": run["run"], "step": step["step"], "makes": step["makes"]} | {"at": step["decided"]},
                     step["decided"],
                     runs,
                     made,
@@ -392,10 +416,10 @@ class _Reading:
             ]
             trainers.append(
                 {
-                    "trainer": f"{run['run']} (the run's own)",
+                    "trainer": f"{run['name']} (the run's own)",
                     "weights": "lora",  # (a channel serves LoRA adapters only)
-                    "base": None,
-                    "policies": [run["policy"]],
+                    "base": next((version.base for version in line if version.base), None),
+                    "runs": [run["run"]],
                     "colocated": any("waited_for_requests_seconds" in version.metrics for version in line),
                     "implicit": True,
                     "queue": queue,
@@ -417,7 +441,6 @@ class _Reading:
         return {
             "run": entry["run"],
             "step": int(entry["step"]),
-            "policy": entry.get("policy"),
             "makes": entry["makes"],
             "queued": entry.get("at"),
             "began": began,
@@ -447,7 +470,7 @@ class _Reading:
                     {
                         "subject": subject,
                         "kind": about.get("kind", "version"),
-                        "version": about.get("version") or (subject if "@" in subject else None),
+                        "version": about.get("version"),
                         "model": about.get("model"),
                         "episodes": int(about.get("episodes") or 1),
                         "asked_by": about.get("asked_by"),
@@ -474,7 +497,7 @@ class _Reading:
 
 def _state(life: Mapping[str, Any], older: set[str]) -> str:
     """Where a version is on its way to the engines (`WRITTEN` to `SERVING`, or `SUPERSEDED`). A run's latest rolls
-    out until no worker serves an older version of its policy in its place (`older`: those that serve one now); any
+    out until no worker serves an older version of that run in its place (`older`: those that serve one now); any
     other version serves where requests name it exactly."""
     workers: Mapping[str, Any] = life["workers"]
     now = {worker for worker, span in workers.items() if span["until"] is None}

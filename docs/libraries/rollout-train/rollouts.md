@@ -3,7 +3,7 @@
 Code: `rollout_train.rollouts` · See [episodes](episodes.md), [training](training.md),
 [API reference](../../guide/reference.md#rollout_trainrollouts)
 
-A run asks for episodes in the [ledger](policies.md#the-ledger), and runners play them. The run decides what to play,
+A run asks for episodes in the [ledger](versions.md#the-ledger), and runners play them. The run decides what to play,
 how often and how to group it; a runner knows no algorithm, and the run never learns where its episodes were played.
 Several runners, on one machine or many, share the work of every run whose ledger they reach: which machine plays a
 group's episodes is only a matter of where runners are.

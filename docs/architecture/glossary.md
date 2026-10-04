@@ -38,7 +38,7 @@ of segments.
 |---|---|
 | **Catalog / row** | What an environment offers to train on, easiest first / one situation of it, of which a start is drawn for each group. See [three ways in](../guide/perspectives.md#building-an-environment). |
 | **Training run** | One training loop (`rollout_train.train`, `rollout train`) over a catalog, kept in one directory and in the ledger: its groups, their results and its steps. See [training](../libraries/rollout-train/training.md). |
-| **Step** | One call of the trainer, over the groups queued with something to train on (at least `groups_per_step` of them, except at the end of the run); it makes one version of the policy. |
+| **Step** | One call of the trainer, over the groups queued with something to train on (at least `groups_per_step` of them, except at the end of the run); it makes one version, from the one the step before made. |
 | **Group** | One start of one row, played as several episodes (its record says how many: `group_size`) that are compared with each other. Its episodes are numbered from 1 within it and carry the labels `run`, `group` and `episode`; the rest of it is in its record. |
 | **Episode** | One run of a program, as training sees it once it has ended: labels, outcome, result, and a trajectory per model slot. See [episodes](../libraries/rollout-train/episodes.md). |
 | **Rollout** | One model slot's part of an episode as it plays: every turn of one agent. Each rollout becomes a trajectory. |
@@ -49,12 +49,16 @@ of segments.
 | **Plan** | How a training run's episodes are played: its program and its binding, in the run's `plans` table. |
 | **Episode runner** | Claims the episodes runs ask for in the ledger, plays them on a runner and records them, at most as many at once as it has places. Several, on one machine or many, share the work. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
 | **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under. |
-| **Policy / version** | One line of training, by its id / one of its versions, `ID@number`, which a step makes. See [policies](../libraries/rollout-train/policies.md). |
-| **Id / name** | What a run or a policy is kept under, which never changes / what it is called, which can be chosen and changed, in the registry beside the ledger. See [ids and names](../libraries/rollout-train/policies.md#ids-and-names). |
-| **Ledger** | Append-only tables that hold a training run's decisions and results and the policies' versions, with fences so that one writer holds each. |
-| **Channel** | A trainable policy being served, by name: its engines, its limits, and the version it samples from. |
+| **Version** | Weights a step (or imitation) made: a node of a graph, with an id of its own (shown by its shortest unique start), its parents (what it was trained from, and any others it learned from), its base model, its depth, and the run and step that made it. See [versions](../libraries/rollout-train/versions.md). |
+| **Base model** | The model a version adapts (`Qwen/Qwen3.5-9B`): the root every line of versions grows from. |
+| **Depth** | A version's steps from its base model along its first parents: the number stamped on the tokens it samples. |
+| **Fork** | A run started from a version of another run (or an earlier one of its own): it trains on from there, sharing its parent's files. |
+| **Bookmark** | A name for a version, kept in the registry, moved by hand or carried by a run to each version it makes. A version needs none. See [bookmarks](../libraries/rollout-train/versions.md#bookmarks). |
+| **Id / name** | What a run is kept under, which never changes / what it is called, which can be chosen and changed, in the registry beside the ledger. See [runs](../libraries/rollout-train/versions.md#runs). |
+| **Ledger** | Append-only tables that hold a training run's decisions and results and the versions, with fences so that one writer holds each. |
+| **Channel** | A trainable model being served, by name: its engines, its limits, and the version it samples from. |
 | **Engine** | One replica serving a model: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` is one ([vLLM engine](../implementations/rollout-vllm.md)). |
 | **Recorder** | The model endpoint for channels: renders contexts to tokens, samples, and keeps what was sampled. |
 | **Renderer** | The chat template, tokenizer and parser of one model family ([Qwen](../implementations/rollout-qwen.md), [Gemma](../implementations/rollout-gemma.md)). |
-| **Weights version** | The number of the policy version a channel serves; every sampled span carries the one it was sampled at. |
+| **Weights version** | The depth of the version a channel serves; every sampled span carries the one it was sampled at. |
 | **Trainer** | Turns weighted segments into new weights, within a budget it states. `LoraTrainer` is one ([LoRA trainer](../implementations/rollout-lora.md)). |

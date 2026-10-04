@@ -1,8 +1,9 @@
 "use strict";
 // The monitor's page, in three: the runs, each organised as a run is (its steps, each one update of the policy over
 // the groups it covers; each group, a task, a start and a number of episodes; each episode, one run of the program,
-// and its rollouts, one per agent, each of which becomes a trajectory to train on); the policies, each alone and all
-// of them as a graph; and statistics across every run, with the machine, the engines and the ledger.
+// and its rollouts, one per agent, each of which becomes a trajectory to train on); the versions, each alone and all
+// of them as a graph growing from their base models; and statistics across every run, with the machine, the engines
+// and the ledger.
 
 const h = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -33,7 +34,22 @@ const bytes = count => count >= 2 ** 30 ? `${(count / 2 ** 30).toFixed(1)} GiB` 
 const figure = value => value == null ? "–" : typeof value === "boolean" ? (value ? "yes" : "no")
   : Number.isInteger(value) ? value.toLocaleString() : typeof value === "number" ? Number(value).toFixed(Math.abs(value) < 1 ? 4 : 1) : String(value);
 const tokens = count => count >= 1e6 ? `${(count / 1e6).toFixed(1)} M` : count >= 1e3 ? `${Math.round(count / 1e3)} k` : String(count ?? 0);
-const versionOf = name => name ? `@${name.split("@").at(-1)}` : "base";
+// A version is shown by the shortest start of its id that no other has (`kpqx`), and known by where it came from.
+let versionIndex = { system: null, byId: new Map() };
+const versionInfo = id => {
+  if (versionIndex.system !== state.system) versionIndex = { system: state.system, byId: new Map((state.system?.versions ?? []).map(version => [version.id, version])) };
+  return id ? versionIndex.byId.get(id) : undefined;
+};
+const versionOf = id => id ? versionInfo(id)?.short ?? String(id).slice(0, 8) : "base";
+const runNamed = id => state.system?.runs.find(run => run.run === id)?.name ?? id;
+const originOf = version => version ? `${version.run ? `${runNamed(version.run)}${version.step != null ? `:${version.step}` : ""}` : "made outside a run"}` : "";
+const versionTitle = id => {
+  const version = versionInfo(id);
+  if (!version) return id ?? "the base model";
+  return [`${version.id} · depth ${version.depth}`, `${originOf(version)}, from ${version.parents.map(versionOf).join(" + ") || version.base || "the base model"}`,
+    version.bookmarks?.length ? `bookmarks: ${version.bookmarks.join(", ")}` : null].filter(Boolean).join("\n");
+};
+const marks = names => (names ?? []).map(name => h("span", { class: "chip bookmark", title: `the bookmark ${name}` }, name));
 const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const hue = name => [...name].reduce((sum, letter) => (sum * 31 + letter.charCodeAt(0)) % 360, 7);
 // An agent's badge: its slot's number (`agent-2` → 2) in a color of its own, or, for a slot with no number, its initial.
@@ -50,9 +66,9 @@ const runPlace = run => `#/run/${encodeURIComponent(run)}`;
 const groupPlace = (run, number) => `${runPlace(run)}/group/${number}`;
 const stepPlace = (run, number) => `${runPlace(run)}/step/${number}`;
 const episodePlace = (id, slot) => `#/episode/${encodeURIComponent(id)}${slot ? `/${encodeURIComponent(slot)}` : ""}`;
-const policyPlace = name => `#/policy/${encodeURIComponent(name)}`;
+const versionPlace = id => `#/version/${encodeURIComponent(id)}`;
 // The three pages, each with its sidebar; every place is on one of them.
-const PAGES = [["runs", "Runs", "#/runs"], ["policies", "Policies", "#/policies"], ["statistics", "Statistics", "#/statistics"]];
+const PAGES = [["runs", "Runs", "#/runs"], ["policies", "Versions", "#/policies"], ["statistics", "Statistics", "#/statistics"]];
 function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   const at = (page, place) => ({ page, ...place });
@@ -62,7 +78,7 @@ function route() {
   if (parts[0] === "episode") return at("runs", { kind: "episode", id: parts[1], slot: parts[2] || null });
   if (parts[0] === "episodes") return at("runs", { kind: "outside" });
   if (parts[0] === "policies") return at("policies", { kind: "policies", sample: parts[1] === "sample" });
-  if (parts[0] === "policy") return at("policies", { kind: "policy", name: parts[1] });
+  if (parts[0] === "version") return at("policies", { kind: "version", id: parts[1] });
   if (parts[0] === "statistics") return at("statistics", { kind: "statistics", section: parts[1] || null });
   if (parts[0] === "system") return at("statistics", { kind: "statistics", section: "machine" });  // (the machine is a section of the statistics)
   return at("runs", { kind: "runs" });
@@ -110,7 +126,6 @@ const dotsOf = line => h("span", { class: "dots" }, [...line.rewards.map((_, ind
 const groupsOf = run => new Map([...run.done.map(line => [line.group, { number: line.group, task: line.task, title: line.title, line, episodes: line.episodes ?? [] }]),
   ...run.open.map(group => [group.number, { number: group.number, task: group.task, title: group.title, open: group, episodes: group.episodes }])]);
 const stepOf = (run, number) => run.steps.find(step => step.groups.includes(number) || step.skipped.includes(number));
-const versionNamed = name => state.system.policies.flatMap(policy => policy.versions).find(version => version.name === name);
 const range = numbers => numbers.length ? (numbers.length > 1 && numbers.at(-1) - numbers[0] === numbers.length - 1
   ? `#${numbers[0]}–${numbers.at(-1)}` : numbers.map(number => `#${number}`).join(" ")) : "no group";
 const stateKind = name => ({ running: "accent", completed: "good", done: "good", failed: "bad", cancelled: "bad", playing: "accent", queued: "warm", stepping: "violet", committed: "good" })[name] ?? "";
@@ -316,14 +331,20 @@ function runsTree(here) {
   return nodes;
 }
 
-// The policies: the graph of them all, with or without the sample fixture, then each policy.
+// The versions: the graph of them all, with or without the sample fixture; then those bookmarks name, and each run's newest.
 function policiesTree(here) {
-  const system = state.system;
-  return [link(policiesPlace(false), { class: `label${here.kind === "policies" && !here.sample ? " here" : ""}` }, `Policies · ${system.policies.length}`),
-    ...system.policies.map(policy => node(policyPlace(policy.policy), here.kind === "policy" && here.name === policy.policy,
-      h("span", { class: "name" }, policy.policy), h("span", { class: "tag" }, `${versionOf(policy.head)} · ${policy.versions.length}`))),
-    system.policies.length ? null : h("div", { class: "empty" }, "No policy yet."),
-    h("div", { class: "label" }, "Sample"),
+  const system = state.system, versions = system.versions;
+  const heads = system.runs.map(run => versions.filter(version => version.run === run.run).at(-1)).filter(Boolean);
+  const bookmarked = versions.filter(version => version.bookmarks?.length);
+  const row = (version, tag) => node(versionPlace(version.id), here.kind === "version" && here.id === version.id,
+    h("span", { class: "name mono", title: versionTitle(version.id) }, version.short), h("span", { class: "tag" }, tag));
+  return [link(policiesPlace(false), { class: `label${here.kind === "policies" && !here.sample ? " here" : ""}` }, `Versions · ${versions.length}`),
+    bookmarked.length ? h("div", { class: "label" }, "Bookmarks") : null,
+    ...bookmarked.map(version => row(version, version.bookmarks.join(", "))),
+    heads.length ? h("div", { class: "label" }, "Each run's newest") : null,
+    ...heads.map(version => row(version, originOf(version))),
+    versions.length ? null : h("div", { class: "empty" }, "No version yet."),
+    h("div", { class: "label" }, "Proposed"),
     node(policiesPlace(true), here.kind === "policies" && here.sample, h("span", { class: "name" }, "Sample fixture"), h("span", { class: "chip sample" }, "sample"))].filter(Boolean);
 }
 
@@ -354,7 +375,7 @@ const runColor = name => {
 
 function drawBar(crumbs) {
   const system = state.system, here = route();
-  const counts = { runs: system?.runs.length, policies: system?.policies.length, statistics: null };
+  const counts = { runs: system?.runs.length, policies: system?.versions.length, statistics: null };
   document.getElementById("pages").replaceChildren(...PAGES.map(([page, name, place]) => link(place, { class: here.page === page ? "current" : null, "aria-current": here.page === page ? "page" : null },
     name, counts[page] != null ? h("span", { class: "count" }, String(counts[page])) : null)));
   document.getElementById("crumbs").replaceChildren(...crumbs.flatMap((crumb, index) => [
@@ -370,18 +391,18 @@ function drawBar(crumbs) {
 function drawRun(name) {
   const system = state.system, run = system.runs.find(each => each.run === name);
   if (!run) return [h("div", { class: "empty" }, `There is no run ${name}.`)];
-  // (the policy its steps make, or its start names; its engines, as its feed has them)
-  const trains = run.steps.findLast(step => step.makes)?.makes?.split("@")[0] ?? run.policy;
-  const policy = system.policies.find(each => each.policy === trains);
+  // (the versions it made, and its engines, as its feed has them)
+  const made = system.versions.filter(version => version.run === run.run), newest = made.at(-1);
   const channel = run.channels.find(each => each.adapter) ?? run.channels[0];
   const trained = run.done.filter(line => line.update).length, last = run.done.at(-1);
   const committed = run.steps.filter(step => step.state === "committed").length;
   const throughput = channel?.throughput.at(-1);
   const width = Math.max(300, document.getElementById("main").clientWidth - 100);
-  const from = run.steps[0]?.parent, current = run.steps.findLast(step => step.state === "committed")?.makes;
+  const from = run.from ?? run.steps[0]?.parent, current = newest?.id;
   const head = h("div", { class: "head" }, h("h1", { title: run.run }, `Run ${run.name ?? run.run}`),
-    specs(spec("state", `${running(run)} · ${wrote(run)}`, run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""), policy ? spec("trains", policy.policy, "violet") : null,
-      spec("from", from ?? (run.steps.length ? "the base model" : "–")), current ? spec("now", current, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
+    specs(spec("state", `${running(run)} · ${wrote(run)}`, run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""), newest?.base ? spec("base", newest.base) : null,
+      spec("from", from ? link(versionPlace(from), { title: versionTitle(from) }, versionOf(from)) : "the base model"),
+      current ? spec("now", link(versionPlace(current), { title: versionTitle(current) }, versionOf(current)), "violet") : null, channel?.adapter ? spec("serving", h("span", { title: channel.adapter }, versionOf(channel.adapter)), "accent") : null,
       spec("fence", run.fence ?? "–"), spec("directory", run.directory ?? "–"), run.starts > 1 ? spec("started", `${run.starts} times`) : null));
   const groups = groupsOf(run), stepping = run.steps.filter(step => step.state === "stepping");
   const waiting = run.next.filter(number => groups.get(number)?.line);
@@ -416,8 +437,8 @@ function drawRun(name) {
   const outcomes = solvedOf(run.done), half = Math.ceil(run.done.length / 2);
   const all = run.done.filter(line => line.solved.length && line.solved.every(Boolean)).length, none = run.done.filter(line => line.solved.length && !line.solved.some(Boolean)).length;
   const kpis = h("div", { class: "kpis" },
-    kpi("Started from", from ? versionOf(from) : run.steps.length ? "base" : "–", from ?? (run.steps.length ? "the base model" : "no step yet")),
-    kpi("Now", current ? versionOf(current) : "–", policy ? `${policy.versions.length} versions kept` : "no step committed"),
+    kpi("Started from", versionOf(from), from ? originOf(versionInfo(from)) || "outside this ledger" : newest?.base ?? "the base model"),
+    kpi("Now", current ? versionOf(current) : "–", newest ? `depth ${newest.depth} · ${made.length} made${newest.bookmarks?.length ? ` · ${newest.bookmarks.join(", ")}` : ""}` : "no step committed"),
     kpi("Steps", `${run.steps.length}`, `${committed} committed · ${run.next.length} waiting`),
     kpi("Groups done", `${run.done.length}`, `${trained} trained on, of ${run.decided} decided`),
     kpi("Groups solved", `${all} · ${run.done.length - all - none} · ${none}`, "all · some · none solved"),
@@ -440,7 +461,7 @@ function drawRun(name) {
     h("div", { class: "cols" },
       card("Steps", "newest first", table([["step"], ["made"], ["groups"], ["solved"], ["segments", "n"], ["moved", "n"], ["took", "n"]],
         recent.map(step => {
-          const version = versionNamed(step.makes), lines = step.groups.map(number => groups.get(number)?.line).filter(Boolean);
+          const version = versionInfo(step.makes), lines = step.groups.map(number => groups.get(number)?.line).filter(Boolean);
           const solved = lines.flatMap(line => line.solved);
           return [{ text: `S${step.step}`, kind: "key" }, step.state === "committed" ? versionOf(step.makes) : { text: step.state, kind: stateKind(step.state) },
             { node: h("span", {}, range(step.groups), step.skipped.length ? h("span", { class: "faint" }, ` + ${step.skipped.length} skipped`) : null) },
@@ -458,11 +479,11 @@ function drawRun(name) {
 function drawStep(here) {
   const run = state.system.runs.find(each => each.run === here.run), step = run?.steps.find(each => each.step === here.number);
   if (!step) return [h("div", { class: "empty" }, `There is no step ${here.number}.`)];
-  const version = versionNamed(step.makes), metrics = version?.metrics, groups = groupsOf(run);
+  const version = versionInfo(step.makes), metrics = version?.metrics, groups = groupsOf(run);
   const lines = step.groups.map(number => groups.get(number)?.line).filter(Boolean), solved = lines.flatMap(line => line.solved);
   const head = h("div", { class: "head" }, h("h1", {}, `Step ${step.step}`),
-    specs(spec("makes", step.makes ? link(policyPlace(step.makes.split("@")[0]), {}, step.makes) : "–", "violet"),
-      spec("from", step.parent ?? "the base model"), spec("state", step.state, stateKind(step.state)), spec("decided", clock(step.decided) || "–")));
+    specs(spec("makes", step.makes ? link(versionPlace(step.makes), { title: versionTitle(step.makes) }, versionOf(step.makes)) : "–", "violet"),
+      spec("from", step.parent ? link(versionPlace(step.parent), { title: versionTitle(step.parent) }, versionOf(step.parent)) : "the base model"), spec("state", step.state, stateKind(step.state)), spec("decided", clock(step.decided) || "–")));
   const kpis = h("div", { class: "kpis" },
     kpi("Groups", `${step.groups.length}`, `${range(step.groups)}${step.skipped.length ? ` · ${step.skipped.length} gave nothing to train on` : ""}`),
     kpi("Solved", solved.length ? `${solved.filter(Boolean).length} of ${solved.length}` : "–", "episodes of its groups"),
@@ -525,8 +546,8 @@ function drawGroup(here) {
   const metrics = version?.metrics ?? outcome?.update;
   const what = card("What was done", outcome ? outcomeOf(outcome).text : "nothing yet",
     metrics ? [pairs([
-      ["version", version ? link(policyPlace(version.name.split("@")[0]), {}, h("b", {}, version.name)) : outcome?.adapter ?? "–"],
-      ["from", version?.parent ?? group.step?.parent ?? "the base model"],
+      ["version", version ? link(versionPlace(version.id), { title: versionTitle(version.id) }, h("b", {}, version.short ?? versionOf(version.id))) : outcome?.adapter ? versionOf(outcome.adapter) : "–"],
+      ["from", versionOf(version?.parents?.[0] ?? group.step?.parent)],
       ...["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "mean_weight", "truncated_fraction", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"]
         .filter(key => metrics[key] !== undefined).map(key => [key.replaceAll("_", " "), figure(metrics[key])]),
       ["took", span(metrics.update_seconds ?? metrics.seconds)]])]
@@ -696,120 +717,134 @@ function otherEffects(lines) {
     h("div", { style: "margin-top:10px" }, table([["tool"], ["arguments"], ["returned"]], rows)));
 }
 
-// A policy
-function drawPolicy(name) {
-  const system = state.system, policy = system.policies.find(each => each.policy === name);
-  if (!policy) return [h("div", { class: "empty" }, `There is no policy ${name}.`)];
-  const versions = policy.versions, width = Math.max(300, document.getElementById("main").clientWidth - 100);
-  const madeBy = new Map(system.runs.flatMap(run => run.steps.filter(step => step.makes).map(step => [step.makes, [run.run, step.step]])));
-  const size = versions.reduce((sum, version) => sum + (version.weights?.bytes ?? 0) + (version.state?.bytes ?? 0), 0);
-  const serving = system.channels.find(channel => channel.adapter?.startsWith(`${name}@`));
-  const newest = [...versions].reverse();
-  return [h("div", { class: "head" }, h("h1", {}, `Policy ${policy.policy}`),
-    specs(serving ? spec("served on", serving.channel, "accent") : null, spec("fence", policy.fence ?? "–"),
-      spec("a version is", "the commit of one step: its weights and the trainer's state, as files in the blob store"))),
-  h("div", { class: "kpis" }, kpi("Head", versionOf(policy.head), policy.head ?? ""), kpi("Versions", `${versions.length}`),
-    kpi("Kept", bytes(size), "weights and trainer state"),
-    kpi("Last step moved", versions.length ? figure(versions.at(-1).metrics.kl_moved) : "–", "KL from its parent")),
-  card("How far each step moved the policy", "KL between a version and its parent", barChart(versions.map(version => version.metrics.kl_moved ?? 0),
-    versions.map(version => versionOf(version.name)), width, 150, index => { const made = madeBy.get(versions[index].name); if (made) go(stepPlace(...made)); })),
-  card("Versions", "newest first", table([["version"], ["from"], ["made"], ["by"], ["segments", "n"], ["steps", "n"], ["moved", "n"], ["loss", "n"], ["took", "n"], ["state"], ["size", "n"]],
-    newest.map(version => [{ text: versionOf(version.name), kind: "key" }, versionOf(version.parent), clock(version.made),
-      madeBy.has(version.name) ? `step ${madeBy.get(version.name)[1]}` : "–", figure(version.metrics.segments), figure(version.metrics.optimizer_steps),
-      version.metrics.kl_moved?.toFixed(4), version.metrics.loss?.toFixed(3), span(version.metrics.update_seconds ?? version.metrics.seconds),
-      version.state ? "kept" : version.released ? { text: "released", kind: "still" } : "–", bytes((version.weights?.bytes ?? 0) + (version.state?.bytes ?? 0))]),
-    newest.map(version => madeBy.has(version.name) ? () => go(stepPlace(...madeBy.get(version.name))) : null)))];
+// A version: where it came from (its parents, its base, the run and step that made it), the bookmarks that name it,
+// and what it was trained on and how far it moved.
+function drawVersion(id) {
+  const system = state.system, version = versionInfo(id);
+  if (!version) return [h("div", { class: "empty" }, `There is no version ${id}.`)];
+  const children = system.versions.filter(each => each.parents.includes(version.id));
+  const line = [];  // (its first parents, back to the base model)
+  for (let each = version; each; each = versionInfo(each.parents[0])) line.unshift(each);
+  const serving = system.channels.find(channel => channel.adapter === version.id);
+  const width = Math.max(300, document.getElementById("main").clientWidth - 100);
+  const size = (version.weights?.bytes ?? 0) + (version.state?.bytes ?? 0);
+  const placeOf = each => each.run && each.step != null && system.runs.some(run => run.run === each.run) ? stepPlace(each.run, each.step) : versionPlace(each.id);
+  return [h("div", { class: "head" }, h("h1", { class: "mono", title: version.id }, version.short), h("div", { class: "chips" }, ...marks(version.bookmarks)),
+    h("div", { class: "sub" }, `${originOf(version)} · depth ${version.depth} · from ${version.parents.length ? version.parents.map(versionOf).join(" + ") : version.base ?? "the base model"}`),
+    specs(spec("id", version.id), spec("base", version.base ?? "–"), version.run ? spec("made by", link(runPlace(version.run), {}, runNamed(version.run))) : null,
+      version.step != null && version.run ? spec("step", link(stepPlace(version.run, version.step), {}, `S${version.step}`), "violet") : null,
+      serving ? spec("served on", serving.channel, "accent") : null)),
+  h("div", { class: "kpis" }, kpi("Depth", String(version.depth), "steps from its base model"), kpi("Moved", figure(version.metrics.kl_moved), "KL from its parent"),
+    kpi("Loss", figure(version.metrics.loss)), kpi("Kept", version.weights ? bytes(size) : "released", version.weights ? "weights and trainer state" : "its record stays"),
+    kpi("Grown from it", String(children.length), children.length ? children.map(each => each.short).join(", ") : "nothing yet")),
+  card("Its line", `from ${line[0]?.base ?? "the base model"}, first parent by first parent`, line.length > 1 ? barChart(line.map(each => each.metrics.kl_moved ?? 0),
+    line.map(each => each.short), width, 150, index => go(placeOf(line[index]))) : h("p", { class: "muted" }, "It was trained from the base model.")),
+  card("What it came from, and what grew from it", "", table([["version"], ["is"], ["made"], ["by"], ["moved", "n"], ["state"]],
+    [...version.parents.map((parent, place) => [versionInfo(parent), place ? "learned from" : "trained from"]), ...children.map(each => [each, "grew from it"])]
+      .map(([each, is]) => each ? [{ node: h("span", {}, h("b", { class: "mono", title: versionTitle(each.id) }, each.short), " ", ...marks(each.bookmarks)) }, is, clock(each.made),
+        originOf(each), each.metrics.kl_moved?.toFixed(4) ?? "–", each.weights ? "kept" : { text: "released", kind: "still" }] : ["outside this ledger", is, "–", "–", "–", "–"]),
+    [...version.parents.map(parent => versionInfo(parent)), ...children].map(each => each ? () => go(versionPlace(each.id)) : null)))];
 }
 
-// Every policy, as a graph: a lane for each policy with its versions from the left (folded to the ones that matter
-// until it is opened), and between lanes the forks and the distillations; beside it the trainers with their queues,
-// the inference workers with what each serves, and evaluations. What no run writes yet comes from the sample
-// fixture, when it is asked for, and is marked so.
+// Every version, as a graph: each base model a root, and under it a lane for each run with the versions it made from
+// the left (folded to the ones that matter until it is opened); a run that starts from another's version hangs under
+// that run's lane, and the lines between lanes say what came from what. Beside it the trainers with their queues, the
+// inference workers with what each serves, and evaluations. What no run writes yet comes from the sample fixture, when
+// it is asked for, and is marked so.
 const policiesPlace = sample => `#/policies${sample ? "/sample" : ""}`;
-const LANE = 78, COLUMN = 54, PAD = 34;
+const LANE = 78, COLUMN = 62, PAD = 34;
 const short = name => name ? String(name).split("/").at(-1) : "–";
 const modeKind = mode => mode === "on-policy" ? "violet" : mode === "off-policy" ? "warm" : "accent";
 const lifeKind = state => ({ serving: "good", "rolling out": "warm", resharding: "violet", resharded: "accent" })[state] ?? "";
 const sampleChip = () => h("span", { class: "chip sample", title: "from the sample fixture: no run writes this yet" }, "sample");
 const ago = (lineage, at) => at ? span(Math.max(0, lineage.now - at)) : "–";
+const OUTSIDE = "(outside a run)";
 
-// What each version is, wherever it is drawn: its policy's line, the run that made it, its evaluations.
+// What each version is, wherever it is drawn: where it came from, the run that made it, its evaluations.
 function indexOf(lineage) {
-  const versions = new Map(), runs = new Map(lineage.runs.map(run => [run.run, run])), scores = new Map();
-  for (const policy of lineage.policies) for (const version of policy.versions) versions.set(version.name, { ...version, policy: policy.policy });
+  const versions = new Map(lineage.versions.map(version => [version.id, version])), runs = new Map(lineage.runs.map(run => [run.run, run])), scores = new Map();
   for (const suite of lineage.evaluations) for (const subject of suite.subjects) {
     if (subject.version && !scores.has(subject.version)) scores.set(subject.version, { suite: suite.suite, starts: suite.starts.length, ...subject });
   }
-  return { versions, runs, scores };
+  const shortOf = id => versions.get(id)?.short ?? String(id).slice(0, 12);
+  return { versions, runs, scores, shortOf };
 }
 
-// The lanes, in order: under each policy, those that start from it (by a fork, or a distillation's start); versions
-// that this ledger does not have, but that something here starts from, in a lane of their own at the top.
+// The lanes, in order: a lane for each base model (its root), and under it each run whose first version was trained
+// from it; under a run, each run that starts from one of its versions (a fork, or a distillation's start). Versions
+// this ledger does not have, but that something here starts from, are in a lane of their own at the top.
 function lanesOf(lineage, index) {
-  const policies = new Map(lineage.policies.map(policy => [policy.policy, policy]));
-  const source = policy => {
-    const first = policy.versions[0], run = first?.by ? index.runs.get(first.by.run) : null;
-    const from = run?.kind === "distill" ? run.from ?? run.teachers[0] : first?.parent;
-    if (!from) return null;
-    const owner = from.split("@")[0];
-    return owner === policy.policy ? null : policies.has(owner) ? owner : "outside";
+  const byRun = new Map();
+  for (const version of lineage.versions) {
+    const key = version.by?.run ?? OUTSIDE;
+    byRun.set(key, [...(byRun.get(key) ?? []), version]);
+  }
+  for (const run of lineage.runs) if (!byRun.has(run.run)) byRun.set(run.run, []);
+  for (const line of byRun.values()) line.sort((a, b) => a.depth - b.depth || a.made - b.made);
+  const outside = new Set(lineage.outside);
+  const source = key => {  // (the lane a run's lane hangs under)
+    const first = byRun.get(key)[0], run = index.runs.get(key);
+    const from = run?.kind === "distill" ? run.from ?? run.teachers[0] : first?.parents[0] ?? run?.from;
+    if (!from) return `base:${first?.base ?? lineage.bases[0] ?? "the base model"}`;
+    if (outside.has(from)) return "outside";
+    const owner = index.versions.get(from)?.by?.run ?? OUTSIDE;
+    return owner === key ? `base:${first?.base ?? "the base model"}` : owner;
   };
   const children = new Map();
-  for (const policy of lineage.policies) {
-    const parent = source(policy);
-    children.set(parent, [...(children.get(parent) ?? []), policy]);
-  }
-  const made = policy => policy.versions[0]?.made ?? 0;
-  const lanes = [];
+  for (const key of byRun.keys()) children.set(source(key), [...(children.get(source(key)) ?? []), key]);
+  const made = key => byRun.get(key)[0]?.made ?? Infinity;
+  const lanes = [], seen = new Set();
   const visit = (key, depth) => {
-    for (const policy of [...(children.get(key) ?? [])].sort((a, b) => made(a) - made(b))) {
-      lanes.push({ key: policy.policy, policy, depth });
-      visit(policy.policy, depth + 1);
+    for (const child of [...(children.get(key) ?? [])].sort((a, b) => made(a) - made(b))) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      lanes.push({ key: child, run: index.runs.get(child), versions: byRun.get(child), depth });
+      visit(child, depth + 1);
     }
   };
-  if (lineage.outside.length) { lanes.push({ key: "outside", outside: lineage.outside, depth: 0 }); visit("outside", 1); }
-  visit(null, 0);
+  if (outside.size) { lanes.push({ key: "outside", outside: [...outside], depth: 0 }); visit("outside", 1); }
+  const bases = [...new Set([...lineage.bases, ...[...children.keys()].filter(key => key.startsWith("base:")).map(key => key.slice(5))])];
+  for (const base of bases) { lanes.push({ key: `base:${base}`, base, depth: 0 }); visit(`base:${base}`, 1); }
+  for (const key of byRun.keys()) if (!seen.has(key)) { lanes.push({ key, run: index.runs.get(key), versions: byRun.get(key), depth: 1 }); seen.add(key); }
   return lanes;
 }
 
-// A lane's items, left to right: versions, the distillations that made some of them (each before the first version
+// A lane's items, left to right: a base's root; or a run's versions, the distillation that made them (before the first
 // it made), and, while the lane is folded, a gap for each stretch of versions that nothing points at.
-function itemsOf(lane, open, anchors, lineage, index) {
+function itemsOf(lane, open, anchors) {
+  if (lane.base) return [{ kind: "base", name: lane.base }];
   if (lane.outside) return lane.outside.map(name => ({ kind: "version", name, outside: true }));
-  const items = [], versions = lane.policy.versions, distills = lineage.runs.filter(run => run.kind === "distill" && run.policy === lane.key);
-  const before = new Map(distills.map(run => [run.versions[0] ?? null, run]));
+  const items = [], versions = lane.versions, distill = lane.run?.kind === "distill" ? lane.run : null;
   let hidden = [];
   const flush = () => { if (hidden.length) items.push({ kind: "gap", count: hidden.length, names: hidden }); hidden = []; };
+  if (distill) items.push({ kind: "distill", run: distill });
   versions.forEach((version, place) => {
-    const run = before.get(version.name);
-    const by = version.by?.run, next = versions[place + 1], last = versions[place - 1];
-    const shown = open || run || place === 0 || place === versions.length - 1 || anchors.has(version.name)
-      || by !== last?.by?.run || by !== next?.by?.run || !["written", "superseded"].includes(version.life.state);
-    if (run) { flush(); items.push({ kind: "distill", run }); }
-    if (shown) { flush(); items.push({ kind: "version", name: version.name }); } else hidden.push(version.name);
+    const shown = open || place === 0 || place === versions.length - 1 || anchors.has(version.id) || version.bookmarks.length
+      || !["written", "superseded"].includes(version.life.state);
+    if (shown) { flush(); items.push({ kind: "version", name: version.id }); } else hidden.push(version.id);
   });
   flush();
-  for (const run of distills) if (!run.versions.length) items.push({ kind: "distill", run });
   return items;
 }
 
-const itemId = item => item.kind === "version" ? `v:${item.name}` : item.kind === "distill" ? `d:${item.run.run}` : `g:${item.names[0]}`;
+const itemId = item => item.kind === "version" ? `v:${item.name}` : item.kind === "distill" ? `d:${item.run.run}` : item.kind === "base" ? `b:${item.name}` : `g:${item.names[0]}`;
+const edgeFrom = edge => edge.from.startsWith("base:") ? `b:${edge.from.slice(5)}` : `v:${edge.from}`;
+const edgeTo = edge => ["teach", "start"].includes(edge.kind) ? `d:${edge.to}` : `v:${edge.to}`;
 
 function lineageGraph(lineage, index, lanes) {
-  const anchors = new Set(lineage.edges.flatMap(edge => [edge.from, edge.kind === "fork" ? edge.to : null]).filter(Boolean));
+  const anchors = new Set(lineage.edges.flatMap(edge => [edge.from, edge.kind === "learned" || edge.kind === "base" ? edge.to : null]).filter(Boolean));
   for (const name of index.scores.keys()) anchors.add(name);
+  for (const edge of lineage.edges) if (edge.kind === "trained" && index.versions.get(edge.from)?.by?.run !== index.versions.get(edge.to)?.by?.run) { anchors.add(edge.from); anchors.add(edge.to); }
   const laid = lanes.map(lane => ({ ...lane, open: Boolean(folds[`lane:${lane.key}`]), items: [] }));
-  for (const lane of laid) lane.items = itemsOf(lane, lane.open, anchors, lineage, index);
+  for (const lane of laid) lane.items = itemsOf(lane, lane.open, anchors);
   // Columns: every item stands right of what it comes from, in its lane and across lanes (longest path).
   const before = new Map(), where = new Map();
   laid.forEach((lane, row) => lane.items.forEach((item, place) => {
     where.set(itemId(item), { item, row });
     before.set(itemId(item), place ? [itemId(lane.items[place - 1])] : []);
   }));
-  for (const edge of lineage.edges) {
-    const to = edge.kind === "fork" ? `v:${edge.to}` : `d:${edge.to}`;
-    if (where.has(to) && where.has(`v:${edge.from}`)) before.get(to).push(`v:${edge.from}`);
-  }
+  const crossing = edge => where.has(edgeFrom(edge)) && where.has(edgeTo(edge)) && where.get(edgeFrom(edge)).row !== where.get(edgeTo(edge)).row;
+  for (const edge of lineage.edges) if (crossing(edge)) before.get(edgeTo(edge)).push(edgeFrom(edge));
   const column = new Map(), visiting = new Set();
   const columnOf = id => {
     if (column.has(id)) return column.get(id);
@@ -823,11 +858,11 @@ function lineageGraph(lineage, index, lanes) {
   for (const id of where.keys()) columnOf(id);
   const columns = Math.max(0, ...column.values()) + 1;
   const room = (document.getElementById("main")?.clientWidth ?? 1200) - 64 - 252;  // (the bands reach across the frame)
-  const width = Math.max(room, PAD * 2 + (columns - 1) * COLUMN + 60), height = laid.length * LANE;
+  const width = Math.max(room, PAD * 2 + (columns - 1) * COLUMN + 90), height = laid.length * LANE;
   const x = id => PAD + column.get(id) * COLUMN, y = row => row * LANE + LANE / 2 + 8;
-  const drawing = svg("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img", "aria-label": "policies as a graph", class: "dag-drawing" });
+  const drawing = svg("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img", "aria-label": "versions as a graph, from their base models", class: "dag-drawing" });
   laid.forEach((lane, row) => drawing.append(svg("rect", { x: 0, y: row * LANE, width, height: LANE,
-    class: `lane-band${row % 2 ? " odd" : ""}${lane.policy?.sample ? " sample" : ""}` })));
+    class: `lane-band${row % 2 ? " odd" : ""}${lane.versions?.some(version => version.sample) ? " sample" : ""}` })));
   const kindOfVersion = name => {
     const version = index.versions.get(name), run = version?.by ? index.runs.get(version.by.run) : null;
     return run?.kind === "distill" ? modeKind(run.mode) : "accent";
@@ -835,63 +870,68 @@ function lineageGraph(lineage, index, lanes) {
   // Along each lane: a line from item to item, in the color of what made the later one.
   laid.forEach((lane, row) => lane.items.forEach((item, place) => {
     if (!place) return;
-    const from = lane.items[place - 1], kind = item.kind === "gap" || from.kind === "gap" ? "quiet dash"
-      : item.kind === "distill" ? `${modeKind(item.run.mode)} dash` : lane.outside ? "quiet dash" : kindOfVersion(item.name);
+    const from = lane.items[place - 1], kind = item.kind === "gap" || from.kind === "gap" ? "quiet dash" : lane.outside ? "quiet dash" : kindOfVersion(item.name);
     drawing.append(svg("line", { x1: x(itemId(from)), x2: x(itemId(item)), y1: y(row), y2: y(row), class: kind.split(" ").map(each => each === "dash" ? "dash" : `s-${each}`).join(" ") }));
   }));
-  // Between lanes: forks, and each distillation's teachers and start.
+  // Between lanes: from a base model to the first version of a line, a fork, a teacher, a distillation's start.
   for (const edge of lineage.edges) {
-    const from = where.get(`v:${edge.from}`), to = where.get(edge.kind === "fork" ? `v:${edge.to}` : `d:${edge.to}`);
-    if (!from || !to) continue;
-    const x1 = x(`v:${edge.from}`), y1 = y(from.row), x2 = x(itemId(to.item)) - (to.item.kind === "distill" ? 9 : 7), y2 = y(to.row);
+    if (!crossing(edge)) continue;
+    const from = where.get(edgeFrom(edge)), to = where.get(edgeTo(edge));
+    const x1 = x(edgeFrom(edge)), y1 = y(from.row), x2 = x(itemId(to.item)) - (to.item.kind === "distill" ? 9 : 7), y2 = y(to.row);
     const middle = x1 + Math.max(18, (x2 - x1) * 0.55);
-    const kind = edge.kind === "fork" ? "s-quiet" : `s-${modeKind(edge.mode)}${edge.kind === "start" ? " dash" : ""}`;
-    drawing.append(svg("path", { d: `M ${x1} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${x2} ${y2}`, class: `edge ${kind}` },
-      svg("title", {}, edge.kind === "fork" ? `${edge.to} forks from ${edge.from}` : edge.kind === "teach" ? `${edge.from} teaches (${edge.mode})` : `the student starts from ${edge.from}`)));
+    const kind = edge.kind === "base" || edge.kind === "trained" ? "s-quiet" : edge.kind === "learned" ? "s-quiet dash" : `s-${modeKind(edge.mode)}${edge.kind === "start" ? " dash" : ""}`;
+    const said = edge.kind === "base" ? `${index.shortOf(edge.to)} was trained from the base model ${edge.from.slice(5)}`
+      : edge.kind === "trained" ? `${index.shortOf(edge.to)} was trained from ${index.shortOf(edge.from)}`
+        : edge.kind === "learned" ? `${index.shortOf(edge.to)} also learned from ${index.shortOf(edge.from)}`
+          : edge.kind === "teach" ? `${index.shortOf(edge.from)} teaches ${index.runs.get(edge.to)?.name ?? edge.to} — ${edge.says}`
+            : `${index.runs.get(edge.to)?.name ?? edge.to} starts from ${index.shortOf(edge.from)} — ${edge.says}`;
+    drawing.append(svg("path", { d: `M ${x1} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${x2} ${y2}`, class: `edge ${kind}` }, svg("title", {}, said)));
   }
-  // The items, over the lines; and above each lane, where a run's stretch of it begins.
+  // The items, over the lines; and above each run's lane, its name where its stretch begins.
   laid.forEach((lane, row) => {
-    let previous = null;
-    lane.items.forEach(item => {
+    lane.items.forEach((item, place) => {
       const id = itemId(item), cx = x(id), cy = y(row);
+      if (item.kind === "base") {
+        drawing.append(svg("g", { class: "base" }, svg("rect", { x: cx - 8, y: cy - 8, width: 16, height: 16, rx: 3, class: "f-quiet" }),
+          svg("title", {}, `the base model ${item.name}: every line here grows from it`)));
+        drawing.append(svg("text", { x: cx + 14, y: cy + 4 }, short(item.name)));
+        return;
+      }
       if (item.kind === "gap") {
         drawing.append(svg("g", { class: "gap", onclick: () => { folds[`lane:${lane.key}`] = true; keepFolds(); redraw(); } },
           svg("rect", { x: cx - 15, y: cy - 9, width: 30, height: 18, rx: 9 }), svg("text", { x: cx, y: cy + 3.5, "text-anchor": "middle" }, `+${item.count}`),
-          svg("title", {}, `${item.count} more versions: ${item.names[0]} to ${item.names.at(-1)} (open the lane)`)));
+          svg("title", {}, `${item.count} more versions: ${index.shortOf(item.names[0])} to ${index.shortOf(item.names.at(-1))} (open the lane)`)));
         return;
       }
       if (item.kind === "distill") {
         const run = item.run, kind = modeKind(run.mode);
         drawing.append(svg("g", { class: "distill" }, svg("path", { d: `M ${cx - 9} ${cy} L ${cx} ${cy - 9} L ${cx + 9} ${cy} L ${cx} ${cy + 9} Z`, class: `f-${kind}` }),
-          svg("title", {}, `${run.run}: distil ${run.teachers.join(" + ")} into ${run.policy}${run.from ? `, from ${run.from}` : ""}\n${run.mode}: trains on ${(run.data.sampled_by ?? []).join(", ")}'s samples · objective ${run.objective}`)));
+          svg("title", {}, `${run.name}: distil ${run.teachers.map(index.shortOf).join(" + ")}${run.from ? `, from ${index.shortOf(run.from)}` : ""}\n${run.says}\nobjective ${run.objective ?? "–"}`)));
         drawing.append(svg("text", { x: cx, y: cy + 23, "text-anchor": "middle", class: `t-${kind}` }, run.mode));
-        drawing.append(svg("text", { x: cx - 9, y: cy - 26, class: "stretch" }, run.run));
-        previous = run.run;
         return;
       }
       const version = index.versions.get(item.name);
-      if (!version) {  // (a version of a policy this ledger does not have)
+      if (!version) {  // (a version this ledger does not have)
         drawing.append(svg("circle", { cx, cy, r: 6, class: "dot-outside" }, svg("title", {}, `${item.name}: not in this ledger`)));
-        drawing.append(svg("text", { x: cx + 10, y: cy + 3.5 }, item.name));
+        drawing.append(svg("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "v" }, item.name.length > 10 ? `…${item.name.slice(-9)}` : item.name));
         return;
       }
       const run = version.by?.run;
-      if (run !== previous && run && !(index.runs.get(run)?.kind === "distill")) drawing.append(svg("text", { x: cx - 6, y: cy - 26, class: "stretch" }, run));
-      previous = run;
+      if (place === (lane.items[0]?.kind === "distill" ? 1 : 0) && lane.run) drawing.append(svg("text", { x: cx - 6, y: cy - 26, class: "stretch" }, lane.run.name));
       const life = version.life, workers = Object.entries(life.workers).filter(([, span]) => span.until == null).map(([worker]) => worker);
       const score = index.scores.get(item.name);
-      const real = state.system.runs.find(each => each.run === run && !version.sample);
-      const group = svg("g", { class: `version${real || !lane.policy.sample ? " link" : ""}`, onclick: () => {
-        if (real && version.by.step) go(stepPlace(run, version.by.step)); else if (!lane.policy.sample) go(policyPlace(lane.key));
-      } });
+      const real = !version.sample && state.system.versions.some(each => each.id === version.id);
+      const group = svg("g", { class: `version${real ? " link" : ""}`, onclick: () => { if (real) go(versionPlace(version.id)); } });
       if (["serving", "rolling out", "resharding"].includes(life.state)) group.append(svg("circle", { cx, cy, r: 10.5, class: `ring ring-${lifeKind(life.state)}` }));
       group.append(svg("circle", { cx, cy, r: 6, class: version.kept ? `dot-${kindOfVersion(item.name)}` : "dot-released" }));
-      group.append(svg("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "v" }, `@${version.number}`));
-      if (score) group.append(svg("text", { x: cx, y: cy - 13, "text-anchor": "middle", class: `score t-${score.solved / Math.max(1, score.played) >= 0.6 ? "good" : score.solved / Math.max(1, score.played) >= 0.35 ? "warm" : "bad"}` },
+      group.append(svg("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "v" }, version.short));
+      if (version.bookmarks.length) group.append(svg("text", { x: cx, y: cy - 13, "text-anchor": "middle", class: "bookmark" }, version.bookmarks.join(", ")));
+      if (score) group.append(svg("text", { x: cx, y: cy - (version.bookmarks.length ? 24 : 13), "text-anchor": "middle", class: `score t-${score.solved / Math.max(1, score.played) >= 0.6 ? "good" : score.solved / Math.max(1, score.played) >= 0.35 ? "warm" : "bad"}` },
         `${score.solved}/${score.played}${score.played < score.starts ? "…" : ""}`));
-      group.append(svg("title", {}, [`${version.name}${lane.policy.sample ? " (sample)" : ""}`,
-        `made ${clock(version.made)}${run ? ` by ${run}${version.by.step ? ` step ${version.by.step}` : ""}` : ""} from ${version.parent ?? "the base model"}`,
-        `${life.state}${workers.length ? ` on ${workers.join(", ")}` : ""}${life.waiting ? ` · ${life.waiting} requests waiting` : ""}${life.latest_of ? ` · ${life.latest_of}'s latest` : ""}`,
+      group.append(svg("title", {}, [`${version.id} · depth ${version.depth}${version.sample ? " (sample)" : ""}`,
+        `made ${clock(version.made)}${run ? ` by ${version.by.name}${version.by.step != null ? ` at step ${version.by.step}` : ""}` : ""}, from ${version.parents.map(index.shortOf).join(" + ") || `the base model ${version.base ?? ""}`}`,
+        version.bookmarks.length ? `bookmarks: ${version.bookmarks.join(", ")}` : null,
+        `${life.state}${workers.length ? ` on ${workers.join(", ")}` : ""}${life.waiting ? ` · ${life.waiting} requests waiting` : ""}${life.latest_of ? ` · ${index.runs.get(life.latest_of)?.name ?? life.latest_of}'s latest` : ""}`,
         version.metrics.kl_moved != null ? `moved ${version.metrics.kl_moved.toFixed(4)} from its parent` : null,
         version.kept ? "its weights are kept" : "released: its weights are gone, its record stays",
         score ? `${score.suite}: solved ${score.solved} of ${score.played}${score.played < score.starts ? ` (${score.starts - score.played} starts to play)` : ""}` : null].filter(Boolean).join("\n")));
@@ -903,14 +943,18 @@ function lineageGraph(lineage, index, lanes) {
     const toggle = () => { folds[`lane:${lane.key}`] = !lane.open; keepFolds(); redraw(); };
     if (lane.outside) return h("div", { class: "lane-label" }, h("span", {}), h("b", { class: "muted" }, "Outside this ledger"),
       h("small", {}, `${lane.outside.length} version${lane.outside.length === 1 ? "" : "s"} something here starts from`));
-    const policy = lane.policy, first = policy.versions[0], run = first?.by ? index.runs.get(first.by.run) : null;
-    const says = run?.kind === "distill" ? `distilled from ${run.teachers.join(" + ")}` : policy.fork ? `fork of ${policy.fork}` : "from the base model";
+    if (lane.base) return h("div", { class: "lane-label" }, h("span", {}), h("b", { title: lane.base }, short(lane.base)), h("small", {}, "base model: the root of the lines below it"));
+    const run = lane.run, first = lane.versions[0], from = first?.parents[0];
+    const says = run?.kind === "distill" ? run.says : from && index.versions.get(from)?.by?.run !== lane.key
+      ? `forked from ${index.shortOf(from)}${index.versions.get(from)?.by ? ` (${index.versions.get(from).by.name})` : ""}` : "from the base model";
+    const sample = lane.versions.some(version => version.sample) || run?.sample;
+    const name = run?.name ?? (lane.key === OUTSIDE ? "made outside a run" : lane.key);
     return h("div", { class: "lane-label", style: `padding-left:${4 + Math.min(lane.depth, 3) * 10}px`, onclick: toggle, title: lane.open ? "fold the lane" : "show every version" },
       h("button", { class: `twist${lane.open ? " open" : ""}`, "aria-label": lane.open ? "collapse" : "expand", "aria-expanded": String(lane.open), onclick: event => { event.stopPropagation(); toggle(); } },
         svg("svg", { width: 10, height: 10, viewBox: "0 0 10 10" }, svg("path", { d: "M3 1.5 L7 5 L3 8.5", fill: "none", stroke: "currentColor", "stroke-width": 1.6 }))),
-      h("b", {}, policy.sample ? policy.policy : link(policyPlace(policy.policy), { onclick: event => event.stopPropagation() }, policy.policy)),
-      h("small", {}, `${policy.versions.length} versions · ${says}`),
-      h("span", { class: "lane-tags" }, h("span", { class: "chip" }, policy.definition?.weights === "full" ? "full" : "LoRA"), policy.sample ? sampleChip() : null));
+      h("b", {}, run && !sample && state.system.runs.some(each => each.run === run.run) ? link(runPlace(run.run), { onclick: event => event.stopPropagation() }, name) : name),
+      h("small", { title: says }, `${lane.versions.length} versions · ${says}`),
+      h("span", { class: "lane-tags" }, run?.kind === "distill" ? h("span", { class: `chip t-${modeKind(run.mode)}`, title: run.says }, run.mode) : null, sample ? sampleChip() : null));
   }));
   return h("div", { class: "dag" }, labels, h("div", { class: "dag-frame" }, drawing));
 }
@@ -938,23 +982,26 @@ function queueChart(depth, groups, now, width, height) {
   return drawing;
 }
 
+const shortOf = (lineage, id) => lineage.versions.find(version => version.id === id)?.short ?? String(id).slice(0, 12);
+const runOf = (lineage, id) => lineage.runs.find(run => run.run === id)?.name ?? id;
+
 function trainerTile(trainer, lineage) {
   const taking = trainer.queue.filter(entry => entry.state === "taking"), queued = trainer.queue.filter(entry => entry.state === "queued");
   const done = trainer.queue.filter(entry => entry.state === "made" || entry.state === "failed").slice(-3).reverse();
   const waited = trainer.queue.filter(entry => entry.began && entry.queued).map(entry => entry.began - entry.queued);
-  const row = entry => h("div", { class: "member" }, h("b", {}, `S${entry.step}`), h("span", { class: "what" }, entry.run),
+  const row = entry => h("div", { class: "member" }, h("b", {}, `S${entry.step}`), h("span", { class: "what" }, runOf(lineage, entry.run)),
     mark(entry.state === "taking" ? "stepping" : entry.state === "queued" ? "queued" : entry.state === "made" ? "committed" : "failed",
       entry.state === "taking" ? `taking, ${ago(lineage, entry.began)}` : entry.state === "queued" ? `queued ${ago(lineage, entry.queued)}` : entry.state),
-    h("span", { class: "faint" }, `→ ${entry.makes}`));
+    h("span", { class: "faint mono", title: entry.makes }, `→ ${shortOf(lineage, entry.makes)}`));
   return h("div", { class: `tile rail ${taking.length ? "violet" : queued.length ? "warm" : ""}` },
     h("header", {}, h("b", {}, trainer.trainer), h("span", { class: "what" }, `${trainer.weights === "full" ? "full weights" : "LoRA"}${trainer.base ? ` on ${short(trainer.base)}` : ""}`),
       trainer.sample ? sampleChip() : null),
     h("div", { class: "facts" },
-      h("span", {}, trainer.weights === "full" ? "dedicated to " : trainer.implicit ? "trains " : "any LoRA of its base: ", h("b", {}, trainer.policies.join(", "))),
+      h("span", {}, trainer.weights === "full" ? "dedicated to " : trainer.implicit ? "trains for " : "any LoRA of its base: ", h("b", {}, (trainer.runs ?? []).map(run => runOf(lineage, run)).join(", "))),
       trainer.colocated ? h("span", {}, "shares the engines' accelerator: they sleep while it steps") : trainer.where ? h("span", {}, trainer.where) : null,
       trainer.implicit ? h("span", {}, "not registered: the run's own, from its profile") : null),
     h("div", { class: "cells four" },
-      h("div", { class: `cell ${taking.length ? "violet" : ""}` }, h("span", {}, "taking"), h("b", {}, String(taking.length)), h("small", {}, taking[0] ? `${taking[0].makes}` : "idle")),
+      h("div", { class: `cell ${taking.length ? "violet" : ""}` }, h("span", {}, "taking"), h("b", {}, String(taking.length)), h("small", { class: "mono" }, taking[0] ? shortOf(lineage, taking[0].makes) : "idle")),
       h("div", { class: `cell ${queued.length ? "warm" : "waiting"}` }, h("span", {}, "queued"), h("b", {}, String(queued.length)), h("small", {}, queued.length ? `oldest ${ago(lineage, queued[0].queued)}` : "none")),
       h("div", { class: "cell" }, h("span", {}, "waited"), h("b", {}, waited.length && !trainer.implicit ? span(mean(waited)) : "–"),
         h("small", {}, trainer.implicit ? "not recorded" : "mean, queued to taken")),
@@ -966,12 +1013,12 @@ function trainerTile(trainer, lineage) {
 }
 
 function workerTile(worker, lineage) {
-  const holds = worker.holds?.policy ? `${worker.holds.policy}, full weights` : worker.holds?.base ? `${worker.serving.length} of ${worker.adapters ?? "?"} adapter slots` : "the run's engines";
+  const holds = worker.holds?.run ? `${runOf(lineage, worker.holds.run)}'s line, full weights` : worker.holds?.base ? `${worker.serving.length} of ${worker.adapters ?? "?"} adapter slots` : "the run's engines";
   const waiting = lineage.routing.waiting ?? {};
   return h("div", { class: `tile rail ${worker.serving.length ? "good" : ""}` },
     h("header", {}, h("b", {}, worker.worker), h("span", { class: "what" }, holds), worker.share ? mark(worker.share === "evaluations" ? "queued" : "", worker.share) : null, worker.sample ? sampleChip() : null),
     worker.machine ? h("div", { class: "facts" }, h("span", {}, worker.machine), h("span", {}, worker.accelerators), worker.holds?.base ? h("span", {}, short(worker.holds.base)) : null) : null,
-    h("div", { class: "chips" }, worker.serving.length ? worker.serving.map(name => h("span", { class: "chip", title: `${waiting[name] ?? 0} requests waiting for ${name}` }, name,
+    h("div", { class: "chips" }, worker.serving.length ? worker.serving.map(name => h("span", { class: "chip mono", title: `${name}: ${waiting[name] ?? 0} requests waiting for it` }, shortOf(lineage, name),
       waiting[name] ? h("b", { class: "waits" }, ` ${waiting[name]} waiting`) : null)) : h("span", { class: "none" }, "serves nothing")));
 }
 
@@ -987,15 +1034,16 @@ function way(version) {
 
 function drawPolicies(here) {
   const lineage = state.lineage;
-  if (!lineage || state.lineageSample !== here.sample) return [h("div", { class: "empty" }, "Reading the policies…")];
+  if (!lineage || state.lineageSample !== here.sample) return [h("div", { class: "empty" }, "Reading the versions…")];
   const index = indexOf(lineage), lanes = lanesOf(lineage, index);
-  const versions = lineage.policies.reduce((sum, policy) => sum + policy.versions.length, 0);
+  const versions = lineage.versions.length;
   const toggle = h("div", { class: "segmented" },
     link(policiesPlace(false), { class: `seg${here.sample ? "" : " current"}` }, "The ledger"),
     link(policiesPlace(true), { class: `seg${here.sample ? " current" : ""}` }, "With the sample fixture"));
-  const head = h("div", { class: "head" }, h("h1", {}, "Policies"),
-    h("div", { class: "sub" }, "Each policy a line of versions; forks and distillations between them. Below: what trains them, what serves them, and how they play a fixed suite."),
-    specs(spec("policies", String(lineage.policies.length)), spec("versions", String(versions)), spec("runs", String(lineage.runs.length)),
+  const head = h("div", { class: "head" }, h("h1", {}, "Versions"),
+    h("div", { class: "sub" }, "Every version grows from a base model, along what it was trained from; each run makes a line of them, and a run that starts from another's version forks there. Below: what trains them, what serves them, and how they play a fixed suite."),
+    specs(spec("base models", String(lineage.bases.length)), spec("versions", String(versions)), spec("runs", String(lineage.runs.length)),
+      spec("bookmarks", String(Object.keys(lineage.bookmarks).length), "accent"),
       spec("distillations", String(lineage.runs.filter(run => run.kind === "distill").length), "warm"), spec("trainers", String(lineage.trainers.length), "violet"),
       spec("workers", String(lineage.workers.length), "accent"), spec("suites", String(lineage.evaluations.length))), toggle);
   const notice = here.sample ? h("div", { class: "tile rail warm notice" }, h("header", {}, h("b", {}, "Sample fixture"), sampleChip()),
@@ -1004,12 +1052,15 @@ function drawPolicies(here) {
   const opened = lanes.filter(lane => folds[`lane:${lane.key}`]).length;
   const all = open => () => { for (const lane of lanes) folds[`lane:${lane.key}`] = open; keepFolds(); redraw(); };
   const graph = h("section", { class: "card" }, h("header", {}, h("h2", {}, "Lineage"),
-    h("span", {}, `a lane per policy, its versions from the left; ${opened ? `${opened} open` : "folded to the versions something points at"} · `,
+    h("span", {}, `a lane per run under its base model, its versions from the left; ${opened ? `${opened} open` : "folded to the versions something points at"} · `,
       h("button", { class: "linkish", onclick: all(true) }, "open all"), " · ", h("button", { class: "linkish", onclick: all(false) }, "fold all"))),
-    lanes.length ? lineageGraph(lineage, index, lanes) : h("div", { class: "empty" }, "The ledger has no policy yet."),
+    lineage.versions.length ? lineageGraph(lineage, index, lanes) : h("div", { class: "empty" }, "The ledger has no version yet."),
     h("div", { class: "legend dag-legend" },
-      h("span", {}, h("i", { style: "background:var(--accent)" }), "trained by a run"), h("span", {}, h("i", { style: "background:var(--warm)" }), "distilled off policy"),
-      h("span", {}, h("i", { style: "background:var(--violet)" }), "distilled on policy"), h("span", {}, h("i", { class: "rule", style: "background:var(--quiet)" }), "fork"),
+      h("span", {}, h("i", { class: "rule", style: "background:var(--quiet)" }), "trained from (a base model, or a version of another run: a fork)"),
+      h("span", {}, h("i", { style: "background:var(--accent)" }), "trained by a run on its own groups"),
+      h("span", { title: "a distillation's mode: whose samples it trains on" }, h("i", { style: "background:var(--warm)" }), "distilled off-policy: on its teachers' samples"),
+      h("span", { title: "a distillation's mode: whose samples it trains on" }, h("i", { style: "background:var(--violet)" }), "distilled on-policy: it samples, its teachers score each token"),
+      h("span", {}, h("b", { class: "t-accent" }, "name"), " a bookmark"),
       h("span", {}, h("i", { class: "hollow" }), "released (weights let go)"), h("span", {}, h("i", { class: "ring-good" }), "serving"),
       h("span", {}, h("i", { class: "ring-warm" }), "rolling out"), h("span", {}, h("i", { class: "ring-violet" }), "resharding"),
       lineage.evaluations.length ? h("span", {}, h("b", { class: "t-good" }, "9/16"), " solved of the suite played") : null));
@@ -1018,9 +1069,10 @@ function drawPolicies(here) {
     h("div", { class: "tiles wide-tiles" }, lineage.trainers.map(trainer => trainerTile(trainer, lineage)))];
   // Serving: every version on its way to the engines or served, the workers, the requests waiting.
   const order = new Map(lanes.map((lane, place) => [lane.key, place]));
-  const moving = lineage.policies.flatMap(policy => policy.versions.filter(version => !["superseded", "written"].includes(version.life.state)
-    || (version.life.state === "written" && version.name === policy.head)).map(version => ({ ...version, policy })))
-    .sort((a, b) => (order.get(a.policy.policy) ?? 0) - (order.get(b.policy.policy) ?? 0) || b.number - a.number);
+  const heads = new Set(lanes.filter(lane => lane.versions?.length).map(lane => lane.versions.at(-1).id));
+  const laneOf = version => version.by?.run ?? OUTSIDE;
+  const moving = lineage.versions.filter(version => !["superseded", "written"].includes(version.life.state) || (version.life.state === "written" && heads.has(version.id)))
+    .sort((a, b) => (order.get(laneOf(a)) ?? 0) - (order.get(laneOf(b)) ?? 0) || b.depth - a.depth);
   const waiting = lineage.routing.waiting ?? {}, totalWaiting = Object.values(waiting).reduce((sum, count) => sum + count, 0);
   const serving = [h("div", { class: "section-title" }, h("h2", {}, "Serving"), h("span", {}, "a request names an exact version, or a run's latest; the router sends it to a worker that has it")),
     h("div", { class: "kpis" },
@@ -1029,33 +1081,34 @@ function drawPolicies(here) {
       kpi("Rolling out", String(moving.filter(version => version.life.state === "rolling out").length), "a run's latest, not yet on every worker"),
       kpi("Resharding", String(moving.filter(version => ["resharding", "resharded"].includes(version.life.state)).length), "full weights, for the engines' layout"),
       kpi("Workers", String(lineage.workers.length), `${lineage.workers.filter(worker => worker.registered).length} registered`)),
-    card("On their way to the engines, and served", "newest first in each policy",
+    card("On their way to the engines, and served", "newest first in each run's line",
       table([["version"], ["made by"], ["way"], ["workers"], ["waiting", "n"], ["latest of"], ["made", "n"]], moving.map(version => {
         const workers = Object.entries(version.life.workers);
-        return [{ node: h("span", {}, h("b", { class: "mono" }, version.name), version.policy.sample ? " " : null, version.policy.sample ? sampleChip() : null) },
-          version.by ? `${version.by.run}${version.by.step ? ` S${version.by.step}` : ""}` : "–", { node: way(version) },
+        return [{ node: h("span", {}, h("b", { class: "mono", title: version.id }, version.short), " ", ...marks(version.bookmarks), version.sample ? " " : null, version.sample ? sampleChip() : null) },
+          version.by ? `${version.by.name}${version.by.step != null ? ` S${version.by.step}` : ""}` : "–", { node: way(version) },
           { node: h("div", { class: "chips" }, workers.length ? workers.map(([worker, served]) => h("span", { class: `chip${served.until == null ? " on" : " off"}`,
             title: served.until == null ? `serving since ${clock(served.since)}` : `served ${clock(served.since)} to ${clock(served.until)}` }, worker))
             : h("span", { class: "none" }, version.life.state === "resharding" ? "files being rewritten" : "on no worker")) },
-          version.life.waiting ? { text: String(version.life.waiting), kind: "bad" } : "0", version.life.latest_of ?? "–", ago(lineage, version.made)];
+          version.life.waiting ? { text: String(version.life.waiting), kind: "bad" } : "0", version.life.latest_of ? runOf(lineage, version.life.latest_of) : "–", ago(lineage, version.made)];
       }))),
     h("div", { class: "tiles" }, lineage.workers.map(worker => workerTile(worker, lineage)))];
   // Runs, and what each was set up to do.
-  const runs = card("Runs and distillations", "what made each stretch of a line", table([["run"], ["kind"], ["policy"], ["from"], ["teachers"], ["trains on"], ["objective"], ["versions"], ["latest"]],
-    lineage.runs.map(run => [{ node: h("span", {}, h("b", { class: "mono" }, run.run), run.sample ? " " : null, run.sample ? sampleChip() : null) },
-      run.kind === "distill" ? { node: mark(modeKind(run.mode) === "violet" ? "stepping" : "queued", `distil, ${run.mode}`) } : "train",
-      run.policy, run.from ?? "–", run.teachers.join(", ") || "–",
-      run.kind === "distill" ? `${(run.data.sampled_by ?? []).join(", ")}'s samples${run.data.runs ? ` from ${run.data.runs.join(", ")}` : ""}${run.data.episodes ? ` (${run.data.episodes})` : ""}` : "its own groups",
-      run.objective ?? "policy gradient", run.versions.length ? `${versionOf(run.versions[0])}–${versionOf(run.versions.at(-1))}` : "–", run.latest ?? "–"]),
+  const runs = card("Runs and distillations", "what made each line", table([["run"], ["kind"], ["from"], ["teachers"], ["trains on"], ["objective"], ["versions"], ["latest"]],
+    lineage.runs.map(run => [{ node: h("span", {}, h("b", { title: run.run }, run.name), run.sample ? " " : null, run.sample ? sampleChip() : null) },
+      run.kind === "distill" ? { node: h("span", { title: run.says }, mark(modeKind(run.mode) === "violet" ? "stepping" : "queued", `distil, ${run.mode}`)) } : "train",
+      run.from ? index.shortOf(run.from) : "the base model", run.teachers.map(index.shortOf).join(", ") || "–",
+      run.kind === "distill" ? `${run.says}${run.data.runs ? ` (from ${run.data.runs.map(each => runOf(lineage, each)).join(", ")})` : ""}` : "its own groups",
+      run.objective ?? "policy gradient", run.versions.length ? `${index.shortOf(run.versions[0])}–${index.shortOf(run.versions.at(-1))}` : "–", run.latest ? index.shortOf(run.latest) : "–"]),
     lineage.runs.map(run => state.system.runs.some(each => each.run === run.run) && !run.sample ? () => go(runPlace(run.run)) : null)));
   // Evaluations: each suite, a column for each subject that played it.
   const suites = lineage.evaluations.map(suite => {
     const subjects = [...suite.subjects].sort((a, b) => {
-      const place = subject => subject.version ? (order.get(subject.version.split("@")[0]) ?? 99) * 1000 + Number(subject.version.split("@")[1]) : 1e9;
+      const place = subject => { const version = subject.version && index.versions.get(subject.version);
+        return version ? (order.get(laneOf(version)) ?? 99) * 1000 + version.depth : subject.version ? 9e8 : 1e9; };
       return place(a) - place(b);
     });
     const header = h("tr", {}, h("th", {}, "start"), subjects.map(subject => h("th", { class: "subject" },
-      h("div", {}, subject.version ?? subject.model ?? subject.subject), h("small", {}, subject.kind === "model" ? short(subject.subject.split(".").at(-1)) : subject.asked_by === "by hand" ? "" : "scheduled"))));
+      h("div", { title: subject.version ?? subject.subject }, subject.version ? index.shortOf(subject.version) : subject.model ?? subject.subject), h("small", {}, subject.kind === "model" ? short(subject.subject.split(".").at(-1)) : subject.asked_by === "by hand" ? "" : "scheduled"))));
     const total = h("tr", { class: "total" }, h("td", {}, "solved"), subjects.map(subject => h("td", { class: "n" },
       h("b", {}, `${subject.solved}/${subject.played}`), subject.played < suite.starts.length ? h("small", { class: "faint" }, ` of ${suite.starts.length}`) : null,
       h("div", { class: "track" }, h("i", { style: `width:${(100 * subject.solved / Math.max(1, suite.starts.length)).toFixed(1)}%` })))));
@@ -1082,9 +1135,9 @@ function drawRuns() {
     const recent = run.done.slice(-12), solved = recent.flatMap(line => line.solved);
     const committed = run.steps.filter(step => step.state === "committed").length;
     const head = run.steps.findLast(step => step.state === "committed")?.makes;
-    const trains = head?.split("@")[0] ?? run.policy;
+    const base = system.versions.findLast(version => version.run === run.run)?.base;
     return link(runPlace(run.run), { class: `tile rail ${run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}` },
-      h("header", {}, runDot(run), h("b", { title: run.run }, run.name ?? run.run), h("span", { class: "what" }, trains ? `trains ${trains}` : ""), h("span", { class: "faint small" }, running(run))),
+      h("header", {}, runDot(run), h("b", { title: run.run }, run.name ?? run.run), h("span", { class: "what" }, base ? `on ${short(base)}` : ""), h("span", { class: "faint small" }, running(run))),
       h("div", { class: "cells four" },
         h("div", { class: `cell ${run.open.length ? "accent" : "waiting"}` }, h("span", {}, "in flight"), h("b", {}, String(run.open.length)), h("small", {}, `${run.next.length} toward a step`)),
         h("div", { class: "cell" }, h("span", {}, "groups done"), h("b", {}, String(run.done.length)), h("small", {}, `of ${run.decided} decided`)),
@@ -1433,7 +1486,7 @@ function machine(half) {
     h("p", { class: "small muted", style: "margin:4px 0 0" }, `Measured every 15 s while this monitor runs; the newest ${history.length} cover ${span(now.at - (history[0]?.at ?? now.at))}.`));
   const channels = system.channels.map(channel => {
     const latest = channel.throughput.at(-1);
-    return card(`Channel ${channel.channel}`, `${channel.directory.split("/").at(-1)} · ${channel.adapter ? `serving ${channel.adapter} since ${clock(channel.published)}` : "serving the base model"}`,
+    return card(`Channel ${channel.channel}`, `${channel.directory.split("/").at(-1)} · ${channel.adapter ? `serving ${versionOf(channel.adapter)} since ${clock(channel.published)}` : "serving the base model"}`,
       latest ? [h("div", { class: "kpis", style: "margin-bottom:12px" }, kpi("tokens a second", figure(latest.tokens_per_second)),
         kpi("requests at once", figure(latest.mean_concurrency)), kpi("each", `${figure(latest.tokens_per_second_per_stream)} tok/s`))]
         : h("p", { class: "muted" }, "No request has been measured yet."));
@@ -1470,19 +1523,19 @@ function redraw() {
   let crumbs = [[PAGES.find(([page]) => page === here.page)[1], PAGES.find(([page]) => page === here.page)[2]]], content;
   if (!system) content = [h("div", { class: "empty" }, "Reading the run…")];
   else if (here.kind === "runs") content = drawRuns();
-  else if (here.kind === "run") { crumbs.push([`Run ${here.run}`, runPlace(here.run)]); content = drawRun(here.run); }
-  else if (here.kind === "step") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], [`Step ${here.number}`, ""]); content = drawStep(here); }
-  else if (here.kind === "group") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], ...stepCrumb(here.run, here.number), [`Group #${here.number}`, ""]); content = drawGroup(here); }
+  else if (here.kind === "run") { crumbs.push([`Run ${runNamed(here.run)}`, runPlace(here.run)]); content = drawRun(here.run); }
+  else if (here.kind === "step") { crumbs.push([`Run ${runNamed(here.run)}`, runPlace(here.run)], [`Step ${here.number}`, ""]); content = drawStep(here); }
+  else if (here.kind === "group") { crumbs.push([`Run ${runNamed(here.run)}`, runPlace(here.run)], ...stepCrumb(here.run, here.number), [`Group #${here.number}`, ""]); content = drawGroup(here); }
   else if (here.kind === "episode") {
     const labels = state.episode?.labels ?? {};
-    if (labels.run && labels.group) crumbs.push([`Run ${labels.run}`, runPlace(labels.run)], ...stepCrumb(labels.run, Number(labels.group)),
+    if (labels.run && labels.group) crumbs.push([`Run ${runNamed(labels.run)}`, runPlace(labels.run)], ...stepCrumb(labels.run, Number(labels.group)),
       [`Group #${Number(labels.group)}`, groupPlace(labels.run, Number(labels.group))]);
     else crumbs.push(["Episodes outside a run", "#/episodes"]);
     crumbs.push([labels.episode ? `Episode ${labels.episode}` : "Episode", here.slot ? episodePlace(here.id) : ""]);
     if (here.slot) crumbs.push([`Rollout ${here.slot}`, ""]);
     content = drawEpisode(here);
   } else if (here.kind === "outside") { crumbs.push(["Episodes outside a run", ""]); content = drawOthers(); }
-  else if (here.kind === "policy") { crumbs.push([`Policy ${here.name}`, ""]); content = drawPolicy(here.name); }
+  else if (here.kind === "version") { crumbs.push([`Version ${versionOf(here.id)}`, ""]); content = drawVersion(here.id); }
   else if (here.kind === "policies") { if (here.sample) crumbs.push(["Sample fixture", ""]); content = drawPolicies(here); }
   else content = drawStatistics(here);
   drawBar(crumbs);
@@ -1523,7 +1576,7 @@ async function pull() {
       if (known && more.source === known.source) { known.lines.push(...more.lines); Object.assign(known, { ...more, lines: known.lines }); }
       else state.episode = more;
     }
-    const drawn = JSON.stringify([location.hash, system.at > (state.drawnAt ?? 0) + 10 ? system.at : state.drawnAt, system.runs, system.policies,
+    const drawn = JSON.stringify([location.hash, system.at > (state.drawnAt ?? 0) + 10 ? system.at : state.drawnAt, system.runs, system.versions,
       system.channels.map(channel => channel.throughput.length), here.kind === "statistics" ? [system.machine.now, { ...state.statistics, now: 0 }] : 0, state.group, state.episode?.lines.length, state.episode?.state,
       here.kind === "policies" ? { ...state.lineage, now: 0 } : 0]);
     if (drawn !== state.drawn) { state.drawn = drawn; state.drawnAt = system.at; redraw(); }

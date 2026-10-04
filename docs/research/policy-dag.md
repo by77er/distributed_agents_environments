@@ -1,6 +1,6 @@
 # The policy graph
 
-Code: `rollout_train.monitor.lineage` (the draft view) · See [policies, versions and the ledger](../libraries/rollout-train/policies.md),
+Code: `rollout_train.monitor.lineage` (the draft view) · See [policies, versions and the ledger](../libraries/rollout-train/versions.md),
 [training](../libraries/rollout-train/training.md), [the monitor](../libraries/rollout-train/monitor.md#the-policies-view)
 
 **A proposal.** It describes a view of every policy as a graph, and the records behind it: training, distillation,

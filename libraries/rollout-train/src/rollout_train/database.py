@@ -6,14 +6,15 @@ fence it was written under, and the record as JSON; a table has each key once) a
 of every scope). Taking a fence and appending run in transactions that hold the scope's lock, so a writer that was
 replaced is refused (`Fenced`) whichever process it is in. SQLite serves one machine; Postgres serves several.
 
-`DatabaseRegistry` is the registry of runs and policies (`rollout_train.registry`) beside it, in a table of the same
-database (`registry`: a row per run or policy, its id and its name, a name once per kind); a database ledger's is
-its `registry`.
+`DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in two tables of the same database: `runs`
+(each run's id and name, a name once) and `bookmarks` (each bookmark's name and version); a database ledger's is its
+`registry`.
 """
 
 import asyncio
 import json
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from pydantic import JsonValue
 
 from rollout_durable.database import Connection, Database, fetch_all, fetch_one, sql
 from rollout_train.ledger import Fence, Fenced, Ledger
-from rollout_train.registry import KINDS, Entry, Taken, checked, new_id, registry_of
+from rollout_train.registry import Bookmark, Entry, Taken, checked, found, new_run_id, registry_of, valid
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(
@@ -40,14 +41,19 @@ FENCES = sa.Table(
     sa.Column("scope", sa.Text, primary_key=True),
     sa.Column("number", sa.BigInteger, nullable=False),
 )
-REGISTRY = sa.Table(
-    "registry",
+RUNS = sa.Table(
+    "runs",
     METADATA,
-    sa.Column("kind", sa.Text, primary_key=True),
     sa.Column("id", sa.Text, primary_key=True),
-    sa.Column("name", sa.Text, nullable=False),
+    sa.Column("name", sa.Text, nullable=False, unique=True),
     sa.Column("created", sa.Float(), nullable=False),
-    sa.UniqueConstraint("kind", "name"),
+)
+BOOKMARKS = sa.Table(
+    "bookmarks",
+    METADATA,
+    sa.Column("name", sa.Text, primary_key=True),
+    sa.Column("version", sa.Text, nullable=False),
+    sa.Column("moved", sa.Float(), nullable=False),
 )
 
 
@@ -125,57 +131,75 @@ class DatabaseLedger:
 
 
 class DatabaseRegistry:
-    """A `Registry` (`rollout_train.registry`) in the `registry` table of a database."""
+    """A `Registry` (`rollout_train.registry`) in the `runs` and `bookmarks` tables of a database."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    async def entries(self, kind: str) -> list[Entry]:
-        def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            query = "SELECT kind, id, name, created FROM registry WHERE kind = :kind ORDER BY created, id"
-            return fetch_all(connection, query, {"kind": kind})
+    async def runs(self) -> list[Entry]:
+        return await asyncio.to_thread(self.database.read, _runs)
 
-        return [Entry(*row) for row in await asyncio.to_thread(self.database.read, rows)]
-
-    async def create(self, kind: str, name: str, id: str | None = None) -> Entry:
-        made = id or new_id(kind)
+    async def create(self, name: str, id: str | None = None) -> Entry:
+        made = id or new_run_id()
 
         def created(connection: Connection) -> Entry:
-            if fetch_one(
-                connection, "SELECT 1 FROM registry WHERE kind = :kind AND id = :id", {"kind": kind, "id": made}
-            ):
-                raise Taken(f"there is a {kind} {made} already")
-            entry = Entry(kind, made, checked(kind, name, made, _entries(connection, kind)), round(time.time(), 1))
-            sql(connection, "INSERT INTO registry (kind, id, name, created) VALUES (:kind, :id, :name, :created)",
-                {"kind": kind, "id": made, "name": entry.name, "created": entry.created})  # fmt: skip
+            runs = _runs(connection)
+            if any(each.id == made for each in runs):
+                raise Taken(f"there is a run {made} already")
+            entry = Entry(made, checked(name, made, runs), round(time.time(), 1))
+            sql(connection, "INSERT INTO runs (id, name, created) VALUES (:id, :name, :created)", asdict(entry))
             return entry
 
         return await asyncio.to_thread(self.database.write, created, exclusive="registry")
 
-    async def rename(self, kind: str, who: str, name: str) -> Entry:
+    async def rename(self, who: str, name: str) -> Entry:
         def renamed(connection: Connection) -> Entry:
-            entries = _entries(connection, kind)
-            found = next((e for e in entries if e.name == who), None) or next((e for e in entries if e.id == who), None)
-            if found is None:
-                raise KeyError(f"there is no {kind} {who!r}")
-            entry = Entry(kind, found.id, checked(kind, name, found.id, entries), found.created)
-            sql(connection, "UPDATE registry SET name = :name WHERE kind = :kind AND id = :id",
-                {"name": entry.name, "kind": kind, "id": found.id})  # fmt: skip
+            runs = _runs(connection)
+            if (was := found(runs, who)) is None:
+                raise KeyError(f"there is no run {who!r}")
+            entry = Entry(was.id, checked(name, was.id, runs), was.created)
+            sql(connection, "UPDATE runs SET name = :name WHERE id = :id", {"name": entry.name, "id": was.id})
             return entry
 
         return await asyncio.to_thread(self.database.write, renamed, exclusive="registry")
 
+    async def bookmarks(self) -> list[Bookmark]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            return fetch_all(connection, "SELECT name, version, moved FROM bookmarks ORDER BY name")
 
-def _entries(connection: Connection, kind: str) -> list[Entry]:
-    query = "SELECT kind, id, name, created FROM registry WHERE kind = :kind"
-    return [Entry(*row) for row in fetch_all(connection, query, {"kind": kind})]
+        return [Bookmark(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+
+    async def bookmark(self, name: str, version: str) -> Bookmark:
+        mark = Bookmark(valid(name), version, round(time.time(), 1))
+
+        def moved(connection: Connection) -> Bookmark:
+            sql(
+                connection,
+                "INSERT INTO bookmarks (name, version, moved) VALUES (:name, :version, :moved) "
+                "ON CONFLICT (name) DO UPDATE SET version = excluded.version, moved = excluded.moved",
+                asdict(mark),
+            )
+            return mark
+
+        return await asyncio.to_thread(self.database.write, moved, exclusive="registry")
+
+    async def unbookmark(self, name: str) -> None:
+        def taken(connection: Connection) -> None:
+            if sql(connection, "DELETE FROM bookmarks WHERE name = :name", {"name": name}).rowcount == 0:
+                raise KeyError(f"there is no bookmark {name!r}")
+
+        await asyncio.to_thread(self.database.write, taken, exclusive="registry")
+
+
+def _runs(connection: Connection) -> list[Entry]:
+    return [Entry(*row) for row in fetch_all(connection, "SELECT id, name, created FROM runs ORDER BY created, id")]
 
 
 async def copy(source: Ledger, target: DatabaseLedger) -> int:
     """Copy every table and fence of `source` (files, or another database) into `target`, which must have none of its
     tables yet; returns how many records. Records keep their keys and their order; each is noted under its scope's
     newest fence (the fence a record was written under is not read back through a ledger). A fence already in the
-    target is kept if it is newer. The runs and policies registered beside `source` are registered beside `target`
+    target is kept if it is newer. The runs and bookmarks registered beside `source` are registered beside `target`
     too. To move to Postgres: copy, then point the profile's `[ledger] url` at it."""
     tables = await source.tables()
     there = set(await target.tables())
@@ -211,7 +235,8 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
 
     count = await asyncio.to_thread(target.database.write, copied, exclusive="ledger:copy")
     if (registered := registry_of(source)) is not None:
-        for kind in KINDS:
-            for entry in await registered.entries(kind):
-                await target.registry.create(kind, entry.name, entry.id)
+        for entry in await registered.runs():
+            await target.registry.create(entry.name, entry.id)
+        for mark in await registered.bookmarks():
+            await target.registry.bookmark(mark.name, mark.version)
     return count

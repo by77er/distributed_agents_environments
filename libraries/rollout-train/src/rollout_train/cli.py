@@ -25,6 +25,7 @@ from rollout.names import named
 
 if TYPE_CHECKING:
     from rollout_train.ledger import Ledger
+    from rollout_train.registry import Registry
 
 
 async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
@@ -76,10 +77,11 @@ async def _train(
         assert platform.trainer is not None
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
-            rows, platform.trainer, platform.policies, policy=platform.policy, channel=channel,
+            rows, platform.trainer, platform.versions, start=platform.origin, channel=channel,
+            base=described.channels[channel].model,
             directory=described.directory / "versions", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
-            run=platform.run.id, started=started, hooks=[platform.feed],
+            run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
         )  # fmt: skip
 
 
@@ -88,9 +90,10 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     from rollout_train.imitation import examples, imitate
     from rollout_train.layout import BLOBS, LEDGER
     from rollout_train.ledger import opened
-    from rollout_train.policies import Policies
     from rollout_train.profile import Profile
-    from rollout_train.registry import policy_of, registry_of, run_of
+    from rollout_train.record import scope
+    from rollout_train.registry import registry_of, resolved, run_of
+    from rollout_train.versions import Versions
 
     described = Profile.load(profile, directory=directory)
     if described.trainer is None:
@@ -100,21 +103,22 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     store = dict(described.blobs)
     blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
     ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
-    policies, registry = Policies(ledger, blobs), registry_of(ledger)
+    versions, registry = Versions(ledger, blobs), registry_of(ledger)
     run = await run_of(described.directory, ledger, registry)
-    policy = (await policy_of(ledger, registry, described.trainer.policy or run.name)).id
+    start = await resolved(ledger, registry, described.trainer.start) if described.trainer.start else None
     taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
     if not taught.segments:
         raise SystemExit("no solved episode of the run carried that guidance")
     print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out)", flush=True)
     settings = {**described.trainer.settings, "objective": "likelihood"}
     trainer = named(described.trainer.kind)(spec.model, **settings)
-    writer = await policies.writer(policy)
+    fence = await ledger.take(scope(run.id))  # (the run is stopped: imitation writes as it)
     version = await imitate(
-        policies, trainer, taught, fence=writer, policy=policy, directory=described.directory / "versions",
+        versions, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
+        directory=described.directory / "versions",
         limit=limit, seed=seed,
     )  # fmt: skip
-    print(f"made {version.name}: {json.dumps({key: round(value, 4) for key, value in version.metrics.items()})}")
+    print(f"made {version.id}: {json.dumps({key: round(value, 4) for key, value in version.metrics.items()})}")
 
 
 def _ledger_at(where: str) -> "Ledger":
@@ -148,17 +152,62 @@ async def _copy_ledger(source: str, target: str, point: bool) -> None:
         await asyncio.to_thread(pointed)
 
 
-async def _rename(kind: str, who: str, name: str, where: str) -> None:
-    from rollout_train.registry import Taken, registry_of
+def _registry_at(where: str) -> "tuple[Ledger, Registry]":
+    from rollout_train.registry import registry_of
 
-    registry = registry_of(_ledger_at(where))
+    ledger = _ledger_at(where)
+    registry = registry_of(ledger)
     if registry is None:
-        raise SystemExit(f"the ledger at {where} has no registry of names")
+        raise SystemExit(f"the ledger at {where} has no registry beside it")
+    return ledger, registry
+
+
+async def _rename(who: str, name: str, where: str) -> None:
+    from rollout_train.registry import Taken
+
+    _, registry = _registry_at(where)
     try:
-        entry = await registry.rename(kind, who, name)
+        entry = await registry.rename(who, name)
     except (KeyError, Taken) as error:
         raise SystemExit(error.args[0]) from None
-    print(f"the {kind} {entry.id} is called {entry.name}")
+    print(f"the run {entry.id} is called {entry.name}")
+
+
+async def _bookmark(name: str, reference: str | None, delete: bool, where: str) -> None:
+    from rollout_train.registry import Taken, resolved
+
+    ledger, registry = _registry_at(where)
+    try:
+        if delete:
+            await registry.unbookmark(name)
+            print(f"no bookmark {name} any more")
+            return
+        version = await resolved(ledger, registry, reference or "")
+        if version is None:
+            raise SystemExit("a bookmark names a version, not the base model")
+        await registry.bookmark(name, version)
+    except (KeyError, Taken) as error:
+        raise SystemExit(error.args[0]) from None
+    print(f"{name} is {version}")
+
+
+async def _versions(where: str) -> None:
+    from rollout_train.registry import names
+    from rollout_train.versions import short, versions_in
+
+    ledger, registry = _registry_at(where)
+    every, called = await versions_in(ledger), await names(registry)
+    shown = short(version.id for version in every)
+    marks: dict[str, list[str]] = {}
+    for mark, version in called["bookmarks"].items():
+        marks.setdefault(version, []).append(mark)
+    for version in sorted(every, key=lambda each: (each.made, each.depth), reverse=True):
+        origin = called["runs"].get(version.run, version.run) if version.run else "made outside a run"
+        at = f":{version.step}" if version.step is not None else ""
+        parents = ", ".join(shown.get(parent, parent) for parent in version.parents) or "the base model"
+        kept = "" if version.weights is not None else "  (released)"
+        bookmarked = f"  [{', '.join(marks[version.id])}]" if version.id in marks else ""
+        print(f"{shown[version.id]:<8} depth {version.depth:<4} {origin}{at}  from {parents}{bookmarked}{kept}")
 
 
 def main() -> None:
@@ -194,11 +243,18 @@ def main() -> None:
     copying.add_argument("source", help="a run's directory, a directory of files, or a database's URL")
     copying.add_argument("target", help="a database's URL: sqlite:///path or postgresql://…")
     copying.add_argument("--point", action="store_true", help="make the source run's directory name the copy")
-    renaming = commands.add_parser("rename", help="call a run or a policy something else (its id stays)")
-    renaming.add_argument("kind", choices=["run", "policy"])
-    renaming.add_argument("who", help="its name or its id")
+    where = "a run's directory, a ledger's directory, or a database's URL (by default this directory)"
+    renaming = commands.add_parser("rename", help="call a run something else (its id stays)")
+    renaming.add_argument("who", help="the run, by its name or its id")
     renaming.add_argument("name", help="what it is called from now on")
-    renaming.add_argument("--ledger", default=".", help="a run's directory, a ledger's directory, or a database's URL")
+    renaming.add_argument("--ledger", default=".", help=where)
+    marking = commands.add_parser("bookmark", help="name a version, move a bookmark, or take one away")
+    marking.add_argument("name")
+    marking.add_argument("version", nargs="?", help="a bookmark, RUN:STEP, RUN, or a version's id or its start")
+    marking.add_argument("--delete", action="store_true", help="take the bookmark away (the version stays)")
+    marking.add_argument("--ledger", default=".", help=where)
+    listing = commands.add_parser("versions", help="every version, newest first: where it came from")
+    listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
     serving.add_argument("factory")
     serving.add_argument("--directory", type=Path, default=Path("."))
@@ -218,7 +274,15 @@ def main() -> None:
         )
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "rename":
-        asyncio.run(_rename(arguments.kind, arguments.who, arguments.name, arguments.ledger))
+        asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
+        return
+    if arguments.command == "bookmark":
+        if arguments.version is None and not arguments.delete:
+            parser.error("bookmark: name a version, or --delete")
+        asyncio.run(_bookmark(arguments.name, arguments.version, arguments.delete, arguments.ledger))
+        return
+    if arguments.command == "versions":
+        asyncio.run(_versions(arguments.ledger))
         return
     if arguments.command == "ledger":
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))

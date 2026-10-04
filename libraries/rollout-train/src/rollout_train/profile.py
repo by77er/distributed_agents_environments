@@ -26,13 +26,13 @@ from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
-from rollout_train import Colocated, Ledger, Policies, Trainer
+from rollout_train import Colocated, Ledger, Trainer, Version, Versions
 from rollout_train.inference import Channel, Engine, Limits
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION, opened
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
-from rollout_train.registry import Entry, Registry, policy_of, registry_of, run_of
+from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
 from rollout_train.rollouts.scheduler import EpisodeRunner
 
 __all__ = ["ChannelSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
@@ -59,9 +59,12 @@ class TrainerSpec:
     """`module:name` of what makes the trainer, called with the channel's model and `settings`."""
     channel: str
     """The channel that serves the policy it trains."""
-    policy: str | None = None
-    """The policy it trains, by its name or its id (`rollout_train.registry`); by default one called what the run is.
-    A policy that has versions is gone on with; one that has none is registered under this as its name."""
+    start: str | None = None
+    """The version a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a
+    version's id or the start of one); by default the base model. A run started again goes on from the newest version
+    it made."""
+    bookmark: str | None = None
+    """A bookmark the run carries: moved to each version it makes."""
     colocated: bool = False
     """Whether it shares the channels' accelerator: their engines then sleep while it steps."""
     settings: Mapping[str, Any] = field(default_factory=dict[str, Any])
@@ -106,7 +109,7 @@ class Profile:
     """Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`,
     in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database
     (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share
-    a ledger see each other's policies."""
+    a ledger see each other's versions."""
     blobs: Mapping[str, Any] = field(default_factory=dict[str, Any])
     """Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called
     with the other entries. Without one, files under `directory/blobs`."""
@@ -151,7 +154,8 @@ class Profile:
             trainer=TrainerSpec(
                 kind=trainer.pop("kind"),
                 channel=trainer.pop("channel"),
-                policy=trainer.pop("policy", None),
+                start=trainer.pop("start", None),
+                bookmark=trainer.pop("bookmark", None),
                 colocated=trainer.pop("colocated", False),
                 settings=trainer,
             )
@@ -177,8 +181,8 @@ def _only(table: dict[str, Any], where: str, *known: str) -> dict[str, Any]:
 
 
 class Platform:
-    """An open profile: its `run` and the `policy` it trains (by their ids), the `policies`' versions, a `trainer` to
-    step, `publish` to serve a version, and a `runner` that plays the episodes its run asks for
+    """An open profile: its `run`, the version it trains from (`origin`), the `versions`, a `trainer` to step,
+    `publish` to serve a version, and a `runner` that plays the episodes its run asks for
     (`rollout_train.rollouts.scheduler.EpisodeRunner`)."""
 
     def __init__(self, profile: Profile) -> None:
@@ -186,14 +190,14 @@ class Platform:
         self.location: dict[str, Any] = dict(profile.ledger) or {"directory": str(profile.directory / LEDGER)}
         """Where the ledger is; written into the run's directory, for whatever reads the run."""
         self.ledger: Ledger = opened(self.location)
-        self.policies: Policies
-        """The policies' versions, in the ledger and the blob store."""
+        self.versions: Versions
+        """The versions, in the ledger and the blob store."""
         self.registry: Registry | None = registry_of(self.ledger)
-        """What the runs and policies of the ledger are called."""
+        """What the runs are called, and the bookmarks."""
         self.run: Entry
         """The run in the profile's directory."""
-        self.policy: str
-        """The id of the policy the profile's trainer trains."""
+        self.origin: str | None = None
+        """The version a new run trains from, by id (None: the base model)."""
         self.channels: dict[str, Channel] = {}
         self.recorder: Recorder
         self.runner: EpisodeRunner
@@ -215,8 +219,8 @@ class Platform:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / LOCATION).write_text(json.dumps(self.location))
         self.run = await run_of(directory, self.ledger, self.registry, profile.name)
-        wanted = (profile.trainer.policy if profile.trainer else None) or self.run.name
-        self.policy = (await policy_of(self.ledger, self.registry, wanted)).id
+        if profile.trainer is not None and profile.trainer.start is not None:
+            self.origin = await resolved(self.ledger, self.registry, profile.trainer.start)
         record = directory / PROCESSES
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
@@ -257,7 +261,7 @@ class Platform:
             stack.push_async_callback(_closed, tool_sets[name])
         store = dict(profile.blobs)
         self.blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(directory / BLOBS)
-        self.policies = Policies(self.ledger, self.blobs)
+        self.versions = Versions(self.ledger, self.blobs)
         runner: Runner
         if profile.runner == "durable":
             from rollout_durable import DurableRunner
@@ -295,6 +299,15 @@ class Platform:
         if profile.serve:
             _background(stack, self._serve(profile.serve))
         return self
+
+    async def bookmarked(self) -> set[str]:
+        """The versions bookmarks name (which keep their files)."""
+        return {mark.version for mark in await self.registry.bookmarks()} if self.registry else set()
+
+    async def made(self, version: Version) -> None:
+        """Carry the profile's bookmark, if it names one, to a version the run made."""
+        if self.registry is not None and self.profile.trainer is not None and self.profile.trainer.bookmark:
+            await self.registry.bookmark(self.profile.trainer.bookmark, version.id)
 
     async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
         """Serve new weights on a channel from now on; returns the version they are served as."""

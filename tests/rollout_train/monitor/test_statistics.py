@@ -17,11 +17,17 @@ def tables() -> dict[str, dict[str, JsonValue]]:
             "1": {"time": 20.0, "rewards": [1.0, 0.0], "solved": [True, False], "segments": 6},
             "2": {"time": 25.0, "rewards": [2.0, 2.0], "solved": [True, True], "segments": 0, "skipped": "same"},
         },
-        "runs/a/steps": {"1": {"policy": "p", "parent": None, "number": 1, "groups": [1], "decided": 40.0}},
-        "policies/p/versions": {
-            "1": {"policy": "p", "number": 1, "made": 50.0, "metrics": {"kl_moved": 0.01, "update_seconds": 9.0}}
+        "runs/a/steps": {"1": {"makes": "pqrstuvw", "parent": None, "groups": [1], "decided": 40.0}},
+        "versions": {
+            "pqrstuvw": {
+                "id": "pqrstuvw",
+                "run": "a",
+                "step": 1,
+                "made": 50.0,
+                "metrics": {"kl_moved": 0.01, "update_seconds": 9.0},
+            }
         },
-        "runs/b/starts": {"1": {"policy": "q", "started": 5.0}},
+        "runs/b/starts": {"1": {"from": None, "started": 5.0}},
     }
 
 
@@ -41,7 +47,7 @@ def test_a_runs_groups_are_joined_with_their_rows_and_what_their_steps_did() -> 
     assert first["names"] == 2 and second["names"] is None and second["skipped"] == "same" and second["step"] is None
     assert third["time"] is None and third["rewards"] == []  # (in flight)
     (step,) = runs["a"]["steps"]
-    assert step == {**step, "version": "p@1", "made": 50.0, "state": "committed", "groups": 1}
+    assert step == {**step, "version": "pqrstuvw", "made": 50.0, "state": "committed", "groups": 1}
     assert step["metrics"] == {"kl_moved": 0.01, "update_seconds": 9.0}
     assert runs["a"]["wrote"] == 50.0
     # In flight from each decision to its result; group 1 waited from its result to its step, group 2 never did.

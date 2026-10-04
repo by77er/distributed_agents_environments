@@ -18,9 +18,9 @@ import httpx
 from rollout.catalog import Row
 from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Ledger, of_run
-from rollout_train.policies import Version, policies_in, versions_in
 from rollout_train.record import Result, Trained, results, trained
 from rollout_train.registry import registry_of, run_of
+from rollout_train.versions import Version, versions_in
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
@@ -42,7 +42,7 @@ def summary(
     versions: Mapping[str, Version] | None = None,
 ) -> str:
     """The run in words: the latest group, what was done with it, and each unlocked row's record. `steps` says
-    what was done with each group, and `versions` holds the versions those steps made, by name."""
+    what was done with each group, and `versions` holds the versions those steps made, by id."""
     if not lines:
         return f"**{name}** — no group has finished yet."
     steps, versions = steps or {}, versions or {}
@@ -94,7 +94,8 @@ def _update(line: Result, version: Version) -> str:
     update = version.metrics
     of = f" of {line.segments_recorded}" if line.segments_recorded else ""
     trained = update.get("segments", line.segments)
-    parts = [f"{version.name}, {trained:g}{of} segments, {update.get('tokens', 0):g} sampled tokens"]
+    tokens = update.get("tokens", 0)
+    parts = [f"{version.id[:8]} (depth {version.depth}), {trained:g}{of} segments, {tokens:g} sampled tokens"]
     if "kl_moved" in update:
         parts.append(f"moved the policy by KL ≈ {update['kl_moved']:.4f} (floor {update.get('kl_floor', 0.0):.4f})")
         parts.append(f"{update.get('optimizer_steps', 0):g} steps")
@@ -222,13 +223,13 @@ async def report(
     while True:
         lines = await results(ledger, run)
         steps = await trained(ledger, run)
-        versions = [version for policy in await policies_in(ledger) for version in await versions_in(ledger, policy)]
+        versions = [version for version in await versions_in(ledger) if version.run == run]
         if (len(lines), len(versions)) != reported:
             reported = (len(lines), len(versions))
             curriculum = Curriculum(rows)
             for line in lines:
                 curriculum.recorded(line)
-            text = summary(title, lines, curriculum, steps, {version.name: version for version in versions})
+            text = summary(title, lines, curriculum, steps, {version.id: version for version in versions})
             image = chart(lines, rows, versions, title=f"{title}: climb through the curriculum") if lines else None
             (directory / "progress.md").write_text(text + "\n")
             if image is not None:

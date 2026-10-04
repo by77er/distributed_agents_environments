@@ -5,9 +5,9 @@ from pathlib import Path
 from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import FileLedger, Policies
+from rollout_train import FileLedger, Versions
 from rollout_train.imitation import GUIDANCE, examples, imitate, without
-from rollout_train.record import table
+from rollout_train.record import scope, table
 from rollout_train.recorder import Segment, Span
 from rollout_train.rollouts import Episode, Outcome, Record, Trajectory, stored
 from rollout_train.rollouts.scheduler import EPISODES
@@ -54,8 +54,14 @@ async def test_the_solved_guided_episodes_are_examples_and_a_step_on_them_makes_
     first = (await ledger.read(table("train", EPISODES)))["1/1"]
     assert Record.from_json(first).episode.info[GUIDANCE] == {"way": WAY}  # type: ignore[arg-type]
 
-    policies, trainer = Policies(ledger, blobs), Counting()
-    writer = await policies.writer("miner")
-    version = await imitate(policies, trainer, taught, fence=writer, policy="miner", directory=tmp_path / "versions")
-    assert version.name == "miner@1" and version.metrics["imitated_episodes"] == 1.0
-    assert trainer.batches == [[example]]
+    versions, trainer = Versions(ledger, blobs), Counting()
+    run = await ledger.take(scope("train"))
+    version = await imitate(
+        versions, trainer, taught, fence=run, run="train", start=None, base="qwen", directory=tmp_path / "versions"
+    )
+    assert (version.run, version.parents, version.depth, version.base) == ("train", (), 1, "qwen")
+    assert version.metrics["imitated_episodes"] == 1.0 and trainer.batches == [[example]]
+    again = await imitate(
+        versions, trainer, taught, fence=run, run="train", start=None, directory=tmp_path / "versions"
+    )
+    assert again.parents == (version.id,) and again.depth == 2 and await versions.head("train") == again
