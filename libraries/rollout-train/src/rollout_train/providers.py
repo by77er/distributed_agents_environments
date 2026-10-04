@@ -231,8 +231,9 @@ class ModelOffer:
 @dataclass(frozen=True)
 class SharedPool:
     """A provider shared by several runs: its servers hold every bound run's live checkpoints as adapters side by
-    side. A run joins when its rank fits the model's `max_lora_rank` and the pool has `max_lag + 1` free adapter slots
-    for each channel it serves there; turns are shared among its runs by their `share`."""
+    side. A run joins when its rank fits the model's `max_lora_rank` and the pool has free adapter slots for each
+    channel it serves there (`max_lag + 1` for the trained channel, 2 for one following it, 1 for a fixed checkpoint);
+    turns are shared among its runs by their `share`."""
 
     adapter_slots: int | None = None
     """Adapters its servers hold at once (none: not limited)."""

@@ -199,8 +199,9 @@ until a live test confirms them.
 
 **Shared pools.** A `vllm`, `vllm-servers` or `runpod-inference` provider is a pool runs share (`SharedPool`): its
 servers hold each bound run's live checkpoints as adapters side by side. `pool = { adapter_slots = N, max_runs = M }`
-limits it. A run needs `max_lag + 1` slots for each channel it serves there, and its rank must fit the model's
-`max_lora_rank`. Turns are shared among a pool's runs by each run's `share`.
+limits it. A run needs slots for each channel it serves there (`max_lag + 1` for the trained channel, 2 for one that
+follows another, 1 for a fixed checkpoint or an eval's subject, none for the base model), and its rank must fit the
+model's `max_lora_rank`. Turns are shared among a pool's runs by each run's `share`.
 
 **Several providers.** A channel may name several providers (`channels.NAME.providers`), shared by a routing rule
 (`channels.NAME.routing`): `spill` fills the first and sends the rest to the next; `weighted` shares turns by

@@ -662,17 +662,25 @@ def _capacity(run: _Run) -> None:
         run.note("capacity", "trainer.provider", f"the run needs {needs:g} GPUs, and {free:g} are free: it waits")
 
 
+def _slots(run: _Run, channel: str) -> int:
+    """The adapter slots a channel holds on a shared pool: `max_lag + 1` for the trained channel, 2 for one that follows
+    another (what it serves, and the next), 1 for a fixed checkpoint (an eval's subject among them), none for the base
+    model."""
+    mode = run.settings.mode(channel)
+    if mode == "trained":
+        lag = run.settings["max_lag"]
+        return (lag if isinstance(lag, int) else 1) + 1
+    if mode == "follows":
+        return 2
+    fixed = run.settings[f"channels.{channel}.checkpoint"]
+    return 1 if fixed is not None or (run.kind == "eval" and run.settings["start"] is not None) else 0
+
+
 def _pools(run: _Run) -> None:
-    lag = run.settings["max_lag"]
-    live = (lag if isinstance(lag, int) else 1) + 1
     needs: dict[str, int] = {}
     for channel in run.settings.channels:
-        mode = run.settings.mode(channel)
-        if channel in run.serving():
-            want = live
-        elif mode == "fixed" and run.settings[f"channels.{channel}.checkpoint"] is not None:
-            want = 1
-        else:
+        want = _slots(run, channel)
+        if not want:
             continue
         for name, provider in run.providers(channel):
             if provider.pool is not None:
@@ -683,8 +691,9 @@ def _pools(run: _Run) -> None:
         use = run.ledger.pools.get(name, PoolUse())
         key = "max_lag"
         if pool.adapter_slots is not None and want > pool.adapter_slots:
-            run.refuse("pools", key, f"the run needs {want} adapter slots on {name} (max_lag + 1 for each channel it "
-                       f"serves there), and the pool has {pool.adapter_slots}")  # fmt: skip
+            run.refuse("pools", key, f"the run needs {want} adapter slots on {name} (max_lag + 1 for the trained "
+                       f"channel, 2 for one following it, 1 for a fixed checkpoint), and the pool has "
+                       f"{pool.adapter_slots}")  # fmt: skip
         elif pool.adapter_slots is not None and want > pool.adapter_slots - use.slots:
             run.note("pools", key, f"{name} has {pool.adapter_slots - use.slots} adapter slots free, and the run needs "
                      f"{want}: it waits")  # fmt: skip

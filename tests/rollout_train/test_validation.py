@@ -498,7 +498,17 @@ def test_more_gpus_than_the_cluster_has_is_refused_and_more_than_are_free_waits(
 
 def test_a_pool_needs_slots_for_the_runs_live_checkpoints() -> None:
     assert refused("pools", findings({"max_lag": 4})) == [
-        "the run needs 5 adapter slots on local-vllm (max_lag + 1 for each channel it serves there), and the pool has 4"
+        "the run needs 5 adapter slots on local-vllm (max_lag + 1 for the trained channel, 2 for one following it, 1 "
+        "for a fixed checkpoint), and the pool has 4"
+    ]
+    rival: dict[str, JsonValue] = {
+        "channels.rival.provider": "local-vllm", "channels.rival.model": "Qwen/Qwen3.5-4B",
+        "channels.rival.mode": "follows", "channels.rival.follows": "policy", "channels.rival.lag": 5,
+    }  # fmt: skip
+    assert refused("pools", findings(rival)) == []  # (2 for the trained channel, 2 for the one following it)
+    assert refused("pools", findings({**rival, "max_lag": 2})) == [
+        "the run needs 5 adapter slots on local-vllm (max_lag + 1 for the trained channel, 2 for one following it, 1 "
+        "for a fixed checkpoint), and the pool has 4"
     ]
     shared = dataclasses.replace(LEDGER, pools={"local-vllm": PoolUse(runs=1, slots=3, shares=1.0)})
     found = findings(ledger=shared)
