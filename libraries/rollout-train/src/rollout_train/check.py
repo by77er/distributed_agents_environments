@@ -299,16 +299,12 @@ async def played(
     same = 0
     for (number, row), group_episodes in zip(chosen.items(), every, strict=True):
         good = [episode for episode in group_episodes if episode.trainable]
-        bad = [episode for episode in group_episodes if not episode.trainable]
         rewards = [episode.reward for episode in good]
         taught = len(rewards) > 1 and max(rewards) > min(rewards)
         same += not taught
-        line = Result(
-            group=number, time=round(time.time(), 1), task=row.key, title=row.title, rewards=rewards,
-            solved=[episode.solved for episode in good], durations=[episode.duration for episode in good],
-            failed=len(bad), failures=[str(each.detail or each.excluded or each.outcome.value) for each in bad],
-            skipped=None if taught else NOTHING_TAUGHT,
-        )  # fmt: skip
+        line = Result.of(
+            group_episodes, group=number, task=row.key, title=row.title, skipped=None if taught else NOTHING_TAUGHT
+        )
         await ledger.append(table(run, RESULTS), str(number), line.to_json(), fence)
         problems = [each for episode in good for each in _said(environment.description, episode)]
         failed = f"; {line.failed} failed ({', '.join(sorted(set(line.failures)))})" if line.failed else ""

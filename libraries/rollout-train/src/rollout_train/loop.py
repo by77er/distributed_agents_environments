@@ -410,19 +410,13 @@ async def train(
         group = decided[number]
         began = float(str(group.get("decided", time.time())))
         good = [episode for episode in episodes if episode.trainable]
-        failed = [episode for episode in episodes if not episode.trainable]
         batch = algorithm.batch(episodes, trainer.budget, random.Random(number))
-        line = Result(
+        line = Result.of(
+            episodes,
             group=number,
-            time=round(time.time(), 1),
             task=str(group["task"]),
             title=str(group["title"]),
             rollout_seconds=round(time.time() - began, 1),
-            rewards=[episode.reward for episode in good],
-            solved=[episode.solved for episode in good],
-            durations=[episode.duration for episode in good],
-            failed=len(failed),
-            failures=[str(episode.detail or episode.excluded or episode.outcome.value) for episode in failed],
             notes=batch.notes,
             segments_recorded=sum(
                 len(trajectory.segments) for episode in good for trajectory in episode.trajectories.values()

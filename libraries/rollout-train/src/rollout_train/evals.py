@@ -695,19 +695,7 @@ async def evaluate(
                 "time": round(time.time(), 1),
             }
             await ledger.append(subject_table(suite.name, run, "results"), f"{at}-{episode.number}", outcome, fence)
-        good = [episode for episode in found if episode.trainable]
-        line = Result(
-            group=number,
-            time=round(time.time(), 1),
-            task=start.task,
-            title=start.title,
-            rewards=[episode.reward for episode in good],
-            solved=[episode.solved for episode in good],
-            durations=[episode.duration for episode in good],
-            failed=len(found) - len(good),
-            failures=[str(each.detail or each.excluded or each.outcome.value) for each in found if not each.trainable],
-            skipped=NOTHING_TRAINED,
-        )
+        line = Result.of(found, group=number, task=start.task, title=start.title, skipped=NOTHING_TRAINED)
         await ledger.append(table(played_by, RESULTS), str(number), line.to_json(), its_fence)
         note("result", {"group": number, **line.to_json()} | ({"part": played_by} if several else {}))
         return found

@@ -3547,6 +3547,8 @@ class Result
 
 **Methods**
 
+- `@classmethod def of(cls, episodes: Sequence['Episode'], *, group: int, task: str, title: str, **more: Any) -> 'Result'` — A group's result, written now, from its episodes: the rewards, `solved` and durations of those fit to train
+  on, and how many did not complete and why; `more` says the rest.
 - `def to_json(self) -> dict[str, Any]` — The record as the `results` table keeps it: without what the group's own record and key say (`JOINED`).
 - `@classmethod def from_json(cls, data: Mapping[str, Any], number: int, group: Mapping[str, Any]) -> 'Result'` — A result as it is kept, with what its group's record (`group`, under `number`) says.
 

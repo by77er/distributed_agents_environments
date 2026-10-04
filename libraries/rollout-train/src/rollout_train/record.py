@@ -29,15 +29,18 @@ import os
 import secrets
 import socket
 import time
-from collections.abc import AsyncGenerator, Iterable, Mapping
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import JsonValue
 
 from rollout.environment import Environment
 from rollout_train.checkpoints import checkpoints_in
 from rollout_train.ledger import Fence, Fenced, Ledger, between
+
+if TYPE_CHECKING:
+    from rollout_train.rollouts.episodes import Episode
 
 
 @dataclass
@@ -67,6 +70,25 @@ class Result:
     """Why the algorithm found nothing to train on, if it did not."""
     unlocked: int = 0
     """Rows of the environment unlocked after this group."""
+
+    @classmethod
+    def of(cls, episodes: Sequence["Episode"], *, group: int, task: str, title: str, **more: Any) -> "Result":
+        """A group's result, written now, from its episodes: the rewards, `solved` and durations of those fit to train
+        on, and how many did not complete and why; `more` says the rest."""
+        good = [episode for episode in episodes if episode.trainable]
+        bad = [episode for episode in episodes if not episode.trainable]
+        return cls(
+            group=group,
+            time=round(time.time(), 1),
+            task=task,
+            title=title,
+            rewards=[episode.reward for episode in good],
+            solved=[episode.solved for episode in good],
+            durations=[episode.duration for episode in good],
+            failed=len(bad),
+            failures=[str(episode.detail or episode.excluded or episode.outcome.value) for episode in bad],
+            **more,
+        )
 
     def to_json(self) -> dict[str, Any]:
         """The record as the `results` table keeps it: without what the group's own record and key say (`JOINED`)."""
