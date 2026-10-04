@@ -1,11 +1,10 @@
 """Runners, run specifications and deployments (docs/libraries/rollout/README.md#runner)."""
 
-import importlib
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from enum import StrEnum
-from typing import Any, Protocol, Self
+from typing import Protocol, Self
 
 from pydantic import Field, JsonValue, model_validator
 
@@ -23,6 +22,7 @@ from rollout.harness.imports import ToolBinding
 from rollout.harness.program import AgentProgram, Program
 from rollout.harness.sandboxes import PoolBinding
 from rollout.harness.task import Task
+from rollout.names import named
 
 
 class SamplingParameters(ContractModel):
@@ -285,10 +285,7 @@ def resolve(name: str) -> type:
     """The class a `module:QualifiedName` names: registered in this process, or imported."""
     if name in _LOCAL_CLASSES:
         return _LOCAL_CLASSES[name]
-    module_name, _, qualified = name.partition(":")
-    value: Any = importlib.import_module(module_name)
-    for part in qualified.split("."):
-        value = getattr(value, part)
+    value = named(name)
     if not isinstance(value, type):
         raise TypeError(f"{name} is not a class")
     return value
