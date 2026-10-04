@@ -90,7 +90,7 @@ class ChannelSpec:
     @property
     def routed(self) -> bool:
         """Whether its engines serve elsewhere (said by name: an engine's module is not imported to load a profile)."""
-        return self.engine in REMOTE
+        return self.engine == REMOTE
 
     def route(self, renderer: Any, sequence: int | None = None) -> Route:
         """How a runner samples it on its servers elsewhere; `sequence`, the trainer's longest turn, where this process
@@ -106,7 +106,7 @@ class ChannelSpec:
         )
 
 
-REMOTE = ("rollout_train.inference:RemoteEngine", "rollout_train.inference.remote:RemoteEngine")
+REMOTE = "rollout_train.inference:RemoteEngine"
 """What a channel whose engines serve elsewhere names as its `engine`."""
 
 
