@@ -36,7 +36,7 @@ from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
-from rollout_train.monitor.statistics import newest, statistics
+from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
 from rollout_train.presence import Beat, alive, presence_of
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, runs_in, table
 from rollout_train.record import scope as run_scope
@@ -284,6 +284,7 @@ class System:
             groups: Any = tables.get(table(run, GROUPS), {})
             results: Any = tables.get(subject_table(str(latest.get("suite")), run, "results"), {})
             expected = sum(int(group.get("episodes") or 0) for group in groups.values())
+            solved = _solved_count(results, tables.get(table(run, EPISODES), {}))
             evals.append(
                 {
                     "run": run,
@@ -293,7 +294,7 @@ class System:
                     "started": latest.get("started"),
                     "played": len(results),
                     "expected": expected,
-                    "solved": sum(bool(result.get("solved")) for result in results.values()),
+                    "solved": solved,
                     "done": bool(groups) and len(results) >= expected,
                 }
             )
@@ -368,15 +369,16 @@ class System:
         step: Any = group["step"]
         made = checkpoints.get(str(step.get("makes"))) if step else None
         result: Any = tables[RESULTS].get(number)
+        unsaid = number in unreported(tables[EPISODES])
         return {
             **group,
             "run": run,
             "episodes_at": "here" if place else found.address if isinstance(found, _Remote) else None,
             "parameters": record.get("parameters"),
-            "outcome": _done(number, result, record, step, made, group["error"])
+            "outcome": _done(number, result, record, step, made, group["error"], unsaid)
             if group["stage"] == DONE and result
             else None,
-            "result": _outcome(number, record, result) if result else None,
+            "result": _outcome(number, record, result, unsaid) if result else None,
             "checkpoint": _checkpoint(made, short(checkpoints)) if made else None,
         }
 
@@ -632,12 +634,13 @@ def _run(
         _group(number, groups[number], tables, checkpoints, played, in_feed) for number in sorted(groups, key=int)
     ]
     done: list[dict[str, Any]] = []
+    unsaid = unreported(tables[EPISODES])
     for entry in entries:
         if entry["stage"] == DONE:
             step: Any = entry["step"]
             made = checkpoints.get(str(step.get("makes"))) if step else None
             key = str(entry["number"])
-            line = _done(key, tables[RESULTS][key], groups[key], step, made, entry["error"])
+            line = _done(key, tables[RESULTS][key], groups[key], step, made, entry["error"], key in unsaid)
             shown = ("run_id", "episode", "state", "reward", "solved", "interrupted", "slots", "outcome")
             done.append(line | {"episodes": [{key: each.get(key) for key in shown} for each in entry["episodes"]]})
     steps: Any = tables[STEPS]
@@ -714,7 +717,8 @@ def _group(
                 "state": each["state"],
                 "samples": each["samples"],
                 "slots": sorted(each["slots"]),
-                "reward": next(iter(each["rewards"].values()), None),
+                "reward": sum(each["rewards"].values()) / len(each["rewards"]) if each["rewards"] else None,
+                "rewards": each["rewards"],
                 "updated": each["updated"],
                 "in_feed": True,
                 "interrupted": each["state"] == Outcome.CANCELLED.value and each["run_id"] not in ended,
@@ -755,11 +759,17 @@ def _group(
 
 
 def _done(
-    number: str, result: Any, group: Mapping[str, Any], step: Any, made: Checkpoint | None, error: str | None
+    number: str,
+    result: Any,
+    group: Mapping[str, Any],
+    step: Any,
+    made: Checkpoint | None,
+    error: str | None,
+    unsaid: bool = False,
 ) -> dict[str, Any]:
     """A group that is done with, as the page shows it: its result, and what was done with it (the checkpoint its step
     made and the trainer's statistics, or why the step failed), with how long it all took."""
-    line = _outcome(number, group, result)
+    line = _outcome(number, group, result, unsaid)
     ended = made.made if made else float(result.get("time") or 0.0)
     began = float(group.get("decided") or result.get("time") or 0.0)
     return {
@@ -826,11 +836,19 @@ def _replayed(events: list[RunEvent]) -> list[dict[str, Any]]:
     return lines
 
 
-def _outcome(number: str, group: Mapping[str, Any], line: Mapping[str, Any]) -> dict[str, Any]:
-    """A group's result as it is read (with what its record says), its failures said once each and briefly."""
+def _outcome(number: str, group: Mapping[str, Any], line: Mapping[str, Any], unsaid: bool = False) -> dict[str, Any]:
+    """A group's result as it is read (with what its record says), its failures said once each and briefly; `solved`
+    is null for each where none of its episodes said whether it solved its task (`unsaid`)."""
     joined = asdict(Result.from_json(line, int(number), group))
     failures = list(dict.fromkeys(str(failure)[:300] for failure in joined["failures"]))
-    return {**joined, "failures": failures}
+    return {**joined, "failures": failures, "solved": solved_of(joined["solved"], unsaid)}
+
+
+def _solved_count(results: Mapping[str, Any], episodes: Mapping[str, Any]) -> int | None:
+    """How many of an eval's episodes solved their start (its results, by `START-EPISODE`, beside its run's
+    `episodes`); None where none of them said whether it did."""
+    said = [result for key, result in results.items() if reported(episodes.get(key.replace("-", "/", 1))) is not False]
+    return sum(bool(result.get("solved")) for result in said) if said or not results else None
 
 
 def _run_in(directory: Path) -> str:
@@ -851,6 +869,7 @@ def _checkpoint(checkpoint: Checkpoint, shorter: Mapping[str, str]) -> dict[str,
         "depth": checkpoint.depth,
         "parents": list(checkpoint.parents),
         "base": checkpoint.base,
+        "kind": checkpoint.kind,
         "run": checkpoint.run,
         "step": checkpoint.step,
         "made": checkpoint.made,
@@ -957,7 +976,7 @@ def _ended(record: Record) -> dict[str, Any]:
         "outcome": episode.outcome.value,
         "detail": episode.detail or episode.excluded,
         "reward": episode.reward,
-        "solved": episode.solved,
+        "solved": episode.solved if "solved" in episode.info else None,  # (None: the task did not say)
         "sampled": sum(record.sampled.values()),
         "labels": dict(episode.labels),
         "slots": sorted(episode.trajectories),

@@ -56,7 +56,19 @@ def test_a_launcher_offers_the_profiles_that_train_with_the_settings_a_launch_ma
     settings = small["settings"]
     assert settings["trainer.segment_tokens"] == 900 and settings["trainer.bookmark"] == "best"
     assert settings["episodes_at_once"] == 6 and settings["channels.policy.thinking_tokens"] == 64
+    assert small["weights"] is None  # (its trainer says what it makes only once made)
     assert slug("Diamonds, unguided!") == "diamonds-unguided"
+
+
+class EveryWeight:
+    """A trainer that says what it makes before it is made."""
+
+    weights = "full"
+
+
+def test_a_launcher_says_what_a_profiles_trainer_makes_where_the_trainer_says() -> None:
+    assert launching._weights(f"{__name__}:EveryWeight") == "full"  # pyright: ignore[reportPrivateUsage]
+    assert launching._weights("no_such_module:Trainer") is None  # pyright: ignore[reportPrivateUsage]
 
 
 def test_a_run_changes_settings_of_its_profile_by_dotted_key(tmp_path: Path) -> None:

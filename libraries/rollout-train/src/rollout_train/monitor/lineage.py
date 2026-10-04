@@ -6,11 +6,12 @@ trained from its base model, which is the root its line hangs from. Each checkpo
 says which. A run that starts from another run's checkpoint forks there. Beside the graph stand the trainers that take
 the steps, the inference workers and what each serves, and evaluations.
 
-What a ledger has today is read as it is: the checkpoints, the runs' steps (which stand for their trainer's queue: a run
-takes one step at a time), bookmarks, each checkpoint's reshard (`checkpoints/resharding`, `checkpoints/resharded`,
-which `rollout_train.resharding` writes), and the `published` notes read from the runners' heartbeats (which stand for
-what the run's engines serve). The other tables read here are proposed in docs/research/policy-dag.md, and nothing
-appends them yet:
+What a ledger has today is read as it is: the checkpoints (each says what its weights are: an adapter, or full weights,
+which are resharded for the engines), the runs' steps (which stand for their trainer's queue: a run takes one step at a
+time; its own trainer makes what the run's checkpoints are), bookmarks, each checkpoint's reshard
+(`checkpoints/resharding`, `checkpoints/resharded`, which `rollout_train.resharding` writes), and the `published` notes
+read from the runners' heartbeats (which stand for what the run's engines serve). The other tables read here are
+proposed in docs/research/policy-dag.md, and nothing appends them yet:
 
 - `runs/RUN/plan`, `runs/RUN/published`: what a run was set up to do (a distillation's teachers, whose samples it
   trains on, its objective), and the checkpoint a request for the run's latest goes to, from when;
@@ -37,6 +38,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
 from rollout_train.ledger import between
+from rollout_train.monitor.statistics import reported
 
 SAMPLE = Path(__file__).with_name("sample-lineage.json")
 """A fixture of the proposed tables: two more LoRA runs sharing a trainer, a full-weight run with a trainer of its
@@ -278,12 +280,11 @@ class _Reading:
                 for worker, span in loads.get(each.id, {}).items()
                 if span["until"] is None
             }
-            full = (self.record(f"{_RUNS}{checkpoint.run}/plan", "plan").get("weights") or "lora") == "full"
             noted = checkpoint.id in self.read("checkpoints/resharding") or checkpoint.id in self.read(
                 "checkpoints/resharded"
             )
             life: dict[str, Any] = {
-                "reshard": full or noted,
+                "reshard": checkpoint.kind == "full" or noted,
                 "resharding": self.record("checkpoints/resharding", checkpoint.id).get("at"),
                 "resharded": self.record("checkpoints/resharded", checkpoint.id).get("at"),
                 "latest_of": latest.get(checkpoint.id),
@@ -298,6 +299,7 @@ class _Reading:
                     "depth": checkpoint.depth,
                     "parents": list(checkpoint.parents),
                     "base": checkpoint.base,
+                    "kind": checkpoint.kind,
                     "made": checkpoint.made,
                     "kept": checkpoint.weights is not None,
                     "released": checkpoint.released,
@@ -424,7 +426,7 @@ class _Reading:
             trainers.append(
                 {
                     "trainer": f"{run['name']} (the run's own)",
-                    "weights": "lora",  # (a channel serves LoRA adapters only)
+                    "weights": line[-1].kind if line else None,  # (what its steps make, as its newest checkpoint says)
                     "base": next((checkpoint.base for checkpoint in line if checkpoint.base), None),
                     "runs": [run["run"]],
                     "colocated": any("waited_for_requests_seconds" in checkpoint.metrics for checkpoint in line),
@@ -466,12 +468,15 @@ class _Reading:
             for subject in self.named(f"{_EVALUATIONS}{suite}/", "/results"):
                 about = self.record(f"{_EVALUATIONS}{suite}/{subject}/subject", "subject")
                 by_start: dict[str, list[dict[str, Any]]] = {}
+                episodes = self.read(f"{_RUNS}{subject}/episodes")  # (an eval's subject is its run)
                 for key, result in self.read(f"{_EVALUATIONS}{suite}/{subject}/results").items():
+                    said = reported(episodes.get(key.replace("-", "/", 1))) is not False
                     by_start.setdefault(key.partition("-")[0], []).append(
-                        {"solved": bool(result.get("solved")), "reward": result.get("reward")}
+                        {"solved": bool(result.get("solved")) if said else None, "reward": result.get("reward")}
                         | {"run_id": result.get("run_id")}
                     )
                 played = [each for listed in by_start.values() for each in listed]
+                solved = [each["solved"] for each in played if each["solved"] is not None]
                 rewards = [float(each["reward"]) for each in played if each["reward"] is not None]
                 subjects.append(
                     {
@@ -483,7 +488,7 @@ class _Reading:
                         "asked_by": about.get("asked_by"),
                         "results": by_start,
                         "played": len(played),
-                        "solved": sum(each["solved"] for each in played),
+                        "solved": sum(solved) if solved or not played else None,
                         "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
                         "sample": f"{_EVALUATIONS}{suite}/{subject}/results" in self.sampled,
                     }

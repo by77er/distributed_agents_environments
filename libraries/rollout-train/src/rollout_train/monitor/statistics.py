@@ -1,10 +1,11 @@
 """Every run of a ledger in figures: what the monitor's statistics page draws.
 
 For each run (`rollout_train.record`): its groups, each with its row, when it was decided and when its result was
-written, its episodes' rewards and whether each solved, what it gave to train on (or why nothing) and what its step
-did with it; its steps, each with the checkpoint it made and the trainer's statistics; how many groups were in flight
-and how many waited toward a step, over time; and its engines' throughput, from the `inference` notes in its feed
-(for a run whose directory is where the feed can be read).
+written, its episodes' rewards and whether each solved (null for each where none of the group's episodes said whether it
+solved its task: `unreported`), what it gave to train on (or why nothing) and what its step did with it; its steps,
+each with the checkpoint it made and the trainer's statistics; how many groups were in flight and how many waited
+toward a step, over time; and its engines' throughput, from the `inference` notes in its feed (for a run whose
+directory is where the feed can be read).
 
 It knows rows, groups, episodes, rewards and durations, not what an environment plays. A group whose start carries a
 list under `names` says how many it names (`names`), so that groups can be counted by it.
@@ -19,6 +20,7 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import CHECKPOINTS
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, named_runs, table
+from rollout_train.rollouts.scheduler import EPISODES
 
 STEP_METRICS = (
     "kl_moved",
@@ -58,7 +60,7 @@ def statistics(
         "runs": [
             _run(
                 run,
-                {name: tables.get(table(run, name), {}) for name in (GROUPS, RESULTS, STEPS, FAILURES)},
+                {name: tables.get(table(run, name), {}) for name in (GROUPS, RESULTS, STEPS, FAILURES, EPISODES)},
                 made,
             )
             | {"inference": _throughput(notes.get(run, ()))}
@@ -99,6 +101,7 @@ def _run(run: str, tables: Mapping[str, Mapping[str, Any]], made: Mapping[str, d
         for group in listed:
             covering[int(group)] = step
     groups: list[dict[str, Any]] = []
+    unsaid = unreported(tables[EPISODES])
     for key, record in sorted(tables[GROUPS].items(), key=lambda item: int(item[0])):
         number, result = int(key), tables[RESULTS].get(key)
         joined = asdict(Result.from_json(result, number, record)) if result else None
@@ -114,7 +117,7 @@ def _run(run: str, tables: Mapping[str, Mapping[str, Any]], made: Mapping[str, d
                 "time": joined["time"] if joined else None,
                 "rollout_seconds": joined["rollout_seconds"] if joined else None,
                 "rewards": joined["rewards"] if joined else [],
-                "solved": joined["solved"] if joined else [],
+                "solved": solved_of(joined["solved"], key in unsaid) if joined else [],
                 "failed": joined["failed"] if joined else 0,
                 "segments": joined["segments"] if joined else None,
                 "skipped": joined["skipped"] if joined else None,
@@ -135,6 +138,30 @@ def _run(run: str, tables: Mapping[str, Mapping[str, Any]], made: Mapping[str, d
         "steps": steps,
         "flight": _flight(groups, steps),
     }
+
+
+def reported(line: Any) -> bool | None:
+    """Whether an episode's record (as the ledger keeps it) says if it solved its task (`info["solved"]`); None
+    without a record."""
+    if not isinstance(line, dict):
+        return None
+    episode: Any = cast(dict[str, Any], line).get("episode") or {}
+    return "solved" in (episode.get("info") or {})
+
+
+def unreported(episodes: Mapping[str, Any]) -> set[str]:
+    """The groups (by number) whose episodes ended, none of them saying whether it solved its task: training counts
+    each as not solved, and the page says nothing of it (a task may never say)."""
+    said: dict[str, bool] = {}
+    for key, line in episodes.items():
+        group = key.split("/")[0]
+        said[group] = said.get(group, False) or bool(reported(line))
+    return {group for group, any_said in said.items() if not any_said}
+
+
+def solved_of(solved: Sequence[bool], unsaid: bool) -> list[bool | None]:
+    """A result's `solved` as the page shows it: as written, or null for each where nothing said it (`unsaid`)."""
+    return [None] * len(solved) if unsaid else list(solved)
 
 
 def newest(times: Iterable[Any]) -> float | None:

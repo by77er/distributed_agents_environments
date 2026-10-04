@@ -2,10 +2,11 @@
 
 `rollout launcher --ledger WHERE --profiles DIRECTORY --catalog module:name … --runs DIRECTORY` beats like a runner
 (`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that
-loads and names a trainer), with the settings a launch may change and their values in the profile; the catalogs; and
-whether it has room. It claims the oldest launch asked for one of its profiles while it plays fewer than `--at-once`,
-starts `rollout train` for it in a directory of its own under `--runs` (`NAME-ID`), and notes how it goes. A launch
-asked to stop is sent an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
+loads and names a trainer), with what its trainer makes (`lora` or `full` weights) and the settings a launch may change
+and their values in the profile; the catalogs; and whether it has room. It claims the oldest launch asked for one of
+its profiles while it plays fewer than `--at-once`, starts `rollout train` for it in a directory of its own under
+`--runs` (`NAME-ID`), and notes how it goes. A launch asked to stop is sent an interrupt: the run stops as it does on
+Ctrl-C, at a group boundary of the ledger.
 
 Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
 cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
@@ -42,7 +43,8 @@ TAIL = 2000
 
 def offered(directory: Path) -> list[dict[str, Any]]:
     """The profiles under `directory` that a launch can name: each by its name (its file's, without `.toml`), with
-    its path and the settings a launch may change, with their values in the profile."""
+    its path, what its trainer makes (`weights`: `lora`, `full`, or None where its trainer cannot be read here) and the
+    settings a launch may change, with their values in the profile."""
     from rollout_train.profile import Profile
 
     found: list[dict[str, Any]] = []
@@ -63,8 +65,27 @@ def offered(directory: Path) -> list[dict[str, Any]]:
             settings |= {f"channels.{channel}.thinking_tokens": spec.thinking_tokens}
             settings |= {f"channels.{channel}.answer_tokens": spec.answer_tokens}
         model = profile.channels[profile.trainer.channel].model
-        found.append({"profile": path.stem, "path": str(path), "model": model, "settings": settings})
+        found.append(
+            {
+                "profile": path.stem,
+                "path": str(path),
+                "model": model,
+                "weights": _weights(profile.trainer.kind),
+                "settings": settings,
+            }
+        )
     return found
+
+
+def _weights(trainer: str) -> str | None:
+    """What a trainer (`module:name`) makes, as it says (`Trainer.weights`), without making one."""
+    from rollout.names import named
+
+    try:
+        made = getattr(named(trainer), "weights", None)
+    except Exception:  # (a trainer this machine cannot import)
+        return None
+    return made if isinstance(made, str) else None
 
 
 def slug(name: str) -> str:

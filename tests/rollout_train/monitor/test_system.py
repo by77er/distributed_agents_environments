@@ -13,6 +13,8 @@ from pydantic import JsonValue
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout_train import Budget, Checkpoints, FileLedger, Files, Step, Weighted, train
+from rollout_train.evals import subject_table, suite_table
+from rollout_train.launches import EVAL
 from rollout_train.layout import BLOBS, FEED, LEDGER
 from rollout_train.ledger import Ledger
 from rollout_train.machine import measured
@@ -152,12 +154,20 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert system["written"] <= system["at"]
 
 
-async def ended(ledger: Ledger, run: str, group: int, number: int, run_id: str, runner: str = "here") -> None:
-    """An episode a runner recorded: its reward is its number."""
+async def ended(
+    ledger: Ledger,
+    run: str,
+    group: int,
+    number: int,
+    run_id: str,
+    runner: str = "here",
+    info: dict[str, JsonValue] | None = None,
+) -> None:
+    """An episode a runner recorded: its reward is its number; `info` is what it reported."""
     fence = await ledger.take(runner_scope(f"{runner}-records"))  # (records are written under a fence of their own)
     trajectories = {"ada": Trajectory([], {"default": float(number)})}
     labels = {"run": run, "group": str(group), "episode": str(number)}
-    episode = Episode(run, group, number, run_id, labels, Outcome.COMPLETED, trajectories=trajectories)
+    episode = Episode(run, group, number, run_id, labels, Outcome.COMPLETED, info=info or {}, trajectories=trajectories)
     record: JsonValue = Record(episode, sampled={"ada": 40}).to_json()
     await ledger.append(table(run, EPISODES), f"{group}/{number}", record, fence)
 
@@ -293,3 +303,78 @@ async def test_a_claim_holds_while_its_runner_keeps_the_fence_it_was_made_under(
     assert [each["runner"] for each in snapshot["runners"]] == ["other", "first"]  # (playing ones first)
     (run,) = snapshot["runs"]
     assert run["played"]["playing"] == 1 and [claim["runner"] for claim in run["open"][0]["playing"]] == ["other"]
+
+
+async def test_a_task_that_never_says_whether_it_solved_is_shown_saying_nothing_of_it(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / LEDGER)
+    fence = await ledger.take(scope("words"))
+    start: JsonValue = {"from": None, "host": "here", "started": 5.0}
+    await ledger.append(table("words", STARTS), str(fence.number), start, fence)
+    for number, episodes in (("1", 2), ("2", 1)):
+        decided: JsonValue = {"task": "say", "decided": 5.0, "episodes": episodes}
+        await ledger.append(table("words", GROUPS), number, decided, fence)
+    await ended(ledger, "words", 1, 1, "r_one", info={"turns": 3})  # (group 1 says nothing of solving)
+    await ended(ledger, "words", 1, 2, "r_two")
+    await ended(ledger, "words", 2, 1, "r_three", info={"solved": True})
+    for number, solved in (("1", [False, False]), ("2", [True])):  # (training reads what is not said as not solved)
+        result: JsonValue = {"time": 9.0, "rewards": [1.0] * len(solved), "solved": list[JsonValue](solved)}
+        await ledger.append(table("words", RESULTS), number, result, fence)
+    system = System(ledger=ledger)
+
+    (run,) = (await system.snapshot())["runs"]
+    assert [line["solved"] for line in run["done"]] == [[None, None], [True]]
+    assert [each["solved"] for line in run["done"] for each in line["episodes"]] == [None, None, True]
+    group = await system.group("words", 1)
+    assert group is not None and group["result"]["solved"] == group["outcome"]["solved"] == [None, None]
+    statistics = (await system.statistics())["runs"][0]["groups"]
+    assert [each["solved"] for each in statistics] == [[None, None], [True]]
+
+
+async def test_a_checkpoint_says_what_its_weights_are(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / LEDGER)
+    checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / BLOBS))
+    fence = await ledger.take(scope("train"))
+    weights = tmp_path / "weights.bin"
+    weights.write_text("weights")
+    await checkpoints.add(fence, "fullone", weights=weights, run="train", step=1, kind="full", base="small")
+    await checkpoints.add(fence, "adapterone", weights=weights, run="train", step=2, parents=["fullone"])
+    shown = {each["id"]: each for each in (await System(ledger=ledger).snapshot())["checkpoints"]}
+    assert (shown["fullone"]["kind"], shown["fullone"]["base"]) == ("full", "small")
+    assert (shown["adapterone"]["kind"], shown["adapterone"]["base"]) == ("lora", "fullone")  # (an adapter over it)
+
+
+async def test_an_eval_whose_task_never_says_whether_it_solved_counts_no_solves(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / LEDGER)
+    fence = await ledger.take(scope("words-eval"))
+    begun: JsonValue = {"kind": EVAL, "suite": "words-v1", "checkpoint": None, "started": 5.0}
+    await ledger.append(table("words-eval", STARTS), str(fence.number), begun, fence)
+    await ledger.append(table("words-eval", GROUPS), "1", {"task": "say", "episodes": 1}, fence)
+    await ledger.append(suite_table("words-v1", "starts"), "1", {"task": "say", "seed": 1}, fence)
+    await ledger.append(subject_table("words-v1", "words-eval", "subject"), "subject", {"kind": "model"}, fence)
+    outcome: JsonValue = {"run_id": "r_one", "reward": 0.5, "solved": False}
+    await ledger.append(subject_table("words-v1", "words-eval", "results"), "1-1", outcome, fence)
+    await ended(ledger, "words-eval", 1, 1, "r_one")
+    evals = await System(ledger=ledger).evals()
+    assert [each["solved"] for each in evals["evals"]] == [None]
+    (suite,) = evals["suites"]
+    (subject,) = suite["subjects"]
+    assert subject["solved"] is None
+    assert subject["results"] == {"1": [{"solved": None, "reward": 0.5, "run_id": "r_one"}]}
+
+
+async def test_an_episode_playing_is_shown_with_its_reward_so_far_and_each_slots(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / LEDGER)
+    fence = await ledger.take(scope("train"))
+    start: JsonValue = {"from": None, "host": "here", "started": 5.0, "directory": str(tmp_path)}
+    await ledger.append(table("train", STARTS), str(fence.number), start, fence)
+    await ledger.append(table("train", GROUPS), "1", {"task": "t", "decided": 5.0, "episodes": 1}, fence)
+    feed = RunFeed(tmp_path / FEED)
+    created: JsonValue = {"labels": {"run": "train", "group": "1", "episode": "1"}}
+    feed._write("r_one", {"kind": "event", "type": "run.created", "at": 6.0, "payload": created})  # pyright: ignore[reportPrivateUsage]
+    for slot, value in (("ada", 1.0), ("bo", 0.0)):
+        reward: JsonValue = {"slot": slot, "value": value}
+        feed._write("r_one", {"kind": "event", "type": "reward.assigned", "at": 7.0, "payload": reward})  # pyright: ignore[reportPrivateUsage]
+    (run,) = (await System(tmp_path, FeedReader(tmp_path / FEED)).snapshot())["runs"]
+    (episode,) = run["open"][0]["episodes"]
+    assert episode["reward"] == 0.5 and episode["rewards"] == {"ada": 1.0, "bo": 0.0}
+    feed.close()

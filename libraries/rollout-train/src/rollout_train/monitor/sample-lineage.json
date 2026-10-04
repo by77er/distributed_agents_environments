@@ -1098,8 +1098,7 @@
      ]
     },
     "objective": "likelihood",
-    "decided": -11520.0,
-    "weights": "lora"
+    "decided": -11520.0
    }
   },
   "runs/distill-merged-on/plan": {
@@ -1125,8 +1124,7 @@
      "suite": "unguided-v1",
      "every": 2
     },
-    "decided": -6600.0,
-    "weights": "lora"
+    "decided": -6600.0
    }
   },
   "runs/scout-train/plan": {
@@ -1135,7 +1133,6 @@
     "from": "curriculum-9@20",
     "objective": "policy_gradient",
     "decided": -109800.0,
-    "weights": "lora",
     "teachers": []
    }
   },
@@ -1145,7 +1142,6 @@
     "from": null,
     "objective": "policy_gradient",
     "decided": -77400.0,
-    "weights": "full",
     "teachers": []
    }
   },
@@ -3377,7 +3373,8 @@
      "loss": 0.4167
     },
     "made": -68400.0,
-    "released": null
+    "released": null,
+    "kind": "full"
    },
    "kszsqvyvvmrnrzqu": {
     "id": "kszsqvyvvmrnrzqu",
@@ -3399,7 +3396,8 @@
      "loss": 0.7753
     },
     "made": -46800.0,
-    "released": null
+    "released": null,
+    "kind": "full"
    },
    "qzkzvmnwqzpxumwy": {
     "id": "qzkzvmnwqzpxumwy",
@@ -3421,7 +3419,8 @@
      "loss": 0.8209
     },
     "made": -3000.0,
-    "released": null
+    "released": null,
+    "kind": "full"
    },
    "wmppokoyozvookkn": {
     "id": "wmppokoyozvookkn",
@@ -3443,7 +3442,8 @@
      "loss": 0.5232
     },
     "made": -372.0,
-    "released": null
+    "released": null,
+    "kind": "full"
    },
    "oxqqksqtrusxolvy": {
     "id": "oxqqksqtrusxolvy",

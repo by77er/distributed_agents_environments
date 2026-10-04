@@ -75,7 +75,6 @@ def tables() -> dict[str, dict[str, JsonValue]]:
         "runs/merge/plan": {
             "plan": {
                 "kind": "distill",
-                "weights": "full",
                 "from": "minerthree",
                 "teachers": ["minerthree", "diggertwo"],
                 "data": {"sampled_by": ["minerthree", "diggertwo"]},
@@ -208,6 +207,29 @@ def test_without_proposed_tables_a_runs_steps_stand_for_its_trainer_and_its_publ
     assert life["minertwo"]["state"] == SUPERSEDED and life["minerone"]["state"] == WRITTEN
     assert [worker["worker"] for worker in graph["workers"]] == ["train engines"]
     assert [trainer["trainer"] for trainer in graph["trainers"]] == ["train (the run's own)"]
+
+
+def test_a_runs_own_trainer_and_resharding_follow_what_its_checkpoints_are() -> None:
+    graph = lineage(
+        {
+            "checkpoints": {
+                "fullone": checkpoint("fullone", [], 1, "big", 1, 100.0) | {"kind": "full"},
+                "adapterone": checkpoint("adapterone", [], 1, "small", 1, 100.0),
+            },
+            "runs/big/steps": {"1": step("fullone", None, 1, 50.0)},
+            "runs/small/steps": {"1": step("adapterone", None, 1, 50.0)},
+            "runs/idle/steps": {"1": step("nothingyet", None, 1, 50.0)},
+        },
+        now=NOW,
+    )
+    assert {trainer["runs"][0]: trainer["weights"] for trainer in graph["trainers"]} == {
+        "big": "full",
+        "small": "lora",
+        "idle": None,  # (it has made nothing to say)
+    }
+    shown = {each["id"]: each for each in graph["checkpoints"]}
+    assert (shown["fullone"]["kind"], shown["fullone"]["life"]["reshard"]) == ("full", True)
+    assert (shown["adapterone"]["kind"], shown["adapterone"]["life"]["reshard"]) == ("lora", False)
 
 
 def test_the_sample_fixture_is_read_only_when_asked_for_is_marked_and_never_replaces_a_ledgers_table() -> None:
