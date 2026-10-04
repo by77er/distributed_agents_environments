@@ -1254,3 +1254,12 @@ The user settled the design's open questions on 2026-10-04:
   store, a public address beside the internal one, and the launcher hands each provider the address for where it
   runs. Outside the cluster the ledger is the HTTP ledger service, never the database itself. The gateway finds
   followers by their beats (address and certificate identity), as before.
+- **A pool hands out adapter slots.** A slot is one of vLLM's GPU LoRA slots (`--max-loras`), sized at the pool's
+  `max_lora_rank`, so every slot costs the same whatever a run's rank; every engine of a pool holds the same set, and
+  `--max-cpu-loras` is a cache above it, not allocated. A trained channel holds `max_lag + 1` slots, a channel that
+  follows another some steps behind holds 2 (what it serves and the next), a channel on a pinned checkpoint holds 1,
+  an eval of a checkpoint holds 1 while it runs, and a channel on the base model holds none. The launcher binds a run
+  to a pool only when the pool has free slots for all its channels, else queues the launch or offers another
+  provider; raising `max_lag` on a running run is checked the same way, and lowering it frees slots once the follower
+  has unloaded the adapters. Slots decide whether a run is served at all; the gateway's weighted fair shares decide
+  how much throughput each bound run gets.
