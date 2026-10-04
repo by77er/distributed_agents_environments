@@ -2546,8 +2546,9 @@ async def evaluate(catalog: Catalog, checkpoints: Checkpoints, *, run: str, suit
 
 Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
 `episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`). `publish`
-serves a checkpoint on the channel, `reshard` gives its files in the engines' layout (`rollout_train.resharding`);
-`directory` holds its files on this machine.
+serves a checkpoint on the channel (a full one in place of the engines' weights; for an adapter over a full
+checkpoint, the engines must already hold that checkpoint's weights, as `rollout eval` sees to), `reshard` gives its
+files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine.
 
 ### `Fence`
 
