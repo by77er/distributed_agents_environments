@@ -158,6 +158,22 @@ model and flags the groups whose episodes all scored the same, which teach nothi
 | episode rewards | `run.rewards` |
 | effects, suspensions, interruptions | `events_of(run, RunEventType.…)` |
 
+## Tests on Ray
+
+A test that needs Ray asks for the `local_ray` fixture (`tests/conftest.py`): a Ray of the test session's own, started
+once and shared by every test that asks for it, and shut down when the session ends.
+
+| It is | So that |
+|---|---|
+| a new local instance (`address="local"`, `RAY_ADDRESS` unset) | a test never joins a cluster the machine runs already |
+| on disk, in `~/.cache/rollout/ray-tests/session_DATE_PID` | `/tmp` may be memory; the session's directory is removed at its end |
+| 4 CPUs, no GPU, a 100 MiB object store | tasks and actors ask for fractions of these, as on a cluster |
+| the dashboard on, and its job agent, on free ports | jobs can be submitted (`local_ray.dashboard`); a cluster already running holds Ray's default ports |
+| `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, `RAY_AUTH_MODE=disabled` | workers run in the test's environment, and nothing asks for a token |
+
+Ray reads its environment once, when it is imported, so `tests/conftest.py` sets it before any test module loads.
+`tests.local_ray.submitted` submits a job, asking again while the node's job agent is still starting.
+
 ## Live tests
 
 Tests that need what a test cannot start alone are marked `live`, and the workspace's pytest settings leave them out

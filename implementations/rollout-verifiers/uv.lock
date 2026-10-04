@@ -4024,6 +4024,7 @@ name = "rollout-train"
 version = "0.0.0"
 source = { editable = "../../libraries/rollout-train" }
 dependencies = [
+    { name = "ray", extra = ["default"] },
     { name = "rollout" },
 ]
 
@@ -4035,20 +4036,17 @@ http = [
     { name = "starlette" },
     { name = "uvicorn" },
 ]
-ray = [
-    { name = "ray", extra = ["default"] },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'report'", specifier = ">=3.9" },
-    { name = "ray", extras = ["default"], marker = "extra == 'ray'", specifier = ">=2.59" },
+    { name = "ray", extras = ["default"], specifier = ">=2.59" },
     { name = "rollout", editable = "../../libraries/rollout" },
     { name = "rollout-durable", marker = "extra == 'durable'", editable = "../rollout-durable" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]
-provides-extras = ["http", "report", "durable", "ray"]
+provides-extras = ["http", "report", "durable"]
 
 [[package]]
 name = "rollout-verifiers"
@@ -4066,7 +4064,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "rollout-s3" },
-    { name = "rollout-train", extra = ["durable", "http", "ray"] },
+    { name = "rollout-train", extra = ["durable", "http"] },
 ]
 spike = [
     { name = "rollout-lora" },
@@ -4087,7 +4085,7 @@ dev = [
     { name = "pytest", specifier = ">=8.4" },
     { name = "pytest-asyncio", specifier = ">=1.2" },
     { name = "rollout-s3", editable = "../rollout-s3" },
-    { name = "rollout-train", extras = ["http", "durable", "ray"], editable = "../../libraries/rollout-train" },
+    { name = "rollout-train", extras = ["http", "durable"], editable = "../../libraries/rollout-train" },
 ]
 spike = [
     { name = "rollout-lora", editable = "../rollout-lora" },

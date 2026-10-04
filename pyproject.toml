@@ -1,6 +1,6 @@
 # The workspace: interface libraries, implementations of what they define, products, and environments.
 #   uv sync                 everything that needs no GPU
-#   uv sync --all-extras    with the engine, the trainer, the model families' renderers (Linux, NVIDIA GPU), Tinker and Ray
+#   uv sync --all-extras    with the engine, the trainer, the model families' renderers (Linux, NVIDIA GPU) and Tinker
 [project]
 name = "rollout-workspace"
 version = "0.0.0"
@@ -25,7 +25,6 @@ dependencies = [
 gpu = ["rollout-vllm", "rollout-lora", "rollout-qwen"]
 gemma = ["rollout-gemma"]
 tinker = ["rollout-tinker"]  # a trainer and an engine at Thinking Machines
-ray = ["rollout-train[ray]"]  # a launcher that submits runs as Ray jobs, and resharding as Ray tasks
 
 [tool.uv.workspace]
 members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft", "environments/gridworld"]

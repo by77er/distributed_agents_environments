@@ -496,7 +496,7 @@ the launcher itself as a long-lived Ray job and returns; it refuses when a launc
 host. A profile with `ray` connects its run to the cluster, and runs each checkpoint's reshard as a Ray task of one CPU
 ([resharding](../libraries/rollout-train/checkpoints.md#resharding)).
 
-Ray is the `ray` extra (`uv sync --all-extras` installs it). On a machine, start a head node, its temporary directory
+Ray comes with `rollout-train` (`uv sync` installs it). On a machine, start a head node, its temporary directory
 on disk (Ray writes its sessions and spilled objects there, and `/tmp` may be memory), and stop it with `ray stop`:
 
 ```bash

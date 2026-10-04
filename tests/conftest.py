@@ -1,12 +1,12 @@
-"""Shared fixtures: a Postgres server for runners sharing a database, and an S3 server for blob stores.
+"""Shared fixtures: a Postgres server for runners sharing a database, an S3 server for blob stores, and a local Ray.
 
-By default both are started in-process for the test session (`pgembed`, `moto`). To test against real services, such
-as those in deploy/local/compose.yaml, set ROLLOUT_TEST_POSTGRES (a URL whose user may create databases) and
-ROLLOUT_TEST_S3 (an endpoint URL; credentials from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY).
+By default the first two are started in-process for the test session (`pgembed`, `moto`). To test against real
+services, such as those in deploy/local/compose.yaml, set ROLLOUT_TEST_POSTGRES (a URL whose user may create databases)
+and ROLLOUT_TEST_S3 (an endpoint URL; credentials from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY). Ray is always a
+fresh local instance of the session's own (`local_ray`), never a cluster that is running already.
 """
 
 import os
-import socket
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,6 +15,16 @@ import pytest
 
 from rollout.harness import Blobs, FileBlobStore
 from rollout_durable.database import create_database, temporary_postgres
+from tests.local_ray import LocalRay, free_port, isolated, started
+
+isolated()  # (before anything imports Ray)
+
+
+@pytest.fixture(scope="session")
+def local_ray() -> Iterator[LocalRay]:
+    """A Ray of the session's own, started once and shared by every test that asks for it (`tests.local_ray`)."""
+    with started() as ray:
+        yield ray
 
 
 @pytest.fixture(scope="session")
@@ -50,9 +60,7 @@ def s3_server() -> Iterator[str]:
         yield external
         return
     server_module = pytest.importorskip("moto.server")
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
+    port = free_port()
     server = server_module.ThreadedMotoServer(ip_address="127.0.0.1", port=port, verbose=False)
     server.start()
     yield f"http://127.0.0.1:{port}"

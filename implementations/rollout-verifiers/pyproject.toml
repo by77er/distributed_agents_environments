@@ -16,7 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "rollout-train[http,durable,ray]",  # (durable: the database ledger; ray: a launcher that submits Ray jobs)
+    "rollout-train[http,durable]",  # (durable: the database ledger; Ray comes with rollout-train)
     "rollout-s3",  # (blobs in a bucket, as the K3s cluster keeps them)
     "pytest>=8.4",
     "pytest-asyncio>=1.2",

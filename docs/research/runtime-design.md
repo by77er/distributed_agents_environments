@@ -1021,7 +1021,7 @@ shared code changes (the loop, the gateway, contracts).
 | # | Commit | Delivers | Depends on | Tests guarding it | Size |
 |---|---|---|---|---|---|
 | 1 | Bring rollout-tinker into the workspace (**done**) | `implementations/rollout-tinker` as a workspace member with only the `tinker` SDK (a `tinker` extra); `tinker-cookbook` dropped; `rollout_tinker.weights.peft_adapter` reimplements the archive → PEFT name remap (with `fused`); its own lock and project removed; tests moved to `tests/rollout_tinker` | — | `tests/rollout_tinker` (the remap against a recorded archive's tensor names and shapes, captured once from the cookbook's output; `fused`; the fake service) | M, ~+350 −300 |
-| 2 | One local Ray per test session | Ray becomes a dependency of `rollout-train` (the `ray` extra removed); a session fixture: `ray.init` on disk (`~/.cache/rollout/ray-tests/PID`), `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, 4 CPUs, a small object store, the dashboard on (jobs need it), Serve on a free port; `test_resharding`'s Ray test moved to it | — | `tests/rollout_train/test_resharding.py`; the fixture's own test | S, ~150 |
+| 2 | One local Ray per test session (**done**) | Ray becomes a dependency of `rollout-train` (the `ray` extra removed); a session fixture: `ray.init` on disk (`~/.cache/rollout/ray-tests/PID`), `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, 4 CPUs, a small object store, the dashboard on (jobs need it), Serve on a free port; `test_resharding`'s Ray test moved to it | — | `tests/rollout_train/test_resharding.py`; the fixture's own test | S, ~150 |
 | 3 | Provider and trainer declarations | `rollout_train.providers`: `Capabilities`, `ModelOffer`, `TrainerCapabilities`, `settings_of(trainer)`; declared by `VllmEngine`, `RemoteEngine`, `TinkerEngine`, `ResponsesEndpoint`, `LoraTrainer`, `FullTrainer`, `TinkerTrainer` | 1 | `tests/rollout_train/test_providers.py` (pure) | S, ~300 |
 | 4 | The cluster config | `rollout_train.cluster`: `Cluster`, `load`, discovery, secret references, `Stores.open`; `rollout cluster check` | 3 | `tests/rollout_train/test_cluster.py` (pure: unknown keys, kinds, secrets by reference, discovery order) | M, ~450 |
 | 5 | Run settings and presets | `RunSettings` (schema, fixed and changeable, kinds, precedence, `--settings` files); `Preset`, `FilePresets`, `DatabasePresets` (with the table); `rollout preset` | 3 | `tests/rollout_train/test_settings.py`, `test_presets.py` (versions, compare-and-set, deleted names) | M, ~550 |
@@ -1150,6 +1150,15 @@ it; one it has no place for (providers, `limits.spend`, `share`, slots, routing)
 setting stays a profile key, as `--set` took it (so a launcher's `trainer.start` still works, read as `start`). A
 preset is read beside the profile's ledger. The start records `run_settings` (`recorded(...)`, with the preset id)
 beside the profile-era `settings`, which the monitor and resuming still read; 16 makes `run_settings` the one record.
+
+### The Ray track, as made
+
+- **2** (the session's Ray): `local_ray` in `tests/conftest.py`, built in `tests/local_ray.py`
+  ([testing](../guide/testing.md#tests-on-ray)). Ray names its session's directory `session_DATE_PID` itself, so the
+  files are in `~/.cache/rollout/ray-tests/session_DATE_PID` rather than under a directory of the process's own: Ray's
+  sockets are inside it, and a socket's path may be 107 bytes at most. The dashboard and its job agent listen on free
+  ports, since a cluster already running on the machine holds Ray's defaults (`ray.init` does not take the agent's
+  port: the fixture gives it to the node's parameters). No Serve (the decisions after review).
 
 ### What the acceptance run needs from each step
 

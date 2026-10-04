@@ -5,6 +5,7 @@ description = "Reinforcement learning on rollout: the training loop, the schedul
 requires-python = ">=3.13"
 dependencies = [
     "rollout",
+    "ray[default]>=2.59",  # every role runs on Ray: runs as jobs, engine hosts as actors, bridges as tasks
 ]
 
 [project.scripts]
@@ -14,7 +15,6 @@ rollout = "rollout_train.cli:main"
 http = ["starlette>=0.48", "uvicorn>=0.37"]  # the endpoint for harnesses, the monitor
 report = ["matplotlib>=3.9"]
 durable = ["rollout-durable"]  # for a profile whose runner is durable
-ray = ["ray[default]>=2.59"]  # a launcher that submits runs as Ray jobs, and resharding as Ray tasks
 
 [tool.uv.sources]
 rollout = { workspace = true }

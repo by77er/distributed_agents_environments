@@ -5099,6 +5099,7 @@ name = "rollout-train"
 version = "0.0.0"
 source = { editable = "libraries/rollout-train" }
 dependencies = [
+    { name = "ray", extra = ["default"] },
     { name = "rollout" },
 ]
 
@@ -5110,9 +5111,6 @@ http = [
     { name = "starlette" },
     { name = "uvicorn" },
 ]
-ray = [
-    { name = "ray", extra = ["default"] },
-]
 report = [
     { name = "matplotlib" },
 ]
@@ -5120,13 +5118,13 @@ report = [
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'report'", specifier = ">=3.9" },
-    { name = "ray", extras = ["default"], marker = "extra == 'ray'", specifier = ">=2.59" },
+    { name = "ray", extras = ["default"], specifier = ">=2.59" },
     { name = "rollout", editable = "libraries/rollout" },
     { name = "rollout-durable", marker = "extra == 'durable'", editable = "implementations/rollout-durable" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]
-provides-extras = ["http", "report", "durable", "ray"]
+provides-extras = ["http", "report", "durable"]
 
 [[package]]
 name = "rollout-vllm"
@@ -5174,9 +5172,6 @@ gpu = [
     { name = "rollout-qwen" },
     { name = "rollout-vllm" },
 ]
-ray = [
-    { name = "rollout-train", extra = ["ray"] },
-]
 tinker = [
     { name = "rollout-tinker" },
 ]
@@ -5217,10 +5212,9 @@ requires-dist = [
     { name = "rollout-s3", editable = "implementations/rollout-s3" },
     { name = "rollout-tinker", marker = "extra == 'tinker'", editable = "implementations/rollout-tinker" },
     { name = "rollout-train", extras = ["http", "report"], editable = "libraries/rollout-train" },
-    { name = "rollout-train", extras = ["ray"], marker = "extra == 'ray'", editable = "libraries/rollout-train" },
     { name = "rollout-vllm", marker = "extra == 'gpu'", editable = "implementations/rollout-vllm" },
 ]
-provides-extras = ["gpu", "gemma", "tinker", "ray"]
+provides-extras = ["gpu", "gemma", "tinker"]
 
 [package.metadata.requires-dev]
 dev = [

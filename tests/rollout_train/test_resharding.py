@@ -1,7 +1,6 @@
 """Resharding a checkpoint into its engines' layout, here and as a Ray task; and a launcher whose runs are Ray jobs."""
 
 import asyncio
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +12,9 @@ from rollout_train.launcher import OUTPUT, Launcher
 from rollout_train.launches import CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import presence_of
-from rollout_train.ray_cluster import prepare
 from rollout_train.record import scope
 from rollout_train.resharding import RESHARDED, RESHARDING, VERBATIM, on_ray, reshard, resharded
+from tests.local_ray import LocalRay
 from tests.rollout_train.support import profiles
 
 
@@ -62,22 +61,11 @@ async def test_a_released_version_cannot_be_resharded(tmp_path: Path) -> None:
         await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
 
 
-async def test_a_reshard_runs_as_a_ray_task(tmp_path: Path) -> None:
-    prepare()  # (before Ray is imported: workers run in this environment)
-    ray = pytest.importorskip("ray")
+async def test_a_reshard_runs_as_a_ray_task(tmp_path: Path, local_ray: LocalRay) -> None:
     checkpoints, fence, checkpoint = await a_version(tmp_path)
-    sessions = Path.home() / ".cache" / "ray-tests"  # (on disk: /tmp may be memory)
-    ray.init(
-        num_cpus=1, object_store_memory=80 * 2**20, include_dashboard=False, log_to_driver=False,
-        _temp_dir=str(sessions),
-    )  # fmt: skip
-    try:
-        ledger_at = {"directory": str(tmp_path / "ledger")}
-        blobs_at = {"kind": "rollout.harness.blobs:FileBlobStore", "directory": str(tmp_path / "blobs")}
-        manifest = await on_ray(ledger_at, blobs_at, fence, checkpoint, VERBATIM)
-    finally:
-        ray.shutdown()
-        shutil.rmtree(sessions, ignore_errors=True)
+    ledger_at = {"directory": str(tmp_path / "ledger")}
+    blobs_at = {"kind": "rollout.harness.blobs:FileBlobStore", "directory": str(tmp_path / "blobs")}
+    manifest = await on_ray(ledger_at, blobs_at, fence, checkpoint, VERBATIM)
     assert sorted(manifest.files) == ["adapter_config.json", "adapter_model.safetensors"]
     assert await resharded(checkpoints.ledger, checkpoint) == manifest  # (noted by the task, in the ledger)
 
@@ -111,7 +99,6 @@ class Jobs:
 
 
 async def ray_launcher(tmp_path: Path, jobs: Jobs) -> tuple[Launcher, Any]:
-    pytest.importorskip("ray")
     ledger = FileLedger(tmp_path / "ledger")
     launches, heartbeats = launches_of(ledger), presence_of(ledger)
     assert launches is not None and heartbeats is not None
