@@ -1181,3 +1181,10 @@ The user settled the design's open questions on 2026-10-04:
   five steps behind).
 - **Tinker's logprobs are checked live** (a few cents) before distillation's validation relies on prompt or top-k
   logprobs from Tinker.
+- **A channel may be served by several inference providers at once,** for example local engine hosts and RunPod pods,
+  or Tinker's sampler beside them, with a routing rule: spill over (fill one provider first, send the rest to the next;
+  on-demand pods start only when the first is full and stop when idle) or weighted shares. Every provider of a trained
+  channel must pass its checks (token-exact, sampled logprobs, honours sampling) and should serve the same model, ideally
+  at the same precision. Each provider follows the same serving record and loads the same bridged files; each turn
+  records the provider and checkpoint that served it, and the importance weight corrects small numeric differences
+  between providers as it corrects staleness.
