@@ -254,7 +254,8 @@ async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_pa
     assert [(version, entry["episodes"], entry["answer_tokens"]) for version, entry in entries] == [
         ("words-new@1", 2, None), ("words-new@2", 3, None), ("words-new@3", 1, 32),
     ]  # fmt: skip
-    assert shown["versions"][1]["edited_from"] == "words-new@1"
+    second = await suite_of(ledger, "words-new@2")
+    assert second is not None and second.edited_from == 1
     given_suite = await suite_of(ledger, "words-given")
     assert given_suite is not None and given_suite.entries[0].chosen == GIVEN
     assert given_suite.starts[0].parameters == words.start(words.rows()[2], random.Random(3))  # (drawn as `drawn` does)
