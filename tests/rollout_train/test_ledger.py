@@ -199,6 +199,43 @@ async def test_every_table_is_read_at_once_in_the_order_its_records_were_appende
     assert set(await ledger.read_all(leaving_out="_with%")) == {"runs/a/groups", "runs/a/turns/r_1"}
 
 
+async def test_the_stores_beside_a_database_ledger_change_their_rows_in_place(
+    tmp_path: Path, database: str | None
+) -> None:
+    from rollout.harness.sandboxes import Lease
+    from rollout_train.database import DatabaseLedger
+    from rollout_train.registry import Taken
+
+    ledger = DatabaseLedger(database or f"sqlite:///{tmp_path / 'ledger.db'}")
+    registry = ledger.registry
+    await registry.bookmark("best", "aaaa")
+    await registry.bookmark("best", "bbbb")  # (moved)
+    assert [(mark.name, mark.checkpoint) for mark in await registry.bookmarks()] == [("best", "bbbb")]
+    await registry.unbookmark("best")
+    with pytest.raises(KeyError):
+        await registry.unbookmark("best")
+    await registry.name_dataset("mined", "dddd")
+    await registry.name_dataset("mined", "dddd")  # (named so again: nothing changes)
+    with pytest.raises(Taken):
+        await registry.name_dataset("mined", "eeee")
+    assert [(each.name, each.dataset) for each in await registry.datasets()] == [("mined", "dddd")]
+    await registry.point_suite("words", "words@2")
+    assert (await registry.point_suite("words", "words@1", forward=True)).version == "words@2"  # (only forward)
+    assert [(each.name, each.version) for each in await registry.suites()] == [("words", "words@2")]
+    settings = ledger.desired_settings
+    assert await settings.desired("train") is None
+    await settings.want("train", {"paused": True})
+    wanted = await settings.want("train", {"groups_per_step": 2})
+    assert wanted.settings == {"paused": True, "groups_per_step": 2} == (await settings.desired("train")).settings  # type: ignore[union-attr]
+    leases = ledger.sandboxes
+    lease = Lease(key="train/1/1/1/box", kind="fake", pool="boxes", handle="h1")
+    await leases.put(lease)
+    await leases.put(lease.model_copy(update={"handle": "h2"}))
+    assert await leases.all() == [lease.model_copy(update={"handle": "h2"})] and await leases.get("other") is None
+    await leases.delete(lease.key)
+    assert await leases.all() == []
+
+
 async def test_a_ledger_moves_from_files_to_sqlite_to_postgres_whole(tmp_path: Path, postgres: str) -> None:
     from rollout_train.database import DatabaseLedger, copy
 

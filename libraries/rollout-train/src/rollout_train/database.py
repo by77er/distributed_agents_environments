@@ -17,14 +17,15 @@ dataset's name and id) and `suite_names` (each suite's name and the version it p
 ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of each run's settings
 (`rollout_train.settings`) in another, `run_settings`: a row per run, changed in place; a database ledger's is its
 `desired_settings`. `DatabaseLeases` holds the sandbox pools' leases (`rollout_train.sandboxes`) in another,
-`sandboxes`: a row per lease; a database ledger's is its `sandboxes`.
+`sandboxes`: a row per lease; a database ledger's is its `sandboxes`. A table whose rows are found by one key and
+changed in place (bookmarks, dataset names, suite names, desired settings, leases) is a `KeyedTable`.
 """
 
 import asyncio
 import json
 import time
-from collections.abc import Collection, Mapping
-from dataclasses import asdict, replace
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import asdict, astuple, replace
 from pathlib import Path
 from typing import Any
 
@@ -250,12 +251,54 @@ class DatabaseLedger:
         self.database.close()
 
 
+class KeyedTable:
+    """A table of a database whose rows are found by one key column (`key`; `columns` are the others, in order), each
+    changed in place."""
+
+    def __init__(self, database: Database, table: str, key: str, columns: Sequence[str]) -> None:
+        self.database, self.table, self.key, self.columns = database, table, key, tuple(columns)
+        self._selected = ", ".join((key, *columns))
+
+    def get(self, connection: Connection, key: str) -> tuple[Any, ...] | None:
+        """A row (its key first), or None."""
+        query = f"SELECT {self._selected} FROM {self.table} WHERE {self.key} = :key"
+        return fetch_one(connection, query, {"key": key})
+
+    def put(self, connection: Connection, row: Sequence[Any]) -> None:
+        """Write a row (its key first), in place of the one of its key."""
+        named = dict(zip((self.key, *self.columns), row, strict=True))
+        values = ", ".join(f":{name}" for name in named)
+        changes = ", ".join(f"{name} = excluded.{name}" for name in self.columns)
+        sql(connection, f"INSERT INTO {self.table} ({self._selected}) VALUES ({values}) "
+            f"ON CONFLICT ({self.key}) DO UPDATE SET {changes}", named)  # fmt: skip
+
+    def delete(self, connection: Connection, key: str) -> bool:
+        """Delete a row; whether there was one."""
+        return sql(connection, f"DELETE FROM {self.table} WHERE {self.key} = :key", {"key": key}).rowcount > 0
+
+    async def one(self, key: str) -> tuple[Any, ...] | None:
+        """A row (its key first), or None."""
+        return await asyncio.to_thread(self.database.read, lambda connection: self.get(connection, key))
+
+    async def all(self) -> list[tuple[Any, ...]]:
+        """Every row, by key."""
+        query = f"SELECT {self._selected} FROM {self.table} ORDER BY {self.key}"
+        return await asyncio.to_thread(self.database.read, lambda connection: fetch_all(connection, query))
+
+    async def change[T](self, change: Callable[[Connection], T], *, exclusive: str) -> T:
+        """Run `change` in one transaction, one at a time with every other change of the same `exclusive` name."""
+        return await asyncio.to_thread(self.database.write, change, exclusive=exclusive)
+
+
 class DatabaseRegistry:
     """A `Registry` (`rollout_train.registry`) in the `runs`, `bookmarks`, `dataset_names` and `suite_names` tables of a
     database."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        self._bookmarks = KeyedTable(database, "bookmarks", "name", ("checkpoint", "moved"))
+        self._datasets = KeyedTable(database, "dataset_names", "name", ("dataset", "named"))
+        self._suites = KeyedTable(database, "suite_names", "name", ("version", "moved"))
 
     async def runs(self) -> list[Entry]:
         return await asyncio.to_thread(self.database.read, _runs)
@@ -285,75 +328,51 @@ class DatabaseRegistry:
         return await asyncio.to_thread(self.database.write, renamed, exclusive="registry")
 
     async def bookmarks(self) -> list[Bookmark]:
-        def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT name, checkpoint, moved FROM bookmarks ORDER BY name")
-
-        return [Bookmark(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+        return [Bookmark(*row) for row in await self._bookmarks.all()]
 
     async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
         mark = Bookmark(valid(name), checkpoint, round(time.time(), 1))
-
-        def moved(connection: Connection) -> Bookmark:
-            sql(
-                connection,
-                "INSERT INTO bookmarks (name, checkpoint, moved) VALUES (:name, :checkpoint, :moved) "
-                "ON CONFLICT (name) DO UPDATE SET checkpoint = excluded.checkpoint, moved = excluded.moved",
-                asdict(mark),
-            )
-            return mark
-
-        return await asyncio.to_thread(self.database.write, moved, exclusive="registry")
+        await self._bookmarks.change(
+            lambda connection: self._bookmarks.put(connection, astuple(mark)), exclusive="registry"
+        )
+        return mark
 
     async def unbookmark(self, name: str) -> None:
-        def taken(connection: Connection) -> None:
-            if sql(connection, "DELETE FROM bookmarks WHERE name = :name", {"name": name}).rowcount == 0:
-                raise KeyError(f"there is no bookmark {name!r}")
-
-        await asyncio.to_thread(self.database.write, taken, exclusive="registry")
+        if not await self._bookmarks.change(
+            lambda connection: self._bookmarks.delete(connection, name), exclusive="registry"
+        ):
+            raise KeyError(f"there is no bookmark {name!r}")
 
     async def datasets(self) -> list[Named]:
-        def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT name, dataset, named FROM dataset_names ORDER BY name")
-
-        return [Named(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+        return [Named(*row) for row in await self._datasets.all()]
 
     async def name_dataset(self, name: str, dataset: str) -> Named:
         entry = Named(valid(name), dataset, round(time.time(), 1))
 
         def given(connection: Connection) -> Named:
-            row = fetch_one(connection, "SELECT dataset FROM dataset_names WHERE name = :name", {"name": entry.name})
-            if row is not None and row[0] != dataset:
+            row = self._datasets.get(connection, entry.name)
+            if row is not None and row[1] != dataset:
                 raise Taken(f"another dataset is called {entry.name!r}")
             if row is None:
-                sql(connection, "INSERT INTO dataset_names (name, dataset, named) VALUES (:name, :dataset, :named)",
-                    asdict(entry))  # fmt: skip
+                self._datasets.put(connection, astuple(entry))
             return entry
 
-        return await asyncio.to_thread(self.database.write, given, exclusive="registry")
+        return await self._datasets.change(given, exclusive="registry")
 
     async def suites(self) -> list[SuiteName]:
-        def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT name, version, moved FROM suite_names ORDER BY name")
-
-        return [SuiteName(*row) for row in await asyncio.to_thread(self.database.read, rows)]
+        return [SuiteName(*row) for row in await self._suites.all()]
 
     async def point_suite(self, name: str, version: str, *, forward: bool = False) -> SuiteName:
         entry = SuiteName(valid(name), version, round(time.time(), 1))
 
         def pointed(connection: Connection) -> SuiteName:
-            row = fetch_one(connection, "SELECT name, version, moved FROM suite_names WHERE name = :name",
-                            {"name": entry.name})  # fmt: skip
+            row = self._suites.get(connection, entry.name)
             if forward and row is not None and version_number(str(row[1])) >= version_number(version):
                 return SuiteName(*row)
-            sql(
-                connection,
-                "INSERT INTO suite_names (name, version, moved) VALUES (:name, :version, :moved) "
-                "ON CONFLICT (name) DO UPDATE SET version = excluded.version, moved = excluded.moved",
-                asdict(entry),
-            )
+            self._suites.put(connection, astuple(entry))
             return entry
 
-        return await asyncio.to_thread(self.database.write, pointed, exclusive="registry")
+        return await self._suites.change(pointed, exclusive="registry")
 
 
 class DatabaseLaunches:
@@ -452,69 +471,47 @@ class DatabaseDesiredSettings:
     """`DesiredSettings` (`rollout_train.settings`) in the `run_settings` table of a database."""
 
     def __init__(self, database: Database) -> None:
-        self.database = database
+        self._table = KeyedTable(database, "run_settings", "run", ("settings", "changed"))
 
     async def desired(self, run: str) -> Desired | None:
-        def row(connection: Connection) -> tuple[Any, ...] | None:
-            return fetch_one(connection, "SELECT settings, changed FROM run_settings WHERE run = :run", {"run": run})
-
-        found = await asyncio.to_thread(self.database.read, row)
-        return Desired(run, json.loads(found[0]), float(found[1])) if found else None
+        found = await self._table.one(run)
+        return Desired(run, json.loads(found[1]), float(found[2])) if found else None
 
     async def want(self, run: str, settings: Mapping[str, JsonValue]) -> Desired:
         def changed(connection: Connection) -> Desired:
-            row = fetch_one(connection, "SELECT settings FROM run_settings WHERE run = :run", {"run": run})
-            now = Desired(run, {**(json.loads(row[0]) if row else {}), **settings}, round(time.time(), 1))
-            sql(
-                connection,
-                "INSERT INTO run_settings (run, settings, changed) VALUES (:run, :settings, :changed) "
-                "ON CONFLICT (run) DO UPDATE SET settings = excluded.settings, changed = excluded.changed",
-                {"run": run, "settings": json.dumps(dict(now.settings)), "changed": now.changed},
-            )
+            row = self._table.get(connection, run)
+            now = Desired(run, {**(json.loads(row[1]) if row else {}), **settings}, round(time.time(), 1))
+            self._table.put(connection, (run, json.dumps(dict(now.settings)), now.changed))
             return now
 
-        return await asyncio.to_thread(self.database.write, changed, exclusive=f"run_settings:{run}")
+        return await self._table.change(changed, exclusive=f"run_settings:{run}")
 
 
 class DatabaseLeases:
     """`Leases` (`rollout.harness.sandboxes`) in the `sandboxes` table of a database."""
 
     def __init__(self, database: Database) -> None:
-        self.database = database
+        self._table = KeyedTable(database, "sandboxes", "key", ("pool", "lease"))
 
     async def get(self, key: str) -> Lease | None:
-        def row(connection: Connection) -> tuple[Any, ...] | None:
-            return fetch_one(connection, "SELECT lease FROM sandboxes WHERE key = :key", {"key": key})
-
-        found = await asyncio.to_thread(self.database.read, row)
-        return Lease.model_validate_json(found[0]) if found else None
+        found = await self._table.one(key)
+        return Lease.model_validate_json(found[2]) if found else None
 
     async def put(self, lease: Lease) -> None:
-        def written(connection: Connection) -> None:
-            sql(
-                connection,
-                "INSERT INTO sandboxes (key, pool, lease) VALUES (:key, :pool, :lease) "
-                "ON CONFLICT (key) DO UPDATE SET pool = excluded.pool, lease = excluded.lease",
-                {"key": lease.key, "pool": lease.pool, "lease": lease.model_dump_json()},
-            )
-
-        await asyncio.to_thread(self.database.write, written, exclusive=f"sandboxes:{lease.key}")
+        row = (lease.key, lease.pool, lease.model_dump_json())
+        await self._table.change(
+            lambda connection: self._table.put(connection, row), exclusive=f"sandboxes:{lease.key}"
+        )
 
     async def delete(self, key: str) -> None:
-        def deleted(connection: Connection) -> None:
-            sql(connection, "DELETE FROM sandboxes WHERE key = :key", {"key": key})
-
-        await asyncio.to_thread(self.database.write, deleted, exclusive=f"sandboxes:{key}")
+        await self._table.change(lambda connection: self._table.delete(connection, key), exclusive=f"sandboxes:{key}")
 
     async def all(self) -> list[Lease]:
-        def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT lease FROM sandboxes ORDER BY key")
-
-        return [Lease.model_validate_json(lease) for (lease,) in await asyncio.to_thread(self.database.read, rows)]
+        return [Lease.model_validate_json(lease) for _, _, lease in await self._table.all()]
 
 
 def _ordered(connection: Connection) -> None:
-    """The index a table's records are read by, in order (made in a database made before it had one too)."""
+    """The index a table's records are read by, in order."""
     sql(connection, "CREATE INDEX IF NOT EXISTS ledger_records_order ON ledger_records (name, position)")
 
 
