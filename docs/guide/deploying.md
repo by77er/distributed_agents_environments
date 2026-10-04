@@ -42,9 +42,9 @@ runs_gib = 6                                  # must be available to admit runs
 training_gib = 4                              # and to start a step
 
 [evals]
-suite = "words-held-out"                      # optional: evaluate checkpoints as they are made (its eval data, say)
+suite = "words-held-out"                      # evaluate checkpoints as they are made (its eval data, say); "" for none
 every = 2                                     # the checkpoint of every second step
-episodes = 1                                  # episodes of each start
+episodes = 1                                  # episodes of each start (by default the suite's)
 
 [gateway]                                     # optional: for `rollout gateway`, a replica that records every turn
 url = "https://models.example/gw"             # where programs and harnesses reach it, through its proxy
@@ -67,8 +67,9 @@ uv run rollout runner runner.toml --run first                       # a machine 
 uv run rollout gateway profile.toml --listen 127.0.0.1:8830          # a replica of the gateway: as many as wanted
 uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
 uv run rollout env check ENVIRONMENT --profile profile.toml --groups 4   # does it hold together; do its groups teach
-uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # a frozen list of starts
-uv run rollout eval profile.toml words-v1 --checkpoint diamonds --episodes 4         # play it with a checkpoint
+uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # an eval configuration
+uv run rollout suite edit words-v1 --seeds 1,2,3,4 --ledger RUN                       # its next version
+uv run rollout eval profile.toml words-v1 --checkpoint diamonds --episodes 4         # play its newest with a checkpoint
 uv run rollout eval profile.toml teams-every-task --environment ENVIRONMENT     # its eval data, frozen on first use
 uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONMENT --runs RUNS   # start runs asked for here
 uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONMENT --runs RUNS \
@@ -79,8 +80,8 @@ uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONME
 profile or the command is told by name. `train --name NAME` names a new run (by default after its directory);
 `rename` names a run again, by its name or its id; `bookmark` names a checkpoint by any reference, and `checkpoints` lists
 them all ([checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
-of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)). `suite` makes and
-lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](../libraries/rollout-train/evals.md)); `env check`
+of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)). `suite` makes,
+edits (each edit a version of its own) and lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](../libraries/rollout-train/evals.md)); `env check`
 checks an environment before anything trains on it, and with a profile plays a few groups and flags those that teach
 nothing ([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)); `report` and
 `imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
@@ -101,11 +102,11 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the tool set should live |
 | `pools` | Each sandbox pool, by the kind of sandbox it serves ([sandboxes](../libraries/rollout/sandboxes.md)): `module:name` of the provider that makes them in this process, or a table whose `kind` is that and whose other keys are its settings (`size`: how many at once), or a URL. A pool in this process is named `KIND@HOST/DIRECTORY`, keeps its leases beside the ledger and has a keeper that ends them with their claims | Run `rollout pool` where the sandboxes should live, and give its URL |
-| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, the launches, what is wanted of each run's settings, and the sandboxes' leases | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
+| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names, bookmarks and the versions suites' names point to, the runners' heartbeats, the launches, what is wanted of each run's settings, and the sandboxes' leases | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say). Retention deletes a released checkpoint's files an hour at the earliest after they were last put ([checkpoints](../libraries/rollout-train/checkpoints.md#checkpoints)) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
-| `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
+| `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (the suite's unless it says otherwise), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). A suite named by its name is played in the version its name points to as each step is decided (`NAME@N` names one version for good). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, or with `suite = ""`, the run evaluates nothing; a launch from the monitor says a suite or none, where its profile does not. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
 | `gateway` | The [gateway](#the-gateway) `rollout gateway` serves: where it is reached (`url`) and serves (`listen`), the file of the secrets its keys are signed with (`keys`), and how long a key minted for a slot is good for (`lifetime`, 6 hours) | Start more replicas behind a proxy |
 | `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines can take. An episode is claimed only while its sandboxes' pools have room for it too | Raise it with the engines' `max_num_seqs`, and the pools' sizes with the memory for their sandboxes |
 
@@ -113,7 +114,8 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 
 Some of a run's settings can change between two steps without breaking it, and are taken from its next step on:
 `groups_per_step`, `max_lag` (how many checkpoints behind the newest a turn of the trained channel may begin; the
-channel's `max_lag` to start with), the `evals` (`evals.suite`, `evals.every`, `evals.episodes`), and the settings its trainer takes
+channel's `max_lag` to start with), the `evals` (`evals.suite`, `evals.every`, `evals.episodes`; an edit of the suite,
+too, as a new version its name points to), and the settings its trainer takes
 between steps (`trainer.learning_rate`, and for `rollout_lora`'s trainers the clips, `truncate`, `tokens_per_step`,
 `max_kl` and `max_gradient_norm`). The rest are fixed when it starts: the channels, their models and engines, the
 trainer's kind, what its weights are and its other settings (the adapter's `rank`, the longest segment), the runner,
@@ -401,8 +403,10 @@ may change, with their values in the file (the trainer's settings, `trainer.star
 `evals.episodes`, which the monitor's **New run** form asks for as the run's evals); its environments; and how many runs
 it plays.
 A launch (`rollout_train.launches`) names a profile, an environment, the run's name, the checkpoint it starts from, a
-bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, or one
-the profile offers). The launcher claims the oldest launch asked for one of its profiles while it has room (a claim
+bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, one
+every training run can change, or one the profile offers). A training run's launch says the evals it makes
+(`evals.suite`: a suite, or null for none), unless its profile's `[evals]` says them; the monitor refuses one that says
+neither. The launcher claims the oldest launch asked for one of its profiles while it has room (a claim
 is one change, so two launchers never start one launch), and starts
 
 ```bash
@@ -410,15 +414,16 @@ python -m rollout_train.cli train PROFILE ENVIRONMENT --directory RUNS/NAME-ID -
     --groups-per-step K --seed S --set KEY=VALUE ...
 ```
 
-with its output in the run's `train.log`. A launch of kind `eval` names a suite, the checkpoint that plays it
-(`start`) and its episodes a start, and is started as
+with its output in the run's `train.log` (a launch that says no evals passes `--set evals.suite=""`, so the profile's
+`[evals]` is not used). A launch of kind `eval` names a version of a suite (`NAME@N`), the checkpoint that plays it
+(`start`) and its episodes a start (none: the version's), and is started as
 
 ```bash
-python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name NAME --episodes N \
+python -m rollout_train.cli eval PROFILE SUITE@N --directory RUNS/NAME-ID --name NAME --episodes N \
     --checkpoint REF --set KEY=VALUE ...
 ```
 
-([evals](../libraries/rollout-train/evals.md#asked-for-from-the-page)). It notes how the launch goes: `claimed`, `running` (with the process),
+([evals](../libraries/rollout-train/evals.md#made-edited-and-asked-for-from-the-page)). It notes how the launch goes: `claimed`, `running` (with the process),
 then `ended`, or `failed` with the end of the output. A launch asked to stop before it is claimed is `stopped` at
 once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). Launches are ordinary
 state beside the ledger: `launches.json` beside a ledger of files, the `launches` table in a database ledger's

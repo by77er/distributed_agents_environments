@@ -198,9 +198,9 @@ under [dying and starting again](training.md#dying-and-starting-again).
 
 ## The registry
 
-What runs, checkpoints and datasets are called is kept beside the ledger, in the registry (`rollout_train.registry`):
-`registry.json` beside a ledger of files, the `runs`, `bookmarks` and `dataset_names` tables in a database ledger's
-database (`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
+What runs, checkpoints, datasets and suites are called is kept beside the ledger, in the registry
+(`rollout_train.registry`): `registry.json` beside a ledger of files, the `runs`, `bookmarks`, `dataset_names` and
+`suite_names` tables in a database ledger's database (`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
 the ledger keeps is under a name, so naming anything again moves nothing. Two more kinds of ordinary state are kept
 beside the ledger the same way: the runners' and launchers' heartbeats (`presence.json`, the `presence` table;
 [heartbeats](rollouts.md#heartbeats)) and the runs asked for (`launches.json`, the `launches` table;
@@ -230,6 +230,13 @@ a bookmark names keeps its files. A checkpoint needs no bookmark: it is shown by
 A [dataset](datasets.md) can be given a name when it is made (`rollout dataset make … --name NAME`, or
 `Registry.name_dataset`). A name says one dataset for good, as the dataset never changes; another dataset cannot be
 given it.
+
+### Suite names
+
+A [suite](evals.md#versions)'s name points to one of its versions, by id (`NAME@NUMBER`): the newest, moved there by
+each edit (`Registry.point_suite(name, version, forward=True)`, which moves it only to a later version, so two edits at
+once leave it at the newer). `Registry.suites()` lists where each points. A version never changes; the name moves. A
+suite never edited needs none: its name is its version 1.
 
 ## References
 

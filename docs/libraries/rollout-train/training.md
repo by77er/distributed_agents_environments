@@ -75,9 +75,9 @@ what happens are appended to the run's tables in the [ledger](checkpoints.md#the
 |---|---|---|---|
 | `runs/RUN/groups` | group | when a group is decided: runners play it from there | the row, the start every episode of the group is given, and how many episodes it asks for |
 | `runs/RUN/results` | group | when its last episode ends | how it went: a [`Result`](../../guide/reference.md#result) |
-| `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the checkpoint it starts from (`parent`), the id of the one it will make (`makes`), the batch (a blob) and how many segments it has, the seed, when it was decided |
+| `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the checkpoint it starts from (`parent`), the id of the one it will make (`makes`), the batch (a blob) and how many segments it has, the seed, when it was decided, its changeable settings (`settings`) and the version of the suite its evals play (`suite_version`) |
 | `runs/RUN/failures` | step | when a step's trainer fails | its error |
-| `runs/RUN/evals` | step | when the eval of the checkpoint the step made has played every start | the suite, the checkpoint, the eval's run, and how it went ([evals during training](evals.md#evals-during-training)) |
+| `runs/RUN/evals` | step | when the eval of the checkpoint the step made has played every start | the suite, the version played, the checkpoint, the eval's run, and how it went ([evals during training](evals.md#evals-during-training)) |
 
 A step's outcome is the checkpoint it makes, in the ledger's `checkpoints` table. A group is done with once its result trains on
 nothing, or the step that covers it has made its checkpoint or failed.
@@ -204,7 +204,8 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 A run's settings are named by dotted key, as a profile's are, and are of two kinds (`rollout_train.settings`).
 **Changeable** ones can change between two steps without breaking the run: `groups_per_step`, `max_lag` (written into what the channel should serve with each
 checkpoint it serves, so runners elsewhere take it with that checkpoint), the evals it makes
-(`evals.suite`, none for no evals; `evals.every`; `evals.episodes`), and its trainer's (`trainer.NAME` for each of its
+(`evals.suite`: a suite by name, which follows its newest version, a version by id, or none for no evals;
+`evals.every`; `evals.episodes`, none for the suite's own), and its trainer's (`trainer.NAME` for each of its
 `changeable`). **Fixed** ones make what the run is: the model, the trainer's kind and what its weights are, the
 adapter's rank and the trainer's other settings, the channels and their engines, how many episodes it plays at once,
 and the groups and seed the loop was started with (`fixed(profile, trainer, …)`). `rollout train` writes both into the
@@ -217,14 +218,16 @@ the keys given and keeps the others. The monitor's run page writes them ([a run'
 
 The loop (`train(desired=…, scheduled=…)`) reads them each time it is about to decide a step. Each one it has, with a
 value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `evals.every` and
-`evals.episodes`, 0 at least for `max_lag`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the
+`evals.episodes`, which may also be none; 0 at least for `max_lag`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the
 trainer refuses leaves the trainer's as they were, noted to the hooks as a `settings` note with the error. A change is
 noted as a `settings` note with what changed. The step is decided with the settings then in effect, and its record in
-`steps` says them (`settings`); a step taken again after a stop is taken with those. Whether a step's checkpoint is
-evaluated is that step's evals: `scheduled(suite, every, episodes)` gives the schedule of a suite by name. `rollout
-train`'s resolves it as the profile's `[evals]` suite is resolved (`suite_for`): the ledger's suite, or else the
-environment's eval data of that name, frozen on first use; for a name neither has, or another environment's suite,
-there is none, and nothing is evaluated. So a change made while a step is being taken applies from
+`steps` says them (`settings`), with the version of the suite they name as its name points then (`suite_version`); a
+step taken again after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and
+the version played is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by
+name (the version its name points to now) or of a version by id. `rollout train`'s resolves it as the profile's
+`[evals]` suite is resolved (`suite_for`): the ledger's version, or else the environment's eval data of that name,
+frozen on first use; for a name neither has, or another environment's suite, there is none, and nothing is evaluated.
+An edit of the suite (a new version, [versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken applies from
 the next one, and a run that is stopped takes it when it is started again.
 
 ## The record

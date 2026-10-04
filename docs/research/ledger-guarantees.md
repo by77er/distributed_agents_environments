@@ -145,7 +145,8 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
   (`append_returning`: `DatabaseLedger` reads the row in the same transaction, `FileLedger` reads the key's line by
   its offset), and of any other ledger the table is read back.
   - `Checkpoints.add` reads back, and so does `reshard`.
-  - `make_suite` uses `appended` and plays the winner's suite (finding 8, fixed).
+  - `make_suite` uses `appended` and plays the winner's suite (finding 8, fixed); `edit_suite` uses it to find its
+    number taken, and tries the next.
   - `EpisodeRunner._ended` does not read back. That is intended: the loser's episode is dropped. Most losers are
     refused before that: an older attempt's record raises `Fenced` once a newer attempt took the episode's fence.
 
@@ -600,19 +601,27 @@ wins (see finding 9).
 
 ## 8. Suites (finding 8)
 
-**Claim.** A suite is written once under the suite's fence (`suites/NAME`) and never changed, and two makers of one
-suite at once leave one of their suites whole. **This holds (finding 8, fixed).**
+**Claim.** Each version of a suite is written once under the suite's fence (`suites/NAME`) and never changed, two
+makers of one suite at once leave one of their suites whole, and two editors at once leave two whole versions with the
+suite's name at the later. **This holds (finding 8, fixed).**
 
-**Mechanism.** `make_suite` checks that the name is free, takes the fence, and appends the whole suite as one record
-(`evaluations/SUITE/suite`: what it is and its starts in order) with `appended`. A maker whose fence was taken after
-its own raises `Fenced`; a maker whose append finds a record there returns the suite in that record, and plays it.
-With one record, there is nothing for a second maker to finish: the suite in the ledger is one maker's. `suite_for`,
-which makes an environment's eval data on first use, tries again after `Fenced` until it finds a suite of the name.
-A suite written before (a record and a table of starts by number) reads the same.
+**Mechanism.** `make_suite` checks that the name is free, takes the fence, and appends the whole of version 1 as one
+record (`evaluations/SUITE/suite`, key `suite`: what it is and its starts in order) with `appended`. A maker whose
+fence was taken after its own raises `Fenced`; a maker whose append finds a record there returns the suite in that
+record, and plays it. With one record, there is nothing for a second maker to finish: the suite in the ledger is one
+maker's. `suite_for`, which makes an environment's eval data on first use, tries again after `Fenced` until it finds a
+suite of the name. `edit_suite` appends its version under the next number with `appended`, under the same fence; an
+editor fenced out, or whose number another took, tries the next number (or, told the version it edited, is refused).
+The suite's name is ordinary state beside the ledger (the registry's suite names), moved only forward
+(`point_suite(…, forward=True)`), so the later of two edits is where it points whichever writes last. A name that
+points nowhere is its newest version in the ledger, so an edit that died between its append and the move is still
+read. A suite written before (a record, or a record and a table of starts by number) reads as its version 1.
 
 Tests: `test_two_makers_of_one_suite_leave_one_of_their_suites` (the second maker takes the fence after the first and
-before its append: the first is fenced out, and the ledger holds the second's suite) and
-`test_a_maker_that_finds_the_suite_made_meanwhile_plays_that_one`.
+before its append: the first is fenced out, and the ledger holds the second's suite),
+`test_a_maker_that_finds_the_suite_made_meanwhile_plays_that_one`, and in `tests/rollout_train/test_suite_versions.py`
+`test_an_edit_makes_a_new_version_and_moves_the_suites_name_to_it` and
+`test_a_suites_name_points_to_a_version_beside_the_ledger` (the name moves only forward, in both registries).
 
 ## 9. The durable runner
 
@@ -770,7 +779,7 @@ by it ([clocks](#3-clocks)); a service in front of Postgres keeps that as it is.
 | Training loop of run `R` | `runs/R` | `runs/R/*`, `checkpoints`, `checkpoints/released`, `checkpoints/resharding`, `checkpoints/resharded` | the bookmarks its profile names; blob puts | everything |
 | Pool `NAME` | `pools/NAME` (proposed) | nothing | its own leases (`pool = NAME`), its beat | claims, fences, beats |
 | Launcher `NAME` | nothing | nothing | claim and note launches; `note` only on launches it claimed; its beat | launches |
-| Monitor or operator | `suites/*`, `datasets/*`, `merges` | suites, datasets, merged checkpoints | ask and stop launches, run settings, registry | everything |
+| Monitor or operator | `suites/*`, `datasets/*`, `merges` | suites' versions, datasets, merged checkpoints | ask and stop launches, run settings, registry (suite names among it) | everything |
 | Retention | none | none | **blob deletes**: no client role deletes blobs | everything |
 
 Sandbox operations on an HTTP pool should need a token that names the lease's key, so that only the run holding a
