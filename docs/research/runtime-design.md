@@ -1141,6 +1141,16 @@ module stays a declaration that opens nothing; `Stores.open(cluster)` opens a da
 (`rollout_s3:S3BlobStore` with its `bucket`, credentials from `AWS_*`). The commands over a ledger take `--cluster`
 beside `--ledger` rather than in its place, until profiles are deleted (19).
 
+The rest of 5 is in, over profiles until the commands take launches (14). `rollout preset list`, `show NAME[@N]`,
+`save NAME (--from-run RUN | --settings FILE | --set …)` and `delete NAME` work over `--ledger` or `--cluster`.
+`train`, `eval`, `imitate` and `env check --profile` take `--preset`, `--settings` and `--set`, and those that sample
+take `--model`, `--renderer` and `--channel`; `--provider` and `--trainer` wait for 14, since a profile names its
+engines and trainer. The layers go over what the profile gives, and the run settings a profile keeps are applied to
+it; one it has no place for (providers, `limits.spend`, `share`, slots, routing) is refused, and a key that is no run
+setting stays a profile key, as `--set` took it (so a launcher's `trainer.start` still works, read as `start`). A
+preset is read beside the profile's ledger. The start records `run_settings` (`recorded(...)`, with the preset id)
+beside the profile-era `settings`, which the monitor and resuming still read; 16 makes `run_settings` the one record.
+
 ### What the acceptance run needs from each step
 
 **The run.** Trainer: Tinker LoRA on `Qwen/Qwen3.5-4B`. Inference: `local-vllm`, the same model unquantized on the

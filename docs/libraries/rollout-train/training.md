@@ -21,12 +21,20 @@ serves what it trains, and sets `episodes_at_once` ([deploying](../../guide/depl
 directory: its id is in the directory's `run.json`, and its name is chosen with `--name` and changed with
 `rollout rename` ([runs](checkpoints.md#runs)).
 
-`--set KEY=VALUE` (repeatable) changes a setting of the profile for this run, by dotted key, without editing its
-file: `--set trainer.learning_rate=3e-5`, `--set episodes_at_once=4`, `--set trainer.start=curriculum-9:20`,
-`--set trainer.bookmark=diamonds`. The value is read as TOML (`3e-5`, `true`, `[1, 2]`, `"text"`), or else as the
-text it is. A key the profile cannot have is an error, as in the file: when the profile is loaded, for its top level
-and its tables; for a `trainer.` key, when the trainer is made with its settings
-([`Profile.load(path, settings=...)`](../../guide/reference.md#profile)).
+A run's [settings](../../guide/cluster.md#run-settings) are given in layers over what the profile gives, each over
+the last, without editing its file: `--preset NAME[@N]` (a [preset](../../guide/cluster.md#presets) kept beside the
+profile's ledger), `--settings FILE` (TOML or JSON, dotted keys or tables), `--set KEY=VALUE` (repeatable), then
+`--model`, `--renderer` (of `--channel`, by default the trained one), `--groups`, `--groups-per-step` and `--seed`.
+A value is read as JSON, then TOML, then as the text it is: `--set trainer.learning_rate=3e-5`,
+`--set episodes_at_once=4`, `--set start=curriculum-9:20`, `--set bookmark=diamonds`, `--set max_lag=2`. The run
+settings the profile keeps are applied to it (`start` and `bookmark` as `[trainer] start` and `bookmark`, `max_lag` as
+the trained channel's); one it has no place for (`trainer.provider`, a channel's `provider`, `limits.spend`) is
+refused, as it needs the cluster config. A key that is no run setting is the profile's own (`memory.runs_gib`), and a
+key the profile cannot have is an error, as in the file: when the profile is loaded, for its top level and its
+tables; for a `trainer.` key, when the trainer is made with its settings
+([`Profile.load(path, settings=...)`](../../guide/reference.md#profile)). The run's start records the profile's
+settings (`settings`) and, beside them, its run settings as they ran, with the preset they came from
+(`run_settings`: `rollout_train.run_settings.recorded`).
 
 ## The loop
 

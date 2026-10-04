@@ -17,10 +17,16 @@ rollout pause RUN, rollout resume RUN
                                     pause a run, and resume it (in place, or launched again in its directory)
 rollout gateway PROFILE             serve a replica of the gateway: it samples PROFILE's channels and records every turn
 rollout cluster check               read the cluster config (`rollout_train.cluster`) and say what does not resolve here
+rollout preset list|show|save|delete
+                                    presets: named, versioned run settings beside the ledger (`rollout_train.presets`)
 
-A command over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`) takes it
-as `--ledger WHERE`, or as the cluster config's with `--cluster [PATH or NAME]` (alone: `ROLLOUT_CLUSTER`, else
-`~/.config/rollout/cluster.toml`).
+A command that starts a run (`train`, `eval`, `imitate`, `env check --profile`) takes its run settings
+(`rollout_train.run_settings`) in layers over what its profile gives: `--preset NAME[@N]` (beside the profile's
+ledger), `--settings FILE`, `--set KEY=VALUE`, then its own flags. Its start records them (`run_settings`).
+
+A command over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`,
+`preset`) takes it as `--ledger WHERE`, or as the cluster config's with `--cluster [PATH or NAME]` (alone:
+`ROLLOUT_CLUSTER`, else `~/.config/rollout/cluster.toml`).
 
 `rollout COMMAND --help` lists each command's options.
 """
@@ -33,15 +39,18 @@ import os
 import signal
 import sys
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from rollout.names import named
 
 if TYPE_CHECKING:
     from rollout_train.cluster import Cluster
     from rollout_train.ledger import Ledger
+    from rollout_train.profile import Profile
     from rollout_train.registry import Registry
+    from rollout_train.run_settings import RunSettings
     from rollout_train.stores import Stores
 
 
@@ -85,12 +94,15 @@ async def _train(
     profile: Path,
     directory: Path | None,
     environment: str,
-    groups: int,
-    groups_per_step: int,
-    seed: int,
+    groups: int | None,
+    groups_per_step: int | None,
+    seed: int | None,
     monitor: str | None = None,
     name: str | None = None,
-    settings: dict[str, Any] | None = None,
+    sets: list[str] | None = None,
+    preset: str | None = None,
+    file: Path | None = None,
+    chosen: dict[str, str | None] | None = None,
 ) -> None:
     import dataclasses
     from collections.abc import Mapping
@@ -104,7 +116,13 @@ async def _train(
     from rollout_train.record import ending
     from rollout_train.settings import changeable, desired_settings_of, fixed
 
-    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
+    flags = {"environment": environment, "name": name, "groups": groups, "groups_per_step": groups_per_step}
+    layers = await _layered(
+        profile, directory, "train", preset, file, sets or [], flags | {"seed": seed}, **chosen or {}
+    )
+    groups, groups_per_step, seed = (_whole(layers.settings, each) for each in ("groups", "groups_per_step", "seed"))
+    called = cast(str | None, layers.settings["name"])
+    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=layers.profile), name=called)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
     channel, offered = described.trainer.channel, named(environment)
@@ -154,6 +172,7 @@ async def _train(
                 evals=described.evals,
             ),
         }
+        started["run_settings"] = _recorded(layers, described)  # (beside what the profile gave, as run settings)
         async with ending(platform.ledger, platform.run.id):
             await train(
             offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
@@ -175,8 +194,11 @@ async def _evaluate(
     directory: Path | None,
     monitor: str | None = None,
     name: str | None = None,
-    settings: dict[str, Any] | None = None,
+    sets: list[str] | None = None,
     environment: str | None = None,
+    preset: str | None = None,
+    file: Path | None = None,
+    chosen: dict[str, str | None] | None = None,
 ) -> None:
     import dataclasses
     import shutil
@@ -189,7 +211,12 @@ async def _evaluate(
     from rollout_train.record import ending
     from rollout_train.registry import resolved
 
-    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
+    flags = {"name": name, "start": reference, "eval.suite": suite_name, "eval.episodes": episodes}
+    layers = await _layered(profile, directory, "eval", preset, file, sets or [], flags, **chosen or {})
+    reference = cast(str | None, layers.given.get("start"))  # (none: the base model, whatever the profile starts from)
+    episodes = cast(int | None, layers.settings["eval.episodes"])
+    called = cast(str | None, layers.settings["name"])
+    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=layers.profile), name=called)
     if described.trainer is not None:  # (so the engines hold what the checkpoint is served over: full weights, say)
         trainer = dataclasses.replace(described.trainer, start=reference, bookmark=None)
         described = dataclasses.replace(described, trainer=trainer)
@@ -210,6 +237,7 @@ async def _evaluate(
             closing()
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
+    started["run_settings"] = _recorded(layers, described, {"start": reference})
     try:
         async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
             try:
@@ -383,13 +411,16 @@ async def _check(
     reply: str,
     tools: list[str],
     profile: Path | None,
-    groups: int,
+    groups: int | None,
     episodes: int | None,
     directory: Path | None,
     name: str | None,
-    seed: int,
-    settings: dict[str, Any] | None = None,
+    seed: int | None,
+    sets: list[str] | None = None,
     pools: list[str] | None = None,
+    preset: str | None = None,
+    file: Path | None = None,
+    chosen: dict[str, str | None] | None = None,
 ) -> int:
     import dataclasses
 
@@ -433,14 +464,22 @@ async def _check(
                 await closing
     print(episode, flush=True)
     found.append(episode)
-    if profile is not None and groups > 0:
-        loaded = Profile.load(profile, directory=scratch, settings=settings)
-        described = dataclasses.replace(loaded, trainer=None, name=name or scratch.name)  # (the base model, untrained)
+    flags = {"environment": environment, "name": name, "groups": groups, "seed": seed}
+    layers = (
+        await _layered(profile, scratch, "check", preset, file, sets or [], flags, **chosen or {}) if profile else None
+    )
+    groups = int(cast(int, layers.given.get("groups", 4))) if layers else 0  # (4 groups unless said otherwise)
+    if profile is not None and layers is not None and groups > 0:
+        loaded = Profile.load(profile, directory=scratch, settings=layers.profile)
+        called = cast(str | None, layers.settings["name"]) or scratch.name
+        described = dataclasses.replace(loaded, trainer=None, name=called)  # (the base model, untrained)
         channel = loaded.trainer.channel if loaded.trainer else next(iter(loaded.channels))
+        seed = _whole(layers.settings, "seed")
         async with described.open() as platform:
             binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
             started: dict[str, Any] = {"environment": environment, "profile": str(profile), "blobs": platform.blobs_at}
             started["directory"] = str(await asyncio.to_thread(scratch.absolute))
+            started["run_settings"] = _recorded(layers, described, {"groups": groups})
             async with ending(platform.ledger, platform.run.id):
                 groups_found = await played(
                     offered, platform.ledger, platform.blobs, run=platform.run.id, binding=binding, groups=groups,
@@ -457,7 +496,7 @@ async def _imitate(
     directory: Path | None,
     kinds: list[str],
     limit: int | None,
-    seed: int,
+    seed: int | None,
     dataset: str | None = None,
     start_at: str | None = None,
     name: str | None = None,
@@ -465,6 +504,9 @@ async def _imitate(
     learning_rate: float | None = None,
     warmup: int | None = None,
     passes: int | None = None,
+    sets: list[str] | None = None,
+    preset: str | None = None,
+    file: Path | None = None,
 ) -> None:
     import socket
     import time
@@ -481,7 +523,18 @@ async def _imitate(
     from rollout_train.registry import registry_of, resolved, run_of
     from rollout_train.stores import location
 
-    described = Profile.load(profile, directory=directory)
+    flags: dict[str, Any] = {
+        "name": name, "start": start_at, "seed": seed, "trainer.learning_rate": learning_rate,
+        "imitation.dataset": dataset, "imitation.limit": limit, "imitation.warmup": warmup, "imitation.passes": passes,
+        "imitation.resume_optimizer": resume_optimizer or None,
+    }  # fmt: skip
+    layers = await _layered(profile, directory, "imitate", preset, file, sets or [], flags)
+    given, said = layers.given, layers.settings
+    name, dataset = cast(str | None, said["name"]), cast(str | None, said["imitation.dataset"])
+    limit, seed = cast(int | None, said["imitation.limit"]), _whole(said, "seed")
+    learning_rate, warmup = given.get("trainer.learning_rate"), given.get("imitation.warmup")  # (not the profile's)
+    passes, resume_optimizer = given.get("imitation.passes"), bool(said["imitation.resume_optimizer"])
+    described = Profile.load(profile, directory=directory, settings=layers.profile)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
     spec = described.channels[described.trainer.channel]
@@ -492,7 +545,7 @@ async def _imitate(
     checkpoints, registry = Checkpoints(ledger, blobs), registry_of(ledger)
     run = await run_of(described.directory, ledger, registry, name)
     try:
-        reference = start_at or described.trainer.start
+        reference = cast(str | None, said["start"])  # (the profile's, unless said otherwise)
         start = await resolved(ledger, registry, reference) if reference else None
         made = await dataset_of(ledger, await resolved_dataset(ledger, registry, dataset)) if dataset else None
     except KeyError as error:
@@ -527,6 +580,10 @@ async def _imitate(
         "supervision": taught.supervision, "host": socket.gethostname(), "process": PROCESS,
         "started": round(time.time(), 1), "directory": str(where), "profile": str(profiled),
         "blobs": location(described.blobs, described.directory / BLOBS),
+        "run_settings": _recorded(layers, described, {
+            "trainer.objective": "likelihood", "trainer.learning_rate": settings["learning_rate"],
+            "imitation.warmup": settings["warmup_updates"], "imitation.passes": settings["passes"],
+        }),
     }  # fmt: skip
     await ledger.append(table(run.id, STARTS), str(fence.number), started, fence)
     try:
@@ -598,17 +655,170 @@ async def _dataset(
 
 
 def _setting(given: str) -> tuple[str, Any]:
-    """`KEY=VALUE` as a profile setting: the value read as TOML (`3e-5`, `true`, `[1, 2]`, `"text"`), or else as
-    the text it is."""
+    """`KEY=VALUE` (a tool set's or a pool's, say): the value read as TOML (`3e-5`, `true`, `[1, 2]`, `"text"`), or
+    else as the text it is."""
     import tomllib
 
     key, _, value = given.partition("=")
     if not key or not _:
-        raise SystemExit(f"--set {given!r}: it should be KEY=VALUE")
+        raise SystemExit(f"{given!r}: it should be KEY=VALUE")
     try:
         return key.strip(), tomllib.loads(f"value = {value}")["value"]
     except tomllib.TOMLDecodeError:
         return key.strip(), value
+
+
+_ALIASES = {"trainer.start": "start", "trainer.bookmark": "bookmark"}
+"""Profile keys that are run settings by another name (as a launch passes them)."""
+_COMMANDS = ("kind", "name", "environment", "groups", "groups_per_step", "seed", "eval.", "check.", "imitation.")
+"""Run settings a command over a profile applies itself, not through the profile."""
+_BUDGETS = ("thinking_tokens", "answer_tokens")
+
+
+@dataclass(frozen=True)
+class _Layered:
+    """A run's settings over a profile: the keys the profile is loaded with (`profile`), the run's settings as it runs
+    them (`settings`: the profile's, then a preset's, a file's and the flags'), what was given over the profile
+    (`given`), and the preset they came from (`NAME@N`)."""
+
+    profile: dict[str, Any]
+    settings: "RunSettings"
+    given: dict[str, Any]
+    preset: str | None
+
+
+async def _layered(
+    path: Path,
+    directory: Path | None,
+    kind: str,
+    preset: str | None,
+    file: Path | None,
+    sets: list[str],
+    flags: dict[str, Any],
+    *,
+    model: str | None = None,
+    renderer: str | None = None,
+    channel: str | None = None,
+) -> _Layered:
+    """A run's settings in layers over what its profile gives (`_given_by`): a preset (`NAME` or `NAME@N`, kept beside
+    the profile's ledger), a settings file, `--set` flags, then the command's own flags (those not `None`), `--model`
+    and `--renderer` among them (of `--channel`, by default the trained one). A run setting the profile has no place
+    for (a provider, a spend limit) is refused; a key that is no run setting is the profile's own, as `--set` takes
+    it."""
+    from rollout_train.hosting import ledger_of
+    from rollout_train.presets import presets_of
+    from rollout_train.profile import Profile
+    from rollout_train.run_settings import from_file, from_flags, is_trainers, key_of, layered, shortcuts
+
+    plain = Profile.load(path, directory=directory)
+    channel = channel or (plain.trainer.channel if plain.trainer else next(iter(plain.channels), "policy"))
+    flags = {**flags, **shortcuts(model=model, renderer=renderer, channel=channel)}
+    chosen = None
+    if preset is not None:
+        kept = presets_of(ledger_of(plain))
+        chosen = await kept.get(preset) if kept is not None else None
+        if chosen is None:
+            raise SystemExit(f"there is no preset {preset!r} beside the profile's ledger")
+    try:
+        said = layered(chosen.settings if chosen else None, from_file(file) if file else None, from_flags(sets))
+    except (OSError, ValueError) as error:
+        raise SystemExit(str(error)) from None
+    given: dict[str, Any] = {}
+    profile: dict[str, Any] = {}
+    for key, value in [*said.values.items(), *((key, value) for key, value in flags.items() if value is not None)]:
+        key = _ALIASES.get(key, key)
+        if key_of(key) is None and not is_trainers(key):
+            profile[key] = value  # (the profile's own)
+            continue
+        if (key == "evals.suite" and value == "") or (key.rpartition(".")[2] in _BUDGETS and value == "none"):
+            value = None  # (no evals, no budget: as a launch says them)
+        given[key] = value
+    trained = plain.trainer.channel if plain.trainer else None
+    refused: list[str] = []
+    for key, value in given.items():
+        last = key.rpartition(".")[2]
+        if key.startswith(_COMMANDS):
+            continue
+        if key in ("start", "bookmark"):
+            profile[f"trainer.{key}"] = value
+        elif key == "max_lag" and trained is not None:
+            profile[f"channels.{trained}.max_lag"] = value
+        elif key == "evals.suite":
+            profile[key] = "" if value is None else value
+        elif key in ("episodes_at_once", "trainer.channel") or key.startswith("evals.") or is_trainers(key):
+            profile[key] = value
+        elif key.startswith("channels.") and key.count(".") == 2 and last in ("model", "renderer", *_BUDGETS):
+            profile[key] = "none" if value is None and last in _BUDGETS else value
+        else:
+            refused.append(key)
+    if refused:
+        raise SystemExit(f"a run over a profile cannot take {', '.join(refused)}: those need the cluster config")
+    settings = layered(_given_by(plain, kind), given, {"kind": kind})
+    return _Layered(profile, settings, given, chosen.id if chosen else None)
+
+
+def _whole(settings: "RunSettings", key: str) -> int:
+    return int(cast(int, settings[key]))
+
+
+def _given_by(profile: "Profile", kind: str) -> dict[str, Any]:
+    """The run settings a profile gives a run of `kind`: its trainer's, its channels', its evals'."""
+
+    said: dict[str, Any] = {"episodes_at_once": profile.episodes_at_once}
+    if (trainer := profile.trainer) is not None:
+        said |= {"trainer.channel": trainer.channel, "start": trainer.start, "bookmark": trainer.bookmark}
+        said |= {f"trainer.{key}": value for key, value in trainer.settings.items()}
+        said["max_lag"] = profile.channels[trainer.channel].max_lag
+    for name, channel in profile.channels.items():
+        said |= {f"channels.{name}.model": channel.model, f"channels.{name}.renderer": channel.renderer}
+        said |= {f"channels.{name}.{budget}": getattr(channel, budget) for budget in _BUDGETS}
+    if (evals := profile.evals) is not None:
+        said |= {"evals.suite": evals.suite, "evals.every": evals.every, "evals.episodes": evals.episodes}
+    return {key: json.loads(json.dumps(value)) for key, value in said.items() if _takes(kind, key)}
+
+
+def _takes(kind: str, key: str) -> bool:
+    """Whether a run of `kind` takes the run setting `key` (a trainer's own: a run that trains)."""
+    from rollout_train.run_settings import is_trainers, key_of
+
+    found = key_of(key)
+    return kind in found.kinds if found is not None else is_trainers(key) and kind in ("train", "imitate")
+
+
+def _recorded(layers: _Layered, profile: "Profile", ran: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What a run's start records of its run settings (`rollout_train.run_settings.recorded`): what ran (with `ran`,
+    what the command decided beyond its layers), the settings its trainer declares, and the preset."""
+    from rollout_train.providers import TRAINER_KINDS, settings_of
+    from rollout_train.run_settings import layered, recorded
+
+    trainer = profile.trainer.kind if profile.trainer else None
+    kinds = [each for each in TRAINER_KINDS.values() if each.implementation == trainer]
+    try:
+        specs = settings_of(kinds[0]) if kinds else ()
+    except ImportError:  # (a trainer whose package is not installed here: its settings as given)
+        specs = ()
+    return recorded(layered(layers.settings.values, ran), specs, layers.preset)
+
+
+def _chosen(arguments: argparse.Namespace) -> dict[str, str | None]:
+    """What `--model`, `--renderer` and `--channel` said."""
+    return {"model": arguments.model, "renderer": arguments.renderer, "channel": arguments.channel}
+
+
+def _layers_of(command: argparse.ArgumentParser, *, channels: bool = True) -> None:
+    """A command that starts a run takes its settings in layers: `--preset`, then `--settings`, then `--set`, then
+    (with `channels`) `--model` and `--renderer` of `--channel`."""
+    if channels:
+        command.add_argument("--model", help="the channel's model: channels.CHANNEL.model")
+        command.add_argument("--renderer", help="the channel's renderer, module:name: channels.CHANNEL.renderer")
+        command.add_argument("--channel", help="the channel --model and --renderer are of (by default the trained one)")
+    command.add_argument("--preset", metavar="NAME[@N]", help="start from a preset's settings (`rollout preset`)")
+    command.add_argument("--settings", type=Path, metavar="FILE", help="run settings: TOML or JSON, dotted keys")
+    command.add_argument(
+        "--set", action="append", default=[], metavar="KEY=VALUE",
+        help="a run setting (trainer.learning_rate=3e-5) or a profile's key, the value read as JSON, then TOML, then "
+        "as text (repeatable; over the preset and the file)",
+    )  # fmt: skip
 
 
 def _ledger_at(where: "str | Stores") -> "Ledger":
@@ -729,6 +939,61 @@ async def _merge(who: str, where: "str | Stores", base: str | None, merger: str,
     if bookmark:
         await registry.bookmark(bookmark, merged.id)
     print(f"merged {lora} into its base: {merged.id} (full weights, depth {merged.depth}, base {merged.base})")
+
+
+@_user_errors
+async def _preset(
+    command: str,
+    where: "str | Stores",
+    reference: str | None = None,
+    run: str | None = None,
+    file: Path | None = None,
+    sets: list[str] | None = None,
+    note: str = "",
+) -> None:
+    """`rollout preset`: list the presets, show one (`NAME` or `NAME@N`), save a version, or delete one."""
+    import time
+
+    from rollout_train.presets import presets_of
+    from rollout_train.record import STARTS, newest_record, table
+    from rollout_train.registry import registry_of, run_id
+    from rollout_train.run_settings import from_file, from_flags, layered
+
+    ledger = _ledger_at(where)
+    presets = presets_of(ledger)
+    if presets is None:
+        raise SystemExit("this ledger keeps no presets beside it")
+    if command == "list":
+        for each in await presets.all():
+            saved = time.strftime("%Y-%m-%d %H:%M", time.localtime(each.saved))
+            noted = f"  {each.note}" if each.note else ""
+            print(f"{each.id:<32} {len(each.settings):>3} settings  saved {saved}{noted}")
+        return
+    assert reference is not None
+    if command == "show":
+        found = await presets.get(reference)
+        if found is None:
+            raise KeyError(f"there is no preset {reference!r}")
+        versions = ", ".join(str(each.version) for each in await presets.versions(found.name))
+        print(f"{found.id} (versions {versions}){f': {found.note}' if found.note else ''}")
+        for key, value in sorted(found.settings.items()):
+            print(f"{key} = {json.dumps(value)}")
+        return
+    if command == "delete":
+        gone = await presets.delete(reference)
+        print(f"the preset {gone.name} is deleted (its versions stay readable by number)")
+        return
+    copied: dict[str, Any] = {}
+    if run is not None:  # (the settings a run's newest start records, less its name)
+        started = newest_record(await ledger.read(table(await run_id(registry_of(ledger), run), STARTS)))
+        kept = started.get("run_settings")
+        if not isinstance(kept, dict):
+            raise SystemExit(f"the run {run} records no run settings in its start")
+        copied = {**cast(dict[str, Any], kept).get("fixed", {}), **cast(dict[str, Any], kept).get("changeable", {})}
+        copied.pop("name", None)
+    said = layered(copied, from_file(file) if file else None, from_flags(sets or []))
+    saved = await presets.save(reference, said.values, note)
+    print(f"saved {saved.id}: {len(saved.settings)} settings")
 
 
 @_user_errors
@@ -862,15 +1127,12 @@ def main() -> None:
     training.add_argument("profile", type=Path)
     training.add_argument("environment")
     training.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
-    training.add_argument("--groups", type=int, default=100)
-    training.add_argument("--groups-per-step", type=int, default=4, help="groups a step waits for (4)")
-    training.add_argument("--seed", type=int, default=0)
+    training.add_argument("--groups", type=int, help="groups it plays (100)")
+    training.add_argument("--groups-per-step", type=int, help="groups a step waits for (4)")
+    training.add_argument("--seed", type=int, help="(0)")
     training.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
     training.add_argument("--name", help="what a new run is called (by default its directory's name)")
-    training.add_argument(
-        "--set", action="append", default=[], metavar="KEY=VALUE",
-        help="change a profile setting, by dotted key: --set trainer.learning_rate=3e-5 (a TOML value; repeatable)",
-    )  # fmt: skip
+    _layers_of(training)
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
     reporting.add_argument("environment")
@@ -888,7 +1150,7 @@ def main() -> None:
     imitating.add_argument("--name", help="what a new run is called (by default its directory's name)")
     imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
     imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
-    imitating.add_argument("--seed", type=int, default=0)
+    imitating.add_argument("--seed", type=int, help="(0)")
     imitating.add_argument("--learning-rate", type=float, help="the step's rate (by default 1e-6 full, 1e-4 LoRA)")
     imitating.add_argument("--warmup", type=int, help="updates a fresh optimizer warms up over (4)")
     imitating.add_argument("--passes", type=int, help="passes over the examples (by default enough for 8 updates)")
@@ -896,6 +1158,25 @@ def main() -> None:
         "--resume-optimizer", action="store_true",
         help="go on from the trainer state of the checkpoint it trains from (by default the optimizer starts afresh)",
     )  # fmt: skip
+    _layers_of(imitating, channels=False)
+    presets = commands.add_parser("preset", help="list, show, save or delete presets: named, versioned run settings")
+    preset_commands = presets.add_subparsers(dest="preset_command", required=True)
+    _over_a_ledger(preset_commands.add_parser("list", help="every preset's newest version"))
+    preset_showing = preset_commands.add_parser("show", help="a preset's settings: its newest version, or NAME@N")
+    preset_showing.add_argument("preset", metavar="NAME[@N]")
+    _over_a_ledger(preset_showing)
+    preset_saving = preset_commands.add_parser(
+        "save", help="save settings as a preset's next version: a run's, a file's, flags' (each over the last)"
+    )
+    preset_saving.add_argument("preset", metavar="NAME")
+    preset_saving.add_argument("--from-run", metavar="RUN", help="the settings a run's start records, by name or id")
+    preset_saving.add_argument("--settings", type=Path, metavar="FILE", help="run settings: TOML or JSON, dotted keys")
+    preset_saving.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="a run setting")
+    preset_saving.add_argument("--note", default="", help="what this version is for, or what it changed")
+    _over_a_ledger(preset_saving)
+    preset_deleting = preset_commands.add_parser("delete", help="delete a preset (its versions stay readable)")
+    preset_deleting.add_argument("preset", metavar="NAME")
+    _over_a_ledger(preset_deleting)
     datasets = commands.add_parser("dataset", help="make or list datasets: examples chosen from runs' episodes")
     dataset_commands = datasets.add_subparsers(dest="dataset_command", required=True)
     dataset_making = dataset_commands.add_parser("make", help="make a dataset by an episode rule and turn filters")
@@ -973,7 +1254,7 @@ def main() -> None:
     evaluating.add_argument("--directory", type=Path, help="the eval's directory (instead of the profile's)")
     evaluating.add_argument("--name", help="what the eval is called (by default its directory's name)")
     evaluating.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
-    evaluating.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
+    _layers_of(evaluating)
     suites = commands.add_parser("suite", help="make, edit or list evaluation suites")
     suite_commands = suites.add_subparsers(dest="suite_command", required=True)
     making = suite_commands.add_parser("make", help="make a suite: its eval data, or a start of each row for each seed")
@@ -1014,12 +1295,12 @@ def main() -> None:
         "profile's are used too)",
     )  # fmt: skip
     checking.add_argument("--profile", type=Path, help="play groups on this profile's channel, with its base model")
-    checking.add_argument("--groups", type=int, default=4, help="groups played with --profile (4)")
+    checking.add_argument("--groups", type=int, help="groups played with --profile (4)")
     checking.add_argument("--episodes", type=int, help="episodes of each group (by default the algorithm's group size)")
     checking.add_argument("--directory", type=Path, help="the check's directory (~/.cache/rollout/checks/NAME)")
     checking.add_argument("--name", help="what the check's run is called")
-    checking.add_argument("--seed", type=int, default=0)
-    checking.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
+    checking.add_argument("--seed", type=int, help="(0)")
+    _layers_of(checking)
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     _over_a_ledger(listing)
     hosting = commands.add_parser("engines", help="keep a profile's engines serving what a run says, and nothing else")
@@ -1079,7 +1360,10 @@ def main() -> None:
             arguments.seed,
             arguments.monitor,
             arguments.name,
-            dict(_setting(each) for each in arguments.set),
+            arguments.set,
+            arguments.preset,
+            arguments.settings,
+            _chosen(arguments),
         )
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "merge":
@@ -1090,7 +1374,8 @@ def main() -> None:
     if arguments.command == "eval":
         work = _evaluate(
             arguments.profile, arguments.suite, arguments.checkpoint, arguments.episodes, arguments.directory,
-            arguments.monitor, arguments.name, dict(_setting(each) for each in arguments.set), arguments.environment,
+            arguments.monitor, arguments.name, arguments.set, arguments.environment, arguments.preset,
+            arguments.settings, _chosen(arguments),
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "suite":
@@ -1107,8 +1392,15 @@ def main() -> None:
         sys.exit(asyncio.run(_check(
             arguments.environment, arguments.row, arguments.reply, arguments.tools, arguments.profile,
             arguments.groups, arguments.episodes, arguments.directory, arguments.name, arguments.seed,
-            dict(_setting(each) for each in arguments.set), arguments.pools,
+            arguments.set, arguments.pools, arguments.preset, arguments.settings, _chosen(arguments),
         )))  # fmt: skip
+    if arguments.command == "preset":
+        asyncio.run(_preset(
+            arguments.preset_command, _ledger_of(arguments), getattr(arguments, "preset", None),
+            getattr(arguments, "from_run", None), getattr(arguments, "settings", None), getattr(arguments, "set", None),
+            getattr(arguments, "note", ""),
+        ))  # fmt: skip
+        return
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, _ledger_of(arguments)))
         return
@@ -1158,7 +1450,8 @@ def main() -> None:
         work = _imitate(
             arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed,
             arguments.dataset, arguments.start, arguments.name, arguments.resume_optimizer,
-            arguments.learning_rate, arguments.warmup, arguments.passes,
+            arguments.learning_rate, arguments.warmup, arguments.passes, arguments.set, arguments.preset,
+            arguments.settings,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "dataset":

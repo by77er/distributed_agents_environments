@@ -69,7 +69,9 @@ uv run rollout tools FACTORY --directory DATA --port 8700            # a tool se
 uv run rollout engines engines.toml --run first   # load what run first serves into this machine's vLLM servers
 uv run rollout runner runner.toml --run first                       # a machine that plays first's episodes, and nothing else
 uv run rollout gateway profile.toml --listen 127.0.0.1:8830          # a replica of the gateway: as many as wanted
-uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
+uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set start=diamonds  # change settings
+uv run rollout train profile.toml ENVIRONMENT --preset faster --settings run.toml   # a preset, then a file, then flags
+uv run rollout preset save faster --from-run first --set trainer.learning_rate=1e-4 --ledger RUN   # a preset's next version
 uv run rollout env check ENVIRONMENT --profile profile.toml --groups 4   # does it hold together; do its groups teach
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # an eval configuration
 uv run rollout suite edit words-v1 --seeds 1,2,3,4 --ledger RUN                       # its next version

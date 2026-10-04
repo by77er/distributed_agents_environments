@@ -357,6 +357,13 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     assert [(each["name"], each["checkpoint"], each["played"], each["done"]) for each in listed] == [
         ("stacked-on-words", made["stacked"], 6, True)
     ]
+    registry = registry_of(ledger)
+    assert registry is not None
+    (run,) = [each.id for each in asyncio.run(registry.runs()) if each.name == "stacked-on-words"]
+    (started,) = asyncio.run(ledger.read(table(run, STARTS))).values()
+    recorded: Any = started["run_settings"]  # type: ignore[index]
+    assert recorded["fixed"]["start"] == "stacked" and recorded["fixed"]["eval.suite"] == "words-v1"
+    assert recorded["fixed"]["eval.episodes"] == 2 and recorded["fixed"]["kind"] == "eval"
 
 
 async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_step_and_the_next(

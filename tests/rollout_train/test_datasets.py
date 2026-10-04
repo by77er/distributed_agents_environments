@@ -4,7 +4,7 @@ a supervised step on one that makes a checkpoint learned from the checkpoints th
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import JsonValue
@@ -309,12 +309,16 @@ def test_the_commands_make_list_and_train_on_a_dataset(
     profile = tmp_path / "profile.toml"
     profile.write_text(PROFILE.format(directory=tmp_path / "played"))
     monkeypatch.setattr("sys.argv", ["rollout", "imitate", str(profile), "--dataset", "guesses", "--start",
-                                     second, "--name", "sft-guesses"])  # fmt: skip
+                                     second, "--name", "sft-guesses", "--set", "imitation.passes=2"])  # fmt: skip
     with pytest.raises(SystemExit) as exited:
         main()
     assert exited.value.code == 0
     out = capsys.readouterr().out
-    assert "3 segments of 1 episodes (0 left out), importance" in out and f"(from {second}, {first})" in out
+    assert (
+        "3 segments of 1 episodes (0 left out), importance" in out
+        and "2 passes at" in out
+        and f"(from {second}, {first})" in out
+    )
     (made_by,) = [each for each in asyncio.run(checkpoints.all()) if each.dataset is not None]
     assert made_by.parents == (second, first) and made_by.dataset == made.id
 
@@ -328,6 +332,12 @@ def test_the_commands_make_list_and_train_on_a_dataset(
     (start,) = asyncio.run(started()).values()
     assert isinstance(start, dict) and start["kind"] == "imitation" and start["dataset"] == made.id
     assert start["from"] == second and start["supervision"] == "importance"
+    fixed = cast(dict[str, Any], start["run_settings"])[
+        "fixed"
+    ]  # (its run settings: the profile's, with what was said over them)
+    assert fixed["kind"] == "imitate" and fixed["imitation.dataset"] == "guesses" and fixed["start"] == second
+    assert fixed["imitation.passes"] == 2 and fixed["trainer.objective"] == "likelihood"
+    assert start["run_settings"]["preset"] is None
 
 
 @pytest.mark.parametrize("kind", ["files", "database"])

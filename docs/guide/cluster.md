@@ -19,8 +19,10 @@ They are declarations: none of them starts, imports or reaches anything. What op
 - `rollout_train.stores.Stores.open(cluster)` opens the ledger and the blob store the config names
   ([below](#the-stores));
 - `rollout cluster check` reads the config and says what of it does not resolve on this node;
-- the commands over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`)
-  take the cluster's with `--cluster`, in place of `--ledger`.
+- the commands over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`,
+  `preset`) take the cluster's with `--cluster`, in place of `--ledger`;
+- `rollout preset` lists, shows, saves and deletes [presets](#presets);
+- the commands that start runs take run settings in layers over their profile ([below](#over-a-profile)).
 
 The commands that start runs still take profiles ([Deploying](deploying.md)); the
 [runtime design](../research/runtime-design.md) says how they move onto these.
@@ -274,6 +276,23 @@ Settings are given in layers, each over the last (`layered`): the schema's defau
 `recorded(settings, trainer_settings, preset)` is what a run's start records: a full copy, fixed and changeable,
 and the preset version they came from. `diff(before, after)` says what changed, key by key.
 
+### Over a profile
+
+`rollout train`, `eval`, `imitate` and `env check --profile` take their settings in these layers over what the profile
+gives (its trainer's settings and `start`, its channels' models, renderers and budgets, the trained channel's
+`max_lag`, `episodes_at_once`, its evals): `--preset NAME[@N]` (beside the profile's ledger), `--settings FILE`,
+`--set KEY=VALUE`, then the command's own flags (`--model`, `--renderer` and `--channel` for those that sample,
+`--groups`, `--seed`, …).
+
+- A run setting the profile keeps is applied to it: `start` and `bookmark` as `[trainer] start` and `bookmark`,
+  `max_lag` as the trained channel's, `evals.suite = null` as no evals, a budget of `null` (or `none`) as none.
+- A run setting it has no place for (`trainer.provider`, `channels.NAME.provider`, `limits.spend`, `share`, slots,
+  routing) is refused: it needs the cluster config.
+- A key that is no run setting is the profile's own (`memory.runs_gib`), as `--set` takes it.
+
+The run's start records the profile's settings (`settings`), and beside them its run settings as they ran
+(`run_settings`: `recorded`, with the settings its trainer declares and the preset it came from).
+
 ## Presets
 
 A preset (`Preset`) is named run settings, in versions: each save is the next version, and nothing is changed in
@@ -281,6 +300,16 @@ place. `NAME` is the newest version and `NAME@N` one version. Two saves at once 
 appends a version that says so: its name then points to nothing, and its earlier versions stay readable for the runs
 that name them. `presets_of(ledger)` gives the store beside a ledger: `FilePresets` (a file per version, in
 `presets/` beside a ledger of files) or `DatabasePresets` (the `presets` table of a database ledger's database).
+
+```bash
+rollout preset list --cluster                                # every preset's newest version
+rollout preset show minecraft-one-gpu@3 --cluster            # one version's settings, a key a line
+rollout preset save minecraft-one-gpu --from-run team-8 --set trainer.learning_rate=3e-5 --note "slower" --cluster
+rollout preset save gsm8k-tinker --settings run.toml --cluster   # a file of settings (each source over the last)
+rollout preset delete minecraft-one-gpu --cluster            # its name points to nothing; its versions stay
+```
+
+`--from-run RUN` copies the run settings the run's newest start records, less its name.
 
 ## Validation
 
