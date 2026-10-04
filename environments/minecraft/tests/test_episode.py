@@ -1,5 +1,5 @@
-"""A whole team episode on a live server, with a scripted policy instead of a model: the lockstep loop, the tool set,
-and the shared reward. Needs Java and Node."""
+"""A whole team episode on a live server, with a scripted policy instead of a model: the lockstep loop, the world as
+a sandbox, and the shared reward. Needs Java and Node."""
 
 import re
 import shutil
@@ -10,7 +10,7 @@ import pytest
 
 from minecraft_team.episode import TeamEpisode
 from minecraft_team.tasks import TEAM
-from minecraft_team.worlds import MinecraftTools, MinecraftWorlds
+from minecraft_team.worlds import KIND, MinecraftWorlds
 from rollout.contracts import (
     CapabilityContract,
     FinishReason,
@@ -23,15 +23,16 @@ from rollout.contracts import (
 from rollout.harness import (
     DirectModel,
     ModelBinding,
+    Pool,
+    PoolBinding,
     ProgramReference,
     RunBinding,
     RunSpecification,
     RunStatus,
-    ToolBinding,
-    ToolSet,
+    SandboxPool,
     register,
 )
-from rollout.harness.remote import RemoteToolSet, serve
+from rollout.harness.remote import RemotePool, serve_pool
 from rollout.local import LocalRunner
 from rollout.testing import payload, tool_call_reply
 
@@ -65,20 +66,21 @@ class WalkToDiamonds:
 def binding() -> RunBinding:
     return RunBinding(
         models={name: ModelBinding(direct=DirectModel(provider="scripted", model="walk")) for name in TEAM},
-        imports={"minecraft": ToolBinding(local="minecraft")},
+        pools={KIND: PoolBinding(local="worlds")},
     )
 
 
 @pytest.mark.skipif(shutil.which("java") is None or shutil.which("node") is None, reason="Java and Node are needed")
 @pytest.mark.parametrize("through", ["in process", "over HTTP"])
 async def test_a_scripted_team_picks_up_diamonds_and_shares_the_reward(through: str) -> None:
-    worlds = MinecraftWorlds()
-    tools: ToolSet = MinecraftTools(worlds)
-    if through == "over HTTP":  # the worlds served as a tool set, as from a machine of their own
-        transport = httpx.ASGITransport(app=serve(tools))
+    worlds = MinecraftWorlds(size=1)
+    leased = SandboxPool(worlds)
+    pool: Pool = leased
+    if through == "over HTTP":  # the pool served, as from a machine of its own
+        transport = httpx.ASGITransport(app=serve_pool(leased))
         client = httpx.AsyncClient(transport=transport, base_url="http://worlds", timeout=300)
-        tools = RemoteToolSet("http://worlds", client=client, specifications=tools.specifications())
-    runner = LocalRunner(providers={"scripted": lambda model: WalkToDiamonds()}, tool_sets={"minecraft": tools})
+        pool = RemotePool("http://worlds", client=client, operations=worlds.operations())
+    runner = LocalRunner(providers={"scripted": lambda model: WalkToDiamonds()}, pools={"worlds": pool})
     names = ["ada", "ben", "cy", "dee"]
     parameters: Mapping[str, object] = {"task": "t001", "world_seed": 12345, "layout_seed": 3, "turns": 4}
     parameters = {**parameters, "names": names}
@@ -89,8 +91,9 @@ async def test_a_scripted_team_picks_up_diamonds_and_shares_the_reward(through: 
     try:
         handle = await runner.start(specification)
         outcome = await handle.result()
+        assert await worlds.held() == [] and await leased.held() == []  # the world was deleted when the episode ended
     finally:
-        await worlds.close()
+        await leased.close()
     assert outcome.status is RunStatus.COMPLETED, outcome
     events = handle.recorded_events()
     rewards = {str(payload(e)["slot"]): payload(e)["value"] for e in events if e.type is RunEventType.REWARD_ASSIGNED}
@@ -109,3 +112,6 @@ async def test_a_scripted_team_picks_up_diamonds_and_shares_the_reward(through: 
         e for e in events if e.type is RunEventType.EFFECT_REQUESTED and payload(e).get("kind") == "tool.call"
     ]
     assert len(world_operations) > 4 * 4, "every world operation is a recorded effect"
+    assert all(dict(payload(e)["payload"])["sandbox"] == "world" for e in world_operations)  # type: ignore[arg-type]
+    (acquired,) = [payload(e)["sandboxes"] for e in events if e.type is RunEventType.SANDBOXES_ACQUIRED]
+    assert isinstance(acquired, dict) and set(acquired) == {"world"}

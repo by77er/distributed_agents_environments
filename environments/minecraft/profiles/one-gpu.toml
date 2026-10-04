@@ -2,7 +2,7 @@
 # while it steps). `rollout train environments/minecraft/profiles/one-gpu.toml minecraft_team.environment:environment`
 directory = "~/.cache/rollout/runs/team"
 feed_runs = 80
-episodes_at_once = 6             # each a Paper server of its own, and up to four agents' requests
+episodes_at_once = 6             # each with a world of its own (`[pools.minecraft]`), and up to four agents' requests
 ray = "auto"                     # reshards run as Ray tasks on this machine's Ray cluster (`ray start --head`)
 
 [ledger]                         # one database for every run on this machine; `rollout ledger copy` moves it to Postgres
@@ -29,8 +29,9 @@ learning_rate = 5e-5
 segment_tokens = 8000           # peak 12.4 GiB at 8,000 tokens; past the card's memory a step crawls
 segments_per_step = 384         # 4 to 8 s each: about half an hour a step
 
-[tools]
-minecraft = "minecraft_team.worlds:tools"
+[pools.minecraft]                # the worlds, each a Paper server: no more at once than this machine's memory holds
+kind = "minecraft_team.worlds:worlds"
+size = 6
 
 [memory]
 runs_gib = 6                     # each episode runs a Paper server

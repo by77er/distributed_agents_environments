@@ -16,7 +16,7 @@ from minecraft_team.environment import Teams
 from minecraft_team.episode import TICKS_PER_MINUTE, TeamEpisode, action, answer
 from minecraft_team.prompts import COMPACT, NO_CALL, ONE_CALL
 from minecraft_team.tasks import TEAM, catalog
-from minecraft_team.worlds import DROP_TICKS, OPERATIONS, WINDOW_TICKS, MinecraftTools, MinecraftWorlds
+from minecraft_team.worlds import DROP_TICKS, KIND, OPERATIONS, WINDOW_TICKS, MinecraftWorlds
 from rollout.contracts import (
     CapabilityContract,
     FinishReason,
@@ -35,11 +35,14 @@ from rollout.harness import (
     DirectModel,
     Memory,
     ModelBinding,
+    PoolBinding,
     ProgramReference,
+    Reach,
     RunBinding,
     RunSpecification,
     RunStatus,
-    ToolBinding,
+    SandboxPool,
+    SandboxSpec,
     register,
 )
 from rollout.local import LocalRunner
@@ -57,26 +60,41 @@ FULL_WINDOW = WINDOW_TICKS + DROP_TICKS
 
 
 class MadeUpWorld:
-    """The `minecraft` tool set without a server: each agent stands one block further east every turn."""
+    """Worlds without a server, as a sandbox provider: in each, every agent stands one block further east every
+    turn."""
 
+    kind = KIND
+    size = 4
     deduplicates = False
 
     def __init__(self, ticks: int = SHORT_WINDOW) -> None:
         self.observed: dict[str, int] = dict.fromkeys(CREW, 0)
         self.ticks = ticks
         """Game time each window takes."""
+        self.made: dict[str, SandboxSpec] = {}
+        self.deleted: list[str] = []
 
-    def specifications(self) -> Sequence[ToolSpecification]:
-        return MinecraftTools(MinecraftWorlds()).specifications()
+    def operations(self) -> Sequence[ToolSpecification]:
+        return MinecraftWorlds().operations()
+
+    async def create(self, handle: str, spec: SandboxSpec, environment: Mapping[str, str]) -> Reach:
+        self.made[handle] = spec
+        return Reach()
+
+    async def delete(self, handle: str) -> None:
+        if self.made.pop(handle, None) is not None:
+            self.deleted.append(handle)
+
+    async def held(self) -> Sequence[str]:
+        return list(self.made)
 
     async def call(
-        self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
+        self, handle: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
     ) -> ToolResult:
-        assert name in OPERATIONS, name  # an episode asks only for what the tool set offers
+        assert name in OPERATIONS, name  # an episode asks only for what the worlds offer
+        assert handle in self.made, handle  # of the world it was given
         value: JsonValue
         match name:
-            case "begin":
-                value = {"episode": "e-1"}
             case "observe":
                 agent = str(arguments["agent"])
                 self.observed[agent] += 1
@@ -85,10 +103,8 @@ class MadeUpWorld:
                 value = {"started": True}
             case "window":
                 value = {"ticks": self.ticks, "done": False}
-            case "score":
-                value = {"reward": 3.0, "solved": True, "team_diamonds": 3}
             case _:
-                value = {"ended": True}
+                value = {"reward": 3.0, "solved": True, "team_diamonds": 3}
         return ToolResult(content=[Text(text=json.dumps(value))], structured=value)
 
 
@@ -154,7 +170,7 @@ class Remembering:
 def specification(turns: int | None = TURNS) -> RunSpecification:
     binding = RunBinding(
         models={name: ModelBinding(direct=DirectModel(provider="scripted", model="m")) for name in TEAM},
-        imports={"minecraft": ToolBinding(local="minecraft")},
+        pools={KIND: PoolBinding(local="worlds")},
     )
     parameters: dict[str, JsonValue] = {"task": "t001", "turns": turns, "names": list[JsonValue](CREW)}
     return RunSpecification(
@@ -185,11 +201,11 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
         from rollout_durable import DurableRunner
 
         runner = DurableRunner(
-            tmp_path / "state", providers={"scripted": lambda _: model}, tool_sets={"minecraft": world}
+            tmp_path / "state", providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(world)}
         )
         await runner.launch()
     else:
-        runner = LocalRunner(providers={"scripted": lambda _: model}, tool_sets={"minecraft": world})
+        runner = LocalRunner(providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(world)})
     try:
         handle = await runner.start(specification())
         outcome = await handle.result()
@@ -200,6 +216,8 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
     assert outcome.status is RunStatus.COMPLETED, outcome
     (result,) = [payload(event)["payload"] for event in events if event.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict) and result["turns"] == TURNS and result["compactions"] != 0
+    assert len(world.deleted) == 1  # one world for the episode, released when it ended
+    assert world.made == {} and world.observed == dict.fromkeys(CREW, TURNS)
     # How it went, in the game's terms: nothing here ended the game early, and its time is game minutes.
     assert result["solved"] is True and result["saturated"] is False and result["ended"] == "turns"
     assert result["duration"] == pytest.approx(TURNS * SHORT_WINDOW / TICKS_PER_MINUTE)
@@ -223,7 +241,7 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
 
 async def test_the_team_compacts_in_the_same_turn() -> None:
     model = Remembering(wordy="agent-3")  # cy's memory fills two turns before the others' would
-    runner = LocalRunner(providers={"scripted": lambda _: model}, tool_sets={"minecraft": MadeUpWorld()})
+    runner = LocalRunner(providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(MadeUpWorld())})
     handle = await runner.start(specification())
     assert (await handle.result()).status is RunStatus.COMPLETED
     when: dict[str, list[int]] = {name: [] for name in TEAM}  # the turn each compaction came before
@@ -240,7 +258,7 @@ async def test_the_team_compacts_in_the_same_turn() -> None:
 async def test_an_episode_ends_when_its_turns_are_spent_however_little_game_time_they_took() -> None:
     async def play(ticks: int) -> dict[str, Any]:
         runner = LocalRunner(
-            providers={"scripted": lambda _: Remembering()}, tool_sets={"minecraft": MadeUpWorld(ticks)}
+            providers={"scripted": lambda _: Remembering()}, pools={"worlds": SandboxPool(MadeUpWorld(ticks))}
         )
         handle = await runner.start(specification(turns=None))
         assert (await handle.result()).status is RunStatus.COMPLETED

@@ -1,5 +1,5 @@
 """What is written in two places says the same in both: the actions and their limits (the prompts, and the Node
-harness that performs them), the control API (the Python client, and the Java plugin that serves it), the tool set's
+harness that performs them), the control API (the Python client, and the Java plugin that serves it), the worlds'
 operations, the game's version, and how far off large things are seen (the harness, and the server's configuration).
 
 No server is started: the files are read, and Node prints what the harness takes (a script that connects to nothing).
@@ -20,7 +20,7 @@ from minecraft_team.limits import LIMITS
 from minecraft_team.paper import CONFIG, PAPER_VERSION, PLUGIN_SOURCES, server_properties
 from minecraft_team.prompts import ACTIONS, DIRECTION, SLOT, SYMBOLS, symbol, system_prompt
 from minecraft_team.tasks import NAMES, catalog
-from minecraft_team.worlds import OPERATIONS, MinecraftTools, MinecraftWorlds
+from minecraft_team.worlds import OPERATIONS, MinecraftWorlds
 from rollout.contracts import RetryClass
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
@@ -88,8 +88,8 @@ def test_the_client_asks_only_for_what_the_plugin_serves_and_for_all_of_it() -> 
     assert len(served) == len(set(served)) and set(asked) == set(served)
 
 
-def test_the_tool_set_specifies_the_operations_it_performs() -> None:
-    specifications = MinecraftTools(MinecraftWorlds()).specifications()
+def test_the_worlds_specify_the_operations_they_perform() -> None:
+    specifications = MinecraftWorlds().operations()
     assert [specification.name for specification in specifications] == list(OPERATIONS)
     for specification in specifications:
         takes = OPERATIONS[specification.name].takes
@@ -100,8 +100,8 @@ def test_the_tool_set_specifies_the_operations_it_performs() -> None:
     assert OPERATIONS["act"].retry_class is OPERATIONS["window"].retry_class is RetryClass.SIDE_EFFECTING
 
 
-async def test_an_operation_the_tool_set_does_not_have_is_an_error() -> None:
-    result = await MinecraftTools(MinecraftWorlds()).call("teleport", {}, effect_id="e", arguments_digest="d")
+async def test_an_operation_the_worlds_do_not_have_is_an_error() -> None:
+    result = await MinecraftWorlds().call("s-1", "teleport", {}, effect_id="e", arguments_digest="d")
     assert result.is_error
 
 

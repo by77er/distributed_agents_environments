@@ -1,5 +1,9 @@
 """The team episode: one to four agents, one shared reward, the world frozen while they think.
 
+The episode plays in one world, a sandbox it declares (`world`, of the kind `minecraft`: the task, its seeds and the
+team's names), which the runner acquires before the episode begins and releases when it ends. Every agent's
+observations and actions go to that world through `run.sandbox("world")`, each a recorded effect.
+
 Each turn, every agent observes, thinks and calls one action tool, all at once while the world is frozen; then the
 world runs one window while the actions happen. The episode ends when its budget of game time or of turns is spent,
 or earlier when nothing is left to earn. Its reward, the task's objective scored from the plugin's ground truth,
@@ -28,6 +32,7 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
+from minecraft_team import worlds
 from minecraft_team.limits import LIMITS, TICKS_PER_SECOND
 from minecraft_team.prompts import (
     ACTIONS,
@@ -44,7 +49,7 @@ from minecraft_team.prompts import (
 )
 from minecraft_team.tasks import NAMES, TEAM, TURNS_PER_MINUTE, Task, catalog
 from rollout.contracts import Message, Text, ToolCall
-from rollout.harness import Memory, ModelSlot, Program, RunContext
+from rollout.harness import Memory, ModelSlot, Program, RunContext, Sandbox, SandboxSpec
 
 TICKS_PER_MINUTE = 60 * TICKS_PER_SECOND
 SPARE_TURNS = 4
@@ -86,59 +91,47 @@ class TeamEpisode(Program):
     def model_slots(self) -> Mapping[str, ModelSlot]:
         return {name: ModelSlot() for name in TEAM}
 
-    def imports(self) -> list[str]:
-        return ["minecraft"]
+    def sandboxes(self) -> Mapping[str, SandboxSpec]:
+        names = [self.names[slot] for slot in self.team]
+        return {"world": worlds.world(self.task.id, self.world_seed, self.layout_seed, names)}
 
     async def main(self, run: RunContext) -> None:
-        begun = await self._call(
-            run,
-            "begin",
-            {
-                "task": self.task.id,
-                "world_seed": self.world_seed,
-                "layout_seed": self.layout_seed,
-                "names": [self.names[slot] for slot in self.team],
-            },
-        )
-        episode = str(begun["episode"])
+        world = run.sandbox("world")
         compact = COMPACT if len(self.team) > 1 else COMPACT_ALONE
         memories = {name: Memory(prompt=compact, remembered=REMEMBERED) for name in self.team}
         budget = self.minutes * TICKS_PER_MINUTE
         spent = 0.0
         turn = 0
-        try:
-            saturated = False
-            while spent < budget and turn < self.max_turns:
-                turn += 1
-                observations = await run.gather(
-                    *(self._call(run, "observe", {"episode": episode, "agent": self.names[slot]}) for slot in self.team)
+        saturated = False
+        while spent < budget and turn < self.max_turns:
+            turn += 1
+            observations = await run.gather(
+                *(call(world, "observe", {"agent": self.names[slot]}) for slot in self.team)
+            )
+            for name, observation in zip(self.team, observations, strict=True):
+                answer(memories[name], observation)
+            full = [name for name in self.team if memories[name].crowded(run.models[name])]
+            if full:
+                spare = [name for name in self.team if name in full or len(memories[name].turns) >= SPARE_TURNS]
+                await run.gather(*(memories[name].compact(run.models[name], self.system) for name in spare))
+            actions = await run.gather(
+                *(
+                    self._think(run, name, turn, observation, memories[name])
+                    for name, observation in zip(self.team, observations, strict=True)
                 )
-                for name, observation in zip(self.team, observations, strict=True):
-                    answer(memories[name], observation)
-                full = [name for name in self.team if memories[name].crowded(run.models[name])]
-                if full:
-                    spare = [name for name in self.team if name in full or len(memories[name].turns) >= SPARE_TURNS]
-                    await run.gather(*(memories[name].compact(run.models[name], self.system) for name in spare))
-                actions = await run.gather(
-                    *(
-                        self._think(run, name, turn, observation, memories[name])
-                        for name, observation in zip(self.team, observations, strict=True)
-                    )
+            )
+            await run.gather(
+                *(
+                    call(world, "act", {"agent": self.names[name], "action": action})
+                    for name, action in zip(self.team, actions, strict=True)
                 )
-                await run.gather(
-                    *(
-                        self._call(run, "act", {"episode": episode, "agent": self.names[name], "action": action})
-                        for name, action in zip(self.team, actions, strict=True)
-                    )
-                )
-                window = await self._call(run, "window", {"episode": episode})
-                spent += float(cast(int, window["ticks"]))
-                if window.get("done"):
-                    saturated = True
-                    break
-            score = await self._call(run, "score", {"episode": episode})
-        finally:
-            await self._call(run, "end", {"episode": episode})
+            )
+            window = await call(world, "window")
+            spent += float(cast(int, window["ticks"]))
+            if window.get("done"):
+                saturated = True
+                break
+        score = await call(world, "score")
         reward = float(cast(float, score["reward"]))
         for name in self.team:  # the team is rewarded equally
             run.reward(reward, slot=name)
@@ -176,12 +169,16 @@ class TeamEpisode(Program):
             heard.append((turn, self.names[name], said))
         return action(call)
 
-    async def _call(self, run: RunContext, operation: str, arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-        result = await run.tools.call(operation, arguments)
-        if result.is_error or not isinstance(result.structured, dict):
-            detail = "".join(part.text for part in result.content if isinstance(part, Text))
-            raise RuntimeError(f"minecraft.{operation} failed: {detail}")
-        return result.structured
+
+async def call(
+    world: Sandbox, operation: str, arguments: Mapping[str, JsonValue] | None = None
+) -> dict[str, JsonValue]:
+    """An operation on the episode's world, and what it answered."""
+    result = await world.call(operation, arguments)
+    if result.is_error or not isinstance(result.structured, dict):
+        detail = "".join(part.text for part in result.content if isinstance(part, Text))
+        raise RuntimeError(f"minecraft.{operation} failed: {detail}")
+    return result.structured
 
 
 def action(call: ToolCall) -> dict[str, JsonValue]:
