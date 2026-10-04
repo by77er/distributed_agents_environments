@@ -98,7 +98,18 @@ python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name N
 ```
 
 as a process of its own, or as a Ray job with `--ray` ([launchers](../../guide/deploying.md#launchers)). The suite's
-page shows the launch and how it goes. A checkpoint's page lists the suites it played, each with a link to the suite.
+page shows the launch and how it goes.
+
+A checkpoint's page (`#/checkpoint/ID`) has the same form the other way round, **Run an eval**: it takes the suite
+(by default the first a launcher alive can play), the episodes per start, the profile and the name, and posts the same
+launch with the checkpoint as `start`; the launches of evals of it follow, with how each goes. The page lists every
+eval the checkpoint had, by hand or by its run's schedule (the suite, the share solved where its episodes say, the
+mean reward, the episodes, who asked for it and when), each opening the eval's own page (`#/eval/RUN`: who played,
+the suite, who asked, its score, and how it did at each start), and charts each suite's score along its line from the
+base model ([scores along a line](monitor.md#scores-along-a-line)).
+
+On a suite's page, a column stands for each subject: the base model first, then each run's checkpoints under the run's
+name, runs in the order their checkpoints grew and within a run by depth.
 
 ## Evals during training
 
@@ -134,7 +145,15 @@ checkpoint and serves it, the loop:
 |---|---|---|
 | `runs/RUN/evals` | step | the suite, the checkpoint, the eval's run (`run`), `played`, `solved`, `reward`, and when it ended (`at`) |
 
-The eval is an eval like any other: it is listed on the **Evals** page and the suite's grid, with its own run's page.
+The eval is an eval like any other: it is listed on the **Evals** page, the suite's grid (under its run's name, with
+its step) and the checkpoint's page, with a page of its own.
+
+The evals are among a run's changeable settings ([changing a running run's
+settings](training.md#changing-a-running-runs-settings)): set when the run is launched (the **New run** form's suite,
+every N steps and episodes per start), and changed while it runs from its page. Each step's record says the evals it
+was decided with, and those decide whether its checkpoint is evaluated: a change made while a step is taken applies
+from the next. `rollout train` gives the loop `scheduled`, which resolves a suite by name as the profile's is
+(`suite_for`: the ledger's, or the environment's eval data of that name, frozen on first use).
 Started again, the loop folds each eval in `evals` into its curriculum (reading the eval's `results`), and if it died
 during an eval, it finishes that eval (the checkpoint is the run's newest, served when the loop starts) before it
 decides anything else.

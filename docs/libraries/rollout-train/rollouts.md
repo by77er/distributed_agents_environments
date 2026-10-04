@@ -78,7 +78,8 @@ episodes of a group have records and returns them, trajectories and all.
 ### Heartbeats
 
 With `presence` (a `Presence`, `rollout_train.presence`), a runner beats when it
-starts, before it claims anything, and every `beating` seconds (15) after. A beat holds what `about()` says of its
+starts, before it claims anything, and every `beating` seconds (15) after; `beat()` beats at once besides (an open
+profile's runner does when a channel serves a new checkpoint). A beat holds what `about()` says of its
 machine (called in a thread: it may measure), with its `places` and how many episodes it is `playing`. Each runner's newest beat
 is kept with the measurements of its recent ones (240: an hour), so its machine can be shown from anywhere.
 

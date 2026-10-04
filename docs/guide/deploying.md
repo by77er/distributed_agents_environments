@@ -89,12 +89,24 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
-| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, and the launches | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
+| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, the launches, and what is wanted of each run's settings | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
-| `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing | Ask for evals as launches instead, so that they run on engines of their own |
+| `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
 | `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
+
+## What can change while a run goes
+
+Some of a run's settings can change between two steps without breaking it, and are taken from its next step on:
+`groups_per_step`, the `evals` (`evals.suite`, `evals.every`, `evals.episodes`), and the settings its trainer takes
+between steps (`trainer.learning_rate`, and for `rollout_lora`'s trainers the clips, `truncate`, `tokens_per_step`,
+`max_kl` and `max_gradient_norm`). The rest are fixed when it starts: the channels, their models and engines, the
+trainer's kind, what its weights are and its other settings (the adapter's `rank`, the longest segment), the runner,
+`episodes_at_once`. The monitor's run page changes the changeable ones and shows the fixed ones; what is wanted is kept
+beside the ledger, and each step's record says the settings it used ([changing a running run's
+settings](../libraries/rollout-train/training.md#changing-a-running-runs-settings)). The profile's own values are
+where a run starts; a run started again starts from them and takes what is wanted at its next step.
 
 ## What a profile names
 
@@ -192,7 +204,8 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
 `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
-`evals.episodes`); its environments; and how many runs it plays.
+`evals.episodes`, which the monitor's **New run** form asks for as the run's evals); its environments; and how many runs
+it plays.
 A launch (`rollout_train.launches`) names a profile, an environment, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, or one
 the profile offers). The launcher claims the oldest launch asked for one of its profiles while it has room (a claim

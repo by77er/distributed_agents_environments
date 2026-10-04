@@ -13,7 +13,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -2374,6 +2374,8 @@ many it plays, and a claim holds only while its runner beats.
 **Methods**
 
 - `async def serve(self) -> None` — Claim and play episodes until cancelled; what is playing then is cut short and noted.
+- `async def beat(self) -> None` — Beat now, beside the beats every `beating` seconds: after what it says of itself changed (a channel serves
+  a new checkpoint, say), so that whoever reads the beats does not wait for the next.
 - `async def open(self) -> list[Open]` — The episodes nobody plays now, of the runs this runner serves, oldest group first.
 
 ### `episodes_of`
@@ -2593,6 +2595,23 @@ class Budget
 | `segment_tokens` | `int \| None` | `None` | The longest segment the trainer can train on (None: any). |
 | `segments` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
 
+### `Changeable`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Changeable(Protocol)
+```
+
+A trainer that takes some of its settings between steps (its learning rate, say): those that change neither
+what its weights are nor what it can take (`Budget`).
+
+**Methods**
+
+- `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings it takes between steps, by its name for each, with their values now.
+- `def change(self, settings: Mapping[str, JsonValue]) -> None` — Take these settings (some of `changeable`) from its next step on. Raises `ValueError` for one it does not
+  take, or a value it cannot.
+
 ### `Checkpoint`
 
 *class* · `libraries/rollout-train/src/rollout_train/checkpoints.py`
@@ -2614,7 +2633,6 @@ class Checkpoint
 | `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
-| `dataset` | `str \| None` | `None` | The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its parents after the first are then the checkpoints that sampled the dataset's examples. |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 | `released` | `float \| None` | `None` | When its files were deleted (`Checkpoints.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
 
@@ -2641,7 +2659,7 @@ Every checkpoint, in a ledger, and their files in a blob store.
   builds on, if it is an adapter over one; None for an adapter over a model. Raises `ValueError` if that
   checkpoint was released.
 - `async def head(self, run: str) -> Checkpoint | None` — The newest checkpoint a run made, if it made one.
-- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None, dataset: str | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
+- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
   Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
   id); for a merge (full weights from an adapter), the `base` it names; else its first parent's base, or `base`
   for a checkpoint made from the base model. The append is what
@@ -2671,43 +2689,9 @@ start (too little memory, say).
 **Methods**
 
 - `def __init__(self, trainer: Trainer, channels: Sequence[Pausable], *, guard: Callable[[], None] | None = None) -> None`
+- `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings the trainer it wraps takes between steps (`rollout_train.trainer.Changeable`), if any.
+- `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
-
-### `Dataset`
-
-*class* · `libraries/rollout-train/src/rollout_train/datasets.py`
-
-```python
-class Dataset
-```
-
-A dataset's record (`DATASETS`): how its examples were chosen, what came of it, and where its manifest is.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `id` | `str` | required | Sixteen random letters, like a checkpoint's. |
-| `rule` | `str` | required | The episode rule, by name (`RULES`). |
-| `runs` | `list[str]` | required | The runs its episodes are from, by id. |
-| `turns` | `list[str]` | required | The turn filters, by name. |
-| `cut` | `list[str]` | required | The kinds of guidance cut from its examples' prompts when they are made. |
-| `manifest` | `BlobReference` | required | One JSON line per example, compressed (`manifest_of` reads it). |
-| `blobs` | `Mapping[str, JsonValue]` | required | Where the manifest is kept, as any process opens it (`rollout_train.stores`). |
-| `per_task` | `int \| None` | `None` | For `capped-per-task`: the most episodes of each task. |
-| `counts` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; and of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens`. |
-| `left_out` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | Turns of its episodes that are no examples, by why. |
-| `checkpoints` | `list[str]` | `field(default_factory=list[str])` | The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none). |
-| `made` | `float` | `0.0` | When, in seconds since the epoch. |
-| `by` | `str` | `''` | Who made it: `user@host`. |
-
-### `dataset_of`
-
-*function* · `libraries/rollout-train/src/rollout_train/datasets.py`
-
-```python
-async def dataset_of(ledger: Ledger, id: str) -> Dataset
-```
-
-The dataset an id says.
 
 ### `evaluate`
 
@@ -2828,19 +2812,6 @@ class Ledger(Protocol)
 - `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended.
 - `async def tables(self) -> list[str]` — The tables that have records, by name.
 - `async def fences(self) -> dict[str, int]` — The newest fence of every scope that has been taken.
-
-### `make_dataset`
-
-*function* · `libraries/rollout-train/src/rollout_train/datasets.py`
-
-```python
-async def make_dataset(ledger: Ledger, rule: str, runs: Sequence[str], *, into: Blobs, at: Mapping[str, JsonValue], turns: Sequence[str] = (ALL,), cut: Sequence[str] = ('way',), per_task: int | None = None, by: str | None = None) -> Dataset
-```
-
-Make a dataset of the episodes `runs` (by id) completed: those `rule` picks, and of them the turns every filter
-of `turns` keeps. Its manifest is kept in `into`, which is at `at` (as `rollout_train.stores.opened` reads it).
-Episodes are read one at a time, from where each run's blobs are. Raises `ValueError` for a rule or filter that
-does not exist, or a dataset of no examples.
 
 ### `make_suite`
 
@@ -3026,7 +2997,7 @@ A suite, if there is one by that name.
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(environment: Environment, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, evals: Schedule | None = None) -> None
+async def train(environment: Environment, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, evals: Schedule | None = None, desired: Callable[[], Awaitable[Mapping[str, JsonValue]]] | None = None, scheduled: Callable[[str, int, int], Awaitable[Schedule | None]] | None = None) -> None
 ```
 
 Train from `start` (a checkpoint's id; else the base model, named `base`) on `environment` until `groups` more
@@ -3049,7 +3020,10 @@ machine serves (`address`), and what profile started it, say. `hooks` are told o
 called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
 load for a checkpoint (in their layout: `rollout_train.resharding`), told the run's fence to note it under; without
 it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
-and the next.
+and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
+`groups_per_step`, `evals.…`, `trainer.…`), each time a step is about to be decided; `scheduled` makes the schedule
+of evals they name (a suite by name, every, episodes; None for a suite the run cannot play), without which only
+`evals`' suite can be played.
 
 ### `Trained`
 
@@ -3485,7 +3459,7 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
 - `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
 - `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
-  samples are stamped with (a checkpoint's depth).
+  samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves.
 
 ### `Profile`
 
@@ -3632,6 +3606,16 @@ class System
   checkpoint no reference says.
 - `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
   group boundary. Raises `KeyError` when there is no such launch going.
+- `async def settings(self, run: str) -> dict[str, Any] | None` — A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
+  start says, what is wanted of them now, those its newest step used, and each step that used other settings than
+  the one before, with what changed. None where there is no such run.
+- `async def want(self, run: str, settings: Mapping[str, Any]) -> Desired` — Want these of a run's changeable settings from its next step on. Raises `Taken` for a setting it does not
+  have or cannot change, or a value it cannot take (a suite there is not, say); `KeyError` where there is no such
+  run, or nowhere to keep what is wanted.
+- `async def checkpoint_evals(self, checkpoint: str) -> dict[str, Any] | None` — Every eval a checkpoint (by its id or the start of it) has had, by hand or by a schedule, newest first
+  (`rollout_train.monitor.scores.evals_of`); None where there is no such checkpoint.
+- `async def path(self, checkpoint: str) -> dict[str, Any] | None` — A checkpoint's line from the base model, with each point's scores at each suite
+  (`rollout_train.monitor.scores.path_of`); None where there is no such checkpoint.
 - `async def evals(self) -> dict[str, Any]` — Every suite (its environment and starts, and each subject that played it, with how it did at each start) and
   every eval (its suite, its checkpoint, how far it has got), newest first (`rollout_train.evals`).
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
@@ -3952,16 +3936,12 @@ class LoraSettings
 | `layer_inputs_on_host` | `bool` | `False` | Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B. |
 | `mlp_rows` | `int \| None` | `None` | Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
-| `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
-| `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
 | `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, weight or stop at `max_kl` (`rollout_lora.objectives`). |
 | `ratio` | `str` | `'token'` | `token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens' (GSPO). |
 
 **Methods**
 
 - `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
-- `def rate(self, update: int, *, fresh: bool) -> float` — The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
-  `fresh`.
 - `@property def alpha(self) -> float`
 
 ### `LoraTrainer`
@@ -3974,7 +3954,8 @@ class LoraTrainer
 
 Trains a LoRA adapter over `model`'s checkpoint, one step at a time, each in a fresh process on the GPU
 (`rollout_lora.worker`). It keeps nothing between steps: a step starts from the adapter and the optimizer's
-state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields.
+state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields; those in
+`CHANGEABLE` it takes between steps (`rollout_train.trainer.Changeable`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -3983,6 +3964,8 @@ state it is given and leaves the new ones where it is told. `settings` are `Lora
 **Methods**
 
 - `def __init__(self, model: str, **settings: Any) -> None`
+- `@property def changeable(self) -> Mapping[str, JsonValue]`
+- `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
 
 ## `rollout_qwen`

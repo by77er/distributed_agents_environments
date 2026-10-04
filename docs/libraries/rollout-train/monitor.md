@@ -21,10 +21,10 @@ rollout monitor sqlite:///~/.cache/rollout/ledger.db  # a database's runs (or po
 ```
 
 `WHERE` is a run's directory (its ledger, as `ledger.json` there says, or files under `ledger`), a ledger's
-directory of files, or a database's URL. The monitor reads, and writes three things: names in the registry
+directory of files, or a database's URL. The monitor reads, and writes four things: names in the registry
 ([the registry](checkpoints.md#the-registry)) (a run's, when it is renamed on its page, and bookmarks, made, moved and
-deleted on a checkpoint's page), and launches: runs asked for from the page ([launching a run](#launching-a-run)),
-and asked to stop. The runs' processes write the rest, and need not be running: the page shows a stopped run as it
+deleted on a checkpoint's page), launches: runs and evals asked for from the page ([launching a run](#launching-a-run)),
+and asked to stop, and what is wanted of a run's settings ([a run's settings](#a-runs-settings)). The runs' processes write the rest, and need not be running: the page shows a stopped run as it
 was left.
 
 A run is shown by its name; its id (what everything kept of it is under) is on its page and under the pointer. A
@@ -102,9 +102,13 @@ Everything but the live feed is in the database (with a database ledger) or the 
 reaches them shows every run, its machines and its finished episodes; only episodes still playing need the run's
 directory or the monitor on its machine.
 
-A run is **running** while it writes (something this reads was written within 20 minutes: a record in the ledger,
-its start, a runner's beat, or its feed), **idle** until three hours have passed without a write, and **ended** after. No process is
-asked, so a run on any machine is told apart the same way.
+A run whose runners beat ([heartbeats](rollouts.md#heartbeats)) is **running** while one of them beat within the last 90 seconds
+(**idle** if nothing this reads was written for 20 minutes), and **ended** once none does: its process is gone. Only
+while it beats does its page say what its channels serve; a runner beats again as soon as a channel serves a new
+checkpoint, so that says the checkpoint served now. An eval that played every start has ended; one a training run's
+schedule asked for, and not done, is as that run is (that run's runner plays it). A run with no beat at all is told
+by when it last wrote (a record in the ledger, its start, or its feed): **running** within 20 minutes, **idle** until
+three hours have passed, and **ended** after. No process is asked, so a run on any machine is told apart the same way.
 
 ## The pages
 
@@ -115,7 +119,7 @@ A step's groups need not be consecutive. A group that gave nothing to train on i
 it, marked skipped. Runs, steps, groups and episodes fold open and closed: an open step lists its groups, an open
 group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph (with or without the sample
 fixture), the checkpoints bookmarks name, and each run's newest. On **Evals**, the suites, then the evals playing
-now. An eval's run is on Evals, not among the runs (its page opens from there). On **Statistics**, its sections, and the runs drawn: a click leaves a run out or takes it
+now and the eval shown. An eval's run is on Evals, not among the runs: its page is `#/eval/RUN`. On **Statistics**, its sections, and the runs drawn: a click leaves a run out or takes it
 back. What is folded and what is left out are remembered in the browser. The address (after `#`) names what is shown,
 so a reload stays there.
 
@@ -123,15 +127,16 @@ so a reload stays there.
 |---|---|---|---|
 | Runs | Every run | `#/runs` (and `#/`) | the launches (each asked-for run: its state, launcher, directory, settings changed, why it failed, a Stop button); each run, running ones first: its state and host, groups in flight and done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
 | Runs | New run | `#/runs/new` | a form asking for a run ([launching a run](#launching-a-run)) |
-| Runs | Run | `#/run/RUN` | its name (with a control to rename it), id, state, base model (or the full checkpoint its adapters build on), the checkpoint it started from and the one it is at, what each of its channels serves; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played |
+| Runs | Run | `#/run/RUN` | its name (with a control to rename it), id, state, base model (or the full checkpoint its adapters build on), the checkpoint it started from and the one it is at, what each of its channels serves; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played; each suite's score along the line to its newest checkpoint ([scores along a line](#scores-along-a-line)); its settings ([a run's settings](#a-runs-settings)). An eval's run shows the eval's page instead |
 | Runs | Step | `#/run/RUN/step/N` | the checkpoint the step made and its parent, the groups that went into it (and those decided before it that gave nothing to train on), and the update's statistics |
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
 | Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below ([an episode's rollouts](#an-episodes-rollouts)) |
 | Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
 | Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations; evaluation suites, a column per checkpoint or model ([the checkpoints view](#the-checkpoints-view)) |
-| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, and the suites it played (each opening the suite) |
-| Evals | Every suite and eval | `#/evals` | the evals asked for from the page; each suite (its environment, starts, subjects, and the subject that did best); every eval, newest first (its suite, who played, episodes played of those asked for, the share solved, whether it is done), each opening its run |
-| Evals | Suite | `#/evals/SUITE` | its environment, rows and seeds; the subject that did best; a **Run this suite** form ([evals](evals.md#asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals; two subjects compared at the starts both played |
+| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, each suite's score along its line ([scores along a line](#scores-along-a-line)), every eval it had (by hand or by its run's schedule: the suite, the share solved where its episodes say, the mean reward, episodes, who asked for it, when; each opening the eval), a **Run an eval** form (a suite, episodes per start, a profile and a name: it posts the same launch as a suite's **Run this suite** form), and the evals of it asked for so, with how each goes |
+| Evals | Every suite and eval | `#/evals` | the evals asked for from the page; each suite (its environment, starts, subjects, and the subject that did best); every eval, newest first (its suite, who played, episodes played of those asked for, the share solved, whether it is done), each opening its page |
+| Evals | Eval | `#/eval/RUN` | who played (a checkpoint, or the base model), the suite, who asked for it (by hand, or a run's schedule at a step), when it started; its share solved, mean reward, episodes played of those asked for, how long it took; and at each start, its episodes, how many solved and their mean reward |
+| Evals | Suite | `#/evals/SUITE` | its environment, rows and seeds; the subject that did best; a **Run this suite** form ([evals](evals.md#asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals, a column per subject: the base model first, then each run's checkpoints under the run's name (those made outside a run together), runs in the order their checkpoints grew and within a run by depth, each column saying the checkpoint, what its weights are (`full`, or `over full` for an adapter over full weights), its step, its episodes per start (opening the eval) and whether a schedule asked for it; two subjects compared at the starts both played |
 | Statistics | Across every run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color |
 
 Renaming on a run's page asks the monitor (`POST /api/rename`, `{"id", "name"}`), which renames it in the registry
@@ -140,6 +145,37 @@ name it, or moves one there (`POST /api/bookmarks`, `{"name", "checkpoint"}`, wh
 [reference](checkpoints.md#references)), and takes one away (`DELETE /api/bookmarks/NAME`). A name another run has, or
 one that says `/`, `@` or `:`, is refused (409) and the page says why. Every page open on the monitor hears of the
 change through its stream.
+
+## Scores along a line
+
+A checkpoint's line is its first parents back to the checkpoint trained from the base model, and the base model before
+it (`/api/checkpoints/ID/path`, `rollout_train.monitor.scores.path_of`). It crosses runs (a run that starts from
+another's checkpoint), merges (a full checkpoint made from an adapter, outside a run) and forks. The chart draws a line
+for each suite any point was evaluated on: its share solved at each point where its episodes say whether they solved
+their start, else its mean reward, by depth (0 is the base model), every eval of a point on that suite pooled. Its
+scale runs from the data's own lowest value. A rule marks where the line enters a run (with the run's name, or
+"outside a run" for a merge) and where its weights change between full and LoRA; each point is named by a bookmark
+that names it, else its short id. A checkpoint's page draws the line ending at it, a run's page the line to the run's
+newest checkpoint.
+
+A checkpoint's evals (`/api/checkpoints/ID/evals`, `rollout_train.monitor.scores.evals_of`) are read from each
+suite's subjects (`evaluations/SUITE/EVAL/subject`, whose `checkpoint` it is) and their results, the eval's start (when,
+and `by` and `step` for one a schedule asked for), and the training runs' `evals` tables.
+
+## A run's settings
+
+A training run's page ends with its settings (`/api/runs/RUN/settings`, `System.settings`), as its newest start
+records them ([run settings](training.md#changing-a-running-runs-settings)). **Changeable** is a form of the settings it
+takes between steps: `groups_per_step`, `evals.suite` (a suite, or none), `evals.every`, `evals.episodes`, and its
+trainer's (`trainer.learning_rate`, say), each holding what is wanted of it, else what the newest step used; one wanted
+and not yet used says what the run uses now. Under it, each step that used other settings than the step before, with
+what changed. **Save** asks the monitor (`POST /api/runs/RUN/settings`, `{"settings": {KEY: VALUE}}`, only those
+changed), which checks each (`System.want`: a setting the run can change, a whole number of 1 at least where one is
+needed, no suite of another environment than the run's) and keeps it beside the ledger; a fixed setting, or one the run does not have, is
+refused (409) and the page says why. The run takes them when it next decides a step (or, stopped, when it is started
+again). **Fixed** lists the rest as they are: the model, what the trainer is and makes, the adapter's rank, the
+channels and their engines, how many episodes it plays at once, the groups and seed it was started with. A run whose
+start records no settings (one started before runs recorded them) shows none.
 
 ## Launching a run
 
@@ -153,8 +189,10 @@ settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel'
 **New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and an environment, the
 run's name, the checkpoint it starts from (the base model, a bookmark, or any checkpoint whose weights are kept, by where it
 came from and what its weights are; a profile whose trainer trains every weight starts only from full weights, so an
-adapter is merged first), a bookmark for it to carry, its groups, groups a step and seed, and every setting of the profile as a field
-holding the profile's value, with rows for any other `trainer.KEY`. Values are read as numbers, true or false, or JSON
+adapter is merged first), a bookmark for it to carry, its groups, groups a step and seed, the evals it makes of its
+checkpoints (a suite of the ledger, every how many steps, and episodes per start: the launch's `evals.suite`,
+`evals.every` and `evals.episodes`), and every other setting of the profile as a field holding the profile's value,
+with rows for any other `trainer.KEY`. Values are read as numbers, true or false, or JSON
 where they look like them, and as text otherwise. Launching asks the monitor (`POST /api/launches`, with the settings
 changed only), which checks the ask (`System.launch`: a launcher alive offers the profile and the environment, the name is
 no other run's, every setting is the profile's or a trainer's, the checkpoint is one) and appends it to the launches; a

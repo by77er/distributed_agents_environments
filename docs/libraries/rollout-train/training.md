@@ -180,6 +180,12 @@ nothing between steps that it cannot be given again, so any trainer can take any
   machine; none means the base model). It leaves the new weights in `into/weights`, as engines load them, and what
   a later step starts from (an optimizer's state, say) in `into/state`. It returns its metrics.
 - **`StepFailed`** means the step produced no weights: the weights are as they were, and a later step may succeed.
+- **`changeable`** and **`change(settings)`**, where a trainer has them ([`Changeable`](../../guide/reference.md#changeable)):
+  the settings it takes between steps, by its name for each, with their values now, and a call that has it take some
+  of them from its next step on (raising `ValueError` for one it does not take). They change neither what its weights
+  are nor its `budget`. `LoraTrainer` and `FullTrainer` take `learning_rate`, `clip_low`, `clip_high`,
+  `segment_clip_low`, `segment_clip_high`, `truncate`, `tokens_per_step`, `max_kl` and `max_gradient_norm`: each step
+  runs in a process of its own, which reads them afresh (the optimizer's saved state is given the learning rate then).
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
@@ -188,6 +194,33 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 `LoraTrainer` is the trainer this repository gives: [LoRA trainer](../../implementations/rollout-lora.md).
 
+## Changing a running run's settings
+
+A run's settings are named by dotted key, as a profile's are, and are of two kinds (`rollout_train.settings`).
+**Changeable** ones can change between two steps without breaking the run: `groups_per_step`, the evals it makes
+(`evals.suite`, none for no evals; `evals.every`; `evals.episodes`), and its trainer's (`trainer.NAME` for each of its
+`changeable`). **Fixed** ones make what the run is: the model, the trainer's kind and what its weights are, the
+adapter's rank and the trainer's other settings, the channels and their engines, how many episodes it plays at once,
+and the groups and seed the loop was started with (`fixed(profile, trainer, …)`). `rollout train` writes both into the
+run's start record (`settings`: `fixed`, and `changeable` with their values as it starts).
+
+What someone wants of a run's changeable settings (its **desired settings**) is ordinary state beside the ledger,
+changed in place and not appended: `settings.json` beside a ledger of files, the `run_settings` table in a database
+ledger's database (`DatabaseDesiredSettings`); `desired_settings_of(ledger)` finds them, `want(run, settings)` replaces
+the keys given and keeps the others. The monitor's run page writes them ([a run's settings](monitor.md#a-runs-settings)).
+
+The loop (`train(desired=…, scheduled=…)`) reads them each time it is about to decide a step. Each one it has, with a
+value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `evals.every` and
+`evals.episodes`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the
+trainer refuses leaves the trainer's as they were, noted to the hooks as a `settings` note with the error. A change is
+noted as a `settings` note with what changed. The step is decided with the settings then in effect, and its record in
+`steps` says them (`settings`); a step taken again after a stop is taken with those. Whether a step's checkpoint is
+evaluated is that step's evals: `scheduled(suite, every, episodes)` gives the schedule of a suite by name. `rollout
+train`'s resolves it as the profile's `[evals]` suite is resolved (`suite_for`): the ledger's suite, or else the
+environment's eval data of that name, frozen on first use; for a name neither has, or another environment's suite,
+there is none, and nothing is evaluated. So a change made while a step is being taken applies from
+the next one, and a run that is stopped takes it when it is started again.
+
 ## The record
 
 When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the checkpoint it
@@ -195,7 +228,8 @@ starts from (`from`), the host, when, and what `train(started=…)` adds; `rollo
 `--monitor URL`, where the monitor on that machine serves (`address`), as other machines reach it, and where the run's
 blobs are (`blobs`, [rollouts](rollouts.md#what-runners-write)). A run started
 again appends another. That is how a [monitor](monitor.md) over a shared ledger finds every run, and where each keeps
-its episodes.
+its episodes. With `settings`, its fixed and changeable settings ([changing a running run's
+settings](#changing-a-running-runs-settings)).
 
 For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table when its last
 episode ends: the rewards, `solved` and durations of the episodes fit to train on, how many episodes failed and why,
