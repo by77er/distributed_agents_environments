@@ -606,16 +606,16 @@ makers of one suite at once leave one of their suites whole, and two editors at 
 suite's name at the later. **This holds (finding 8, fixed).**
 
 **Mechanism.** `make_suite` checks that the name is free, takes the fence, and appends the whole of version 1 as one
-record (`evaluations/SUITE/suite`, key `suite`: what it is and its starts in order) with `appended`. A maker whose
-fence was taken after its own raises `Fenced`; a maker whose append finds a record there returns the suite in that
+record (`evaluations/SUITE/suite`, key `suite`: its entries, each with its starts in order) with `appended`. A maker
+whose fence was taken after its own raises `Fenced`; a maker whose append finds a record there returns the suite in that
 record, and plays it. With one record, there is nothing for a second maker to finish: the suite in the ledger is one
 maker's. `suite_for`, which makes an environment's eval data on first use, tries again after `Fenced` until it finds a
 suite of the name. `edit_suite` appends its version under the next number with `appended`, under the same fence; an
-editor fenced out, or whose number another took, tries the next number (or, told the version it edited, is refused).
-The suite's name is ordinary state beside the ledger (the registry's suite names), moved only forward
-(`point_suite(…, forward=True)`), so the later of two edits is where it points whichever writes last. A name that
-points nowhere is its newest version in the ledger, so an edit that died between its append and the move is still
-read. A suite written before (a record, or a record and a table of starts by number) reads as its version 1.
+editor fenced out, or whose number another took, tries the next number (or, told the version it edited, is refused). The
+suite's name is ordinary state beside the ledger (the registry's suite names), moved only forward (`point_suite(…,
+forward=True)`), so the later of two edits is where it points whichever writes last. A name that points nowhere is its
+newest version in the ledger, so an edit that died between its append and the move is still read. A suite written before
+(a record, or a record and a table of starts by number) reads as its version 1.
 
 Tests: `test_two_makers_of_one_suite_leave_one_of_their_suites` (the second maker takes the fence after the first and
 before its append: the first is fenced out, and the ledger holds the second's suite),

@@ -153,18 +153,22 @@ uses the environment's own when it has one (`environment.curriculum()`, `curricu
   its title, so records stay with their rows when an environment changes. The run's evals are folded in after them,
   in the order they ended. A choice is made with a random number generator seeded by the group's number, and is
   written down before it is acted on.
-- **Evals, and gates on them.** `evaluated(suite, checkpoint, results)` takes an eval the run made of its checkpoints
-  into account ([evals during training](evals.md#evals-during-training)): the suite, the checkpoint that played it,
-  and one result per start. The generic curriculum keeps the newest of each suite in `evaluations` and decides nothing
-  from it. An environment's own overrides it to open rows on how a checkpoint did:
+- **Evals, and gates on them.** `evaluated(suite, checkpoint, results, entry)` takes one entry of an eval the run made
+  of its checkpoints into account ([evals during training](evals.md#evals-during-training)): the suite, the
+  checkpoint that played it, one result per start of the entry, and the entry's environment (`module:name`). It is
+  called once for each entry of the suite. The generic curriculum keeps the newest of each suite's entry in
+  `evaluations`, by the suite and the environment, and decides nothing from it. An environment's own overrides it to
+  open rows on how a checkpoint did:
 
 ```py
 @dataclass
 class Gated(Curriculum):
     passed: bool = False
 
-    def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None:
-        super().evaluated(suite, checkpoint, results)
+    def evaluated(
+        self, suite: str, checkpoint: str | None, results: Sequence[GroupResult], entry: str | None = None
+    ) -> None:
+        super().evaluated(suite, checkpoint, results, entry)
         self.passed = self.passed or (suite == "teams-stage-2" and solved_share(results) >= 0.6)
 
     def unlocked(self) -> list[Row]:  # stage 3 (rows 20 on) waits for the suite
@@ -226,7 +230,8 @@ step taken again after a stop is taken with those. Whether a step's checkpoint i
 the version played is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by
 name (the version its name points to now) or of a version by id. `rollout train`'s resolves it as the profile's
 `[evals]` suite is resolved (`suite_for`): the ledger's version, or else the environment's eval data of that name,
-frozen on first use; for a name neither has, or another environment's suite, there is none, and nothing is evaluated.
+frozen on first use, whatever environments it plays; for a name neither has, or a suite whose environments do not all
+load where the run is, there is none, and nothing is evaluated.
 An edit of the suite (a new version, [versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken applies from
 the next one, and a run that is stopped takes it when it is started again.
 

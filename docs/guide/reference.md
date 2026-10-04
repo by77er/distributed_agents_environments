@@ -14,7 +14,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#refused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
@@ -1160,6 +1160,8 @@ Configured on bindings, never by task or agent code.
 | `temperature` | `float` | `1.0` |  |
 | `top_p` | `float` | `1.0` |  |
 | `reasoning_effort` | `str \| None` | `None` | For providers with reasoning controls, e.g. `low`, `medium`, `high`. |
+| `thinking_tokens` | `int \| None` | `None` | For a recorded channel: tokens of thinking per turn, and of answer after it, in place of the channel's own (an eval's, say); none: the channel's. |
+| `answer_tokens` | `int \| None` | `None` |  |
 
 ### `Sandbox`
 
@@ -2368,7 +2370,7 @@ class Curriculum
 | `smoothing` | `float` | `0.5` | Weight of the newest group in the moving averages. |
 | `floor` | `float` | `0.05` |  |
 | `records` | `dict[str, Record]` | `field(default_factory=dict[str, Record])` |  |
-| `evaluations` | `dict[str, tuple[str \| None, list[GroupResult]]]` | `field(default_factory=dict[str, tuple[str \| None, list[GroupResult]]])` | The newest eval of each suite, by the suite's name: the checkpoint that played it (None: the base model), and how it did at each start. |
+| `evaluations` | `dict[tuple[str, str \| None], tuple[str \| None, list[GroupResult]]]` | `field(default_factory=dict[tuple[str, str \| None], tuple[str \| None, list[GroupResult]]])` | The newest eval of each suite's entry, by the suite's name and the entry's environment: the checkpoint that played it (None: the base model), and how it did at each start of that entry. |
 
 **Methods**
 
@@ -2381,9 +2383,10 @@ class Curriculum
 - `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
 - `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
   longer untried, and it taught nothing.
-- `def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None` — Take an eval into account: `suite` played by `checkpoint` (None: the base model), one result per start of
-  the suite. The generic curriculum keeps the newest of each suite and decides nothing from it; one that gates on
-  evals overrides this.
+- `def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult], entry: str | None = None) -> None` — Take an eval's entry into account: `suite` played by `checkpoint` (None: the base model), one result per
+  start of its entry of the environment `entry` (`module:name`; None where the eval does not say). The generic
+  curriculum keeps the newest of each suite's entry and decides nothing from it; one that gates on evals
+  overrides this.
 - `def record(self, row: Row) -> Record`
 
 ### `curriculum_of`
@@ -3247,36 +3250,40 @@ The dataset an id says.
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def edit_suite(ledger: Ledger, name: str, environment_name: str, environment: Environment, *, rows: Sequence[str] | None = None, seeds: Sequence[int] = (), starts: Sequence[Start] | None = None, eval_data: str | None = None, same_starts: bool = False, episodes: int = 1, thinking_tokens: int | None = None, answer_tokens: int | None = None, base: int | None = None) -> Suite
+async def edit_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry], *, base: int | None = None) -> Suite
 ```
 
-Make a suite's next version, and point its name to it: its starts chosen as `chosen_starts` says, or (with
-`same_starts`) those of the version its name points to now, with `episodes` of each start and the limits its evals'
-channel takes. `base` is the version the edit was made from, by number: an edit of another than the one the name
-points to is refused (someone edited it meanwhile). Raises `KeyError` for a suite there is not or eval data the
-environment does not have; `ValueError` for another environment than the suite's, an edit that changes nothing,
-or what `make_suite` refuses.
+Make a suite's next version of these entries, and point its name to it. An entry whose starts are those of the
+current version's entry of its environment keeps how they were chosen. `base` is the version the edit was made
+from, by number: an edit of another than the one the name points to is refused (someone edited it meanwhile).
+Raises `KeyError` for a suite there is not; `ValueError` for an edit that changes nothing, or what `make_suite`
+refuses.
 
 ### `evaluate`
 
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def evaluate(environment: Environment, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, episodes: int | None = None, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = (), served_by: str | None = None, limits: Mapping[str, int] | None = None) -> dict[str, Any]
+async def evaluate(checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, environments: Mapping[str, Environment] | None = None, binding: Callable[[Environment], RunBinding] | None = None, parts: Callable[[int], Awaitable[str]] | None = None, episodes: int | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = (), served_by: str | None = None) -> dict[str, Any]
 ```
 
 Play `suite` (one version) with `subject` (a checkpoint's id; None: the base model, named `base`) served on
-`channel`, `episodes` episodes of each start (none: the suite's), as the run `run`; returns how it went (`played`,
-`solved`, `reward`, and each start's `results`, a `Result` each). `publish` serves a checkpoint on the channel (a
-full one in place of the engines' weights; for an adapter over a full checkpoint, the engines must already hold that
+`channel`, `episodes` episodes of each start (none: each entry's), as the run `run`. Returns how it went: `played`,
+`solved`, `reward` and every start's `results` (a `Result` each), and each entry's (`entries`: its environment, the
+run that played it, its scores, `entry_scores`, and its `results`).
+
+`environments` are the entries' environments by `module:name` (any not given are imported: `environments_of`);
+`binding` says how an environment's episodes are played (by default every slot from `channel`), and each entry's
+binding takes its limits. A suite of several entries plays each in a run of its own: `parts` gives the run of an
+entry, by its number from 1 (by default `RUN-NUMBER`). `publish` serves a checkpoint on the channel (a full one in
+place of the engines' weights; for an adapter over a full checkpoint, the engines must already hold that
 checkpoint's weights, as `rollout eval` sees to); None: the channel serves `subject` already (a training run's
-newest checkpoint). `reshard` gives its files in the engines' layout (`rollout_train.resharding`); `directory`
-holds its files on this machine.
-What the eval's channel serves is written down (`rollout_train.serving`), so that runners anywhere play it on
-replicas that serve `subject` and no other checkpoint; `served_by` names the channel whose replicas serve it
-(`RUN/NAME`: the training run's, for an eval its schedule asks for), where it is not the eval's own. `limits` are
-the sampling limits the channel was given (the suite's, where it serves the eval's own channel), recorded with who
-played.
+newest checkpoint). `reshard` gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds
+its files on this machine. What the eval's channel serves is written down for each of its runs
+(`rollout_train.serving`), so that runners anywhere play it on replicas that serve `subject` and no other
+checkpoint; `served_by` names the channel whose replicas serve it (`RUN/NAME`: the training run's, for an eval its
+schedule asks for), where it is not the eval's own. Raises `KeyError` for an entry's environment that does not load
+here.
 
 ### `Fence`
 
@@ -3433,13 +3440,11 @@ does not exist, or a dataset of no examples.
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def make_suite(ledger: Ledger, name: str, environment_name: str, environment: Environment, *, rows: Sequence[str] | None = None, seeds: Sequence[int] = (), starts: Sequence[Start] | None = None, eval_data: str | None = None, episodes: int = 1, thinking_tokens: int | None = None, answer_tokens: int | None = None) -> Suite
+async def make_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry]) -> Suite
 ```
 
-Make version 1 of a suite of `environment`, its starts chosen as `chosen_starts` says, with `episodes` of each
-start and the limits its evals' channel takes. Raises `ValueError` for a name that is no name or is taken (a suite
-is edited instead: `edit_suite`), a row the environment does not have, no starts, or a count below 1; `KeyError`
-for eval data the environment does not have.
+Make version 1 of a suite of these entries (`suite_entry`). Raises `ValueError` for a name that is no name or is
+taken (a suite is edited instead: `edit_suite`), no entries, or an environment in two.
 
 ### `Manifest`
 
@@ -3541,20 +3546,21 @@ class Schedule
 ```
 
 Evals a training run makes of its own checkpoints: `suite` (one version) played by the checkpoint of every
-`every`th step, `episodes` episodes of each start (none: the suite's), between that step and the next.
-`environment` is the suite's environment, and `binding` how its episodes are played (by default every slot from the
-trained channel). `run` gives the eval's run for a step: the same each time it is asked for that step, and one the
-run's episode runners play. `named` is what the run's settings call the suite (`evals.suite`): its name (by
-default), which follows its newest version, or the version's id, which does not.
+`every`th step, `episodes` episodes of each start (none: each entry's), between that step and the next. `run` gives
+the eval's run for a step, and each part's: runs the run's episode runners play. `environments` are the entries'
+environments, by `module:name` (any not given are imported), and `binding` how an environment's episodes are played
+(by default every slot from the trained channel); each entry's limits are its own. `named` is what the run's
+settings call the suite (`evals.suite`): its name (by default), which follows its newest version, or the version's
+id, which does not.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `suite` | `Suite` | required |  |
-| `environment` | `Environment` | required |  |
-| `run` | `Callable[[int], Awaitable[str]]` | required |  |
+| `run` | `EvalRuns` | required |  |
 | `every` | `int` | `1` |  |
 | `episodes` | `int \| None` | `None` |  |
-| `binding` | `RunBinding \| None` | `None` |  |
+| `environments` | `Mapping[str, Environment]` | `field(default_factory=dict[str, Environment])` |  |
+| `binding` | `Callable[[Environment], RunBinding] \| None` | `None` |  |
 | `named` | `str \| None` | `None` |  |
 
 **Methods**
@@ -3621,33 +3627,38 @@ A step did not produce weights: the policy is as it was, and a later step may su
 class Suite
 ```
 
-One version of a suite: what every subject of it plays, start for start, and how.
+One version of a suite: its entries, each what every subject of it plays, start for start, and how.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | required |  |
-| `environment` | `str` | required | The environment, as `module:name`. |
-| `starts` | `list[Start]` | required | Its starts, in order. |
+| `entries` | `list[SuiteEntry]` | required |  |
 | `made` | `float` | `0.0` |  |
-| `rows` | `list[str] \| None` | `None` | The rows it names, by key. |
-| `seeds` | `list[int] \| None` | `None` |  |
-| `environment_version` | `str \| None` | `None` | The environment's version when this version was made. |
-| `held_out` | `bool` | `False` | Whether every start is one of the environment's eval starts, which training never draws. |
 | `number` | `int` | `1` |  |
-| `chosen` | `str` | `DRAWN` | How its starts were chosen: `EVAL_DATA`, `DRAWN` or `GIVEN`. |
-| `eval_data` | `str \| None` | `None` | The name of the environment's eval data its starts are, where they are. |
-| `episodes` | `int` | `1` | Episodes of each start an eval plays, unless it is asked for another number. |
-| `thinking_tokens` | `int \| None` | `None` | The eval's channel's tokens of thinking per turn, and of answer after it; none: the channel's own. |
-| `answer_tokens` | `int \| None` | `None` |  |
 | `edited_from` | `int \| None` | `None` | The version it was edited from, by number. |
 
 **Methods**
 
 - `@property def id(self) -> str`
-- `@property def limits(self) -> dict[str, int]` — The sampling limits it gives the eval's channel, by a channel's names for them (`thinking_tokens`,
-  `answer_tokens`), where it gives any.
+- `@property def environments(self) -> list[str]` — Its entries' environments, in order.
+- `@property def starts(self) -> list[Start]` — Every start, numbered from 1 in this order: the first entry's, then the next's.
+- `@property def held_out(self) -> bool` — Whether every entry is held out of training.
+- `def entry(self, environment: str) -> SuiteEntry | None` — Its entry of an environment, if it has one.
 - `def record(self) -> dict[str, Any]` — What the ledger keeps of it (its name and number are its table and key).
-- `def configured(self) -> tuple[Any, ...]` — What makes an eval of it what it is: the environment's version, the starts, the episodes and the limits.
+- `def configured(self) -> tuple[Any, ...]` — What makes an eval of it what it is: each entry's configuration, in order.
+
+### `suite_entry`
+
+*function* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+def suite_entry(environment_name: str, environment: Environment, *, rows: Sequence[str] | None = None, seeds: Sequence[int] = (), starts: Sequence[Start] | None = None, eval_data: str | None = None, episodes: int = 1, thinking_tokens: int | None = None, answer_tokens: int | None = None) -> SuiteEntry
+```
+
+An entry of `environment` (named `environment_name`), its starts chosen as `chosen_starts` says, with `episodes`
+of each start and the limits its episodes take. Raises `ValueError` for a row the environment does not have, no
+starts, or a count that is no whole number of 1 at least; `KeyError` for eval data the environment does not
+have.
 
 ### `suite_for`
 
@@ -3658,8 +3669,8 @@ async def suite_for(ledger: Ledger, reference: str, environment_name: str, envir
 ```
 
 The version of a suite a reference says (`NAME`: the one its name points to; `NAME@NUMBER`: that one): the
-ledger's, or else the environment's eval data of that name, frozen now as its version 1 (on first use). Raises
-`KeyError` when neither has it, `ValueError` when the ledger's is another environment's.
+ledger's, whatever its environments, or else `environment`'s eval data of that name, frozen now as its version 1 (on
+first use). Raises `KeyError` when neither has it.
 
 ### `suite_of`
 
@@ -3671,6 +3682,37 @@ async def suite_of(ledger: Ledger, reference: str) -> Suite | None
 
 The version of a suite a reference says, if there is one: `NAME@NUMBER`, that version; `NAME`, the one the
 registry points the name to, else its newest.
+
+### `SuiteEntry`
+
+*class* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+class SuiteEntry
+```
+
+One environment of a suite's version: what every subject plays of it, start for start, and how.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str` | required | The environment, as `module:name`. |
+| `starts` | `list[Start]` | required | Its starts, in order. |
+| `environment_version` | `str \| None` | `None` | The environment's version when the entry was made. |
+| `chosen` | `str` | `DRAWN` | How its starts were chosen: `EVAL_DATA`, `DRAWN` or `GIVEN`. |
+| `eval_data` | `str \| None` | `None` | The name of the environment's eval data its starts are, where they are. |
+| `rows` | `list[str] \| None` | `None` | The rows it names, by key. |
+| `seeds` | `list[int] \| None` | `None` |  |
+| `held_out` | `bool` | `False` | Whether every start is one of the environment's eval starts, which training never draws. |
+| `episodes` | `int` | `1` | Episodes of each start an eval plays, unless it is asked for another number. |
+| `thinking_tokens` | `int \| None` | `None` | Its episodes' tokens of thinking per turn, and of answer after it; none: the channel's own. |
+| `answer_tokens` | `int \| None` | `None` |  |
+
+**Methods**
+
+- `@property def limits(self) -> dict[str, int]` — The sampling limits it gives its episodes, by a channel's names for them (`thinking_tokens`,
+  `answer_tokens`), where it gives any.
+- `def configured(self) -> tuple[Any, ...]` — What makes it what it is in an eval: the environment and its version, the starts, the episodes and the
+  limits.
 
 ### `train`
 
@@ -4671,8 +4713,10 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
 - `@property def layout(self) -> str | None` — The layout the trained channel's engines load checkpoints in, if they are resharded.
 - `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
   cluster, else here.
-- `async def eval_run(self, step: int) -> str` — The run of the eval of the checkpoint this run made at `step` (`rollout_train.evals.Schedule`), by id:
-  registered the first time as `NAME-eval-STEP` and kept in `directory/evals`; the runner plays its episodes.
+- `async def eval_run(self, step: int | None = None, part: int | None = None) -> str` — The run of an eval, by id, which the runner plays: with `step`, the eval of the checkpoint this run made at
+  that step (`rollout_train.evals.Schedule`), registered the first time as `NAME-eval-STEP` and kept in
+  `directory/evals`; else this run (an eval itself). With `part`, the run that plays that entry (by its number
+  from 1) of the eval of a suite of several: that eval's name and `-PART`, kept beside it.
 - `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
 - `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
@@ -4828,18 +4872,21 @@ class System
   points to now, which the launch then names by id. A training run says the evals it makes (`_checked_evals`).
   Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have, no
   word of the evals), `KeyError` for what no launcher offers or a checkpoint no reference says.
+- `async def environments(self) -> dict[str, Any]` — Every environment the system knows of, by `module:name`, for the pages' pickers: those the launchers alive
+  offer, those runs were started on and those suites' versions play; each with a readable `name`, the versions of
+  it seen (in runs' starts and suites' entries), and whether a launcher alive offers it (`offered`).
 - `async def environment(self, environment: str) -> dict[str, Any]` — What the forms that make and edit suites need of an environment: its version, its rows (each its key and
   title) and its eval data (each list's name and how many starts). Raises `KeyError` where it does not load.
 - `async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite` — Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,
-  `edit_suite`): its `environment` (`module:name`: a new suite's; an edit's is the suite's), how its starts are
-  `chosen` (`eval data`, of the name `eval_data`; `rows and seeds`, `rows` (none: every row) and `seeds`;
-  `starts`, each a row (`task`) and its `seed`, drawn as the row's start with that seed unless it says its
-  `parameters`; or, for an edit, `same`: those of the version edited), the `episodes` of each start, the limits
-  (`thinking_tokens`, `answer_tokens`; null for the channel's own), and, for an edit, the version it was made from
-  (`base`, by number). Raises `Taken` for what cannot be: a name that is no name, an environment that does not
-  load here or is another than the suite's, eval data or a row the environment does not have, seeds that are no
-  whole numbers, counts below 1, an edit made from another version than the newest, or one that changes
-  nothing.
+  `edit_suite`): its `entries`, each its `environment` (`module:name`), how its starts are `chosen` (`eval data`,
+  of the name `eval_data`; `rows and seeds`, `rows` (none: every row) and `seeds`; `starts`, each a row (`task`)
+  and its `seed`, drawn as the row's start with that seed unless it says its `parameters`; or, for an edit,
+  `same`: those of the edited version's entry of that environment), the `episodes` of each start and the limits
+  (`thinking_tokens`, `answer_tokens`; null for the channel's own); and, for an edit, the version it was made from
+  (`base`, by number). A body with no `entries` is one entry. Raises `Taken` for what cannot be: a name that is no
+  name, no entries, an environment that does not load here or is in two entries, eval data or a row an
+  environment does not have, seeds that are no whole numbers, counts below 1, an edit made from another version
+  than the newest, or one that changes nothing.
 - `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
   group boundary. Raises `KeyError` when there is no such launch going.
 - `async def settings(self, run: str) -> dict[str, Any] | None` — A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
