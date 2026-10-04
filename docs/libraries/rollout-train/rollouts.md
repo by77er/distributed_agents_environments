@@ -171,7 +171,7 @@ data from rows and seeds when that is enough.
 ### Checking an environment
 
 ```sh
-uv run rollout env check minecraft_team.environment:environment --tools minecraft=minecraft_team.worlds:tools
+uv run rollout env check minecraft_team.environment:environment --pools minecraft=minecraft_team.worlds:worlds
 uv run rollout env check tests.rollout_train.rollouts.games:guessing --profile PROFILE --groups 4   # with a model
 ```
 
@@ -179,8 +179,9 @@ uv run rollout env check tests.rollout_train.rollouts.games:guessing --profile P
 naming rows it has); whether its description and version say something; whether one seed draws one start and its eval
 data is the same each time; how many of the starts drawn for training were eval starts, and were drawn again; and how
 one episode went on the local runner with a scripted model (`--reply` is what it says each turn; `--row` the row; the
-tool sets its program imports from `--tools NAME=module:factory` or a URL, or the profile's), with a reward in the
-described range and a result that says what the description says it does.
+tool sets its program imports from `--tools NAME=module:factory` or a URL, and the pools of the sandboxes it declares
+from `--pools KIND=module:factory` or a URL, or the profile's), with a reward in the described range and a result that
+says what the description says it does.
 
 With `--profile P --groups N` it also plays N groups (of the algorithm's group size, or `--episodes`) of the rows the
 environment's curriculum would choose first, on the profile's channel, served by its base model with nothing trained,

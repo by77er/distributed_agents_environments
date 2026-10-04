@@ -34,6 +34,7 @@ from rollout.harness.runner import (
     instantiate,
     with_row,
 )
+from rollout.harness.sandboxes import Pool, PoolBinding
 from rollout.local import LocalRunner
 from rollout.testing import ScriptedModelEndpoint
 from rollout_train.ledger import Ledger
@@ -188,10 +189,13 @@ async def scripted(
     reply: str = "hello",
     tool_sets: Mapping[str, ToolSet] | None = None,
     tools: Mapping[str, ToolBinding] | None = None,
+    pools: Mapping[str, Pool] | None = None,
+    pool_urls: Mapping[str, str] | None = None,
     within: float = 600.0,
 ) -> Finding:
     """One episode of `row` (by key; else the first row) on the local runner, every model slot answered by a scripted
-    model that says `reply` each turn; each import served by `tool_sets` (in this process, by name) or `tools` (a URL).
+    model that says `reply` each turn; each import served by `tool_sets` (in this process, by name) or `tools` (a URL),
+    and each kind of sandbox its program declares by `pools` (in this process, by kind) or `pool_urls`.
     Fails when it does not end within `within` seconds, ends in failure, or its result is not what the description
     says."""
     rows = list(environment.rows())
@@ -206,13 +210,22 @@ async def scripted(
         return Finding(
             "episode", False, f"its program imports {', '.join(missing)}: name a tool set for each (--tools)"
         )
+    pools, pool_urls = dict(pools or {}), dict(pool_urls or {})
+    kinds = sorted({spec.kind for spec in program.sandboxes().values()})
+    if missing := [kind for kind in kinds if kind not in pools and kind not in pool_urls]:
+        return Finding(
+            "episode", False, f"its program declares sandboxes of {', '.join(missing)}: name a pool for each (--pools)"
+        )
     endpoint = ScriptedModelEndpoint([reply] * REPLIES)
     scripted_model = ModelBinding(direct=DirectModel(provider="scripted", model="script"))
     binding = RunBinding(
         models=dict.fromkeys(program.model_slots(), scripted_model),
         imports={name: tools.get(name) or ToolBinding(local=name) for name in program.imports()},
+        pools={
+            kind: PoolBinding(url=pool_urls[kind]) if kind in pool_urls else PoolBinding(local=kind) for kind in kinds
+        },
     )
-    runner = LocalRunner(providers={"scripted": lambda model: endpoint}, tool_sets=tool_sets)
+    runner = LocalRunner(providers={"scripted": lambda model: endpoint}, tool_sets=tool_sets, pools=pools)
     handle = await runner.start(RunSpecification(program=reference, binding=binding), labels={"check": chosen.key})
     try:
         outcome = await asyncio.wait_for(handle.result(), within)

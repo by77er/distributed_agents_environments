@@ -256,11 +256,13 @@ async def _check(
     name: str | None,
     seed: int,
     settings: dict[str, Any] | None = None,
+    pools: list[str] | None = None,
 ) -> int:
     import dataclasses
 
     from rollout.environment import binding_for
     from rollout.harness.imports import ToolBinding
+    from rollout.harness.sandboxes import Pool, SandboxPool
     from rollout_train.algorithm import Grpo
     from rollout_train.check import checked, played, scripted
     from rollout_train.profile import Profile
@@ -273,15 +275,25 @@ async def _check(
         return 1
     scratch = directory or Path.home() / ".cache" / "rollout" / "checks" / (name or environment.replace(":", "-"))
     given = dict(_setting(each) for each in tools)  # (NAME=module:factory, or NAME=URL)
+    kinds: dict[str, Any] = dict(_setting(each) for each in pools or [])  # (KIND=module:factory, or KIND=URL)
     if profile is not None:
         given = {**Profile.load(profile).tools, **given}
+        kinds = {**Profile.load(profile).pools, **kinds}
     urls = {key: ToolBinding(url=str(where)) for key, where in given.items() if str(where).startswith("http")}
     await asyncio.to_thread(scratch.mkdir, parents=True, exist_ok=True)
     local = {key: named(str(where))(scratch) for key, where in given.items() if key not in urls}
+    pool_urls = {kind: str(where) for kind, where in kinds.items() if str(where).startswith("http")}
+    local_pools: dict[str, Pool] = {}
+    for kind, where in kinds.items():
+        if kind not in pool_urls:
+            options = {"kind": where} if isinstance(where, str) else dict(where)
+            local_pools[kind] = SandboxPool(named(str(options.pop("kind")))(scratch, **options))
     try:
-        episode = await scripted(offered, row=row, reply=reply, tool_sets=local, tools=urls)
+        episode = await scripted(
+            offered, row=row, reply=reply, tool_sets=local, tools=urls, pools=local_pools, pool_urls=pool_urls
+        )
     finally:
-        for each in local.values():  # (as a profile closes its tool sets)
+        for each in [*local.values(), *local_pools.values()]:  # (as a profile closes its tool sets and pools)
             close = getattr(each, "close", None)
             if close is not None and asyncio.iscoroutine(closing := close()):
                 await closing
@@ -762,6 +774,11 @@ def main() -> None:
         "--tools", action="append", default=[], metavar="NAME=WHERE",
         help="a tool set its program imports: module:factory, or a URL (repeatable; a profile's are used too)",
     )  # fmt: skip
+    checking.add_argument(
+        "--pools", action="append", default=[], metavar="KIND=WHERE",
+        help="a pool of the sandboxes its program declares: module:factory of their provider, or a URL (repeatable; a "
+        "profile's are used too)",
+    )  # fmt: skip
     checking.add_argument("--profile", type=Path, help="play groups on this profile's channel, with its base model")
     checking.add_argument("--groups", type=int, default=4, help="groups played with --profile (4)")
     checking.add_argument("--episodes", type=int, help="episodes of each group (by default the algorithm's group size)")
@@ -823,7 +840,7 @@ def main() -> None:
         sys.exit(asyncio.run(_check(
             arguments.environment, arguments.row, arguments.reply, arguments.tools, arguments.profile,
             arguments.groups, arguments.episodes, arguments.directory, arguments.name, arguments.seed,
-            dict(_setting(each) for each in arguments.set),
+            dict(_setting(each) for each in arguments.set), arguments.pools,
         )))  # fmt: skip
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
