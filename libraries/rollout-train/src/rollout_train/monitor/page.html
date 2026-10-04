@@ -252,6 +252,61 @@
   details summary { cursor: pointer; color: var(--quiet); font-size: 13px; padding: 2px 0; }
   .menu { display: none; border: 1px solid var(--line-strong); background: var(--panel); border-radius: 3px; padding: 3px 10px; cursor: pointer; }
 
+  /* Every policy, as a graph: a lane per policy, labelled on the left */
+  .dag { display: grid; grid-template-columns: 250px minmax(0, 1fr); }
+  .dag-labels { border-right: 1px solid var(--line-strong); }
+  .lane-label { height: 78px; display: grid; grid-template-columns: 16px minmax(0, 1fr); align-content: center; gap: 1px 8px; padding-right: 12px;
+                border-bottom: 1px solid var(--line); cursor: pointer; min-width: 0; }
+  .lane-label:nth-child(even) { background: var(--raised); }
+  .lane-label:hover b { color: var(--accent); }
+  .lane-label b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lane-label small, .lane-label .lane-tags { grid-column: 2; color: var(--quiet); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lane-tags { display: flex; gap: 4px; margin-top: 2px; } .lane-tags .chip { font-size: 10.5px; padding: 0 5px; }
+  .dag-frame { overflow-x: auto; min-width: 0; }
+  .dag-drawing { max-width: none; }  /* (it scrolls across, rather than shrink until nothing reads) */
+  .dag-drawing .lane-band { fill: var(--panel); } .dag-drawing .lane-band.odd { fill: var(--raised); }
+  .dag-drawing .lane-band.sample { fill: var(--warm-soft); opacity: .4; }
+  .dag-drawing text.v { fill: var(--quiet); } .dag-drawing text.stretch { fill: var(--faint); font-size: 9.5px; letter-spacing: .04em; }
+  .dag-drawing text.score { font-weight: 600; font-size: 10px; }
+  .t-good { fill: var(--good); color: var(--good); } .t-warm { fill: var(--warm); color: var(--warm); } .t-bad { fill: var(--bad); color: var(--bad); }
+  .t-violet { fill: var(--violet); } .t-accent { fill: var(--accent); }
+  .s-quiet { stroke: var(--quiet); stroke-width: 1.4; fill: none; } .dash { stroke-dasharray: 4 3; }
+  .dag-drawing line.s-accent, .dag-drawing line.s-warm, .dag-drawing line.s-violet { stroke-width: 2.5; }
+  .dag-drawing .edge { opacity: .85; } .dag-drawing .edge:hover { opacity: 1; stroke-width: 2.6; }
+  .dot-accent { fill: var(--accent); } .dot-warm { fill: var(--warm); } .dot-violet { fill: var(--violet); }
+  .dot-accent, .dot-warm, .dot-violet, .dot-released { stroke: var(--panel); stroke-width: 2; }
+  .dot-released { fill: var(--panel); stroke: var(--faint); stroke-width: 1.5; }
+  .dot-outside { fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-dasharray: 3 2; }
+  .ring { fill: none; stroke-width: 2; } .ring-good { stroke: var(--good); } .ring-warm { stroke: var(--warm); stroke-dasharray: 3 2.5; }
+  .ring-violet { stroke: var(--violet); stroke-dasharray: 3 2.5; } .ring-accent { stroke: var(--accent); }
+  .version.link { cursor: pointer; } .version.link:hover circle:not(.ring) { stroke: var(--ink); }
+  .gap { cursor: pointer; } .gap rect { fill: var(--panel); stroke: var(--line-strong); } .gap:hover rect { stroke: var(--accent); }
+  .gap text { fill: var(--quiet); font-weight: 600; }
+  .dag-legend { padding: 10px 18px 12px; margin: 0; border-top: 1px solid var(--line); }
+  .legend i.ring-good, .legend i.ring-warm, .legend i.ring-violet { border-radius: 50%; background: none; border: 2px solid var(--good); width: 10px; height: 10px; vertical-align: -1px; }
+  .legend i.ring-warm { border: 2px dashed var(--warm); } .legend i.ring-violet { border: 2px dashed var(--violet); }
+  .linkish { border: 0; background: none; padding: 0; cursor: pointer; color: var(--accent); font-size: 12px; }
+  .linkish:hover { text-decoration: underline; }
+  .chip.sample { color: var(--warm); border-color: var(--warm); background: var(--warm-soft); font: 600 9.5px var(--mono); text-transform: uppercase; letter-spacing: .07em; padding: 1px 5px; }
+  .chip.on { border-color: var(--good); color: var(--ink); box-shadow: inset 2px 0 0 var(--good); } .chip.off { color: var(--faint); }
+  .chip .waits { color: var(--bad); font-weight: 600; }
+  .notice p { margin: 0; }
+  .cells.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .members.queue .member { grid-template-columns: 36px minmax(0, 10em) auto minmax(0, 1fr); }
+  .wide-tiles { grid-template-columns: repeat(auto-fill, minmax(min(440px, 100%), 1fr)); }
+  .stages.way { grid-template-columns: repeat(4, minmax(56px, 1fr)); min-width: 280px; }
+  .stages .skipped { color: var(--faint); opacity: .6; } .stages .skipped::before { background: repeating-linear-gradient(90deg, var(--line) 0 4px, transparent 4px 7px); opacity: 1; }
+  .mono { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  table.evals th.subject { white-space: normal; text-align: center; min-width: 74px; vertical-align: bottom; }
+  table.evals th.subject div { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--ink); }
+  table.evals th.subject small { display: block; color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  table.evals td { text-align: center; padding: 5px 8px; } table.evals td.key { text-align: left; }
+  table.evals tr.total td { border-bottom: 1px solid var(--line-strong); }
+  table.evals .track { height: 5px; margin-top: 4px; }
+  .cell-result i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin: 0 1px; vertical-align: middle; }
+  .cell-result i.solved { background: var(--good); } .cell-result i.unsolved { background: var(--line-strong); }
+  .cell-result i.unplayed { box-shadow: inset 0 0 0 1px var(--line-strong); }
+
   @media (max-width: 900px) {
     body { display: block; height: auto; }
     aside { position: fixed; inset: 0 auto 0 0; z-index: 10; transform: translateX(-100%); transition: transform .2s; box-shadow: 6px 0 0 var(--line); }

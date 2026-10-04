@@ -27,6 +27,7 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train.layout import BLOBS, JOBS, LEDGER, PROCESSES
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.feed import Appended, FeedReader, plain
+from rollout_train.monitor.lineage import lineage
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, runs_in, table
@@ -88,6 +89,16 @@ class System:
                 versions += kept
                 policies.append(_policy(policy, kept, fences.get(policy_scope(policy))))
         return await asyncio.to_thread(self._assembled, tables, fences, runs, policies, versions)
+
+    async def lineage(self, sample: bool = False) -> dict[str, Any]:
+        """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
+        With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
+        beside the ledger."""
+        tables: dict[str, dict[str, JsonValue]] = {}
+        if await asyncio.to_thread(self._ledger.directory.exists):
+            tables = {name: await self._ledger.read(name) for name in await self._ledger.tables()}
+        notes = await asyncio.to_thread(self.feed.job)
+        return await asyncio.to_thread(lineage, tables, notes, sample=sample)
 
     async def group(self, run: str, number: int) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
