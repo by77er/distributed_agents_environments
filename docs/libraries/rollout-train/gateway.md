@@ -2,10 +2,13 @@
 
 Code: `rollout_train.gateway` · See [`Gateway`](../../guide/reference.md#gateway),
 [`TurnStore`](../../guide/reference.md#turnstore), [`Keyring`](../../guide/reference.md#keyring),
-[recorder](recorder.md), [the recorder over HTTP](harness-endpoint.md), [episodes](episodes.md)
+[`GatewayEndpoints`](../../guide/reference.md#gatewayendpoints), [recording](recorder.md),
+[harnesses over HTTP](harness-endpoint.md), [episodes](episodes.md)
 
 The gateway stands between programs and harnesses on one side and the endpoints that sample a policy on the other.
-Programs and harnesses speak a standard model API to it, with a key per model slot. For each request it:
+Programs and harnesses speak a standard model API to it, with a key per model slot. It is how every run records its
+samples: a runner's recorded slots sample through it, a gateway in the runner's own process or replicas of their own
+([a runner served by the gateway](#a-runner-served-by-the-gateway)). For each request it:
 
 1. verifies the key;
 2. renders the request with the channel's renderer;
@@ -35,8 +38,8 @@ app = create_app(gateway)               # serve with uvicorn, as many replicas a
 | `GET /healthz` | 200 while the process serves |
 | `GET /readyz` | 200 when the ledger and the blob store answer; 503, saying which does not, otherwise |
 
-The three APIs are read and answered by the same code as [the recorder over HTTP](harness-endpoint.md): what a request
-means, how reasoning goes both ways, streams and errors are as described there. The native path answers errors as
+What a request in the three APIs means, how reasoning goes both ways, streams and errors are described in
+[harnesses over HTTP](harness-endpoint.md). The native path answers errors as
 `{"error": {"type", "message"}}`, with the `context_limit` of a context too long for the model.
 
 A reply's headers say what served it:
@@ -61,8 +64,7 @@ A reply's headers say what served it:
   append. Both answer with the turn that was kept.
 - **A turn samples one checkpoint**, the one chosen when it began, through both phases of its thinking. An endpoint
   that unloads it in between has the turn sampled again from the start, on the next choice.
-- **The sampling parameters are the binding's**, carried in the key: what a client sends is ignored, as in the
-  recorder.
+- **The sampling parameters are the binding's**, carried in the key: what a client sends is ignored.
 
 ## Keys
 
@@ -90,7 +92,8 @@ rk1.KID.PAYLOAD.SIGNATURE
 secret is rotated by putting a new one first, and removing the old once the keys it signed have expired. Secrets are
 read from `ROLLOUT_GATEWAY_KEYS` (`KID:SECRET` pairs separated by commas) or from a file named by
 `ROLLOUT_GATEWAY_KEYS_FILE` or a profile's `[gateway] keys` (one `KID SECRET` per line). They are never written to the
-ledger. A secret is 32 bytes at least.
+ledger. A secret is 32 bytes at least. A gateway in a runner's own process given none signs with a secret it makes when
+it starts: its keys are taken only while it runs.
 
 Whoever plays an attempt mints a key per slot: [`GatewayEndpoints`](#a-runner-served-by-the-gateway) does, for a
 runner. Clients send it as OpenAI's do (a bearer token) or as Anthropic's do (`x-api-key`).
@@ -163,15 +166,16 @@ stale attempt's turns out of training:
 ### Segments
 
 `TurnStore.sessions(run, run_id)` reads a program's run's turns, in the order they were recorded, and assembles each
-slot's segments with `segments_of` (`rollout_train.recorder.segments`): the rule the recorder applies in memory. A
-runner puts them in the episode as it puts the recorder's ([how an episode is
-assembled](episodes.md#how-an-episode-is-assembled)), so an episode recorded by the gateway has the same
-trajectories, in the same blob, as one recorded in process.
+slot's segments with `segments_of` (`rollout_train.recorder.segments`: [what a session
+exports](recorder.md#what-a-session-exports)). A runner puts them in the episode when the run ends ([how an episode is
+assembled](episodes.md#how-an-episode-is-assembled)). The segments are the same whether the gateway ran in the
+runner's process or elsewhere, and whether or not the runner was started again while the run played.
 
 ### Links between requests
 
-A request may say how it follows from earlier ones, in `X-Rollout-Links`: a JSON list of `{"type", "source"}`, each
-source an earlier request's id. Types are labels (a letter, then letters, digits and `._:-`), and every label is kept
+A request may say how it follows from earlier ones: a harness in `X-Rollout-Links` (a JSON list of `{"type",
+"source"}`), a program in its `SampleRequest.links`, each source an earlier request's id. `Memory` declares its
+compactions this way, as the Minecraft team's agents compact. Types are labels (a letter, then letters, digits and `._:-`), and every label is kept
 as it was sent:
 
 | Type | From, to |
@@ -186,7 +190,7 @@ source of a `compaction`. Its tokens are kept as context either way. By default 
 
 ## Which checkpoint
 
-The gateway samples a channel as a runner's recorder does ([channels](channels.md)), through the same `Sampler`:
+The gateway samples a channel through its `Sampler` ([channels](channels.md)):
 
 - **A channel whose engines serve elsewhere** (`RemoteEngine`: vLLM servers, or a router in front of them) is
   sampled per run, as a `RemoteChannel`. It reads what the run says its channel should serve
@@ -203,6 +207,10 @@ between the phases (`Unserved`), has the turn sampled again from the start, up t
 attempt is recorded.
 
 ## Running it
+
+A runner whose profile names no `[gateway] url` runs a gateway in its own process, over the profile's channels and
+routes, and records through it with no HTTP in between; it serves it to harnesses at the profile's `serve`
+([deploying](../../guide/deploying.md#the-gateway)). Replicas of their own serve the same code:
 
 ```bash
 ROLLOUT_GATEWAY_KEYS_FILE=~/.config/rollout/gateway.keys \
@@ -224,15 +232,32 @@ Replicas share nothing but the ledger and the blob store.
 
 ## A runner served by the gateway
 
-[`GatewayEndpoints`](../../guide/reference.md#gatewayendpoints) stands where a runner's recorder stands
-([`RecordedEndpoints`](../../guide/reference.md#recordedendpoints)):
+[`GatewayEndpoints`](../../guide/reference.md#gatewayendpoints) is a runner's recorder
+([`RecordedEndpoints`](../../guide/reference.md#recordedendpoints)), over a gateway in this process or one at a URL:
+
+```python
+endpoints = GatewayEndpoints.of(gateway, "http://runner:8800")   # a gateway in this process, served there
+endpoints = GatewayEndpoints("https://models.example/gw", keyring, TurnStore(ledger, blobs), routes=routes)
+```
 
 - `admit(run_id, Attempt(run, fence, episode, attempt))` says which attempt a program's run plays, before it
-  starts;
-- `endpoint(binding)` serves its recorded slots. A program's samples go to `/v1/samples` under a key minted for the
-  slot, and are posted again under the same effect id when the gateway cannot be reached or a replica fails;
-- `address()` hands a harness the gateway's URL and such a key. Its samples are recorded by the gateway, so they do
-  not reach the runner's hooks;
+  starts. The [episode runner](rollouts.md#a-runner) admits each attempt under the fence of its episode, which its
+  claim took, and admits an adopted run again under the fence it takes anew;
+- `endpoint(binding)` serves its recorded slots. A program's sample is a call of the gateway in this process, or a
+  post to `/v1/samples` under a key minted for the slot, posted again under the same effect id when the gateway
+  cannot be reached or a replica fails;
+- `address()` hands a harness the gateway's URL and such a key;
+- `reaches(run, binding)` says whether every recorded model of a run's binding can be sampled now (a routed channel's
+  servers have a checkpoint close enough), which the episode runner asks before claiming;
 - `sessions(run, run_id)` reads what each slot recorded, when the run ends.
 
-The [episode runner](rollouts.md) records through the recorder in its own process.
+What a channel guarantees a session (its capability contract) is its channel's: in this process, or for a routed
+channel, as the runner sees its servers.
+
+**Hooks.** A program's samples reach the runner's hooks through its endpoints. A harness's go straight to the
+gateway: one in the runner's process tells the runner's hooks of each (`Gateway.hooks`), and the
+[monitor](monitor.md) reads the turns of an episode a gateway elsewhere recorded.
+
+**A runner started again.** A durable run resumed by a runner started again asks again for the samples it had not
+heard back from, under the same effect ids, and is answered with the recorded turns; what it had recorded before
+survived in the turn store. Its episode is trained on like any other.

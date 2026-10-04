@@ -13,7 +13,7 @@ Nothing else about the run is needed to compute a loss, and nothing in an episod
 ## How an episode is assembled
 
 A [runner](rollouts.md#a-runner) assembles an episode when its run ends, from the run's [events](../rollout/contracts/run-events.md) and from
-what the recorder kept of each of its model slots.
+what the gateway recorded of each of its model slots.
 
 | Part of the episode | Comes from |
 |---|---|
@@ -22,7 +22,7 @@ what the recorder kept of each of its model slots.
 | `outcome`, `detail` | the terminal event: `completed`; `failed` with what the program raised; `cancelled`, also for a run whose events have no ending |
 | `info` | the payload of the run's `output.emitted` event of kind `result`: what the program reported with `run.emit("result", {...})` |
 | `excluded` | the reason of a `training.excluded` event |
-| `trajectories` | one per model slot that sampled or was rewarded: the slot's segments from the recorder, and its rewards |
+| `trajectories` | one per model slot that sampled or was rewarded: the slot's segments from the gateway's turn store, and its rewards |
 
 A run that could not start is a failed episode whose `detail` says why, with no trajectories.
 

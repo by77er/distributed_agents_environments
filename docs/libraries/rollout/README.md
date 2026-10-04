@@ -82,7 +82,7 @@ what task and agent code must not: which model serves a slot, how it samples, wh
 | [`RunBinding`](../../guide/reference.md#runbinding) | how each model slot and each import is served, which pool serves each kind of sandbox, and how priorities map to delivery modes ([conversations](../../guide/conversations.md#priority-and-delivery-mode)) |
 | [`ModelBinding`](../../guide/reference.md#modelbinding) | exactly one of `direct` and `recorded` |
 | [`DirectModel`](../../guide/reference.md#directmodel) | a provider's API. `provider` is the key of an endpoint factory registered with the runner. Nothing is recorded. |
-| [`RecordedModel`](../../guide/reference.md#recordedmodel) | a channel served through the [recorder](../rollout-train/recorder.md) |
+| [`RecordedModel`](../../guide/reference.md#recordedmodel) | a channel served through the [gateway](../rollout-train/gateway.md), which records every sample |
 | [`SamplingParameters`](../../guide/reference.md#samplingparameters) | how a bound model samples. It belongs to bindings; task and agent code cannot set it. |
 | [`ToolBinding`](../../guide/reference.md#toolbinding) | exactly one of `local` (a tool set registered with the runner) and `url` (a tool set served over HTTP, [tools](../../guide/tools.md#serving-a-tool-set-over-http)) |
 | [`PoolBinding`](../../guide/reference.md#poolbinding) | exactly one of `local` (a pool registered with the runner) and `url` (a pool served over HTTP, [sandboxes](sandboxes.md#over-http)) |

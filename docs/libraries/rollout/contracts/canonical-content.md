@@ -4,8 +4,8 @@ Code: `rollout.contracts.content`, `rollout.contracts.digests` · See [guide: co
 [API reference](../../../guide/reference.md#message)
 
 Canonical content is the model-agnostic form of everything a model reads or writes. Task and agent code, run events,
-tool sets and the model endpoint use only this form. Rendering to a model's tokens happens in a recorder's renderer
-([recorder](../../rollout-train/recorder.md#renderers)) or inside a direct adapter, and nowhere else.
+tool sets and the model endpoint use only this form. Rendering to a model's tokens happens in the gateway's renderer
+([recording](../../rollout-train/recorder.md#renderers)) or inside a direct adapter, and nowhere else.
 
 Building and reading messages is shown in the [guide](../../../guide/content.md). This page gives the rules.
 
@@ -27,7 +27,7 @@ and [`Reasoning`](../../../guide/reference.md#reasoning), told apart by its `typ
 - **`meta`** is a string map that no model sees. It is never rendered, and no digest covers it. The harness uses
   `meta["effect_id"]` to tie a sampled reply to the sample that produced it.
 - **`call_id`** is unique within a context. Whatever parses a model's output makes it; the tool result repeats it.
-- **Reasoning** is portable: plain text that a renderer may render or drop. A recorder's renderer parses a model's
+- **Reasoning** is portable: plain text that a renderer may render or drop. The gateway's renderer parses a model's
   thinking into a reasoning block and renders it back for the model family's template. The Responses adapter does
   not carry reasoning from one turn to the next.
 - **Media** holds a [`BlobReference`](../../../guide/reference.md#blobreference), never bytes. The reference depends

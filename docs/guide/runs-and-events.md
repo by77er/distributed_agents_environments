@@ -151,5 +151,5 @@ The handle's `context` is the run's `LocalRunContext`. Sending messages, cancell
 | Messages | `message.received`, `turn.interrupted` |
 
 A sample's completion carries the canonical reply, the finish reason and the usage. Tokens and logprobs never appear
-in run events; they live in the recorder. Each type's payload and the order of events are specified in
+in run events; they live in the gateway's turn store. Each type's payload and the order of events are specified in
 [run events](../libraries/rollout/contracts/run-events.md).

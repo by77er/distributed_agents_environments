@@ -1,6 +1,6 @@
 # verifiers environments
 
-Code: `rollout_verifiers` · See [the recorder over HTTP](../libraries/rollout-train/harness-endpoint.md),
+Code: `rollout_verifiers` · See [harnesses over HTTP](../libraries/rollout-train/harness-endpoint.md),
 [Prime Intellect's verifiers](../research/prime-compat.md)
 
 Prime Intellect's [`verifiers`](https://github.com/PrimeIntellect-ai/verifiers) v1 describes an environment as a
@@ -81,7 +81,7 @@ one verifiers episode in the runner's process:
 1. It builds verifiers' environment from the config, and its task from the start's data.
 2. verifiers stands its own interception server between the harness and the model, and relays each of the harness's
    requests, in the harness's own API (Chat Completions for `null`, Responses for Codex, Messages for Claude Code), to
-   the address. The recorder renders and samples each, so the episode's tokens and logprobs are recorded by this
+   the address. The gateway renders and samples each, so the episode's tokens and logprobs are recorded by this
    system, not rebuilt by verifiers.
 3. The task's rewards score the trace. The episode's reward is their weighted sum; its `result` is each reward, each
    metric, the turns the harness took, and whether the episode solved its task.
@@ -100,12 +100,12 @@ your own (`custom`).
 ## Checking one
 
 `rollout env check MODULE:NAME` passes its rows, description, starts and eval data (for the example: one row, rewards
-in [0, 1], 100 eval starts on a row training never plays). Its scripted episode fails: the check's recorder is not
+in [0, 1], 100 eval starts on a row training never plays). Its scripted episode fails: the check's model is not
 served over HTTP, and the harness needs an address.
 
 ## Tests
 
 `implementations/rollout-verifiers/tests/` plays a two-task taskset defined in the test through the `null` harness,
-against a recorder served on `127.0.0.1:8809`. It runs in the project's own environment (`uv run pytest tests` there),
+against a gateway served on `127.0.0.1:8809`. It runs in the project's own environment (`uv run pytest tests` there),
 needs `uv` (the harness runs as a uv script) and, the first time, the network. Elsewhere it skips: it needs
 `verifiers`.

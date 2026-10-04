@@ -11,7 +11,7 @@ trainer on machines of their own.
 
 ```python
 await train(environment, trainer, checkpoints, start=None, base="Qwen/Qwen3.5-9B", channel="policy",
-            directory=cache, publish=recorder.publish, run=run.id, groups=100)
+            directory=cache, publish=platform.publish, run=run.id, groups=100)
 ```
 
 `rollout train PROFILE ENVIRONMENT [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:

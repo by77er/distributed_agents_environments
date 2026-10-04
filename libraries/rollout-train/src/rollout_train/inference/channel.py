@@ -1,6 +1,6 @@
 """A channel: a policy being served, by name.
 
-Task code never sees a channel: a run's binding names one for a model slot, and the recorder samples from it. Whoever
+Task code never sees a channel: a run's binding names one for a model slot, and the gateway samples from it. Whoever
 trains publishes new weights to it; whoever deploys decides which engines stand behind it.
 """
 
@@ -24,7 +24,7 @@ class Generation:
     """`stop` (a stop token, included in `tokens`) or `length`."""
     model: str | None = None
     """The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by
-    the name it is served as. The recorder checks that it is the checkpoint it stamps the tokens with."""
+    the name it is served as. The gateway checks that it is the checkpoint it stamps the tokens with."""
 
 
 class Engine(Protocol):
@@ -88,7 +88,7 @@ class Limits:
 
 
 class Sampler(Protocol):
-    """What the recorder samples from: a `Channel`, whose engines this process publishes to, or a channel sampled on
+    """What the gateway samples from: a `Channel`, whose engines this process publishes to, or a channel sampled on
     servers elsewhere (`rollout_train.inference.remote.RemoteChannel`)."""
 
     @property

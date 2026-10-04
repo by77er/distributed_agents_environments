@@ -89,6 +89,7 @@ them ([rollouts](rollouts.md)), and the checkpoints. Each run keeps the rest in 
 | the registry's suite names | the version each suite's name points to ([versions](evals.md#versions)) | which version a suite's page, its tile and the forms take as its newest |
 | a run's `feed` | what is happening now, written by `RunFeed` | episodes still running, their rollouts turn by turn |
 | the run's blob store | each ended episode's events, where the run's newest start says its blobs are (`blobs`: files, or S3) | the rollouts of episodes no longer in the feed |
+| the ledger's turns | each turn the gateway recorded (`runs/RUN/turns/RUN_ID`), its reply in the blob store | the rollouts of episodes whose feed and kept events hold no sample: a harness's, recorded by a gateway elsewhere |
 
 Where a run's episodes are read is decided in one place (`System._source`), from the run's newest `starts` record:
 
@@ -301,6 +302,9 @@ memory, say) takes no turn then: those samples are folded, closed, under its tur
 
 An episode whose feed file has been pruned is read back from the events its runner kept in the blob store: its
 replies and tool calls are there, and what each model was sent is not (it is kept as tokens in the trajectories).
+Where neither the feed nor the kept events hold a sample of an episode (a harness's samples, which a gateway elsewhere
+recorded and the runner's hooks never saw), its rollouts are the replies of the turns the gateway recorded, read from
+the ledger, live and once it ended.
 
 `System(directory)` reads a run's directory and its ledger, and `System(ledger=…)` a ledger alone: `snapshot()`
 (where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds),

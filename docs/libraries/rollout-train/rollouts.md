@@ -11,7 +11,8 @@ group's episodes is only a matter of where runners are.
 ```python
 await plan(ledger, "train", Plan(program, binding), fence)        # how the run's episodes are played
 await ledger.append(table("train", GROUPS), "1", {"parameters": row, "episodes": 4}, fence)
-async with playing(EpisodeRunner("host/train", ledger, runner, recorder, blobs, places=6)):
+recorder = GatewayEndpoints.of(gateway)                            # what the runs' recorded slots sample through
+async with playing(EpisodeRunner("host/train", ledger, LocalRunner(recorder=recorder), recorder, blobs, places=6)):
     episodes = await episodes_of(ledger, blobs, "train", 1, 4)     # the group's four, once all have ended
 ```
 
@@ -88,17 +89,19 @@ of the fences it lists.
 ## A runner
 
 [`EpisodeRunner(name, ledger, runner, recorder, blobs, places, ...)`](../../guide/reference.md#episoderunner) claims
-open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
+open episodes and plays them on a [`Runner`](../rollout/README.md#runner). Its `recorder` is what the runs' recorded
+slots sample through, the runner's too: the [gateway](gateway.md#a-runner-served-by-the-gateway)'s endpoints
+([`Recorded`](../../guide/reference.md#recorded)).
 
 - **`places`**: how many episodes it plays at once. When one ends it looks again at once; otherwise every `every`
   seconds.
 - **Oldest group first.** Open episodes are claimed in the order their groups were decided, across every run it
   serves.
-- **What it serves.** A run whose plan's recorded models are all on channels its recorder serves, whose local
+- **What it serves.** A run whose plan's recorded models its recorder can sample now (`reaches`), whose local
   imports are all among `imports` (the tool sets it has), and whose local pools are all among `pools` (the sandbox
-  pools it has). With `runs`, those runs only. A channel whose engines are on other machines is served while one
-  of its servers has a checkpoint close enough to what the run says it should serve (`Recorder.reaches`), and the
-  run is played with the channel named within it (`Recorder.for_run`): the runner knows nothing of servers.
+  pools it has). With `runs`, those runs only. A channel whose engines are on other machines can be sampled while one
+  of its servers has a checkpoint close enough to what the run says it should serve: the runner knows nothing of
+  servers.
 - **Room in the pools.** An episode whose program declares sandboxes is claimed only while their pools have room
   for them: each pool's `capacity()` is asked once a look, and what the runner claims is counted against it as it
   goes ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)).
@@ -106,9 +109,11 @@ open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
   room.
 - **An episode is played** as the run's program with the group's `parameters` as its row, labelled `run`, `group`
   and `episode`, with the claim's key (`RUN/GROUP/EPISODE/ATTEMPT`) as the run's lease: its sandboxes are leased
-  under it, and their leases end with the claim. When it ends, the runner takes the run's segments from the recorder
-  (which then forgets the run), assembles the [episode](episodes.md), stores it and appends its record under the
-  episode's fence.
+  under it, and their leases end with the claim. Before the run starts, the runner admits it to its recorder under
+  the episode's fence (`admit(run_id, Attempt(run, fence, "GROUP/EPISODE", attempt))`): the gateway appends the run's
+  turns under that fence, so an attempt taken over records nothing more. When it ends, the runner reads the run's
+  segments from the gateway's turn store (`await sessions(run, run_id)`), assembles the [episode](episodes.md),
+  stores it and appends its record under the episode's fence.
 - **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
   `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
   is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop. Over a runner whose runs
@@ -124,9 +129,10 @@ runner, so that the runs the runner recovers find their claims adopted):
   a record, found by the claim's `run_id`; the claim may have been made under any fence the runner held before (one
   that died before adopting, or whose fence was taken twice, adopts its runs all the same). The runner takes the
   episode's fence, reads the claims again, and notes the adoption in `adopted`, keyed by its new fence and appended
-  under the episode's; the claim holds again. The runner follows the run to its end and records its episode, which is
-  left out of training: what it sampled before its runner stopped is not recorded (its outcome and result still
-  count). A run that ended while its runner was stopped, unrecorded, is recorded now.
+  under the episode's; the claim holds again, and the run is admitted to the recorder under the episode's new fence.
+  The runner follows the run to its end and records its episode, which trains like any other: the gateway kept what
+  the run sampled before its runner stopped, and answers a sample asked for again under its effect id with the turn
+  it recorded. A run that ended while its runner was stopped, unrecorded, is recorded now.
 - **Cut short:** a run of its own claim that lapsed meanwhile (another runner took the episode up, say), still
   going. The attempt is noted in `interrupted` and the run cancelled; a pool beside the ledger refuses it its
   sandboxes and releases them.

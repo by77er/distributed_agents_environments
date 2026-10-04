@@ -91,8 +91,8 @@ class SandboxSpec(ContractModel):
     slots: FrozenSequence[str] = ()
     """Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment:
     `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, suffixed with the slot's name in capitals (`_AGENT_1`),
-    and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once the
-    recorder forgets the run: an episode runner has it forget the run as the episode ends."""
+    and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it
+    expires or a newer attempt of its episode takes the episode's fence."""
     process: Process | None = None
     mounts: FrozenSequence[Mount] = ()
     scratch: Scratch | None = None

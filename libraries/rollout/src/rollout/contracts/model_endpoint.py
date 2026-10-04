@@ -124,8 +124,8 @@ class ModelAddress(ContractModel):
 
 
 class ModelEndpoint(Protocol):
-    """Serves model slots: implemented by the recorder and by direct adapters. An endpoint that can also be reached
-    over HTTP is an `AddressableEndpoint`."""
+    """Serves model slots: implemented by the gateway's endpoints and by direct adapters. An endpoint that can also be
+    reached over HTTP is an `AddressableEndpoint`."""
 
     def describe(self, session_id: str) -> CapabilityContract:
         """The capability contract of the session's model slot."""

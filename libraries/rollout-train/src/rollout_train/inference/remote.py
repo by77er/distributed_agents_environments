@@ -7,8 +7,8 @@ as an adapter named by the checkpoint's id (`/v1/load_lora_adapter`, which the s
 the prompt's token ids (`/v1/completions` with `return_token_ids` and `logprobs`), whose answer names the model that
 sampled it. `RemoteEngine` is an `Engine` over that API, beside `VllmEngine` and the scripted engines.
 
-The recorder stays with the episode runner, so that what is recorded is exactly what was sampled. A `RemoteChannel` is
-one run's channel as a runner samples it: it reads what the run says the channel should serve
+The gateway records what was sampled, exactly as it was sampled. A `RemoteChannel` is one run's channel as the gateway
+samples it: it reads what the run says the channel should serve
 (`rollout_train.serving`), and asks for that checkpoint by name; where the server does not have it yet, it asks for the
 newest one before it the server has, no more than `max_lag` checkpoints behind, and for the newest again at its next
 look. Every token is stamped with the depth of the checkpoint its answer names. Which server samples is the router's
@@ -240,7 +240,7 @@ def _said(answer: Mapping[str, Any]) -> str:
 
 
 class RemoteChannel:
-    """One run's channel, sampled on servers elsewhere: what the recorder samples from (`Sampler`).
+    """One run's channel, sampled on servers elsewhere: what the gateway samples from (`Sampler`).
 
     Each turn asks for the checkpoint the run says the channel should serve (`wanted`), by its id as the model's name;
     or, where its server does not have it yet, the newest one before it that the server has, no more than `max_lag`
@@ -462,7 +462,7 @@ class Route:
 
 class Routes:
     """The routed channels of every run a runner plays (`RemoteChannel`), each made when first asked for, choosing from
-    what that run says its channel serves (in `ledger`): implements the recorder's `Routes`."""
+    what that run says its channel serves (in `ledger`): what the gateway samples them through."""
 
     def __init__(
         self, routes: Mapping[str, Route], ledger: Ledger, *, every: float | None = None, patience: float = 300.0

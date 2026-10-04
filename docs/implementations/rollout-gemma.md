@@ -34,6 +34,6 @@ as one.
 
 Gemma's template asks for thinking with `enable_thinking`, and opens the thought channel in the generation prompt
 itself only after a tool's response. The renderer opens it in every generation prompt (`<|channel>thought` and a
-newline: [`ThinkingFormat`](../guide/reference.md#thinkingformat) with `prompt_opens`), so that the recorder can hold
+newline: [`ThinkingFormat`](../guide/reference.md#thinkingformat) with `prompt_opens`), so that the gateway can hold
 thinking to its budget: thinking that runs out of it is closed with a newline and `<channel|>`, unsampled, and the
 answer is sampled after it. An earlier turn's thinking is not shown again, as the template has it.

@@ -9,7 +9,7 @@ runs in) in a runtime, one rollout per task. `VerifiersEnvironment` wraps one as
 - **Eval data.** The tasks of the eval data (`eval`), in order, are one named list of starts: a suite once frozen.
 - **An episode** (`VerifiersProgram`) is one verifiers episode, played in its process: verifiers' own interception
   server stands between the harness and the model, and relays the harness's requests, in the harness's own API, to
-  the episode's model address. The recorder samples them, so the tokens and logprobs are recorded by this system. The
+  the episode's model address. The gateway samples them, so the tokens and logprobs are recorded by this system. The
   episode's reward is the task's (its rewards' weighted sum); its info has each reward and metric, and `solved`.
 """
 

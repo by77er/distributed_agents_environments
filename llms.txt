@@ -2,7 +2,7 @@
 
 > Durable, scalable agents and environments for agent products and reinforcement learning. A uv workspace of Python
 > 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (rollout jobs,
-> episodes with token trajectories, the training loop, policies, channels, the recorder, deployment profiles, the
+> episodes with token trajectories, the training loop, policies, channels, the gateway that records every turn, deployment profiles, the
 > `rollout` command), one package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Qwen and
 > Gemma renderers, computers, an OpenAI endpoint, an S3 blob store), two products and one environment. The
 > documentation describes the code as built.
@@ -51,12 +51,12 @@ the test suite and a block tagged `python fragment` does not. The API reference 
 - [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
 - [Training](docs/libraries/rollout-train/training.md): the loop, its steps over groups, group-relative advantages,
   the curriculum, the trainer protocol
-- [Channels](docs/libraries/rollout-train/channels.md) and the [recorder](docs/libraries/rollout-train/recorder.md):
+- [Channels](docs/libraries/rollout-train/channels.md) and [recording](docs/libraries/rollout-train/recorder.md):
   engines, limits, publishing weights, token recording
-- [The recorder over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the OpenAI-compatible endpoint for
+- [Harnesses over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the OpenAI-compatible endpoint for
   harnesses that bring their own loop
 - [The gateway](docs/libraries/rollout-train/gateway.md): a stateless service that samples channels for programs and
-  harnesses with signed keys, and records every turn in the ledger and the blob store
+  harnesses with signed keys, and records every turn in the ledger and the blob store: how every run records
 - [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a run's directory: its steps, groups,
   episodes and every agent's turns
 

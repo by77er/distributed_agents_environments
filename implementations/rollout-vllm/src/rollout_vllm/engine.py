@@ -56,7 +56,7 @@ class VllmEngine:
         )
         self.model = model
         self.max_model_len = max_model_len
-        """The longest sequence (prompt and completion) the engine accepts; a recorder channel reads it."""
+        """The longest sequence (prompt and completion) the engine accepts; a channel reads it."""
         self._engine: Any = AsyncLLM.from_engine_args(arguments)
         self._requests = itertools.count()
         self._adapters: dict[str, Any] = {}

@@ -29,8 +29,8 @@ Both families write thinking between `<think>` and `</think>`
 |---|---|---|
 | Who opens the block | The generation prompt ends inside it (`prompt_opens`) | The model |
 | A sample that never closes it | All of it is reasoning | It is text |
-| Thinking that runs out of its budget | The recorder appends `forced_close` (a newline, `</think>`, two newlines) and samples the answer | Not held apart: one phase samples with the thinking and answer room together |
+| Thinking that runs out of its budget | The gateway appends `forced_close` (a newline, `</think>`, two newlines) and samples the answer | Not held apart: one phase samples with the thinking and answer room together |
 
 What precedes the last close becomes a `Reasoning` block of the canonical message; what follows is text and tool
-calls. How the recorder holds thinking to its budget is described under
+calls. How the gateway holds thinking to its budget is described under
 [thinking](../libraries/rollout-train/recorder.md#thinking).

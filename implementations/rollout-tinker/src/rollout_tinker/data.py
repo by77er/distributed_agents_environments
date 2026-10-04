@@ -3,7 +3,7 @@
 A datum's input is the segment's tokens but the last, and its targets the tokens but the first: row *i* predicts token
 *i* + 1. So a sampled token at position *t* is row *t* - 1, which carries what the loss needs of it (its behaviour or
 starting logprob, its advantage, its weight). Every other row carries zeros: a prompt token, a tool result, a token the
-recorder forced (none of which is in a span) adds nothing to the loss, and no gradient.
+gateway forced (none of which is in a span) adds nothing to the loss, and no gradient.
 """
 
 from collections.abc import Mapping, Sequence

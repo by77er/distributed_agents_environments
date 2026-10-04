@@ -9,7 +9,7 @@ described. The code is `rollout_train.profile`, and the command is `rollout` (`r
 ```toml
 directory = "~/.cache/rollout/runs/first"     # the run's own: run.json, checkpoints in use, the monitor's feed
 runner = "local"                              # or "durable": runs survive this process
-serve = "0.0.0.0:8900"                        # optional: the model endpoint for harnesses, over HTTP
+serve = "0.0.0.0:8900"                        # optional: the runner's gateway, for harnesses, over HTTP
 address = "http://trainer-1:8900"             # what others reach it at, if not http://{serve}
 feed_runs = 80                                # optional: episodes kept in the monitor's feed
 episodes_at_once = 6                          # optional: the most episodes this machine's runner plays at once
@@ -46,8 +46,8 @@ suite = "words-held-out"                      # evaluate checkpoints as they are
 every = 2                                     # the checkpoint of every second step
 episodes = 1                                  # episodes of each start (by default the suite's)
 
-[gateway]                                     # optional: for `rollout gateway`, a replica that records every turn
-url = "https://models.example/gw"             # where programs and harnesses reach it, through its proxy
+[gateway]                                     # optional: the gateway that records every turn (`rollout gateway`)
+url = "https://models.example/gw"             # its replicas, which the runner records through (none: one in its process)
 listen = "127.0.0.1:8830"                     # where a replica serves
 keys = "~/.config/rollout/gateway.keys"       # the secrets keys are signed with (else ROLLOUT_GATEWAY_KEYS)
 ```
@@ -99,7 +99,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the checkpoint a new run trains from, by any [reference](../libraries/rollout-train/checkpoints.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest checkpoint. `bookmark` names a bookmark the run moves to each checkpoint it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
-| `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
+| `serve`, `address` | Where the gateway in the runner's own process listens for [harnesses](../libraries/rollout-train/harness-endpoint.md), and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the tool set should live |
 | `pools` | Each sandbox pool, by the kind of sandbox it serves ([sandboxes](../libraries/rollout/sandboxes.md)): `module:name` of the provider that makes them in this process, or a table whose `kind` is that and whose other keys are its settings (`size`: how many at once), or a URL. A pool in this process is named `KIND@HOST/DIRECTORY`, keeps its leases beside the ledger and has a keeper that ends them with their claims | Run `rollout pool` where the sandboxes should live, and give its URL |
 | `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names, bookmarks and the versions suites' names point to, the runners' heartbeats, the launches, what is wanted of each run's settings, and the sandboxes' leases | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
@@ -107,7 +107,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
 | `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (the suite's unless it says otherwise), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). A suite named by its name is played in the version its name points to as each step is decided (`NAME@N` names one version for good). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, or with `suite = ""`, the run evaluates nothing; a launch from the monitor says a suite or none, where its profile does not. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
-| `gateway` | The [gateway](#the-gateway) `rollout gateway` serves: where it is reached (`url`) and serves (`listen`), the file of the secrets its keys are signed with (`keys`), and how long a key minted for a slot is good for (`lifetime`, 6 hours) | Start more replicas behind a proxy |
+| `gateway` | The [gateway](#the-gateway) the runner records through and `rollout gateway` serves: where its replicas are reached (`url`; none: a gateway in the runner's own process) and serve (`listen`), the file of the secrets its keys are signed with (`keys`), and how long a key minted for a slot is good for (`lifetime`, 6 hours) | Give it a `url` and start replicas behind a proxy |
 | `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines can take. An episode is claimed only while its sandboxes' pools have room for it too | Raise it with the engines' `max_num_seqs`, and the pools' sizes with the memory for their sandboxes |
 
 ## What can change while a run goes
@@ -166,10 +166,11 @@ async with Profile.load(Path("profile.toml")).open() as platform:
 
 Opening starts, in order: the run (registered the first time: `run.json`) and the checkpoint it starts from; with
 `ray`, the connection to the Ray cluster; the engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
-the trained one with the trainer's longest segment as its longest turn; the recorder; the monitor's feed in
-`directory/feed`; the tool sets; the pools, each with its keeper; the blob store and the checkpoints; the runner, and the
-[episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
-listens there.
+the trained one with the trainer's longest segment as its longest turn; the monitor's feed in `directory/feed`; what
+the runner records through (`platform.recorder`: the [gateway](#the-gateway) at `[gateway] url`, or one in this process,
+`platform.gateway`); the tool sets; the pools, each with its keeper; the blob store and the checkpoints; the runner, and
+the [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in
+[`Colocated`](reference.md#colocated). With `serve`, the gateway in this process listens there for harnesses.
 `open(training=False)` (what `rollout eval` opens) makes no trainer; the trained channel's engines still load what its
 `start` is served over. `platform.eval_run(step)` registers the run of the eval of the checkpoint made at `step`
 (`NAME-eval-STEP`) and adds it to the runs the episode runner plays.
@@ -223,7 +224,7 @@ heartbeats beside it and the blob store, wherever each runs:
 |---|---|---|
 | The trainer | writes down, under the run's fence, what each of its channels should serve: the checkpoint, its depth and kind, and the files its engines load ([what a channel should serve](../libraries/rollout-train/channels.md#what-a-channel-should-serve)) | `rollout train` |
 | Engine hosts | load what the run says from the blob store into the vLLM servers on their machine, as an adapter named by the checkpoint's id, and beat with what each serves | `rollout engines` |
-| Episode runners | ask the channel's servers (a router in front of them, or the servers themselves) for the checkpoint the run says, by name, and record what they sample: the recorder stays with the runner, so tokens and logprobs are recorded exactly as sampled | `rollout runner`, or the runner `rollout train` opens |
+| Episode runners | ask the channel's servers (a router in front of them, or the servers themselves) for the checkpoint the run says, by name, and record what they sample through the gateway (in their own process, or replicas of its own), so tokens and logprobs are recorded exactly as sampled | `rollout runner`, or the runner `rollout train` opens |
 
 A profile that runs everything in one process needs none of this: its channels' engines are in that process, the loop
 publishes to them directly, and no request leaves it.
@@ -292,7 +293,7 @@ directory = "~/.cache/rollout/runs/first"
 
 [channels.policy]
 model = "Qwen/Qwen3-0.6B"
-renderer = "rollout_qwen:qwen3"               # the recorder renders and records here
+renderer = "rollout_qwen:qwen3"               # the gateway renders and records with it
 engine = "rollout_train.inference:RemoteEngine"
 engines = [{ address = "http://gpu-1:8000" }, { address = "http://gpu-2:8000" }]
 via = "https://router.example.com"            # optional: a router or proxy every request goes to instead
@@ -332,7 +333,7 @@ one URL that passes requests on. What makes either safe:
   samples the turn again, so a proxy that sends a request to the wrong model, or answers from a cache, cannot make a
   recorded version wrong. What a server has is judged from its own listing (`/v1/models`) and answers, never from the
   proxy.
-- **A retry is safe.** A request sent again through a proxy may be sampled again by the server; the recorder keeps the
+- **A retry is safe.** A request sent again through a proxy may be sampled again by the server; the gateway keeps the
   answer it was given, under the turn's effect, once.
 - **Authentication is the deployment's.** A bearer token (vLLM's `--api-key`, or the proxy's own) and TLS with a CA
   bundle and a client certificate, read from where `connection` says.
@@ -373,7 +374,19 @@ them may stop at any moment.
 - **Health.** `/healthz` answers while the process serves; `/readyz` answers 200 once the ledger and the blob store
   answer, and 503 otherwise.
 
-A run's own runner records through the recorder in its process, whether or not the profile has a `[gateway]` table.
+A run's runner records through the gateway too ([a runner served by the
+gateway](../libraries/rollout-train/gateway.md#a-runner-served-by-the-gateway)):
+
+- **With no `url`** (the default), through a gateway in its own process, over the profile's channels and routes: the
+  same code a replica runs, with no HTTP in between, recording in the profile's ledger and blob store. It tells the
+  monitor's feed of the samples harnesses ask for, and listens for them at `serve`. With no keys given, it signs with
+  a secret it makes when it starts.
+- **With `url`**, through the replicas there. Every channel of the profile has its engines elsewhere (a
+  `RemoteEngine` channel): the runner starts no engine, and the replicas sample the same servers. They hold the same
+  secrets as the runner (`keys`, or the environment).
+
+Either way the runner's episodes are assembled from the turns in the ledger, and an episode a runner started again
+adopts trains like any other.
 
 ## Launchers
 

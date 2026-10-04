@@ -1,7 +1,7 @@
-# The recorder over HTTP
+# Harnesses over HTTP
 
-Code: `rollout_train.recorder.compat` · See [recorder](recorder.md),
-[endpoints with an address](../rollout/contracts/model-endpoint.md#endpoints-with-an-address)
+Code: `rollout_train.recorder.compat`, served by `rollout_train.gateway` · See [the gateway](gateway.md),
+[recording](recorder.md), [endpoints with an address](../rollout/contracts/model-endpoint.md#endpoints-with-an-address)
 
 For a harness that brings its own loop: a coding agent running inside an environment, or any program that already
 knows how to talk to a model. It needs no agent loop from this library. The program that launches it asks its model
@@ -16,32 +16,33 @@ address = run.model.address()          # ModelAddress(base_url, api_key, model)
 A harness inside a sandbox is handed its address without any of that: a sandbox's spec names the slots it samples,
 and the runner puts each one's address in the sandbox's environment ([sandboxes](../rollout/sandboxes.md#harnesses-inside-a-sandbox)).
 
-What the harness samples there is recorded for the run's slot like any other sample, reaches the runner's hooks, and
-ends up in the episode's trajectory. Whichever API it speaks, each request is rendered with the channel's renderer
-and sampled by the channel, so the recorded tokens and logprobs are exactly what the policy sampled.
+The address is the [gateway](gateway.md)'s, and the key one it signed for the run's slot. What the harness samples
+there is recorded for the slot like any other sample and ends up in the episode's trajectory. Whichever API it speaks,
+each request is rendered with the channel's renderer and sampled by the channel, so the recorded tokens and logprobs
+are exactly what the policy sampled.
 
 | Path | API |
 |---|---|
 | `POST {base_url}/chat/completions` | OpenAI's Chat Completions |
 | `POST {base_url}/responses` | OpenAI's Responses (what Codex speaks) |
 | `POST {base_url}/messages` | Anthropic's Messages (what Claude Code speaks) |
-| `GET {base_url}/models` | the recorder's channels, in a list both OpenAI's and Anthropic's clients read |
+| `GET {base_url}/models` | the gateway's channels, in a list both OpenAI's and Anthropic's clients read |
 
 Each answers with one reply, or with `"stream": true` the same reply as server-sent events in that API's own event
-shapes. `create_app(recorder)` serves them under `SERVED_UNDER`, and a recorder's `base_url` ends with that path
-(Anthropic's clients add `/v1` themselves). A recorder has a `base_url` when its deployment serves it: a
-[profile](../../guide/deploying.md)'s `serve`, reached at its `address`. `Model.address()` raises `RuntimeError`
-otherwise.
+shapes. The gateway serves them under `SERVED_UNDER` (`/v1`), and a base URL handed to a harness ends with that path
+(Anthropic's clients add `/v1` themselves). A slot has an address when its gateway is served over HTTP: the replicas
+at a [profile](../../guide/deploying.md)'s `[gateway] url`, or a gateway in the runner's own process served at the
+profile's `serve` and reached at its `address`. `Model.address()` raises `RuntimeError` otherwise.
 
-The [gateway](gateway.md) serves the same paths, read and answered by the same functions (`requested`, `replied`,
-`refused`), with two differences: its keys are signed and name their session by themselves, and every turn is
-recorded in the ledger and the blob store before its reply is sent. What follows holds for both.
+A gateway in the runner's own process tells the runner's hooks of each sample a harness asks for, as the runner's own
+endpoints tell them of its program's samples, so the [monitor](monitor.md)'s feed has both. A gateway elsewhere does
+not; the monitor reads such an episode's turns from the ledger instead.
 
 ## What a request means
 
-- **The key names the session.** Each call of `address()` makes a key for one run's slot. The recorder's is valid
-  until the recorder forgets the run; the gateway's until it expires ([keys](gateway.md#keys)). OpenAI's clients send it as a bearer token, Anthropic's as `x-api-key`; either is read on
-  every path.
+- **The key names the session.** Each call of `address()` makes a key for one run's slot, valid until it expires
+  or another attempt takes its episode's fence ([keys](gateway.md#keys)). OpenAI's clients send it as a bearer token,
+  Anthropic's as `x-api-key`; either is read on every path.
 - **The model name and sampling parameters a client sends are ignored**: a trainable channel samples as its binding
   says, so that the trainer can reproduce the distribution. So is Anthropic's `thinking.budget_tokens`: the channel's
   [thinking budget](recorder.md) applies.
@@ -78,7 +79,7 @@ Each API's errors come in its own shape: `{"error": {"message", "type", "code"}}
 
 | When | Chat Completions, Responses | Messages |
 |---|---|---|
-| the key names no session | 401 `invalid_api_key` | 401 `authentication_error` |
+| the key is refused: malformed, forged, expired, or its attempt taken over | 401 `invalid_api_key` | 401 `authentication_error` |
 | the request could not be read | 400 `invalid_request_error` | 400 `invalid_request_error` |
 | the context is too long for the model. Harnesses compact on it | 400 `context_length_exceeded` | 400 `invalid_request_error`, "prompt is too long: ..." |
 | the model endpoint failed | 503 `server_error` | 500 `api_error` |

@@ -4,7 +4,7 @@ Code: `rollout_train.inference` · See [`Channel`](../../guide/reference.md#chan
 [`Engine`](../../guide/reference.md#engine), [`Limits`](../../guide/reference.md#limits), [recorder](recorder.md)
 
 A **channel** is a trainable model being served, by name. Task code never sees one: a run's binding names a channel
-for a model slot, and the recorder samples from it. Whoever trains publishes new weights to it; whoever deploys
+for a model slot, and the gateway samples from it. Whoever trains publishes new weights to it; whoever deploys
 decides which engines stand behind it. An **engine** is one replica serving the channel's model.
 
 ```python
@@ -75,8 +75,8 @@ nothing.
   channel pauses its engines, has each read the files into the model it holds (`Engine.load_weights`), drops the
   adapters it had loaded, and samples with no adapter from then on. `Channel.serving` names what is served, an
   adapter or full weights.
-- Callers publish through the recorder (`Recorder.publish`, which a profile's platform hands on as `publish`),
-  naming the channel.
+- Callers publish through a profile's platform (`Platform.publish`, which the loop is handed as `publish`), naming
+  the channel.
 - `Channel.loaded` names the adapters loaded: the one served, and the one before. `Channel.held` names the full
   checkpoint the engines hold, if they hold one.
 
@@ -132,7 +132,7 @@ an adapter of that name.
 down), a CA bundle, a client certificate. A server must give logprobs of the distribution it sampled from
 (`--logprobs-mode processed_logprobs`), as `VllmEngine` does.
 
-A `RemoteChannel` is one run's channel as a runner samples it: what the recorder samples from in place of a `Channel`
+A `RemoteChannel` is one run's channel as a runner samples it: what the gateway samples from in place of a `Channel`
 (`Sampler`: a name, a renderer, limits, a context limit, `weights(session)` and `generate`). Its servers are one URL
 (a router, a proxy, a server) or a list. Every `every` seconds (2) it reads every checkpoint the run has said the
 channel serves (`serving_of`) and asks each server which models it has; then:

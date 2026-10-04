@@ -25,7 +25,7 @@
 | **Pool / provider / PoolBinding** | Hands out sandboxes of one kind under leases, saying how many it has room for / makes, deletes and operates them / which pool serves a kind for a run: in the runner's process or at a URL. |
 | **Lease** | A sandbox held under a key (the run's lease and the sandbox's name): the same key gets the same sandbox. An episode's are held under its claim, and end with it. |
 | **Canonical content** | Model-agnostic messages and content blocks; the only content form that code, run events and tool sets use. |
-| **Model endpoint** | Anything that implements the [model endpoint contract](../libraries/rollout/contracts/model-endpoint.md): the recorder or an adapter. |
+| **Model endpoint** | Anything that implements the [model endpoint contract](../libraries/rollout/contracts/model-endpoint.md): the gateway or an adapter. |
 | **Profile** | A deployment, described: channels and engines, the trainer, the runner, where tool sets and sandbox pools live. See [deploying](../guide/deploying.md). |
 | **Library / implementation / product / environment** | The four kinds of package in the repository: what code is written against; one implementation of an interface a library defines; an application; something to train on. See [overview](overview.md#layers). |
 | **Environment** | What a run trains on and an eval measures (`rollout.environment.Environment`, [below](#training-terms)); the packages under `environments/` are environments in that sense. Also, a computer a task creates through `run.environments` ([computers](../implementations/rollout-computers.md)). |
@@ -48,7 +48,7 @@ of segments.
 | **Group** | One start of one row, played as several episodes (its record's `episodes`, the algorithm's `group_size`) that are compared with each other. Its episodes are numbered from 1 within it and carry the labels `run`, `group` and `episode`; the rest of it is in its record. |
 | **Episode** | One run of a program, as training sees it once it has ended: labels, outcome, result, and a trajectory per model slot. See [episodes](../libraries/rollout-train/episodes.md). |
 | **Rollout** | One model slot's part of an episode as it plays: every turn of one agent. Each rollout becomes a trajectory. |
-| **Session** | The recorder's record of one rollout: every sample of one model slot of one run. |
+| **Session** | The gateway's record of one rollout: every sample of one model slot of one run. |
 | **Trajectory** | What a rollout leaves to train on: its segments and its rewards (`Trajectory`). |
 | **Segment** | A piece of a trajectory: tokens that only grew by appending, with the spans the policy sampled, their behavior logprobs and weights checkpoints (`Segment`). An edited context (a compaction, thinking dropped) starts the next. |
 | **Behavior logprob** | The log-probability of a sampled token under the distribution it was sampled from. |
@@ -72,7 +72,7 @@ of segments.
 | **What a channel should serve** | A run's record, in its `serving` table, that its channel (`RUN/NAME`) serves a checkpoint from then on: its id, depth and kind, and the files its engines load. The training loop writes it each time it serves a checkpoint; whatever serves or samples the channel elsewhere reads it. See [what a channel should serve](../libraries/rollout-train/channels.md#what-a-channel-should-serve). |
 | **Follower / engine host** | Keeps a process's channels serving what a run says, loading each checkpoint from the blob store, named by its id / a process that does that for the vLLM servers on its machine, and nothing else (`rollout engines`). See [deploying](../guide/deploying.md#engines-on-other-machines). |
 | **Max lag** | How many checkpoints behind what its channel should serve a sample may be, where its server does not have the newest yet (1 unless a profile says otherwise; 0 for an eval). |
-| **Recorder** | The model endpoint for channels: renders contexts to tokens, samples, and keeps what was sampled. |
+| **Gateway** | The model endpoint for channels, as a service that keeps no session: renders contexts to tokens, samples, and records every turn in the ledger and the blob store; in a runner's own process, or replicas of its own. |
 | **Renderer** | The chat template, tokenizer and parser of one model family ([Qwen](../implementations/rollout-qwen.md), [Gemma](../implementations/rollout-gemma.md)). |
 | **Weights checkpoint** | The depth of the checkpoint a channel serves; every sampled span carries the one it was sampled at. |
 | **Trainer** | Turns weighted segments into new weights, within a budget it states. `LoraTrainer` is one ([LoRA trainer](../implementations/rollout-lora.md)). |

@@ -47,7 +47,7 @@ The [glossary](../architecture/glossary.md) defines every term; these are the on
 | **Reply** | The assistant `Message` the agent returns each turn. |
 | **Turn** | One reply and the observation that answers it. `run.turn` counts replies. |
 | **Model slot** | A named model a task uses. The agent acts through `policy`; tasks may declare others. |
-| **Model endpoint** | What serves a model slot: a recorder, an API adapter, or a scripted endpoint in tests. |
+| **Model endpoint** | What serves a model slot: the gateway, an API adapter, or a scripted endpoint in tests. |
 | **Effect** | An operation that leaves task or agent code, such as a model sample. It has a stable `effect_id`. |
 | **Run event** | A typed record of something that happened in a run, in a gapless sequence. |
 | **Environment** | What a run trains on and an eval measures: rows, easiest first, and how to draw a start of one; eval data training never draws; what its results say; a version; perhaps a curriculum of its own. |
@@ -71,7 +71,7 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 | `rollout.testing` | `rollout` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
 | `rollout_train.rollouts` | `rollout-train` | `EpisodeRunner`, `Plan`, `plan`, `episodes_of`, `playing`, `Hooks`, `Episode`, `Record` |
 | `rollout_train` | `rollout-train` | `train`, `Grpo`, `Trainer`, `Colocated`, `Checkpoints`, `FileLedger` |
-| `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Segment`, `Renderer` |
+| `rollout_train.inference`, `rollout_train.recorder`, `rollout_train.gateway` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Segment`, `Renderer`; `Gateway`, `GatewayEndpoints` |
 | `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
 | `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |
 | `rollout_durable` | `rollout-durable` | `DurableRunner` |

@@ -9,10 +9,10 @@ identifier means, what a digest covers, which events a run records and when, and
 | Page | Covers | Crosses |
 |---|---|---|
 | [identifiers](identifiers.md) | the identifiers with a structure, and who makes them | everything |
-| [canonical content](canonical-content.md) | messages, blocks, tool specifications and results, digests | harness, runners, model endpoints, tool sets, the recorder |
+| [canonical content](canonical-content.md) | messages, blocks, tool specifications and results, digests | harness, runners, model endpoints, tool sets, the gateway |
 | [effects](effects.md) | the operations that leave a run's code, their identity and how they complete | runners, model endpoints, tool sets, environment services |
 | [run events](run-events.md) | the record of what happened in a run | runners, episode runners, hooks, clients |
-| [model endpoint](model-endpoint.md) | what serves a model slot | runners, the recorder, direct adapters |
+| [model endpoint](model-endpoint.md) | what serves a model slot | runners, the gateway, direct adapters |
 
 ## What every contract type has in common
 

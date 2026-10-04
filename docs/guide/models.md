@@ -2,7 +2,7 @@
 
 A run's model slots are served by **model endpoints**. Which endpoint serves a slot is decided by the run's binding,
 never by task or agent code. A `ModelBinding` is either `direct` (a provider's API, on this page) or `recorded` (a
-trainable channel served through the [recorder](../libraries/rollout-train/recorder.md)). This page covers the
+trainable channel served through the [gateway](../libraries/rollout-train/gateway.md), which records every turn). This page covers the
 adapter for the OpenAI Responses API.
 
 ## Binding a slot to a provider

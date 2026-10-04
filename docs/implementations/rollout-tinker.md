@@ -7,7 +7,7 @@ Code: `rollout_tinker` · See [Thinking Machines' API](../research/thinking-mach
 `TinkerTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol and `TinkerEngine` the
 [`Engine`](../guide/reference.md#engine) protocol on Thinking Machines' hosted API, Tinker. The trainer takes LoRA steps
 there with the [LoRA trainer](rollout-lora.md)'s objective, expressed as Tinker's losses; the engine samples there,
-token ids in, ids and logprobs out. Neither uses this machine's GPU. The loop, the recorder, the ledger, the renderer and
+token ids in, ids and logprobs out. Neither uses this machine's GPU. The loop, the gateway, the ledger, the renderer and
 the objective are the platform's own: Tinker holds the weights and does the arithmetic.
 
 ## Installing
@@ -97,7 +97,7 @@ A step takes the same minibatches as the [LoRA step](rollout-lora.md#the-step): 
 or with nothing sampled left out and counted, the rest shuffled by the step's seed and cut where a minibatch reaches
 `tokens_per_step` sampled tokens, `passes` times. Each segment is one of Tinker's `Datum`s, its input the tokens but the
 last and its targets the tokens but the first, so a sampled token at position *t* is row *t* - 1; every other row
-(a prompt, a tool's result, a token the recorder forced) carries zeros and adds nothing to the loss.
+(a prompt, a tool's result, a token the gateway forced) carries zeros and adds nothing to the loss.
 
 Tinker's losses take one reference logprob per token, where ours has two: the logprob at the step's start (`old`) and
 the one it was sampled at (`behavior`). Folding the importance weight `w = min(exp(old - behavior), truncate)` and the
@@ -232,7 +232,7 @@ documentation writes them. The project's tests show, with no network:
   `max_kl`; going on from a parent's state (the live client, or a new one) equals the LoRA step going on with its
   optimizer; a parent's weights alone start a fresh optimizer;
 - a datum's rows: the shift by one, spans across turns, forced tokens left out;
-- the engine's contract, and a published version sampled at once through the channel and the recorder;
+- the engine's contract, and a published version sampled at once through the channel and the gateway;
 - `weights = "peft"`: the cookbook's conversion (on the platform's transformers) and the joining of q, k and v, on a
   tiny model laid out as Qwen3.5, and `rollout merge` folding the result in exactly;
 - a profile naming the trainer and the engine, the loop playing groups and stepping on the fake.

@@ -1256,7 +1256,7 @@ only a kind and parameters; a worker for an environment names a process, mounts,
 |---|---|---|---|
 | `kind` | `str` | required | The kind of sandbox (`minecraft`, say): the binding names the pool that serves each kind. |
 | `parameters` | `Mapping[str, JsonValue]` | `Field(default_factory=dict[str, JsonValue])` | What the pool makes it from: a task and its seeds, an image. |
-| `slots` | `FrozenSequence[str]` | `()` | Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once the recorder forgets the run: an episode runner has it forget the run as the episode ends. |
+| `slots` | `FrozenSequence[str]` | `()` | Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it expires or a newer attempt of its episode takes the episode's fence. |
 | `process` | `Process \| None` | `None` |  |
 | `mounts` | `FrozenSequence[Mount]` | `()` |  |
 | `scratch` | `Scratch \| None` | `None` | Without it, the sandbox writes nowhere. |
@@ -1773,8 +1773,8 @@ Anthropic's APIs. Whatever answers there is the slot's model; the harness only s
 class ModelEndpoint(Protocol)
 ```
 
-Serves model slots: implemented by the recorder and by direct adapters. An endpoint that can also be reached
-over HTTP is an `AddressableEndpoint`.
+Serves model slots: implemented by the gateway's endpoints and by direct adapters. An endpoint that can also be
+reached over HTTP is an `AddressableEndpoint`.
 
 **Methods**
 
@@ -2071,7 +2071,7 @@ Nothing here identifies the policy, weights version or engine.
 def session_id(run_id: str, model_slot: str) -> str
 ```
 
-`{run_id}/{model_slot}`: one recorder session per model slot per run.
+`{run_id}/{model_slot}`: one recorded session per model slot per run.
 
 ### `SessionIdentity`
 
@@ -3947,7 +3947,7 @@ class Generation
 | `tokens` | `list[int]` | required |  |
 | `logprobs` | `list[float]` | required | Of each sampled token, under the distribution it was sampled from. |
 | `finish_reason` | `str` | required | `stop` (a stop token, included in `tokens`) or `length`. |
-| `model` | `str \| None` | `None` | The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by the name it is served as. The recorder checks that it is the checkpoint it stamps the tokens with. |
+| `model` | `str \| None` | `None` | The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by the name it is served as. The gateway checks that it is the checkpoint it stamps the tokens with. |
 
 ### `Limits`
 
@@ -3974,7 +3974,7 @@ What a turn may take, in tokens: the deployment's hardware decides, and code abo
 class RemoteChannel
 ```
 
-One run's channel, sampled on servers elsewhere: what the recorder samples from (`Sampler`).
+One run's channel, sampled on servers elsewhere: what the gateway samples from (`Sampler`).
 
 Each turn asks for the checkpoint the run says the channel should serve (`wanted`), by its id as the model's name;
 or, where its server does not have it yet, the newest one before it that the server has, no more than `max_lag`
@@ -4074,7 +4074,7 @@ class Routes
 ```
 
 The routed channels of every run a runner plays (`RemoteChannel`), each made when first asked for, choosing from
-what that run says its channel serves (in `ledger`): implements the recorder's `Routes`.
+what that run says its channel serves (in `ledger`): what the gateway samples them through.
 
 **Methods**
 
@@ -4093,7 +4093,7 @@ what that run says its channel serves (in `ledger`): implements the recorder's `
 class Sampler(Protocol)
 ```
 
-What the recorder samples from: a `Channel`, whose engines this process publishes to, or a channel sampled on
+What the gateway samples from: a `Channel`, whose engines this process publishes to, or a channel sampled on
 servers elsewhere (`rollout_train.inference.remote.RemoteChannel`).
 
 **Methods**
@@ -4543,6 +4543,7 @@ What a recorded turn answered, and who it answered.
 | `depth` | `int` | required |  |
 | `result` | `SampleResult` | required |  |
 | `replayed` | `bool` | `True` | Whether it was recorded before (False: by the call that returned it). |
+| `timings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The turn's timings (`TurnRecord.timings`), as recorded. |
 
 ### `TurnRecord`
 
@@ -4927,9 +4928,10 @@ class System
 - `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the
   monitors elsewhere serve), summarised, newest first.
 - `async def episode(self, run_id: str, after: int = 0, relayed: bool = False) -> dict[str, Any]` — One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
-  replies and tool calls from the events its runner kept), from which its rollouts (one per model slot) are
-  drawn; what it reported when it ended; and where it sits: its run, its group and its labels. An episode of a
-  run on another machine is asked of the monitor there.
+  replies and tool calls from the events its runner kept; where neither has a sample, as a harness's are where a
+  gateway elsewhere recorded them, the replies of the turns the gateway recorded), from which its rollouts (one
+  per model slot) are drawn; what it reported when it ended; and where it sits: its run, its group and its
+  labels. An episode of a run on another machine is asked of the monitor there.
 
 ## `rollout_train.testing`
 
@@ -5013,7 +5015,7 @@ class Policy
 ```
 
 Channels whose engines are in this process, as a test's training loop and its runners see them: `publish` serves
-new weights on one (what a loop is given to publish with), and `recording` is a runner's recorder over them.
+new weights on one (what a loop is given to publish with), and `recording` is what a runner records through.
 
 **Methods**
 

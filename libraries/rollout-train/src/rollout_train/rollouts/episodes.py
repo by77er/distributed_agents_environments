@@ -196,8 +196,8 @@ def assemble(
     group: int,
     number: int,
 ) -> Episode:
-    """An episode from a run's events (its labels, rewards, result and ending) and what the recorder kept of each
-    of its model slots."""
+    """An episode from a run's events (its labels, rewards, result and ending) and what the gateway recorded of
+    each of its model slots."""
     labels: Mapping[str, str] = {}
     info: Mapping[str, JsonValue] = {}
     excluded: str | None = None

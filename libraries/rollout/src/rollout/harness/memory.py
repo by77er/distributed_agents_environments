@@ -7,8 +7,8 @@ slot, with room for the summary and none to think it over. A prompt that overflo
 tried again.
 
 Each request says how it follows from the ones before (`SampleLink`): a summary's request is a `compaction_attempt` of
-the latest reply's, and the request that goes on from a summary names that summary's as its `compaction`, so a recorder
-can tell what each sample was for.
+the latest reply's, and the request that goes on from a summary names that summary's as its `compaction`, so a recording
+endpoint can tell what each sample was for.
 
 Code that uses it says nothing about tokens or limits. It says what a turn should look like once it is no longer
 the current one (`remember`: an observation without its bulky part, say), and what to ask when turns must go.

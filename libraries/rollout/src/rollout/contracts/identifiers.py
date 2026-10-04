@@ -79,5 +79,5 @@ class SessionIdentity:
 
 
 def session_id(run_id: str, model_slot: str) -> str:
-    """`{run_id}/{model_slot}`: one recorder session per model slot per run."""
+    """`{run_id}/{model_slot}`: one recorded session per model slot per run."""
     return str(SessionIdentity(run_id, model_slot))

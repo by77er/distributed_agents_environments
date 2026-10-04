@@ -61,7 +61,7 @@ does with an effect that a crash interrupted depends on whether its receiver doe
 
 | Effect | Receiver | After a crash interrupted it |
 |---|---|---|
-| `model.sample` | the recorder returns the recorded result for an `effect_id` it has sampled | requested again |
+| `model.sample` | the gateway returns the recorded result for an `effect_id` it has recorded | requested again |
 | `model.sample` | a direct adapter does not deduplicate | requested again: it samples again, and nothing was lost |
 | `environment.lifecycle`, and the `put` and `get` of `environment.call` | an environment service makes these safe to repeat. A creation finds the environment it already made, because the id comes from the `effect_id`. | requested again |
 | `Environment.execute` | a command is not safe to repeat | guarded: `OutcomeUnknown` |

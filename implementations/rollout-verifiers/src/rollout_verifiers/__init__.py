@@ -1,4 +1,4 @@
-"""Prime Intellect's verifiers environments, played through the recorder (docs/implementations/rollout-verifiers.md)."""
+"""Prime Intellect's verifiers environments, played through the gateway (docs/implementations/rollout-verifiers.md)."""
 
 from rollout_verifiers.environment import VerifiersEnvironment, VerifiersProgram, play
 

@@ -1,26 +1,20 @@
-# Recorder
+# Recording
 
-Code: `rollout_train.recorder` · See [`Recorder`](../../guide/reference.md#recorder),
-[`Segment`](../../guide/reference.md#segment), [channels](channels.md), [episodes](episodes.md)
+Code: `rollout_train.recorder` · See [`sample_turn`](../../guide/reference.md#sample_turn),
+[`Segment`](../../guide/reference.md#segment), [`segments_of`](../../guide/reference.md#segments_of),
+[the gateway](gateway.md), [channels](channels.md), [episodes](episodes.md)
 
-The recorder serves the model slots a run binds to a trainable channel, and keeps what training needs of every
-sample: the tokens the policy was shown, the tokens it sampled, their logprobs, and the weights version that sampled
-them. It is the [model endpoint](../rollout/contracts/model-endpoint.md) for recorded bindings.
+A run's model slots bound to a trainable channel are recorded: of every sample, training keeps the tokens the policy
+was shown, the tokens it sampled, their logprobs, and the weights version that sampled them. The
+[gateway](gateway.md) is what records, whether it runs in the runner's own process or as replicas of its own; a
+runner's recorded slots sample through it ([a runner served by the gateway](gateway.md#a-runner-served-by-the-gateway)).
+This page is what recording does with a sample, the same wherever the gateway runs:
 
-```python
-recorder = Recorder({"policy": channel})
-runner = LocalRunner(recorder=recorder)        # a run's RecordedModel(channel="policy") binding is served by it
-segments = recorder.sessions(run_id)             # by model slot: what each exports
-```
-
-| Member | Does |
-|---|---|
-| `endpoint(binding)` | the model endpoint for a recorded binding. A binding that names no channel of the recorder raises `ValueError`. |
-| `routes`, `for_run(run, binding)`, `reaches(run, binding)` | the channels whose engines serve on other machines, each run's sampled from the checkpoints that run says it serves ([engines elsewhere](channels.md#engines-elsewhere)); a run's binding with each such channel named within the run (`RUN/NAME`), which an episode runner plays it with; and whether every recorded model of a binding can be sampled now, which it asks before claiming |
-| `export(session_id)`, `sessions(run_id)` | what one session exports, and what every slot of a run exports |
-| `publish(channel, adapter, path, version)` | serves new weights on a channel, and returns the version they are served as ([publishing weights](channels.md#publishing-weights)) |
-| `forget(run_id)` | drops everything kept of a run: its turns, its recorded results and the keys of its harnesses |
-| `base_url` | where the recorder is served over HTTP, for [harnesses that bring their own loop](harness-endpoint.md) |
+- `sample_turn` (`rollout_train.recorder.sampling`): one turn sampled with the [thinking budget](#thinking);
+- `segments_of` (`rollout_train.recorder.segments`): [what a session exports](#what-a-session-exports);
+- `Renderer` (`rollout_train.recorder.renderers`): a model family's [token format](#renderers);
+- `rollout_train.recorder.compat`: OpenAI's and Anthropic's APIs, read and answered, for
+  [harnesses that bring their own loop](harness-endpoint.md).
 
 A session is one model slot of one run. Its capability contract comes from its channel: the context limit is the
 channel's longest turn, and the most output is the channel's thinking and answer room together
@@ -28,20 +22,23 @@ channel's longest turn, and the most output is the channel's thinking and answer
 
 ## A sample
 
-The endpoint renders the request's context to tokens, samples from the channel, parses the result into canonical
+The gateway renders the request's context to tokens, samples from the channel, parses the result into canonical
 content and records the turn.
 
-- **A retried effect is not sampled twice.** A request whose `effect_id` was sampled returns the recorded result.
+- **A retried effect is not sampled twice.** A request whose `effect_id` was recorded is answered with the recorded
+  result.
 - **The binding decides how it samples**: the temperature and `top_p` of its `SamplingParameters`.
-- **One turn, one set of weights.** The adapter and the version are read when the sample starts (where the
-  channel's engines are elsewhere, the checkpoint the run says, or the newest close enough that the session's server
-  has), and both of its phases use them. Where the checkpoint is not served there after all, the server is gone, or an
-  answer names another checkpoint, the turn is sampled again from the start, three times at most: no token is stamped
-  with a version that did not sample it.
+- **One turn, one set of weights.** The checkpoint is chosen when the sample starts (where the channel's engines are
+  elsewhere, the checkpoint the run says, or the newest close enough that the session's server has), and both of its
+  phases sample it. Where the checkpoint is not served there after all, the server is gone, or an answer names another
+  checkpoint, the turn is sampled again from the start, three times at most: no token is stamped with a version that
+  did not sample it.
 - **No turn is longer than the channel's limit.** A long prompt leaves less room to think. A prompt that leaves no
   room to answer is refused with `ContextOverflow`, which callers compact on.
 - **The reply** is the parsed message, a finish reason (`tool_use` when it calls tools, `stop` when it ended on a
   stop token, `length` otherwise) and usage in tokens.
+- **Links.** A request may say how it follows from earlier ones of its session (`SampleRequest.links`: a type and the
+  earlier request's effect id). `Memory` says so of its compactions ([links between requests](gateway.md#links-between-requests)).
 
 ### Thinking
 
@@ -63,8 +60,8 @@ For a family with no thinking block, one phase samples with the thinking and ans
 
 ## What a session exports
 
-Training wants contexts that only grew; a session is a series of samples. The recorder joins samples into segments
-([`Segment`](../../guide/reference.md#segment)), each the tokens of a context that only grew, by one rule:
+Training wants contexts that only grew; a session is a series of samples. `segments_of` joins a session's turns into
+segments ([`Segment`](../../guide/reference.md#segment)), each the tokens of a context that only grew, by one rule:
 
 > A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues that
 > turn's segment.
@@ -84,15 +81,15 @@ Training wants contexts that only grew; a session is a series of samples. The re
   template. A program that only appends gets one. A program that shortens each observation once it is no longer the
   current one gets a segment per turn.
 
-A [runner](rollouts.md#a-runner) reads `sessions(run_id)` when a run ends and puts the segments in the run's
-[episode](episodes.md#how-an-episode-is-assembled).
+A [runner](rollouts.md#a-runner) reads a run's segments from the gateway's turn store when the run ends
+(`GatewayEndpoints.sessions`) and puts them in the run's [episode](episodes.md#how-an-episode-is-assembled).
 
 ## Renderers
 
 A [`Renderer`](../../guide/reference.md#renderer) is a model family's token format. It turns canonical messages and
 tool specifications into prompt tokens, says which tokens end a turn and how thinking is delimited, and parses
-sampled tokens back into a canonical message: reasoning, text and tool calls. The recorder and trainers depend only
-on this protocol.
+sampled tokens back into a canonical message: reasoning, text and tool calls. The gateway and trainers depend only on
+this protocol.
 
 - A model family is supported by a function that makes its renderer from a checkpoint's name. A profile names the
   function as `module:name` ([deploying](../../guide/deploying.md)).

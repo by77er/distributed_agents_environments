@@ -9,7 +9,7 @@ code reaches it only through [`Model`](../../../guide/reference.md#model) (`run.
 
 | Implementation | Serves | Code |
 |---|---|---|
-| A recorder's endpoint | a trainable channel, with everything training needs recorded | [recorder](../../rollout-train/recorder.md) |
+| The gateway's endpoint | a trainable channel, with everything training needs recorded | [the gateway](../../rollout-train/gateway.md#a-runner-served-by-the-gateway) |
 | A direct adapter | a provider's API; nothing is recorded | [guide: models](../../../guide/models.md) |
 | `ScriptedModelEndpoint` | a script, in tests | [guide: testing](../../../guide/testing.md) |
 
@@ -37,7 +37,9 @@ code cannot depend on them and a trainer can reproduce the distribution a channe
 - **`max_output_tokens`** never exceeds the contract's: `Model.sample` raises `ContractViolation` before it
   requests anything.
 - **`tool_choice`** says whether the model may, must not or must call a tool, or names the tool it must call. The
-  Responses adapter sends it to the provider. A recorder's endpoint ignores it.
+  Responses adapter sends it to the provider. The gateway ignores it.
+- **`links`** say how the request follows from earlier ones of its session (`SampleLink`: a type and the earlier
+  request's `effect_id`). The gateway keeps them with the turn; a direct adapter ignores them.
 
 ## What an endpoint answers
 
@@ -45,7 +47,7 @@ A [`SampleResult`](../../../guide/reference.md#sampleresult) is an ASSISTANT mes
 reason and usage.
 
 - **Nothing in it identifies the policy, the weights version or the engine.** Tokens and logprobs stay in the
-  recorder.
+  gateway's turn store.
 - **The finish reason** is `tool_use` when the reply calls tools, `length` when the reply was cut off, and `stop`
   otherwise.
 - **Usage** reports how much of the context is used and its limit. `input_tokens` and `output_tokens` are given by
@@ -67,8 +69,8 @@ that leaves the program fails the run ([failures](../README.md#failures)).
 
 ## Guarantees
 
-- **Idempotency.** A recorder returns the recorded result for an `effect_id` it has sampled, for as long as it
-  remembers the run. A direct adapter samples again.
+- **Idempotency.** The gateway returns the recorded result for an `effect_id` it has recorded: the turn is in the
+  ledger, so a runner started again gets it back too. A direct adapter samples again.
 - **A stable contract.** A slot's capability contract does not weaken during a run.
 - **One session per slot per run.** The `session_id` is `{run_id}/{model_slot}` ([identifiers](identifiers.md)).
 
@@ -80,6 +82,7 @@ harness that brings its own loop. `Model.address()` returns a
 name to send.
 
 - `address_of(endpoint, session_id)` returns the address, and raises `RuntimeError` for an endpoint that has none.
-- What a harness samples at the address goes `through` the endpoint the run holds, so a runner's
-  [hooks](../hooks.md) see those samples too.
-- The recorder is the addressable endpoint ([the recorder over HTTP](../../rollout-train/harness-endpoint.md)).
+- An endpoint may have what a harness samples at the address go `through` the endpoint the run holds, so that a
+  runner's [hooks](../hooks.md) see those samples too.
+- The gateway's endpoint is the addressable one ([harnesses over HTTP](../../rollout-train/harness-endpoint.md)). A
+  harness's samples go to the gateway itself; one in the runner's own process tells the runner's hooks of them.

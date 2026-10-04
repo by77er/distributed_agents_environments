@@ -178,7 +178,7 @@ def recording(
 
 class Policy:
     """Channels whose engines are in this process, as a test's training loop and its runners see them: `publish` serves
-    new weights on one (what a loop is given to publish with), and `recording` is a runner's recorder over them."""
+    new weights on one (what a loop is given to publish with), and `recording` is what a runner records through."""
 
     def __init__(self, *channels: Channel) -> None:
         self.channels = {channel.name: channel for channel in channels}

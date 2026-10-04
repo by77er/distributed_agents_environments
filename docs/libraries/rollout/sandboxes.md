@@ -102,8 +102,9 @@ to reach its model. For each slot a spec names, the runner puts the slot's
 [address](../rollout-train/harness-endpoint.md) in the sandbox's environment: `OPENAI_BASE_URL`, `OPENAI_API_KEY` and
 `OPENAI_MODEL`, each suffixed with the slot's name in capitals (`OPENAI_API_KEY_AGENT_1`), and unsuffixed too when
 the spec names one slot. What the harness samples there is recorded for the slot like any other sample. A key names
-the run's session of its slot only, and stops working once the recorder forgets the run, which an episode runner has
-it do as the episode ends. A slot whose model is not served over HTTP has no address, and the run fails.
+the run's session of its slot only, and stops working once it expires or a newer attempt takes its episode's fence
+([keys](../rollout-train/gateway.md#keys)). A slot whose model is not served over HTTP has no address, and the run
+fails.
 
 ## The runner
 
