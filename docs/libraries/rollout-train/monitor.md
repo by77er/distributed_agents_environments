@@ -163,7 +163,7 @@ so a reload stays there.
 | Statistics | Across every training run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color; evals and their parts are on Evals |
 
 Renaming on a run's page asks the monitor (`POST /api/rename`, `{"id", "name"}`), which renames it in the registry
-(`System.rename`; a run from before the registry is registered under its key first). A checkpoint's page makes a bookmark
+(`System.rename`). A checkpoint's page makes a bookmark
 name it, or moves one there (`POST /api/bookmarks`, `{"name", "checkpoint"}`, where the checkpoint may be any
 [reference](checkpoints.md#references)), and takes one away (`DELETE /api/bookmarks/NAME`). A name another run has, or
 one that says `/`, `@` or `:`, is refused (409) and the page says why. The **New suite** and **Edit** forms make a

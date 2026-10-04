@@ -4887,9 +4887,8 @@ class System
 - `async def pause(self, run: str) -> Desired` — Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run.
 - `async def resume(self, run: str) -> Resumed` — Resume a run: in place, or by a launch (`rollout_train.resuming.resume`). Raises `Taken` for a run that
   cannot be resumed, `KeyError` where there is no such run or no launcher alive offers what it needs.
-- `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
-  run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
-  `KeyError` when there is no such run (or no registry).
+- `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger.
+  Raises `Taken` for a name it cannot have, `KeyError` when there is no such run (or no registry).
 - `async def bookmark(self, name: str, checkpoint: str) -> Bookmark` — Make a bookmark name the checkpoint `checkpoint` says (its id, the start of one, `RUN:STEP`, `RUN` or another
   bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
   says no checkpoint (or no registry).

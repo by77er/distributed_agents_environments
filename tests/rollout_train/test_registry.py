@@ -79,14 +79,6 @@ async def test_a_runs_directory_says_which_run_it_is_whatever_it_is_called(tmp_p
     assert (alone.id, alone.name) == ("unregistered", "unregistered")
 
 
-async def test_a_run_from_before_the_registry_keeps_its_key_as_its_id(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    fence = await ledger.take(scope("curriculum-9"))
-    await ledger.append(table("curriculum-9", GROUPS), "1", {"episodes": 4}, fence)
-    old = await run_of(tmp_path / "curriculum-9", ledger, registry_of(ledger))
-    assert (old.id, old.name) == ("curriculum-9", "curriculum-9")
-
-
 async def made(
     ledger: Ledger, tmp_path: Path, run: str, steps: int, after: Checkpoint | None = None
 ) -> list[Checkpoint]:
@@ -113,14 +105,14 @@ async def test_a_reference_finds_a_version_by_bookmark_run_and_step_or_id(tmp_pa
     registry = registered(ledger)
     named = await registry.create("scout")
     scout = await made(ledger, tmp_path, named.id, 3)
-    fork = await made(ledger, tmp_path, "nnnn-fork", 1, after=scout[1])
+    fork = await made(ledger, tmp_path, (await registry.create("fork", "nnnn-fork")).id, 1, after=scout[1])
     await registry.bookmark("best", scout[1].id)
     assert await resolved(ledger, registry, BASE) is None
     assert await resolved(ledger, registry, "best") == scout[1].id
     assert await resolved(ledger, registry, "scout:3") == scout[2].id  # by its name
     assert await resolved(ledger, registry, f"{named.id}:1") == scout[0].id  # or its id
     assert await resolved(ledger, registry, "scout") == scout[2].id  # its newest
-    assert await resolved(ledger, registry, "nnnn-fork") == fork[0].id  # (a run from before the registry)
+    assert await resolved(ledger, registry, "nnnn-fork") == fork[0].id  # (by its id)
     assert await resolved(ledger, registry, scout[0].id) == scout[0].id
     assert await resolved(ledger, registry, scout[0].id[:6]) == scout[0].id  # a start no other id shares
     for unknown, says in [

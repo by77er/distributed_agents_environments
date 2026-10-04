@@ -20,6 +20,7 @@ from rollout_train.monitor.feed import FeedReader
 from rollout_train.monitor.stream import MISSING, Hub, version_of
 from rollout_train.monitor.system import System
 from rollout_train.record import GROUPS, STARTS, scope, table
+from rollout_train.registry import registry_of
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -28,6 +29,9 @@ from rollout_train.monitor.app import create_app
 async def a_run(tmp_path: Path) -> FileLedger:
     """A run that decided one group: what a loop that just started writes."""
     ledger = FileLedger(tmp_path / LEDGER)
+    registry = registry_of(ledger)
+    assert registry is not None
+    await registry.create("train", "train")
     fence = await ledger.take(scope("train"))
     start: JsonValue = {"policy": "miner", "host": "here", "started": 5.0, "directory": str(tmp_path)}
     await ledger.append(table("train", STARTS), str(fence.number), start, fence)
@@ -108,7 +112,7 @@ async def test_an_answer_names_its_version_and_one_asked_again_with_it_is_told_n
 
 
 async def test_a_run_is_named_again_and_the_page_hears_of_it(tmp_path: Path) -> None:
-    await a_run(tmp_path)  # (a run from before the registry: it is registered under its key when it is named)
+    await a_run(tmp_path)
     transport = httpx.ASGITransport(app=create_app(tmp_path, beat=60.0))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         before = await client.get("/api/system")

@@ -8,7 +8,7 @@ beside a ledger of files (`FileRegistry`), tables in a database ledger's databas
 
 - A **run** has an id and a name. A name is one no other run has, as its name or as its id, so that either finds one
   run. A run's directory says which run it is (`run.json`); `run_of` finds it, or registers the run the first time it
-  is started. A run recorded before there was a registry keeps its key as its id, and is registered under it.
+  is started.
 - A **bookmark** names a checkpoint, and is moved to another by whoever moves it: a run told to carry one moves it to
   each checkpoint it makes. A checkpoint needs none: it is shown by where it came from.
 - A **dataset's name** (`rollout_train.datasets`) names one dataset, for good: a dataset is never changed, so neither
@@ -35,7 +35,7 @@ from rollout.contracts import new_ulid
 from rollout_train.checkpoints import SHORTEST, checkpoints_in
 from rollout_train.layout import RUN
 from rollout_train.ledger import FileLedger, Ledger
-from rollout_train.record import STEPS, runs_in, table
+from rollout_train.record import STEPS, table
 
 BASE = "base"
 """The reference to the base model: no checkpoint."""
@@ -306,18 +306,15 @@ class FileRegistry:
 
 async def run_of(directory: Path, ledger: Ledger, registry: Registry | None, name: str | None = None) -> Entry:
     """The run in `directory`: the one its `run.json` names; else, the first time it is started, a run registered
-    under `name` (by default the directory's name), which `run.json` then names. A run recorded before there was a
-    registry, under the directory's name, keeps that as its id. Without a registry, the run is the directory's name."""
+    under `name` (by default the directory's name), which `run.json` then names. Without a registry, the run is the
+    directory's name."""
     path = directory / RUN
     if await asyncio.to_thread(path.exists):
         id = str(json.loads(await asyncio.to_thread(path.read_text))["id"])
         return await _registered(registry, id, name or directory.name)
     if registry is None:
         return Entry(directory.name, directory.name, 0.0)
-    if directory.name in await runs_in(ledger):  # (recorded before there was a registry)
-        entry = await _registered(registry, directory.name, directory.name)
-    else:
-        entry = await registry.create(name or directory.name)
+    entry = await registry.create(name or directory.name)
 
     def noted() -> None:
         directory.mkdir(parents=True, exist_ok=True)
@@ -353,7 +350,7 @@ async def resolved(ledger: Ledger, registry: Registry | None, reference: str) ->
         return marks[reference]
     runs = await registry.runs() if registry else []
     who, _, step = reference.partition(":")
-    run = found(runs, who) or (Entry(who, who, 0.0) if who in await runs_in(ledger) else None)
+    run = found(runs, who)
     checkpoints = await checkpoints_in(ledger)
     if run is not None:
         if step:

@@ -96,7 +96,6 @@ from rollout_train.registry import (
     Registry,
     Taken,
     checked,
-    found,
     names,
     registry_of,
     resolved,
@@ -207,7 +206,7 @@ class System:
         """Where a run's episodes are seen (its feed, its episodes' events): the one place that decides.
 
         - its directory, where its newest start says, if that is on this machine; for a run that says nothing, the
-          directory this was opened on, if the run is its (as its `run.json` says, or by its name);
+          directory this was opened on, if the run is its (as its `run.json` says);
         - else the monitor at the address its newest start names, which serves its machine's runs (unless this was
           asked by another monitor: then nothing more is asked of others);
         - else nowhere this can read: what is shown of the run is what the ledger has."""
@@ -260,13 +259,9 @@ class System:
             raise Taken(str(error)) from None
 
     async def rename(self, who: str, name: str) -> Entry:
-        """Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
-        run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
-        `KeyError` when there is no such run (or no registry)."""
-        registry = self._registry()
-        if found(await registry.runs(), who) is None and who in await runs_in(self._ledger):
-            await registry.create(who, id=who)
-        return await registry.rename(who, name)
+        """Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger.
+        Raises `Taken` for a name it cannot have, `KeyError` when there is no such run (or no registry)."""
+        return await self._registry().rename(who, name)
 
     async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
         """Make a bookmark name the checkpoint `checkpoint` says (its id, the start of one, `RUN:STEP`, `RUN` or another
@@ -1339,10 +1334,10 @@ def _solved_count(results: Mapping[str, Any], episodes: Mapping[str, Any]) -> in
     return sum(bool(result.get("solved")) for result in said) if said or not results else None
 
 
-def _run_in(directory: Path) -> str:
-    """The id of the run in a directory: as its `run.json` says, or (a run from before the registry) its name."""
+def _run_in(directory: Path) -> str | None:
+    """The id of the run in a directory, as its `run.json` says (none: it holds no run)."""
     path = directory / RUN
-    return str(json.loads(path.read_text())["id"]) if path.exists() else directory.name
+    return str(json.loads(path.read_text())["id"]) if path.exists() else None
 
 
 def _checkpoint(checkpoint: Checkpoint, shorter: Mapping[str, str]) -> dict[str, Any]:

@@ -217,7 +217,6 @@ its id, so that either finds one run.
 |---|---|
 | A new run | `rollout train` registers it the first time it starts in a directory, under `--name` (by default the directory's name), with a new id (`run_` and a ULID) that the directory's `run.json` keeps (`run_of`) |
 | Renaming | `rollout rename WHO NAME --ledger WHERE`, where `WHO` is the run's name or its id and `WHERE` a run's directory, a ledger's directory or a database's URL; or `Registry.rename` |
-| From before the registry | a run recorded under a key before there was a registry keeps that key as its id, and is registered under it as its name the first time it is asked for |
 
 ### Bookmarks
 
