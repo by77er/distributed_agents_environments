@@ -101,3 +101,5 @@ nav:
       - "Minecraft team": products/minecraft-team.md
   - Development:
       - "Local services": development/local-services.md
+  - Research:
+      - "The policy graph": research/policy-dag.md
