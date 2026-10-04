@@ -21,12 +21,9 @@ A name says neither `/`, `@` nor `:` (they are what a reference to a checkpoint 
 """
 
 import asyncio
-import fcntl
 import json
 import os
 import time
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -34,7 +31,7 @@ from typing import Any, Protocol
 from rollout.contracts import new_ulid
 from rollout_train.checkpoints import SHORTEST, checkpoints_in
 from rollout_train.layout import RUN
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import FileLedger, Ledger, locked
 from rollout_train.record import STEPS, table
 
 BASE = "base"
@@ -179,7 +176,7 @@ class FileRegistry:
 
     async def create(self, name: str, id: str | None = None) -> Entry:
         def created() -> Entry:
-            with self._locked():
+            with locked(self.directory):
                 runs, marks = self._read()
                 made = id or new_run_id()
                 if any(each.id == made for each in runs):
@@ -192,7 +189,7 @@ class FileRegistry:
 
     async def rename(self, who: str, name: str) -> Entry:
         def renamed() -> Entry:
-            with self._locked():
+            with locked(self.directory):
                 runs, marks = self._read()
                 if (was := found(runs, who)) is None:
                     raise KeyError(f"there is no run {who!r}")
@@ -207,7 +204,7 @@ class FileRegistry:
 
     async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
         def moved() -> Bookmark:
-            with self._locked():
+            with locked(self.directory):
                 runs, marks = self._read()
                 mark = Bookmark(valid(name), checkpoint, round(time.time(), 1))
                 self._write(runs, [each for each in marks if each.name != mark.name] + [mark])
@@ -217,7 +214,7 @@ class FileRegistry:
 
     async def unbookmark(self, name: str) -> None:
         def taken() -> None:
-            with self._locked():
+            with locked(self.directory):
                 runs, marks = self._read()
                 if not any(each.name == name for each in marks):
                     raise KeyError(f"there is no bookmark {name!r}")
@@ -230,7 +227,7 @@ class FileRegistry:
 
     async def name_dataset(self, name: str, dataset: str) -> Named:
         def given() -> Named:
-            with self._locked():
+            with locked(self.directory):
                 runs, marks = self._read()
                 named = self._named()
                 entry = Named(valid(name), dataset, round(time.time(), 1))
@@ -246,7 +243,7 @@ class FileRegistry:
 
     async def point_suite(self, name: str, version: str, *, forward: bool = False) -> SuiteName:
         def pointed() -> SuiteName:
-            with self._locked():
+            with locked(self.directory):
                 runs, marks = self._read()
                 every = self._suite_names()
                 was = next((each for each in every if each.name == name), None)
@@ -292,16 +289,6 @@ class FileRegistry:
             kept["suites"] = [asdict(each) for each in pointers]
         staged.write_text(json.dumps(kept, indent=1))
         staged.replace(self.path)
-
-    @contextmanager
-    def _locked(self) -> Generator[None]:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / ".lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 async def run_of(directory: Path, ledger: Ledger, registry: Registry | None, name: str | None = None) -> Entry:

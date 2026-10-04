@@ -17,11 +17,9 @@ files (`FileLaunches`), a table in a database ledger's database (`rollout_train.
 """
 
 import asyncio
-import fcntl
 import json
 import time
-from collections.abc import Callable, Collection, Generator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -29,7 +27,7 @@ from typing import Any, Protocol
 from pydantic import JsonValue
 
 from rollout.contracts import new_ulid
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import FileLedger, Ledger, locked
 
 ASKED, CLAIMED, RUNNING, STOPPING, ENDED, FAILED, STOPPED = (
     "asked",
@@ -208,7 +206,7 @@ class FileLaunches:
         return noted[0]
 
     def _change(self, change: Callable[[dict[str, Launch]], dict[str, Launch]]) -> None:
-        with self._locked():
+        with locked(self.directory):
             launches = change(self._read())
             staged = self.path.with_suffix(".staged")
             staged.write_text(json.dumps([asdict(each) for each in launches.values()]))
@@ -218,13 +216,3 @@ class FileLaunches:
         if not self.path.exists():
             return {}
         return {each["id"]: as_launch(each) for each in json.loads(self.path.read_text())}
-
-    @contextmanager
-    def _locked(self) -> Generator[None]:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / ".lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)

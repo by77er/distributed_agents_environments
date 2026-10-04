@@ -23,18 +23,16 @@ engines. Paused false, it goes on.
 """
 
 import asyncio
-import fcntl
 import json
 import time
-from collections.abc import Generator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import JsonValue
 
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import FileLedger, Ledger, locked
 from rollout_train.record import STARTS, newest_record, table
 
 GROUPS_PER_STEP = "groups_per_step"
@@ -184,7 +182,7 @@ class FileDesiredSettings:
 
     async def want(self, run: str, settings: Mapping[str, JsonValue]) -> Desired:
         def changed() -> Desired:
-            with self._locked():
+            with locked(self.directory):
                 every = self._read()
                 was = every.get(run)
                 now = Desired(run, {**(was.settings if was else {}), **settings}, round(time.time(), 1))
@@ -200,13 +198,3 @@ class FileDesiredSettings:
         if not self.path.exists():
             return {}
         return {each["run"]: Desired(**each) for each in json.loads(self.path.read_text())}
-
-    @contextmanager
-    def _locked(self) -> Generator[None]:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / ".lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)

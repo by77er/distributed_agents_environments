@@ -17,18 +17,16 @@ and a SQLite database serve one machine, whose clock every writer and reader sha
 
 import asyncio
 import contextlib
-import fcntl
 import json
 import time
-from collections.abc import Callable, Generator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import JsonValue
 
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import FileLedger, Ledger, locked
 
 STALE = 90.0
 """Seconds after its newest beat that a runner is taken to be gone."""
@@ -100,7 +98,7 @@ class FilePresence:
 
     async def beat(self, runner: str, about: Mapping[str, JsonValue]) -> None:
         def noted() -> None:
-            with self._locked():
+            with locked(self.directory):
                 beats = self._read()
                 at = round(time.time(), 1)
                 was = beats.get(runner)
@@ -122,16 +120,6 @@ class FilePresence:
         if not self.path.exists():
             return {}
         return {each["runner"]: Beat(**each) for each in json.loads(self.path.read_text())}
-
-    @contextmanager
-    def _locked(self) -> Generator[None]:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / ".lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _runner(beat: Beat) -> str:

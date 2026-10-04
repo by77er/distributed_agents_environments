@@ -29,19 +29,17 @@ served from a machine of its own.
 
 import asyncio
 import contextlib
-import fcntl
 import json
 import logging
 import socket
 import time
-from collections.abc import Awaitable, Callable, Collection, Generator
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 
 from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease, Leases, SandboxPool
-from rollout_train.ledger import Fenced, FileLedger, Ledger
+from rollout_train.ledger import Fenced, FileLedger, Ledger, locked
 from rollout_train.presence import Presence
 from rollout_train.record import runs_in, table
 from rollout_train.rollouts.scheduler import INTERRUPTED, RELEASED, Claims, episode_scope, holding
@@ -197,11 +195,11 @@ class FileLeases:
         return list((await asyncio.to_thread(self._locked_read)).values())
 
     def _locked_read(self) -> dict[str, Lease]:
-        with self._locked():
+        with locked(self.directory):
             return self._read()
 
     def _change(self, change: Callable[[dict[str, Lease]], dict[str, Lease]]) -> None:
-        with self._locked():
+        with locked(self.directory):
             leases = change(self._read())
             staged = self.path.with_suffix(".staged")
             staged.write_text(json.dumps([lease.model_dump(mode="json") for lease in leases.values()]))
@@ -211,13 +209,3 @@ class FileLeases:
         if not self.path.exists():
             return {}
         return {each["key"]: Lease.model_validate(each) for each in json.loads(self.path.read_text())}
-
-    @contextmanager
-    def _locked(self) -> Generator[None]:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / ".lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)

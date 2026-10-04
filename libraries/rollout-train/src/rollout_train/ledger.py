@@ -132,7 +132,7 @@ class FileLedger:
         return await asyncio.to_thread(self._under_lock, self._fences)
 
     def _take(self, scope: str) -> Fence:
-        with self._locked():
+        with locked(self.directory):
             fences = self._fences()
             fences[scope] = fences.get(scope, 0) + 1
             _replaced(self.directory / FENCES, json.dumps(fences).encode())
@@ -140,7 +140,7 @@ class FileLedger:
 
     def _append(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended:
         line = (json.dumps({"key": key, "fence": fence.number, "record": record}) + "\n").encode()
-        with self._locked():
+        with locked(self.directory):
             if self._fences().get(fence.scope, 0) != fence.number:
                 raise Fenced(f"{fence.scope} has a newer writer than fence {fence.number}")
             path = self._path(table)
@@ -221,18 +221,21 @@ class FileLedger:
         return json.loads(path.read_text()) if path.exists() else {}
 
     def _under_lock[**P, T](self, call: Callable[P, T], *arguments: P.args, **options: P.kwargs) -> T:
-        with self._locked():
+        with locked(self.directory):
             return call(*arguments, **options)
 
-    @contextlib.contextmanager
-    def _locked(self) -> Generator[None]:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / ".lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
+
+@contextlib.contextmanager
+def locked(directory: Path) -> Generator[None]:
+    """Hold the lock on a ledger of files' directory, which the ledger and the state kept beside it (the registry,
+    heartbeats, launches, desired settings, leases) are written under. It blocks: call it in a thread."""
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / ".lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 @dataclass
