@@ -102,8 +102,8 @@ class SampleResult(ContractModel):
 
 
 class ModelAddress(ContractModel):
-    """Where a harness that brings its own loop reaches a model slot: an OpenAI-compatible endpoint. Whatever
-    answers there is the slot's model; the harness only sets its base URL and key."""
+    """Where a harness that brings its own loop reaches a model slot: an endpoint that speaks OpenAI's and
+    Anthropic's APIs. Whatever answers there is the slot's model; the harness only sets its base URL and key."""
 
     base_url: str
     api_key: str

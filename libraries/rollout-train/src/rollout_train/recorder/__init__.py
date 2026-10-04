@@ -4,7 +4,7 @@
 - `renderers`: what a model family's token format must provide, and the pieces most are built from.
 - `recorder`: `Recorder` serves a run's recorded bindings; a session exports `Segment`s (token sequences with the
   spans the policy sampled, their logprobs and the version of the weights: the served checkpoint's depth).
-- `compat`: the recorder over HTTP, for harnesses that bring their own loop.
+- `compat`: the recorder over HTTP (OpenAI's and Anthropic's APIs), for harnesses that bring their own loop.
 """
 
 from rollout_train.recorder.recorder import RecordedEndpoint, Recorder, Segment, Span

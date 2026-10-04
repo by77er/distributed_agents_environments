@@ -26,7 +26,7 @@
 | **Profile** | A deployment, described: channels and engines, the trainer, the runner, where tool sets live. See [deploying](../guide/deploying.md). |
 | **Library / implementation / product / environment** | The four kinds of package in the repository: what code is written against; one implementation of an interface a library defines; an application; something to train on. See [overview](overview.md#layers). |
 | **Environment** | What a run trains on and an eval measures (`rollout.environment.Environment`, [below](#training-terms)); the packages under `environments/` are environments in that sense. Also, a computer a task creates through `run.environments` ([computers](../implementations/rollout-computers.md)). |
-| **Harness inside an environment** | A program's own agent, given an OpenAI-compatible address for a model slot: recorded like any other sample. |
+| **Harness inside an environment** | A program's own agent, given an address for a model slot that speaks OpenAI's and Anthropic's APIs: recorded like any other sample. |
 
 ## Training terms
 

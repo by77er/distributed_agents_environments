@@ -1,0 +1,109 @@
+"""The recorder over HTTP, for harnesses that bring their own loop: OpenAI's Chat Completions and Responses, and
+Anthropic's Messages.
+
+A coding agent running inside an environment, or any other program that already knows how to talk to a model, needs
+no agent loop from this library: it is given a base URL and a key (`Model.address()`), and what it samples there is
+recorded for the run's slot like any other sample. The key names the session; the model name a client sends is
+ignored, and so are its sampling parameters (a trainable channel samples as its binding says).
+
+    POST {base_url}/chat/completions      OpenAI's Chat Completions  (`chat`)
+    POST {base_url}/responses             OpenAI's Responses  (`responses`)
+    POST {base_url}/messages              Anthropic's Messages  (`messages`)
+    GET  {base_url}/models                every channel of the recorder, as a model  (`base_url` ends in `/v1`)
+
+Each answers with one reply, or the same reply as server-sent events in its API's own shapes. The reply is sampled
+before the first event is sent, so a recorded turn is kept whole or not at all. A context too long for the model is
+refused the way each API refuses one, which harnesses compact on.
+"""
+
+import itertools
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
+
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.routing import Route
+
+from rollout.contracts import (
+    ContextDelta,
+    ContextOverflow,
+    ModelEndpointError,
+    SampleRequest,
+    arguments_digest,
+    context_digests,
+)
+from rollout_train.recorder.compat import chat, messages, responses
+from rollout_train.recorder.compat.wire import Failure, Format
+from rollout_train.recorder.recorder import SERVED_UNDER, Recorder
+
+__all__ = ["create_app"]
+
+
+def create_app(recorder: Recorder) -> Starlette:
+    """Serve `recorder` (whose `base_url` says where this app is reachable, path included)."""
+    counter = itertools.count()
+
+    async def models(request: Request) -> Response:
+        names = list(recorder.channels)
+        listed = [
+            {"id": name, "object": "model", "type": "model", "display_name": name, "created": 0, "owned_by": "rollout"}
+            for name in names
+        ]
+        page = {"has_more": False, "first_id": names[0] if names else None, "last_id": names[-1] if names else None}
+        return JSONResponse({"object": "list", "data": listed} | page)
+
+    def answering(format: Format) -> Callable[[Request], Awaitable[Response]]:
+        async def answer(request: Request) -> Response:
+            served = recorder.served(key(request))
+            if served is None:
+                return format.error(Failure.KEY, "this key names no session")
+            session_id, endpoint = served
+            try:
+                body = await request.json()
+                if not isinstance(body, dict):
+                    raise TypeError("the body is not a JSON object")
+                body = cast(dict[str, Any], body)
+                prompt = format.read(body)
+                if not prompt.messages:
+                    raise ValueError("the request has no messages")
+                effect = request.headers.get("idempotency-key") or f"{session_id}:harness:{next(counter)}"
+                allowed = endpoint.describe(session_id).max_output_tokens
+                cap = prompt.max_output_tokens
+                sample = SampleRequest(
+                    effect_id=effect,
+                    arguments_digest=arguments_digest(body),
+                    session_id=session_id,
+                    context=ContextDelta(append=prompt.messages, digest=context_digests(prompt.messages)[-1]),
+                    tools=prompt.tools,
+                    max_output_tokens=min(cap, allowed) if cap else None,
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                return format.error(Failure.REQUEST, f"the request could not be read: {error}")
+            try:
+                result = await endpoint.sample(sample)
+            except ContextOverflow as error:
+                return format.error(Failure.CONTEXT, str(error))
+            except ModelEndpointError as error:
+                return format.error(Failure.ENDPOINT, str(error))
+            reply = format.reply(result, effect, body)
+            if body.get("stream"):
+                return StreamingResponse(format.events(reply), media_type="text/event-stream")
+            return JSONResponse(reply)
+
+        return answer
+
+    return Starlette(
+        routes=[
+            Route(f"{SERVED_UNDER}/models", models),
+            Route(f"{SERVED_UNDER}/chat/completions", answering(chat.FORMAT), methods=["POST"]),
+            Route(f"{SERVED_UNDER}/responses", answering(responses.FORMAT), methods=["POST"]),
+            Route(f"{SERVED_UNDER}/messages", answering(messages.FORMAT), methods=["POST"]),
+        ]
+    )
+
+
+def key(request: Request) -> str:
+    """The key a client sent: OpenAI's clients send it as a bearer token, Anthropic's as `x-api-key`."""
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    return request.headers.get("x-api-key") or bearer

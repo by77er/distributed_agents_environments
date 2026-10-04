@@ -19,7 +19,7 @@ it went. It is a package that depends on `rollout` and on nothing above it (`tes
 |---|---|---|
 | The platform's loop | A `Task`: tools, observations, a score | The agent loop, and memory that fits any model (`CompactingAgent`) |
 | Your own loop | A `Program`: several players at once, lockstep, anything | A model per slot (`run.models[name]`), and `Memory` for long games |
-| Your own harness, inside the environment | Launch it; say when it ended and how it went | An address per slot (`run.model.address()`): a base URL and a key for an OpenAI-compatible endpoint |
+| Your own harness, inside the environment | Launch it; say when it ended and how it went | An address per slot (`run.model.address()`): a base URL and a key for an endpoint that speaks OpenAI's and Anthropic's APIs |
 
 In all three, the reward goes through the run (`run.reward`, or an observation's `reward`), and the result says how it
 went in the world's own terms:
