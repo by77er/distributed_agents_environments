@@ -1,0 +1,68 @@
+{{- define "rollout.image" -}}
+{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{- end }}
+
+{{- define "rollout.labels" -}}
+app.kubernetes.io/part-of: rollout
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "rollout.ledgerUrl" -}}
+postgresql://rollout@postgres.{{ .Release.Namespace }}:5432/rollout
+{{- end }}
+
+{{/* What every process of the platform is given: where the stores are, with their credentials, and the cluster
+config. The ledger's URL holds no password: PGPASSWORD does. */}}
+{{- define "rollout.env" -}}
+- name: ROLLOUT_CLUSTER
+  value: /etc/rollout/cluster.toml
+- name: ROLLOUT_LEDGER_URL
+  value: {{ include "rollout.ledgerUrl" . }}
+- name: PGPASSWORD
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: POSTGRES_PASSWORD}}
+- name: AWS_ENDPOINT_URL
+  value: http://s3.{{ .Release.Namespace }}:7070
+- name: AWS_DEFAULT_REGION
+  value: us-east-1
+- name: AWS_ACCESS_KEY_ID
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: ROOT_ACCESS_KEY_ID}}
+- name: AWS_SECRET_ACCESS_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: ROOT_SECRET_ACCESS_KEY}}
+- name: TINKER_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.tinker }}, key: TINKER_API_KEY, optional: true}}
+- name: HF_HOME
+  value: {{ .Values.state.path }}/huggingface
+{{- end }}
+
+{{/* What a process outside the Ray cluster needs to reach it: the cluster's token (KubeRay keeps it in a Secret named
+after the cluster, and gives it to Ray's own pods itself). */}}
+{{- define "rollout.rayClientEnv" -}}
+- name: RAY_AUTH_MODE
+  value: token
+- name: RAY_AUTH_TOKEN
+  valueFrom: {secretKeyRef: {name: {{ .Values.ray.name }}, key: auth_token}}
+{{- end }}
+
+{{- define "rollout.volumeMounts" -}}
+- {name: state, mountPath: {{ .Values.state.path }}}
+- {name: config, mountPath: /etc/rollout, readOnly: true}
+- {name: gateway-keys, mountPath: /etc/rollout-secrets/gateway, readOnly: true}
+- {name: tinker, mountPath: /root/.tinker, readOnly: true}
+{{- end }}
+
+{{- define "rollout.volumes" -}}
+- name: state
+  persistentVolumeClaim: {claimName: {{ .Values.state.claim }}}
+- name: config
+  configMap:
+    name: rollout
+    items:
+      - {key: cluster.toml, path: cluster.toml}
+      {{- range $path, $_ := .Files.Glob "files/profiles/**.toml" }}
+      - {key: {{ trimPrefix "files/" $path | replace "/" "_" }}, path: {{ trimPrefix "files/" $path }}}
+      {{- end }}
+- name: gateway-keys
+  secret: {secretName: {{ .Values.secrets.gatewayKeys }}, optional: true, defaultMode: 0400}
+- name: tinker
+  secret: {secretName: {{ .Values.secrets.tinker }}, optional: true, defaultMode: 0400}
+{{- end }}

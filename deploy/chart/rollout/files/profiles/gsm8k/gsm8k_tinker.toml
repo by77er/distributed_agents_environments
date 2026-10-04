@@ -1,0 +1,28 @@
+# GSM8K played by the base Qwen/Qwen3.5-9B, sampled at Tinker, in the K3s cluster: implementations/rollout-verifiers/
+# examples/gsm8k_tinker.toml with the cluster's stores. The gateway Deployment hosts the channel's engine, samples every
+# turn there and records it; the GSM8K launcher's evals (in rollout-verifiers' Python) reach it at [gateway] url and
+# start no engine.
+directory = "{{ .Values.state.path }}/runs/gsm8k-tinker"
+episodes_at_once = 8
+
+[ledger]
+kind = "rollout_train.database:DatabaseLedger"
+url = "{{ include "rollout.ledgerUrl" . }}"  # the password is PGPASSWORD's
+
+[blobs]  # (the gateway writes each turn's blob; the runner reads them into its episodes, the monitor into its pages)
+kind = "rollout_s3:S3BlobStore"
+bucket = "{{ .Values.stores.bucket }}"
+prefix = "{{ .Values.stores.prefix }}"
+
+[channels.policy]
+model = "Qwen/Qwen3.5-9B"
+renderer = "rollout_qwen:qwen35"
+engine = "rollout_tinker:TinkerEngine"
+engines = [{ max_model_len = 4096 }]
+thinking_tokens = 1024  # (Tinker bills each token: the room is capped here, and by the suite's entry)
+answer_tokens = 512
+
+[gateway]
+url = "http://gateway.{{ .Release.Namespace }}:{{ .Values.gateway.port }}"
+listen = "0.0.0.0:{{ .Values.gateway.port }}"
+keys = "/etc/rollout-secrets/gateway/gateway.keys"

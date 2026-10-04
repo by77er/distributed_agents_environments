@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rollout
+description: The platform in one namespace, by role - the stores, a Ray cluster, the launchers, the gateway, the monitor
+type: application
+version: 0.1.0

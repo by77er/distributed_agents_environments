@@ -1,0 +1,94 @@
+# The platform in the namespace it is installed into (`rollout`), by role: the stores, a Ray cluster, the launchers,
+# the gateway, the monitor. Secrets are made outside the chart and named here (deploy/k3s/README.md).
+
+image:
+  repository: localhost:30500/rollout-platform  # deploy/images/platform, built in the cluster
+  tag: dev
+  pullPolicy: Always
+
+# Where every pod of the platform keeps local state: run directories, Minecraft's servers and worlds, the Hugging Face
+# cache. One node, so one local-path volume that every pod mounts (each mount is the same directory on the node).
+state:
+  claim: state
+  size: 200Gi
+  storageClass: local-path
+  path: /root/.cache/rollout  # where pods mount it: the code's `~/.cache/rollout`, the containers running as root
+
+secrets:
+  stores: stores              # POSTGRES_PASSWORD, ROOT_ACCESS_KEY_ID, ROOT_SECRET_ACCESS_KEY
+  gatewayKeys: gateway-keys   # gateway.keys: one `KID SECRET` line
+  tinker: tinker              # TINKER_API_KEY, or credentials.json (what `tinker auth login` writes); optional
+
+# The ledger and the blob store, as deploy/k3s/services.yaml had them: the StatefulSets keep their names and claims,
+# so an install over those resources takes them over with their data.
+stores:
+  postgres:
+    image: postgres:17
+    storage: 20Gi
+    resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+  s3:
+    image: versity/versitygw:v1.8.0
+    storage: 200Gi
+    resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 2Gi}}
+  bucket: rollout-blobs
+  prefix: blobs/
+
+# One long-lived Ray cluster: the launchers submit each run to it as a Ray job. The head runs no tasks; a run that asks
+# for a GPU gets the GPU group's pod, a run that asks for none the CPU group's. The autoscaler starts either from zero
+# when a job waits, and removes it after idleSeconds without work.
+ray:
+  name: ray
+  version: "2.59.0"
+  idleSeconds: 300
+  head:
+    resources: {requests: {cpu: 500m, memory: 2Gi}, limits: {memory: 3Gi}}
+  gpu:
+    maxReplicas: 1
+    resources: {requests: {cpu: "4", memory: 8Gi}, limits: {memory: 14Gi, nvidia.com/gpu: 1}}
+  cpu:
+    maxReplicas: 1
+    cpus: "4"
+    resources: {requests: {cpu: "1", memory: 2Gi}, limits: {memory: 4Gi}}
+
+# Each launcher offers the profiles under files/profiles/PROFILES and the environments it names, beats as
+# launcher/launcher-NAME/NAME, and submits the runs it claims to the Ray cluster, each asking for `gpus`. It runs in the
+# Python environment that can import its environments.
+launchers:
+  minecraft:
+    python: /opt/rollout/venv/bin/python
+    workingDir: /opt/rollout/source
+    profiles: minecraft
+    environments: [minecraft_team.environment:environment]
+    atOnce: 1
+    gpus: 1
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+  gsm8k:
+    python: /opt/rollout/verifiers/bin/python
+    workingDir: /opt/rollout/source/implementations/rollout-verifiers
+    profiles: gsm8k
+    environments: [rollout_verifiers.environments:gsm8k]
+    atOnce: 2
+    gpus: 0
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+
+gateway:
+  profile: gsm8k/gsm8k_tinker.toml
+  replicas: 1
+  port: 8900
+  host: gateway.localhost
+  resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+
+# Each monitor serves the page over a run's directory (its ledger, and every run in that ledger) or a ledger's URL.
+monitors:
+  main:
+    where: runs/curriculum-9   # under state.path
+    host: monitor.localhost
+    resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 3Gi}}
+  astra:
+    where: evaluations/astra-t054u
+    host: astra.monitor.localhost
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+
+ingress:
+  className: traefik
+  rayHost: ray.localhost      # Ray's dashboard; it asks for the cluster's token

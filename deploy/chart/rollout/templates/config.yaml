@@ -1,0 +1,58 @@
+# What every pod of the platform mounts: the local state's volume, and the cluster config with the profiles the
+# commands still take (files/), which name the stores at their in-cluster addresses.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.state.claim }}
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep  # (uninstalling the chart leaves the run directories)
+spec:
+  accessModes: [ReadWriteOnce]  # one node: every pod mounts it there
+  storageClassName: {{ .Values.state.storageClass }}
+  resources: {requests: {storage: {{ .Values.state.size }}}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rollout
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+data:
+  cluster.toml: |
+    {{- tpl (.Files.Get "files/cluster.toml") . | nindent 4 }}
+  {{- range $path, $_ := .Files.Glob "files/profiles/**.toml" }}
+  {{ trimPrefix "files/" $path | replace "/" "_" }}: |
+    {{- tpl ($.Files.Get $path) $ | nindent 4 }}
+  {{- end }}
+---
+# The launchers' account: they may manage RayJobs and RayClusters (and read their pods), for runs started as RayJobs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: launcher
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: launcher
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [ray.io]
+    resources: [rayjobs, rayclusters]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [ray.io]
+    resources: [rayjobs/status, rayclusters/status]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods, pods/log, services]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: launcher
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+subjects:
+  - {kind: ServiceAccount, name: launcher, namespace: {{ .Release.Namespace }}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: launcher}

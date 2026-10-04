@@ -1,0 +1,69 @@
+# The Ray cluster the launchers submit runs to, long-lived: a head that runs no tasks, a GPU group and a CPU group the
+# autoscaler starts from zero when a job waits for one and removes after `ray.idleSeconds` idle. Its pods run the
+# platform's image and mount what every pod of the platform mounts, so a run's job finds its profile, its directory
+# and the stores. Clients present the cluster's token, which KubeRay keeps in a Secret named after the cluster.
+{{- define "rollout.rayContainer" -}}
+image: {{ include "rollout.image" .root }}
+imagePullPolicy: {{ .root.Values.image.pullPolicy }}
+workingDir: /opt/rollout/source
+env:
+  {{- include "rollout.env" .root | nindent 2 }}
+  - {name: RAY_ENABLE_UV_RUN_RUNTIME_ENV, value: "0"}
+volumeMounts:
+  {{- include "rollout.volumeMounts" .root | nindent 2 }}
+resources: {{- toYaml .resources | nindent 2 }}
+{{- end }}
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: {{ .Values.ray.name }}
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  rayVersion: {{ .Values.ray.version | quote }}
+  enableInTreeAutoscaling: true
+  authOptions: {mode: token}
+  autoscalerOptions:
+    idleTimeoutSeconds: {{ .Values.ray.idleSeconds }}
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+  headGroupSpec:
+    rayStartParams:
+      num-cpus: "0"
+      dashboard-host: 0.0.0.0
+    template:
+      metadata: {labels: {app: ray-head}}
+      spec:
+        containers:
+          - name: ray-head
+            {{- include "rollout.rayContainer" (dict "root" . "resources" .Values.ray.head.resources) | nindent 12 }}
+            ports:
+              - {containerPort: 6379, name: gcs-server}
+              - {containerPort: 8265, name: dashboard}
+              - {containerPort: 10001, name: client}
+        volumes: {{- include "rollout.volumes" . | nindent 10 }}
+  workerGroupSpecs:
+    - groupName: gpu
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: {{ .Values.ray.gpu.maxReplicas }}
+      rayStartParams: {}
+      template:
+        metadata: {labels: {app: ray-worker-gpu}}
+        spec:
+          runtimeClassName: nvidia
+          containers:
+            - name: ray-worker
+              {{- include "rollout.rayContainer" (dict "root" . "resources" .Values.ray.gpu.resources) | nindent 14 }}
+          volumes: {{- include "rollout.volumes" . | nindent 12 }}
+    - groupName: cpu
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: {{ .Values.ray.cpu.maxReplicas }}
+      rayStartParams:
+        num-cpus: {{ .Values.ray.cpu.cpus | quote }}
+      template:
+        metadata: {labels: {app: ray-worker-cpu}}
+        spec:
+          containers:
+            - name: ray-worker
+              {{- include "rollout.rayContainer" (dict "root" . "resources" .Values.ray.cpu.resources) | nindent 14 }}
+          volumes: {{- include "rollout.volumes" . | nindent 12 }}

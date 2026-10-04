@@ -1,0 +1,89 @@
+# The K3s cluster on this machine, in docs/guide/cluster.md's format: the ledger in Postgres, blobs in versitygw's S3,
+# the Ray cluster KubeRay keeps, one 16 GB GPU, Tinker, the Minecraft worlds and GSM8K in rollout-verifiers' Python.
+# Every pod finds it at /etc/rollout/cluster.toml (ROLLOUT_CLUSTER). Secrets are named, never written: PGPASSWORD,
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY come from the Secret `stores`, TINKER_API_KEY (or credentials.json)
+# from `tinker`, the gateway's keys from `gateway-keys`.
+name = "k3s"
+
+[ray]
+address = "auto"                              # in a Ray pod: the cluster it is part of
+jobs = "http://{{ .Values.ray.name }}-head-svc.{{ .Release.Namespace }}:8265"
+temp_dir = "/tmp/ray"                         # the container's own disk
+
+[ledger]
+url = "{{ include "rollout.ledgerUrl" . }}"  # the password is PGPASSWORD's
+
+[blobs]
+kind = "rollout_s3:S3BlobStore"               # the endpoint and the credentials come from the environment
+bucket = "{{ .Values.stores.bucket }}"
+prefix = "{{ .Values.stores.prefix }}"
+
+[scratch]
+directory = "{{ .Values.state.path }}/scratch"
+
+[gateway]
+url = "http://gateway.{{ .Release.Namespace }}:{{ .Values.gateway.port }}"
+listen = "0.0.0.0:{{ .Values.gateway.port }}"
+replicas = {{ .Values.gateway.replicas }}
+keys_file = "/etc/rollout-secrets/gateway/gateway.keys"
+
+[monitor]
+listen = "0.0.0.0:8765"
+feed_episodes = 80
+
+[launcher]
+at_once = 1
+
+[runners]
+places = 8
+
+[guards]
+runs_gib = 6                                  # each Minecraft episode runs a Paper server
+training_gib = 4
+
+[inference.local-vllm]
+kind = "vllm"
+gpus = 1
+max_logprobs = 20
+pool = { adapter_slots = 4 }
+[inference.local-vllm.models."cyankiwi/Qwen3.5-9B-AWQ-4bit"]
+base = "Qwen/Qwen3.5-9B"
+context = 8192
+options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 96 }
+[inference.local-vllm.models."Qwen/Qwen3.5-4B"]
+context = 8192
+options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 64 }
+
+[inference.tinker]
+kind = "tinker"                               # auth vendor: Tinker's SDK reads TINKER_API_KEY or ~/.tinker
+[inference.tinker.models."Qwen/Qwen3.5-9B"]
+context = 65536
+cost = { input = 0.0, output = 0.0 }          # dollars per million tokens, from Tinker's price list
+[inference.tinker.models."Qwen/Qwen3.5-4B"]
+context = 65536
+cost = { input = 0.0, output = 0.0 }
+
+[trainers.local-lora]
+kind = "lora"
+gpus = 1
+colocate_with = "local-vllm"                  # the engines sleep while it steps
+models = ["cyankiwi/Qwen3.5-9B-AWQ-4bit", "Qwen/Qwen3.5-4B"]
+segment_tokens = 8000
+
+[trainers.tinker-lora]
+kind = "tinker"
+models = ["Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-9B"]
+segment_tokens = 32768
+cost = { train = 0.0 }
+
+[sandboxes.minecraft]
+provider = "minecraft_team.worlds:worlds"
+size = 6
+cpus = 1
+memory_gib = 1.5
+
+[environments."minecraft_team.environment:environment"]
+python = "platform"
+
+[environments."rollout_verifiers.environments:gsm8k"]
+project = "/opt/rollout/source/implementations/rollout-verifiers"
