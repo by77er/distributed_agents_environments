@@ -147,7 +147,7 @@ def fixed(profile: Any, trainer: Any, **loop: JsonValue) -> dict[str, JsonValue]
         said |= {f"channels.{name}.engines": len(channel.engines), f"channels.{name}.renderer": channel.renderer}
         said |= {f"channels.{name}.thinking_tokens": channel.thinking_tokens}
         said |= {f"channels.{name}.answer_tokens": channel.answer_tokens, f"channels.{name}.reshard": channel.reshard}
-    said |= {"episodes_at_once": profile.episodes_at_once, "runner": profile.runner, **loop}
+    said |= {"episodes_at_once": profile.episodes_at_once, **loop}
     return {key: _json(value) for key, value in said.items()}
 
 

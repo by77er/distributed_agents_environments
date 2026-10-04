@@ -16,11 +16,9 @@ rollout = "rollout_train.cli:main"
 [project.optional-dependencies]
 http = ["starlette>=0.48", "uvicorn>=0.37"]  # the endpoint for harnesses, the monitor
 report = ["matplotlib>=3.9"]
-durable = ["rollout-durable"]  # for a profile whose runner is durable
 
 [tool.uv.sources]
 rollout = { workspace = true }
-rollout-durable = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

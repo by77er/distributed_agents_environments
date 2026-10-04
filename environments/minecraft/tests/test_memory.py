@@ -1,12 +1,10 @@
 """The team episode on a made-up world and a scripted model (no server): what each agent's context holds as the
-game goes on, when the team compacts, how an episode ends and what it reports. Under the local runner and the
-durable one."""
+game goes on, when the team compacts, how an episode ends and what it reports."""
 
 import json
 import math
 import random
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -189,30 +187,13 @@ def of(model: Remembering, agent: str) -> tuple[list[SampleRequest], list[Sample
     return [request for request in mine if texts(request)[-1] != COMPACT], compactions
 
 
-@pytest.mark.parametrize("runner_kind", ["local", "durable"])
-async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_older_ones_as_a_summary(
-    runner_kind: str, tmp_path: Path
-) -> None:
+async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_older_ones_as_a_summary() -> None:
     model = Remembering()
     world = MadeUpWorld()
-    runner: Any
-    if runner_kind == "durable":
-        pytest.importorskip("dbos")
-        from rollout_durable import DurableRunner
-
-        runner = DurableRunner(
-            tmp_path / "state", providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(world)}
-        )
-        await runner.launch()
-    else:
-        runner = LocalRunner(providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(world)})
-    try:
-        handle = await runner.start(specification())
-        outcome = await handle.result()
-        events = [event async for event in handle.events()]
-    finally:
-        if runner_kind == "durable":
-            await runner.close()
+    runner = LocalRunner(providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(world)})
+    handle = await runner.start(specification())
+    outcome = await handle.result()
+    events = [event async for event in handle.events()]
     assert outcome.status is RunStatus.COMPLETED, outcome
     (result,) = [payload(event)["payload"] for event in events if event.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict) and result["turns"] == TURNS and result["compactions"] != 0

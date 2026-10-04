@@ -120,7 +120,7 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[gateway]` | `url`, `listen`, `replicas`, `keys_file` / `keys_env`, `lifetime` | |
 | `[monitor]` | `listen`, `feed_episodes` | |
 | `[launcher]` | `at_once` | |
-| `[runners]` | `places`, `durable`, `database_url` or `database_url_env` | |
+| `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | |
 | `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `models`, and the kind's own | Below |
 | `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, and the kind's own | Below |

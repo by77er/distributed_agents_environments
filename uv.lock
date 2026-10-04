@@ -5068,9 +5068,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-durable = [
-    { name = "rollout-durable" },
-]
 http = [
     { name = "starlette" },
     { name = "uvicorn" },
@@ -5085,12 +5082,11 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "ray", extras = ["default"], specifier = ">=2.59" },
     { name = "rollout", editable = "libraries/rollout" },
-    { name = "rollout-durable", marker = "extra == 'durable'", editable = "implementations/rollout-durable" },
     { name = "sqlalchemy", specifier = ">=2" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]
-provides-extras = ["http", "report", "durable"]
+provides-extras = ["http", "report"]
 
 [[package]]
 name = "rollout-vllm"

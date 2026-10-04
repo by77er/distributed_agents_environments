@@ -4,7 +4,7 @@ sandbox pools live.
 Whoever deploys writes this down once (a TOML file, or the dataclasses below) and opens it; whoever trains gets the
 `policies`, a `trainer` and a way to `publish` checkpoints, while a runner plays the episodes the run asks for in the
 ledger, and never learns what stands behind them. Scaling is a change here: more engines behind a
-channel, a durable runner instead of an in-process one, a tool set or a pool at a URL instead of in this process.
+channel, a tool set or a pool at a URL instead of in this process.
 
 Engines, renderers, the trainer, tool sets and sandbox providers are named as `module:name`, and what the profile says
 of each is passed to it: this module knows no engine and no trainer. docs/guide/deploying.md describes the file.
@@ -27,8 +27,8 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.harness.imports import ToolBinding, ToolSet
-from rollout.harness.runner import Runner
 from rollout.harness.sandboxes import MemoryLeases, Pool, PoolBinding, SandboxPool
+from rollout.local import LocalRunner
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
@@ -193,8 +193,6 @@ class Profile:
     its ledger and blobs."""
     channels: Mapping[str, ChannelSpec]
     trainer: TrainerSpec | None = None
-    runner: str = "local"
-    """`local` runs episodes in this process; `durable` records them so that they survive it."""
     serve: str | None = None
     """`host:port` to serve the gateway in the runner's own process on, for harnesses (none: a harness cannot be given
     an address)."""
@@ -272,8 +270,7 @@ class Profile:
             *(each.name for each in dataclasses.fields(GatewaySpec)),
         )
         known = (
-            "directory", "ledger", "runner", "serve", "address", "tools", "pools", "feed_runs", "episodes_at_once",
-            "ray",
+            "directory", "ledger", "serve", "address", "tools", "pools", "feed_runs", "episodes_at_once", "ray",
         )  # fmt: skip
         top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
@@ -456,26 +453,7 @@ class Platform:
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
         pools = await self._pools(stack)
-        runner: Runner
-        if profile.runner == "durable":
-            from rollout_durable import DurableRunner
-
-            runner = DurableRunner(
-                directory / "runs",
-                recorder=self.recorder,
-                tool_sets=tool_sets,
-                pools=pools,
-                hooks=[feed],
-                blobs=self.blobs,
-            )
-        elif profile.runner == "local":
-            from rollout.local import LocalRunner
-
-            runner = LocalRunner(
-                recorder=self.recorder, tool_sets=tool_sets, pools=pools, hooks=[feed], blobs=self.blobs
-            )
-        else:
-            raise ValueError(f"runner is {profile.runner!r}: it is local or durable")
+        runner = LocalRunner(recorder=self.recorder, tool_sets=tool_sets, pools=pools, hooks=[feed], blobs=self.blobs)
         self.feed = feed
         self.runner = EpisodeRunner(
             f"{socket.gethostname()}/{directory.name}",  # (the same name when started again: what it claimed is free)
@@ -492,7 +470,7 @@ class Platform:
             presence=presence_of(self.ledger),
             about=lambda: self._about(record),
         )
-        await self.runner.prepare()  # (before the runner recovers its runs: they find their claims adopted)
+        await self.runner.prepare()
         await runner.launch()
         stack.push_async_callback(runner.close)
         _background(stack, self.runner.serve())
@@ -532,7 +510,7 @@ class Platform:
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """The pools the profile names that live in this process, each with its keeper; the rest are bound by URL.
         A pool's leases are kept beside the ledger, under a name of this machine and run; it refuses a key whose claim
-        has lapsed. Under a durable runner, closing leaves its leases for the runs resumed when it starts again."""
+        has lapsed."""
         pools: dict[str, Pool] = {}
         directory = self.profile.directory
         for kind, where in self.profile.pools.items():
@@ -546,8 +524,7 @@ class Platform:
             pool = SandboxPool(
                 provider, name=name, leases=leases_of(self.ledger) or MemoryLeases(), admits=admits(self.ledger, beats)
             )
-            release = self.profile.runner != "durable"
-            stack.push_async_callback(pool.close, release=release)  # (after the runner: its runs release theirs first)
+            stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
             _background(stack, keep(pool, self.ledger, presence_of(self.ledger)))
             pools[kind] = pool
             self.pool_bindings[kind] = PoolBinding(local=kind)

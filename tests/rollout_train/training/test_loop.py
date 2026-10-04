@@ -1,11 +1,10 @@
-"""The training loop with a runner playing the episodes it asks for in the ledger, under two runners: one in this
-process, and a durable one. The loop's code is the same; so is what it does."""
+"""The training loop with a runner playing the episodes it asks for in the ledger."""
 
 import asyncio
 import dataclasses
 import json
 import random
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -65,22 +64,11 @@ def checkpoints_in(directory: Path) -> Checkpoints:
     return Checkpoints(FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs"))
 
 
-@pytest.fixture(params=["in process", "durable runner"])
-async def wiring(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[tuple[Runner, Policy]]:
+@pytest.fixture
+def wiring(tmp_path: Path) -> tuple[Runner, Policy]:
     recorder = answering()
     recorded = recorder.recording(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    if request.param == "in process":
-        yield LocalRunner(recorder=recorded), recorder
-        return
-    pytest.importorskip("dbos")
-    from rollout_durable import DurableRunner
-
-    runner = DurableRunner(tmp_path / "runs", recorder=recorded)
-    await runner.launch()
-    try:
-        yield cast(Runner, runner), recorder
-    finally:
-        await runner.close()
+    return LocalRunner(recorder=recorded), recorder
 
 
 async def test_the_loop_records_each_group_and_steps_on_what_it_played(

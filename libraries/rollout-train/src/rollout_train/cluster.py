@@ -140,11 +140,6 @@ class LauncherSection:
 class RunnersSection:
     places: int = 8
     """Episodes one runner plays at once."""
-    durable: bool = False
-    """Runs episodes so that they survive their process (`rollout_durable`)."""
-    database_url: str | None = None
-    database_secret: Secret | None = None
-    """The durable runner's database (by default the ledger's)."""
 
 
 @dataclass(frozen=True)
@@ -243,7 +238,6 @@ class Cluster:
 
         note("ledger.url", self.ledger.url_secret)
         note("gateway.keys", self.gateway.keys)
-        note("runners.database_url", self.runners.database_secret)
         for kind, providers in (("inference", self.inference), ("trainers", self.trainers)):
             for name, provider in providers.items():
                 note(f"{kind}.{name}.auth.token", provider.auth.token)
@@ -354,12 +348,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     launcher_said = LauncherSection(launcher.whole("at_once", 1, least=1))
     launcher.done()
     runners = table.section("runners")
-    runners_said = RunnersSection(
-        places=runners.whole("places", 8, least=1),
-        durable=runners.flag("durable", False),
-        database_url=runners.text("database_url", None),
-        database_secret=runners.secret("database_url"),
-    )
+    runners_said = RunnersSection(places=runners.whole("places", 8, least=1))
     runners.done()
     guards = table.section("guards")
     guards_said = GuardsSection(guards.number("runs_gib", 0.0), guards.number("training_gib", 0.0))

@@ -8,7 +8,6 @@ described. The code is `rollout_train.profile`, and the command is `rollout` (`r
 
 ```toml
 directory = "~/.cache/rollout/runs/first"     # the run's own: run.json, checkpoints in use, the monitor's feed
-runner = "local"                              # or "durable": runs survive this process
 serve = "0.0.0.0:8900"                        # optional: the runner's gateway, for harnesses, over HTTP
 address = "http://trainer-1:8900"             # what others reach it at, if not http://{serve}
 feed_runs = 80                                # optional: episodes kept in the monitor's feed
@@ -105,7 +104,6 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`: [`Limits`](reference.md#limits)' `thinking` and `answer`; either left out is no budget, and with neither a turn may fill all the context its prompt leaves, [limits](../libraries/rollout-train/channels.md#limits)). `reshard` names the bridge that makes the files its engines load from a checkpoint's (`verbatim`, `peft-from-tinker`, …): each checkpoint is then [bridged](../libraries/rollout-train/checkpoints.md#bridges) before it is served. Without it, the engines load the trainer's files as they are. A channel whose `engine` is `rollout_train.inference:RemoteEngine` has its engines on other machines: vLLM servers, each entry of `engines` one's `address` (`via`, `max_lag`, `connection`: [engines on other machines](#engines-on-other-machines)) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one. Or serve them on machines of their own (`rollout engines`), behind a router |
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the checkpoint a new run trains from, by any [reference](../libraries/rollout-train/checkpoints.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest checkpoint. `bookmark` names a bookmark the run moves to each checkpoint it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its bridges then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
-| `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the gateway in the runner's own process listens for [harnesses](../libraries/rollout-train/harness-endpoint.md), and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the tool set should live |
 | `pools` | Each sandbox pool, by the kind of sandbox it serves ([sandboxes](../libraries/rollout/sandboxes.md)): `module:name` of the provider that makes them in this process, or a table whose `kind` is that and whose other keys are its settings (`size`: how many at once), or a URL. A pool in this process is named `KIND@HOST/DIRECTORY`, keeps its leases beside the ledger and has a keeper that ends them with their claims | Run `rollout pool` where the sandboxes should live, and give its URL |
@@ -205,8 +203,7 @@ Opening a profile starts an [episode runner](../libraries/rollout-train/rollouts
 sets and pools. It plays the episodes of the run in its directory, claiming them in the ledger and recording them
 there, with their trajectories and events in the blob store; it claims an episode only while the pools of its
 sandboxes have room for them, and leases them under the claim. Started again, it takes its fence anew, and what it
-had claimed is open to be played again; the sandboxes leased under those claims are deleted by their pools. With the
-durable runner, it first adopts the runs the runner recovers whose claims held until it stopped, and they play on
+had claimed is open to be played again; the sandboxes leased under those claims are deleted by their pools
 ([a runner started again](../libraries/rollout-train/rollouts.md#a-runner-started-again)).
 
 Runners on other machines share a run's work through the ledger and the blob store alone: a database ledger they

@@ -186,7 +186,6 @@ PROFILE_FIELDS = {
     "Profile.directory": "Cluster.scratch",
     "Profile.channels": "channels.*.provider",
     "Profile.trainer": "trainer.provider",
-    "Profile.runner": "RunnersSection.durable",
     "Profile.serve": "GatewaySection.listen",
     "Profile.address": "GatewaySection.url",
     "Profile.tools": "Cluster.tools",
