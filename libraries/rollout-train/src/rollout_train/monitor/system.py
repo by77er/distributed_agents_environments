@@ -1006,7 +1006,6 @@ class System:
             "directory": latest.get("directory") or (str(found.directory) if isinstance(found, _Place) else None),
             "episodes_at": "here" if isinstance(found, _Place) else found.address if found else None,
             "reached": found.reached if isinstance(found, _Remote) else None,
-            "profile": latest.get("profile"),
             **{key: latest.get(key) for key in ("environment", "version", "description")},  # (what its results say)
             "from": latest.get("from"),
             "started": latest.get("started"),

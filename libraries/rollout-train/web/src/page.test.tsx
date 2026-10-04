@@ -22,7 +22,7 @@ import { Suite } from "./pages/Suite";
 
 const run = (name: string, done: number): Run => ({
   run: name, name, fence: 1, wrote: 10, decided: done, open: [], next: [], channels: [], state: "ended", host: "here",
-  address: null, directory: `/runs/${name}`, episodes_at: "here", reached: null, profile: null, from: null, started: 1,
+  address: null, directory: `/runs/${name}`, episodes_at: "here", reached: null, from: null, started: 1,
   starts: 1, written: 10, steps: [],
   done: Array.from({ length: done }, (_, index) => ({
     group: index + 1, time: 10 + index, task: "t003", title: "chests", rollout_seconds: 5, rewards: [1, 0], solved: [true, false],

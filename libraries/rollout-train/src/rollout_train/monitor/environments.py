@@ -378,7 +378,6 @@ def _check(
         "name": called.get(run, run),
         "started": start.get("started"),
         "version": start.get("version"),
-        "profile": start.get("profile"),
         "ended": ended,
         "groups": shown,
     }

@@ -133,7 +133,6 @@ export interface Run {
   directory: string | null;
   episodes_at: string | null;
   reached: boolean | null;
-  profile: string | null;
   /** The checkpoint it started from (none: the base model). */
   from: string | null;
   started: number | null;
@@ -956,7 +955,6 @@ export interface EnvironmentInfo {
     name: string;
     started: number | null;
     version: string | null;
-    profile: string | null;
     ended: { how: string; at: number; detail?: string | null } | null;
     groups: CheckGroup[];
   } | null;
