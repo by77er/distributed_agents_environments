@@ -41,7 +41,9 @@ channel) plays.
 engines never sleep for one. What the trainer's `start` would be is the checkpoint, so the trained channel's engines
 load what it is served over: the model; a full checkpoint's files; or, for an adapter over a full checkpoint, that
 checkpoint's files, with the adapter loaded over them. The engines keep the profile's sizes (`--set` changes them).
-Without a trainer, the channel's longest turn is what its engines accept, not the trainer's longest segment.
+Without a trainer, the channel's longest turn is what its engines accept, not the trainer's longest segment. When it
+ends, however it ends, it deletes what it fetched to serve the checkpoint (its directory's `bases/`, `checkpoints/`
+and `resharding/`): a full checkpoint's files are a whole model's.
 
 `evaluate(catalog, checkpoints, run=…, suite=…, subject=…, …)` does the work:
 

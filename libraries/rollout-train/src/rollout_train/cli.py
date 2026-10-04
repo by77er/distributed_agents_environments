@@ -110,6 +110,7 @@ async def _evaluate(
     settings: dict[str, Any] | None = None,
 ) -> None:
     import dataclasses
+    import shutil
 
     from rollout.catalog import binding_for
     from rollout_train.evals import evaluate, suite_of
@@ -123,22 +124,27 @@ async def _evaluate(
     channel = described.trainer.channel if described.trainer else next(iter(described.channels))
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
-    async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
-        suite = await suite_of(platform.ledger, suite_name)
-        if suite is None:
-            raise SystemExit(f"there is no suite {suite_name!r}: make one with `rollout suite make`")
-        try:
-            subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
-        except KeyError as error:
-            raise SystemExit(error.args[0]) from None
-        rows = named(suite.catalog)
-        started["blobs"] = platform.blobs_at
-        said = await evaluate(
-            rows, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
-            base=described.channels[channel].model, channel=channel, directory=described.directory / "checkpoints",
-            publish=platform.publish, episodes=episodes, binding=binding_for(rows, channel, platform.tool_bindings),
-            started=started, reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
-        )  # fmt: skip
+    try:
+        async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
+            suite = await suite_of(platform.ledger, suite_name)
+            if suite is None:
+                raise SystemExit(f"there is no suite {suite_name!r}: make one with `rollout suite make`")
+            try:
+                subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
+            except KeyError as error:
+                raise SystemExit(error.args[0]) from None
+            rows = named(suite.catalog)
+            started["blobs"] = platform.blobs_at
+            said = await evaluate(
+                rows, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
+                base=described.channels[channel].model, channel=channel,
+                directory=described.directory / "checkpoints", publish=platform.publish, episodes=episodes,
+                binding=binding_for(rows, channel, platform.tool_bindings), started=started,
+                reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
+            )  # fmt: skip
+    finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
+        for fetched in ("bases", "checkpoints", "resharding"):
+            await asyncio.to_thread(shutil.rmtree, described.directory / fetched, ignore_errors=True)
     print(f"{suite_name}: solved {said['solved']} of {said['played']} episodes (mean reward {said['reward']})")
 
 

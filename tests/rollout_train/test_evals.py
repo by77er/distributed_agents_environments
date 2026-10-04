@@ -276,6 +276,7 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     policy = support.STARTED[0]
     assert policy.told[0].startswith(f"started {directory / 'bases' / made['merged']}")  # (what the adapter is over)
     assert f"load {made['stacked']}" in policy.told
+    assert not (directory / "bases").exists() and not (directory / "checkpoints").exists()  # (deleted once it ended)
     ledger = FileLedger(tmp_path / "ledger")
     listed = asyncio.run(System(ledger=ledger).evals())["evals"]
     assert [(each["name"], each["checkpoint"], each["played"], each["done"]) for each in listed] == [
