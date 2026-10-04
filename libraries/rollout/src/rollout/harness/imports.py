@@ -5,7 +5,7 @@ set that deduplicates performs each call at most once, however often a durable r
 """
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol, Self, runtime_checkable
+from typing import Protocol, Self
 
 from pydantic import JsonValue, model_validator
 
@@ -25,7 +25,6 @@ class ToolSet(Protocol):
         ...
 
 
-@runtime_checkable
 class DeduplicatingToolSet(ToolSet, Protocol):
     """A tool set that says whether it performs each `effect_id` at most once (a `deduplicates = True` attribute, on
     a class). The side-effecting tools of one that does are re-executed after a crash rather than guarded
@@ -35,9 +34,17 @@ class DeduplicatingToolSet(ToolSet, Protocol):
     def deduplicates(self) -> bool: ...
 
 
-def deduplicates(tool_set: ToolSet) -> bool:
-    """Whether a tool set performs each `effect_id` at most once: what it says, or False if it does not say."""
-    return isinstance(tool_set, DeduplicatingToolSet) and tool_set.deduplicates
+def deduplicates(receiver: object) -> bool:
+    """Whether a tool set, a sandbox pool or a sandbox provider performs each `effect_id` at most once: what its
+    `deduplicates` says, or False if it says nothing."""
+    return bool(getattr(receiver, "deduplicates", False))
+
+
+def guarded(retry_class: RetryClass, receiver: object) -> bool:
+    """Whether a call of `retry_class` to `receiver` is guarded (performed at most once by a durable runner, completing
+    as `OUTCOME_UNKNOWN` after a crash interrupted it): a side-effecting or unknown call to a receiver that does not
+    deduplicate."""
+    return retry_class in (RetryClass.SIDE_EFFECTING, RetryClass.UNKNOWN) and not deduplicates(receiver)
 
 
 class ToolBinding(ContractModel):
@@ -84,11 +91,10 @@ class Tools:
             return await tool_set.call(name, arguments, effect_id=effect_id, arguments_digest=arguments_digest)
 
         specification = next(s for s in tool_set.specifications() if s.name == name)
-        side_effecting = specification.retry_class in (RetryClass.SIDE_EFFECTING, RetryClass.UNKNOWN)
         return await self._effects.perform(
             EffectKind.TOOL_CALL,
             {"tool": name, "arguments": dict(arguments)},
             execute,
             completion=lambda result: result.model_dump(mode="json", exclude_none=True),
-            guard=side_effecting and not deduplicates(tool_set),
+            guard=guarded(specification.retry_class, tool_set),
         )

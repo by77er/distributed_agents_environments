@@ -40,7 +40,6 @@ from rollout.harness.sandboxes import (
     Pool,
     SandboxLost,
     SandboxSpec,
-    deduplicating,
 )
 
 
@@ -168,7 +167,7 @@ def serve_pool(pool: Pool) -> Any:
 
     async def operations(request: Request) -> Response:
         listed = [each.model_dump(mode="json", exclude_none=True) for each in pool.operations()]
-        return JSONResponse({"operations": listed, "deduplicates": deduplicating(pool)})
+        return JSONResponse({"operations": listed, "deduplicates": deduplicates(pool)})
 
     async def capacity(request: Request) -> Response:
         return JSONResponse((await pool.capacity()).model_dump(mode="json"))

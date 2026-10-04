@@ -31,6 +31,7 @@ from rollout.contracts import (
     ToolResult,
     ToolSpecification,
 )
+from rollout.harness.imports import deduplicates, guarded
 from rollout.harness.model import Effects
 
 
@@ -305,7 +306,7 @@ class SandboxPool:
 
     @property
     def deduplicates(self) -> bool:
-        return bool(getattr(self.provider, "deduplicates", False))
+        return deduplicates(self.provider)
 
     def operations(self) -> Sequence[ToolSpecification]:
         return self.provider.operations()
@@ -451,10 +452,6 @@ class SandboxPool:
         return self._locks.setdefault(key, asyncio.Lock())
 
 
-def deduplicating(pool: Pool) -> bool:
-    return bool(getattr(pool, "deduplicates", False))
-
-
 class Sandbox:
     """A sandbox a run holds, as `run.sandbox(name)` gives it: how to reach it, and its operations, each a
     `tool.call` effect."""
@@ -490,13 +487,12 @@ class Sandbox:
 
         specification = next((each for each in self._pool.operations() if each.name == operation), None)
         retry_class = specification.retry_class if specification is not None else RetryClass.UNKNOWN
-        side_effecting = retry_class in (RetryClass.SIDE_EFFECTING, RetryClass.UNKNOWN)
         return await self._effects.perform(
             EffectKind.TOOL_CALL,
             {"sandbox": self.name, "tool": operation, "arguments": given},
             execute,
             completion=lambda result: result.model_dump(mode="json", exclude_none=True),
-            guard=side_effecting and not deduplicating(self._pool),
+            guard=guarded(retry_class, self._pool),
         )
 
 
