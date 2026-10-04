@@ -4,7 +4,7 @@
 with it, or with [three ways in](guide/perspectives.md) to see it from where you stand: building an environment,
 designing training, or deploying.
 
-The documentation follows the repository's split into libraries, implementations, products and environments.
+The documentation follows the repository's split into libraries, implementations and environments.
 
 ## Guide
 
@@ -55,12 +55,10 @@ Each implements one interface a library defines.
 | [verifiers environments](implementations/rollout-verifiers.md) | Prime Intellect's verifiers environments as environments here, their harnesses reaching the gateway |
 | [Models](guide/models.md), [Content](guide/content.md#media-and-blobs) | `rollout-openai` and `rollout-s3` are described in the guide |
 
-## Products and environments
+## Environments
 
 | Page | What it covers |
 |---|---|
-| [Project assistant](products/project-assistant.md) | A long-lived conversational agent about one code repository |
-| [Agent sessions](products/agent-sessions.md) | Independent agents with their own computers, which create and message each other |
 | [Minecraft team](products/minecraft-team.md) | One to four agents in a Minecraft world: an environment to train on |
 | [Gridworld](products/gridworld.md) | Two to four agents share out the plates of a grid level over chat: a small environment to train on |
 
@@ -87,8 +85,6 @@ Each implements one interface a library defines.
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
 | `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod (the pods API), and certificates for them from step-ca | |
 | `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the gateway | `Environment` |
-| `products/project-assistant` | `project_assistant` | A conversational agent about one repository | |
-| `products/agent-sessions` | `agent_sessions` (and `agent_sessions.coordination`) | Agents with their own computers, and their coordination | |
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
 | `environments/gridworld` | `gridworld` | Two to four agents on a grid level, with plates, doors, a gate and a lever; depends on `rollout` only | `Environment` |
 

@@ -20,7 +20,7 @@ checkpoint by name. A **profile** says which engines, trainer, runner, tool sets
 
 ## Layers
 
-The repository is a workspace of packages in four layers. Each package's directory, import name and page are in the
+The repository is a workspace of packages in three layers. Each package's directory, import name and page are in the
 [documentation index](../README.md#packages).
 
 | Layer | Packages | What it holds |
@@ -28,7 +28,6 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, sandboxes and their pools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment and the curriculum |
 | | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; recording (the thinking budget, segments) and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; bridges; evaluation suites and evals; heartbeats, launches and the launcher; the cluster config, providers, run settings and the check of a run; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-tinker`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3`, `rollout-runpod`, `rollout-verifiers` | One implementation each of an interface a library defines |
-| Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-team`, `gridworld` | Environments to train on |
 
 What may depend on what is checked by `tests/test_layers.py`:

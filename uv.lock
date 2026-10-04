@@ -10,10 +10,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "agent-sessions",
     "gridworld",
     "minecraft-team",
-    "project-assistant",
     "rollout",
     "rollout-computers",
     "rollout-durable",
@@ -54,27 +52,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b3/92/2c3e2ad5ce9683876729034082af19cfb3fbafd1c298b22a0b0c10ecfdc5/agent_detector-2.0.0.tar.gz", hash = "sha256:19c8ae185dbdca23c24abdcd8ac2cf58b8e84dc284c6f6db536656601f9ffc3f", size = 55094, upload-time = "2026-09-02T14:19:51.88Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/72/15/504337e302d070bd2ff2f39418bb17d2ad73c662c403a4f37cb4e5c5b237/agent_detector-2.0.0-py3-none-any.whl", hash = "sha256:22c6a1c9c23894a12f55aea625f060b8d3330fba774de72d02d5442bb580417f", size = 9352, upload-time = "2026-09-02T14:19:50.971Z" },
-]
-
-[[package]]
-name = "agent-sessions"
-version = "0.0.0"
-source = { editable = "products/agent-sessions" }
-dependencies = [
-    { name = "rollout", extra = ["http"] },
-    { name = "rollout-computers" },
-    { name = "rollout-durable" },
-    { name = "rollout-openai" },
-    { name = "rollout-s3" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
-    { name = "rollout-computers", editable = "implementations/rollout-computers" },
-    { name = "rollout-durable", editable = "implementations/rollout-durable" },
-    { name = "rollout-openai", editable = "implementations/rollout-openai" },
-    { name = "rollout-s3", editable = "implementations/rollout-s3" },
 ]
 
 [[package]]
@@ -3816,23 +3793,6 @@ wheels = [
 ]
 
 [[package]]
-name = "project-assistant"
-version = "0.0.0"
-source = { editable = "products/project-assistant" }
-dependencies = [
-    { name = "rollout", extra = ["http"] },
-    { name = "rollout-durable" },
-    { name = "rollout-openai" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
-    { name = "rollout-durable", editable = "implementations/rollout-durable" },
-    { name = "rollout-openai", editable = "implementations/rollout-openai" },
-]
-
-[[package]]
 name = "prometheus-client"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5152,10 +5112,8 @@ name = "rollout-workspace"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "agent-sessions" },
     { name = "gridworld" },
     { name = "minecraft-team" },
-    { name = "project-assistant" },
     { name = "rollout", extra = ["http"] },
     { name = "rollout-computers" },
     { name = "rollout-durable" },
@@ -5199,10 +5157,8 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-sessions", editable = "products/agent-sessions" },
     { name = "gridworld", editable = "environments/gridworld" },
     { name = "minecraft-team", editable = "environments/minecraft" },
-    { name = "project-assistant", editable = "products/project-assistant" },
     { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
     { name = "rollout-computers", editable = "implementations/rollout-computers" },
     { name = "rollout-durable", editable = "implementations/rollout-durable" },

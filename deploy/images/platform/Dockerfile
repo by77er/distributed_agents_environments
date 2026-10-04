@@ -22,7 +22,6 @@ WORKDIR /opt/rollout/source
 COPY pyproject.toml uv.lock ./
 COPY libraries libraries
 COPY implementations implementations
-COPY products products
 COPY environments environments
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv python install 3.13 \

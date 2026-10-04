@@ -1,6 +1,6 @@
 # Local HTML documentation: `uv run --group docs mkdocs serve` (live) or `mkdocs build` (writes site/).
 site_name: rollout
-site_description: Durable, scalable agents and environments for agent products and reinforcement learning
+site_description: Reinforcement learning for agents, from one GPU to a cluster
 docs_dir: docs
 site_dir: site
 use_directory_urls: false  # the built site also works when opened straight from disk
@@ -102,9 +102,7 @@ nav:
       - "Gemma renderers": implementations/rollout-gemma.md
       - "Computers": implementations/rollout-computers.md
       - "verifiers environments": implementations/rollout-verifiers.md
-  - Products and environments:
-      - "Project assistant": products/project-assistant.md
-      - "Agent sessions": products/agent-sessions.md
+  - Environments:
       - "Minecraft team": products/minecraft-team.md
       - "Gridworld": products/gridworld.md
   - Development:

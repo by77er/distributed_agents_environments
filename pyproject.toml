@@ -1,10 +1,10 @@
-# The workspace: interface libraries, implementations of what they define, products, and environments.
+# The workspace: interface libraries, implementations of what they define, and environments.
 #   uv sync                 everything that needs no GPU
 #   uv sync --all-extras    with the engine, the trainer, the model families' renderers (Linux, NVIDIA GPU) and Tinker
 [project]
 name = "rollout-workspace"
 version = "0.0.0"
-description = "Durable, scalable agents and environments for agent products and reinforcement learning"
+description = "Reinforcement learning for agents, from one GPU to a cluster"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -15,8 +15,6 @@ dependencies = [
     "rollout-openai",
     "rollout-s3",
     "rollout-runpod",
-    "project-assistant",
-    "agent-sessions",
     "minecraft-team",
     "gridworld",
 ]
@@ -27,7 +25,7 @@ gemma = ["rollout-gemma"]
 tinker = ["rollout-tinker"]  # a trainer and an engine at Thinking Machines
 
 [tool.uv.workspace]
-members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft", "environments/gridworld"]
+members = ["libraries/*", "implementations/*", "environments/minecraft", "environments/gridworld"]
 exclude = ["implementations/rollout-verifiers"]  # a project of its own, locked apart
 
 [tool.uv.sources]
@@ -43,8 +41,6 @@ rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
 rollout-runpod = { workspace = true }
 rollout-tinker = { workspace = true }
-project-assistant = { workspace = true }
-agent-sessions = { workspace = true }
 minecraft-team = { workspace = true }
 gridworld = { workspace = true }
 
@@ -72,7 +68,7 @@ line-length = 120
 target-version = "py313"
 # Code in docs/ is illustrative and hand-aligned for reading; .claude/ holds agents' working copies.
 extend-exclude = ["docs", ".claude"]
-src = ["libraries/*/src", "implementations/*/src", "products/*/src", "environments/minecraft", "environments/gridworld", "."]
+src = ["libraries/*/src", "implementations/*/src", "environments/minecraft", "environments/gridworld", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
@@ -80,7 +76,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
 ignore = ["RUF012"]
 
 [tool.pyright]
-include = ["libraries", "implementations", "products", "environments", "tests", "scripts"]
+include = ["libraries", "implementations", "environments", "tests", "scripts"]
 exclude = ["**/node_modules", "**/__pycache__", "**/.*"]
 extraPaths = [
     "libraries/rollout/src",
@@ -96,8 +92,6 @@ extraPaths = [
     "implementations/rollout-runpod/src",
     "implementations/rollout-tinker/src",
     "implementations/rollout-verifiers/src",
-    "products/project-assistant/src",
-    "products/agent-sessions/src",
     "environments/minecraft",
     "environments/gridworld",
 ]

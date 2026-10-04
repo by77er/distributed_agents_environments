@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 PROJECTS = sorted(
     path.parent
-    for pattern in ("libraries/*", "implementations/*", "products/*", "environments/*")
+    for pattern in ("libraries/*", "implementations/*", "environments/*")
     for path in ROOT.glob(f"{pattern}/pyproject.toml")
 )
 

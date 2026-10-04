@@ -1,11 +1,11 @@
 # rollout
 
-> Durable, scalable agents and environments for agent products and reinforcement learning. A uv workspace of Python
+> Reinforcement learning for agents, from one GPU to a cluster. A uv workspace of Python
 > 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (episode runners,
 > episodes with token trajectories, the training loop, checkpoints and the ledger, evals, channels, the gateway that
 > records every turn, bridges, deployment profiles, the cluster config, the `rollout` command, the monitor), one
 > package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Tinker's trainer and engine, Qwen and
-> Gemma renderers, computers, an OpenAI endpoint, an S3 blob store, RunPod pods), two products and two environments.
+> Gemma renderers, computers, an OpenAI endpoint, an S3 blob store, RunPod pods) and two environments.
 > The documentation describes the code as built.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
@@ -78,9 +78,8 @@ the test suite and a block tagged `py` does not. The API reference is generated 
   their harnesses reaching the gateway
 - [Computers](docs/implementations/rollout-computers.md): environment backends and shell and file tools
 
-## Products and environments
+## Environments
 
-- [Project assistant](docs/products/project-assistant.md), [agent sessions](docs/products/agent-sessions.md)
 - [Minecraft team](docs/products/minecraft-team.md): one to four agents in a Minecraft world, trained on a curriculum
 - [Gridworld](docs/products/gridworld.md): two to four agents share out the plates of a grid level, talking it over
 
