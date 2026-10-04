@@ -18,15 +18,15 @@ class HarnessError(RuntimeError):
 
 
 class Harness:
-    def __init__(self, process: asyncio.subprocess.Process, log: Path | None) -> None:
+    def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process
         self._ids = itertools.count(1)
         self._replies: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self._reader = asyncio.create_task(self._read())
-        self.log = log
 
     @classmethod
-    async def start(cls, *, log: Path | None = None, node: str = "node") -> Self:
+    async def start(cls, *, log: Path | None = None) -> Self:
+        """Start the harness, installing its packages the first time; its standard error goes to `log`."""
         if not (HARNESS / "node_modules").is_dir():
             installed = await asyncio.create_subprocess_exec(
                 "npm", "ci", "--no-audit", "--no-fund", cwd=HARNESS,
@@ -37,7 +37,7 @@ class Harness:
                 raise HarnessError(f"npm ci failed: {error.decode(errors='replace')}")
         stderr = log.open("a") if log is not None else asyncio.subprocess.DEVNULL
         process = await asyncio.create_subprocess_exec(
-            node, str(HARNESS / "harness.js"), cwd=HARNESS,
+            "node", str(HARNESS / "harness.js"), cwd=HARNESS,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr,
             limit=16 * 1024 * 1024,
         )  # fmt: skip
@@ -46,7 +46,7 @@ class Harness:
             while not (line := await process.stdout.readline()).startswith(b'{"ready"'):
                 if not line:
                     raise HarnessError("the harness exited while starting")
-        return cls(process, log)
+        return cls(process)
 
     async def connect(self, host: str, port: int, team: list[str], *, version: str = PAPER_VERSION) -> None:
         """Join the server at `host` and `port`, which runs Minecraft `version`, with one bot for each of `team`."""

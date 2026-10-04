@@ -48,9 +48,9 @@ class Control:
         `gamemode`, `difficulty`, `time`, `gamerules`."""
         return await self._request("POST", "/episode", setup)
 
-    async def ores(self, x: int, y: int, z: int, *, radius: int = 32, exposed: bool = False) -> list[dict[str, Any]]:
+    async def ores(self, x: int, y: int, z: int, *, radius: int = 32) -> list[dict[str, Any]]:
         """Diamond ores near a point (ground truth, for choosing where episodes start)."""
-        query = {"x": x, "y": y, "z": z, "radius": radius, "exposed": str(exposed).lower()}
+        query = {"x": x, "y": y, "z": z, "radius": radius}
         return (await self._request("GET", "/ores", params=query))["ores"]
 
     # Setup: building tasks from ground truth

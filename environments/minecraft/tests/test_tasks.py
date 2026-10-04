@@ -255,7 +255,7 @@ class Site:
     async def set_block(self, x: int, y: int, z: int, block: str) -> None:
         self.blocks[(x, y, z)] = block
 
-    async def ores(self, x: int, y: int, z: int, *, radius: int = 32, exposed: bool = False) -> list[dict[str, int]]:
+    async def ores(self, x: int, y: int, z: int, *, radius: int = 32) -> list[dict[str, int]]:
         return [{"x": 10, "y": -55, "z": 10}] if radius >= 24 else []
 
     async def surface(self, x: int, z: int, world: str = "world") -> int:

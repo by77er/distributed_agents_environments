@@ -59,7 +59,7 @@ the others stay put. {obstacles} in the way.{mechanics}
 
 Decide together who goes to which plate: one of you on each."""
 
-COUNTS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+COUNTS = {2: "two", 3: "three", 4: "four"}
 MECHANICS = {
     DoorKind.PLATES: "A door with plates opens for good when all its plates are pressed at once.",
     DoorKind.HELD: "A gate is open only while its plate is pressed: one of you holds it while others pass.",

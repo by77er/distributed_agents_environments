@@ -21,7 +21,6 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -57,7 +56,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Ground truth and tick control for RL episodes, behind an HTTP API on 127.0.0.1 only (port from the system property
- * {@code rollout.control.port}). Agents never see this API: it is for the environment service.
+ * {@code rollout.control.port}). Agents never see this API: it is for the worlds ({@code minecraft_team.worlds}) and
+ * the servers ({@code minecraft_team.paper}).
  *
  * <ul>
  *   <li>GET /health: ready, and who is online.</li>
@@ -71,7 +71,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       real time while agents think.</li>
  *   <li>POST /episode: set up the team (one scoreboard team without friendly fire; clear, kit with armor worn,
  *       teleport to any dimension, respawn there, game mode) and the worlds (difficulty, time, rules).</li>
- *   <li>GET /ores?x&amp;y&amp;z&amp;radius&amp;exposed: diamond ores near a point, for choosing starts (never agents).</li>
+ *   <li>GET /ores?x&amp;y&amp;z&amp;radius: diamond ores near a point, for choosing starts (never agents).</li>
  *   <li>GET /events?after=n: what happened (chat, ores mined, items picked up, deaths, joins, advancements, hits on
  *       creatures, moves the server refused, the dragon's death).</li>
  *   <li>POST /baseline: remember each team member's advancements now; /state then reports only newer ones (a kit can
@@ -505,7 +505,6 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
 
     private JsonElement ores(String method, Map<String, String> query, JsonObject body) throws Exception {
         int radius = Math.min(Integer.parseInt(query.getOrDefault("radius", "32")), MAX_ORE_RADIUS);
-        boolean exposedOnly = Boolean.parseBoolean(query.getOrDefault("exposed", "false"));
         int cx = Integer.parseInt(query.get("x")), cy = Integer.parseInt(query.get("y")), cz = Integer.parseInt(query.get("z"));
         String worldName = query.getOrDefault("world", "world");
         return onMainThread(() -> {
@@ -523,15 +522,10 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
                         if (type != Material.DIAMOND_ORE && type != Material.DEEPSLATE_DIAMOND_ORE) {
                             continue;
                         }
-                        boolean exposed = isExposed(block);
-                        if (exposedOnly && !exposed) {
-                            continue;
-                        }
                         JsonObject ore = new JsonObject();
                         ore.addProperty("x", x);
                         ore.addProperty("y", y);
                         ore.addProperty("z", z);
-                        ore.addProperty("exposed", exposed);
                         found.add(ore);
                     }
                 }
@@ -1131,16 +1125,6 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             case DIAMOND_BLOCK -> 9 * stack.getAmount();
             default -> 0;
         };
-    }
-
-    private static boolean isExposed(Block block) {
-        for (BlockFace face : new BlockFace[] {BlockFace.UP, BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
-            Material neighbour = block.getRelative(face).getType();
-            if (neighbour.isAir() || neighbour == Material.WATER || neighbour == Material.LAVA) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private JsonObject describe(Player player, int diamonds) {
