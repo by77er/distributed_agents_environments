@@ -54,24 +54,25 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 
 ## The spike
 
-Run on 2026-10-04 on one RTX 5080, from `implementations/rollout-verifiers/examples` (`prime_gsm8k.py` and
-`prime_gsm8k.toml`), with every run in the shared ledger.
+Run on 2026-10-04 on one RTX 5080, from `implementations/rollout-verifiers`, on GSM8K
+(`rollout_verifiers.environments:gsm8k`) with the profile `examples/gsm8k_vllm.toml`, with every run in the shared
+ledger.
 
 **Installing and running it.** `implementations/rollout-verifiers` is a uv project of its own, locked apart from the
-workspace; its `spike` group adds `rollout-train`, vLLM, the LoRA trainer, the Qwen renderers (all by path from the
-workspace) and the Hub's `gsm8k` 0.1.4 wheel. From that directory:
+workspace, with the Hub's `gsm8k` 0.1.4 wheel among its dependencies; its `spike` group adds vLLM, the LoRA trainer and
+the Qwen renderers (all by path from the workspace). From that directory:
 
 ```bash
 uv sync --group spike
-export PYTHONPATH=examples
-uv run --group spike rollout eval examples/prime_gsm8k.toml gsm8k-test-100 --environment prime_gsm8k:environment --directory ~/.cache/rollout/runs/e2e-prime-eval-base --name e2e-prime-eval-base
-uv run --group spike rollout train examples/prime_gsm8k.toml prime_gsm8k:environment --groups 8 --groups-per-step 2 --directory ~/.cache/rollout/runs/e2e-prime-lora --name e2e-prime-lora
-uv run --group spike rollout eval examples/prime_gsm8k.toml gsm8k-test-100 --checkpoint e2e-prime-lora:3 --directory ~/.cache/rollout/runs/e2e-prime-eval-lora --name e2e-prime-eval-lora
+uv run rollout suite make math --environment rollout_verifiers.environments:gsm8k --data gsm8k-test-100 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
+uv run --group spike rollout eval examples/gsm8k_vllm.toml math --directory ~/.cache/rollout/runs/e2e-prime-eval-base --name e2e-prime-eval-base
+uv run --group spike rollout train examples/gsm8k_vllm.toml rollout_verifiers.environments:gsm8k --groups 8 --groups-per-step 2 --directory ~/.cache/rollout/runs/e2e-prime-lora --name e2e-prime-lora
+uv run --group spike rollout eval examples/gsm8k_vllm.toml math --checkpoint e2e-prime-lora:3 --directory ~/.cache/rollout/runs/e2e-prime-eval-lora --name e2e-prime-eval-lora
 ```
 
-The environment's eval data is the test split's first 100 tasks (`gsm8k-test-100`), frozen as a suite the first time
-an eval plays it. The spike's own suite, `e2e-prime-gsm8k-test`, was drawn by hand: 100 starts of the test split with
-seeds 1 to 100 (93 distinct tasks), made before environments had eval data of their own; it stays in the ledger.
+The environment's eval data is the whole test split (`gsm8k-test`) and its first 100 tasks (`gsm8k-test-100`), which
+the suite `math` names as its entry's starts. The spike's own suite, `e2e-prime-gsm8k-test`, was drawn by hand: 100
+starts of the test split with seeds 1 to 100 (93 distinct tasks), made before environments had eval data of their own.
 
 verifiers' own eval ran as `vf-eval primeintellect/gsm8k --env.taskset.split test --env.agent.harness.id null
 --env.agent.runtime.type subprocess --client.base-url URL --client.api-key-var VARIABLE --select.include.idx …

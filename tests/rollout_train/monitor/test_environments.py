@@ -161,6 +161,27 @@ async def test_an_environment_that_does_not_load_here_is_shown_from_its_runs(tmp
     assert (run["run"], run["groups"], run["played"], run["solved"]) == ("walk", 3, 7, None)
 
 
+async def test_an_environment_of_another_project_is_listed_from_its_launchers_offer_and_its_runs(
+    tmp_path: Path,
+) -> None:
+    """GSM8K lives in rollout-verifiers' own environment, which the monitor's cannot import: a launcher started there
+    offers it, and an eval there names it in its start."""
+    ledger, gsm8k = FileLedger(tmp_path / "ledger"), "rollout_verifiers.environments:gsm8k"
+    fence = await ledger.take(scope("gsm8k-base"))
+    start: Any = {"kind": "eval", "suite": "math", "environment": gsm8k, "version": "math@1", "started": time.time()}
+    await ledger.append(table("gsm8k-base", STARTS), str(fence.number), start, fence)
+    heartbeats = presence_of(ledger)
+    assert heartbeats is not None
+    await heartbeats.beat("launcher/verifiers", {"kind": LAUNCHER, "profiles": [], "environments": [gsm8k]})
+    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
+    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+        (line,) = (await client.get("/api/environments")).json()["environments"]
+        page = (await client.get(f"/api/environments/{gsm8k}")).json()
+    assert (line["environment"], line["name"], line["offered"], line["runs"]) == (gsm8k, "gsm8k", True, [])
+    assert line["used"] == start["started"] and line["versions"] == []  # (an eval's version is its suite's)
+    assert (page["loads"], page["offered"]) == (False, True) and "does not load here" in page["error"]
+
+
 def test_the_list_folds_every_sources_sightings() -> None:
     def packages(read: Read) -> list[Sighting]:  # (another source: a table of published environments, say)
         return [Sighting("pkg:maze", version="3"), Sighting(WORDS, version="2")]

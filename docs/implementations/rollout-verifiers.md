@@ -11,14 +11,15 @@ on and evals play.
 
 It is a uv project of its own, with its own lock, outside the workspace: verifiers ships development releases daily
 and pins what it needs (`openai<3`, `mcp==2.0.0`, a pre-release of Prime's `renderers`), so it is resolved apart from
-the platform. It pins `verifiers==0.3.2.dev185` and depends on the workspace's `rollout` (and, for its tests and the
-example, `rollout-train` and the implementations a profile names) by path.
+the platform. It pins `verifiers==0.3.2.dev185` and the Hub's `gsm8k` 0.1.4 wheel, and depends on the workspace's
+`rollout` (and, for its tests and its commands, `rollout-train`; for training here, the implementations a profile
+names) by path.
 
 ```py
 from rollout_verifiers import VerifiersEnvironment
 
-environment = VerifiersEnvironment(
-    "primeintellect/gsm8k", train={"split": "train"}, eval={"split": "test"}, eval_size=100
+gsm8k = VerifiersEnvironment(
+    "primeintellect/gsm8k", train={"split": "train"}, eval={"split": "test"}, eval_subsets=[100]
 )
 ```
 
@@ -26,28 +27,68 @@ environment = VerifiersEnvironment(
 
 ```bash
 cd implementations/rollout-verifiers
-uv sync                  # the adapter, and what its tests need
+uv sync                  # the adapter, GSM8K, rollout-train (the commands, the database ledger) and the tests
 uv run pytest tests
-uv sync --group spike    # with rollout-train, vLLM, the LoRA trainer, the Qwen renderers and primeintellect/gsm8k 0.1.4
+uv sync --group spike    # with vLLM, the LoRA trainer and the Qwen renderers: training on this machine
 ```
 
-`examples` has the environment above (`prime_gsm8k.py`, not `gsm8k.py`: its module must not take the name of the
-environment's package) and a profile for it, which serves the model endpoint (`serve`): the harness needs an address.
-Its ledger is the shared one, `sqlite:///~/.cache/rollout/ledger.db`. From `implementations/rollout-verifiers`:
+Another environment is installed into the project the same way: its Hub wheel as a dependency, and an object of its
+own in `rollout_verifiers.environments`.
+
+## GSM8K
+
+`rollout_verifiers.environments:gsm8k` is GSM8K (grade-school math word problems) from the Environments Hub,
+`primeintellect/gsm8k` 0.1.4, played by the `null` harness: one turn, in which the model reasons and gives its final
+number after `#### `; the taskset's reward runs `math-verify` on it against the problem's answer, 1 or 0.
+
+| | |
+|---|---|
+| Training data | the train split: 7,473 problems, one row |
+| `gsm8k-test` | eval data: the whole test split, 1,319 problems, in order |
+| `gsm8k-test-100` | eval data: its first 100 problems, the same starts |
+| Description | rewards in [0, 1], `solved` at 1, duration in turns |
+
+Eval data is the environment's own; a suite names it in an entry, with how its episodes play. The suite `math`, in the
+shared ledger, has one entry: `gsm8k-test-100`, one episode of each start, 1,024 tokens of thinking and 512 of answer:
 
 ```bash
-export PYTHONPATH=examples
-uv run --group spike rollout env check prime_gsm8k:environment
-uv run --group spike rollout eval examples/prime_gsm8k.toml gsm8k-test-100 --environment prime_gsm8k:environment --directory ~/.cache/rollout/runs/gsm8k-eval
-uv run --group spike rollout train examples/prime_gsm8k.toml prime_gsm8k:environment --groups 8 --groups-per-step 2
+uv run rollout suite make math --environment rollout_verifiers.environments:gsm8k --data gsm8k-test-100 \
+    --episodes 1 --thinking-tokens 1024 --answer-tokens 512 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
 ```
 
-Another environment is installed into the project the same way: its Hub wheel as a dependency of a group.
+Its tasks load from Hugging Face's `openai/gsm8k` (the first time, over the network) once its rows, a start, its
+description or its eval data are asked for; importing it loads nothing. The root workspace's environment cannot
+import it (verifiers is not in the platform's lock): there, the monitor lists it from the runs, suites and launchers
+that name it, and its page says it does not load, with what the ledger has of it.
+
+`examples` has two profiles for it, both on the shared ledger `sqlite:///~/.cache/rollout/ledger.db`:
+
+- **`gsm8k_tinker.toml`**: the base `Qwen/Qwen3.5-9B` sampled at Tinker, through a gateway that hosts the channel
+  in rollout-tinker's environment, while the eval's runner plays GSM8K in this one
+  ([a gateway elsewhere that hosts channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels),
+  [Tinker](rollout-tinker.md#evals-through-a-gateway)):
+
+  ```bash
+  (cd ../rollout-tinker && uv run rollout gateway ../rollout-verifiers/examples/gsm8k_tinker.toml) &
+  uv run rollout eval examples/gsm8k_tinker.toml math --name gsm8k-tinker-base --directory ~/.cache/rollout/runs/gsm8k-tinker-base
+  ```
+
+- **`gsm8k_vllm.toml`**: an adapter over Qwen3-0.6B trained on this machine (the `spike` group), whose runner serves
+  the gateway in its own process (`serve`) for the harness:
+
+  ```bash
+  uv run --group spike rollout env check rollout_verifiers.environments:gsm8k
+  uv run --group spike rollout train examples/gsm8k_vllm.toml rollout_verifiers.environments:gsm8k --groups 8 --groups-per-step 2
+  uv run --group spike rollout eval examples/gsm8k_vllm.toml math --directory ~/.cache/rollout/runs/gsm8k-eval
+  ```
+
+A launcher started from this project offers it by name (`--environment rollout_verifiers.environments:gsm8k`), so
+that launches can name it.
 
 ## The environment
 
 `VerifiersEnvironment(taskset, *, harness="null", train=None, eval=None, runtime=None, environment=None, limit=None,
-eval_size=None, solved_at=1.0)`:
+eval_size=None, eval_subsets=(), solved_at=1.0)`:
 
 | | |
 |---|---|
@@ -57,15 +98,17 @@ eval_size=None, solved_at=1.0)`:
 | `runtime` | Where each rollout runs: `{"type": "subprocess"}` by default |
 | `environment` | Any other setting of verifiers' environment config (`timeout`, `retries`) |
 | `limit`, `eval_size` | Only the first training tasks (a taskset without end needs it), and the first eval tasks |
+| `eval_subsets` | Sizes: the first so many eval tasks, each eval data of its own |
 | `solved_at` | An episode whose reward reaches it solved its task |
 
 - **Rows and starts.** The training data is one row; its tasks are its starts. A group's start is a task drawn with
   the group's random generator, so every episode of a group plays the same task, and a suite's seed always draws the
   same task. A start carries the task's data whole (`{"environment", "task", "solved_at"}`): whoever plays it needs
   no dataset. The tasks are loaded once, the first time the rows, a start or the description are asked for.
-- **Eval data.** `evals()` is one named list: every task of the eval data (the first `eval_size`), in order, each a
-  start of the row `eval`, which training never plays. Its name is the taskset's and its eval settings' (`gsm8k-test`,
-  or `gsm8k-test-100`); `rollout eval PROFILE NAME --environment MODULE:NAME` freezes it as a suite the first time.
+- **Eval data.** `evals()` names every task of the eval data (the first `eval_size`), in order, each a start of
+  the row `eval`, which training never plays, after the taskset and its eval settings (`gsm8k-test`), and the first so
+  many of them for each eval subset, with their number after (`gsm8k-test-100`): a task is the same start in each. A
+  suite's entry names one (`rollout suite make NAME --environment MODULE:NAME --data EVAL_DATA`).
 - **Version.** The taskset's package and its version, verifiers' version, and a digest of the settings above, such as
   `gsm8k 0.1.4, verifiers 0.3.2.dev185, settings 1a2b3c4d`.
 - **Description.** Results say `solved` and, as `duration`, the turns the harness took. Rewards fall from the sum of
@@ -99,13 +142,14 @@ your own (`custom`).
 
 ## Checking one
 
-`rollout env check MODULE:NAME` passes its rows, description, starts and eval data (for the example: one row, rewards
-in [0, 1], 100 eval starts on a row training never plays). Its scripted episode fails: the check's model is not
+`rollout env check MODULE:NAME` passes its rows, description, starts and eval data (for GSM8K: one row, rewards in
+[0, 1], 1,319 and 100 eval starts on a row training never plays). Its scripted episode fails: the check's model is not
 served over HTTP, and the harness needs an address.
 
 ## Tests
 
 `implementations/rollout-verifiers/tests/` plays a two-task taskset defined in the test through the `null` harness,
-against a gateway served on `127.0.0.1:8809`. It runs in the project's own environment (`uv run pytest tests` there),
+against a gateway served on `127.0.0.1:8809`, and checks GSM8K's configuration and eval data with its tasks stood in
+for (no network). It runs in the project's own environment (`uv run pytest tests` there),
 needs `uv` (the harness runs as a uv script) and, the first time, the network. Elsewhere it skips: it needs
 `verifiers`.

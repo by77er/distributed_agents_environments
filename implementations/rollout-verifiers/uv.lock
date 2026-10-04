@@ -3791,6 +3791,7 @@ name = "rollout-verifiers"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "gsm8k" },
     { name = "renderers" },
     { name = "rollout" },
     { name = "verifiers" },
@@ -3800,18 +3801,17 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "rollout-train", extra = ["http"] },
+    { name = "rollout-train", extra = ["durable", "http"] },
 ]
 spike = [
-    { name = "gsm8k" },
     { name = "rollout-lora" },
     { name = "rollout-qwen" },
-    { name = "rollout-train", extra = ["durable", "http"] },
     { name = "rollout-vllm" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "gsm8k", url = "https://hub.primeintellect.ai/primeintellect/gsm8k/@eb4818f9/gsm8k-0.1.4-py3-none-any.whl" },
     { name = "renderers", specifier = ">=0.1.12.dev2" },
     { name = "rollout", editable = "../../libraries/rollout" },
     { name = "verifiers", specifier = "==0.3.2.dev185" },
@@ -3821,13 +3821,11 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.4" },
     { name = "pytest-asyncio", specifier = ">=1.2" },
-    { name = "rollout-train", extras = ["http"], editable = "../../libraries/rollout-train" },
+    { name = "rollout-train", extras = ["http", "durable"], editable = "../../libraries/rollout-train" },
 ]
 spike = [
-    { name = "gsm8k", url = "https://hub.primeintellect.ai/primeintellect/gsm8k/@eb4818f9/gsm8k-0.1.4-py3-none-any.whl" },
     { name = "rollout-lora", editable = "../rollout-lora" },
     { name = "rollout-qwen", editable = "../rollout-qwen" },
-    { name = "rollout-train", extras = ["http", "durable"], editable = "../../libraries/rollout-train" },
     { name = "rollout-vllm", editable = "../rollout-vllm" },
 ]
 

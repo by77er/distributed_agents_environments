@@ -1,4 +1,5 @@
-# An adapter over Qwen3-0.6B, on GSM8K from the Environments Hub (prime_gsm8k.py, on PYTHONPATH).
+# An adapter over Qwen3-0.6B trained on this machine (vLLM, the LoRA trainer: `uv sync --group spike`), on GSM8K
+# (`rollout_verifiers.environments:gsm8k`).
 directory = "~/.cache/rollout/runs/e2e-prime-gsm8k"
 episodes_at_once = 8
 serve = "127.0.0.1:8800"  # the model endpoint verifiers' interception server relays the harness's requests to

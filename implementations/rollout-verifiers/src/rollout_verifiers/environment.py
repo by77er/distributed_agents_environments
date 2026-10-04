@@ -6,7 +6,8 @@ runs in) in a runtime, one rollout per task. `VerifiersEnvironment` wraps one as
 - **Rows and starts.** The training data (`train`, settings of the taskset's config: a split, say) is one row; its
   tasks are its starts, one drawn per group with the group's random generator. A start carries the task's data
   whole, so whoever plays it needs no dataset.
-- **Eval data.** The tasks of the eval data (`eval`), in order, are one named list of starts: a suite once frozen.
+- **Eval data.** The tasks of the eval data (`eval`), in order, are one named list of starts, and the first so many of
+  them (`eval_subsets`) lists of their own, each named after its size: what a suite's entry names.
 - **An episode** (`VerifiersProgram`) is one verifiers episode, played in its process: verifiers' own interception
   server stands between the harness and the model, and relays the harness's requests, in the harness's own API, to
   the episode's model address. The gateway samples them, so the tokens and logprobs are recorded by this system. The
@@ -49,6 +50,7 @@ class VerifiersEnvironment:
         environment: Mapping[str, JsonValue] | None = None,
         limit: int | None = None,
         eval_size: int | None = None,
+        eval_subsets: Sequence[int] = (),
         solved_at: float = 1.0,
     ) -> None:
         """`taskset` is its id (`owner/name` of an Environments Hub package, which must be installed, or a built-in);
@@ -56,9 +58,12 @@ class VerifiersEnvironment:
         split, say) for the training and the eval data; without `eval` there is no eval data. `runtime` is where
         each rollout runs (`subprocess` by default); `environment` holds any other settings of verifiers' environment
         config (`timeout`, `retries`). `limit` takes the first training tasks only (an infinite taskset needs it), and
-        `eval_size` the first eval tasks. An episode whose reward reaches `solved_at` solved its task."""
+        `eval_size` the first eval tasks. Each of `eval_subsets` is the first so many eval tasks, eval data of its own.
+        An episode whose reward reaches `solved_at` solved its task."""
+        if any(size < 1 for size in eval_subsets):
+            raise ValueError("an eval subset has one task at least")
         self.taskset, self.harness, self.solved_at = taskset, harness, solved_at
-        self.limit, self.eval_size = limit, eval_size
+        self.limit, self.eval_size, self.eval_subsets = limit, eval_size, tuple(sorted(set(eval_subsets)))
         self.train, self.eval = dict(train or {}), dict(eval or {})
         self.runtime: dict[str, JsonValue] = dict(runtime or {"type": "subprocess"})
         self.environment = dict(environment or {})
@@ -92,6 +97,7 @@ class VerifiersEnvironment:
             except importlib.metadata.PackageNotFoundError:  # (a module of no installed package: its settings say all)
                 package = f"{module}, verifiers {verifiers}"
         settings = [self.harness, self.train, self.eval, self.runtime, self.environment, self.limit, self.eval_size]
+        settings += [list(self.eval_subsets)] if self.eval_subsets else []
         digest = hashlib.sha256(json.dumps([*settings, self.solved_at], sort_keys=True).encode()).hexdigest()
         return f"{package}, settings {digest[:8]}"
 
@@ -116,21 +122,23 @@ class VerifiersEnvironment:
         return {"environment": self.configuration(self.train), "task": task, "solved_at": self.solved_at}
 
     def evals(self) -> Mapping[str, Sequence[Start]]:
-        """The eval data's tasks, in order, named after the taskset and its eval settings (`gsm8k-test`)."""
+        """The eval data's tasks, in order, named after the taskset and its eval settings (`gsm8k-test`), and the first
+        so many of them for each eval subset, named with their number after (`gsm8k-test-100`): a task is the same
+        start in each."""
         if not self.eval:
             return {}
         words = [self.taskset.rsplit("/", 1)[-1], *map(str, self.eval.values())]
         words += [str(self.eval_size)] if self.eval_size is not None else []
         name = re.sub(r"[^a-z0-9.]+", "-", "-".join(words).lower()).strip("-")
         configuration = self.configuration(self.eval)
-        return {
-            name: [
-                Start("eval", f"task {task['idx']}", int(str(task["idx"])), {
-                    "environment": configuration, "task": task, "solved_at": self.solved_at,
-                })
-                for task in self.eval_tasks
-            ]
-        }  # fmt: skip
+        starts = [
+            Start("eval", f"task {task['idx']}", int(str(task["idx"])), {
+                "environment": configuration, "task": task, "solved_at": self.solved_at,
+            })
+            for task in self.eval_tasks
+        ]  # fmt: skip
+        subsets = {f"{name}-{size}": starts[:size] for size in self.eval_subsets if size < len(starts)}
+        return {name: starts, **subsets}
 
     @cached_property
     def tasks(self) -> list[dict[str, JsonValue]]:

@@ -180,7 +180,11 @@ suites with a version that plays it, and when a run last started on it. A source
 An environment's page (`/api/environments/MODULE:NAME`, topic `environment/MODULE:NAME`; 404 for one neither known nor
 loading) imports the environment in the monitor's process, once, for what it says of itself: its version, description,
 rows, eval data and curriculum. Where it does not load there, the page says why, its rows are those its runs played
-(in the order first played), and its description is its newest run's start's. Beside that, from the ledger:
+(in the order first played), and its description is its newest run's start's. An environment of a project with an
+environment of its own, such as GSM8K (`rollout_verifiers.environments:gsm8k`, [verifiers
+environments](../../implementations/rollout-verifiers.md#gsm8k)), is listed from a launcher started in that project
+that offers it, from the runs and evals played there, and from the suites that name it; its page shows those, without
+its own rows and eval data. Beside that, from the ledger:
 
 - each row's groups and episodes in the training runs on it (their `results` tables, matched to the row by the key in
   each group's record), and how many solved, of the episodes fit to train on in runs whose description says their

@@ -1,7 +1,7 @@
 # A project of its own, locked apart from the workspace: verifiers moves fast and pins what it needs (openai, mcp, a
 # pre-release of renderers), so it resolves here and never in the platform's lock.
-#   uv sync                     the adapter and what its tests need
-#   uv sync --group spike       with the engine, the trainer, the Qwen renderers and primeintellect/gsm8k: the spike
+#   uv sync                     the adapter, its environments (GSM8K), and what its tests and its evals need
+#   uv sync --group spike       with vLLM, the LoRA trainer and the Qwen renderers: training on this machine
 [project]
 name = "rollout-verifiers"
 version = "0.0.0"
@@ -11,20 +11,19 @@ dependencies = [
     "rollout",
     "verifiers==0.3.2.dev185",
     "renderers>=0.1.12.dev2",  # what that verifiers needs: a pre-release
+    "gsm8k @ https://hub.primeintellect.ai/primeintellect/gsm8k/@eb4818f9/gsm8k-0.1.4-py3-none-any.whl",  # the Hub's, 0.1.4
 ]
 
 [dependency-groups]
 dev = [
-    "rollout-train[http]",
+    "rollout-train[http,durable]",  # (durable: the database ledger, for `rollout eval` and `rollout suite`)
     "pytest>=8.4",
     "pytest-asyncio>=1.2",
 ]
 spike = [
-    "rollout-train[http,durable]",  # (durable: the database ledger)
     "rollout-vllm",
     "rollout-lora",
     "rollout-qwen",
-    "gsm8k @ https://hub.primeintellect.ai/primeintellect/gsm8k/@eb4818f9/gsm8k-0.1.4-py3-none-any.whl",  # the Hub's, 0.1.4
 ]
 
 [tool.uv.sources]
@@ -45,3 +44,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rollout_verifiers"]
+
+[tool.hatch.metadata]
+allow-direct-references = true  # (the Hub wheel of GSM8K, by its URL)
