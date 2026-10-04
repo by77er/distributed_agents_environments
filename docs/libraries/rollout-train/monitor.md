@@ -148,7 +148,7 @@ A **launcher** on a training machine (`rollout launcher --ledger URL --profiles 
 `--profiles` that names a trainer, with what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
 says, as `rollout_lora`'s do) and the settings a launch may change and their values in the profile (the trainer's
 settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
-`answer_tokens`), the catalogs, and how many runs it plays of how many it may.
+`answer_tokens`, and the `evals.` settings), the catalogs, and how many runs it plays of how many it may.
 
 **New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and a catalog, the
 run's name, the checkpoint it starts from (the base model, a bookmark, or any checkpoint whose weights are kept, by where it

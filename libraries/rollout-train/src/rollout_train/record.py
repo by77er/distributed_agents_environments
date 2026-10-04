@@ -1,4 +1,4 @@
-"""What a training run writes down: five tables in a ledger.
+"""What a training run writes down: six tables in a ledger.
 
 - `starts`: each time the run was started, where and by what (its directory and host, where the monitor on its
   machine serves, the profile, the policy, when), by the number of the fence its loop took. Written as the loop
@@ -12,6 +12,9 @@
   from, the one it will make, the batch. Written before the trainer is called. The checkpoint it makes, in the
   policy's table, is its outcome.
 - `failures`: the steps whose trainer failed, and why, by the step's number.
+- `evals`: the evals of the checkpoints it made that its schedule names (`rollout_train.evals.Schedule`), by the
+  number of the step that made each: the suite, the checkpoint, the eval's run, and how it went. Written when the eval
+  has played every start.
 
 A group is done with once it has a result that trains on nothing, or a step that covers it has made its checkpoint or
 failed. A run that is started again reads the tables and goes on: whatever has a decision and no outcome is taken up
@@ -90,7 +93,7 @@ def table(run: str, name: str) -> str:
     return f"{scope(run)}/{name}"
 
 
-GROUPS, RESULTS, STEPS, FAILURES, STARTS = "groups", "results", "steps", "failures", "starts"
+GROUPS, RESULTS, STEPS, FAILURES, STARTS, EVALS = "groups", "results", "steps", "failures", "starts", "evals"
 _RUNS = "runs/"
 
 

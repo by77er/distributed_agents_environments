@@ -6,6 +6,9 @@ groups whose rewards differed (a moving average), plus a little for every unlock
 untried rows get full weight. Whether a row was solved decides only what unlocks: rows unlock in the catalog's
 order, the first `start` of them, and `reach` past the hardest one solved at least half the time. A group counts for
 its own row and for every row that row `counts_for`.
+
+The evals a run makes of its checkpoints (`rollout_train.evals.Schedule`) are folded in too: the newest of each suite is
+kept, for what reads them.
 """
 
 import random
@@ -46,6 +49,9 @@ class Curriculum:
     """Weight of the newest group in the moving averages."""
     floor: float = 0.05
     records: dict[str, Record] = field(default_factory=dict[str, Record])
+    evaluations: dict[str, tuple[str, list[Result]]] = field(default_factory=dict[str, tuple[str, list[Result]]])
+    """The newest eval of each suite, by the suite's name: the checkpoint that played it, and how it did at each start
+    (a `Result` each)."""
 
     def unlocked(self) -> list[Row]:
         solved = [index for index, row in enumerate(self.rows) if self.record(row).success >= 0.5]
@@ -73,6 +79,11 @@ class Curriculum:
                 self.update(each, line.rewards, line.solved)
             else:
                 self.failed(each)
+
+    def evaluated(self, suite: str, checkpoint: str, results: Sequence[Result]) -> None:
+        """Take an eval into account: `checkpoint` played `suite`, and `results` say how it did at each start. A
+        curriculum folds a run's evals in the order they were made, so the newest of each suite is kept."""
+        self.evaluations[suite] = (checkpoint, list(results))
 
     def weight(self, row: Row) -> float:
         record = self.record(row)

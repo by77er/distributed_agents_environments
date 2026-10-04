@@ -1,5 +1,5 @@
 """Evaluations: a frozen suite of starts, played by a checkpoint (or the base model) with nothing trained; asked for
-from the page and started by a launcher."""
+from the page and started by a launcher; and made by a training run of its own checkpoints, between its steps."""
 
 import asyncio
 import functools
@@ -11,21 +11,40 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
+from rollout.local import LocalRunner
 from rollout_train import evals as evals_module
+from rollout_train import loop as loop_module
+from rollout_train import testing as support
+from rollout_train import train
 from rollout_train.checkpoints import Checkpoints, new_id
-from rollout_train.evals import EVAL, NOTHING_TRAINED, evaluate, make_suite, subject_table, suite_of, suites_in
+from rollout_train.curriculum import Curriculum
+from rollout_train.evals import (
+    EVAL,
+    NOTHING_TRAINED,
+    Schedule,
+    Suite,
+    evaluate,
+    make_suite,
+    subject_table,
+    suite_of,
+    suites_in,
+)
 from rollout_train.launcher import LAUNCHER, Launcher
 from rollout_train.launches import Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.system import System
 from rollout_train.presence import presence_of
-from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
+from rollout_train.profile import Profile
+from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, STEPS, results, scope, table
 from rollout_train.registry import registry_of
-from rollout_train.rollouts.scheduler import episodes_of
+from rollout_train.rollouts import EpisodeRunner, Record, loaded, playing
+from rollout_train.rollouts.scheduler import EPISODES, episodes_of
 from tests.rollout_train.monitor.test_launching import OFFERED
 from tests.rollout_train.rollouts.games import words
+from tests.rollout_train.test_full_weights import a_ledger, a_profile
 from tests.rollout_train.test_launches import Process, profiles
-from tests.rollout_train.training.test_loop import answering, here
+from tests.rollout_train.test_profile import write
+from tests.rollout_train.training.test_loop import Counting, answering, here, made_by
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -35,8 +54,9 @@ CATALOG = "tests.rollout_train.rollouts.games:words"
 
 @pytest.fixture(autouse=True)
 def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An eval looks for its groups' episodes in the ledger often (a run looks twice a second)."""
+    """An eval, and a run, look for their groups' episodes in the ledger often (a run looks twice a second)."""
     monkeypatch.setattr(evals_module, "episodes_of", functools.partial(episodes_of, every=0.01))
+    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 async def test_a_suite_is_a_frozen_list_of_starts_of_a_catalogs_rows(tmp_path: Path) -> None:
@@ -225,3 +245,147 @@ def test_the_command_makes_and_lists_suites(
         run("make", "words-v1", "--catalog", CATALOG, "--seeds", "4")
     with pytest.raises(SystemExit, match="invalid literal"):
         run("make", "other", "--catalog", CATALOG, "--seeds", "one")
+
+
+class Unmade:
+    """A trainer an eval must not make."""
+
+    weights = "lora"
+
+    def __init__(self, model: str, **settings: Any) -> None:
+        raise AssertionError("an eval makes no trainer")
+
+
+def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_no_trainer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from rollout_train.cli import main
+
+    shared, made = asyncio.run(a_ledger(tmp_path))
+    asyncio.run(make_suite(FileLedger(tmp_path / "ledger"), "words-v1", CATALOG, words, rows=None, seeds=[1]))
+    profile = a_profile(tmp_path, shared, "Unmade", "plain")
+    profile.write_text(profile.read_text().replace("test_full_weights:Unmade", "test_evals:Unmade"))
+    support.STARTED.clear()
+    directory = tmp_path / "eval"
+    arguments = [str(profile), "words-v1", "--checkpoint", "stacked", "--episodes", "2", "--directory", str(directory)]
+    monkeypatch.setattr("sys.argv", ["rollout", "eval", *arguments, "--name", "stacked-on-words"])
+    with pytest.raises(SystemExit) as exited:
+        main()
+    assert exited.value.code == 0
+    assert capsys.readouterr().out.startswith("words-v1: solved ")
+    policy = support.STARTED[0]
+    assert policy.told[0].startswith(f"started {directory / 'bases' / made['merged']}")  # (what the adapter is over)
+    assert f"load {made['stacked']}" in policy.told
+    ledger = FileLedger(tmp_path / "ledger")
+    listed = asyncio.run(System(ledger=ledger).evals())["evals"]
+    assert [(each["name"], each["checkpoint"], each["played"], each["done"]) for each in listed] == [
+        ("stacked-on-words", made["stacked"], 6, True)
+    ]
+
+
+def a_schedule(suite: Suite, every: int) -> Schedule:
+    """Evals of `suite` every `every` steps, two episodes of each start, each eval the run `eval-STEP`."""
+
+    async def run(step: int) -> str:
+        return f"eval-{step}"
+
+    return Schedule(suite, words, run, every=every, episodes=2)
+
+
+async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_step_and_the_next(
+    tmp_path: Path,
+) -> None:
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    checkpoints = Checkpoints(ledger, blobs)
+    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1])
+    recorder, curriculum = answering(), Curriculum(words.rows())
+    async with here(ledger, recorder, blobs):
+        await train(
+            words, Counting(), checkpoints, base="tiny", channel="policy", directory=tmp_path / "files",
+            publish=recorder.publish, groups=8, groups_per_step=1, seed=1, curriculum=curriculum,
+            evals=a_schedule(suite, every=2),
+        )  # fmt: skip
+    made = {checkpoint.step: checkpoint for checkpoint in await made_by(checkpoints)}
+    evaluated: Any = await ledger.read(table("train", EVALS))
+    assert len(made) >= 2 and sorted(int(key) for key in evaluated) == [step for step in made if step and step % 2 == 0]
+    steps: Any = await ledger.read(table("train", STEPS))
+    for key, said in evaluated.items():
+        checkpoint = made[int(key)]
+        assert (said["suite"], said["checkpoint"], said["run"], said["played"]) == (
+            "words-v1", checkpoint.id, f"eval-{key}", 4,
+        )  # fmt: skip
+        if str(int(key) + 1) in steps:  # the next step waited for the eval
+            assert steps[str(int(key) + 1)]["decided"] >= said["at"]
+        for record in (await ledger.read(table(said["run"], EPISODES))).values():  # each played under that checkpoint
+            episode = await loaded(Record.from_json(record), blobs)  # type: ignore[arg-type]
+            spans = [span for each in episode.trajectories.values() for part in each.segments for span in part.spans]
+            assert spans and {span.version for span in spans} == {checkpoint.depth}
+        who: Any = (await ledger.read(subject_table("words-v1", said["run"], "subject")))["subject"]
+        assert who["checkpoint"] == checkpoint.id and who["episodes"] == 2
+        start: Any = next(iter((await ledger.read(table(said["run"], STARTS))).values()))
+        assert (start["kind"], start["by"], start["from"]) == (EVAL, "train", None)
+    newest = max(int(key) for key in evaluated)
+    last, lines = curriculum.evaluations["words-v1"]
+    assert last == made[newest].id and [line.task for line in lines] == ["say-yes", "say-no"]
+    assert lines == await results(ledger, f"eval-{newest}")
+    listed = (await System(ledger=ledger).evals())["suites"][0]["subjects"]
+    assert {each["checkpoint"] for each in listed} == {made[int(key)].id for key in evaluated}
+
+
+async def test_a_run_started_again_finishes_the_eval_it_left_before_it_steps_again(tmp_path: Path) -> None:
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    checkpoints = Checkpoints(ledger, blobs)
+    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1])
+    recorder, trainer = answering(), Counting()
+
+    async def training(groups: int, curriculum: Curriculum | None = None) -> None:
+        await train(
+            words, trainer, checkpoints, base="tiny", channel="policy", directory=tmp_path / "files",
+            publish=recorder.publish, groups=groups, groups_per_step=1, seed=1, curriculum=curriculum,
+            evals=a_schedule(suite, every=1),
+        )  # fmt: skip
+
+    # A runner that plays the training run's episodes and not the eval's: the loop waits in the first eval.
+    only = EpisodeRunner("training", ledger, LocalRunner(recorder=recorder), recorder, blobs, 6, runs={"train"})
+    async with playing(only):
+        going = asyncio.create_task(training(8))
+        async with asyncio.timeout(10):
+            while not await ledger.read(table("eval-1", GROUPS)):  # noqa: ASYNC110 (the first step's eval is asked for)
+                await asyncio.sleep(0.01)
+        await asyncio.sleep(0.3)  # (training groups go on being played meanwhile)
+        going.cancel()
+        await asyncio.gather(going, return_exceptions=True)
+    (first,) = await made_by(checkpoints)
+    assert list(await ledger.read(table("train", STEPS))) == ["1"] and not await ledger.read(table("train", EVALS))
+
+    curriculum = Curriculum(words.rows())
+    async with here(ledger, recorder, blobs):
+        await training(0, curriculum)  # (no more groups: it trains on those played and evaluates what that makes)
+    evaluated: Any = await ledger.read(table("train", EVALS))
+    assert evaluated["1"]["checkpoint"] == first.id and evaluated["1"]["played"] == 4
+    steps: Any = await ledger.read(table("train", STEPS))
+    assert all(step["decided"] >= evaluated["1"]["at"] for key, step in steps.items() if key != "1")
+    newest = max(evaluated, key=int)
+    assert curriculum.evaluations["words-v1"][0] == evaluated[newest]["checkpoint"]
+
+    again = Curriculum(words.rows())  # a run started again folds its evals into its curriculum
+    async with here(ledger, recorder, blobs):
+        await training(0, again)
+    assert again.evaluations["words-v1"] == curriculum.evaluations["words-v1"]
+
+
+async def test_a_profile_says_what_its_run_evaluates_and_each_eval_is_a_run_its_runner_plays(tmp_path: Path) -> None:
+    path = write(tmp_path)
+    path.write_text(path.read_text() + '\n[evals]\nsuite = "words-v1"\nevery = 2\nepisodes = 3\n')
+    profile = Profile.load(path)
+    assert profile.evals is not None and (profile.evals.suite, profile.evals.every, profile.evals.episodes) == (
+        "words-v1", 2, 3,
+    )  # fmt: skip
+    async with profile.open() as platform:
+        assert platform.registry is not None
+        made = await platform.eval_run(2)
+        assert await platform.eval_run(2) == made and made in (platform.runner.runs or ())
+        names = {entry.id: entry.name for entry in await platform.registry.runs()}
+        assert names[made] == f"{platform.run.name}-eval-2"
+    with pytest.raises(ValueError, match="1 at least"):
+        Profile.load(path, settings={"evals.every": 0})

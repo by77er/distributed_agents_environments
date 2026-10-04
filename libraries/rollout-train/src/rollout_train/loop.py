@@ -26,6 +26,12 @@ taken twice.
 
 Taking the run's fence when it starts shuts out a loop it replaced: that one's next write is refused. The checkpoints it
 makes are appended under that fence.
+
+**It can evaluate its checkpoints as it makes them** (`evals`, a `rollout_train.evals.Schedule`). After a step whose
+checkpoint the schedule names is served, the suite is asked for as an eval of that checkpoint, a run of its own, and
+the next step waits until every start has been played: all that time the channel serves that checkpoint, while
+training groups go on being played under it. The eval's results are folded into the curriculum. Started again, the
+loop finishes an eval it left unfinished before it decides anything.
 """
 
 import asyncio
@@ -46,8 +52,9 @@ from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.curriculum import Curriculum
+from rollout_train.evals import Schedule, evaluate
 from rollout_train.ledger import Fence
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, scope, table
+from rollout_train.record import EVALS, FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, results, scope, table
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
 from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Trainer, Weighted
@@ -90,6 +97,7 @@ async def train(
     kept: Callable[[], Awaitable[Collection[str]]] | None = None,
     made: Callable[[Checkpoint], Awaitable[object]] | None = None,
     reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None,
+    evals: Schedule | None = None,
 ) -> None:
     """Train from `start` (a checkpoint's id; else the base model, named `base`) on `catalog` until `groups` more groups
     have been played (those a stopped loop left unplayed among them) and every group played has been trained on, serving
@@ -108,7 +116,8 @@ async def train(
     directory is, where the monitor on its machine serves (`address`), and what profile started it, say. `hooks` are
     told of each result and step; `made` is called with each checkpoint made, once it is served (to move a bookmark,
     say). `reshard` gives the files the engines load for a checkpoint (in their layout: `rollout_train.resharding`),
-    told the run's fence to note it under; without it, they load the trainer's."""
+    told the run's fence to note it under; without it, they load the trainer's. `evals` says which checkpoints the run
+    evaluates as it makes them, between their step and the next."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
@@ -120,9 +129,13 @@ async def train(
     }
     steps = {int(key): _mapping(step) for key, step in (await ledger.read(table(run, STEPS))).items()}
     failures = {int(key) for key in await ledger.read(table(run, FAILURES))}
+    evaluated = {int(key): _mapping(said) for key, said in (await ledger.read(table(run, EVALS))).items()}
     curriculum = curriculum or Curriculum(catalog.rows())
     for number in sorted(recorded):
         curriculum.recorded(recorded[number])
+    for key in sorted(evaluated):
+        said = evaluated[key]
+        curriculum.evaluated(str(said["suite"]), str(said["checkpoint"]), await results(ledger, str(said["run"])))
     if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
         raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
     await plan(ledger, run, Plan(catalog.program, binding or binding_for(catalog, channel)), fence)
@@ -174,10 +187,31 @@ async def train(
         serving = {served.id, *served.parents} if served is not None else set[str]()
         return begun | serving | set(await kept() if kept is not None else ())
 
+    async def evaluated_with(checkpoint: Checkpoint) -> None:
+        """Play the schedule's suite with a checkpoint the run made and serves, if the schedule names it and it has
+        not been evaluated yet."""
+        if evals is None or not evals.due(checkpoint, run) or int(str(checkpoint.step)) in evaluated:
+            return
+        step = int(str(checkpoint.step))
+        eval_run = await evals.run(step)
+        said = await evaluate(
+            evals.catalog, checkpoints, run=eval_run, suite=evals.suite, subject=checkpoint.id, base=base,
+            channel=channel, directory=directory, publish=None, episodes=evals.episodes, binding=evals.binding,
+            started={"from": None, "by": run, "step": step},  # (whether its files are kept is the run's retention's)
+            asked_by=f"the run, every {evals.every} steps", hooks=hooks,
+        )  # fmt: skip
+        summary: dict[str, JsonValue] = {"played": said["played"], "solved": said["solved"], "reward": said["reward"]}
+        record: dict[str, JsonValue] = {"suite": evals.suite.name, "checkpoint": checkpoint.id, "run": eval_run}
+        record |= summary | {"at": round(time.time(), 1)}
+        await ledger.append(table(run, EVALS), str(step), record, fence)
+        evaluated[step] = record
+        curriculum.evaluated(evals.suite.name, checkpoint.id, said["results"])
+
     served: Checkpoint | None = None
     await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
     if (now := await current()) is not None:
         await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
+        await evaluated_with(now)  # (and one that died while evaluating it finishes the eval)
 
     outstanding: dict[asyncio.Task[list[Episode]], int] = {}
     """Groups being played, by the task that waits for their episodes."""
@@ -318,6 +352,7 @@ async def train(
         metrics: dict[str, JsonValue] = {name: round(value, 5) for name, value in checkpoint.metrics.items()}
         note("step", {"step": key, "groups": list[JsonValue](numbers), "checkpoint": checkpoint.id, "metrics": metrics})
         done_with(numbers)
+        await evaluated_with(checkpoint)  # (the next step waits for it: the checkpoint is served until it ends)
 
     failed_updates = 0
     stepping: asyncio.Task[None] | None = None

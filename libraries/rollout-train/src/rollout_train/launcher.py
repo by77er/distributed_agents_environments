@@ -64,6 +64,9 @@ def offered(directory: Path) -> list[dict[str, Any]]:
         for channel, spec in profile.channels.items():
             settings |= {f"channels.{channel}.thinking_tokens": spec.thinking_tokens}
             settings |= {f"channels.{channel}.answer_tokens": spec.answer_tokens}
+        evals = profile.evals
+        settings |= {"evals.suite": evals.suite if evals else None, "evals.every": evals.every if evals else None}
+        settings |= {"evals.episodes": evals.episodes if evals else None}
         model = profile.channels[profile.trainer.channel].model
         found.append(
             {

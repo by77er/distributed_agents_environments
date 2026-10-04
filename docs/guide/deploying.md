@@ -39,6 +39,11 @@ minecraft = "minecraft_team.worlds:tools"    # made in this process by `tools(di
 [memory]
 runs_gib = 6                                  # must be available to admit runs
 training_gib = 4                              # and to start a step
+
+[evals]
+suite = "words-v1"                            # optional: evaluate checkpoints as they are made, on this suite
+every = 2                                     # the checkpoint of every second step
+episodes = 1                                  # episodes of each start
 ```
 
 ```bash
@@ -84,6 +89,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
+| `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing | Ask for evals as launches instead, so that they run on engines of their own |
 | `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
 
 ## What a profile names
@@ -125,6 +131,9 @@ the trained one with the trainer's longest segment as its longest turn; the reco
 `directory/feed`; the tool sets; the blob store and the checkpoints; the runner, and the
 [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
 listens there.
+`open(training=False)` (what `rollout eval` opens) makes no trainer; the trained channel's engines still load what its
+`start` is served over. `platform.eval_run(step)` registers the run of the eval of the checkpoint made at `step`
+(`NAME-eval-STEP`) and adds it to the runs the episode runner plays.
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
 run's newest checkpoint (else the one it starts from) on its channel when it starts. `platform.layout` is the trained
 channel's `reshard`; `platform.reshard` reshards a checkpoint into it, as a Ray task when the profile names `ray`, else in
@@ -178,7 +187,8 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 
 It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
-`episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`); its catalogs; and how many runs it plays.
+`episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
+`evals.episodes`); its catalogs; and how many runs it plays.
 A launch (`rollout_train.launches`) names a profile, a catalog, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, or one
 the profile offers). The launcher claims the oldest launch asked for one of its profiles while it has room (a claim

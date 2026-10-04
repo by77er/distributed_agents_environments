@@ -51,6 +51,9 @@ catalog's program and that binding.
   checkpoint the run made (its first, from `start`); the checkpoint it makes is appended under the run's fence and served
   on the channel, and `made` is told of it (a profile's carried bookmark moves there). Tokens sampled under an
   older checkpoint are corrected for by the trainer's objective. One step is taken at a time.
+- **Evals between steps.** With `evals` (a [`Schedule`](../../guide/reference.md#schedule)), the checkpoint of every
+  `every`th step is evaluated once it is served, and the next step waits until the eval has played every start
+  ([evals during training](evals.md#evals-during-training)).
 - **A step that fails** (`StepFailed`) is written down with its `error`, its groups are done with, and the weights
   stay as they were. `FAILED_UPDATES` in a row stop the loop.
 - **Serving waits for the engines' layout.** With `reshard` (a function of a checkpoint and the run's fence, giving a
@@ -62,7 +65,7 @@ catalog's program and that binding.
 ## Dying and starting again
 
 The loop can be killed at any moment and started again. It keeps nothing it cannot read back: what it decides and
-what happens are appended to the run's tables in the [ledger](checkpoints.md#the-ledger) (these four, besides its
+what happens are appended to the run's tables in the [ledger](checkpoints.md#the-ledger) (these five, besides its
 `plans` and `starts`), and every action is one that can be taken twice.
 
 | Table | Keyed by | Written | Holds |
@@ -71,6 +74,7 @@ what happens are appended to the run's tables in the [ledger](checkpoints.md#the
 | `runs/RUN/results` | group | when its last episode ends | how it went: a [`Result`](../../guide/reference.md#result) |
 | `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the checkpoint it starts from (`parent`), the id of the one it will make (`makes`), the batch (a blob) and how many segments it has, the seed, when it was decided |
 | `runs/RUN/failures` | step | when a step's trainer fails | its error |
+| `runs/RUN/evals` | step | when the eval of the checkpoint the step made has played every start | the suite, the checkpoint, the eval's run, and how it went ([evals during training](evals.md#evals-during-training)) |
 
 A step's outcome is the checkpoint it makes, in the ledger's `checkpoints` table. A group is done with once its result trains on
 nothing, or the step that covers it has made its checkpoint or failed.
@@ -82,6 +86,7 @@ nothing, or the step that covers it has made its checkpoint or failed.
 | with groups queued | finds results to train on that no step covers, and queues them again |
 | during a step | finds the step decided and no checkpoint made, and takes it again over the same groups, from the same parent |
 | after the step | finds the checkpoint, serves it, and goes on |
+| during an eval of its checkpoint | serves that checkpoint (the newest), and finishes the eval before it decides anything |
 
 - **A step that was decided is finished before another is decided.** A decision names the checkpoint it will make,
   and only one step may make it.
@@ -135,8 +140,10 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
   start may be one the row can be set up from. After `FAILED_GROUPS` such groups in a row, the row counts as tried,
   and as having taught nothing.
 - **What it sees.** The task's own rewards, whatever the algorithm adds to them.
+- **Evals.** `evaluated(suite, checkpoint, results)` is told of each eval the run makes of its checkpoints, and
+  keeps the newest of each suite in `evaluations`, for a curriculum that reads them.
 - **It is a fold.** A curriculum is rebuilt from the run's results when the loop starts: each goes to the row of
-  its title, so records stay with their rows when a catalog changes. A choice is made with a random number
+  its title, so records stay with their rows when a catalog changes. The run's evals are folded in after them. A choice is made with a random number
   generator seeded by the group's number, and is written down before it is acted on.
 
 ## The trainer

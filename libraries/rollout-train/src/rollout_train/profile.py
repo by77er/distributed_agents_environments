@@ -41,7 +41,7 @@ from rollout_train.resharding import connect, disconnect, on_ray, reshard
 from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.stores import location, opened
 
-__all__ = ["ChannelSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
+__all__ = ["ChannelSpec", "EvalsSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
 
 
 @dataclass(frozen=True)
@@ -77,6 +77,22 @@ class TrainerSpec:
     colocated: bool = False
     """Whether it shares the channels' accelerator: their engines then sleep while it steps."""
     settings: Mapping[str, Any] = field(default_factory=dict[str, Any])
+
+
+@dataclass(frozen=True)
+class EvalsSpec:
+    """Evals a training run makes of its checkpoints as it makes them (`rollout_train.evals.Schedule`)."""
+
+    suite: str
+    """The suite each plays, by name (`rollout suite make`)."""
+    every: int = 1
+    """The checkpoint of every `every`th step is evaluated."""
+    episodes: int = 1
+    """Episodes of each of the suite's starts."""
+
+    def __post_init__(self) -> None:
+        if self.every < 1 or self.episodes < 1:
+            raise ValueError("evals: `every` and `episodes` are 1 at least")
 
 
 class NotEnoughMemory(Exception):
@@ -137,6 +153,8 @@ class Profile:
     name: str | None = None
     """What a run first started in `directory` is called (by default the directory's name). It is named again with
     `rollout rename`; its id, in the directory's `run.json`, never changes."""
+    evals: EvalsSpec | None = None
+    """The evals a training run makes of its checkpoints as it makes them."""
 
     @classmethod
     def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> "Profile":
@@ -159,6 +177,7 @@ class Profile:
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
+        evals = _only(_table(described, "evals"), "evals", "suite", "every", "episodes")
         known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs", "episodes_at_once", "ray")
         top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
@@ -169,6 +188,7 @@ class Profile:
             **memory,
             blobs=blobs,
             channels=channels,
+            evals=EvalsSpec(**evals) if evals else None,
             trainer=TrainerSpec(
                 kind=trainer.pop("kind"),
                 channel=trainer.pop("channel"),
@@ -182,10 +202,12 @@ class Profile:
         )
 
     @contextlib.asynccontextmanager
-    async def open(self) -> AsyncGenerator["Platform"]:
-        """Start what the profile describes, and stop it on the way out (also if starting fails half way)."""
+    async def open(self, *, training: bool = True) -> AsyncGenerator["Platform"]:
+        """Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
+        `training` (an eval), no trainer is made: the trained channel's engines still load what the trainer's `start`
+        is served over."""
         async with contextlib.AsyncExitStack() as stack:
-            yield await Platform.start(self, stack)
+            yield await Platform.start(self, stack, training=training)
 
 
 def _table(described: dict[str, Any], name: str) -> dict[str, Any]:
@@ -228,10 +250,13 @@ class Platform:
         """Where episodes' trajectories and events, and checkpoints' files, are kept."""
         self.blobs_at: dict[str, Any] = {}
         """Where that is, as any process opens it (`rollout_train.stores`), for the run's `starts` record."""
+        self._runs: set[str] = set()
+        """The runs whose episodes the runner plays: the profile's, and its evals'."""
 
     @classmethod
-    async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> "Platform":
-        """Start everything, registering with `stack` how each thing is stopped (the engines last)."""
+    async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack, *, training: bool = True) -> "Platform":
+        """Start everything (the trainer only with `training`), registering with `stack` how each thing is stopped
+        (the engines last)."""
         from rollout_train.monitor import RunFeed
 
         self = cls(profile)
@@ -242,6 +267,7 @@ class Platform:
             await asyncio.to_thread(connect, profile.ray)
             stack.callback(disconnect)
         self.run = await run_of(directory, self.ledger, self.registry, profile.name)
+        self._runs.add(self.run.id)
         if profile.trainer is not None and profile.trainer.start is not None:
             self.origin = await resolved(self.ledger, self.registry, profile.trainer.start)
         self.blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(directory / BLOBS)
@@ -260,7 +286,7 @@ class Platform:
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
         learner: Trainer | None = None
-        if described is not None:
+        if described is not None and training:
             learner = named(described.kind)(models[described.channel], **described.settings)
         started: list[Engine] = []
         for name, spec in profile.channels.items():
@@ -318,7 +344,7 @@ class Platform:
             self.blobs,
             places=profile.episodes_at_once,
             imports=list(tool_sets),
-            runs=[self.run.id],
+            runs=self._runs,
             hooks=[feed],
             guard=_needs(profile.runs_gib, "to run more episodes"),
             presence=presence_of(self.ledger),
@@ -346,6 +372,14 @@ class Platform:
         if self.profile.ray:
             return await on_ray(self.location, self.blobs_at, fence, checkpoint.id, self.layout)
         return await reshard(self.checkpoints, fence, checkpoint.id, self.layout, self.profile.directory / "resharding")
+
+    async def eval_run(self, step: int) -> str:
+        """The run of the eval of the checkpoint this run made at `step` (`rollout_train.evals.Schedule`), by id:
+        registered the first time as `NAME-eval-STEP` and kept in `directory/evals`; the runner plays its episodes."""
+        where = self.profile.directory / "evals" / f"{self.run.id}-eval-{step}"
+        entry = await run_of(where, self.ledger, self.registry, f"{self.run.name}-eval-{step}")
+        self._runs.add(entry.id)
+        return entry.id
 
     async def bookmarked(self) -> set[str]:
         """The checkpoints bookmarks name (which keep their files)."""

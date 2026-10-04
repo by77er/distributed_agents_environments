@@ -12,6 +12,10 @@ takes), or the base model. It is a run of its own, registered and fenced like an
 `evaluations/SUITE/EVAL/results` (`START-EPISODE`), beside a record of the subject (`evaluations/SUITE/EVAL/subject`).
 Each group's result is written to the run's own `results` too, so the eval reads like any run. Started again, it goes
 on: what it decided and what it recorded are not done twice.
+
+A training run can evaluate its own checkpoints as it makes them (a `Schedule`): the loop plays the suite with the
+checkpoint of every `every`th step between that step and the next, on the channel that already serves it, each eval a
+run of its own (`rollout_train.loop.train`).
 """
 
 import asyncio
@@ -30,7 +34,7 @@ from rollout.harness.runner import RunBinding
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.launches import EVAL
 from rollout_train.ledger import Fence, Ledger, between
-from rollout_train.record import GROUPS, RESULTS, STARTS, Result, scope, table
+from rollout_train.record import GROUPS, RESULTS, STARTS, Result, results, scope, table
 from rollout_train.registry import valid
 from rollout_train.rollouts.episodes import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
@@ -127,6 +131,25 @@ class Publisher(Protocol):
     ) -> int: ...
 
 
+@dataclass(frozen=True)
+class Schedule:
+    """Evals a training run makes of its own checkpoints: `suite` played by the checkpoint of every `every`th step,
+    `episodes` episodes of each start, between that step and the next. `catalog` is the suite's catalog, and `binding`
+    how its episodes are played (by default every slot from the trained channel). `run` gives the eval's run for a
+    step: the same each time it is asked for that step, and one the run's episode runners play."""
+
+    suite: Suite
+    catalog: Catalog
+    run: Callable[[int], Awaitable[str]]
+    every: int = 1
+    episodes: int = 1
+    binding: RunBinding | None = None
+
+    def due(self, checkpoint: Checkpoint, run: str) -> bool:
+        """Whether `checkpoint` is evaluated: a checkpoint `run` made at a step the schedule names."""
+        return checkpoint.run == run and checkpoint.step is not None and checkpoint.step % self.every == 0
+
+
 async def evaluate(
     catalog: Catalog,
     checkpoints: Checkpoints,
@@ -137,7 +160,7 @@ async def evaluate(
     base: str | None,
     channel: str,
     directory: Path,
-    publish: Publisher,
+    publish: Publisher | None,
     episodes: int = 1,
     binding: RunBinding | None = None,
     started: Mapping[str, JsonValue] | None = None,
@@ -146,10 +169,11 @@ async def evaluate(
     hooks: Sequence[Hooks] = (),
 ) -> dict[str, Any]:
     """Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
-    `episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`). `publish`
-    serves a checkpoint on the channel (a full one in place of the engines' weights; for an adapter over a full
-    checkpoint, the engines must already hold that checkpoint's weights, as `rollout eval` sees to), `reshard` gives its
-    files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine."""
+    `episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`, and each
+    start's `results`, a `Result` each). `publish` serves a checkpoint on the channel (a full one in place of the
+    engines' weights; for an adapter over a full checkpoint, the engines must already hold that checkpoint's weights, as
+    `rollout eval` sees to); None: the channel serves `subject` already (a training run's newest checkpoint). `reshard`
+    gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine."""
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
     fence = await ledger.take(scope(run))
     await plan(ledger, run, Plan(catalog.program, binding or binding_for(catalog, channel)), fence)
@@ -172,7 +196,7 @@ async def evaluate(
         for hook in hooks:
             hook.on_note(event)
 
-    if subject is not None:
+    if subject is not None and publish is not None:
         served = await checkpoints.checkpoint(subject)
         if served.weights is None:
             raise ValueError(f"{subject} was released: its weights were deleted, so it cannot be played")
@@ -234,4 +258,5 @@ async def evaluate(
         "played": len(done),
         "solved": sum(episode.solved for episode in done),
         "reward": round(sum(rewards) / len(rewards), 4) if rewards else None,
+        "results": await results(ledger, run),  # (as first recorded)
     }

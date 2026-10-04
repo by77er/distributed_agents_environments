@@ -12,10 +12,10 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#events_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Start`](#start), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Start`](#start), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
-- **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
+- **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
@@ -2529,6 +2529,7 @@ class Curriculum
 | `smoothing` | `float` | `0.5` | Weight of the newest group in the moving averages. |
 | `floor` | `float` | `0.05` |  |
 | `records` | `dict[str, Record]` | `field(default_factory=dict[str, Record])` |  |
+| `evaluations` | `dict[str, tuple[str, list[Result]]]` | `field(default_factory=dict[str, tuple[str, list[Result]]])` | The newest eval of each suite, by the suite's name: the checkpoint that played it, and how it did at each start (a `Result` each). |
 
 **Methods**
 
@@ -2537,6 +2538,8 @@ class Curriculum
   be choosing on what was known before it, so the others come first.
 - `def recorded(self, line: Result) -> None` — Take a group's result into account: the row of its title, or failing that of its key (a key that is a
   place in a catalog changes when rows are added). A curriculum is the fold of a run's results.
+- `def evaluated(self, suite: str, checkpoint: str, results: Sequence[Result]) -> None` — Take an eval into account: `checkpoint` played `suite`, and `results` say how it did at each start. A
+  curriculum folds a run's evals in the order they were made, so the newest of each suite is kept.
 - `def weight(self, row: Row) -> float`
 - `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
 - `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
@@ -2548,14 +2551,15 @@ class Curriculum
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def evaluate(catalog: Catalog, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
+async def evaluate(catalog: Catalog, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
 ```
 
 Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
-`episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`). `publish`
-serves a checkpoint on the channel (a full one in place of the engines' weights; for an adapter over a full
-checkpoint, the engines must already hold that checkpoint's weights, as `rollout eval` sees to), `reshard` gives its
-files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine.
+`episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`, and each
+start's `results`, a `Result` each). `publish` serves a checkpoint on the channel (a full one in place of the
+engines' weights; for an adapter over a full checkpoint, the engines must already hold that checkpoint's weights, as
+`rollout eval` sees to); None: the channel serves `subject` already (a training run's newest checkpoint). `reshard`
+gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine.
 
 ### `Fence`
 
@@ -2750,6 +2754,32 @@ age.
 
 - `def kept(self, depths: list[int]) -> set[int]`
 
+### `Schedule`
+
+*class* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+class Schedule
+```
+
+Evals a training run makes of its own checkpoints: `suite` played by the checkpoint of every `every`th step,
+`episodes` episodes of each start, between that step and the next. `catalog` is the suite's catalog, and `binding`
+how its episodes are played (by default every slot from the trained channel). `run` gives the eval's run for a
+step: the same each time it is asked for that step, and one the run's episode runners play.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `suite` | `Suite` | required |  |
+| `catalog` | `Catalog` | required |  |
+| `run` | `Callable[[int], Awaitable[str]]` | required |  |
+| `every` | `int` | `1` |  |
+| `episodes` | `int` | `1` |  |
+| `binding` | `RunBinding \| None` | `None` |  |
+
+**Methods**
+
+- `def due(self, checkpoint: Checkpoint, run: str) -> bool` — Whether `checkpoint` is evaluated: a checkpoint `run` made at a step the schedule names.
+
 ### `Start`
 
 *class* · `libraries/rollout-train/src/rollout_train/evals.py`
@@ -2823,7 +2853,7 @@ A suite, if there is one by that name.
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(catalog: Catalog, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None) -> None
+async def train(catalog: Catalog, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, evals: Schedule | None = None) -> None
 ```
 
 Train from `start` (a checkpoint's id; else the base model, named `base`) on `catalog` until `groups` more groups
@@ -2843,7 +2873,8 @@ run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep
 directory is, where the monitor on its machine serves (`address`), and what profile started it, say. `hooks` are
 told of each result and step; `made` is called with each checkpoint made, once it is served (to move a bookmark,
 say). `reshard` gives the files the engines load for a checkpoint (in their layout: `rollout_train.resharding`),
-told the run's fence to note it under; without it, they load the trainer's.
+told the run's fence to note it under; without it, they load the trainer's. `evals` says which checkpoints the run
+evaluates as it makes them, between their step and the next.
 
 ### `Trained`
 
@@ -3228,6 +3259,22 @@ class ChannelSpec
 | `answer_tokens` | `int \| None` | `None` |  |
 | `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
 
+### `EvalsSpec`
+
+*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+
+```python
+class EvalsSpec
+```
+
+Evals a training run makes of its checkpoints as it makes them (`rollout_train.evals.Schedule`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `suite` | `str` | required | The suite each plays, by name (`rollout suite make`). |
+| `every` | `int` | `1` | The checkpoint of every `every`th step is evaluated. |
+| `episodes` | `int` | `1` | Episodes of each of the suite's starts. |
+
 ### `NotEnoughMemory`
 
 *class* · `libraries/rollout-train/src/rollout_train/profile.py`
@@ -3253,10 +3300,13 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
 **Methods**
 
 - `def __init__(self, profile: Profile) -> None`
-- `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> 'Platform'` — Start everything, registering with `stack` how each thing is stopped (the engines last).
+- `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack, *, training: bool = True) -> 'Platform'` — Start everything (the trainer only with `training`), registering with `stack` how each thing is stopped
+  (the engines last).
 - `@property def layout(self) -> str | None` — The layout the trained channel's engines load checkpoints in, if they are resharded.
 - `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
   cluster, else here.
+- `async def eval_run(self, step: int) -> str` — The run of the eval of the checkpoint this run made at `step` (`rollout_train.evals.Schedule`), by id:
+  registered the first time as `NAME-eval-STEP` and kept in `directory/evals`; the runner plays its episodes.
 - `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
 - `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
@@ -3287,13 +3337,16 @@ class Profile
 | `feed_runs` | `int \| None` | `None` | Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are deleted). |
 | `ray` | `str \| None` | `None` | The Ray cluster to connect to (`auto`, or `ray://host:port`): reshards then run as Ray tasks on it. |
 | `name` | `str \| None` | `None` | What a run first started in `directory` is called (by default the directory's name). It is named again with `rollout rename`; its id, in the directory's `run.json`, never changes. |
+| `evals` | `EvalsSpec \| None` | `None` | The evals a training run makes of its checkpoints as it makes them. |
 
 **Methods**
 
 - `@classmethod def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
   `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
   file has and a profile does not is an error: a misspelt guard would otherwise be no guard.
-- `async def open(self) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way).
+- `async def open(self, *, training: bool = True) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
+  `training` (an eval), no trainer is made: the trained channel's engines still load what the trainer's `start`
+  is served over.
 
 ### `TrainerSpec`
 

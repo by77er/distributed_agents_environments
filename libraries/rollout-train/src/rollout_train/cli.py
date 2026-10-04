@@ -66,6 +66,7 @@ async def _train(
 
     from rollout.catalog import binding_for
     from rollout_train import train
+    from rollout_train.evals import Schedule, suite_of
     from rollout_train.profile import Profile
 
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
@@ -78,13 +79,23 @@ async def _train(
         assert platform.trainer is not None
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
         binding = binding_for(rows, channel, platform.tool_bindings)
+        schedule: Schedule | None = None
+        if (asked := described.evals) is not None:
+            suite = await suite_of(platform.ledger, asked.suite)
+            if suite is None:
+                raise SystemExit(f"there is no suite {asked.suite!r}: make one with `rollout suite make`")
+            played = named(suite.catalog)
+            schedule = Schedule(
+                suite, played, platform.eval_run, asked.every, asked.episodes,
+                binding_for(played, channel, platform.tool_bindings),
+            )  # fmt: skip
         await train(
             rows, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
             base=described.channels[channel].model,
             directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
             run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
-            reshard=platform.reshard if platform.layout else None,
+            reshard=platform.reshard if platform.layout else None, evals=schedule,
         )  # fmt: skip
 
 
@@ -112,7 +123,7 @@ async def _evaluate(
     channel = described.trainer.channel if described.trainer else next(iter(described.channels))
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
-    async with described.open() as platform:
+    async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
         suite = await suite_of(platform.ledger, suite_name)
         if suite is None:
             raise SystemExit(f"there is no suite {suite_name!r}: make one with `rollout suite make`")
