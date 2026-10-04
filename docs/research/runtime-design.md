@@ -30,7 +30,7 @@ Read against main `0f90a2b`. Names in `code` that do not exist yet are what this
 `rollout_train.profile.Profile` mixes three concerns, and `Platform.start` starts all of them in one process: the run's
 registration, a Ray connection for reshards, orphaned engines ended, the trainer, every channel's engines, routes to
 servers elsewhere, the feed, a gateway in process (or endpoints of one elsewhere), tool sets, sandbox pools with
-keepers, the runner (`LocalRunner` or `DurableRunner`), the episode runner, a follower for `rollout runner`, and
+keepers, the runner (`LocalRunner`), the episode runner, a follower for `rollout runner`, and
 `Colocated` around the trainer.
 
 | Profile key | Goes to |
@@ -47,7 +47,6 @@ keepers, the runner (`LocalRunner` or `DurableRunner`), the episode runner, a fo
 | `trainer.start`, `trainer.bookmark` | run settings `start`, `bookmark` |
 | `evals` | run settings `evals.*` |
 | `episodes_at_once` | run settings `episodes_at_once` |
-| `runner` | cluster config `[runners] durable` |
 | `serve`, `address`, `gateway.*` | cluster config `[gateway]` |
 | `tools` | the environment declares its tool sets; shared services by URL in cluster config `[tools.NAME]` |
 | `pools` | the environment declares its sandboxes; pools are cluster config `[sandboxes.KIND]` |
@@ -120,7 +119,6 @@ at_once = 1                                   # runs it plays at once, beside wh
 
 [runners]
 places = 8                                    # episodes one runner actor plays at once
-durable = false                               # true: DurableRunner, its database at database_url(_env)
 
 [guards]
 runs_gib = 6                                  # system memory a node must have free before a runner claims an episode
@@ -230,7 +228,7 @@ memory_gib = 48
 | `[gateway]` | `url`, `port`, `replicas` or `autoscale`, `keys_file` or `keys_env`, `lifetime` | |
 | `[monitor]` | `route`, `feed_episodes` | |
 | `[launcher]` | `at_once` | |
-| `[runners]` | `places`, `durable`, `database_url` or `database_url_env` | |
+| `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | Checked on the node of the runner or trainer |
 | `[inference.NAME]` | `kind` (`vllm`, `vllm-servers`, `tinker`, `api`), kind's fields, `models.MODEL.{context, base, cost, options}` | §2 |
 | `[trainers.NAME]` | `kind` (`module:name`), `gpus`, `colocate_with`, `models`, `segment_tokens`, `cost`, secret references | §2 |
@@ -617,7 +615,7 @@ Every actor is started with `max_restarts=-1`. Fences make each takeover safe, a
 | Trainer | Holds nothing between steps: a step says its parent's files. The loop's call fails with the actor; the step is taken again (`StepFailed`) |
 | Engine host | Starts its engines and reloads what the run's serving record says (`Follower`); the gateway routes around it meanwhile (`Unreachable`) |
 | Gateway replica | Stateless. A runner's request is retried under its effect id; a recorded turn is answered from the record |
-| Episode runner | Restarted under the same name, it takes its runner fence anew; its claims lapse and are played again, or, over the durable runner, are adopted |
+| Episode runner | Restarted under the same name, it takes its runner fence anew; its claims lapse and are played again |
 | Environment worker | Answers again; a run's curriculum is rebuilt from the ledger when the loop next asks for it (§4.6) |
 | Sandbox pool | Its leases are beside the ledger; its keeper takes the pool's fence anew and releases leases whose claims lapsed |
 | Launcher | Follows its jobs again by the launches' `job` field (today's `_adopt`) |
@@ -649,7 +647,7 @@ async def train(launch: Launch, cluster: Cluster) -> None:
 the actor handle; wrapped in `Colocated` over `HostPausable` engine host handles when colocated); start the engine
 hosts (or the `vllm-servers` follower) for each channel that needs them; start the feed actor; start
 `ceil(episodes_at_once / places)` runner actors in the environment's Python, each an `EpisodeRunner` over a
-`LocalRunner` or `DurableRunner`, recording through `GatewayEndpoints([gateway] url)`, with the environment's pools as
+`LocalRunner`, recording through `GatewayEndpoints([gateway] url)`, with the environment's pools as
 `ActorPool`s and its tool sets; record the run's start. On the way out, in reverse; the job's end ends whatever is left.
 
 What changes in the loop and evals:
@@ -751,7 +749,7 @@ chose, by node affinity, and is a no-op where the build is cached.
 The environment's lock must hold `rollout-train` (with `ray` at the cluster's exact version, which `rollout-train`
 then depends on) beside its own dependencies: the worker and the runners run platform code that plays its programs.
 The worker checks `ray.__version__` against the cluster's when it starts, and refuses with the project to fix.
-Resolved in a scratch copy of `implementations/rollout-verifiers`: `rollout-train[http,durable,ray]` resolves beside
+Resolved in a scratch copy of `implementations/rollout-verifiers`: `rollout-train[http]` resolves beside
 `verifiers 0.3.2.dev185` with `openai 2.54.0` and `ray 2.59.0`, the workspace's Ray. The gateway, engine hosts,
 trainers and bridges never import an environment, so they stay in the platform's Python, with vLLM, torch and the
 `tinker` SDK.
@@ -976,7 +974,7 @@ recipe (a gateway in the workspace's environment, the runner in rollout-verifier
 the gateway in the platform's Python, the worker and runners in the verifiers build.
 `docs/implementations/rollout-verifiers.md` shows the cluster config's `[environments]` entry and the `rollout suite
 make math …` and `rollout eval`/`rollout train` commands of §3. The verifiers project's dev group keeps
-`rollout-train[http,durable]`, which then brings Ray.
+`rollout-train[http]`, which brings the database ledger and Ray.
 
 ### `minecraft-group`'s start records
 

@@ -19,7 +19,7 @@ named here are in the [API reference](../../guide/reference.md#rolloutharness).
 | [sandboxes.md](sandboxes.md) | `SandboxSpec`, `Sandbox`, pools and providers: what a program runs against, leased for the run |
 | [hooks.md](hooks.md) | `RunHooks`: watching every event and model sample of a runner |
 | [memory.md](memory.md) | `Memory` and `CompactingAgent`: a context that fits any model |
-| [determinism.md](determinism.md) | rules for code that runs under the durable runner |
+| [determinism.md](determinism.md) | time, randomness and effect identity in task code, and the rules that keep them reliable |
 | [contracts](contracts/README.md) | the types that cross layers, and what they guarantee |
 
 ## The loop
@@ -39,9 +39,7 @@ named here are in the [API reference](../../guide/reference.md#rolloutharness).
 - `agent.act` must return an ASSISTANT message; anything else raises `TypeError`.
 - Steering messages are taken after `respond`, and only when its observation does not end the episode.
 - `score` runs only when the loop ends with an observation whose `end` is set. After an exception it does not run.
-- `teardown` runs on every path, including failure and cancellation. The one exception is a cancellation with the
-  message `rollout: unload`, which the durable runner uses to take a waiting run out of memory without ending it
-  ([evicting idle runs](../../implementations/rollout-durable/eviction.md)).
+- `teardown` runs on every path, including failure and cancellation.
 - `record`, `wait_for_message`, `take_steering_messages` and `interruptible` are the members of `RunContext` that
   only the loop uses.
 
@@ -91,14 +89,13 @@ what task and agent code must not: which model serves a slot, how it samples, wh
 ## Runner
 
 [`Runner`](../../guide/reference.md#runner) and [`RunHandle`](../../guide/reference.md#runhandle) are protocols.
-Code written against them holds either implementation:
+Code written against them holds any implementation:
 
 | Runner | Code | Behaviour |
 |---|---|---|
 | `LocalRunner(...)` | `rollout.local` | Runs each program as a task on the current asyncio loop. Nothing persists: a process crash loses its runs. |
-| `DurableRunner(directory, ...)` | `rollout_durable` | Runs each program inside a DBOS workflow in the runner's process. Effects are recorded steps, so a run resumes after a crash ([durability](../../implementations/rollout-durable/README.md)). |
 
-Both take `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
+It takes `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
 bindings, by name), `pools` (for local pool bindings, by name), `environments` (an `EnvironmentService`), `blobs`,
 `recorder` (serves recorded bindings) and `hooks`.
 
@@ -116,8 +113,7 @@ What the protocols guarantee:
 - A handle's `events(from_seq=...)` yields every event from `from_seq`, then new ones as they are recorded, and
   ends with the run. `recorded_events()` returns what is recorded so far. `outcome` is `None` while the run is live.
 - `cancel` records `run.cancel_requested`, lets `teardown` run, and returns once the run has ended. The
-  `LocalRunner` cancels the run's task at once; the `DurableRunner` stops the run at its next effect, wait or turn
-  boundary.
+  `LocalRunner` cancels the run's task at once.
 - When a run ends, its runner destroys the environments the run still owns and releases its sandboxes.
 
 A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
@@ -154,6 +150,6 @@ the transport: where its runs are, how a message reaches one, and where delivere
 | A `@tool` body raises or times out, its arguments do not validate, or the model calls a tool that does not exist | no failure: the model receives an error result ([tools](../../guide/tools.md#errors-are-observations)) |
 | An imported tool set raises | no failure: the effect completes as `failed` and the model receives an error result |
 | A binding leaves a model slot or an import unserved | `LocalRunner.start` raises `ValueError` |
-| The process crashes | `LocalRunner`: its runs are lost. `DurableRunner`: its runs resume by [replay](determinism.md) |
+| The process crashes | its runs are lost; an episode runner's episodes are open again in the ledger, and are played again |
 
 `teardown` has run by the time a run fails or is cancelled.

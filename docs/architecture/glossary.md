@@ -9,7 +9,7 @@
 | **Run** | One execution of a program under a `RunBinding`, identified by `run_id`: one episode. A training run is the other sense of the word ([below](#training-terms)). |
 | **RunSpecification / RunBinding** | What to run (a program reference and parameters) / how it is served here (model endpoints, imported tool sets, sandbox pools, delivery policy). |
 | **Deployment** | A named, addressable `RunSpecification`. |
-| **Runner** | Executes runs: `LocalRunner` in process, or `DurableRunner`, whose runs survive it ([durable runner](../implementations/rollout-durable/README.md)). |
+| **Runner** | Executes runs: `LocalRunner`, in process ([runs and events](../guide/runs-and-events.md)). |
 | **Observation** | The task's response to a model turn: messages shown to the model next, an optional reward, an optional ending, logged info. |
 | **Ending** | How an episode ended: `TERMINATED` (a real end state) or `TRUNCATED` (stopped by a limit). |
 | **WaitFor** | A return value of `start`, `respond` or `resume` that suspends the run until a message arrives or a timeout passes. |
@@ -18,7 +18,6 @@
 | **Priority / delivery mode** | `LOW` / `NORMAL` / `HIGH`, mapped by the run's `DeliveryPolicy` to `QUEUE` (wait for the next `WaitFor`), `STEER` (merge into the next observation) or `INTERRUPT` (cancel the sample in flight). |
 | **Model slot** | A named model a program uses (`policy`, `user`, …); each is bound to an endpoint and recorded as its own session. |
 | **Effect** | An operation that reaches outside code: a model sample, a tool call, an environment operation, an output. Identified by `effect_id = {run_id}:{generation}:{ordinal}` and a digest of its arguments. |
-| **Replay** | Running a program again while its recorded effects return their results; how a durable runner resumes. |
 | **Tool** | A `ToolSpecification` (what the model sees) and its implementation: a `@tool` method, or an imported tool. |
 | **Tool set / ToolBinding** | Tools a program imports by name / where a run finds them: in the runner's process or at a URL. |
 | **Sandbox** | Something a program runs against for one run, outside its own code (a Minecraft world, a container, an environment's worker): declared by the program (`SandboxSpec`), acquired by the runner before the program starts and released when it ends, reached as `run.sandbox(name)`. See [sandboxes](../libraries/rollout/sandboxes.md). |
@@ -54,7 +53,7 @@ of segments.
 | **Behavior logprob** | The log-probability of a sampled token under the distribution it was sampled from. |
 | **Plan** | How a training run's episodes are played: its program and its binding, in the run's `plans` table. |
 | **Episode runner** | Claims the episodes runs ask for in the ledger, plays them on a runner and records them, at most as many at once as it has places. Several, on one machine or many, share the work. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
-| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under (or adopted it under, started again over a durable runner) and beats. It names the run that plays it. The episode's sandboxes are leased under it, and their leases end with it. |
+| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under (or adopted it under) and beats. It names the run that plays it. The episode's sandboxes are leased under it, and their leases end with it. |
 | **Heartbeat** | What a runner, an engine host, a launcher or a pool served on its own writes every 15 seconds beside the ledger: its host, its machine's measurements, its engines and channels, how full its pools are, or what it offers. One silent for 90 seconds is taken to be gone. See [heartbeats](../libraries/rollout-train/rollouts.md#heartbeats). |
 | **Launch / launcher** | A training run or an eval asked for (its profile, environment, name, checkpoint and settings; an eval's suite and episodes a start) / the process on a training machine that claims launches for the profiles it offers and starts `rollout train` or `rollout eval` for them, as a process of its own or as a Ray job. See [launchers](../guide/deploying.md#launchers). |
 | **Suite / eval** | An eval configuration, by name: an environment, its starts (its eval data of a name, each of some rows' start drawn with each of some seeds, or starts given), episodes per start and the eval channel's sampling limits; kept in versions (`NAME@N`), each never changed, an edit making the next, and the name pointing to the newest / one version of a suite played by one checkpoint or the base model, training nothing: a run of its own whose start says `kind: eval` and the version, recording each episode's outcome under `evaluations/SUITE/EVAL/results`. See [evals](../libraries/rollout-train/evals.md). |

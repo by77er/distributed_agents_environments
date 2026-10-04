@@ -40,8 +40,8 @@ field it never sees.
 
 - **Model-visible**: the name, the description and the input schema. `model_visible()` returns exactly these, an
   endpoint renders only these, and the spec hash covers only these.
-- **Not model-visible**: the `retry_class`, which says what a durable runner may do with a call that a crash
-  interrupted ([effects](effects.md#receivers-that-deduplicate)).
+- **Not model-visible**: the `retry_class`, which says whether a call is safe to make again
+  ([effects](effects.md#receivers-that-deduplicate)).
 - A name matches `^[a-zA-Z0-9_-]{1,64}$`, and an input schema is a JSON Schema of type `object`. Both are checked
   when the specification is constructed. The names of the tools in one sample request are unique.
 

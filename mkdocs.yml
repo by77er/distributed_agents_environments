@@ -68,7 +68,7 @@ nav:
       - rollout:
           - libraries/rollout/README.md
           - "Sandboxes": libraries/rollout/sandboxes.md
-          - "Determinism rules for durable code": libraries/rollout/determinism.md
+          - "Determinism": libraries/rollout/determinism.md
           - "Hooks": libraries/rollout/hooks.md
           - "Memory": libraries/rollout/memory.md
           - Contracts:

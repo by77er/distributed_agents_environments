@@ -1,11 +1,10 @@
 # Ledger guarantees
 
 Code: `rollout_train.ledger`, `rollout_train.database`, `rollout_train.rollouts.scheduler`, `rollout_train.sandboxes`,
-`rollout.harness.sandboxes`, `rollout_train.checkpoints`, `rollout_train.loop`, `rollout_durable` · Tests:
-`tests/research/test_ledger_guarantees.py`, `tests/research/test_durable_guarantees.py` · See
+`rollout.harness.sandboxes`, `rollout_train.checkpoints`, `rollout_train.loop` · Tests:
+`tests/research/test_ledger_guarantees.py` · See
 [checkpoints](../libraries/rollout-train/checkpoints.md#the-ledger), [rollouts](../libraries/rollout-train/rollouts.md),
-[training](../libraries/rollout-train/training.md), [sandboxes](../libraries/rollout/sandboxes.md),
-[several runners](../implementations/rollout-durable/runners.md)
+[training](../libraries/rollout-train/training.md), [sandboxes](../libraries/rollout/sandboxes.md)
 
 Processes on one machine or many cooperate through three kinds of shared state:
 
@@ -19,8 +18,8 @@ guarantee fails, it gives a scenario and a proposed fix. The last section says w
 every role is to reach the ledger through ([runtime design](runtime-design.md#decisions-after-review)), must guarantee
 for all of this to carry over.
 
-The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 1, 2, 3, 4, 5, 6, 7, 8, 10, 11,
-12, 13 and 14 have since been fixed, and finding 9 in part: their sections say what the code does now, with line
+The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 1, 2, 3, 4, 5, 7, 8, 10, 11, 12,
+13 and 14 have since been fixed, and finding 9 in part: their sections say what the code does now, with line
 numbers only where they say what the code did then.
 
 **Evidence.** Each violation still open has a test marked `xfail(strict=True)`: the suite stays green, and a fix turns
@@ -48,18 +47,16 @@ leaks.
 | 3 | Safety | Retention can delete a blob that a checkpoint added at the same moment names (content addressing finds it stored and does not write it again) | fixed: a grace period, and a put that finds a blob sets its time ([6](#6-retention-and-blobs)) | `test_thin_never_deletes_a_blob_a_concurrent_add_names` |
 | 4 | Safety | `FileLedger`: after a writer dies mid-line, the next acknowledged append is lost, and its key then accepts a second, different record | fixed: the next append removes the unfinished line first, and appends are on disk before they are acknowledged | `test_an_append_after_a_torn_line_is_kept` |
 | 5 | Safety | Staleness and wall-time limits compare wall clocks. A runner whose clock is 90 s behind looks dead while it plays (finding 1, everywhere at once), and a clock stepped forward ends sandbox leases early | fixed: beats stamped and aged by the store's clock, time limits on the pool's monotonic clock ([3](#3-clocks)) | `test_a_live_runner_whose_clock_is_behind_keeps_its_claims`, `test_a_clock_stepped_forward_does_not_end_a_lease_early` |
-| 6 | Safety | Durable runner: a run replayed after its terminal event was stored appends a second terminal event (introduced by `42e324d`) | fixed: one terminal event and one end ([9](#9-the-durable-runner)) | `test_a_run_replayed_after_it_ended_has_one_terminal_event` |
 | 7 | Safety | Launch states are overwritten unconditionally: a stop asked for while a run starts is lost, and a stop racing a claim marks a running launch `stopped` | fixed: every state change compares and sets ([7](#7-launches-and-settings)) | `test_a_stop_asked_for_while_a_run_starts_stops_it`, `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` |
 | 8 | Safety | Two makers of one suite leave a suite that neither made | fixed: a suite is one record ([8](#8-suites-finding-8)) | `test_two_makers_of_one_suite_leave_one_of_their_suites` |
 | 9 | Safety | Two loops of one run (a replaced one that has not noticed yet) share unfenced side effects: the run's directory, the trainer, the bookmark | fixed in part: the loop looks at its fence before acting outside the ledger, and trains in a directory of its own ([5](#5-the-training-loop)) | `test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes_and_bookmarks_nothing` |
-| 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all its durable runs on its next start | fixed: adoption under any earlier fence ([2](#adoption-adopts-under-any-earlier-fence-finding-10)) | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
+| 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all the runs it would adopt on its next start | fixed: adoption under any earlier fence ([2](#adoption-adopts-under-any-earlier-fence-finding-10)) | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
 | 11 | Liveness | `FileLedger`: a crash while taking a fence leaves `fences.json` empty, and the ledger is unusable until repaired by hand | fixed: `fences.json` is replaced whole | `test_a_crash_while_taking_a_fence_leaves_the_ledger_usable` |
 | 12 | Liveness | `FileLedger` blocks the event loop on its lock and rereads whole tables on every append, which can delay beats | fixed: it waits in a thread, and keeps each table's keys | `test_a_ledger_of_files_does_not_hold_up_the_event_loop_while_another_holds_its_lock` |
 | 13 | Liveness | The keeper decides from a read and releases afterwards: a lease whose claim was adopted in between is released, and its run is played again | fixed: the keeper reads the claim again and ends it in the ledger before releasing ([4](#4-leases-and-sandboxes)) | `test_the_keeper_reads_a_lapsed_claim_again_and_ends_it_in_the_ledger_before_releasing` |
 | 14 | Documentation | "A table's records … in the order they were appended" does not hold on Postgres for tables that several scopes write | fixed: an append holds its table's lock while it numbers its record | `test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres` |
 
-The [durable runner](#9-the-durable-runner) section lists further problems found by reading `rollout_durable`. Only
-finding 6 among them is tested. Tests of what the fixes added are in `tests/rollout_train/test_episode_fences.py`,
+Tests of what the fixes added are in `tests/rollout_train/test_episode_fences.py`,
 `tests/rollout_train/test_presence.py`, `tests/rollout/harness/test_sandboxes.py`, `tests/rollout/harness/test_blobs.py`
 and `tests/rollout_train/training/test_loop.py`.
 
@@ -108,10 +105,10 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 
 ### `DatabaseLedger` on SQLite: holds
 
-- **Mechanism.** Every write transaction begins with `BEGIN IMMEDIATE` (`rollout_durable/database.py:111,176-179`),
+- **Mechanism.** Every write transaction begins with `BEGIN IMMEDIATE` (`rollout_train/sql.py`, `_begin_immediately`),
   which takes SQLite's single write lock. `take` is an upsert that returns the new number (`database.py:122-132`).
   `append` reads the newest fence and inserts in the same transaction (`database.py:134-152`). Writes are therefore
-  serial. Reads run outside a transaction and see the latest commit (`rollout_durable/database.py:126-129`).
+  serial. Reads run outside a transaction and see the latest commit (`Database.read`).
 - **Evidence.** In `test_writers_on_connections_of_their_own_take_distinct_fences_and_stale_appends_are_refused[sqlite]`,
   four threads, each with an engine of its own, take and append 30 times each. Every take gets a number of its own,
   and fences never go down in append order.
@@ -121,7 +118,7 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 
 - **Mechanism.**
   - Both `take` and `append` run `SELECT pg_advisory_xact_lock(hash("ledger:" + scope))` first
-    (`rollout_durable/database.py:131-137`). The lock is held until the transaction commits.
+    (`Database.write` in `rollout_train/sql.py`). The lock is held until the transaction commits.
   - Postgres makes a commit visible before it releases the transaction's locks. So the next holder's `SELECT number`,
     which under READ COMMITTED takes a fresh snapshot per statement, sees any take committed before it got the lock.
   - An append cannot interleave with a take of its scope: it is ordered either before the take (and the take's
@@ -132,8 +129,8 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
   writes fences under another lock (`database.py:452-474`) and is documented to run with nothing writing.
 - **Evidence.** The same threaded test, `[postgres]`, passes on a real Postgres.
 - **Assumptions.**
-  - The connection to Postgres is direct or through a session-mode pooler. Transaction-scoped advisory locks work
-    behind a transaction-mode pooler such as pgbouncer, but `Database.lock` (session advisory locks) does not.
+  - The ledger takes only transaction-scoped advisory locks, which work directly and behind a pooler in either
+    session or transaction mode, such as pgbouncer.
   - Two scope names whose 64-bit hashes collide only serialize more. That is harmless.
 
 ### First append wins: holds, atomically
@@ -286,7 +283,7 @@ Each episode has a scope of its own, `runs/RUN/episodes/GROUP/EPISODE` (`episode
 - **What is left.** An attempt claimed between the keeper's read and its take loses its fence to the keeper: its
   record is refused, and it is played again (liveness). A claimer that dies between its claim and its take leaves a
   claim with no fence taken; that claim holds while its runner beats, and lapses when the runner is started again
-  (a durable runner finds no run for it). A zombie can still record in the moment between a new claim's append and its
+  A zombie can still record in the moment between a new claim's append and its
   take, if nobody (no keeper) took the fence before.
 
 ### Adoption adopts under any earlier fence (finding 10)
@@ -318,8 +315,6 @@ At `6ec3721` every timestamp below was `time.time()` on the machine that wrote i
 | A runner is alive: beat `at` ≥ now − 90 s | runner (`presence.py:84`, `database.py:342`) | whoever judges: other runners, every pool's `admits` and keeper (`presence.py:55-57`) | Writer 90 s behind, or reader stepped 90 s ahead: a live runner's claims lapse. Others play them again, keepers delete its sandboxes, and finding 1 follows for every episode it plays. Writer ahead: a dead runner's claims hold longer | **Safety** (two holders, wrong outcomes). **Fixed**: the store's clock |
 | "Two sweeps in a row" | keeper (`sandboxes.py:212-221`) | keeper | none: two looks, counted, with no times compared | — |
 | Sandbox wall-time limit: `Lease.ends` ≤ now | pool, at acquire (`harness/sandboxes.py:336,345`) | same pool, at sweep (`harness/sandboxes.py:387,392`) | A step forward ends leases early and deletes sandboxes in use. A step back lets sandboxes overstay | **Safety** (a sandbox deleted under its run). **Fixed**: a duration on the pool's monotonic clock |
-| Durable runner takeover: heartbeat older than `takeover_after` | each runner | each runner | A live runner's runs are executed twice at once (documented, runners.md) | **Safety** |
-| Durable eviction and waking (`wake_at`, `last_activity`, `recorded_at`) | several machines | evicting runner | Runs evicted or woken early or late | Liveness |
 | Launch `at` (ordering of launches asked for) | whoever asked | launcher | Launches started out of order | Liveness |
 | Run state shown by the monitor (beat ages) | runner | monitor | Wrong display | Display. **Fixed**: the store's clock |
 
@@ -357,9 +352,6 @@ Tests:
 - `test_a_clock_stepped_forward_does_not_end_a_lease_early` steps the pool's wall clock forward two hours. The
   sandbox, acquired seconds before with an hour's limit, stays.
 - `test_a_pool_started_again_counts_the_time_its_leases_have_lasted`.
-
-Keep `takeover_after` (the durable runner's own heartbeats, which still compare wall clocks) well above the largest
-expected skew.
 
 ## 4. Leases and sandboxes
 
@@ -622,55 +614,13 @@ before its append: the first is fenced out, and the ledger holds the second's su
 `test_an_edit_makes_a_new_version_and_moves_the_suites_name_to_it` and
 `test_a_suites_name_points_to_a_version_beside_the_ledger` (the name moves only forward, in both registries).
 
-## 9. The durable runner
+## 9. Runs and the ledger
 
-Code: `rollout_durable.runner`, `rollout_durable.context`, `rollout_durable.store`. This section was established by
-reading the code. Only the first item was run.
-
-**How events are numbered.** Each execution numbers its events from an in-memory counter. The store inserts on the
-primary key `(run_id, seq)` with `ON CONFLICT DO NOTHING` (`store.py:323-331`), so the first writer of a `seq` wins.
-A replay's events that were already stored are dropped, which is what keeps the log free of duplicates.
-
-- **A second terminal event (finding 6, tested, fixed).**
-  - What `42e324d` changed: a terminal event takes `MAX(seq) + 1` whenever any event is stored (`context.py:97-102`),
-    so that a replay that took another way still ends its stream.
-  - What that broke: after the terminal event is stored, `execute` still releases environments and sandboxes and
-    finishes the run, before DBOS records the workflow's output (`runner.py:358-371`). A replay that starts in that
-    window appends a second terminal event:
-    - after a crash;
-    - after `close()`, which unloads every run whose `finish_run` has not run (`runner.py:229-239`);
-    - from a second executor.
-  - If the replay takes another way (its sandbox refused after the release), the second terminal event can say
-    something else, and `finish_run` rewrites the outcome.
-  - Test: `test_a_run_replayed_after_it_ended_has_one_terminal_event` gets `[(7, run.completed), (8, run.completed)]`.
-    `DurableRunHandle.events()` stops at the first terminal event, so an episode runner records the first. The
-    store's log, the feed and the outcome may disagree with it.
-  - **What the runner does now.** A terminal event takes `MAX(seq) + 1` only while no terminal event is stored; when
-    one is (`RunStore.terminal_seq`), the replay's takes that event's `seq`, and the store drops it as a duplicate.
-    `finish_run` changes a run only while its status is `running`, so a replay never rewrites how a run ended. The
-    test passes. Left: a replay that takes a longer way than the first execution can still store non-terminal events
-    after the terminal one; readers stop at the first terminal event.
-- **Hooks see replayed events again.** `_recorded` publishes every event, whether or not the store kept it
-  (`runner.py:375-377`). **Fix:** have `append` return whether it inserted, and publish only then.
-- **Teardown on DBOS control flow (unverified).** The harness skips `teardown` only for an `UNLOAD` cancellation
-  (`harness/loop.py:54-59`). DBOS raises `DBOSWorkflowConflictIDError` in the losing executor and
-  `DBOSWorkflowCancelledError` on cancellation, and both are `BaseException`s (`dbos/_error.py:370-388`), so
-  `teardown` runs in the loser.
-- **Eviction writes the store, then DBOS (unverified).** A crash between `store.evict` and `cancel_workflow`
-  (`runner.py:458-459`) leaves a pending workflow marked evicted. A later `resume` then puts it on the queue
-  alongside the recovered copy: two executors.
-- **Unloading mid-effect (unverified).** The cancelled effect's `effect.completed: failed` is stored, and the replay's
-  `ok` at the same `seq` is dropped.
-- **Two executors at once (documented).** A runner stalled past `takeover_after` is executed twice. Effects in flight
-  happen twice, except guarded ones. A loser that runs entirely behind also repeats what lies outside steps: it
-  releases environments and sandboxes, and finishes the run.
-- **Liveness (unverified).**
-  - The eviction loop has no `try` (`runner.py:442-462`): one error stops eviction and deadline waking on that
-    runner for good.
-  - Waking clears `evicted` before `resume`: a failed resume leaves the run cancelled and not evicted, so it is never
-    woken.
-  - An exception after the terminal event (a failed environment destroy) skips `finish_run`, and the run stays
-    running.
+Runs do not survive their process: the `LocalRunner` keeps a run's events in memory. Durability for runs comes from the
+ledger. An episode stays open until its record is appended under the episode's fence, so when a run is lost with its
+process, a runner started again, or another runner, plays the episode again as a new attempt
+([2](#2-claims-and-episodes)), and the sandboxes leased under the lost claim end with it
+([4](#4-leases-and-sandboxes)).
 
 ## 10. The HTTP ledger service
 
@@ -833,6 +783,4 @@ What the client must do:
 - Whether any deployment runs trainers as root. A trainer no longer shares a working directory with another loop, and
   nothing in the loop writes a kept file in place.
 - Pools of one name in two processes with a real provider (Minecraft worlds).
-- The durable runner items marked unverified above: teardown on DBOS exceptions, eviction ordering, unloading
-  mid-effect, the liveness items. They come from reading the code and DBOS 3.1.0's sources, and were not run.
 - Transaction-mode connection poolers in front of Postgres.

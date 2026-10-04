@@ -93,8 +93,8 @@ Every agent's operations reach the episode's world through `run.sandbox("world")
 | `window` | | `SIDE_EFFECTING` | Runs game time while actions happen, then freezes; says whether anything is left to earn |
 | `score` | | `PURE` | The reward, and the ground truth it is scored from |
 
-The worlds do not deduplicate by effect identity; what each class means under a durable runner is in
-[tools](../guide/tools.md#after-a-crash).
+The worlds do not deduplicate by effect identity; what each class means is in
+[tools](../guide/tools.md#retry-classes).
 
 ## No cheating by construction
 

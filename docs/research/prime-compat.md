@@ -48,7 +48,7 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 | verifiers' renderers rebuilding tokens from requests | Our renderer rendering each request before sampling it | Ours records; verifiers' eval client records no tokens |
 | A runtime (`subprocess`, `docker`, `prime`, `modal`) | Where the episode runner runs the program | `subprocess` here; remote ones need a tunnel ([below](#runtimes-and-sandbox-leases)) |
 | `Env.run(task, agents)` with several agents | A program with several model slots | Not mapped: one address for every agent ([below](#multi-agent-environments)) |
-| `Episode`, retried whole | An episode, resumable mid-way under the durable runner | A verifiers episode is one opaque step ([below](#durability)) |
+| `Episode`, retried whole | An episode, played again as a new attempt when its run is lost | Both start the episode over ([below](#durability)) |
 | `BestOfNEnv`, `-r n` rollouts of a task | A group: `group_size` episodes of one start | Ours is the unit of a group-relative update |
 | `vf-eval -n N` over the first tasks | A suite: frozen starts, one per seed | Different selection; both reproducible |
 
@@ -154,8 +154,8 @@ were not run (*unverified* beyond reading the code).
 ### Durability
 
 A verifiers rollout is all or nothing. `run_episode_with_retry` retries the whole episode on failure, and
-`vf-eval --resume` plays errored rollouts again from the start. Here a program can resume mid-episode under the
-durable runner: its effects are recorded, and a sample repeated under its effect id returns the recorded result.
+`vf-eval --resume` plays errored rollouts again from the start. Here an episode whose run is lost is played again as a
+new attempt; within a run, a sample repeated under its effect id returns the recorded result.
 
 `VerifiersProgram.main` is one opaque call. If its process dies, the episode is played again from the start: a new
 interception server, a new harness process, new samples. The harness's requests carry no `Idempotency-Key` (the

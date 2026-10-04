@@ -309,7 +309,7 @@ No real record uses any of these layouts (see the ledger section above).
 | `python -m rollout_train.cli …` | The launcher's child command and the Ray job entrypoint | Stays, as the Ray entrypoint |
 | `monitor`, `ledger copy`, `rename`, `pause`, `resume`, `bookmark`, `checkpoints`, `merge`, `suite *`, `dataset *`, `report` | Ledger tools | Stay; `resume` stops needing a profile path; `ledger copy` goes with the file ledger (3.1) |
 | `scripts/train-with-memory-log.sh` | Wraps `rollout train PROFILE ENV` with a monitor and memory logs, from before the launcher existed | Delete |
-| `minecraft-team server`, `agents`, `project-assistant`, `rollout_tinker.weights` main | Developer and product tools | Unaffected |
+| `minecraft-team server`, `rollout_tinker.weights` main | Developer tools | Unaffected |
 
 ### 2.2 Profiles: `RT/profile.py` (712 lines), `Platform` and everything that passes a profile
 
@@ -330,7 +330,7 @@ No real record uses any of these layouts (see the ledger section above).
 | `trainer.start`, `.bookmark` (:116-121) | Run settings (already `Asked.start`/`bookmark`) |
 | `trainer.colocated` (:122) | Cluster config (placement) |
 | `trainer.settings` (:124) | Run settings plus presets |
-| `runner` local or durable (:193) | Cluster config |
+| `runner` (:193) | Gone: every runner is a `LocalRunner`, and durability for runs comes from the ledger |
 | `serve`, `address` (:195-199) | Cluster config (the gateway address); mostly obsolete once every run records through a gateway replica |
 | `tools` (:200) | Environment declaration (which tool sets), plus cluster config (URLs of shared services) |
 | `pools` (:202) | Environment declaration (sandbox kind and provider), plus cluster config (capacity and URLs) |
@@ -399,7 +399,7 @@ No real record uses any of these layouts (see the ledger section above).
     `research/test_ledger_guarantees.py:147` and `rollouts/games.py:9`.
 - **The one-process `Platform` (`RT/profile.py:377-507`).** It starts engines (`started_engines`, `:637-672`), the
   trainer, an in-process gateway (`_recording`, `:509-527`), a uvicorn server for harnesses (`_serve`, `:626-634`), tool
-  sets, pools with lease keepers (`_pools`, `:529-551`), and a local or durable runner (`:456-475`).
+  sets, pools with lease keepers (`_pools`, `:529-551`), and a `LocalRunner` (`:456-475`).
   - Ray replaces it with engine, trainer, gateway and runner actors.
   - These parts move to the run driver rather than being deleted: `eval_run`, `bookmarked`, `made`, `publish` and
     `_about`.
@@ -500,9 +500,7 @@ No real record uses any of these layouts (see the ledger section above).
 ### 2.7 What survives
 
 - **`R/local/*` (`LocalRunner`, 737 lines).** It is the in-process program runner, not role orchestration. Its users:
-  - the products (`agent_sessions/service.py:155`, `project_assistant/service.py:81`,
-    `project_assistant/evaluation/harness.py`);
-  - `RT/check.py:228` and `rollout_durable`;
+  - `RT/check.py:228`;
   - about 25 test files;
   - the future runner actor.
 
@@ -556,8 +554,8 @@ Checkpoints, datasets and suites are append tables inside the ledger, not stores
 2. Make `DatabaseLedger` the only ledger, with `sqlite:///…` as the local default. Its stores become required attributes
    (`ledger.registry`, `.presence`, `.launches`, `.settings`, `.leases`). The five `*_of` functions and the `None`
    branches go.
-3. `DatabaseLedger` needs SQLAlchemy from `rollout_durable.database`. Either make `rollout-durable` a dependency of
-   `rollout-train`, or move `Database`, `sql` and `fetch_*` into `rollout-train`.
+3. `DatabaseLedger`'s SQL helpers (`Database`, `sql`, `fetch_*`) are `rollout_train.sql`, and SQLAlchemy and psycopg
+   are rollout-train's own dependencies.
 4. Optional, afterwards: one `KeyedTable(database, table, key, columns)` with `get`, `all`, `put`, `delete` and
    `change(key, fn, exclusive=…)` under the remaining database stores. Leases, desired settings, bookmarks, dataset names
    and suite names collapse into it; launches use `change` with a state precondition; presence keeps its own clock SQL.
@@ -705,13 +703,13 @@ commit.
 | # | What | Where | Consolidation | Lines |
 |---|---|---|---|---|
 | T1 | **Helpers living inside `test_*.py`, imported by other test modules (28 imports).** **Do this first**: deleting `test_profile.py` or the `Process` fake otherwise breaks 5 and 4 other files. | `training/test_loop.py` (`Counting:54`, `Notes:80`, `answering:117`, `Running:243`, `here`, `made_by`, `quickly`; imported by 10 files); `test_profile.py` (`PROFILE:24`, `Steps:49`, `write:63`; 5 files); `test_launches.py` (`Process:159`, `profiles:113`; 4 files); `test_sandboxes.py` (`BOX`, `GATES`, `ask`, `episode_runner`; 3 files); `rollouts/test_scheduler.py`; `test_evals.py`; `test_full_weights.py`; `monitor/test_launching.py`; `rollout/harness/test_hooks.py` | `tests/rollout_train/support.py`, beside `games.py` and `machines.py` | 0 net |
-| T2 | `until(condition, seconds)` polling, **12 copies** | `rollout_durable/cluster.py:148`, `rollout_durable/test_eviction.py:72`, `rollout_durable/test_sandboxes.py:60`, `rollout_train/test_adoption.py:96`, `test_sandboxes.py:103`, `test_pausing.py:38`, `test_episode_fences.py:38`, `inference/test_remote.py:31`, `rollouts/test_scheduler.py:76`, `research/test_durable_guarantees.py:57`, `research/test_ledger_guarantees.py:104` | One `until(condition, seconds=10, every=0.01, message=)` taking a sync or async condition, in `rollout.testing` | ~70 |
+| T2 | `until(condition, seconds)` polling, **6 copies** | `rollout_train/test_sandboxes.py:103`, `test_pausing.py:38`, `test_episode_fences.py:38`, `inference/test_remote.py:31`, `rollouts/test_scheduler.py:76`, `research/test_ledger_guarantees.py:104` | One `until(condition, seconds=10, every=0.01, message=)` taking a sync or async condition, in `rollout.testing` | ~70 |
 | T3 | Monitor test client (`ASGITransport(app=create_app(...))` plus `AsyncClient(base_url="http://monitor")`), **~22 copies in 10 files** | `monitor/test_environments`, `test_scores`, `test_launching`, `test_stream`, `test_machines`, `test_monitor`, `test_system`, `test_lineage`; `test_evals:265`; `test_suite_versions:247, 323`; `test_suite_entries:264` | `async with monitor_client(path, beat=0.0)` | ~25 |
 | T4 | Inline profile TOML, 10 copies | `test_profile.py:24`, `test_sandboxes.py:257`, `test_datasets.py:262`, `gateway/test_hosted.py:33`, `gateway/test_on_gpu.py:29`, `gateway/test_replicas.py:33`, `test_machines.py:23`, `test_evals.py:478`, `research/test_ledger_guarantees.py:147`, rollout-tinker `tests/test_profile.py:53` | One builder for the replacement's configuration, in `rollout_train.testing`, so ten new copies do not appear | ~150 |
 | T5 | Two ways to build a test gateway, each with its own `SECRETS` | `RT/testing.py:41, 163-206` vs `tests/rollout_train/gateway/support.py:19-110` | One `SECRETS` and one `gateway_over` in `rollout_train.testing` | ~20 |
 | T6 | `ThinkingRenderer` byte-identical in 2 files | `recorder/test_compat.py:44-58`, `gateway/test_harnesses.py:37-51` | `rollout_train.testing` | ~20 |
 | T7 | `quickly` fixture, 6 copies | `test_evals.py:62`, `training/test_loop.py:49`, `test_settings.py:42`, `test_suite_entries.py:55`, `test_suite_versions.py:56`, `monitor/test_environments.py:39` | `tests/rollout_train/conftest.py` | ~20 |
-| T8 | Durable test tasks and fake services | `Chat` (`rollout_durable/scenarios.py:106`, `test_durable_runner.py:40`, `test_eviction.py:31`, `rollout/local/test_runner.py:61`, `harness/test_messages.py:106`); `Counting` (`crash_child.py:30`, `scenarios.py:127`, `rollout/local/test_imports.py:54`); `LedgerEndpoint`/`LedgerEnvironments` in `crash_child.py:41` and `guard_child.py:26` shadowing `R/testing.py:116-163` | Import from `scenarios.py`; the child scripts wrap `rollout.testing` with their sleeps | ~60 |
+| T8 | Test tasks defined twice | `Chat` (`rollout/local/test_runner.py:61`, `harness/test_messages.py:106`) | One definition, imported | ~15 |
 | T9 | `free_port`, 3 copies | `gateway/test_hosted.py:55`, `monitor/test_stream.py:162`, `tests/conftest.py:53-55` | One helper | ~10 |
 | T10 | `FileLedger(tmp_path / "ledger")` 149 times, `FileBlobStore(...)` 66 times | everywhere | A `ledger` and a `blobs` fixture (comes with 3.1) | small |
 
@@ -803,9 +801,8 @@ code outside tests. Plain dead code is small, about 120 to 160 lines. The large 
     `components/machines.tsx:30, 88, 112, 136, 159, 176`, `components/checkpoints.tsx:36`,
     `components/settings.tsx:13` and `components/ui.tsx:65`;
   - about 15 interfaces in `api/types.ts`.
-- **Keep:** exports that are signature or protocol types even though only their own package uses them (`rollout_durable`,
-  `rollout_openai`, `rollout.contracts`, `rollout.harness`, `rollout.local`, `rollout_train.gateway`, `agent_sessions`,
-  `rollout_gemma`).
+- **Keep:** exports that are signature or protocol types even though only their own package uses them (`rollout_openai`,
+  `rollout.contracts`, `rollout.harness`, `rollout.local`, `rollout_train.gateway`, `rollout_gemma`).
 
 ### 4.4 False positives
 
@@ -813,9 +810,7 @@ Recorded here so nobody chases them:
 - protocol and SDK stub parameters (`rollout_tinker/service.py:80-105`, `testing.py:124-257`, `renderers.py:55-56`);
 - SQLAlchemy `Table`s registered on metadata (`RT/database.py:55-123`);
 - pydantic validators (`R/contracts/content.py:111, 173, 180`, `model_endpoint.py:84, 109`);
-- tool methods (`agent_sessions/coordination/tools.py`, `rollout_computers/tools.py`);
 - about 115 ruff `ARG` hits, all on callback signatures;
-- `ERA001` at `rollout_durable/runner.py:434`, which is a heading comment.
 
 ---
 
@@ -829,12 +824,8 @@ Recorded here so nobody chases them:
 | `libraries/rollout-train/web/src` | 8,262 | 49 |
 | `libraries/rollout/src` | 5,276 | 36 |
 | `environments/minecraft` (code / tests) | 3,026 / 1,615 | 12 / 8 |
-| `products/agent-sessions` | 1,783 | 10 |
-| `products/project-assistant` | 1,510 | 12 |
 | `implementations/rollout-tinker` (src / tests) | 1,411 / 915 | 8 / 8 |
 | `implementations/rollout-lora` | 1,361 | 13 |
-| `implementations/rollout-durable` | 1,352 | 5 |
-| `implementations/rollout-computers` | 632 | 6 |
 | `implementations/rollout-verifiers` | 433 | 5 |
 | `implementations/rollout-openai` | 407 | 2 |
 | `implementations/rollout-s3`, `-vllm`, `-gemma`, `-qwen` | 163, 158, 158, 53 | |
@@ -889,7 +880,7 @@ and runs `npm test` and `tsc`. Every commit that changes a docstring regenerates
 | 9 | Add `record.newest`, `record.mapping` and `start_header`; use `where_blobs_are` and `subject_table` everywhere | 3.5.3–6, 3.4 | `tests/rollout_train`, all of it (shared code) |
 | 10 | One eval scorer with one rule for unreported episodes | 3.5.2 | `monitor/test_scores.py`, `test_lineage.py`, `test_system.py` |
 | 11 | Read the ledger once per beat (ledger view plus `read_all`) | 3.5.1 | `monitor/test_system.py`, `test_stream.py`, the `database` fixture tests |
-| 12 | Merge test helpers: `until`, `monitor_client`, `quickly`, `ThinkingRenderer`, `free_port`, the gateway builder, the durable fakes | T2, T3, T5–T9 | each touched package's tests |
+| 12 | Merge test helpers: `until`, `monitor_client`, `quickly`, `ThinkingRenderer`, `free_port`, the gateway builder | T2, T3, T5–T9 | each touched package's tests |
 | 13 | Front end: `useTopic`/`useWrite`, `ScoreCell`/`SolvedLegend`, `CheckpointSelect`, NewRun uses `wantedOf`, Checkpoints reuses `SuiteMatrix`; unexport file-local names | F1–F5, 4.3 | `page.test.tsx`, `machines.test.tsx`, `environments.test.tsx`, `tsc` |
 | 14 | Move `recorder` into the gateway (pure move); move its tests; fold `recorder.md` into `gateway.md` | 1.7, D9 | the full suite (many packages import it) |
 | 15 | Shared HTTP helpers: described client and `failed()`, `error_of`, `retrying`, `serve` | 3.2 | `tests/rollout/harness/test_sandboxes.py`, `rollouts/test_harness_and_tools.py`, `inference/test_remote.py`, `gateway/` tests |

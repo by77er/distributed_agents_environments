@@ -21,7 +21,6 @@ LocalRunContext(
     blobs: Blobs | None = None,                  # run.blobs
     conversation: ConversationKey | None = None,
     on_event: Callable[[RunEvent], None] | None = None,   # called for each event as it is recorded
-    retain_events: bool = True,                  # keep every event in `events`
 )
 ```
 
@@ -46,8 +45,8 @@ An **effect** is an operation that leaves task or agent code:
 | `environment.call` | `Environment.execute`, `put` and `get` |
 | `output.emit` | `run.emit(...)` |
 
-Each effect gets an identity that is the same every time the run's code is run again, which is what makes retries
-safe under the durable runner ([determinism](../libraries/rollout/determinism.md)):
+Each effect gets an identity, which receivers use to perform it once: the gateway answers a sample asked for again
+under its `effect_id` with the turn it recorded ([determinism](../libraries/rollout/determinism.md)):
 
 | Identifier | Format | Example |
 |---|---|---|
@@ -138,8 +137,8 @@ async def run_with_runner() -> None:
 asyncio.run(run_with_runner())
 ```
 
-The handle's `context` is the run's `LocalRunContext`. Sending messages, cancelling, deployments, bindings and the
-`DurableRunner` are in the [harness reference](../libraries/rollout/README.md#runner).
+The handle's `context` is the run's `LocalRunContext`. Sending messages, cancelling, deployments and bindings are in
+the [harness reference](../libraries/rollout/README.md#runner).
 
 ## Event types
 
@@ -147,7 +146,7 @@ The handle's `context` is the run's `LocalRunContext`. Sending messages, cancell
 |---|---|
 | Lifecycle | `run.created`, `tools.resolved`, `sandboxes.acquired`, `run.suspended`, `run.cancel_requested`, and one terminal event: `run.completed`, `run.failed` ([failures](../libraries/rollout/README.md#failures)) or `run.cancelled` |
 | Episode | `observation.recorded`, `reward.assigned` (`run.reward`, and `score`), `training.excluded`, `output.emitted` (`run.emit`) |
-| Effects | `effect.requested`, `effect.completed` with status `ok`, `failed` or `outcome_unknown` |
+| Effects | `effect.requested`, `effect.completed` with status `ok` or `failed` |
 | Messages | `message.received`, `turn.interrupted` |
 
 A sample's completion carries the canonical reply, the finish reason and the usage. Tokens and logprobs never appear

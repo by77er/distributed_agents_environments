@@ -209,7 +209,7 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | `random` | a `random.Random` seeded from `run_id` |
 | `reward(value, *, slot="policy", key="default")` | assigns a reward ([rewards](#rewards)); an unknown slot raises `ValueError` |
 | `exclude_from_training(reason)` | marks the run as unsuitable for training ([rewards](#rewards)) |
-| `await emit(kind, payload, *, to=None)` | durable output, such as a reply to a person ([conversations](conversations.md#sending-and-replying)) |
+| `await emit(kind, payload, *, to=None)` | output of the run, such as a reply to a person ([conversations](conversations.md#sending-and-replying)) |
 | `await gather(*awaitables)` | awaits concurrently and returns the results in order, as `asyncio.gather` does |
 
 ## Training on a task
@@ -230,7 +230,6 @@ still owns when the run ends. The computers come from the runner's environment s
 ## State and determinism
 
 - Keep episode state on `self`. `__init__` receives the row's parameters once per run.
-- Use `run.now()` and `run.random` rather than `time.time()` or the `random` module. The durable runner resumes a
-  run by running its code again, and these give the same values each time. The rules are in
-  [determinism](../libraries/rollout/determinism.md).
+- Use `run.now()` and `run.random` rather than `time.time()` or the `random` module: `run.random` is seeded from the
+  run's id, so a run's draws follow from it. The rules are in [determinism](../libraries/rollout/determinism.md).
 - `teardown` must be idempotent: it runs on every path once `setup` began, including failures and cancellation.

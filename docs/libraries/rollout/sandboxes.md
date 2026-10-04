@@ -90,9 +90,9 @@ started again counts the time its leases have lasted by the wall clock, once, as
 | `await call(operation, arguments)` | performs an operation and returns its `ToolResult` |
 
 Every call is a `tool.call` effect whose payload is `{"sandbox", "tool", "arguments"}`: the sandbox by its name, so
-a run never carries a handle. An operation's `retry_class` says what a durable runner may do after a crash, as for
-[imported tools](../../guide/tools.md#after-a-crash): `PURE` and `IDEMPOTENT` operations are performed again,
-`SIDE_EFFECTING` and `UNKNOWN` ones are guarded unless the pool deduplicates. The run records its leases, once
+a run never carries a handle. An operation's `retry_class` says whether it is safe to perform again, as for
+[imported tools](../../guide/tools.md#retry-classes): `PURE` and `IDEMPOTENT` operations are, and `SIDE_EFFECTING` and
+`UNKNOWN` ones are only when the pool deduplicates. The run records its leases, once
 acquired, in a [`sandboxes.acquired`](contracts/run-events.md#lifecycle) event.
 
 ## Harnesses inside a sandbox
@@ -119,7 +119,6 @@ fails.
 | When | before the program's `main`, in the order they are declared; each slot's address is taken first |
 | A full pool | the runner tries again every second, for up to `ACQUIRE_SECONDS` (300); then the run fails, releasing what it had |
 | Release | when the program ends, however it ends (completed, failed, cancelled), each lease the run acquired or began to. A release that fails is left to the lease's end |
-| Durable runs | a run acquires its sandboxes each time it is executed, recovered after a crash or woken after eviction, under the same lease, and so gets the same sandboxes back while their leases hold. A run that is unloaded keeps them. A run refused its sandboxes on resuming (`LeaseRefused`, `SandboxLost`) fails |
 
 ## Pools
 
@@ -149,8 +148,7 @@ provider:
   playing in.
 - **`sweep(ended)`** releases the leases `ended` says have ended and those past their time limit, marks lost those
   whose sandbox is gone, and deletes the sandboxes no lease names. A lost lease holds no room.
-- **`close()`** releases every lease it holds and closes the provider; `close(release=False)` leaves the leases, for
-  the runs a durable runner resumes to acquire again.
+- **`close()`** releases every lease it holds and closes the provider.
 
 A [`Provider`](../../guide/reference.md#provider) makes, deletes and operates sandboxes of one kind:
 
@@ -215,8 +213,8 @@ run's own release, when it ends). A pool that serves training runs is served wit
 ## In training: a lease ends with its claim
 
 An [episode runner](../rollout-train/rollouts.md#a-runner) starts each episode's run with the claim's key as its
-lease, so the run's sandboxes are leased under `RUN/GROUP/EPISODE/ATTEMPT/NAME`: an attempt played again (a durable
-run resumed) gets the same sandboxes; a new attempt gets new ones.
+lease, so the run's sandboxes are leased under `RUN/GROUP/EPISODE/ATTEMPT/NAME`: each attempt gets sandboxes of its
+own.
 
 - **Capacity.** A runner claims an episode only while the pools of the sandboxes its program declares have room for
   them, asking each pool's `capacity()` once a look, and counting what it claims as it goes. Runners that share a
@@ -247,10 +245,8 @@ run resumed) gets the same sandboxes; a new attempt gets new ones.
   another process takes it: a run's directory started twice on one machine has one keeper deleting the sandboxes no
   lease names, not two. Leases of a pool name that is never opened again (a host renamed, a run's directory moved)
   are swept by no keeper, and neither are their sandboxes where those outlive the process.
-- **A runner started again** over a durable runner adopts the runs of its claims that are still their episodes'
-  latest attempts ([rollouts](../rollout-train/rollouts.md#a-runner-started-again)); they acquire their sandboxes
-  under the same keys and get them back. A pool opened by a profile with a durable runner leaves its leases when it
-  closes. A sandbox that outlived the process (a pool on a machine of its own) is the run's again; one that ended
-  with it (a Paper server in the process) is lost, and the run is cut short and played again as a new attempt.
+- **A runner started again** takes its fence anew: the claims it held lapse, the keepers end their leases and
+  delete their sandboxes, and the episodes are played again as new attempts
+  ([rollouts](../rollout-train/rollouts.md#a-runner-started-again)).
 - **A pool started again** under its name finds its leases beside the ledger; those whose sandboxes are gone are
   marked lost, and sandboxes no lease names are deleted.

@@ -7,11 +7,11 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 ## Contents
 
 - **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#rolloutharnessenvironment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Priority`](#priority), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
-- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#rolloutenvironmentenvironment), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
-- **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
+- **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
@@ -30,13 +30,10 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#preset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
-- **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#rollout_qwentokenizer_of)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#rollout_gemmatokenizer_of)
-- **[`rollout_computers`](#rollout_computers)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
-- **[`rollout_computers.tools`](#rollout_computerstools)** — Tools for agents that work on a computer: shell, files, edits and images. [`apply_edits`](#apply_edits), [`ComputerTools`](#computertools), [`page_text`](#page_text), [`prepare_image`](#prepare_image), [`Replacement`](#replacement)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 - **[`rollout_s3`](#rollout_s3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
 - **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#pod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
@@ -80,7 +77,7 @@ context (compaction, windows) or the way it acts (plan-then-act, self-critique).
 
 **Methods**
 
-- `def __init__(self, configuration: Any = None) -> None` — Must be deterministic: under a durable runner the agent is re-created on replay.
+- `def __init__(self, configuration: Any = None) -> None` — Once per run, with the configuration of its program reference.
 - `def select_context(self, history: History, hints: ContextHints) -> list[Message]` — What the model sees this turn. Default: the system prompt and the history shaped by the task's hints.
 - `async def act(self, run: RunContext, history: History, tools: list[ToolSpecification]) -> Message` — Produce one action. Default: one sample of the policy slot.
 
@@ -227,8 +224,7 @@ class DeduplicatingToolSet(ToolSet, Protocol)
 ```
 
 A tool set that says whether it performs each `effect_id` at most once (a `deduplicates = True` attribute, on
-a class). The side-effecting tools of one that does are re-executed after a crash rather than guarded
-(docs/libraries/rollout/contracts/effects.md).
+a class): its side-effecting tools are then safe to call again (docs/libraries/rollout/contracts/effects.md).
 
 **Methods**
 
@@ -308,14 +304,12 @@ A model served by a provider's API through a direct adapter; nothing is recorded
 class Effects(Protocol)
 ```
 
-How a run performs effects. The runner decides what performing means: a direct call, or a durable step.
+How a run performs effects: the run context gives each its identity, records it and performs it.
 
 **Methods**
 
-- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue], guard: bool = False) -> T` — Assign the next `effect_id`, digest `arguments`, and run `execute(effect_id, arguments_digest)`.
-  
-    `completion` renders the result for the run's events. `guard` marks a side effect whose receiver cannot
-  deduplicate: a durable runner performs it at most once, raising `OutcomeUnknown` after a crash interrupted it.
+- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue]) -> T` — Assign the next `effect_id`, digest `arguments`, and run `execute(effect_id, arguments_digest)`.
+  `completion` renders the result for the run's events.
 
 ### `End`
 
@@ -392,7 +386,7 @@ A handle to one environment. Its methods are effects.
 **Methods**
 
 - `def __init__(self, environment_id: str, service: EnvironmentService, effects: Effects) -> None`
-- `async def execute(self, command: str, *, timeout_seconds: float = 120.0, cwd: str | None = None) -> ExecutionResult` — Run a shell command. Raises `OutcomeUnknown` if a crash interrupted an earlier attempt of this effect.
+- `async def execute(self, command: str, *, timeout_seconds: float = 120.0, cwd: str | None = None) -> ExecutionResult` — Run a shell command.
 - `async def put(self, path: str, data: bytes | str) -> None` — Write a file (relative paths are under the working directory).
 - `async def get(self, path: str) -> bytes`
 - `async def destroy(self) -> None`
@@ -877,7 +871,7 @@ A process the sandbox runs from its start (an environment's worker, a coding age
 class Program
 ```
 
-What a run executes. `AgentProgram` is the task loop; plain durable workflows are other programs.
+What a run executes. `AgentProgram` is the task loop; other programs drive their own.
 
 **Methods**
 
@@ -1041,11 +1035,11 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `@property def blobs(self) -> Blobs | None` — Stores bytes such as images for `Media` blocks; None when the runner has no blob store.
 - `@property def random(self) -> random.Random` — Seeded from `run_id`.
 - `@property def context_hints(self) -> ContextHints`
-- `def now(self) -> datetime` — The current time. Use it instead of the wall clock, which durable runs cannot replay.
+- `def now(self) -> datetime` — The current time, in UTC: the time the run's events carry.
 - `def reward(self, value: float, *, slot: str = 'policy', key: str = 'default') -> None` — Assign a reward to a model slot outside an observation (e.g. to an opponent, or several keyed rewards).
 - `def exclude_from_training(self, reason: str) -> None` — Mark the run as unsuitable for training, e.g. after an infrastructure fault that is not the policy's.
 - `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]` — Await concurrently, in order. Equivalent to `asyncio.gather`.
-- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Durable output, such as a reply to a person; a connector or client delivers it.
+- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Output of the run, such as a reply to a person; a connector or client delivers it.
 - `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None` — Append a turn to the history. A `WaitFor` records only the reply it answers.
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None` — Suspend until a message of `wait.kind` arrives; `None` on timeout.
 - `async def take_steering_messages(self) -> list[Envelope]` — Messages delivered with mode `STEER` since the last turn boundary.
@@ -1191,8 +1185,7 @@ A sandbox a run holds, as `run.sandbox(name)` gives it: how to reach it, and its
 - `@property def addresses(self) -> Mapping[str, str]`
 - `@property def environment(self) -> Mapping[str, str]` — For what runs inside it: those the runner gave it (its slots' model addresses) and the pool's own.
 - `def specifications(self) -> list[ToolSpecification]` — Its operations.
-- `async def call(self, operation: str, arguments: Mapping[str, JsonValue] | None = None) -> ToolResult` — Perform an operation as a `tool.call` effect. A side-effecting one is guarded unless the pool
-  deduplicates: after a crash it completes as `OUTCOME_UNKNOWN` rather than happen twice.
+- `async def call(self, operation: str, arguments: Mapping[str, JsonValue] | None = None) -> ToolResult` — Perform an operation as a `tool.call` effect.
 
 ### `SandboxLimits`
 
@@ -1247,9 +1240,7 @@ A `Pool` over a `Provider`: at most `provider.size` leases at once, kept in `lea
 - `async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]` — Release the leases `ended` says have ended, and those past their time limit; mark lost those whose sandbox
   is gone (the pool's process was started again, say), which their keys cannot have back; and delete the
   sandboxes no lease names. Returns the keys released or marked lost.
-- `async def close(self, *, release: bool = True) -> None` — Release every lease the pool holds (deleting its sandboxes), and close the provider. With `release` False,
-  the leases stay, for runs a durable runner resumes to acquire again: a sandbox that outlived the provider is
-  theirs again, and one that did not is lost.
+- `async def close(self) -> None` — Release every lease the pool holds (deleting its sandboxes), and close the provider.
 
 ### `SandboxSpec`
 
@@ -1657,7 +1648,6 @@ How an effect completed.
 |---|---|---|
 | `OK` | `'ok'` |  |
 | `FAILED` | `'failed'` |  |
-| `OUTCOME_UNKNOWN` | `'outcome_unknown'` | A possible duplicate of a side effect that could not be deduplicated; never silently retried. |
 
 ### `EMPTY_DIGEST`
 
@@ -1845,21 +1835,7 @@ def new_ulid() -> str
 
 A ULID: 48 bits of Unix time in milliseconds, then 80 random bits, in Crockford base 32 (26 characters).
 
-Minted by runners and services, never by task code (which has no ambient randomness under a durable runner).
-
-### `OutcomeUnknown`
-
-*class* · `libraries/rollout/src/rollout/contracts/effects.py`
-
-```python
-class OutcomeUnknown(Exception)
-```
-
-A guarded effect was interrupted by a crash in an earlier attempt: it may or may not have happened.
-
-**Methods**
-
-- `def __init__(self, effect_id: str) -> None`
+Minted by runners and services, never by task code (whose randomness is `run.random`, seeded from the run's id).
 
 ### `Overloaded`
 
@@ -1921,7 +1897,7 @@ type ResultBlock = Annotated[Text | Media, Field(discriminator='type')]
 class RetryClass(StrEnum)
 ```
 
-What a durable runner may do with a tool call after a crash (docs/architecture/overview.md).
+Whether a tool call is safe to perform again with the same `effect_id` (docs/guide/tools.md#retry-classes).
 
 | Member | Value | Description |
 |---|---|---|
@@ -2481,7 +2457,7 @@ Implements `RunContext` and `Effects` in process.
 
 **Methods**
 
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, blobs: Blobs | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None, retain_events: bool = True) -> None`
+- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, blobs: Blobs | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None) -> None`
 - `@property def run_id(self) -> str`
 - `@property def conversation(self) -> ConversationKey | None`
 - `@property def turn(self) -> int`
@@ -2498,7 +2474,7 @@ Implements `RunContext` and `Effects` in process.
 - `def reward(self, value: float, *, slot: str = 'policy', key: str = 'default') -> None`
 - `def exclude_from_training(self, reason: str) -> None`
 - `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]`
-- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Durable output, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect.
+- `async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None` — Output of the run, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect.
 - `def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None`
 - `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
 - `async def take_steering_messages(self) -> list[Envelope]`
@@ -2506,9 +2482,9 @@ Implements `RunContext` and `Effects` in process.
 - `def take_undelivered(self) -> list[Envelope]` — Messages the run never consumed; the runner hands them to the conversation's next run.
 - `def deliver(self, envelope: Envelope, mode: DeliveryMode) -> None` — Deliver a message to this run (docs/guide/conversations.md#priority-and-delivery-mode).
 - `async def acquire_sandboxes(self, specs: Mapping[str, SandboxSpec], pools: Mapping[str, Pool], lease: str) -> None` — Acquire each declared sandbox from the pool of its kind, under `lease` and its name, giving a harness
-  inside it its slots' model addresses; then record them. Idempotent: a replay gets the same sandboxes.
+  inside it its slots' model addresses; then record them.
 - `async def release_sandboxes(self) -> None` — Release every sandbox the run acquired, or began to: when the program has ended.
-- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue], guard: bool = False) -> T`
+- `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue]) -> T`
 - `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent`
 
 ### `LocalRunHandle`
@@ -2653,25 +2629,6 @@ Wraps a model endpoint and appends every sample's `effect_id` to a file: to coun
 - `async def sample(self, request: SampleRequest) -> SampleResult`
 - `async def cancel(self, effect_id: str) -> None`
 
-### `LedgerEnvironments`
-
-*class* · `libraries/rollout/src/rollout/testing.py`
-
-```python
-class LedgerEnvironments
-```
-
-Wraps an environment service and appends every command it starts to a file, with its `effect_id`.
-
-**Methods**
-
-- `def __init__(self, inner: EnvironmentService, ledger: Path) -> None`
-- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
-- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult`
-- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
-- `async def get(self, environment_id: str, path: str) -> bytes`
-- `async def destroy(self, environment_id: str) -> None`
-
 ### `local_run`
 
 *function* · `libraries/rollout/src/rollout/testing.py`
@@ -2691,14 +2648,6 @@ def payload(event: RunEvent) -> dict[str, JsonValue]
 ```
 
 An event's payload as a JSON object.
-
-### `read_ledger`
-
-*function* · `libraries/rollout/src/rollout/testing.py`
-
-```python
-def read_ledger(ledger: Path) -> list[dict[str, str]]
-```
 
 ### `ScriptedModelEndpoint`
 
@@ -2818,7 +2767,7 @@ to be resumed, and starting again adopts them (`prepare`).
 
 **Methods**
 
-- `@property def resumes(self) -> bool` — Whether its runner's runs survive it (`Runner.resumes`, which a durable runner has).
+- `@property def resumes(self) -> bool` — Whether its runner's runs survive it (`Runner.resumes`).
 - `async def prepare(self) -> None` — Take its fence, beat, and adopt what it finds of its runs: over a runner whose runs survive it, call this
   before launching the runner, so that the runs it recovers find their claims holding. `serve` calls it if it
   has not been.
@@ -4990,7 +4939,6 @@ class Profile
 | `directory` | `Path` | required | The run's state: checkpoints' files while in use, the monitor's feed, and (unless the profile names other places) its ledger and blobs. |
 | `channels` | `Mapping[str, ChannelSpec]` | required |  |
 | `trainer` | `TrainerSpec \| None` | `None` |  |
-| `runner` | `str` | `'local'` | `local` runs episodes in this process; `durable` records them so that they survive it. |
 | `serve` | `str \| None` | `None` | `host:port` to serve the gateway in the runner's own process on, for harnesses (none: a harness cannot be given an address). |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
@@ -5545,9 +5493,6 @@ class RunnersSection
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `places` | `int` | `8` | Episodes one runner plays at once. |
-| `durable` | `bool` | `False` | Runs episodes so that they survive their process (`rollout_durable`). |
-| `database_url` | `str \| None` | `None` |  |
-| `database_secret` | `Secret \| None` | `None` | The durable runner's database (by default the ledger's). |
 
 ### `SandboxesSection`
 
@@ -6868,143 +6813,6 @@ load.
 - `async def wake(self) -> None`
 - `def close(self) -> None`
 
-## `rollout_durable`
-
-A runner whose runs survive their process, on DBOS.
-
-### `DurableRunContext`
-
-*class* · `implementations/rollout-durable/src/rollout_durable/context.py`
-
-```python
-class DurableRunContext(LocalRunContext)
-```
-
-**Methods**
-
-- `def __init__(self, run_id: str, endpoints: Mapping[str, ModelEndpoint], *, started_at: datetime, context_hints: ContextHints | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environment_service: EnvironmentService | None = None, blobs: Blobs | None = None, conversation: ConversationKey | None = None, on_event: Callable[[RunEvent], None] | None = None, mark_attempt: Callable[[str], bool] = lambda effect_id: True, last_seq: Callable[[], int | None] = lambda: None, terminal_seq: Callable[[], int | None] = lambda: None) -> None`
-- `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent` — Events are stored by `seq`, and a replay's are the ones stored. A replay that took another way (a sandbox
-  refused, say) would give its terminal event a `seq` already taken; it comes after every stored event, unless
-  a terminal event is stored already: then it takes that one's `seq`, and is not stored.
-- `def now(self) -> datetime`
-- `async def wait_for_message(self, wait: WaitFor) -> Envelope | None`
-- `async def take_steering_messages(self) -> list[Envelope]`
-- `async def interruptible[T](self, reply: Awaitable[T]) -> T`
-- `async def undelivered(self) -> list[Envelope]` — Messages the run never consumed, including any still in the inbox; handed to the next run.
-
-### `DurableRunHandle`
-
-*class* · `implementations/rollout-durable/src/rollout_durable/runner.py`
-
-```python
-class DurableRunHandle
-```
-
-A durable run, read from the store: valid across processes and restarts.
-
-**Methods**
-
-- `def __init__(self, runner: 'DurableRunner', run_id: str) -> None`
-- `@property def run_id(self) -> str`
-- `@property def outcome(self) -> RunOutcome | None`
-- `@property def done(self) -> bool`
-- `async def result(self) -> RunOutcome`
-- `async def events(self, *, from_seq: int = 0) -> AsyncIterator[RunEvent]`
-- `def recorded_events(self) -> list[RunEvent]` — Every event recorded so far.
-
-### `DurableRunner`
-
-*class* · `implementations/rollout-durable/src/rollout_durable/runner.py`
-
-```python
-class DurableRunner(MessageRouter)
-```
-
-Implements `Runner` on DBOS. Call `await launch()` before use and `await close()` after.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `resumes` |  | `True` | Its runs survive it: started again over its state, it resumes the runs it had (an episode runner adopts them). |
-
-**Methods**
-
-- `def __init__(self, directory: Path, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, environments: EnvironmentService | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), application: str = 'rollout', evict_after: timedelta | None = timedelta(minutes=5), eviction_interval: float = 5.0, database: str | Database | None = None, runner_id: str | None = None, heartbeat_interval: float = 2.0, takeover_after: timedelta = timedelta(seconds=15), pools: Mapping[str, Pool] | None = None) -> None` — `evict_after`: unload runs that have waited this long for a message (None keeps every run resident);
-  `eviction_interval`: how often, in seconds, to look for runs to evict or wake
-  (docs/implementations/rollout-durable/eviction.md).
-  
-    `database`: a Postgres URL (or `Database`) shared with other runners; without it, state is SQLite in
-  `directory` and this runner is the only one. `runner_id` names this runner among them: a runner restarted
-  with its id puts its unfinished runs back on the queue at once, without waiting for a takeover.
-  `takeover_after`: how long a runner's heartbeat may stop before another runner recovers its runs.
-  `directory` holds local files either way.
-  
-    `pools`: the sandbox pools a binding names as `local`. A run acquires its sandboxes each time it is executed
-  (recovered, or woken) under the same lease, and so gets the same ones back while their leases hold.
-- `async def launch(self) -> None` — Start DBOS, which recovers the runs a crash left unfinished, and follow them.
-- `async def close(self) -> None`
-- `def deploy(self, deployment: Deployment) -> None`
-- `def run(self, run_id: str) -> DurableRunHandle`
-- `def conversation_of(self, run_id: str) -> ConversationKey | None` — The conversation a run serves, if any.
-- `def conversation_runs(self, deployment: str, key: str) -> list[DurableRunHandle]`
-- `async def start(self, specification: RunSpecification, *, run_id: str | None = None, conversation: ConversationKey | None = None, labels: Mapping[str, str] | None = None, lease: str | None = None) -> DurableRunHandle`
-- `async def cancel(self, run_id: str, *, reason: str) -> None` — Ask the run to stop at its next effect, wait or turn boundary; `teardown` runs.
-- `async def execute(self, run_id: str, specification_json: dict[str, Any], conversation_json: dict[str, Any] | None, labels: dict[str, str], started_at: str, lease: str) -> dict[str, Any]`
-- `def after_run(self, run_id: str, result: dict[str, Any]) -> None` — Called by the workflow when a run ends, where it ran: start the follow-up outside the workflow.
-
-### `RunCancelled`
-
-*class* · `implementations/rollout-durable/src/rollout_durable/context.py`
-
-```python
-class RunCancelled(Exception)
-```
-
-A cancellation request reached the run; the program unwinds and `teardown` runs.
-
-**Methods**
-
-- `def __init__(self, reason: str) -> None`
-
-### `RunStore`
-
-*class* · `implementations/rollout-durable/src/rollout_durable/store.py`
-
-```python
-class RunStore
-```
-
-**Methods**
-
-- `def __init__(self, database: Database | Path) -> None` — A `Database`, or the path of a SQLite file.
-- `def create_run(self, run_id: str, specification: JsonValue, conversation: str | None, conversation_key: JsonValue = None) -> None`
-- `def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None` — Say how a run ended, if it is still running: a replay of a run that ended (recovered after its terminal
-  event was stored, say) does not say it again.
-- `def run(self, run_id: str) -> RunRecord | None`
-- `def read_all_run_ids(self) -> list[str]`
-- `def evict(self, run_id: str, wake_at: str | None) -> None`
-- `def wake(self, run_id: str, at: str) -> None`
-- `def touch(self, run_id: str, at: str) -> None` — Record that the run was messaged: it must not be evicted until it suspends again.
-- `def last_activity(self, run_id: str) -> str | None` — When the run was last messaged or woken.
-- `def evictions(self) -> int` — How many times runs were evicted, in total.
-- `def is_evicted(self, run_id: str) -> bool`
-- `def due_for_waking(self, now: str) -> list[str]` — Evicted runs whose wait times out by `now`.
-- `def last_events(self, run_ids: list[str]) -> list[RunEvent]` — The latest event of each of these runs that is running and resident.
-- `def live_run(self, address: str) -> str | None`
-- `def conversation_key(self, address: str) -> JsonValue`
-- `def conversation_runs(self, address: str) -> list[str]`
-- `def is_claimed(self, message_id: str) -> bool`
-- `def claim_message(self, message_id: str, address: str) -> bool` — Record a message as delivered; False if it already was (a retry).
-- `def mark_attempt(self, effect_id: str) -> bool` — Record that a guarded effect is starting; False if an earlier attempt already started it.
-- `def heartbeat(self, runner_id: str, at: float) -> None`
-- `def stale_runners(self, before: float) -> list[str]` — Runners whose last heartbeat is older than `before`.
-- `def forget_runner(self, runner_id: str) -> None`
-- `def append(self, event: RunEvent) -> None`
-- `def last_seq(self, run_id: str) -> int | None` — The `seq` of a run's latest stored event; None when it has none.
-- `def terminal_seq(self, run_id: str) -> int | None` — The `seq` of a run's stored terminal event; None when it has none.
-- `def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]`
-- `async def changed(self, run_id: str, wait_seconds: float) -> None` — Wait until the run records something, or `wait_seconds` pass (other processes write without notifying).
-- `def close(self) -> None` — Close the database if this store opened it (a shared `Database` is closed by its owner).
-
 ## `rollout_vllm`
 
 An engine on vLLM.
@@ -7220,145 +7028,6 @@ def tokenizer_of(model: str) -> Tokenizer
 ```
 
 The tokenizer of a checkpoint, by its name or path.
-
-## `rollout_computers`
-
-Environment backends: services that give runs computers.
-
-### `ImageStore`
-
-*class* · `implementations/rollout-computers/src/rollout_computers/images.py`
-
-```python
-class ImageStore
-```
-
-Resolves image names (`alpine`, `alpine:3.24.2`) to verified, cached root filesystem tarballs.
-
-**Methods**
-
-- `def __init__(self, directory: Path) -> None`
-- `async def tarball(self, image: str) -> Path`
-
-### `LocalEnvironments`
-
-*class* · `implementations/rollout-computers/src/rollout_computers/local.py`
-
-```python
-class LocalEnvironments
-```
-
-Implements `EnvironmentService`.
-
-**Methods**
-
-- `def __init__(self, directory: Path, *, variables: Mapping[str, str] | None = None) -> None` — `variables` replaces the inherited environment variables when given.
-- `def workspace(self, environment_id: str) -> Path`
-- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
-- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult`
-- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
-- `async def get(self, environment_id: str, path: str) -> bytes`
-- `async def destroy(self, environment_id: str) -> None`
-
-### `NamespaceEnvironments`
-
-*class* · `implementations/rollout-computers/src/rollout_computers/namespaces.py`
-
-```python
-class NamespaceEnvironments
-```
-
-Implements `EnvironmentService`.
-
-**Methods**
-
-- `def __init__(self, directory: Path, images: ImageStore | None = None) -> None`
-- `def root(self, environment_id: str) -> Path`
-- `async def create(self, environment_id: str, specification: EnvironmentSpecification) -> None`
-- `async def execute(self, environment_id: str, command: str, *, timeout_seconds: float, cwd: str | None, effect_id: str = '') -> ExecutionResult`
-- `async def put(self, environment_id: str, path: str, data: bytes) -> None`
-- `async def get(self, environment_id: str, path: str) -> bytes`
-- `async def destroy(self, environment_id: str) -> None`
-
-## `rollout_computers.tools`
-
-Tools for agents that work on a computer: shell, files, edits and images.
-
-### `apply_edits`
-
-*function* · `implementations/rollout-computers/src/rollout_computers/tools.py`
-
-```python
-def apply_edits(original: str, edits: list[tuple[str, str]], path: str = 'the file') -> str
-```
-
-Apply exact replacements, each matched once against `original`. Line endings and a byte-order mark are kept:
-matching ignores the difference between CRLF and LF.
-
-### `ComputerTools`
-
-*class* · `implementations/rollout-computers/src/rollout_computers/tools.py`
-
-```python
-class ComputerTools
-```
-
-`@tool` methods over the environment `environment_id`. Mix into a `Task`.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `environment_id` | `str \| None` | `None` |  |
-
-**Methods**
-
-- `async def shell(self, run: RunContext, command: str, timeout_seconds: float = 120) -> ToolResult` — Run a shell command in your working directory. Each call starts a fresh shell, and nothing it started
-  keeps running afterwards. Returns the exit code and the combined standard output and error. Long output keeps
-  its last 2000 lines or 50 KB, and the full output is saved to a file you can read.
-- `async def read_file(self, run: RunContext, path: str, offset: int = 1, limit: int | None = None) -> str` — Read a text file (relative paths are under your working directory). Returns at most 2000 lines or 50 KB
-  from line `offset` (1-based), and says how to continue when there is more. `limit` caps the number of lines.
-  Use read_image for images.
-- `async def write_file(self, run: RunContext, path: str, content: str) -> str` — Write a text file (relative paths are under your working directory), replacing it if it exists and
-  creating parent directories.
-- `async def edit_file(self, run: RunContext, path: str, edits: list[Replacement]) -> str` — Edit a text file by exact replacement. Each old_text must occur exactly once in the original file, and
-  edits must not overlap: every edit is matched against the original, not against the result of the others.
-  For several changes in one file, make one call with several edits. Keep each old_text short but unique.
-- `async def read_image(self, run: RunContext, path: str) -> ToolResult` — Look at an image file (PNG, JPEG, GIF, WebP, BMP and other common formats; relative paths are under your
-  working directory). Large images are scaled down.
-- `def computer(self, run: RunContext) -> Environment`
-
-### `page_text`
-
-*function* · `implementations/rollout-computers/src/rollout_computers/tools.py`
-
-```python
-def page_text(text: str, path: str, offset: int, limit: int | None) -> str
-```
-
-Up to `MAX_READ_LINES` lines or `MAX_READ_BYTES` bytes of `text` from line `offset`, with a hint to continue.
-
-### `prepare_image`
-
-*function* · `implementations/rollout-computers/src/rollout_computers/tools.py`
-
-```python
-def prepare_image(data: bytes) -> tuple[bytes, str, str]
-```
-
-An image the model can read: common formats within the limits as they are, others converted to PNG and
-scaled down to fit. Returns the bytes, their media type and a description.
-
-### `Replacement`
-
-*class* · `implementations/rollout-computers/src/rollout_computers/tools.py`
-
-```python
-class Replacement(BaseModel)
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `old_text` | `str` | `Field(description='Exact text to replace. It must occur exactly once in the original file.')` |  |
-| `new_text` | `str` | `Field(description='The text to put in its place.')` |  |
 
 ## `rollout_openai`
 

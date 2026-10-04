@@ -472,5 +472,5 @@ what the page shows to a directory, as it happens.
 `FeedReader` keeps a summary of each run (a line that is neither a run's event nor a sample is passed over) and reads
 a run's lines from its file when the page asks for them.
 
-The feed is a copy for people to read. It is not the run's record: the run's events are, and under a durable runner
-they are in its store. Code that watches a run reads its episodes from the ledger ([rollouts](rollouts.md)).
+The feed is a copy for people to read, not the run's record. Code that watches a run reads its episodes from the
+ledger ([rollouts](rollouts.md)).

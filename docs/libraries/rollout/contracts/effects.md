@@ -5,8 +5,7 @@ Code: `rollout.contracts.effects`, `rollout.harness.model` (`Effects`) · See
 
 An **effect** is an operation that reaches outside task, agent or program code. Code requests effects by awaiting
 `run` methods and the handles `run` gives; the run context performs them. Under the `LocalRunner` an effect is a
-direct call. Under the `DurableRunner` it is a recorded step: once it has completed, a replay returns its recorded
-result and performs nothing ([durability](../../../implementations/rollout-durable/README.md#effects)).
+direct call, recorded as run events.
 
 ## Catalog
 
@@ -52,32 +51,30 @@ An effect records two events: `effect.requested` when it starts and `effect.comp
 |---|---|---|
 | `ok` | the effect was performed | its result |
 | `failed` | whatever performed it raised, or the run was cancelled or interrupted while it was in flight | the exception |
-| `outcome_unknown` | a guarded effect was interrupted by a crash in an earlier attempt, under the durable runner | `OutcomeUnknown`: it may or may not have happened, and it is not performed again |
 
 ## Receivers that deduplicate
 
-A receiver that performs each `effect_id` at most once makes an effect safe to request again. What a durable runner
-does with an effect that a crash interrupted depends on whether its receiver does:
+A receiver that performs each `effect_id` at most once makes an effect safe to request again. Whether an effect is
+safe to request again depends on its receiver:
 
-| Effect | Receiver | After a crash interrupted it |
+| Effect | Receiver | Safe to request again |
 |---|---|---|
-| `model.sample` | the gateway returns the recorded result for an `effect_id` it has recorded | requested again |
-| `model.sample` | a direct adapter does not deduplicate | requested again: it samples again, and nothing was lost |
-| `environment.lifecycle`, and the `put` and `get` of `environment.call` | an environment service makes these safe to repeat. A creation finds the environment it already made, because the id comes from the `effect_id`. | requested again |
-| `Environment.execute` | a command is not safe to repeat | guarded: `OutcomeUnknown` |
-| `tool.call` of a tool whose `retry_class` is `PURE` or `IDEMPOTENT` | any tool set | requested again |
-| `tool.call` of a tool whose `retry_class` is `SIDE_EFFECTING` or `UNKNOWN` | a [`DeduplicatingToolSet`](../../../guide/reference.md#deduplicatingtoolset) whose `deduplicates` is true | requested again: the tool set performs it at most once |
-| the same | any other tool set | guarded: `OutcomeUnknown`. The task loop gives the model an error result that says the call may or may not have taken effect. |
-| `output.emit` | the run context | requested again: it has nothing to perform |
+| `model.sample` | the gateway returns the recorded result for an `effect_id` it has recorded | yes |
+| `model.sample` | a direct adapter does not deduplicate | yes: it samples again, and nothing is lost |
+| `environment.lifecycle`, and the `put` and `get` of `environment.call` | an environment service makes these safe to repeat. A creation finds the environment it already made, because the id comes from the `effect_id`. | yes |
+| `Environment.execute` | a command is not safe to repeat | no |
+| `tool.call` of a tool whose `retry_class` is `PURE` or `IDEMPOTENT` | any tool set | yes |
+| `tool.call` of a tool whose `retry_class` is `SIDE_EFFECTING` or `UNKNOWN` | a [`DeduplicatingToolSet`](../../../guide/reference.md#deduplicatingtoolset) whose `deduplicates` is true | yes: the tool set performs it at most once |
+| the same | any other tool set | no |
+| `output.emit` | the run context | yes: it has nothing to perform |
 
 A tool set says that it deduplicates with a `deduplicates` attribute. One that does not say is treated as one that
 does not. A tool set served over HTTP reports the attribute of the tool set behind it, so a `ToolBinding(url=...)`
-keeps the guarantee ([tools](../../../guide/tools.md#after-a-crash)).
+keeps the guarantee ([tools](../../../guide/tools.md#retry-classes)).
 
 A receiver that deduplicates is sent the `arguments_digest` so that it can tell a repeat from a different call: a
 tool set that finds a known `effect_id` with a different digest raises
-[`Conflict`](../../../guide/reference.md#conflict), because the code that ran again did not request the same effect.
-The helper `rollout_durable.database.recorded` does this for a tool set that writes to a database. The gateway
+[`Conflict`](../../../guide/reference.md#conflict), because the two requests were not the same effect. The gateway
 looks a recorded turn up by its `effect_id` alone.
 
 ## Rules

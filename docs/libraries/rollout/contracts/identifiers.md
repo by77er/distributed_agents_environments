@@ -21,8 +21,8 @@ An identifier is an opaque string unless this page gives it a structure.
 | blob `sha256` | SHA-256 in hexadecimal | a blob store | The bytes of a blob. The same bytes always have the same reference. |
 
 A ULID is 48 bits of Unix time in milliseconds and 80 random bits, written as 26 characters of Crockford base 32.
-Identifiers made from one sort by the time they were made. Runners and services make them; task code does not,
-because it has no randomness of its own under a durable runner ([determinism](../determinism.md)).
+Identifiers made from one sort by the time they were made. Runners and services make them; task code does not: its
+randomness is `run.random`, seeded from the run's id ([determinism](../determinism.md)).
 
 Identifiers above the harness are defined where they are used: a training run, a group, an episode and an attempt
 in [rollouts](../../rollout-train/rollouts.md), a channel's weights version in

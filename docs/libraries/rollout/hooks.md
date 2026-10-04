@@ -16,7 +16,7 @@ class Watch(RunHooks):
     def on_sample(self, sample: ModelSample):  # every model reply, with what the model was sent
         ...
 
-runner = LocalRunner(hooks=[Watch()])   # DurableRunner takes the same argument
+runner = LocalRunner(hooks=[Watch()])
 ```
 
 | Hook | Called | Carries |
@@ -29,8 +29,7 @@ Rules:
 - Hooks run on the runner's event loop, in the middle of the run. They must be quick and must not block; hand slow work
   to a queue or a file.
 - A hook that raises is logged and ignored. A hook never fails a run.
-- Hooks see what their own runner's process records and performs. Under a durable runner, a run that moves to another
-  process after a crash is seen from there on by that process's hooks; a sample retried after a crash is seen again.
+- Hooks see what their own runner's process records and performs.
 - A harness that samples at a slot's address ([harnesses over HTTP](../rollout-train/harness-endpoint.md)) samples
   through the gateway, not the runner's endpoints ([which gateway tells the hooks](../rollout-train/gateway.md#a-runner-served-by-the-gateway)).
 - Hooks are observers. They cannot change a request or a reply; code that must is a `ModelEndpoint`.

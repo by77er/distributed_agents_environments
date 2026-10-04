@@ -25,8 +25,7 @@ class Agent:
 
 Override `select_context` to change what the model sees, `act` to change how a reply is produced, or set
 `system_prompt`. A runner creates the agent from its class and an optional configuration
-(`agent_program(MyTask, MyAgent, agent_configuration=...)`), again each time the durable runner resumes the run, so
-`__init__` must be deterministic.
+(`agent_program(MyTask, MyAgent, agent_configuration=...)`), once per run.
 
 ## What the model sees
 

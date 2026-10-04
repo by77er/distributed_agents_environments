@@ -45,7 +45,7 @@ imports none of them.
 
 | Protocol | Defined in | Between | Implementations |
 |---|---|---|---|
-| [`Runner`](../guide/reference.md#runner) | `rollout.harness` | callers → runs | `LocalRunner` (`rollout.local`), `DurableRunner` ([`rollout_durable`](../implementations/rollout-durable/README.md)) |
+| [`Runner`](../guide/reference.md#runner) | `rollout.harness` | callers → runs | `LocalRunner` (`rollout.local`) |
 | [`ModelEndpoint`](../libraries/rollout/contracts/model-endpoint.md) | `rollout.contracts` | runners → models | the [gateway](../libraries/rollout-train/gateway.md)'s endpoints (`GatewayEndpoints`), `ResponsesEndpoint` ([`rollout_openai`](../guide/models.md)), `ScriptedModelEndpoint` ([`rollout.testing`](../guide/testing.md)) |
 | [`Engine`](../guide/reference.md#engine) | `rollout_train.inference` | channels → replicas | `VllmEngine` ([`rollout_vllm`](../implementations/rollout-vllm.md)), `RemoteEngine` (a vLLM server elsewhere, over its OpenAI-compatible API: [engines elsewhere](../libraries/rollout-train/channels.md#engines-elsewhere)), `TinkerEngine` ([`rollout_tinker`](../implementations/rollout-tinker.md)), `ScriptedEngine` (`rollout_train.testing`) |
 | [`Renderer`](../guide/reference.md#renderer) | `rollout_train.recorder` | the gateway → a model family's tokens | `qwen35`, `qwen3` ([`rollout_qwen`](../implementations/rollout-qwen.md)), `gemma4` ([`rollout_gemma`](../implementations/rollout-gemma.md)), `PlainRenderer` (`rollout_train.testing`) |
@@ -95,15 +95,11 @@ task.respond(reply) ──▶ run_tools ──▶ @tool method ──▶ (an imp
 Everything that leaves task or agent code on the way is an **effect** with an identity:
 `{run_id}:{generation}:{ordinal}` and a digest of its arguments ([effects](../libraries/rollout/contracts/effects.md)).
 
-| | `LocalRunner` | `DurableRunner` |
-|---|---|---|
-| Where code runs | the caller's process | the runner's process, inside a DBOS workflow |
-| An effect | a call, recorded as run events | a durable step: its first recorded result is final |
-| After a crash | runs in flight are lost; their episodes are open again in the ledger, and an episode runner plays them again | the program is run again and recorded effects return their results; what was in flight is performed again under the same identity |
-| A side effect that cannot be deduplicated | performed once | guarded by an attempt marker: a possible duplicate is reported as `OUTCOME_UNKNOWN` to the model, never silently retried |
-| Messages | delivered once by `message_id`, in process | delivered once by `message_id`, through any runner sharing the database |
+The `LocalRunner` runs code in the caller's process, and performs each effect once, as a call recorded as run
+events. After a crash the runs in flight are lost: their episodes are open again in the ledger, and an episode runner
+plays them again. Messages are delivered once by `message_id`.
 
-A tool's `retry_class` says what re-execution may do: `PURE` and `IDEMPOTENT` calls are performed again;
-`SIDE_EFFECTING` and `UNKNOWN` calls are performed again only against a tool set that deduplicates by effect
-identity, and are guarded otherwise. Cancellation is cooperative: it is delivered at the next turn boundary, and
-`teardown` runs. The durable runner is described in [durable runner](../implementations/rollout-durable/README.md).
+A tool's `retry_class` says whether a call is safe to make again: `PURE` and `IDEMPOTENT` calls are; `SIDE_EFFECTING`
+and `UNKNOWN` calls are only against a tool set that deduplicates by effect identity
+([effects](../libraries/rollout/contracts/effects.md#receivers-that-deduplicate)). Cancelling a run cancels its task,
+and `teardown` runs.

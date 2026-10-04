@@ -385,6 +385,5 @@ gateway: one in the runner's process tells the runner's hooks of each (`Gateway.
 [monitor](monitor.md)'s feed has both; one elsewhere does not, and the monitor reads the turns of an episode it
 recorded from the ledger.
 
-**A runner started again.** A durable run resumed by a runner started again asks again for the samples it had not
-heard back from, under the same effect ids, and is answered with the recorded turns; what it had recorded before
-survived in the turn store. Its episode is trained on like any other.
+**A sample asked for again.** A sample asked for again under an effect id the gateway has recorded (a retry whose
+reply never arrived) is answered with the recorded turn (`X-Rollout-Replayed: true`); nothing is sampled twice.

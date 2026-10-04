@@ -4,7 +4,7 @@
 > 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (episode runners,
 > episodes with token trajectories, the training loop, checkpoints and the ledger, evals, channels, the gateway that
 > records every turn, bridges, deployment profiles, the cluster config, the `rollout` command, the monitor), one
-> package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Tinker's trainer and engine, Qwen and
+> package per implementation (a vLLM engine, a LoRA trainer, Tinker's trainer and engine, Qwen and
 > Gemma renderers, an OpenAI endpoint, an S3 blob store, RunPod pods) and two environments.
 > The documentation describes the code as built.
 
@@ -39,7 +39,7 @@ the test suite and a block tagged `py` does not. The API reference is generated 
 ## Libraries
 
 - [Harness](docs/libraries/rollout/README.md): the loop, programs, runners, message routing, failures
-- [Determinism](docs/libraries/rollout/determinism.md): what code a durable runner replays must do
+- [Determinism](docs/libraries/rollout/determinism.md): time, randomness and effect identity in task code
 - [Hooks](docs/libraries/rollout/hooks.md): observers of every run's events and model samples
 - [Memory](docs/libraries/rollout/memory.md): a context that fits any model, for long episodes
 - [Contracts](docs/libraries/rollout/contracts/README.md): the types that cross layers:

@@ -233,14 +233,13 @@ it ends (a Minecraft world, a container), is a [sandbox](../libraries/rollout/sa
 the runner acquires it before the program starts and releases it after, and the program reaches it as
 `run.sandbox(name)`, whose operations are recorded effects like imported tools, with no id to pass.
 
-### After a crash
+### Retry classes
 
-Under the durable runner, a call that a crash interrupted is made again, with the same `effect_id`, when the tool's
-`retry_class` is `PURE` or `IDEMPOTENT`, or when its tool set deduplicates: a `DeduplicatingToolSet` whose
-`deduplicates` is true performs each `effect_id` at most once, and a tool set served over HTTP reports the attribute
-of the one behind it. Otherwise (`SIDE_EFFECTING`, or `UNKNOWN`, which `ToolSpecification` defaults to) it is not
-made again: the effect completes as `outcome_unknown`, and the model receives an error result saying the call may or
-may not have taken effect ([effects](../libraries/rollout/contracts/effects.md#receivers-that-deduplicate)).
+A tool's `retry_class` says whether a call is safe to make again with the same `effect_id`: a `PURE` or `IDEMPOTENT`
+call is, and a `SIDE_EFFECTING` or `UNKNOWN` one (`ToolSpecification`'s default) is only when its tool set
+deduplicates. A `DeduplicatingToolSet` whose `deduplicates` is true performs each `effect_id` at most once, and a tool
+set served over HTTP reports the attribute of the one behind it
+([effects](../libraries/rollout/contracts/effects.md#receivers-that-deduplicate)).
 
 ### Serving a tool set over HTTP
 
@@ -258,6 +257,5 @@ task code calls `run.tools` the same way in both cases. A deployment profile nam
 
 ## What tools are not
 
-- **Tool bodies are task code, not effects.** The durable runner resumes a run by running its code again, so a
-  tool body may run more than once. Work that must happen once belongs in effects: model samples, environment
-  operations, imported tools.
+- **Tool bodies are task code, not effects.** What a tool body does is not recorded and has no identity. Work that
+  must be recorded belongs in effects: model samples, environment operations, imported tools.

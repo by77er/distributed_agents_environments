@@ -39,15 +39,10 @@ through a `LocalRunner` built with `tool_sets=`, `pools=`, `environments=` or `b
 provider, as in [tools](tools.md#imported-tools). `FakeSandboxes` is a sandbox provider whose sandboxes are records
 that honour their specs: `pools={"fake": SandboxPool(FakeSandboxes())}` ([sandboxes](../libraries/rollout/sandboxes.md)).
 
-### Counting calls across processes
+### Counting calls in a file
 
-Tests that kill and restart a durable runner count what ran in a file that outlives the process:
-
-| Helper | Does |
-|---|---|
-| `LedgerEndpoint(inner, ledger)` | wraps a model endpoint; appends the `effect_id` and `session_id` of every sample to the file `ledger` |
-| `LedgerEnvironments(inner, ledger)` | wraps an environment service; appends the `effect_id`, `environment_id` and `command` of every command it starts |
-| `read_ledger(ledger)` | the entries, oldest first, each with its time `at`; an empty list when the file does not exist |
+`LedgerEndpoint(inner, ledger)` wraps a model endpoint and appends the `effect_id` and `session_id` of every sample,
+with its time `at`, to the file `ledger`, one JSON object a line: a count that outlives the process that sampled.
 
 ## A test
 

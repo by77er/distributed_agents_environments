@@ -115,13 +115,13 @@ slots sample through, the runner's too: the [gateway](gateway.md#a-runner-served
 - **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
   `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
   is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop. Over a runner whose runs
-  survive it (`resumes`: a durable runner), closing leaves its runs to be resumed.
+  survive it (`resumes`), closing leaves its runs to be resumed.
 
 ### A runner started again
 
-Over a runner whose runs survive it, a runner started again under its name takes its fence anew and adopts what it
-finds of its runs (`prepare()`, which `serve` calls if it has not been; a profile calls it before it launches the
-runner, so that the runs the runner recovers find their claims adopted):
+A runner started again under its name takes its fence anew (`prepare()`, which `serve` calls if it has not been): the
+claims it held lapse, and their episodes are open again for any runner with room. Over a runner whose runs survive it
+(`resumes`), it also adopts what it finds of its runs, before that runner is launched:
 
 - **Adopted:** a run of its own claim that is still its episode's latest attempt, not cut short, its episode without
   a record, found by the claim's `run_id`; the claim may have been made under any fence the runner held before (one

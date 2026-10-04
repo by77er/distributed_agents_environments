@@ -3,18 +3,16 @@
 Code: `rollout.contracts.events` · See [`RunEvent`](../../../guide/reference.md#runevent),
 [`RunEventType`](../../../guide/reference.md#runeventtype), [guide: runs and events](../../../guide/runs-and-events.md)
 
-Run events are the typed record of what happened in a run. Every runner produces the same stream: the `LocalRunner`
-keeps it in memory, the `DurableRunner` in its store
-([durability](../../../implementations/rollout-durable/README.md#state)). Episode runners, hooks, the monitor, clients
-and tests read these events, never a runner's internals.
+Run events are the typed record of what happened in a run. Every runner produces the same stream; the `LocalRunner`
+keeps it in memory. Episode runners, hooks, the monitor, clients and tests read these events, never a runner's
+internals.
 
 ## The stream
 
 - **`seq`** numbers a run's events from 0 without gaps. A reader that has seen `seq` n asks for the events from
   n + 1 (`RunHandle.events(from_seq=...)`).
-- **`recorded_at`** is `run.now()` when the event was recorded. Under the `LocalRunner` that is the wall clock.
-  Under the `DurableRunner` it is the time of the run's latest recorded input, so a replay records the same events
-  with the same times, and the store keeps the first copy of each ([determinism](../determinism.md#replay)).
+- **`recorded_at`** is `run.now()` when the event was recorded: the wall clock, in UTC
+  ([determinism](../determinism.md)).
 - **`schema_version`** is `RUN_EVENT_SCHEMA_VERSION`.
 - **`payload`** is JSON. Its keys depend on the type and are listed below.
 - **The catalog is closed.** `RunEventType` lists every type.
@@ -77,4 +75,3 @@ logprobs never appear in run events; the gateway keeps them ([the turn store](..
 | An [episode runner](../../rollout-train/rollouts.md#a-runner) | `run.created` (labels), rewards on observations and `reward.assigned`, `output.emitted` of kind `result`, `training.excluded`, and the terminal event: together an [episode](../../rollout-train/episodes.md#how-an-episode-is-assembled) |
 | [Hooks](../hooks.md) | every event, as it is recorded |
 | A client of a conversation | `output.emitted`: what the agent said, and to whom |
-| The eviction of idle runs | `run.suspended`: since when a run has waited |
