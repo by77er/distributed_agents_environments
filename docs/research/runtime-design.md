@@ -1188,3 +1188,12 @@ The user settled the design's open questions on 2026-10-04:
   at the same precision. Each provider follows the same serving record and loads the same bridged files; each turn
   records the provider and checkpoint that served it, and the importance weight corrects small numeric differences
   between providers as it corrects staleness.
+- **Inference providers are shared pools across runs.** A pool serves one base model; every run whose trained (or
+  fixed) channel is a LoRA over that base may bind to it, and the pool's followers load each bound run's checkpoints
+  as named adapters side by side (vLLM batches requests for several adapters together). A run joins only if its rank
+  fits the pool's highest rank and the pool has adapter slots for its live checkpoints (`max_lag + 1`); full-weight
+  runs need servers of their own. The gateway balances a pool between its runs by weighted fair shares (equal by
+  default, a changeable run setting), with optional caps and a priority for evals asked for by hand, and the launcher
+  admits a run to a pool only when slots and share allow, else queues the launch or offers another provider. The
+  Machines tab shows each pool's use by run (requests, tokens per second, queue, adapters loaded); a run's page shows
+  its pools and share. This replaces starting engines per run as the default for LoRA runs.
