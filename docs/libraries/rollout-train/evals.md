@@ -88,8 +88,8 @@ entry's environment must load where the eval is played: one that does not stops 
 Without `--episodes`, each start is played as many times as the version says. An eval is a run of its own, with its own
 id and name in the registry ([runs](checkpoints.md#runs)) and its own fence. Its start record says `kind: eval`, the
 suite and the version (`suite_version`, by id), the checkpoint, and the environment's version (`version`, as a
-training run's start says it) and description. A start written before starts said `suite_version` is read with the
-version its subject's record says.
+training run's start says it) and description. A start that does not say `suite_version` is read with the version
+its subject's record says.
 `--checkpoint` takes any [reference](checkpoints.md#references): a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id.
 A bookmark is read once, when the eval starts. Without `--checkpoint`, the base model of the profile's trained channel
 (or its first channel) plays.

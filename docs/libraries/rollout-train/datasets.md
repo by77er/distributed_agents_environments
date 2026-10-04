@@ -102,7 +102,7 @@ the newest checkpoint the run made, else `--start` (any [reference](checkpoints.
 `[trainer] start`, else the base model.
 
 - **Its parents** are the checkpoint it trained from, then the checkpoints that sampled the examples it trained on,
-  by depth. The checkpoint graph shows those as learned-from edges, as it shows a distillation's teachers. A step
+  by depth. The checkpoint graph shows those as learned-from edges. A step
   from the base model has no parents; its `dataset` still says where its examples came from.
 - **Its record names the dataset** (`dataset`, the id), and its metrics add `imitated_episodes`,
   `imitated_segments` and `optimizer_resumed`, beside the trainer's `learning_rate`, `warmup_updates` and `passes`.

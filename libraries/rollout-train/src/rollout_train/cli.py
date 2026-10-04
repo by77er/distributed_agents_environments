@@ -2,11 +2,19 @@
 
 rollout train PROFILE ENVIRONMENT   the training loop: PROFILE is a TOML file (`rollout_train.profile`), ENVIRONMENT
                                     names an environment as `module:name`
-rollout report RUN ENVIRONMENT      chart a run's progress and summarise it; post both to a Discord webhook
+rollout eval PROFILE SUITE          play a suite with a checkpoint (or the base model), training nothing
+rollout suite make|edit|list        evaluation suites, kept in versions (`rollout_train.evals`)
+rollout report DIRECTORY ENVIRONMENT
+                                    chart a run's progress and summarise it; post both to a Discord webhook
 rollout env check ENVIRONMENT       whether an environment holds together; with --profile, groups played by a model
 rollout imitate PROFILE             a supervised step on a dataset (--dataset), or on the run's solved episodes
                                     without their guidance
 rollout dataset make RULE           make a dataset: examples chosen from runs' episodes (`rollout_train.datasets`)
+rollout checkpoints                 every checkpoint, newest first: where it came from
+rollout bookmark NAME CHECKPOINT    name a checkpoint, or move a bookmark there (--delete takes it away)
+rollout rename WHO NAME             call a run something else (its id stays)
+rollout merge CHECKPOINT            fold a LoRA checkpoint into its base: a full checkpoint of its own
+rollout launcher                    start the runs and evals asked for that this machine can run
 rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`

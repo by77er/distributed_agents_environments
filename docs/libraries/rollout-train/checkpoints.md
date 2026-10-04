@@ -13,8 +13,7 @@ What is trained is a graph of checkpoints. Every checkpoint grows from a base mo
   process and on every machine. It is what a channel serves, the name of the adapter an engine loads, and what a
   request to an engine names.
 - A checkpoint says what it was made from: its **parents** (the checkpoint it was trained from first, then any others it
-  learned from, such as a distillation's teachers, or the checkpoints that sampled a dataset it was trained on; none,
-  the base model), the **base** model it adapts (`Qwen/Qwen3.5-9B`, its first parent's, or the one its line began
+  learned from, such as the checkpoints that sampled a dataset it was trained on; none, the base model), the **base** model it adapts (`Qwen/Qwen3.5-9B`, its first parent's, or the one its line began
   from), and the **run** and **step** that made it. A checkpoint a supervised step on a [dataset](datasets.md) made
   names the dataset (`dataset`), and says whether its examples carried behaviour logprobs (`supervision`:
   `importance` or `supervised`).
@@ -45,8 +44,8 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
 - **A fork is a run started from any checkpoint.** It shares its parent's blobs and costs nothing until it differs. Its
   checkpoints continue its parent's depth and base.
 - **A run serves its newest checkpoint** on its channel, as the adapter named by its id (a full checkpoint, in place
-  of the engines' weights: [full weights](#full-weights-and-merges)); the checkpoint before stays
-  loaded until the turns that began under it finish. It writes down that its channel serves it
+  of the engines' weights: [full weights](#full-weights-and-merges)); the checkpoints before it stay
+  loaded while a turn may still sample from them ([publishing weights](channels.md#publishing-weights)). It writes down that its channel serves it
   ([what a channel should serve](channels.md#what-a-channel-should-serve)), so that engines on other machines follow. Runs on other channels serve their own. When its channel names
   a `reshard`, it serves the files its [bridge](#bridges) makes of the checkpoint's, and waits for them.
 - **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
@@ -168,9 +167,8 @@ starting again reads it back.
 | Fences | Whoever means to write takes the fence of a scope: a number higher than any taken before. An append that carries an older fence is refused (`Fenced`). |
 | Order | A table reads in the order its appends took effect, whichever scopes made them (every runner appends to a run's claims, every run to `checkpoints`). |
 
-An append answers whether it wrote its record. `appended(ledger, table, key, record, fence)` says also what the table
-holds under the key when it did not (`Appended(wrote, record)`): both ledgers answer that from the append itself
-(`append_returning`), and of any other ledger the table is read back. A maker that loses uses the winner's record, as a
+An append answers whether it wrote its record. `append_returning` says also what the table holds under the key when
+it did not (`Appended(wrote, record)`), from the append itself. A maker that loses uses the winner's record, as a
 suite's second maker does ([evals](evals.md)).
 
 Two ledgers are provided:
@@ -215,10 +213,12 @@ under [dying and starting again](training.md#dying-and-starting-again).
 What runs, checkpoints, datasets and suites are called is kept beside the ledger, in the registry
 (`rollout_train.registry`): `registry.json` beside a ledger of files, the `runs`, `bookmarks`, `dataset_names` and
 `suite_names` tables in a database ledger's database (`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
-the ledger keeps is under a name, so naming anything again moves nothing. Two more kinds of ordinary state are kept
-beside the ledger the same way: the runners' and launchers' heartbeats (`presence.json`, the `presence` table;
-[heartbeats](rollouts.md#heartbeats)) and the runs asked for (`launches.json`, the `launches` table;
-[launchers](../../guide/deploying.md#launchers)). A name says none of `/`, `@` and `:` (they
+the ledger keeps is under a name, so naming anything again moves nothing. More ordinary state is kept beside the
+ledger the same way: the heartbeats (`presence.json`, the `presence` table; [heartbeats](rollouts.md#heartbeats)), the
+runs asked for (`launches.json`, the `launches` table; [launchers](../../guide/deploying.md#launchers)), what is wanted
+of each run's settings (`settings.json`, the `run_settings` table;
+[changing a running run's settings](training.md#changing-a-running-runs-settings)) and the sandboxes' leases
+(`sandboxes.json`, the `sandboxes` table). A name says none of `/`, `@` and `:` (they
 are what a reference is made of), and is not `base`.
 
 ### Runs

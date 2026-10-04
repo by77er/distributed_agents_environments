@@ -308,7 +308,7 @@ every episode, what each step was trained on, and the weights and the trainer's 
 
 ## Reporting
 
-`rollout report RUN ENVIRONMENT` writes `progress.png` and `progress.md` into the run's directory: the climb through the
+`rollout report DIRECTORY ENVIRONMENT` writes `progress.png` and `progress.md` into the run's directory: the climb through the
 curriculum, every group's rewards, and what each update did. With `--watch` it does so after every group; with a
 Discord webhook (`--webhook`, or `DISCORD_WEBHOOK_URL`) it posts both there. It needs the `report` extra.
 

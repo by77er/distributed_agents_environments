@@ -171,12 +171,13 @@ async with Profile.load(Path("profile.toml")).open() as platform:
     )
 ```
 
-Opening starts, in order: the run (registered the first time: `run.json`) and the checkpoint it starts from; with
-`ray`, the connection to the Ray cluster; the engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
-the trained one with the trainer's longest segment as its longest turn; the monitor's feed in `directory/feed`; what
-the runner records through (`platform.recorder`: the [gateway](#the-gateway) at `[gateway] url`, or one in this process,
-`platform.gateway`); the tool sets; the pools, each with its keeper; the blob store and the checkpoints; the runner, and
-the [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in
+Opening starts, in order: with `ray`, the connection to the Ray cluster; the run (registered the first time:
+`run.json`) and the checkpoint it starts from; the blob store and the checkpoints; the engines a killed process left
+behind are ended (`engine.json`); the trainer; each channel's engines; the channels, the trained one with the trainer's
+longest segment as its longest turn; the monitor's feed in `directory/feed`; what the runner records through
+(`platform.recorder`: the [gateway](#the-gateway) at `[gateway] url`, or one in this process, `platform.gateway`); the
+tool sets; the pools, each with its keeper; the runner, and the
+[episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in
 [`Colocated`](reference.md#colocated). With `serve`, the gateway in this process listens there for harnesses.
 `open(training=False)` (what `rollout eval` opens) makes no trainer; the trained channel's engines still load what its
 `start` is served over. `platform.eval_run(step)` registers the run of the eval of the checkpoint made at `step`

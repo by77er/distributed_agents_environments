@@ -81,10 +81,8 @@ Whoever took the fence last shuts out every attempt before it:
   fence in turn, and the adoption (or the adopted run's record) is refused.
 - **A runner's interrupts** stay under its own fence: noting an attempt cut short only ever ends its own claim.
 
-Claims written before episodes had fences read as before: such a claim holds by the same rule (its episode's latest
-attempt, its runner's fence and beat), and a runner started again takes the episode's fence to adopt it like any
-other. Each fence is a row of the ledger's fences, one per episode claimed; the [monitor](monitor.md) leaves them out
-of the fences it lists.
+Each fence is a row of the ledger's fences, one per episode claimed; the [monitor](monitor.md) leaves them out of the
+fences it lists.
 
 ## A runner
 

@@ -11,8 +11,8 @@ the table. SQLite serves one machine; Postgres serves several.
 `DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in four tables of the same database: `runs`
 (each run's id and name, a name once), `bookmarks` (each bookmark's name and checkpoint), `dataset_names` (each
 dataset's name and id) and `suite_names` (each suite's name and the version it points to); a database ledger's is its
-`registry`. `DatabasePresence` holds the runners' heartbeats
-(`rollout_train.presence`) in another, `presence`: a row per runner, changed in place; a database ledger's is its
+`registry`. `DatabasePresence` holds the heartbeats
+(`rollout_train.presence`) in another, `presence`: a row per process, changed in place; a database ledger's is its
 `presence`. `DatabaseLaunches` holds the runs asked for (`rollout_train.launches`) in another, `launches`; a database
 ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of each run's settings
 (`rollout_train.settings`) in another, `run_settings`: a row per run, changed in place; a database ledger's is its
@@ -234,7 +234,7 @@ class DatabaseLedger:
 
     @property
     def presence(self) -> "DatabasePresence":
-        """The runners' heartbeats, in this ledger's database."""
+        """The heartbeats, in this ledger's database."""
         return DatabasePresence(self.database)
 
     @property
@@ -525,7 +525,7 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
     newest fence (the fence a record was written under is not read back through a ledger). A fence already in the
     target is kept if it is newer. The runs, bookmarks and dataset names registered beside `source` are registered
     beside `target` too, and so are the suites' names and what is wanted of each run's settings. To move to Postgres:
-    copy, then point the profile's `[ledger] url` at it."""
+    copy, then point the profile's (or the cluster config's) `[ledger] url` at it."""
     tables = await source.tables()
     there = set(await target.tables())
     if clash := sorted(there & set(tables)):

@@ -345,7 +345,7 @@ async def served_at(ledger: Ledger, run: str) -> dict[int, str]:
 
 
 async def where_blobs_are(ledger: Ledger, run: str, reference: BlobReference | None = None) -> dict[str, JsonValue]:
-    """Where a run's blobs are: as its newest start says; else (a run recorded before starts said so) the directory of
+    """Where a run's blobs are: as its newest start says; else (a run whose starts do not say) the directory of
     files that holds `reference`, one of its blobs."""
     kept = newest_record(await ledger.read(table(run, STARTS))).get("blobs")
     if isinstance(kept, dict):

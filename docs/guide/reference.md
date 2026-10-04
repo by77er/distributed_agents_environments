@@ -3173,7 +3173,7 @@ class Checkpoint
 |---|---|---|---|
 | `id` | `str` | required |  |
 | `weights` | `Manifest \| None` | required | None once it was released (`Checkpoints.thin`). |
-| `parents` | `tuple[str, ...]` | `()` | What it was made from, by id: first the checkpoint it was trained from, then any others it learned from (the teachers of a distillation, say). None: from the base model. |
+| `parents` | `tuple[str, ...]` | `()` | What it was made from, by id: first the checkpoint it was trained from, then any others it learned from (the checkpoints that sampled a dataset's examples, say). Empty: from the base model. |
 | `depth` | `int` | `1` | Steps from the base model along its first parents: its first parent's depth and one. |
 | `base` | `str \| None` | `None` | What its weights build on: the model its line began from, by name (`Qwen/Qwen3.5-9B`, say); or, for an adapter trained over a full checkpoint, that checkpoint, by id. |
 | `kind` | `str` | `'lora'` | What its weights are: `lora` (an adapter over its base) or `full` (all of a model's weights). |

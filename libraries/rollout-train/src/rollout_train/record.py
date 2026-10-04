@@ -1,17 +1,18 @@
-"""What a training run writes down: six tables in a ledger.
+"""What a training run writes down: its tables in a ledger.
 
-- `starts`: each time the run was started, where and by what (its directory and host, where the monitor on its
-  machine serves, the profile, the policy, when, and its environment: as `module:name`, its version and what its
-  results say), by the number of the fence its loop took. Written as the loop
-  starts, so that whatever reads the ledger (the monitor) finds every run that shares it, and where each keeps the
-  rest.
+- `starts`: each time the run was started, where and by what (its host and process, when, the checkpoint it starts
+  from, its environment: as `module:name`, its version and what its results say; and what its starter adds: its
+  directory, the profile, where the monitor on its machine serves, where its blobs are, its settings), by the number of
+  the fence its loop took. Written as the loop starts, so that whatever reads the ledger (the monitor) finds every run
+  that shares it, and where each keeps the rest.
+- `ends`: how each start ended (`ENDINGS`), under the same number.
 - `groups`: what the run decided to play (the row, and the start every episode of the group is given), by the
   group's number. Written before the group is asked for.
 - `results`: how each group went (a `Result`), by the group's number. Written when its last episode ends, before
   anything is trained on it.
 - `steps`: what the run decided to train on, by the step's number: the groups it covers, the checkpoint it starts
   from, the one it will make, the batch. Written before the trainer is called. The checkpoint it makes, in the
-  policy's table, is its outcome.
+  ledger's `checkpoints` table, is its outcome.
 - `failures`: the steps whose trainer failed, and why, by the step's number.
 - `evals`: the evals of the checkpoints it made that its schedule names (`rollout_train.evals.Schedule`), by the
   number of the step that made each: the suite, the checkpoint, the eval's run, and how it went. Written when the eval

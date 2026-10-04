@@ -122,7 +122,7 @@ def parsed(reference: str) -> tuple[str, int | None]:
 
 def started_version(start: Mapping[str, Any], subject: Mapping[str, Any]) -> str | None:
     """The version an eval's start played, by id: what it says (`suite_version`), else what its subject's record says
-    (a start written before it said so has its environment's version under `version`, as a training run's start
+    (a start that does not say it has its environment's version under `version`, as a training run's start
     does)."""
     found = start.get(SUITE_VERSION) or subject.get("version")
     return str(found) if found else None

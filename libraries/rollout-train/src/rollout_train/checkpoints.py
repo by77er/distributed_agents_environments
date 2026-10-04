@@ -61,7 +61,7 @@ class Checkpoint:
     """None once it was released (`Checkpoints.thin`)."""
     parents: tuple[str, ...] = ()
     """What it was made from, by id: first the checkpoint it was trained from, then any others it learned from (the
-    teachers of a distillation, say). None: from the base model."""
+    checkpoints that sampled a dataset's examples, say). Empty: from the base model."""
     depth: int = 1
     """Steps from the base model along its first parents: its first parent's depth and one."""
     base: str | None = None
@@ -107,8 +107,7 @@ def new_id() -> str:
 
 def short(ids: Iterable[str]) -> dict[str, str]:
     """Each id by the shortest start of it (at least `SHORTEST` characters) that no other id begins with. An id of
-    the form `NAME@N` (a checkpoint recorded before checkpoints had ids of their own) is shown as `@N`, unless another
-    id would be shown so too: then whole."""
+    the form `NAME@N` is shown as `@N`, unless another id would be shown so too: then whole."""
     every = sorted(set(ids))
     shown: dict[str, str] = {}
     for index, each in enumerate(every):
