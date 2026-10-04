@@ -2,13 +2,12 @@
 each step in a process of its own."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 from pydantic import JsonValue
 
-from rollout_lora.settings import CHANGEABLE, LoraSettings
+from rollout_lora.settings import LoraSettings
 from rollout_lora.worker import TrainerProcess
 from rollout_train.trainer import Budget, Files, Step, Weighted
 
@@ -28,13 +27,10 @@ class LoraTrainer:
 
     @property
     def changeable(self) -> Mapping[str, JsonValue]:
-        said = asdict(self.settings)
-        return {name: said[name] for name in CHANGEABLE}
+        return self.settings.changeable()
 
     def change(self, settings: Mapping[str, JsonValue]) -> None:
-        if unknown := sorted(set(settings) - set(CHANGEABLE)):
-            raise ValueError(f"{', '.join(unknown)} cannot change between steps (these can: {', '.join(CHANGEABLE)})")
-        self.settings = replace(self.settings, **settings)  # (checked as any settings are)
+        self.settings = self.settings.changed(settings)
         self._process.settings = self.settings
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:

@@ -32,7 +32,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
-- **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
+- **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#rollout_qwentokenizer_of)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#rollout_gemmatokenizer_of)
 - **[`rollout_computers`](#rollout_computers)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
@@ -7055,35 +7055,19 @@ new ones where it is told. `settings` are `LoraSettings`' fields; the adapter's 
 *class* · `implementations/rollout-lora/src/rollout_lora/settings.py`
 
 ```python
-class LoraSettings
+class LoraSettings(StepSettings)
 ```
+
+The settings of `LoraTrainer` and `FullTrainer`: a step's, and how a step holds its activations on the GPU.
+The adapter's scaling is twice its rank (`alpha`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `rank` | `int` | `32` | Of the adapter. Its scaling is twice the rank (`alpha`). |
-| `learning_rate` | `float` | `5e-05` |  |
-| `clip_low` | `float` | `0.2` |  |
-| `clip_high` | `float` | `0.28` | A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher). |
-| `segment_clip_low` | `float` | `0.0003` |  |
-| `segment_clip_high` | `float` | `0.0004` | With `ratio = "segment"`, the segment's ratio is clipped to 1 - `segment_clip_low` .. 1 + `segment_clip_high` (GSPO's). |
-| `truncate` | `float \| None` | `2.0` | The most a token's importance weight (its logprob at the step's start against the one it was sampled at) may be (None: not truncated). |
-| `tokens_per_step` | `int` | `4096` | Sampled tokens per optimizer step (gradients accumulate over segments until then). Adam moves a weight by at most the learning rate a step, so how far an update goes is set by how many steps its tokens make. |
-| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far from where the step began (in nats per token, estimated on the sampled tokens). |
-| `max_gradient_norm` | `float` | `1.0` |  |
-| `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
 | `layer_inputs_on_host` | `bool` | `False` | Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B. |
 | `mlp_rows` | `int \| None` | `None` | Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak. |
-| `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
-| `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
-| `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
-| `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, weight or stop at `max_kl` (`rollout_lora.objectives`). |
-| `ratio` | `str` | `'token'` | `token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens' (GSPO). |
 
 **Methods**
 
-- `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
-- `def rate(self, update: int, *, fresh: bool) -> float` — The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
-  `fresh`.
 - `@property def alpha(self) -> float`
 
 ### `LoraTrainer`
@@ -7109,6 +7093,43 @@ state it is given and leaves the new ones where it is told. `settings` are `Lora
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
+
+### `StepSettings`
+
+*class* · `implementations/rollout-lora/src/rollout_lora/settings.py`
+
+```python
+class StepSettings
+```
+
+A policy step's settings (`rollout_lora.step`), whichever trainer takes it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rank` | `int` | `32` | Of the adapter. |
+| `learning_rate` | `float` | `5e-05` |  |
+| `clip_low` | `float` | `0.2` |  |
+| `clip_high` | `float` | `0.28` | A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher). |
+| `segment_clip_low` | `float` | `0.0003` |  |
+| `segment_clip_high` | `float` | `0.0004` | With `ratio = "segment"`, the segment's ratio is clipped to 1 - `segment_clip_low` .. 1 + `segment_clip_high` (GSPO's). |
+| `truncate` | `float \| None` | `2.0` | The most a token's importance weight (its logprob at the step's start against the one it was sampled at) may be (None: not truncated). |
+| `tokens_per_step` | `int` | `4096` | Sampled tokens per optimizer step (gradients accumulate over segments until then). Adam moves a weight by at most the learning rate a step, so how far an update goes is set by how many steps its tokens make. |
+| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far from where the step began (in nats per token, estimated on the sampled tokens). |
+| `max_gradient_norm` | `float` | `1.0` |  |
+| `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
+| `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
+| `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
+| `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
+| `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, weight or stop at `max_kl` (`rollout_lora.objectives`). |
+| `ratio` | `str` | `'token'` | `token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens' (GSPO). |
+
+**Methods**
+
+- `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
+- `def rate(self, update: int, *, fresh: bool) -> float` — The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
+  `fresh`.
+- `def changeable(self) -> dict[str, JsonValue]` — The settings of `CHANGEABLE`, with their values (what `rollout_train.trainer.Changeable` says).
+- `def changed(self, changes: Mapping[str, JsonValue]) -> Self` — These settings with `changes`, each one of `CHANGEABLE` (else `ValueError`), checked as any settings are.
 
 ## `rollout_qwen`
 
@@ -7628,39 +7649,16 @@ as `TinkerTrainer` takes it.
 *class* · `implementations/rollout-tinker/src/rollout_tinker/settings.py`
 
 ```python
-class TinkerSettings
+class TinkerSettings(StepSettings)
 ```
+
+Tinker scales an adapter by its own `lora_alpha / rank`, not by our twice the rank.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `rank` | `int` | `32` | Of the adapter. Tinker scales it by its own `lora_alpha / rank`, not by our twice the rank. |
 | `learning_rate` | `float` | `0.0001` | Twice `LoraTrainer`'s default: Tinker's adapters have an alpha of 32 (its archives say so), half our scale at rank 32, and Adam moves a weight by about the rate whatever its scale. |
-| `clip_low` | `float` | `0.2` |  |
-| `clip_high` | `float` | `0.28` | A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high`. |
-| `segment_clip_low` | `float` | `0.0003` |  |
-| `segment_clip_high` | `float` | `0.0004` | With `ratio = "segment"`, the segment's ratio is clipped to 1 - `segment_clip_low` .. 1 + `segment_clip_high`. |
-| `truncate` | `float \| None` | `2.0` | The most a token's importance weight (its logprob at the step's start against the one it was sampled at) may be (None: not truncated). |
 | `tokens_per_step` | `int` | `65536` | Sampled tokens per optimizer step. A step that is one optimizer step needs no pass for the logprobs it starts from; every optimizer step costs Tinker at least one of its clock cycles. |
-| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch finds the policy this far from where the step began (nats per token, on the sampled tokens). |
-| `strict_kl` | `bool` | `True` | Read each minibatch's distance before its update is sent (two clock cycles a minibatch); else send both at once, and a stop comes one minibatch late. |
-| `max_gradient_norm` | `float` | `1.0` |  |
-| `segment_tokens` | `int \| None` | `None` | The longest segment a step trains on (None: any up to the model's context). Longer ones are left out and counted (`segments_too_long`); whoever serves the policy takes it as the longest turn. |
-| `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
-| `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own. |
-| `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh, its rate rises linearly over its first this many updates. |
-| `objective` | `str` | `'policy_gradient'` | `policy_gradient` or `likelihood`, as `LoraSettings` says. |
-| `ratio` | `str` | `'token'` | `token` (PPO) or `segment` (GSPO), as `LoraSettings` says. |
-| `beta1` | `float` | `0.9` |  |
-| `beta2` | `float` | `0.999` |  |
-| `eps` | `float` | `1e-08` | Adam's, as torch's AdamW has them (Tinker's own defaults are 0.95 and 1e-12). |
-| `train_unembed` | `bool` | `False` | Also adapt the output layer. Off: an adapter of attention and MLP layers is what local engines and the merge take most simply. |
 | `project` | `str \| None` | `None` | A Tinker project's id (not a secret); else `TINKER_PROJECT_ID`, if set. |
-
-**Methods**
-
-- `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
-- `def rate(self, update: int, *, fresh: bool) -> float` — The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
-  `fresh`.
 
 ### `TinkerTrainer`
 
@@ -7685,6 +7683,6 @@ one so). `settings` are `TinkerSettings`'; those in `CHANGEABLE` it takes betwee
 **Methods**
 
 - `def __init__(self, model: str, *, service: 'Service | str | None' = None, **settings: Any) -> None`
-- `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings it takes between steps (`rollout_train.trainer.Changeable`), with their values now.
+- `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`

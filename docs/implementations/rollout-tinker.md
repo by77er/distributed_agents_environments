@@ -106,8 +106,9 @@ step's files are pointers. A channel served on engines here names Tinker's bridg
 
 ### Settings
 
-`TinkerSettings` (`rollout_tinker/settings.py`) is the one place they are written. They have `LoraSettings`' names where they
-mean the same, so a profile switches trainers by changing `kind`.
+`TinkerSettings` (`rollout_tinker/settings.py`) are a policy step's settings, the ones `LoraSettings` hold too
+([`StepSettings`](../guide/reference.md#stepsettings)), with Tinker's defaults, and a project: a profile switches
+trainers by changing `kind`.
 
 | Setting | What it sets |
 |---|---|

@@ -31,7 +31,7 @@ import json
 import random
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ from rollout_lora.objectives import Terms, terms
 from rollout_lora.step import minibatches, sampled
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
-from rollout_tinker.settings import CHANGEABLE, TinkerSettings
+from rollout_tinker.settings import TinkerSettings
 from rollout_tinker.weights import checkpoint_name, pointer, write_pointer
 from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
 
@@ -87,14 +87,10 @@ class TinkerTrainer:
 
     @property
     def changeable(self) -> Mapping[str, JsonValue]:
-        """The settings it takes between steps (`rollout_train.trainer.Changeable`), with their values now."""
-        said = asdict(self.settings)
-        return {name: said[name] for name in CHANGEABLE}
+        return self.settings.changeable()
 
     def change(self, settings: Mapping[str, JsonValue]) -> None:
-        if unknown := sorted(set(settings) - set(CHANGEABLE)):
-            raise ValueError(f"{', '.join(unknown)} cannot change between steps (these can: {', '.join(CHANGEABLE)})")
-        self.settings = replace(self.settings, **settings)  # (checked as any settings are; the live client goes on)
+        self.settings = self.settings.changed(settings)  # (the live client goes on)
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         async with self._lock:

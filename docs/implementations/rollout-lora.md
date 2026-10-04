@@ -50,7 +50,9 @@ whose update has another shape. It is what `rollout merge` calls by default
 
 ## Settings
 
-[`LoraSettings`](../guide/reference.md#lorasettings) is the one place the settings and their defaults are written.
+[`LoraSettings`](../guide/reference.md#lorasettings) is the one place the settings and their defaults are written: a
+policy step's ([`StepSettings`](../guide/reference.md#stepsettings), which the [Tinker trainer](rollout-tinker.md)
+takes too), and `layer_inputs_on_host` and `mlp_rows`.
 
 | Setting | What it sets |
 |---|---|

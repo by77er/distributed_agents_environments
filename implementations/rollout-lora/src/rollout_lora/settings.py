@@ -1,6 +1,11 @@
-"""The LoRA trainer's settings: the one place their defaults are written."""
+"""The trainers' settings: the one place their defaults are written. `StepSettings` are a policy step's, which the
+LoRA, full-weight and Tinker trainers take alike; `LoraSettings` add what a step on this machine's GPU takes."""
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, replace
+from typing import Self
+
+from pydantic import JsonValue
 
 KINDS = ("policy_gradient", "likelihood")
 RATIOS = ("token", "segment")
@@ -47,9 +52,11 @@ class Objective:
 
 
 @dataclass(frozen=True)
-class LoraSettings:
+class StepSettings:
+    """A policy step's settings (`rollout_lora.step`), whichever trainer takes it."""
+
     rank: int = 32
-    """Of the adapter. Its scaling is twice the rank (`alpha`)."""
+    """Of the adapter."""
     learning_rate: float = 5e-5
     clip_low: float = 0.2
     clip_high: float = 0.28
@@ -70,15 +77,9 @@ class LoraSettings:
     per token, estimated on the sampled tokens)."""
     max_gradient_norm: float = 1.0
     segment_tokens: int | None = None
-    """The longest segment a step can hold on its accelerator (None: any). Longer ones are left out and counted
-    (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training,
-    so whoever serves the policy takes this as the longest turn to sample; the count says whether that held."""
-    layer_inputs_on_host: bool = False
-    """Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the
-    GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B."""
-    mlp_rows: int | None = None
-    """Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in
-    passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak."""
+    """The longest segment a step can hold (None: any). Longer ones are left out and counted (`segments_too_long`):
+    one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the
+    policy takes this as the longest turn to sample; the count says whether that held."""
     segments_per_step: int | None = None
     """How many segments a step can afford (None: any number)."""
     passes: int = 1
@@ -120,6 +121,30 @@ class LoraSettings:
         if not fresh or self.warmup_updates <= 0:
             return self.learning_rate
         return self.learning_rate * min(1.0, (update + 1) / self.warmup_updates)
+
+    def changeable(self) -> dict[str, JsonValue]:
+        """The settings of `CHANGEABLE`, with their values (what `rollout_train.trainer.Changeable` says)."""
+        said = asdict(self)
+        return {name: said[name] for name in CHANGEABLE}
+
+    def changed(self, changes: Mapping[str, JsonValue]) -> Self:
+        """These settings with `changes`, each one of `CHANGEABLE` (else `ValueError`), checked as any settings are."""
+        if unknown := sorted(set(changes) - set(CHANGEABLE)):
+            raise ValueError(f"{', '.join(unknown)} cannot change between steps (these can: {', '.join(CHANGEABLE)})")
+        return replace(self, **changes)
+
+
+@dataclass(frozen=True)
+class LoraSettings(StepSettings):
+    """The settings of `LoraTrainer` and `FullTrainer`: a step's, and how a step holds its activations on the GPU.
+    The adapter's scaling is twice its rank (`alpha`)."""
+
+    layer_inputs_on_host: bool = False
+    """Keep each layer's input in pinned system memory between the forward and backward passes, instead of on the
+    GPU (`rollout_lora.activations`): a quarter of a megabyte a token, for Qwen3.5-9B."""
+    mlp_rows: int | None = None
+    """Run each layer's MLP over this many tokens at a time when it is computed again for the backward pass, and in
+    passes without a gradient (None: the whole segment at once). The same numbers, at a lower peak."""
 
     @property
     def alpha(self) -> float:
