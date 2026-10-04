@@ -49,7 +49,7 @@ async def test_the_feed_holds_a_run_as_it_happened_and_the_page_can_ask_for_it(t
 
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
-        assert "Runs monitor" in (await client.get("/")).text
+        assert "Rollout" in (await client.get("/")).text
         assert (await client.get("/api/runs")).json()[0]["run_id"] == handle.run_id
         lines = (await client.get(f"/api/episodes/{handle.run_id}")).json()["lines"]
         (sample,) = [line for line in lines if line["kind"] == "sample"]
