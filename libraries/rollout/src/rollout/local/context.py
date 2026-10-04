@@ -16,7 +16,6 @@ from rollout.contracts import (
     EffectStatus,
     Message,
     ModelEndpoint,
-    OutcomeUnknown,
     RunEvent,
     RunEventType,
     arguments_digest,
@@ -59,7 +58,6 @@ class LocalRunContext:
         blobs: Blobs | None = None,
         conversation: ConversationKey | None = None,
         on_event: Callable[[RunEvent], None] | None = None,
-        retain_events: bool = True,
     ) -> None:
         self._run_id = run_id
         self._conversation = conversation
@@ -70,8 +68,7 @@ class LocalRunContext:
         self._next_ordinal = 0
         self._on_event = on_event
         self.events: list[RunEvent] = []
-        """Every event, in memory; empty when `retain_events` is False (a durable runner keeps them in its store)."""
-        self._retain_events = retain_events
+        """Every event, in memory."""
         self._next_seq = 0
         self.rewards: list[RewardAssignment] = []
         self.excluded_from_training: str | None = None
@@ -163,7 +160,7 @@ class LocalRunContext:
         return list(await asyncio.gather(*awaitables))
 
     async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
-        """Durable output, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect."""
+        """Output of the run, e.g. a reply that a connector delivers. Recorded as an `output.emit` effect."""
         arguments: dict[str, JsonValue] = {"kind": kind, "payload": payload}
         if to is not None:
             arguments["to"] = to.model_dump(mode="json")
@@ -171,7 +168,6 @@ class LocalRunContext:
         async def execute(effect_id: str, arguments_digest: str) -> str:
             return effect_id
 
-        # Recorded after the effect, not inside it: a durable runner replays effects without executing them.
         identifier = await self.perform(EffectKind.OUTPUT_EMIT, arguments, execute, completion=lambda _: None)
         self.record_event(RunEventType.OUTPUT_EMITTED, {**arguments, "effect_id": identifier})
 
@@ -267,7 +263,7 @@ class LocalRunContext:
 
     async def acquire_sandboxes(self, specs: Mapping[str, SandboxSpec], pools: Mapping[str, Pool], lease: str) -> None:
         """Acquire each declared sandbox from the pool of its kind, under `lease` and its name, giving a harness
-        inside it its slots' model addresses; then record them. Idempotent: a replay gets the same sandboxes."""
+        inside it its slots' model addresses; then record them."""
         for name, spec in specs.items():
             environment = harness_environment(spec.slots, lambda slot: self._models[slot].address())
             pool, key = pools[spec.kind], f"{lease}/{name}"
@@ -295,7 +291,6 @@ class LocalRunContext:
         execute: Callable[[str, str], Awaitable[T]],
         *,
         completion: Callable[[T], JsonValue],
-        guard: bool = False,
     ) -> T:
         identifier = effect_id(self._run_id, GENERATION, self._next_ordinal)
         self._next_ordinal += 1
@@ -307,10 +302,7 @@ class LocalRunContext:
         if kind is EffectKind.MODEL_SAMPLE:
             self._samples_in_flight.append(identifier)
         try:
-            result = await self._execute_effect(kind, identifier, arguments_hash, execute, guard)
-        except OutcomeUnknown:
-            self._effect_completed(identifier, EffectStatus.OUTCOME_UNKNOWN, None, error_class="outcome_unknown")
-            raise
+            result = await execute(identifier, arguments_hash)
         except asyncio.CancelledError:
             self._effect_completed(identifier, EffectStatus.FAILED, None, error_class="cancelled")
             raise
@@ -322,17 +314,6 @@ class LocalRunContext:
                 self._samples_in_flight.remove(identifier)
         self._effect_completed(identifier, EffectStatus.OK, completion(result))
         return result
-
-    async def _execute_effect[T](
-        self,
-        kind: EffectKind,
-        identifier: str,
-        arguments_hash: str,
-        execute: Callable[[str, str], Awaitable[T]],
-        guard: bool,
-    ) -> T:
-        """Perform the effect. The durable run context overrides this to make it a recorded, guarded step."""
-        return await execute(identifier, arguments_hash)
 
     def _effect_completed(
         self, identifier: str, status: EffectStatus, payload: JsonValue, *, error_class: str | None = None
@@ -349,8 +330,7 @@ class LocalRunContext:
             run_id=self._run_id, seq=self._next_seq, type=event_type, recorded_at=self.now(), payload=payload
         )
         self._next_seq += 1
-        if self._retain_events:
-            self.events.append(event)
+        self.events.append(event)
         if self._on_event is not None:
             self._on_event(event)
         return event

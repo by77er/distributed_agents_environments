@@ -6,8 +6,7 @@ was sent, the tools it was offered and what it replied. Between them a hook can 
 (`rollout_train.monitor`) without the program taking part.
 
 Hooks run on the runner's event loop, in the middle of the run: they must be quick and must not block (hand slow work
-to a queue or a file). A hook that raises is logged and otherwise ignored; a hook never fails a run. A durable runner
-calls them for what this process records and performs: after a crash, another runner's hooks see the rest.
+to a queue or a file). A hook that raises is logged and otherwise ignored; a hook never fails a run.
 """
 
 import logging

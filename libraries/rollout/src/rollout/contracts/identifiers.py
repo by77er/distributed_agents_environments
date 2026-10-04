@@ -13,7 +13,7 @@ _CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 def new_ulid() -> str:
     """A ULID: 48 bits of Unix time in milliseconds, then 80 random bits, in Crockford base 32 (26 characters).
 
-    Minted by runners and services, never by task code (which has no ambient randomness under a durable runner).
+    Minted by runners and services, never by task code (whose randomness is `run.random`, seeded from the run's id).
     """
     value = (time.time_ns() // 1_000_000) << 80 | int.from_bytes(os.urandom(10))
     characters = [_CROCKFORD_BASE32[(value >> shift) & 0x1F] for shift in range(125, -1, -5)]

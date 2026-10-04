@@ -145,7 +145,7 @@ class Message(ContractModel):
 
 
 class RetryClass(StrEnum):
-    """What a durable runner may do with a tool call after a crash (docs/architecture/overview.md)."""
+    """Whether a tool call is safe to perform again with the same `effect_id` (docs/guide/tools.md#retry-classes)."""
 
     PURE = "pure"
     IDEMPOTENT = "idempotent"

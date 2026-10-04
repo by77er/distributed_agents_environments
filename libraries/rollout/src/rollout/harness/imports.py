@@ -1,7 +1,7 @@
 """Imported tools: tool sets outside task code, bound per run (docs/guide/tools.md#imported-tools).
 
 Calling an imported tool is a `tool.call` effect. Its `effect_id` and arguments digest reach the tool set, so a tool
-set that deduplicates performs each call at most once, however often a durable runner re-executes it.
+set that deduplicates performs each call at most once, however often it is asked.
 """
 
 from collections.abc import Mapping, Sequence
@@ -9,7 +9,7 @@ from typing import Protocol, Self
 
 from pydantic import JsonValue, model_validator
 
-from rollout.contracts import ContractModel, EffectKind, RetryClass, ToolResult, ToolSpecification
+from rollout.contracts import ContractModel, EffectKind, ToolResult, ToolSpecification
 from rollout.harness.model import Effects
 
 
@@ -27,8 +27,7 @@ class ToolSet(Protocol):
 
 class DeduplicatingToolSet(ToolSet, Protocol):
     """A tool set that says whether it performs each `effect_id` at most once (a `deduplicates = True` attribute, on
-    a class). The side-effecting tools of one that does are re-executed after a crash rather than guarded
-    (docs/libraries/rollout/contracts/effects.md)."""
+    a class): its side-effecting tools are then safe to call again (docs/libraries/rollout/contracts/effects.md)."""
 
     @property
     def deduplicates(self) -> bool: ...
@@ -38,13 +37,6 @@ def deduplicates(receiver: object) -> bool:
     """Whether a tool set, a sandbox pool or a sandbox provider performs each `effect_id` at most once: what its
     `deduplicates` says, or False if it says nothing."""
     return bool(getattr(receiver, "deduplicates", False))
-
-
-def guarded(retry_class: RetryClass, receiver: object) -> bool:
-    """Whether a call of `retry_class` to `receiver` is guarded (performed at most once by a durable runner, completing
-    as `OUTCOME_UNKNOWN` after a crash interrupted it): a side-effecting or unknown call to a receiver that does not
-    deduplicate."""
-    return retry_class in (RetryClass.SIDE_EFFECTING, RetryClass.UNKNOWN) and not deduplicates(receiver)
 
 
 class ToolBinding(ContractModel):
@@ -90,11 +82,9 @@ class Tools:
         async def execute(effect_id: str, arguments_digest: str) -> ToolResult:
             return await tool_set.call(name, arguments, effect_id=effect_id, arguments_digest=arguments_digest)
 
-        specification = next(s for s in tool_set.specifications() if s.name == name)
         return await self._effects.perform(
             EffectKind.TOOL_CALL,
             {"tool": name, "arguments": dict(arguments)},
             execute,
             completion=lambda result: result.model_dump(mode="json", exclude_none=True),
-            guard=guarded(specification.retry_class, tool_set),
         )

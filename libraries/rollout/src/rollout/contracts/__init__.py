@@ -30,7 +30,6 @@ from rollout.contracts.effects import (
     Conflict,
     EffectKind,
     EffectStatus,
-    OutcomeUnknown,
 )
 from rollout.contracts.events import (
     RUN_EVENT_SCHEMA_VERSION,
@@ -95,7 +94,6 @@ __all__ = [
     "ModelEndpoint",
     "ModelEndpointError",
     "NamedToolChoice",
-    "OutcomeUnknown",
     "Overloaded",
     "Reasoning",
     "ReasoningScope",

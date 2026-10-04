@@ -12,7 +12,7 @@ from rollout.harness.task import ModelSlot, Task
 
 
 class Program:
-    """What a run executes. `AgentProgram` is the task loop; plain durable workflows are other programs."""
+    """What a run executes. `AgentProgram` is the task loop; other programs drive their own."""
 
     def model_slots(self) -> Mapping[str, ModelSlot]:
         """The model slots the program samples; a runner binds an endpoint to each."""

@@ -121,7 +121,7 @@ class RunContext(Protocol):
     def context_hints(self) -> ContextHints: ...
 
     def now(self) -> datetime:
-        """The current time. Use it instead of the wall clock, which durable runs cannot replay."""
+        """The current time, in UTC: the time the run's events carry."""
         ...
 
     def reward(self, value: float, *, slot: str = "policy", key: str = "default") -> None:
@@ -137,7 +137,7 @@ class RunContext(Protocol):
         ...
 
     async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
-        """Durable output, such as a reply to a person; a connector or client delivers it."""
+        """Output of the run, such as a reply to a person; a connector or client delivers it."""
         ...
 
     # For the loop.

@@ -34,7 +34,7 @@ EFFECT_ID_META = "effect_id"
 
 
 class Effects(Protocol):
-    """How a run performs effects. The runner decides what performing means: a direct call, or a durable step."""
+    """How a run performs effects: the run context gives each its identity, records it and performs it."""
 
     async def perform[T](
         self,
@@ -43,13 +43,9 @@ class Effects(Protocol):
         execute: Callable[[str, str], Awaitable[T]],
         *,
         completion: Callable[[T], JsonValue],
-        guard: bool = False,
     ) -> T:
         """Assign the next `effect_id`, digest `arguments`, and run `execute(effect_id, arguments_digest)`.
-
-        `completion` renders the result for the run's events. `guard` marks a side effect whose receiver cannot
-        deduplicate: a durable runner performs it at most once, raising `OutcomeUnknown` after a crash interrupted it.
-        """
+        `completion` renders the result for the run's events."""
         ...
 
 

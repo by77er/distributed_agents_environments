@@ -1,10 +1,8 @@
 """Environments: computers that task code creates and acts on (docs/guide/tasks.md#environments).
 
 Task code sees `run.environments` and `Environment` handles. Every operation is an effect, performed by an
-`EnvironmentService`: the backend a runner is given (e.g. `rollout_computers.namespaces`). Creation derives the
-environment's id from its `effect_id`, so a replayed or retried creation finds the same environment. Commands are
-guarded: a command that was running when the process crashed completes as `OUTCOME_UNKNOWN` instead of running
-again.
+`EnvironmentService`: the backend a runner is given. Creation derives the environment's id from its `effect_id`, so a
+retried creation finds the same environment.
 """
 
 import hashlib
@@ -64,7 +62,7 @@ class Environment:
         self._effects = effects
 
     async def execute(self, command: str, *, timeout_seconds: float = 120.0, cwd: str | None = None) -> ExecutionResult:
-        """Run a shell command. Raises `OutcomeUnknown` if a crash interrupted an earlier attempt of this effect."""
+        """Run a shell command."""
         arguments: dict[str, JsonValue] = {
             "environment_id": self.environment_id,
             "operation": "execute",
@@ -83,7 +81,6 @@ class Environment:
             arguments,
             execute,
             completion=lambda result: result.model_dump(mode="json"),
-            guard=True,
         )
 
     async def put(self, path: str, data: bytes | str) -> None:

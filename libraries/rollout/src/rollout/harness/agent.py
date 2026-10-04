@@ -18,7 +18,7 @@ class Agent:
     """Sent first in every context when set."""
 
     def __init__(self, configuration: Any = None) -> None:
-        """Must be deterministic: under a durable runner the agent is re-created on replay."""
+        """Once per run, with the configuration of its program reference."""
         self.configuration = configuration
 
     def select_context(self, history: History, hints: ContextHints) -> list[Message]:

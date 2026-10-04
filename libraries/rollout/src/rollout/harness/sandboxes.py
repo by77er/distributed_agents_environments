@@ -6,7 +6,7 @@ before the program starts, and releases it when the program ends; the program re
 addresses, the environment variables a harness inside it is given, and its operations, each a recorded effect.
 
 A `Pool` hands out sandboxes under leases. `acquire(spec, key)` returns the lease of `key` when there is one, so a
-retried or replayed acquire gets the same sandbox. A pool says how many sandboxes it can hold and how many are free.
+retried acquire gets the same sandbox. A pool says how many sandboxes it can hold and how many are free.
 `SandboxPool` is a pool over a `Provider`, which only makes, deletes and operates sandboxes of one kind; it keeps its
 leases in a `Leases` table: in memory, or beside a ledger (`rollout_train.sandboxes`), where a lease ends with the
 claim it was acquired under and a key whose claim has lapsed is refused.
@@ -27,11 +27,10 @@ from rollout.contracts import (
     EffectKind,
     FrozenSequence,
     ModelAddress,
-    RetryClass,
     ToolResult,
     ToolSpecification,
 )
-from rollout.harness.imports import deduplicates, guarded
+from rollout.harness.imports import deduplicates
 from rollout.harness.model import Effects
 
 
@@ -410,11 +409,9 @@ class SandboxPool:
             await self.provider.delete(handle)
         return gone
 
-    async def close(self, *, release: bool = True) -> None:
-        """Release every lease the pool holds (deleting its sandboxes), and close the provider. With `release` False,
-        the leases stay, for runs a durable runner resumes to acquire again: a sandbox that outlived the provider is
-        theirs again, and one that did not is lost."""
-        for lease in await self.held() if release else []:
+    async def close(self) -> None:
+        """Release every lease the pool holds (deleting its sandboxes), and close the provider."""
+        for lease in await self.held():
             with contextlib.suppress(Exception):
                 await self.release(lease.key)
         closing = getattr(self.provider, "close", None)
@@ -476,8 +473,7 @@ class Sandbox:
         return list(self._pool.operations())
 
     async def call(self, operation: str, arguments: Mapping[str, JsonValue] | None = None) -> ToolResult:
-        """Perform an operation as a `tool.call` effect. A side-effecting one is guarded unless the pool
-        deduplicates: after a crash it completes as `OUTCOME_UNKNOWN` rather than happen twice."""
+        """Perform an operation as a `tool.call` effect."""
         given = dict(arguments or {})
 
         async def execute(effect_id: str, arguments_digest: str) -> ToolResult:
@@ -485,14 +481,11 @@ class Sandbox:
                 self.lease.key, operation, given, effect_id=effect_id, arguments_digest=arguments_digest
             )
 
-        specification = next((each for each in self._pool.operations() if each.name == operation), None)
-        retry_class = specification.retry_class if specification is not None else RetryClass.UNKNOWN
         return await self._effects.perform(
             EffectKind.TOOL_CALL,
             {"sandbox": self.name, "tool": operation, "arguments": given},
             execute,
             completion=lambda result: result.model_dump(mode="json", exclude_none=True),
-            guard=guarded(retry_class, self._pool),
         )
 
 
