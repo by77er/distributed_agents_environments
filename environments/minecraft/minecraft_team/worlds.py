@@ -159,18 +159,21 @@ DROP_TICKS = 10
 async def run_window(control: Control, harness: Harness, *, ticks: int, settle: float) -> int:
     """Run game time while the bots act, then freeze; returns the ticks that ran. The window is over when every
     action has finished; when a bot whose own action has finished is hurt (it should not stand and take it while a
-    teammate walks); or when `ticks` have run.
+    teammate walks); when a bot becomes threatened (idle with a hostile mob closing in, or a creeper about to go off
+    beside it: its agent should see it coming, as the first touch of a creeper is its explosion); or when `ticks`
+    have run. A threat already there when the window began does not end it: its agent saw it and chose.
 
     The game runs at its own pace, twenty ticks a second, and is stopped when the bots are done: a bot's client moves
     and digs in real time, so a game stepped ten ticks at a time, with a pause to ask after each, gave the bots
     1.4 times the time the world had."""
     await harness.thaw()
+    _, _, already = await harness.busy()
     started = time.monotonic()
     await control.run(ticks)
     while time.monotonic() - started < ticks * TICK_SECONDS:
         await asyncio.sleep(POLL_SECONDS)
-        acting, hurt = await harness.busy()
-        if not acting or set(hurt) - set(acting):
+        acting, hurt, threatened = await harness.busy()
+        if not acting or set(hurt) - set(acting) or set(threatened) - set(already):
             break
     ran = await control.stop()
     await control.step(DROP_TICKS)  # drops land and are picked up

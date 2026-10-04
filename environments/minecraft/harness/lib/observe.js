@@ -222,4 +222,4 @@ function inventory (bot) {
 
 function round (value) { return Math.round(value * 10) / 10 }
 
-module.exports = { observe, lineOfSight, firstHit, eyes, DIRECTIONS, CONTAINERS, FURNACES, FAR_RANGE }
+module.exports = { observe, lineOfSight, firstHit, eyes, DIRECTIONS, CONTAINERS, FURNACES, FAR_RANGE, HOSTILE }

@@ -21,7 +21,7 @@ const readline = require('node:readline')
 const { Vec3 } = require('vec3')
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements } = require('mineflayer-pathfinder')
-const { observe } = require('./lib/observe')
+const { observe, HOSTILE } = require('./lib/observe')
 const { ACTIONS, ActionError, Interrupted } = require('./lib/actions')
 const { fixMaterials } = require('./lib/data')
 const { LIMITS } = require('./lib/limits')
@@ -203,10 +203,26 @@ function unloaded () {
   return { unloaded: waiting }
 }
 
-// Who is still acting, and who has been hurt since the thaw.
+// Who is still acting, who has been hurt since the thaw, and who is threatened: a bot whose action has finished with a
+// hostile mob close by, or any bot with a creeper about to go off. A bot that stands idle while its teammates act
+// would otherwise take what comes (a creeper's first touch is its explosion) before its agent could answer.
+const THREAT_BLOCKS = 6
+const CREEPER_BLOCKS = 4
+const NEUTRAL = new Set(['enderman', 'piglin', 'zombified_piglin', 'ender_dragon']) // (dangerous only when provoked, or elsewhere)
+
+function threatened (state) {
+  const here = state.bot.entity?.position
+  if (!here) return false
+  return Object.values(state.bot.entities).some(entity => {
+    if (entity === state.bot.entity || !HOSTILE.has(entity.name) || NEUTRAL.has(entity.name)) return false
+    const distance = entity.position.distanceTo(here)
+    return (entity.name === 'creeper' && distance <= CREEPER_BLOCKS) || (!state.action && distance <= THREAT_BLOCKS)
+  })
+}
+
 function busy () {
   const names = filter => [...bots.entries()].filter(([, state]) => filter(state)).map(([name]) => name)
-  return { acting: names(state => state.action), hurt: names(state => state.hurt) }
+  return { acting: names(state => state.action), hurt: names(state => state.hurt), threatened: names(threatened) }
 }
 
 async function handle (request) {

@@ -109,7 +109,9 @@ moves; each calls one action; the game then runs at its own pace, twenty ticks a
 finished, and is stopped; a few more ticks (`DROP_TICKS`) let drops land; then the bots are paused again. A window
 lasts at most `window_seconds` of `limits.json`: an action that takes longer is stopped there and reported as cut
 off, with where the agent got to. A window also ends when an agent whose own action is over is hurt, so that it does
-not stand and take it while a teammate walks.
+not stand and take it while a teammate walks, and when an agent becomes threatened: idle with a hostile mob within six
+blocks, or with a creeper within four whatever it is doing (a creeper's first touch is its explosion). A threat that
+was already there when the window began does not end it: the agent saw it, and chose.
 
 Two things keep the frozen game frozen for players, whom the game itself does not freeze. The harness pauses each
 bot's physics, so that none moves. And the plugin holds each team member as it was when the stepping stopped: it

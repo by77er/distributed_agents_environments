@@ -417,6 +417,32 @@ async def test_what_is_made_at_a_crafting_table_is_what_is_reported_and_a_long_m
 
 
 @pytest.mark.asyncio(loop_scope="module")
+async def test_a_window_ends_when_a_creeper_closes_in_on_an_agent_standing_idle(world: World) -> None:
+    x, z = -60, 60
+    y = await world.control.surface(x, z) + 1
+    await world.control.carve(x - 12, y, z - 3, width=25, height=3, depth=7, light=True)
+    await world.control.episode({
+        "team": ["ada", "ben"], "spawn": {"world": "world", "x": x, "y": y, "z": z},
+        "placements": [
+            {"name": "ada", "world": "world", "x": x + 0.5, "y": y, "z": z + 0.5, "kit": []},
+            {"name": "ben", "world": "world", "x": x - 10.5, "y": y, "z": z + 0.5, "kit": []},
+        ],
+        "gamemode": "survival", "difficulty": "normal", "time": 1000,
+        "gamerules": {"do_daylight_cycle": False, "do_weather_cycle": False, "keep_inventory": True},
+    })  # fmt: skip
+    await settle(world)
+    await world.control.spawn("creeper", x + 10, y, z)  # ten blocks off: no threat yet
+    await world.harness.thaw()
+    await world.harness.act("ada", {"name": "chat", "message": "standing here"})  # done at once
+    await world.harness.act("ben", {"name": "wait"})  # keeps the window open
+    ran = await run_window(world)
+    seen = await world.harness.observe("ada")
+    creepers = [mob for mob in seen["mobs"] if mob["mob"] == "creeper"]
+    assert ran < worlds.WINDOW_TICKS and creepers, (ran, seen["mobs"])
+    assert seen["self"]["health"] == 20 and creepers[0]["distance"] <= 7  # it came close, and went off on nobody
+
+
+@pytest.mark.asyncio(loop_scope="module")
 async def test_a_frozen_game_holds_players_as_they_were_and_nobody_starts_on_the_diamonds(world: World) -> None:
     _, observation = await begin(world, Start.ITEMS, Kit.NONE, seed=5)
     assert (await world.control.state())["team_diamonds"] == 0  # the piles are out of reach of where anyone starts
