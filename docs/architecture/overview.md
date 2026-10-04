@@ -11,7 +11,9 @@ in the **ledger**; **episode runners**, on any machine that reaches the ledger, 
 record them there. A program runs against the **sandboxes** it declares (a Minecraft world, a container), which the
 runner leases from **pools** before the program starts, under the episode's claim, and releases when it ends. The loop
 takes a **step** over several groups at a time; each step's new weights are published to the channel without any task
-or agent noticing. A **profile** says which engines, trainer, runner, tool sets and pools stand behind all of it.
+or agent noticing. What a channel should serve is written down in the ledger: engines in the trainer's process are
+published to directly, **engine hosts** load it into vLLM servers on other machines, and runners ask those for each
+checkpoint by name. A **profile** says which engines, trainer, runner, tool sets and pools stand behind all of it.
 
 ## Layers
 
@@ -43,7 +45,7 @@ imports none of them.
 |---|---|---|---|
 | [`Runner`](../guide/reference.md#runner) | `rollout.harness` | callers → runs | `LocalRunner` (`rollout.local`), `DurableRunner` ([`rollout_durable`](../implementations/rollout-durable/README.md)) |
 | [`ModelEndpoint`](../libraries/rollout/contracts/model-endpoint.md) | `rollout.contracts` | runners → models | the [recorder](../libraries/rollout-train/recorder.md)'s endpoints, `ResponsesEndpoint` ([`rollout_openai`](../guide/models.md)), `ScriptedModelEndpoint` ([`rollout.testing`](../guide/testing.md)) |
-| [`Engine`](../guide/reference.md#engine) | `rollout_train.inference` | channels → replicas | `VllmEngine` ([`rollout_vllm`](../implementations/rollout-vllm.md)), `ScriptedEngine` (`rollout_train.testing`) |
+| [`Engine`](../guide/reference.md#engine) | `rollout_train.inference` | channels → replicas | `VllmEngine` ([`rollout_vllm`](../implementations/rollout-vllm.md)), `RemoteEngine` (a vLLM server elsewhere, over its OpenAI-compatible API: [engines elsewhere](../libraries/rollout-train/channels.md#engines-elsewhere)), `ScriptedEngine` (`rollout_train.testing`) |
 | [`Renderer`](../guide/reference.md#renderer) | `rollout_train.recorder` | the recorder → a model family's tokens | `qwen35`, `qwen3` ([`rollout_qwen`](../implementations/rollout-qwen.md)), `gemma4` ([`rollout_gemma`](../implementations/rollout-gemma.md)), `PlainRenderer` (`rollout_train.testing`) |
 | [`Trainer`](../guide/reference.md#trainer) | `rollout_train` | training → weights | `LoraTrainer` ([`rollout_lora`](../implementations/rollout-lora.md)); `Colocated` wraps one that shares the engines' accelerator |
 | [`Algorithm`](../guide/reference.md#algorithm) | `rollout_train` | the training loop → what to train on | `Grpo` ([training](../libraries/rollout-train/training.md#the-algorithm-grpo)) |
@@ -54,6 +56,7 @@ imports none of them.
 | [`EnvironmentService`](../guide/reference.md#environmentservice) | `rollout.harness` | runs → computers | `NamespaceEnvironments`, `LocalEnvironments` ([`rollout_computers`](../implementations/rollout-computers.md)) |
 | [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
 | [the ledger's `plans`, `groups`, `claims` and `episodes`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `EpisodeRunner`, on any machine that reaches the ledger and the blob store |
+| [the ledger's `serving`](../libraries/rollout-train/channels.md#what-a-channel-should-serve) | `rollout_train.serving` | training → whatever serves and samples its channels | `Follower` (`rollout engines`, or a runner's own engines), `RemoteChannel` in a runner's recorder |
 | [`Environment`](../guide/reference.md#rolloutenvironmentenvironment) | `rollout.environment` | training and evals → an environment's rows, starts, eval data, description and curriculum | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
 | [`RunHooks`](../libraries/rollout/hooks.md), `Hooks` | `rollout.harness`, `rollout_train.rollouts` | runners and runs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
 | `Presence`, `Launches` | `rollout_train.presence`, `rollout_train.launches` | runners and launchers → whoever watches or asks for runs | `FilePresence`, `DatabasePresence`; `FileLaunches`, `DatabaseLaunches` ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats), [launchers](../guide/deploying.md#launchers)) |
@@ -70,6 +73,7 @@ What each part sees. A ✗ is a boundary the code keeps, not an optimization lef
 | Task and agent code | ✓ | ✗ | ✗ | ✗ |
 | Runner | ✓ | ✗ | ✗ | ✗ |
 | Recorder and channels | ✓ | ✓ | ✓ | engines only |
+| Engine hosts | ✗ | ✗ | ✓ | their servers only |
 | Episode runners | labels and results | ✓ (in episodes) | ✓ | ✗ |
 | Training loop and trainer | labels and results | ✓ | ✓ | ✗ |
 | Profile | ✗ | ✗ | ✗ | ✓ |

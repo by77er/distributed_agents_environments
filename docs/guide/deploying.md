@@ -57,6 +57,8 @@ uv run rollout bookmark diamonds first:20 --ledger RUN               # name the 
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout pool minecraft_team.worlds:worlds --directory DATA --ledger URL --port 8710   # worlds on a machine of their own
 uv run rollout tools FACTORY --directory DATA --port 8700            # a tool set on a machine of its own
+uv run rollout engines engines.toml --run first   # load what run first serves into this machine's vLLM servers
+uv run rollout runner runner.toml --run first                       # a machine that plays first's episodes, and nothing else
 uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
 uv run rollout env check ENVIRONMENT --profile profile.toml --groups 4   # does it hold together; do its groups teach
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # a frozen list of starts
@@ -76,7 +78,8 @@ lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](
 checks an environment before anything trains on it, and with a profile plays a few groups and flags those that teach
 nothing ([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)); `report` and
 `imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
-[imitation](../libraries/rollout-train/training.md#imitation).
+[imitation](../libraries/rollout-train/training.md#imitation); `engines` and `runner` in
+[engines on other machines](#engines-on-other-machines).
 
 ## The file
 
@@ -85,7 +88,7 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | Part | What it decides | To scale it |
 |---|---|---|
 | `directory` | Where the run's state is kept. `rollout train --directory` replaces it: one profile, many runs | |
-| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own). `reshard` names the layout its engines load a checkpoint's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each checkpoint is then [resharded](../libraries/rollout-train/checkpoints.md#resharding) before it is served. Without it, the engines load the trainer's files as they are | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
+| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own). `reshard` names the layout its engines load a checkpoint's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each checkpoint is then [resharded](../libraries/rollout-train/checkpoints.md#resharding) before it is served. Without it, the engines load the trainer's files as they are. A channel whose `engine` is `rollout_train.inference:RemoteEngine` has its engines on other machines: vLLM servers, each entry of `engines` one's `address` (`via`, `max_lag`, `connection`: [engines on other machines](#engines-on-other-machines)) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one. Or serve them on machines of their own (`rollout engines`), behind a router |
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the checkpoint a new run trains from, by any [reference](../libraries/rollout-train/checkpoints.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest checkpoint. `bookmark` names a bookmark the run moves to each checkpoint it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
@@ -160,6 +163,12 @@ listens there.
 `open(training=False)` (what `rollout eval` opens) makes no trainer; the trained channel's engines still load what its
 `start` is served over. `platform.eval_run(step)` registers the run of the eval of the checkpoint made at `step`
 (`NAME-eval-STEP`) and adds it to the runs the episode runner plays.
+A channel whose engines are on other machines starts no engine here: its turns are sampled there
+(`platform.routes`), and `platform.publish` leaves it to the engine hosts to load what the loop wrote down.
+`open(plays=RUNS)` (what `rollout runner` opens) is a runner and nothing else: it registers no run in its directory
+and makes no trainer, and its episode runner plays those runs (by id), or every run whose channels it reaches when none
+is named. `profile.engines()` makes clients of the servers of the channels whose engines are elsewhere, and
+nothing else (what `rollout engines` loads checkpoints into).
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
 run's newest checkpoint (else the one it starts from) on its channel when it starts. `platform.layout` is the trained
 channel's `reshard`; `platform.reshard` reshards a checkpoint into it, as a Ray task when the profile names `ray`, else in
@@ -183,7 +192,9 @@ durable runner, it first adopts the runs the runner recovers whose claims held u
 
 Runners on other machines share a run's work through the ledger and the blob store alone: a database ledger they
 all reach (`postgresql://…`) and a blob store they all reach (an object store), with the channels, tool sets and pools
-the run's plan names. The run does not know where its episodes were played.
+the run's plan names. `rollout runner PROFILE --run RUN` is such a runner: its profile's channels, tool sets and pools,
+no trainer, and the runs it is named (repeatable; none named: every run whose channels it reaches). The run does not
+know where its episodes were played.
 
 Each runner beats every 15 seconds ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats)): its host, its
 machine's memory, GPUs and disk, its engines' processes, what each channel serves and how fast, and how full its pools
@@ -192,6 +203,147 @@ stops beating for 90 seconds is taken to be gone, and what it had claimed is pla
 writes into the run's start where its blob store is (its kind and settings; a store's credentials come from its
 environment and are never written), so a monitor anywhere reads the run's finished episodes back, and shows its
 machines and engines from the beats: from the run's machine it reads only the episodes still playing (its feed).
+
+## Engines on other machines
+
+A run's channel can be served by vLLM servers on machines of their own. Three roles meet through the ledger, the
+heartbeats beside it and the blob store, wherever each runs:
+
+| Role | Does | Command |
+|---|---|---|
+| The trainer | writes down, under the run's fence, what each of its channels should serve: the checkpoint, its depth and kind, and the files its engines load ([what a channel should serve](../libraries/rollout-train/channels.md#what-a-channel-should-serve)) | `rollout train` |
+| Engine hosts | load what the run says from the blob store into the vLLM servers on their machine, as an adapter named by the checkpoint's id, and beat with what each serves | `rollout engines` |
+| Episode runners | ask the channel's servers (a router in front of them, or the servers themselves) for the checkpoint the run says, by name, and record what they sample: the recorder stays with the runner, so tokens and logprobs are recorded exactly as sampled | `rollout runner`, or the runner `rollout train` opens |
+
+A profile that runs everything in one process needs none of this: its channels' engines are in that process, the loop
+publishes to them directly, and no request leaves it.
+
+### The servers
+
+Each engine is a stock vLLM OpenAI-compatible server, started on its machine with the model, LoRA, the logprobs of the
+distribution sampled from, and adapters loaded and unloaded while it runs:
+
+```bash
+VLLM_ALLOW_RUNTIME_LORA_UPDATING=True uv run vllm serve Qwen/Qwen3-0.6B --host 0.0.0.0 --port 8000 \
+    --enable-lora --max-lora-rank 32 --max-loras 2 --logprobs-mode processed_logprobs --max-model-len 8192 \
+    --api-key "$ROLLOUT_ENGINES_TOKEN"            # (optional: TLS with --ssl-certfile, --ssl-keyfile, --ssl-ca-certs)
+```
+
+A request names the checkpoint it samples from as its `model`: the base model by its own name, a LoRA checkpoint by
+its id. It completes the prompt's token ids (`/v1/completions` with `return_token_ids` and `logprobs`), so the tokens
+and their logprobs come back exactly as sampled, the stop token among them, and the answer names the model that
+sampled it. A request carries the session (`session_id`, which a router may keep to one server) and a name of its own
+(`request_id`: the effect, the attempt and the phase of the turn). Nothing else of the protocol is ours: any router
+(vLLM's production stack, llm-d, SGLang's router, Dynamo), proxy or tunnel can stand in front of the servers.
+
+A vLLM server serves full weights only under the name it was started with, so a full checkpoint (or an adapter over
+one) is not served this way: a channel whose run trains every weight keeps its engines in the trainer's process, or
+starts a server on the checkpoint's files as a model of its own.
+
+### An engine host
+
+An engine host's profile names the channel with `RemoteEngine` as its engine and the servers on its machine as its
+`engines`, the shared ledger and blob store, and a directory for the checkpoints it fetches:
+
+```toml
+directory = "~/.cache/rollout/engines"        # the checkpoints it fetches, which the servers here read
+[ledger]
+kind = "rollout_train.database:DatabaseLedger"
+url = "postgresql://trainer@db-1/rollout"
+[blobs]
+kind = "rollout_s3:S3BlobStore"
+bucket = "rollout"
+
+[channels.policy]
+model = "Qwen/Qwen3-0.6B"                     # the name the servers serve the base model under
+renderer = "rollout_qwen:qwen3"
+engine = "rollout_train.inference:RemoteEngine"
+engines = [{ address = "http://127.0.0.1:8000" }]   # the servers on this machine
+connection = { token_env = "ROLLOUT_ENGINES_TOKEN" }
+```
+
+```bash
+uv run rollout engines engines.toml --run first --name gpu-1
+```
+
+It reads what the run (`--run`, by name or id) says each of its channels (by name) should serve every two seconds, and
+when a channel serves something older, fetches the checkpoint's files under its directory (hard links, from a blob
+store of files on the same disk) and loads them into each server (`/v1/load_lora_adapter`, named by the checkpoint's
+id). The adapter before stays loaded, so that a turn begun under it finishes under it; the one before that is
+unloaded, and its files deleted. It beats as `--name` (by default this machine's name; kind `engines`) with the run it
+follows, its machine, and for each channel what it serves, each server's address, and why a load failed, if one did.
+
+### A channel whose engines are elsewhere
+
+The trainer's and the runners' profiles name the same channel, with the servers a runner reaches:
+
+```toml
+directory = "~/.cache/rollout/runs/first"
+
+[channels.policy]
+model = "Qwen/Qwen3-0.6B"
+renderer = "rollout_qwen:qwen3"               # the recorder renders and records here
+engine = "rollout_train.inference:RemoteEngine"
+engines = [{ address = "http://gpu-1:8000" }, { address = "http://gpu-2:8000" }]
+via = "https://router.example.com"            # optional: a router or proxy every request goes to instead
+max_lag = 1                                   # optional: checkpoints a sample may be behind what the run says
+connection = { token_env = "ROLLOUT_ENGINES_TOKEN", ca = "~/.config/rollout/ca.pem" }   # optional
+```
+
+| Key | What it says |
+|---|---|
+| `engines` | the servers, each by its `address`. With no router, a session's turns go to one of them, worked out from the session's id alone, among those that answer and have a checkpoint close enough |
+| `via` | a URL every request goes to in place of the servers' addresses: a router, a proxy, a tunnel. Engine hosts still load at the addresses |
+| `max_lag` | how many checkpoints behind what the channel should serve a sample may be, where its server does not have the newest yet (1 unless it says otherwise) |
+| `connection` | how servers are reached: `token_env` or `token_file`, a bearer token read from that environment variable or file (never written to the ledger or the beats); `ca`, a CA bundle the server's certificate is verified against; `certificate` and `key`, a client certificate for servers that ask for one |
+
+The trainer's process starts no engine for such a channel: the loop writes down each checkpoint it serves, and the
+engine hosts load it. An eval its schedule asks for plays its checkpoint and no other.
+
+### How stale a sample may be
+
+Choosing the checkpoint is the runner's: each turn asks for the one the run last wrote down, by name. Where the server
+(or the router) does not have it yet, the turn asks for the newest one before it that it has, no more than `max_lag`
+checkpoints behind (1: the checkpoint before, which a server serves while it loads the newest); a server that answers
+that it does not have a model is asked for the one before, and for the newest again at the next look (every two
+seconds). A turn waits while no server has a checkpoint close enough, up to five minutes. Every token is stamped with
+the depth of the checkpoint its answer names, and the trainer's importance weight (old / behaviour, truncated at
+`truncate`) corrects for the difference, as it does for the turns of an episode that spanned a step on one machine. A
+runner claims a run's episodes only while a server has a checkpoint of each of its channels close enough.
+
+### Directly or through a router or proxy
+
+Either layout is a matter of configuration: `engines` alone sends to the servers directly; `via` sends everything to
+one URL that passes requests on. What makes either safe:
+
+- **Requests carry what they need.** The checkpoint is the request's `model`; the session and the request's name
+  travel with it. Nothing between needs to know more than vLLM's API, or keep a session to a connection.
+- **Answers are checked.** The answer names the model that sampled it: the runner refuses one that names another, and
+  samples the turn again, so a proxy that sends a request to the wrong model, or answers from a cache, cannot make a
+  recorded version wrong. What a server has is judged from its own listing (`/v1/models`) and answers, never from the
+  proxy.
+- **A retry is safe.** A request sent again through a proxy may be sampled again by the server; the recorder keeps the
+  answer it was given, under the turn's effect, once.
+- **Authentication is the deployment's.** A bearer token (vLLM's `--api-key`, or the proxy's own) and TLS with a CA
+  bundle and a client certificate, read from where `connection` says.
+
+### A layout
+
+```
+   trainer-1                       gpu-1, gpu-2                             runner-1 … runner-N
+   rollout train trainer.toml      vllm serve … (port 8000)                 rollout runner runner.toml
+     writes what policy should     rollout engines engines.toml --run first     --run first
+     serve (runs/first/serving)    ──▶ loads each checkpoint by id    ◀── asks for the checkpoint by name
+                                       into its server, beats              (via a router, or directly), records
+                    └───────── ledger (Postgres) · beats beside it · blob store (S3) ─────────┘
+```
+
+The trainer's profile names the trainer and the channel with its servers (its own runner can play too, or
+`episodes_at_once = 0` leaves the playing to the others); each GPU box runs a vLLM server and `rollout engines` over an
+engine host's profile; each runner box runs `rollout runner` over a profile with the channel, the tool sets and the
+pools. A channel whose engines are clients of a service elsewhere (a sampler switched to the checkpoint named) can be
+served by the runner's own process: `rollout runner --run RUN` keeps the channels whose engines are in its process
+following what that run says, as an engine host does.
 
 ## Launchers
 

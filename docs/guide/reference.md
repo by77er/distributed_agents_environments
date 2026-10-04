@@ -14,8 +14,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
-- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -2907,7 +2907,9 @@ An episode as it is logged and sent: everything but its trajectories, and where 
 class Recorded(Protocol)
 ```
 
-What a runner needs of the recorder: each run's segments, and the channels it serves.
+What a runner needs of the recorder: each run's segments, and the channels it serves. A recorder that routes
+channels to engines elsewhere (`rollout_train.recorder.Recorder` with `routes`) also says whether it reaches a
+run's (`reaches`), and names them within the run in its binding (`for_run`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -3209,7 +3211,7 @@ The dataset an id says.
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def evaluate(environment: Environment, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
+async def evaluate(environment: Environment, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = (), served_by: str | None = None) -> dict[str, Any]
 ```
 
 Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
@@ -3218,6 +3220,9 @@ start's `results`, a `Result` each). `publish` serves a checkpoint on the channe
 engines' weights; for an adapter over a full checkpoint, the engines must already hold that checkpoint's weights, as
 `rollout eval` sees to); None: the channel serves `subject` already (a training run's newest checkpoint). `reshard`
 gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine.
+What the eval's channel serves is written down (`rollout_train.serving`), so that runners anywhere play it on
+replicas that serve `subject` and no other checkpoint; `served_by` names the channel whose replicas serve it
+(`RUN/NAME`: the training run's, for an eval its schedule asks for), where it is not the eval's own.
 
 ### `Fence`
 
@@ -3278,6 +3283,28 @@ A checkpoint's files on this machine: what a step starts from.
 |---|---|---|---|
 | `weights` | `Path` | required |  |
 | `state` | `Path \| None` | `None` | What the trainer left for itself beside the weights (an optimizer's state, say), if it left any. |
+
+### `Follower`
+
+*class* · `libraries/rollout-train/src/rollout_train/following.py`
+
+```python
+class Follower
+```
+
+Keeps `channels` serving what `run` says each should (by the channel's name within the run), checking every
+`every` seconds, with each checkpoint's files under `directory` while they are served. With `presence`, it beats as
+`name` every `beating` seconds, and at once when a channel serves something new: what `about` says of the machine,
+and what each channel serves.
+
+**Methods**
+
+- `def __init__(self, name: str, checkpoints: Checkpoints, run: str, channels: Mapping[str, Channel], directory: Path, *, presence: Presence | None = None, about: Callable[[], Mapping[str, JsonValue]] | None = None, every: float = 2.0, beating: float = 15.0) -> None`
+- `async def serve(self) -> None` — Follow until cancelled.
+- `async def follow(self) -> bool` — Give every channel what the run says it should serve, if it serves something older; whether any changed.
+- `async def beat(self) -> None`
+- `def served(self) -> list[JsonValue]` — What each channel serves, how fast since the last call, and each of its engines: its address (where it is a
+  server elsewhere) and what it serves.
 
 ### `group_advantages`
 
@@ -3363,6 +3390,17 @@ The files of a checkpoint, by their paths within it, each kept as a blob.
 |---|---|---|---|
 | `files` | `Mapping[str, BlobReference]` | required |  |
 | `layout` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | How the weights are divided among the files, where they are divided: whoever wrote them says, so that a reader with the same division reads its own files and no others. |
+
+### `record_serving`
+
+*function* · `libraries/rollout-train/src/rollout_train/serving.py`
+
+```python
+async def record_serving(ledger: Ledger, run: str, serving: Serving, fence: Fence) -> bool
+```
+
+Write down, under the run's fence, that its channel serves `serving` from now on; False if it was written
+before (a loop started again serves what it served).
 
 ### `Result`
 
@@ -3451,6 +3489,36 @@ for a step: the same each time it is asked for that step, and one the run's epis
 **Methods**
 
 - `def due(self, checkpoint: Checkpoint, run: str) -> bool` — Whether `checkpoint` is evaluated: a checkpoint `run` made at a step the schedule names.
+
+### `Serving`
+
+*class* · `libraries/rollout-train/src/rollout_train/serving.py`
+
+```python
+class Serving
+```
+
+That a run's channel serves a checkpoint from now on (or, with no checkpoint, the base model).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `channel` | `str` | required | The channel's name within the run. |
+| `checkpoint` | `str \| None` | `None` | By id; None: the model the channel's engines are started with. |
+| `depth` | `int` | `0` | The checkpoint's depth: the version its samples are stamped with. |
+| `kind` | `str` | `'lora'` | `lora`, an adapter; `full`, weights loaded in place of the engines' own. |
+| `files` | `Manifest \| None` | `None` | What the engines load: the checkpoint's weights, or the files they were resharded into. |
+| `layout` | `str \| None` | `None` | The layout `files` are in (`rollout_train.resharding`), if they were resharded. |
+| `over` | `str \| None` | `None` | For an adapter over a full checkpoint, that checkpoint, by id: the engines hold its weights first. |
+| `model` | `str \| None` | `None` | The model the channel's line began from, by name. |
+| `sequence` | `int \| None` | `None` | The longest turn the trainer can train on (`Limits.sequence`), for every runner that samples the channel. |
+| `served_by` | `str \| None` | `None` | The channel whose engines serve this (`RUN/NAME`), where it is another run's: an eval played on the channel of the training run whose checkpoint it plays. None: the channel's own. |
+| `max_lag` | `int \| None` | `None` | How many checkpoints behind this a sample may be, where the run says (0 for an eval, which plays one checkpoint); None: as the runner's channel says. |
+| `at` | `float` | `field(default_factory=lambda: round(time.time(), 1))` |  |
+
+**Methods**
+
+- `def to_json(self) -> dict[str, JsonValue]`
+- `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Serving'`
 
 ### `Step`
 
@@ -3597,6 +3665,17 @@ where its files go, so any trainer can take any step of any policy.
   `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
   produced no weights.
 
+### `wanted`
+
+*function* · `libraries/rollout-train/src/rollout_train/serving.py`
+
+```python
+async def wanted(ledger: Ledger, run: str, channel: str) -> Serving | None
+```
+
+What a run's channel should serve now: its record of the greatest depth (the newest among equals); None if the
+run has said nothing of it.
+
 ### `Weighted`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -3634,12 +3713,17 @@ class Channel
 | `adapter` | `str \| None` | `None` | The adapter sampling now (None: the weights the engines hold, the model's own or a full checkpoint's). |
 | `serving` | `str \| None` | `None` | What is served, by name: the adapter, or the full checkpoint the engines hold (None: the model's own). |
 | `version` | `int` | `0` | How many times weights have been published; recorded with every sampled token. |
+| `held` | `str \| None` | `None` | The full checkpoint the engines hold, by name (None: the model's own). |
 
 **Methods**
 
 - `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '') -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
-  beginnings are cached.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
+  beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
+  the request) are for samplers elsewhere: this process's own callers read what it publishes.
+- `async def weights(self, session: str) -> tuple[str | None, int]` — The adapter a session's next turn samples from (None: the weights the engines hold), and the version its
+  tokens are stamped with: the same for every session, as this process publishes to every engine at once.
+- `@property def loaded(self) -> list[str]` — The adapters loaded on the engines, oldest first: the one served, and the one before.
 - `async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
   checkpoint's weights there, which the engines load in place of what they hold. Returns the version it is
   served as: `version` if one is given (the checkpoint's depth, which means the same in every process), or
@@ -3653,6 +3737,31 @@ class Channel
 - `def take(self) -> dict[str, float]` — What passed through since the last call: requests, tokens in and out, and throughput.
   `tokens_per_second` is everything generated over the time the channel was generating.
 - `def close(self) -> None`
+
+### `Connection`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
+
+```python
+class Connection
+```
+
+How servers are reached: a bearer token read from an environment variable (`token_env`) or a file
+(`token_file`), never written down; TLS verified against a CA bundle (`ca`), and a client certificate and its key
+(`certificate`, `key`) for servers that ask for one. Nothing: plain HTTP, no token.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `token_env` | `str \| None` | `None` |  |
+| `token_file` | `str \| None` | `None` |  |
+| `ca` | `str \| None` | `None` |  |
+| `certificate` | `str \| None` | `None` |  |
+| `key` | `str \| None` | `None` |  |
+
+**Methods**
+
+- `def token(self) -> str | None`
+- `def client(self, timeout: float = 600.0) -> httpx.AsyncClient` — A client that reaches servers so.
 
 ### `Engine`
 
@@ -3692,6 +3801,7 @@ class Generation
 | `tokens` | `list[int]` | required |  |
 | `logprobs` | `list[float]` | required | Of each sampled token, under the distribution it was sampled from. |
 | `finish_reason` | `str` | required | `stop` (a stop token, included in `tokens`) or `length`. |
+| `model` | `str \| None` | `None` | The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by the name it is served as. The recorder checks that it is the checkpoint it stamps the tokens with. |
 
 ### `Limits`
 
@@ -3709,6 +3819,158 @@ What a turn may take, in tokens: the deployment's hardware decides, and code abo
 | `thinking` | `int` | `1024` | Tokens of thinking per turn before it is closed by force. |
 | `answer` | `int` | `400` | Room for the answer after the thinking. |
 | `sequence` | `int \| None` | `None` | The longest turn (prompt and completion): the smaller of what the engines accept and what the trainer can train on. A long prompt leaves less room to think, so that every turn can be trained on. |
+
+### `RemoteChannel`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
+
+```python
+class RemoteChannel
+```
+
+One run's channel, sampled on servers elsewhere: what the recorder samples from (`Sampler`).
+
+Each turn asks for the checkpoint the run says the channel should serve (`wanted`), by its id as the model's name;
+or, where its server does not have it yet, the newest one before it that the server has, no more than `max_lag`
+checkpoints behind (`Serving.max_lag`, where the run says, as an eval does: 0). A server that answers that it does
+not have the model is asked for the one before, and for the newest again at the next look. A turn waits while no
+server has a checkpoint close enough, for `patience` seconds at most (then `NoReplica`). Every token is stamped with
+the depth of the checkpoint its answer names; an answer that names another model is refused, and the turn sampled
+again.
+
+The channel's servers are one URL (a router, a proxy, or a single server), or a list: a session's turns then go to
+one of those that answer and have a checkpoint close enough, worked out from the session's id alone, so that nothing
+is kept per session. What the run says and what each server has are asked again every `every` seconds.
+
+**Methods**
+
+- `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence[str], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0) -> None`
+- `@property def limits(self) -> Limits` — The profile's limits; the longest turn the trainer can train on, as the run says, unless they say one.
+- `@property def context_limit(self) -> int`
+- `@property def bound(self) -> int` — How many checkpoints behind what the channel should serve a sample may be.
+- `def name_of(self, said: Serving) -> str` — The model a server serves a checkpoint as: its id; the base model's name for none.
+- `def choices(self) -> list[Serving]` — The checkpoints a turn may sample from now, newest first: what the channel should serve, and those before it
+  no more than `bound` behind (a full checkpoint, which a server cannot serve under its own name, is none).
+- `def offered(self, address: str) -> Serving | None` — What a server would sample a turn from now: the newest of the `choices` it has.
+- `def server_of(self, session: str) -> str | None` — The server a session's turns go to now (none while none has a checkpoint close enough): of those that do,
+  the one a hash of the session and its address ranks first.
+- `async def refresh(self, *, now: bool = False) -> None` — Ask again what the channel should serve and what each server has (unless that was asked within `every`
+  seconds and `now` is not said). A server that does not answer is given no turn.
+- `async def reaches(self) -> bool` — Whether a server would take a turn now.
+- `async def weights(self, session: str) -> tuple[str | None, int]` — The checkpoint a session's next turn samples from (None: the base model) and the version its tokens are
+  stamped with: its depth.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
+  it any more (`NotLoaded`), answers for another, or does not answer (`Unreachable`).
+- `def servers(self) -> list[dict[str, JsonValue]]` — The servers it samples on, as last asked: each one's address, the checkpoint it would sample from now and its
+  depth, and how far that is behind what the channel should serve.
+- `def take(self) -> dict[str, float]` — What passed through since the last call, as `Channel.take` counts it.
+- `def close(self) -> None`
+
+### `RemoteEngine`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
+
+```python
+class RemoteEngine
+```
+
+An engine served elsewhere: a vLLM OpenAI-compatible server at `address` (or a router or a proxy in front of
+several), serving `model` under its own name. `Engine` over its API: a request names the adapter it samples from as
+its model (the base model's name for none), and an answer that names another is refused (`Unserved`), as is a model
+the server does not have (`NotLoaded`). Adapters are loaded and removed by name; the server must allow it
+(`VLLM_ALLOW_RUNTIME_LORA_UPDATING=True`) and read the path given on its own machine. Full weights cannot be served
+under a name of their own by the server: `load_weights` refuses.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `processes` | `Sequence[int]` | `()` |  |
+
+**Methods**
+
+- `def __init__(self, model: str = '', *, address: str, connection: Connection | None = None, client: httpx.AsyncClient | None = None, max_model_len: int | None = None) -> None`
+- `async def models(self, within: float = 2.0) -> dict[str, Any]` — The models the server has (`/v1/models`), by name; `Unreachable` if it does not answer `within` seconds.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
+  the logprob of each, how it ended, and the model the server says sampled it.
+- `async def load_adapter(self, name: str, path: str) -> None`
+- `async def remove_adapter(self, name: str) -> None`
+- `async def load_weights(self, path: str) -> None`
+- `async def sleep(self) -> None` — Free the server's accelerator (it must allow it: `VLLM_SERVER_DEV_MODE=1`).
+- `async def wake(self) -> None`
+- `def close(self) -> None`
+
+### `Route`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
+
+```python
+class Route
+```
+
+How a channel whose engines serve elsewhere is sampled: its model family's renderer, its limits, its base
+model's name, its servers (a router, a proxy, a server, or a list), how far behind a sample may be (`max_lag`), and
+how the servers are reached (`connection`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `renderer` | `'Renderer'` | required |  |
+| `model` | `str` | required |  |
+| `servers` | `tuple[str, ...]` | required |  |
+| `limits` | `Limits` | `field(default_factory=Limits)` |  |
+| `max_lag` | `int` | `MAX_LAG` |  |
+| `connection` | `Connection` | `field(default_factory=Connection)` |  |
+
+### `Routes`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/remote.py`
+
+```python
+class Routes
+```
+
+The routed channels of every run a runner plays (`RemoteChannel`), each made when first asked for, choosing from
+what that run says its channel serves (in `ledger`): implements the recorder's `Routes`.
+
+**Methods**
+
+- `def __init__(self, routes: Mapping[str, Route], ledger: Ledger, *, every: float | None = None, patience: float = 300.0) -> None`
+- `def routed(self, channel: str) -> bool`
+- `def channel(self, run: str, channel: str) -> RemoteChannel`
+- `async def reaches(self, run: str, channel: str) -> bool`
+- `def channels(self) -> dict[str, RemoteChannel]` — Every routed channel made so far, by its name within its run (`RUN/NAME`).
+- `def close(self) -> None`
+
+### `Sampler`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
+
+```python
+class Sampler(Protocol)
+```
+
+What the recorder samples from: a `Channel`, whose engines this process publishes to, or a channel sampled on
+servers elsewhere (`rollout_train.inference.remote.RemoteChannel`).
+
+**Methods**
+
+- `@property def name(self) -> str`
+- `@property def renderer(self) -> 'Renderer'`
+- `@property def limits(self) -> Limits`
+- `@property def context_limit(self) -> int`
+- `async def weights(self, session: str) -> tuple[str | None, int]` — The adapter (the checkpoint) a session's next turn samples from (None: the weights the engines hold), and
+  the version its tokens are stamped with.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
+  server is gone). `request` names the request, for whatever logs it.
+
+### `Unserved`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
+
+```python
+class Unserved(Exception)
+```
+
+The checkpoint a turn began with is not served where it is asked for (not loaded yet, dropped, or another
+answered), or the server cannot be reached: the turn is sampled again, from what is served then.
 
 ## `rollout_train.recorder`
 
@@ -3769,7 +4031,7 @@ Implements `ModelEndpoint` for one channel.
 
 **Methods**
 
-- `def __init__(self, recorder: Recorder, channel: Channel, sampling: SamplingParameters) -> None`
+- `def __init__(self, recorder: Recorder, channel: Sampler, sampling: SamplingParameters) -> None`
 - `def describe(self, session_id: str) -> CapabilityContract`
 - `def address(self, session_id: str, through: ModelEndpoint | None = None) -> ModelAddress` — Where a harness outside the run's own loop reaches this session, and the key that names it. Its samples
   go `through` an endpoint wrapping this one, if one is given (a runner's, which reports them to its hooks).
@@ -3786,12 +4048,18 @@ class Recorder
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `channels` | `Mapping[str, Channel]` | required |  |
+| `channels` | `Mapping[str, Channel]` | required | The channels whose engines this process publishes to, by name. |
 | `base_url` | `str \| None` | `None` | Where `rollout_train.recorder.compat` serves this recorder, as harnesses reach it (None: it is not served). |
+| `routes` | `Routes \| None` | `None` | The channels whose engines serve elsewhere: a binding names one within its run (`RUN/NAME`, `for_run`). |
 
 **Methods**
 
 - `def endpoint(self, binding: RecordedModel) -> 'RecordedEndpoint'`
+- `def for_run(self, run: str, binding: RunBinding) -> RunBinding` — A run's binding, with each recorded model on a routed channel named within the run (`RUN/NAME`), so that
+  its samples are of the checkpoints that run says its channel serves; the same binding if it names none.
+- `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled here: from a channel whose engines this
+  process publishes to, or from a routed channel whose servers have a checkpoint close enough to what the run
+  says it should serve.
 - `def export(self, session_id: str) -> list[Segment]` — The session's segments, oldest first (see the module's description).
 - `def sessions(self, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run exports, by slot.
 - `def forget(self, run_id: str) -> None`
@@ -3931,6 +4199,15 @@ class ChannelSpec
 | `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own. |
 | `answer_tokens` | `int \| None` | `None` |  |
 | `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
+| `max_lag` | `int` | `MAX_LAG` | For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`, each entry of `engines` a server's `address`): how many checkpoints behind what the channel should serve a sample may be, where its server does not have the newest yet. |
+| `via` | `str \| None` | `None` | For a channel whose engines serve elsewhere: the URL its runners send every request to (a router or a proxy in front of its servers); none: its servers' addresses. Its engine hosts load checkpoints at the addresses. |
+| `connection` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | How servers elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`, `key`. |
+
+**Methods**
+
+- `@property def routed(self) -> bool` — Whether its engines serve elsewhere (said by name: an engine's module is not imported to load a profile).
+- `def route(self, renderer: Any, sequence: int | None = None) -> Route` — How a runner samples it on its servers elsewhere; `sequence`, the trainer's longest turn, where this process
+  trains it.
 
 ### `EvalsSpec`
 
@@ -3973,8 +4250,11 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
 **Methods**
 
 - `def __init__(self, profile: Profile) -> None`
-- `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack, *, training: bool = True) -> 'Platform'` — Start everything (the trainer only with `training`), registering with `stack` how each thing is stopped
-  (the engines last).
+- `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack, *, training: bool = True, plays: Collection[str] | None = None) -> 'Platform'` — Start everything (the trainer only with `training`), registering with `stack` how each thing is stopped
+  (the engines last). With `plays`, a runner and nothing else (`rollout runner`): no run is registered in the
+  directory and no trainer is made; the runner plays those runs (by id), or with none named every run whose
+  channels it reaches, and the channels whose engines serve in this process follow what the one run named says
+  they should serve (`rollout_train.following`).
 - `@property def layout(self) -> str | None` — The layout the trained channel's engines load checkpoints in, if they are resharded.
 - `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
   cluster, else here.
@@ -3983,7 +4263,9 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
 - `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
 - `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
-  samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves.
+  samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves. A
+  channel whose engines serve elsewhere is served there: they follow what the training loop wrote down that it
+  serves (`rollout_train.serving`), and this returns the version given.
 
 ### `Profile`
 
@@ -4018,9 +4300,11 @@ class Profile
 - `@classmethod def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
   `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
   file has and a profile does not is an error: a misspelt guard would otherwise be no guard.
-- `async def open(self, *, training: bool = True) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
+- `async def open(self, *, training: bool = True, plays: Collection[str] | None = None) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
   `training` (an eval), no trainer is made: the trained channel's engines still load what the trainer's `start`
-  is served over.
+  is served over. With `plays`, a runner and nothing else (`rollout runner`): see `Platform.start`.
+- `async def engines(self) -> AsyncGenerator[dict[str, Channel]]` — The channels whose engines are servers elsewhere, as clients of the servers at their addresses, and nothing
+  else: what an engine host (`rollout engines`) loads checkpoints into. Closed on the way out.
 
 ### `TrainerSpec`
 

@@ -16,6 +16,7 @@ segments = recorder.sessions(run_id)             # by model slot: what each expo
 | Member | Does |
 |---|---|
 | `endpoint(binding)` | the model endpoint for a recorded binding. A binding that names no channel of the recorder raises `ValueError`. |
+| `routes`, `for_run(run, binding)`, `reaches(run, binding)` | the channels whose engines serve on other machines, each run's sampled from the checkpoints that run says it serves ([engines elsewhere](channels.md#engines-elsewhere)); a run's binding with each such channel named within the run (`RUN/NAME`), which an episode runner plays it with; and whether every recorded model of a binding can be sampled now, which it asks before claiming |
 | `export(session_id)`, `sessions(run_id)` | what one session exports, and what every slot of a run exports |
 | `publish(channel, adapter, path, version)` | serves new weights on a channel, and returns the version they are served as ([publishing weights](channels.md#publishing-weights)) |
 | `forget(run_id)` | drops everything kept of a run: its turns, its recorded results and the keys of its harnesses |
@@ -32,8 +33,11 @@ content and records the turn.
 
 - **A retried effect is not sampled twice.** A request whose `effect_id` was sampled returns the recorded result.
 - **The binding decides how it samples**: the temperature and `top_p` of its `SamplingParameters`.
-- **One turn, one set of weights.** The adapter and the version are read when the sample starts, and both of its
-  phases use them.
+- **One turn, one set of weights.** The adapter and the version are read when the sample starts (where the
+  channel's engines are elsewhere, the checkpoint the run says, or the newest close enough that the session's server
+  has), and both of its phases use them. Where the checkpoint is not served there after all, the server is gone, or an
+  answer names another checkpoint, the turn is sampled again from the start, three times at most: no token is stamped
+  with a version that did not sample it.
 - **No turn is longer than the channel's limit.** A long prompt leaves less room to think. A prompt that leaves no
   room to answer is refused with `ContextOverflow`, which callers compact on.
 - **The reply** is the parsed message, a finish reason (`tool_use` when it calls tools, `stop` when it ended on a

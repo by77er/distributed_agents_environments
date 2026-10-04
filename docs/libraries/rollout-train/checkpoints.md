@@ -45,7 +45,8 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   checkpoints continue its parent's depth and base.
 - **A run serves its newest checkpoint** on its channel, as the adapter named by its id (a full checkpoint, in place
   of the engines' weights: [full weights](#full-weights-and-merges)); the checkpoint before stays
-  loaded until the turns that began under it finish. Runs on other channels serve their own. When its channel names
+  loaded until the turns that began under it finish. It writes down that its channel serves it
+  ([what a channel should serve](channels.md#what-a-channel-should-serve)), so that engines on other machines follow. Runs on other channels serve their own. When its channel names
   a `reshard`, it serves the checkpoint's [resharded](#resharding) files, and waits for them.
 - **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
   and trainer state, of the checkpoints a run made, but the newest `recent` and every `every`-th by depth. Whatever

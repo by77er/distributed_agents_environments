@@ -25,6 +25,7 @@ machines.
 |---|---|---|
 | `runs/RUN/plans` | the fence the run's loop took | how its episodes are played from then on: a [`Plan`](../../guide/reference.md#plan), the program (each group's start is its row) and the [`RunBinding`](../rollout/README.md#run-specifications) |
 | `runs/RUN/groups` | group | its row, the start each of its episodes is given (`parameters`), and how many episodes it asks for (`episodes`) |
+| `runs/RUN/serving` | `CHANNEL/CHECKPOINT` | what each of its channels should serve from then on ([what a channel should serve](channels.md#what-a-channel-should-serve)): engine hosts load it into their servers, and runners ask for it by name |
 
 An episode is `GROUP/EPISODE`, numbered from 1 within its group. A group with a result (`runs/RUN/results`) asks for
 nothing more.
@@ -64,7 +65,9 @@ open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
   serves.
 - **What it serves.** A run whose plan's recorded models are all on channels its recorder serves, whose local
   imports are all among `imports` (the tool sets it has), and whose local pools are all among `pools` (the sandbox
-  pools it has). With `runs`, those runs only.
+  pools it has). With `runs`, those runs only. A channel whose engines are on other machines is served while one
+  of its servers has a checkpoint close enough to what the run says it should serve (`Recorder.reaches`), and the
+  run is played with the channel named within it (`Recorder.for_run`): the runner knows nothing of servers.
 - **Room in the pools.** An episode whose program declares sandboxes is claimed only while their pools have room
   for them: each pool's `capacity()` is asked once a look, and what the runner claims is counted against it as it
   goes ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)).
@@ -117,8 +120,11 @@ them. A runner whose newest beat is older than `STALE` (90 seconds) is taken to 
 An open profile's runner says, in each beat: its host, the run it serves, the run's directory, its machine
 (`rollout_train.machine`: memory, each GPU's memory and how busy, the disk the directory is on), its engines'
 processes and whether each is alive, and what each channel serves (adapter and version) with what passed through it
-since the beat before (requests, tokens, tokens a second, requests at once). The [monitor](monitor.md) shows
-machines, inference throughput and what is served from these beats.
+since the beat before (requests, tokens, tokens a second, requests at once); for a channel whose engines are on
+other machines, by its name within each run (`RUN/NAME`), what each of its servers would sample from and how far
+behind that is. The [monitor](monitor.md) shows machines, inference throughput and what is served from these
+beats. An engine host (`rollout engines`, kind `engines`) beats with the run it follows, its machine, and what each
+channel's servers serve ([what a channel should serve](channels.md#what-a-channel-should-serve)).
 
 ## The record
 
