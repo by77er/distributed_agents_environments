@@ -51,7 +51,7 @@ and tests read these events, never a runner's internals.
 | `effect.completed` | the effect finishes, however it finishes | `effect_id`, `status`, `payload` (the result, or the error's message), and `error_class` unless the status is `ok` |
 
 A model sample completes with the sample result: the canonical reply, the finish reason and the usage. Tokens and
-logprobs never appear in run events; a recorder keeps them ([recorder](../../rollout-train/recorder.md)).
+logprobs never appear in run events; the gateway keeps them ([the turn store](../../rollout-train/gateway.md#the-turn-store)).
 
 ### Messages
 

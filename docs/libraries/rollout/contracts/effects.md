@@ -77,8 +77,8 @@ keeps the guarantee ([tools](../../../guide/tools.md#after-a-crash)).
 A receiver that deduplicates is sent the `arguments_digest` so that it can tell a repeat from a different call: a
 tool set that finds a known `effect_id` with a different digest raises
 [`Conflict`](../../../guide/reference.md#conflict), because the code that ran again did not request the same effect.
-The helper `rollout_durable.database.recorded` does this for a tool set that writes to a database. The recorder
-looks a sample up by its `effect_id` alone.
+The helper `rollout_durable.database.recorded` does this for a tool set that writes to a database. The gateway
+looks a recorded turn up by its `effect_id` alone.
 
 ## Rules
 

@@ -93,7 +93,7 @@ class _Described:
 
 
 def serve(tool_set: ToolSet) -> Any:
-    """A Starlette application serving `tool_set` (needs the `monitor` extra's starlette)."""
+    """A Starlette application serving `tool_set` (needs the `http` extra's starlette)."""
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse, Response
@@ -160,7 +160,7 @@ def remote_tool_set(url: str) -> RemoteToolSet:
 
 
 def serve_pool(pool: Pool) -> Any:
-    """A Starlette application serving `pool` (needs the `monitor` extra's starlette)."""
+    """A Starlette application serving `pool` (needs the `http` extra's starlette)."""
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse, Response

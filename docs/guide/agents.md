@@ -116,9 +116,9 @@ separate model slot that the task declares.
 
 | Member | Meaning |
 |---|---|
-| `await sample(messages, *, tools=(), max_output_tokens=None, tool_choice=None)` | one assistant `Message` |
+| `await sample(messages, *, tools=(), max_output_tokens=None, tool_choice=None, links=())` | one assistant `Message`; `links` say how the request follows from earlier ones of the slot ([model endpoint](../libraries/rollout/contracts/model-endpoint.md#what-an-endpoint-is-asked)) |
 | `capabilities` | the slot's `CapabilityContract`: the context limit and the maximum output tokens |
-| `usage` | the latest sample's `Usage` (`context_used`, `context_limit`), or `None` before the first; for compaction decisions |
+| `usage` | the latest sample's `Usage` (`context_used`, `context_limit`, and `input_tokens` and `output_tokens` where the endpoint counts them), or `None` before the first; for compaction decisions |
 | `address()` | a `ModelAddress` (`base_url`, `api_key`, `model`) at which a harness that brings its own loop reaches this slot's model; raises `RuntimeError` when the endpoint is not served over HTTP |
 
 `sample` raises `ContractViolation` when `max_output_tokens` exceeds the contract. It retries an endpoint that

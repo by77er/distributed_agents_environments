@@ -107,7 +107,7 @@ asyncio.run(main())
 ```
 
 A run started by a runner also has lifecycle events: `run.created` at `seq = 0`, `tools.resolved` when it has
-tools, and one terminal event. A bare `LocalRunContext`, as above, has none of them.
+tools, `sandboxes.acquired` when its program declares sandboxes, and one terminal event. A bare `LocalRunContext`, as above, has none of them.
 
 ## The local runner
 
@@ -145,7 +145,7 @@ The handle's `context` is the run's `LocalRunContext`. Sending messages, cancell
 
 | Group | Types |
 |---|---|
-| Lifecycle | `run.created`, `tools.resolved`, `run.suspended`, `run.cancel_requested`, and one terminal event: `run.completed`, `run.failed` ([failures](../libraries/rollout/README.md#failures)) or `run.cancelled` |
+| Lifecycle | `run.created`, `tools.resolved`, `sandboxes.acquired`, `run.suspended`, `run.cancel_requested`, and one terminal event: `run.completed`, `run.failed` ([failures](../libraries/rollout/README.md#failures)) or `run.cancelled` |
 | Episode | `observation.recorded`, `reward.assigned` (`run.reward`, and `score`), `training.excluded`, `output.emitted` (`run.emit`) |
 | Effects | `effect.requested`, `effect.completed` with status `ok`, `failed` or `outcome_unknown` |
 | Messages | `message.received`, `turn.interrupted` |
