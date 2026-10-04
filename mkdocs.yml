@@ -96,7 +96,6 @@ nav:
       - "Tinker trainer and engine": implementations/rollout-tinker.md
       - "Qwen renderers": implementations/rollout-qwen.md
       - "Gemma renderers": implementations/rollout-gemma.md
-      - "Computers": implementations/rollout-computers.md
       - "verifiers environments": implementations/rollout-verifiers.md
   - Environments:
       - "Minecraft team": products/minecraft-team.md

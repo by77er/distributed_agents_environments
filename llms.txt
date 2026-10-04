@@ -5,7 +5,7 @@
 > episodes with token trajectories, the training loop, checkpoints and the ledger, evals, channels, the gateway that
 > records every turn, bridges, deployment profiles, the cluster config, the `rollout` command, the monitor), one
 > package per implementation (a durable runner, a vLLM engine, a LoRA trainer, Tinker's trainer and engine, Qwen and
-> Gemma renderers, computers, an OpenAI endpoint, an S3 blob store, RunPod pods) and two environments.
+> Gemma renderers, an OpenAI endpoint, an S3 blob store, RunPod pods) and two environments.
 > The documentation describes the code as built.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
@@ -73,7 +73,6 @@ the test suite and a block tagged `py` does not. The API reference is generated 
   what a profile names
 - [verifiers environments](docs/implementations/rollout-verifiers.md): Prime Intellect's verifiers environments,
   their harnesses reaching the gateway
-- [Computers](docs/implementations/rollout-computers.md): environment backends and shell and file tools
 
 ## Environments
 

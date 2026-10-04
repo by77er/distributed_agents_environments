@@ -10,7 +10,6 @@ requires-python = ">=3.13"
 dependencies = [
     "rollout[http]",
     "rollout-train[http,report]",
-    "rollout-computers",
     "rollout-openai",
     "rollout-s3",
     "rollout-runpod",
@@ -34,7 +33,6 @@ rollout-vllm = { workspace = true }
 rollout-lora = { workspace = true }
 rollout-qwen = { workspace = true }
 rollout-gemma = { workspace = true }
-rollout-computers = { workspace = true }
 rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
 rollout-runpod = { workspace = true }
@@ -83,7 +81,6 @@ extraPaths = [
     "implementations/rollout-lora/src",
     "implementations/rollout-qwen/src",
     "implementations/rollout-gemma/src",
-    "implementations/rollout-computers/src",
     "implementations/rollout-openai/src",
     "implementations/rollout-s3/src",
     "implementations/rollout-runpod/src",

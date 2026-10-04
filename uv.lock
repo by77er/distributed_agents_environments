@@ -13,7 +13,6 @@ members = [
     "gridworld",
     "minecraft-team",
     "rollout",
-    "rollout-computers",
     "rollout-gemma",
     "rollout-lora",
     "rollout-openai",
@@ -4823,21 +4822,6 @@ requires-dist = [
 provides-extras = ["http"]
 
 [[package]]
-name = "rollout-computers"
-version = "0.0.0"
-source = { editable = "implementations/rollout-computers" }
-dependencies = [
-    { name = "pillow" },
-    { name = "rollout" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pillow", specifier = ">=11" },
-    { name = "rollout", editable = "libraries/rollout" },
-]
-
-[[package]]
 name = "rollout-gemma"
 version = "0.0.0"
 source = { editable = "implementations/rollout-gemma" }
@@ -5023,7 +5007,6 @@ dependencies = [
     { name = "gridworld" },
     { name = "minecraft-team" },
     { name = "rollout", extra = ["http"] },
-    { name = "rollout-computers" },
     { name = "rollout-openai" },
     { name = "rollout-runpod" },
     { name = "rollout-s3" },
@@ -5067,7 +5050,6 @@ requires-dist = [
     { name = "gridworld", editable = "environments/gridworld" },
     { name = "minecraft-team", editable = "environments/minecraft" },
     { name = "rollout", extras = ["http"], editable = "libraries/rollout" },
-    { name = "rollout-computers", editable = "implementations/rollout-computers" },
     { name = "rollout-gemma", marker = "extra == 'gemma'", editable = "implementations/rollout-gemma" },
     { name = "rollout-lora", marker = "extra == 'gpu'", editable = "implementations/rollout-lora" },
     { name = "rollout-openai", editable = "implementations/rollout-openai" },

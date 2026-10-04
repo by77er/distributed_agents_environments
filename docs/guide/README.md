@@ -30,7 +30,6 @@ Beyond the guide:
 | For | Read |
 |---|---|
 | Runs that survive their process | [Durable runner](../implementations/rollout-durable/README.md) |
-| Computers for tasks: shell and file tools on an environment | [Computers](../implementations/rollout-computers.md) |
 | Long episodes in a context that fits any model | [Memory](../libraries/rollout/memory.md) |
 | Training: episode runners, episodes, the training loop, checkpoints, recorded channels | [Rollouts](../libraries/rollout-train/rollouts.md), [episodes](../libraries/rollout-train/episodes.md), [training](../libraries/rollout-train/training.md), [checkpoints](../libraries/rollout-train/checkpoints.md), [channels](../libraries/rollout-train/channels.md), [recorder](../libraries/rollout-train/recorder.md) |
 | What a profile names: an engine, a trainer, a model family's renderer | [vLLM engine](../implementations/rollout-vllm.md), [LoRA trainer](../implementations/rollout-lora.md), [Qwen renderers](../implementations/rollout-qwen.md), [Gemma renderers](../implementations/rollout-gemma.md) |
@@ -76,7 +75,6 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 | `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
 | `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |
 | `rollout_durable` | `rollout-durable` | `DurableRunner` |
-| `rollout_computers`, `rollout_computers.tools` | `rollout-computers` | `NamespaceEnvironments`, `LocalEnvironments`; `ComputerTools` |
 | `rollout_openai` | `rollout-openai` | `ResponsesEndpoint`, `codex_provider`, `ApiKey` |
 | `rollout_s3` | `rollout-s3` | `S3BlobStore` |
 | `rollout_vllm` | `rollout-vllm` | `VllmEngine` |

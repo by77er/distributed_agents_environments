@@ -202,7 +202,7 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | `models`, `model` | the declared model slots by name; `model` is `models["policy"]` ([agents](agents.md#the-model-interface)) |
 | `tools` | the imported tools: `specifications()`, `await call(name, arguments)`, `name in run.tools` ([tools](tools.md#imported-tools)) |
 | `sandbox(name)` | a sandbox the task or program declared, acquired for the run: its addresses, its environment, and its operations, each an effect ([sandboxes](../libraries/rollout/sandboxes.md)) |
-| `environments` | creates computers the run owns; `None` when the runner has no environment backend ([environments](../implementations/rollout-computers.md)) |
+| `environments` | creates computers the run owns; `None` when the runner has no environment service ([environments](#environments)) |
 | `blobs` | stores bytes for `Media` blocks; `None` when the runner has no blob store ([content](content.md#media-and-blobs)) |
 | `context_hints` | the task's `context_hints`, for the agent |
 | `now()` | the current time, as a `datetime` |
@@ -224,8 +224,8 @@ never draws, what its results say, a version, and perhaps a curriculum of its ow
 
 The computers below are another sense of the word. A task whose agent needs a computer creates one in `setup` with `await run.environments.create(specification)` and
 keeps the handle on `self`. Every operation on the handle is an effect. The runner destroys any environment the run
-still owns when the run ends. Handles, backends and the ready-made `ComputerTools` are described in
-[environments](../implementations/rollout-computers.md).
+still owns when the run ends. The computers come from the runner's environment service, an
+[`EnvironmentService`](reference.md#environmentservice) it is given (`LocalRunner(environments=...)`).
 
 ## State and determinism
 

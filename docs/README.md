@@ -50,7 +50,6 @@ Each implements one interface a library defines.
 | [Tinker trainer and engine](implementations/rollout-tinker.md) | Training and sampling at Thinking Machines: installing (the `tinker` extra), the key, the objective as Tinker's losses, what a checkpoint holds, serving its adapters here, costs |
 | [Qwen renderers](implementations/rollout-qwen.md) | The token formats of Qwen3.5 and Qwen3 |
 | [Gemma renderers](implementations/rollout-gemma.md) | The token format of Gemma 4 |
-| [Computers](implementations/rollout-computers.md) | Environment backends and the tools that act on them |
 | [verifiers environments](implementations/rollout-verifiers.md) | Prime Intellect's verifiers environments as environments here, their harnesses reaching the gateway |
 | [Models](guide/models.md), [Content](guide/content.md#media-and-blobs) | `rollout-openai` and `rollout-s3` are described in the guide |
 
@@ -78,7 +77,6 @@ Each implements one interface a library defines.
 | `implementations/rollout-tinker` | `rollout_tinker` | A trainer and an engine at Thinking Machines (Tinker); the `tinker` extra | `Trainer`, `Engine` |
 | `implementations/rollout-qwen` | `rollout_qwen` | The Qwen families' token formats | `Renderer` |
 | `implementations/rollout-gemma` | `rollout_gemma` | Gemma 4's token format | `Renderer` |
-| `implementations/rollout-computers` | `rollout_computers` | Computers for tasks, and the tools that act on them | `EnvironmentService` |
 | `implementations/rollout-openai` | `rollout_openai` | The OpenAI Responses API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
 | `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod (the pods API), and certificates for them from step-ca | |
