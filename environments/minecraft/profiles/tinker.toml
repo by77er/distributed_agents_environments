@@ -7,7 +7,7 @@
 # about $8 to $18 a step of 384 segments, $230 to $520 for a run as long as curriculum-9's 72 groups and 31 steps.
 directory = "~/.cache/rollout/runs/team-tinker"
 feed_runs = 80
-episodes_at_once = 6             # each a Paper server of its own: this machine's memory, not a GPU, is the limit
+episodes_at_once = 6             # each with a world of its own (`[pools.minecraft]`): memory, not a GPU, is the limit
 
 [ledger]                         # the database every run on this machine shares
 kind = "rollout_train.database:DatabaseLedger"
@@ -32,8 +32,9 @@ tokens_per_step = 16384          # about six updates a step (curriculum-9 made t
                                  # number) needs no pass for where the step starts, and halves the training's cost
 # weights = "peft"               # keep each adapter too (downloaded each step): to serve or merge it here
 
-[tools]
-minecraft = "minecraft_team.worlds:tools"
+[pools.minecraft]                # the worlds, each a Paper server: no more at once than this machine's memory holds
+kind = "minecraft_team.worlds:worlds"
+size = 6
 
 [memory]
 runs_gib = 6                     # each episode runs a Paper server
