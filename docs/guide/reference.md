@@ -733,11 +733,8 @@ class ModelSlot
 ```
 
 A model the task declares. The agent acts through `policy`; other slots (a simulated user, an opponent) are
-sampled by the task itself.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `trainable` | `bool` | `True` |  |
+sampled by the task itself. What serves each slot, and whether it is recorded for training, is the run's binding's
+to say.
 
 ### `Mount`
 

@@ -17,9 +17,8 @@ from rollout.harness.tools import DeclaredTool, collect_tools, error_result, exe
 @dataclass(frozen=True)
 class ModelSlot:
     """A model the task declares. The agent acts through `policy`; other slots (a simulated user, an opponent) are
-    sampled by the task itself."""
-
-    trainable: bool = True
+    sampled by the task itself. What serves each slot, and whether it is recorded for training, is the run's binding's
+    to say."""
 
 
 class Task:

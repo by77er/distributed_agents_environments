@@ -184,7 +184,7 @@ async def test_ending_with_tool_results_is_valid() -> None:
 class SimulatedUser(Task):
     """A second model inside the environment: the task samples the frozen `user` slot itself."""
 
-    models = {"policy": ModelSlot(), "user": ModelSlot(trainable=False)}
+    models = {"policy": ModelSlot(), "user": ModelSlot()}
 
     async def start(self, run: RunContext) -> Observation:
         return Observation("Hello, I need help.")
