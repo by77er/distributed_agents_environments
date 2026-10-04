@@ -93,3 +93,4 @@ typeCheckingMode = "strict"
 testpaths = ["tests", "environments"]
 asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
+pythonpath = ["."]  # (so that `tests.…` imports the shared test helpers, however the tests are collected)
