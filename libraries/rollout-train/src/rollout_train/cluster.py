@@ -23,7 +23,7 @@ import os
 import re
 import tomllib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -495,8 +495,6 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         pool = SharedPool()
     capabilities = kind.capabilities
     if "max_logprobs" in said.table:
-        from dataclasses import replace
-
         capabilities = replace(capabilities, top_logprobs=said.whole("max_logprobs", least=0))
     settings = said.rest()
     if unknown := sorted(set(settings) - set(kind.fields)):
@@ -559,7 +557,6 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
         runs = settings.get("trainer", "lora")
         if runs not in ("lora", "full"):
             raise ClusterError(f"{where} trainer is lora or full, the trainer its pods run (not {runs!r})")
-    from dataclasses import replace
 
     provider = replace(provider, settings=settings)
     return replace(provider, capabilities=provider.runs.capabilities)
