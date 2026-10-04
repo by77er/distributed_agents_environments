@@ -18,7 +18,7 @@ import httpx
 from rollout.curriculum import Curriculum
 from rollout.environment import Row
 from rollout_train.checkpoints import Checkpoint, checkpoints_in
-from rollout_train.ledger import Ledger, of_run
+from rollout_train.ledger import of_run
 from rollout_train.record import Result, Trained, results, trained
 from rollout_train.registry import registry_of, run_of
 
@@ -211,16 +211,14 @@ async def report(
     rows: Sequence[Row],
     webhook: str | None,
     *,
-    ledger: Ledger | None = None,
     run: str | None = None,
     watch: bool = False,
     interval: float = 30.0,
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
     `watch`, again after every new group, until interrupted. The run's results, steps and checkpoints are read from
-    `ledger` (by default the run's own, wherever its directory says it is); the run is `run` (its id), by default the
-    one in the directory."""
-    ledger = ledger or of_run(directory)
+    its ledger, wherever its directory says it is; the run is `run` (its id), by default the one in the directory."""
+    ledger = of_run(directory)
     entry = await run_of(directory, ledger, registry_of(ledger))
     run, title = run or entry.id, entry.name
     reported: tuple[int, int] = (-1, -1)
