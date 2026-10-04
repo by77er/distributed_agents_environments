@@ -13,7 +13,8 @@ dataset's name and id); a database ledger's is its `registry`. `DatabasePresence
 `presence`. `DatabaseLaunches` holds the runs asked for (`rollout_train.launches`) in another, `launches`; a database
 ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of each run's settings
 (`rollout_train.settings`) in another, `run_settings`: a row per run, changed in place; a database ledger's is its
-`desired_settings`.
+`desired_settings`. `DatabaseLeases` holds the sandbox pools' leases (`rollout_train.sandboxes`) in another,
+`sandboxes`: a row per lease; a database ledger's is its `sandboxes`.
 """
 
 import asyncio
@@ -27,6 +28,7 @@ from typing import Any
 import sqlalchemy as sa
 from pydantic import JsonValue
 
+from rollout.harness.sandboxes import Lease
 from rollout_durable.database import Connection, Database, fetch_all, fetch_one, sql
 from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, new_launch
 from rollout_train.ledger import Fence, Fenced, Ledger
@@ -93,6 +95,15 @@ RUN_SETTINGS = sa.Table(
     sa.Column("run", sa.Text, primary_key=True),
     sa.Column("settings", sa.Text, nullable=False),
     sa.Column("changed", sa.Float(), nullable=False),
+)
+
+
+SANDBOXES = sa.Table(
+    "sandboxes",
+    METADATA,
+    sa.Column("key", sa.Text, primary_key=True),
+    sa.Column("pool", sa.Text, nullable=False),
+    sa.Column("lease", sa.Text, nullable=False),
 )
 
 
@@ -179,6 +190,11 @@ class DatabaseLedger:
     def desired_settings(self) -> "DatabaseDesiredSettings":
         """What is wanted of each run's settings, in this ledger's database."""
         return DatabaseDesiredSettings(self.database)
+
+    @property
+    def sandboxes(self) -> "DatabaseLeases":
+        """The sandbox pools' leases, in this ledger's database."""
+        return DatabaseLeases(self.database)
 
     def close(self) -> None:
         self.database.close()
@@ -374,6 +390,43 @@ class DatabaseDesiredSettings:
             return now
 
         return await asyncio.to_thread(self.database.write, changed, exclusive=f"run_settings:{run}")
+
+
+class DatabaseLeases:
+    """`Leases` (`rollout.harness.sandboxes`) in the `sandboxes` table of a database."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def get(self, key: str) -> Lease | None:
+        def row(connection: Connection) -> tuple[Any, ...] | None:
+            return fetch_one(connection, "SELECT lease FROM sandboxes WHERE key = :key", {"key": key})
+
+        found = await asyncio.to_thread(self.database.read, row)
+        return Lease.model_validate_json(found[0]) if found else None
+
+    async def put(self, lease: Lease) -> None:
+        def written(connection: Connection) -> None:
+            sql(
+                connection,
+                "INSERT INTO sandboxes (key, pool, lease) VALUES (:key, :pool, :lease) "
+                "ON CONFLICT (key) DO UPDATE SET pool = excluded.pool, lease = excluded.lease",
+                {"key": lease.key, "pool": lease.pool, "lease": lease.model_dump_json()},
+            )
+
+        await asyncio.to_thread(self.database.write, written, exclusive=f"sandboxes:{lease.key}")
+
+    async def delete(self, key: str) -> None:
+        def deleted(connection: Connection) -> None:
+            sql(connection, "DELETE FROM sandboxes WHERE key = :key", {"key": key})
+
+        await asyncio.to_thread(self.database.write, deleted, exclusive=f"sandboxes:{key}")
+
+    async def all(self) -> list[Lease]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            return fetch_all(connection, "SELECT lease FROM sandboxes ORDER BY key")
+
+        return [Lease.model_validate_json(lease) for (lease,) in await asyncio.to_thread(self.database.read, rows)]
 
 
 def _runs(connection: Connection) -> list[Entry]:

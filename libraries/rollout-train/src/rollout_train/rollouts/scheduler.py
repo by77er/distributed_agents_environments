@@ -13,11 +13,17 @@ a runner beats every few seconds (`rollout_train.presence`), so one whose machin
 claimed is claimed again by whoever has room. An episode its runner cut short by closing is noted
 (`runs/RUN/interrupted`) and claimed again too. Several runners, on one machine or many, share the work the same way:
 which machine plays a group's episodes is only a matter of where runners are.
+
+A run's sandboxes (`rollout.harness.sandboxes`) are acquired under its claim's key, `RUN/GROUP/EPISODE/ATTEMPT`: a
+retried acquire gets the same sandbox, a new attempt a new one, and a sandbox's lease ends with the claim
+(`rollout_train.sandboxes`). A runner claims an episode only while the pools of the sandboxes its program declares
+have room for them.
 """
 
 import asyncio
 import contextlib
 import time
+from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -26,9 +32,11 @@ from pydantic import JsonValue
 
 from rollout.contracts import RunEvent
 from rollout.harness.blobs import Blobs
-from rollout.harness.runner import ProgramReference, RunBinding, Runner, RunSpecification, with_row
+from rollout.harness.remote import remote_pool
+from rollout.harness.runner import ProgramReference, RunBinding, Runner, RunSpecification, instantiate, with_row
+from rollout.harness.sandboxes import Pool, PoolBinding
 from rollout_train.ledger import Fence, Ledger
-from rollout_train.presence import Presence, alive
+from rollout_train.presence import Beat, Presence, alive
 from rollout_train.record import GROUPS, RESULTS, runs_in, table
 from rollout_train.recorder import Segment
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, assemble, loaded, stored
@@ -43,6 +51,22 @@ CLOSED = "its runner closed"
 def runner_scope(name: str) -> str:
     """The scope whose fence a runner holds while it plays: a runner started again takes it anew."""
     return f"runners/{name}"
+
+
+def holds(
+    claim: Mapping[str, Any],
+    key: str,
+    cut: Collection[str],
+    fences: Mapping[str, int],
+    beats: Mapping[str, Beat] | None,
+    me: str | None = None,
+) -> bool:
+    """Whether the claim made under `key` holds: not noted as cut short, made under its runner's newest fence, and
+    (where runners beat) its runner beating; a runner's own claims (`me`) hold for it without its beat."""
+    runner = str(claim["runner"])
+    if key in cut or fences.get(runner_scope(runner)) != claim["fence"]:
+        return False
+    return beats is None or runner == me or alive(beats.get(runner))
 
 
 @dataclass(frozen=True)
@@ -115,10 +139,12 @@ class Open:
 @dataclass
 class EpisodeRunner:
     """Claims the episodes runs ask for in `ledger` and plays them on `runner`, at most `places` at once: those of the
-    runs it can serve (whose models its recorder's channels serve and whose imports are among `imports`), and of `runs`
-    only, if given. `guard` is called before claiming and raises to wait (a machine short of memory, say). With
-    `presence`, it beats every `beating` seconds, with what `about` says of its machine besides its places and how
-    many it plays, and a claim holds only while its runner beats."""
+    runs it can serve (whose models its recorder's channels serve, whose imports are among `imports` and whose local
+    pools are among `pools`), and of `runs` only, if given. An episode is claimed only while the pools of its
+    sandboxes have room for them, and its run's sandboxes are leased under its claim. `guard` is called before
+    claiming and raises to wait (a machine short of memory, say). With `presence`, it beats every `beating` seconds,
+    with what `about` says of its machine besides its places, how many it plays and how full its pools are, and a
+    claim holds only while its runner beats."""
 
     name: str
     ledger: Ledger
@@ -133,6 +159,8 @@ class EpisodeRunner:
     presence: Presence | None = None
     about: Callable[[], Mapping[str, JsonValue]] | None = None
     """What the runner says of its machine in each beat (called in a thread: it may measure)."""
+    pools: Mapping[str, Pool] = field(default_factory=dict[str, Pool])
+    """The sandbox pools its runner has, by the name a binding gives as `local`."""
     every: float = 0.5
     """Seconds between looks for work while nothing ends."""
     beating: float = 15.0
@@ -140,6 +168,8 @@ class EpisodeRunner:
     _fence: Fence | None = None
     _playing: dict[str, asyncio.Task[None]] = field(default_factory=dict[str, asyncio.Task[None]])
     _news: asyncio.Event = field(default_factory=asyncio.Event)
+    _kinds: dict[tuple[str, int], Counter[str]] = field(default_factory=dict[tuple[str, int], Counter[str]])
+    """The kinds of sandbox each group's program declares, and how many of each."""
 
     async def serve(self) -> None:
         """Claim and play episodes until cancelled; what is playing then is cut short and noted."""
@@ -152,8 +182,18 @@ class EpisodeRunner:
             while True:
                 room = self.places - len(self._playing)
                 if room > 0 and self._fits():
-                    for each in (await self.open())[:room]:
-                        await self._claim(each)
+                    free: dict[str, int] = {}  # each pool's room, asked once a look
+                    plans: dict[str, Plan] = {}  # each run's plan, read once a look
+                    for each in await self.open():
+                        if room == 0:
+                            break
+                        needs = await self._needs(each, plans)
+                        if not await self._room(needs, free):
+                            continue
+                        if await self._claim(each):
+                            room -= 1
+                            for pool, count in needs.items():
+                                free[pool] -= count
                 self._news.clear()
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._news.wait(), self.every)
@@ -178,7 +218,10 @@ class EpisodeRunner:
     async def _beat(self) -> None:
         assert self.presence is not None
         said: Mapping[str, JsonValue] = await asyncio.to_thread(self.about) if self.about is not None else {}
-        await self.presence.beat(self.name, {**said, "places": self.places, "playing": len(self._playing)})
+        about: dict[str, JsonValue] = {**said, "places": self.places, "playing": len(self._playing)}
+        if self.pools:
+            about["pools"] = {name: (await pool.capacity()).to_json() for name, pool in self.pools.items()}
+        await self.presence.beat(self.name, about)
 
     async def open(self) -> list[Open]:
         """The episodes nobody plays now, of the runs this runner serves, oldest group first."""
@@ -199,11 +242,8 @@ class EpisodeRunner:
             attempts: dict[str, list[tuple[int, bool]]] = {}  # each episode's attempts: (attempt, whether it holds)
             for key, claim in claims.items():
                 group, number, attempt = key.split("/")
-                made = _mapping(claim)
-                runner = str(made["runner"])
-                holds = key not in cut and fences.get(runner_scope(runner)) == made["fence"]
-                holds = holds and (beats is None or runner == self.name or alive(beats.get(runner)))
-                attempts.setdefault(f"{group}/{number}", []).append((int(attempt), holds))
+                held = holds(_mapping(claim), key, cut, fences, beats, self.name)
+                attempts.setdefault(f"{group}/{number}", []).append((int(attempt), held))
             for key, group in groups.items():
                 record = _mapping(group)
                 count = record.get("episodes")
@@ -221,7 +261,46 @@ class EpisodeRunner:
     def _serves(self, played: Plan) -> bool:
         channels = {binding.recorded.channel for binding in played.binding.models.values() if binding.recorded}
         local = {binding.local for binding in played.binding.imports.values() if binding.local}
-        return channels <= set(self.recorder.channels) and local <= set(self.imports)
+        pools = {binding.local for binding in played.binding.pools.values() if binding.local}
+        return channels <= set(self.recorder.channels) and local <= set(self.imports) and pools <= set(self.pools)
+
+    async def _needs(self, each: Open, plans: dict[str, Plan]) -> Counter[str]:
+        """The sandboxes an episode's run will acquire, as how many from each pool (by its binding: a local name or
+        a URL). `plans` keeps the runs' plans, as read."""
+        if each.run not in plans:
+            written = await self.ledger.read(table(each.run, PLANS))
+            plans[each.run] = Plan.from_json(_mapping(written[max(written, key=int)]))
+        played = plans[each.run]
+        if not played.binding.pools:
+            return Counter[str]()
+        kinds = self._kinds.get((each.run, each.group))
+        if kinds is None:
+            group = _mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
+            try:
+                program = instantiate(with_row(played.program, group["parameters"]))
+                kinds = Counter(spec.kind for spec in program.sandboxes().values())
+            except Exception:  # (a program that cannot be made fails when its run starts: an episode like any other)
+                kinds = Counter[str]()
+            self._kinds[(each.run, each.group)] = kinds
+        needs: Counter[str] = Counter()
+        for kind, count in kinds.items():
+            binding = played.binding.pools.get(kind)
+            if binding is not None:
+                needs[_named(binding)] += count
+        return needs
+
+    async def _room(self, needs: Mapping[str, int], free: dict[str, int]) -> bool:
+        """Whether every pool has room for what is needed of it (`free` keeps each pool's room, as asked)."""
+        for name, count in needs.items():
+            if name not in free:
+                pool = self.pools.get(name) or (remote_pool(name) if name.startswith(("http://", "https://")) else None)
+                try:
+                    free[name] = (await pool.capacity()).free if pool is not None else 0
+                except Exception:  # (a pool that cannot be asked has no room now; asked again at the next look)
+                    free[name] = 0
+            if free[name] < count:
+                return False
+        return True
 
     def _fits(self) -> bool:
         if self.guard is None:
@@ -232,15 +311,16 @@ class EpisodeRunner:
             return False
         return True
 
-    async def _claim(self, each: Open) -> None:
+    async def _claim(self, each: Open) -> bool:
         assert self._fence is not None
         key = f"{each.group}/{each.number}/{each.attempt}"
         claim: dict[str, JsonValue] = {"runner": self.name, "fence": self._fence.number, "at": round(time.time(), 1)}
         if not await self.ledger.append(table(each.run, CLAIMS), key, claim, self._fence):
-            return  # another runner claimed this attempt first
+            return False  # another runner claimed this attempt first
         task = asyncio.create_task(self._play(each, key))
         self._playing[key] = task
         task.add_done_callback(lambda _: self._done(key))
+        return True
 
     def _done(self, key: str) -> None:
         self._playing.pop(key, None)
@@ -254,7 +334,7 @@ class EpisodeRunner:
         specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=played.binding)
         labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
         try:
-            handle = await self.runner.start(specification, labels=labels)
+            handle = await self.runner.start(specification, labels=labels, lease=f"{each.run}/{key}")
         except Exception as error:  # a run that cannot start is a failed episode like any other
             detail = f"{type(error).__name__}: {error}"
             await self._ended(each, Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail), [])
@@ -310,6 +390,11 @@ async def playing(runner: EpisodeRunner) -> AsyncGenerator[None]:
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+def _named(binding: PoolBinding) -> str:
+    """A pool as a binding names it: its local name, or its URL."""
+    return binding.local or str(binding.url)
 
 
 def _mapping(record: JsonValue) -> dict[str, Any]:

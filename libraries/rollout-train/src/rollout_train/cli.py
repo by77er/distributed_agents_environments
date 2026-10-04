@@ -10,6 +10,7 @@ rollout dataset make RULE           make a dataset: examples chosen from runs' e
 rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`
+rollout pool FACTORY                serve a pool of an environment's sandboxes over HTTP: FACTORY makes their provider
 
 `rollout COMMAND --help` lists each command's options.
 """
@@ -86,7 +87,7 @@ async def _train(
     async with described.open() as platform:
         assert platform.trainer is not None
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
-        binding = binding_for(offered, channel, platform.tool_bindings)
+        binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
         wanting = desired_settings_of(platform.ledger)
 
         async def scheduled(name: str, every: int, episodes: int) -> Schedule | None:
@@ -170,13 +171,43 @@ async def _evaluate(
                 played, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
                 base=described.channels[channel].model, channel=channel,
                 directory=described.directory / "checkpoints", publish=platform.publish, episodes=episodes,
-                binding=binding_for(played, channel, platform.tool_bindings), started=started,
+                binding=binding_for(played, channel, platform.tool_bindings, platform.pool_bindings),
+                started=started,
                 reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
             )  # fmt: skip
     finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
         for fetched in ("bases", "checkpoints", "resharding"):
             await asyncio.to_thread(shutil.rmtree, described.directory / fetched, ignore_errors=True)
     print(f"{suite_name}: solved {said['solved']} of {said['played']} episodes (mean reward {said['reward']})")
+
+
+async def _pool(factory: str, directory: Path, where: str | None, name: str | None, host: str, port: int) -> None:
+    import socket
+
+    import uvicorn
+
+    from rollout.harness.remote import serve_pool
+    from rollout.harness.sandboxes import MemoryLeases, SandboxPool
+    from rollout_train.presence import presence_of
+    from rollout_train.sandboxes import keep, leases_of
+
+    provider = named(factory)(directory)
+    ledger = _ledger_at(where) if where else None
+    leases = (leases_of(ledger) if ledger is not None else None) or MemoryLeases()
+    pool = SandboxPool(provider, name=name or f"{provider.kind}@{socket.gethostname()}", leases=leases)
+    keeping = (
+        asyncio.ensure_future(keep(pool, ledger, presence_of(ledger), beat_as=f"pools/{pool.name}"))
+        if ledger is not None
+        else None
+    )
+    server = uvicorn.Server(uvicorn.Config(serve_pool(pool), host=host, port=port, log_level="warning"))
+    try:
+        await server.serve()
+    finally:
+        if keeping is not None:
+            keeping.cancel()
+            await asyncio.gather(keeping, return_exceptions=True)
+        await pool.close()
 
 
 async def _suite(
@@ -260,7 +291,7 @@ async def _check(
         described = dataclasses.replace(loaded, trainer=None, name=name or scratch.name)  # (the base model, untrained)
         channel = loaded.trainer.channel if loaded.trainer else next(iter(loaded.channels))
         async with described.open() as platform:
-            binding = binding_for(offered, channel, platform.tool_bindings)
+            binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
             started: dict[str, Any] = {"environment": environment, "profile": str(profile), "blobs": platform.blobs_at}
             started["directory"] = str(await asyncio.to_thread(scratch.absolute))
             for each in await played(
@@ -744,6 +775,17 @@ def main() -> None:
     serving.add_argument("--directory", type=Path, default=Path("."))
     serving.add_argument("--host", default="127.0.0.1")
     serving.add_argument("--port", type=int, default=8700)
+    pooling = commands.add_parser("pool", help="serve a pool of sandboxes over HTTP")
+    pooling.add_argument("factory", help="`module:name` of what makes the sandboxes' provider, called with --directory")
+    pooling.add_argument("--directory", type=Path, default=Path("."))
+    pooling.add_argument(
+        "--ledger",
+        help="keep the leases beside this ledger, ending with their claims: a run's directory, a ledger's "
+        "directory, or a database's URL (without it, they are kept in the process, and end only when released)",
+    )
+    pooling.add_argument("--name", help="what the pool is called among those sharing the ledger (KIND@HOST)")
+    pooling.add_argument("--host", default="127.0.0.1")
+    pooling.add_argument("--port", type=int, default=8710)
     arguments = parser.parse_args()
     if arguments.command == "train":
         work = _train(
@@ -804,6 +846,10 @@ def main() -> None:
     if arguments.command == "checkpoints":
         asyncio.run(_checkpoints(arguments.ledger))
         return
+    if arguments.command == "pool":
+        work = _pool(arguments.factory, arguments.directory, arguments.ledger, arguments.name, arguments.host,
+                     arguments.port)  # fmt: skip
+        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "ledger":
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))
         return

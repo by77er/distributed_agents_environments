@@ -1,12 +1,13 @@
-"""A deployment, described: the channels and the engines behind them, the trainer, the runner, where tool sets live.
+"""A deployment, described: the channels and the engines behind them, the trainer, the runner, where tool sets and
+sandbox pools live.
 
 Whoever deploys writes this down once (a TOML file, or the dataclasses below) and opens it; whoever trains gets the
 `policies`, a `trainer` and a way to `publish` checkpoints, while a runner plays the episodes the run asks for in the
 ledger, and never learns what stands behind them. Scaling is a change here: more engines behind a
-channel, a durable runner instead of an in-process one, a tool set at a URL instead of in this process.
+channel, a durable runner instead of an in-process one, a tool set or a pool at a URL instead of in this process.
 
-Engines, renderers, the trainer and tool sets are named as `module:name`, and what the profile says of each is
-passed to it: this module knows no engine and no trainer. docs/guide/deploying.md describes the file.
+Engines, renderers, the trainer, tool sets and sandbox providers are named as `module:name`, and what the profile says
+of each is passed to it: this module knows no engine and no trainer. docs/guide/deploying.md describes the file.
 """
 
 import asyncio
@@ -25,6 +26,7 @@ from pydantic import JsonValue
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
+from rollout.harness.sandboxes import MemoryLeases, Pool, PoolBinding, SandboxPool
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
@@ -39,6 +41,7 @@ from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
 from rollout_train.resharding import connect, disconnect, on_ray, reshard
 from rollout_train.rollouts.scheduler import EpisodeRunner
+from rollout_train.sandboxes import keep, leases_of
 from rollout_train.stores import location, opened
 
 __all__ = ["ChannelSpec", "EvalsSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
@@ -131,6 +134,9 @@ class Profile:
     """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
     """Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`."""
+    pools: Mapping[str, str | Mapping[str, Any]] = field(default_factory=dict[str, str | Mapping[str, Any]])
+    """Each sandbox pool by the kind of sandbox it serves: a URL, or `module:name` of the provider that makes them,
+    called with `directory`; or a table whose `kind` is that and whose other entries are passed to it too."""
     ledger: Mapping[str, Any] = field(default_factory=dict[str, Any])
     """Where the run's tables and the checkpoints are kept (`rollout_train.ledger.opened`): `{"directory":
     …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database
@@ -179,7 +185,10 @@ class Profile:
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
         evals = _only(_table(described, "evals"), "evals", "suite", "every", "episodes")
-        known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs", "episodes_at_once", "ray")
+        known = (
+            "directory", "ledger", "runner", "serve", "address", "tools", "pools", "feed_runs", "episodes_at_once",
+            "ray",
+        )  # fmt: skip
         top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
         if isinstance(top.get("ledger"), str):  # (`ledger = "path"`: a directory of files)
@@ -247,6 +256,8 @@ class Platform:
         self.trainer: Trainer | None = None
         self.tool_bindings: dict[str, ToolBinding] = {}
         """Where a run finds each tool set the profile names (for a run's binding)."""
+        self.pool_bindings: dict[str, PoolBinding] = {}
+        """Where a run acquires each kind of sandbox the profile names a pool for (for a run's binding)."""
         self.blobs: Blobs
         """Where episodes' trajectories and events, and checkpoints' files, are kept."""
         self.blobs_at: dict[str, Any] = {}
@@ -321,17 +332,25 @@ class Platform:
             tool_sets[name] = named(where)(directory)
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
+        pools = await self._pools(stack)
         runner: Runner
         if profile.runner == "durable":
             from rollout_durable import DurableRunner
 
             runner = DurableRunner(
-                directory / "runs", recorder=self.recorder, tool_sets=tool_sets, hooks=[feed], blobs=self.blobs
+                directory / "runs",
+                recorder=self.recorder,
+                tool_sets=tool_sets,
+                pools=pools,
+                hooks=[feed],
+                blobs=self.blobs,
             )
         elif profile.runner == "local":
             from rollout.local import LocalRunner
 
-            runner = LocalRunner(recorder=self.recorder, tool_sets=tool_sets, hooks=[feed], blobs=self.blobs)
+            runner = LocalRunner(
+                recorder=self.recorder, tool_sets=tool_sets, pools=pools, hooks=[feed], blobs=self.blobs
+            )
         else:
             raise ValueError(f"runner is {profile.runner!r}: it is local or durable")
         await runner.launch()
@@ -345,6 +364,7 @@ class Platform:
             self.blobs,
             places=profile.episodes_at_once,
             imports=list(tool_sets),
+            pools=pools,
             runs=self._runs,
             hooks=[feed],
             guard=_needs(profile.runs_gib, "to run more episodes"),
@@ -359,6 +379,25 @@ class Platform:
         if profile.serve:
             _background(stack, self._serve(profile.serve))
         return self
+
+    async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
+        """The pools the profile names that live in this process, each with its keeper; the rest are bound by URL.
+        A pool's leases are kept beside the ledger, under a name of this machine and run."""
+        pools: dict[str, Pool] = {}
+        directory = self.profile.directory
+        for kind, where in self.profile.pools.items():
+            if isinstance(where, str) and where.startswith(("http://", "https://")):
+                self.pool_bindings[kind] = PoolBinding(url=where)
+                continue
+            options = {"kind": where} if isinstance(where, str) else dict(where)
+            provider = named(str(options.pop("kind")))(directory, **options)
+            name = f"{kind}@{socket.gethostname()}/{directory.name}"
+            pool = SandboxPool(provider, name=name, leases=leases_of(self.ledger) or MemoryLeases())
+            stack.push_async_callback(pool.close)  # (after the runner: what its runs hold is released first)
+            _background(stack, keep(pool, self.ledger, presence_of(self.ledger)))
+            pools[kind] = pool
+            self.pool_bindings[kind] = PoolBinding(local=kind)
+        return pools
 
     @property
     def layout(self) -> str | None:
