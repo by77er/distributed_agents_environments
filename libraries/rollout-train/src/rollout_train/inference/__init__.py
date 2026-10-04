@@ -5,8 +5,8 @@
   weights are published to it.
 - `Engine`: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` runs vLLM in this process's care;
   `RemoteEngine` is a vLLM server elsewhere, over its OpenAI-compatible API (`remote`).
-- `remote`: `RemoteChannel`, one run's channel sampled on servers elsewhere as a runner samples it, each request naming
-  the checkpoint it samples from; the servers are `CheckpointServer`s.
+- `remote`: `RemoteChannel`, one run's channel sampled on servers elsewhere as the gateway samples it, each request
+  naming the checkpoint it samples from; the servers are `CheckpointServer`s.
 - `hosts`: `EngineHost`, one replica's engines as a Ray actor that follows what the runs bound to it serve, and
   `HostServer`, a `CheckpointServer` over its handle.
 """

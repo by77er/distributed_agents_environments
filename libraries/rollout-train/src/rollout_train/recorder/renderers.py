@@ -1,7 +1,7 @@
 """Renderers: how a model family's tokens encode canonical content, pluggable per family.
 
 A `Renderer` turns canonical messages and tool specifications into prompt tokens, says how thinking is delimited,
-and parses sampled tokens back into a canonical message (reasoning, text, tool calls). The recorder and trainers
+and parses sampled tokens back into a canonical message (reasoning, text, tool calls). The gateway and trainers
 depend only on this protocol; a model family is supported by a function that makes its renderer from a checkpoint's
 name (`rollout_qwen` has two), usually a `ChatTemplateRenderer` (the tokenizer's chat template) with that family's
 `ToolCallFormat` and `ThinkingFormat`. A deployment's profile names the function.

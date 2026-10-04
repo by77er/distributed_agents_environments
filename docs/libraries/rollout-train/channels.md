@@ -194,7 +194,7 @@ an adapter of that name.
 down), a CA bundle, a client certificate. A server must give logprobs of the distribution it sampled from
 (`--logprobs-mode processed_logprobs`), as `VllmEngine` does.
 
-A `RemoteChannel` is one run's channel as a runner samples it: what the gateway samples from in place of a `Channel`
+A `RemoteChannel` is one run's channel as the gateway samples it, in place of a `Channel`
 (`Sampler`: a name, a renderer, limits, a context limit, `weights(session)` and `generate`). Its servers are one URL
 (a router, a proxy, a server) or a list, of URLs or of any `CheckpointServer` (`models()` and `generate` by
 checkpoint name: `RemoteEngine`, or an engine host's `HostServer`). Every `every` seconds (2) it reads every checkpoint the run has said the
@@ -211,9 +211,10 @@ channel serves (`serving_of`) and asks each server which models it has; then:
 - **A turn waits** while no server has a checkpoint close enough, for five minutes at most (`NoReplica`); a server that
   does not answer is given no turn until it does.
 
-`Routes` holds the channels of every run a runner plays whose engines are elsewhere, each made when first asked for; a
-recorder with `routes` samples a binding's channel named within its run (`RUN/NAME`) from them ([recorder](recorder.md)).
-`max_lag` is 1 unless a profile says otherwise: the checkpoint before, which a server serves while it loads the newest.
+`Routes` holds the channels whose engines are elsewhere of every run the gateway samples, each made when first asked
+for; the gateway (`Gateway.routes`) samples a binding's channel, named within its run (`RUN/NAME`) or not, from them
+([which checkpoint](gateway.md#which-checkpoint)). `max_lag` is 1 (`MAX_LAG`) unless a profile or the run says
+otherwise: the checkpoint before, which a server serves while it loads the newest.
 Every token is stamped with the depth of the checkpoint its answer names, and the trainer's importance weight corrects
 for the difference.
 

@@ -358,7 +358,7 @@ class RemoteChannel:
 
     @property
     def limits(self) -> Limits:
-        """The profile's limits; the longest turn the trainer can train on, as the run says, unless they say one."""
+        """The limits it was given; the longest turn the trainer can train on, as the run says, unless they say one."""
         said = self._said[0].sequence if self._said else None
         return replace(self._limits, sequence=self._limits.sequence or said)
 

@@ -154,7 +154,7 @@ each bridge once per checkpoint.
 A profile names a bridge for a channel (`[channels.NAME] reshard = "verbatim"`); with `ray`, the run's bridges are Ray
 tasks, else they run in its process, with scratch under `directory/resharding`
 ([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint being
-bridged and bridged.
+bridged, and what its bridges made.
 
 ## The ledger
 

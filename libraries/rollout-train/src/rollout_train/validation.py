@@ -5,8 +5,7 @@ rule it breaks, the key it is about and a reason a person can act on), or nothin
 connection and starts nothing: what it needs to know beyond the settings and the cluster is gathered beforehand, as
 facts: the environment's (`EnvironmentFacts`: whether it loads, the sandboxes and tool sets it needs, its slots, how
 long its episodes run) and the ledger's (`LedgerFacts`: the checkpoints the settings name and their formats, the
-suites, the names taken, the shared pools' use, the cluster's capacity). The monitor calls it when a launch is asked,
-the launcher again when it claims one, and `rollout train --check` prints it.
+suites, the names taken, the shared pools' use, the cluster's capacity).
 
 A finding refuses the run unless it says it does not (`refuses`): a run that only waits (for a GPU, a pool's slots)
 is told so and not refused. `RULES` lists the rules in the order findings are reported (docs/guide/cluster.md says

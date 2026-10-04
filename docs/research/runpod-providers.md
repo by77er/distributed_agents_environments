@@ -2,8 +2,8 @@
 
 GPU pods rented by the hour on RunPod, serving a run's channel or taking its training steps, reached over mutual TLS.
 This page says what is built (the images, the code on the pods, the launcher's clients of RunPod and step-ca, and how
-a gateway reaches a pod by its identity), how it becomes two provider kinds once the provider framework of the
-[runtime design](runtime-design.md) lands, and the security model.
+a gateway reaches a pod by its identity), the two provider kinds the [runtime design](runtime-design.md)'s provider
+framework declares for it and what is left to wire them, and the security model.
 
 Code: `deploy/images`, `.github/workflows/images.yml`, `rollout_train.pods`, `rollout_train.inference.remote.Connection`
 (`identity`), `rollout_runpod`.
@@ -87,12 +87,19 @@ trusts). Rotating the gateway's certificate is cert-manager's (on Kubernetes) or
 ## How it plugs into the provider framework
 
 The [runtime design](runtime-design.md) declares providers with capabilities in the cluster config and validates runs
-against them. Two kinds join `vllm`, `vllm-servers`, `tinker` and `api`, once commits 3 (declarations), 4 (the cluster
-config), 6 (bridges), 10 and 11 (checkpoint servers, the gateway) and 14 (the launcher) are in:
+against them. Both kinds are declared (`rollout_train.providers`): `runpod-inference` beside `vllm`, `vllm-servers`,
+`tinker` and `api`, and `runpod-trainer` beside `lora`, `full` and `tinker`; the cluster config reads them
+([the cluster config](../guide/cluster.md)). Starting pods and reaching them wait for commits 11 (the gateway) and 14
+(the launcher):
 
 ```toml
+[tls]                                                 # the cluster's CA, and the client certificate the gateway presents
+ca = "~/.config/rollout/root_ca.crt"
+certificate = "~/.config/rollout/gateway.crt"
+key = "~/.config/rollout/gateway.key"
+
 [inference.runpod-4090]
-kind = "runpod-inference"
+kind = "runpod-inference"                             # auth mtls: each pod's identity from its heartbeat
 image = "ghcr.io/by77er/rollout-inference@sha256:…"   # a digest from the images workflow's summary
 gpu_types = ["NVIDIA GeForce RTX 4090"]
 pods = 2                                              # at most this many at once, across runs
@@ -101,25 +108,24 @@ volume_gb = 50
 api_key_env = "RUNPOD_API_KEY"
 secrets = { AWS_ACCESS_KEY_ID = "r2_key_id", AWS_SECRET_ACCESS_KEY = "r2_secret", HF_TOKEN = "hf_token" }
 step_ca = { url = "https://ca.example.com", provisioner = "launcher", key_file = "~/.config/rollout/provisioner.jwk", root = "~/.config/rollout/root_ca.crt" }
-connection = { ca = "~/.config/rollout/root_ca.crt", certificate = "~/.config/rollout/gateway.crt", key = "~/.config/rollout/gateway.key" }
 [inference.runpod-4090.models."Qwen/Qwen3.5-4B"]
 context = 8192
 options = { max_lora_rank = 96, args = "--max-model-len 8192 --gpu-memory-utilization 0.9" }
 
 [trainers.runpod-lora]
 kind = "runpod-trainer"
-trainer = "rollout_lora:LoraTrainer"
+trainer = "lora"                                      # the trainer its pods run: lora or full
 image = "ghcr.io/by77er/rollout-trainer@sha256:…"
 gpu_types = ["NVIDIA H100 80GB HBM3"]
 pods = 1
 models = ["Qwen/Qwen3.5-4B"]
 segment_tokens = 16000
-# api_key_env, secrets, step_ca, connection as above
+# api_key_env, secrets, step_ca as above
 ```
 
 | | `runpod-inference` | `runpod-trainer` |
 |---|---|---|
-| Capabilities | As `vllm-servers`: token-exact, sampled logprobs (`--logprobs-mode processed_logprobs`), prompt and top-k logprobs up to the server's, honours sampling, adapters by name; no full-weight reload; `loads = {"peft"}`; cost per hour from RunPod's `costPerHr`, not per token | `produces` and `format` as the trainer it names (`lora`/`peft` for `LoraTrainer`, `full`/`full` for `FullTrainer`), its objectives, `scores`; `segment_tokens` from the config |
+| Capabilities | As `vllm-servers`: token-exact, sampled logprobs (`--logprobs-mode processed_logprobs`), prompt and top-k logprobs up to the server's, honours sampling, adapters by name; no full-weight reload; `loads = {"peft"}`; cost per hour from RunPod's `costPerHr`, not per token | `produces` and `format` as the trainer it names (`lora` in `peft` for `lora`, `full` in `full` for `full`), its objectives, `scores`; `segment_tokens` from the config |
 | Bridges | A `peft` checkpoint (a local LoRA trainer's, or a `runpod-trainer`'s) is served verbatim; a Tinker checkpoint through `tinker → peft` | Its checkpoints are ordinary `peft` or `full` files in the blob store: every bridge from those formats applies |
 | The launcher starts | Per run channel, `replicas` pods: a name (`inference-RUN-N`), a token for its identity, `RunPod.create` with the run, channel, model, stores and step-ca's URL and fingerprint in its environment | Per run, one pod (`trainer-RUN`), the same way, with the trainer, model and settings |
 | The launcher stops | When the run ends, or after `idle_stop` with nothing to serve: `RunPod.stop` (or `terminate` when the run is done), then `StepCa.revoke` of the serial its beats said. A run is refused at validation when it would need more than `pods` | The same |
@@ -128,17 +134,17 @@ segment_tokens = 16000
 
 What the integration adds beyond the declarations:
 
-1. A per-server `Connection` in `RemoteChannel` (today one connection serves every server of a channel), so each pod is
-   checked against its own identity.
-2. The gateway's server list for a `runpod-inference` channel taken from `live(beats)` for the run and channel, so it
-   connects only to pods live in heartbeats with a matching identity.
-3. The launcher's pod lifecycle: names, tokens, `create`, waiting for the beat, the pod-count limit and idle stop, stop or
+1. The gateway's server list for a `runpod-inference` channel taken from `live(beats)` for the run and channel, each
+   pod a `RemoteEngine` of its own (a `RemoteChannel` takes any `CheckpointServer`) with the `Connection` that
+   `Auth.connection(tls, identity=…)` gives for the identity its beat names, so it connects only to pods live in
+   heartbeats, each checked against its own identity.
+2. The launcher's pod lifecycle: names, tokens, `create`, waiting for the beat, the pod-count limit and idle stop, stop or
    delete and revoke. The pod-count limit and the idle rule are the launcher's: `RunPod` does what it is asked.
-4. The pods' access to the ledger. They open it with `rollout_train.ledger.opened` from `ROLLOUT_LEDGER`; today that is
-   the database ledger (Postgres reachable from RunPod). The ledger's HTTP service, with tokens scoped to a run, is
-   another branch's; a pod then names it the same way and holds a token that can read its run's serving records and
-   write its own beats, nothing else.
-5. The blob store in S3 or R2 (`rollout_s3:S3BlobStore`), its credentials as console secrets: the pods have no shared
+3. The pods' access to the ledger. They open it with `rollout_train.ledger.opened` from `ROLLOUT_LEDGER`, which names
+   the database ledger (Postgres reachable from RunPod). The design has every role reach the ledger through its HTTP
+   service ([decisions after review](runtime-design.md#decisions-after-review)), which is not built: a pod will name it
+   the same way and hold a token that can read its run's serving records and write its own beats, nothing else.
+4. The blob store in S3 or R2 (`rollout_s3:S3BlobStore`), its credentials as console secrets: the pods have no shared
    disk with the cluster.
 
 ## What the user provides

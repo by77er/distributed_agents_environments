@@ -22,7 +22,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
-- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`of_json`](#of_json), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
+- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`OBJECTIVES`](#objectives), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
@@ -3894,7 +3894,7 @@ class Channel
 | `serving` | `str \| None` | `None` | What is served, by name: the adapter, or the full checkpoint the engines hold (None: the model's own). |
 | `version` | `int` | `0` | How many times weights have been published; recorded with every sampled token. |
 | `held` | `str \| None` | `None` | The full checkpoint the engines hold, by name (None: the model's own). |
-| `keep` | `int` | `KEEP` | Adapters kept loaded: the one served and those before it a turn may still sample from (a run's `max_lag + 1`). |
+| `keep` | `int` | `MAX_LAG + 1` | Adapters kept loaded: the one served and those before it a turn may still sample from (a run's `max_lag + 1`). |
 | `model` | `str \| None` | `None` | The model the engines were started with, by the name a request asks for it (`resolved`). |
 
 **Methods**
@@ -4078,7 +4078,7 @@ every `every` seconds.
 **Methods**
 
 - `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence['str | CheckpointServer'], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0) -> None`
-- `@property def limits(self) -> Limits` — The profile's limits; the longest turn the trainer can train on, as the run says, unless they say one.
+- `@property def limits(self) -> Limits` — The limits it was given; the longest turn the trainer can train on, as the run says, unless they say one.
 - `@property def context_limit(self) -> int`
 - `@property def bound(self) -> int` — How many checkpoints behind what the channel should serve a sample may be.
 - `def name_of(self, said: Serving) -> str` — The model a server serves a checkpoint as: its id; the base model's name for none.
@@ -4251,7 +4251,7 @@ is its index among the replicas of what it serves, and how many there are. It ke
 *function* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
 
 ```python
-def host_spec(cluster: 'Cluster', provider: str, model: str, *, settings: 'RunSettings | None' = None) -> HostSpec
+def host_spec(cluster: Cluster, provider: str, model: str, *, settings: 'RunSettings | None' = None) -> HostSpec
 ```
 
 An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
@@ -5361,7 +5361,7 @@ A cluster, as its config describes it. It holds no secret, only references to se
 | `name` | `str` | required | What runs record as where they ran; the Ray namespace is `rollout-NAME`. |
 | `ledger` | `LedgerSection` | required |  |
 | `blobs` | `BlobsSection` | `field(default_factory=BlobsSection)` |  |
-| `scratch` | `str` | `'~/.cache/rollout/scratch'` | Node-local: checkpoints in use, fetched bases, bridge work, built Pythons. |
+| `scratch` | `str` | `SCRATCH` | Node-local: checkpoints in use, fetched bases, bridge work, built Pythons. |
 | `ray` | `RaySection` | `field(default_factory=RaySection)` |  |
 | `tls` | `Tls \| None` | `None` |  |
 | `gateway` | `GatewaySection` | `field(default_factory=GatewaySection)` |  |
@@ -5376,7 +5376,7 @@ A cluster, as its config describes it. It holds no secret, only references to se
 | `environments` | `Mapping[str, EnvironmentSection]` | `field(default_factory=dict[str, EnvironmentSection])` |  |
 | `placement` | `Mapping[str, Mapping[str, float]]` | `field(default_factory=dict[str, Mapping[str, float]])` | Custom resources each role asks for, by role. |
 | `bridges` | `Mapping[str, BridgeSection]` | `field(default_factory=dict[str, BridgeSection])` |  |
-| `described` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue], repr=False, compare=False)` | The config as it was read (relative paths made absolute): what is handed on as JSON (`of_json`). |
+| `described` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue], repr=False, compare=False)` | The config as it was read (relative paths made absolute): what is handed on as JSON, and `parsed` reads back. |
 
 **Methods**
 
@@ -5509,16 +5509,6 @@ class MonitorSection
 |---|---|---|---|
 | `listen` | `str` | `'127.0.0.1:8765'` |  |
 | `feed_episodes` | `int` | `80` | Episodes kept in a run's live feed. |
-
-### `of_json`
-
-*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
-
-```python
-def of_json(described: Mapping[str, Any]) -> Cluster
-```
-
-The cluster a `Cluster.described` says: what a job or an actor is handed.
 
 ### `parsed` {#rollout_trainclusterparsed}
 
@@ -5860,8 +5850,9 @@ class SharedPool
 ```
 
 A provider shared by several runs: its servers hold every bound run's live checkpoints as adapters side by
-side. A run joins when its rank fits the model's `max_lora_rank` and the pool has `max_lag + 1` free adapter slots
-for each channel it serves there; turns are shared among its runs by their `share`.
+side. A run joins when its rank fits the model's `max_lora_rank` and the pool has free adapter slots for each
+channel it serves there (`max_lag + 1` for the trained channel, 2 for one following it, 1 for a fixed checkpoint);
+turns are shared among its runs by their `share`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

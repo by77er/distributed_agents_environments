@@ -2,8 +2,8 @@
 or changeable from its next step on, and which kinds of run take it.
 
 A run's settings are a flat mapping of dotted keys (`trainer.provider`, `channels.policy.model`, `evals.suite`).
-Keys whose meaning did not change keep their names (`groups_per_step`, `max_lag`, `evals.*`,
-`channels.NAME.thinking_tokens`), so a start written before this schema compares key by key. A key may have a part
+Keys a profile's settings have too are named as there (`groups_per_step`, `max_lag`, `evals.*`,
+`channels.NAME.thinking_tokens`), so a start recorded under a profile compares key by key. A key may have a part
 that names something (`channels.NAME.provider`, `slots.SLOT`), written `*` in the schema (`KEYS`). Keys under
 `trainer.` other than `trainer.provider`, `trainer.model` and `trainer.channel` are the trainer's own settings, which
 its settings dataclass declares (`rollout_train.providers.settings_of`): fixed (`trainer.rank`) or changeable

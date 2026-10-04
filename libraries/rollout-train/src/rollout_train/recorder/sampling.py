@@ -1,8 +1,8 @@
 """One turn, sampled: render the context, sample within the channel's budgets, and parse.
 
-`sample_turn` is what a recorded sample does between receiving a request and keeping its turn, for whoever does it (the
-recorder in this process, the gateway in front of remote engines). It is told how to generate (`Generate`: the
-engines, the weights and the sampling parameters are the caller's), and returns the reply with the tokens to record.
+`sample_turn` is what the gateway does with a sample between receiving its request and keeping its turn. It is told
+how to generate (`Generate`: the engines, the weights and the sampling parameters are the caller's), and returns the
+reply with the tokens to record.
 
 A turn's room is what the context leaves after the prompt (the channel's `context_limit`, and `Limits.sequence`), and
 within the request's own cap (`max_output_tokens`) where it gives one. The budgets (`Limits.thinking`,
