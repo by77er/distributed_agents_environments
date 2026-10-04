@@ -118,7 +118,7 @@ A run's state:
 | **idle** | one of its runners beat within 90 seconds, but nothing was written for 20 minutes: its process is there and waiting |
 | **paused** | running or idle, and a runner alive says in its beat that the run is paused ([pausing and resuming](training.md#pausing-and-resuming)); the page says **pausing** while the run is wanted paused (`pause`) and no runner says so yet |
 | **lost** | its runners beat once and no longer do, and it never said how it ended: it crashed or was killed |
-| **ended** | a run with no beat and no word of how it ended, told by when it last wrote (a record in the ledger, its start, or its feed): **running** within 20 minutes, **idle** until three hours have passed, **ended** after |
+| **ended** | a run with no beat and no word of how it ended; one started within the last 90 seconds is **running**, its first beat yet to come |
 
 Only while it beats does its page say what its channels serve; a runner beats again as soon as a channel serves a
 new checkpoint, so that says the checkpoint served now. An eval that played every start has finished; one a training

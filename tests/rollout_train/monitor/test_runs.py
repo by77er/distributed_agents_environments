@@ -12,7 +12,8 @@ from pydantic import JsonValue
 from rollout_train.layout import FEED
 from rollout_train.ledger import Ledger
 from rollout_train.monitor import RunFeed, System
-from rollout_train.monitor.system import GONE, IDLE, RELAYED, RUNNING
+from rollout_train.monitor.system import GONE, RELAYED, RUNNING
+from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
 from rollout_train.rollouts.scheduler import EPISODES, runner_scope
@@ -52,7 +53,8 @@ async def test_one_monitor_shows_every_run_of_a_database_each_from_its_own_direc
     ledger = DatabaseLedger(f"sqlite:///{tmp_path}/ledger.db")
     busy, quiet = tmp_path / "runs" / "busy", tmp_path / "runs" / "quiet"
     await started(ledger, "busy", now - 60, directory=str(busy))
-    await started(ledger, "quiet", now - 3600, directory=str(quiet))
+    await started(ledger, "quiet", now - 3600, directory=str(quiet))  # (it never beat)
+    await started(ledger, "new", now - 10, directory=str(tmp_path / "runs" / "new"))  # (its first beat is yet to come)
     await started(ledger, "gone", now - 5 * 3600, directory="/nowhere/gone")
     await played(ledger, busy, "busy", "r_busy", now - 30)
     await played(ledger, quiet, "quiet", "r_quiet", now - 3600)
@@ -62,8 +64,8 @@ async def test_one_monitor_shows_every_run_of_a_database_each_from_its_own_direc
     system = System(ledger=ledger)
     snapshot = await system.snapshot()
     runs = {run["run"]: run for run in snapshot["runs"]}
-    assert [run["run"] for run in snapshot["runs"]] == ["busy", "quiet", "gone"]  # (running ones first)
-    assert [runs[name]["state"] for name in ("busy", "quiet", "gone")] == [RUNNING, IDLE, GONE]
+    assert {run["run"] for run in snapshot["runs"][:2]} == {"new", "busy"}  # (running ones first)
+    assert [runs[name]["state"] for name in ("busy", "new", "quiet", "gone")] == [RUNNING, RUNNING, GONE, GONE]
     assert runs["busy"]["episodes_at"] == "here" and runs["busy"]["played"]["episodes"] == 1
     assert runs["busy"]["directory"] == str(busy) and runs["busy"]["host"] == "here"
     assert runs["gone"]["episodes_at"] is None and runs["gone"]["played"]["episodes"] == 0 and runs["gone"]["done"]
@@ -116,6 +118,9 @@ async def test_a_run_on_another_machine_has_its_episodes_from_the_monitor_its_st
 
     ledger = FileLedger(tmp_path / "ledger")
     await started(ledger, "far", time.time() - 3600, directory="/on/runner-2/far", address="http://runner-2:8765/")
+    heartbeats = presence_of(ledger)
+    assert heartbeats is not None
+    await heartbeats.beat("far-runner", {"run": "far"})
     elsewhere = Elsewhere()
     system = System(ledger=ledger, client=httpx.Client(transport=httpx.MockTransport(elsewhere)))
 

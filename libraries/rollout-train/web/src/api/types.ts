@@ -978,5 +978,5 @@ export interface RunSettings {
 }
 
 /** Running, idle or paused while its process beats; how it ended, once it said; lost if it stopped beating without
- * saying; ended for a run from before runs said how they ended. */
+ * saying; ended if it never beat. */
 export type RunState = "running" | "idle" | "paused" | "finished" | "stopped" | "failed" | "lost" | "ended";

@@ -137,19 +137,17 @@ SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
 RUNNING, IDLE, GONE, PAUSED = "running", "idle", "ended", "paused"
-"""A run's process is there and writing; there and quiet; not heard from in long (a run from before runs said how
-they ended, or that never beat); there and paused, as a runner's beat says (`rollout_train.resuming`). Its runners
+"""A run's process is there and writing; there and quiet; not heard from (its runners stopped beating, or never
+beat); there and paused, as a runner's beat says (`rollout_train.resuming`). Its runners
 beat and stopped with no word of how it ended: lost (it crashed or was killed). A run that said how it ended is in the
 state it said (`FINISHED`, `STOPPED`, `FAILED`)."""
 """A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds
 (by the clock of the store that keeps the beats),
 and it is running (idle if it wrote nothing for `QUIET` seconds); none, and its process is gone: ended. An eval that
-played every start has ended; one a training run's schedule asked for, and not done, is as that run is. Otherwise by
-when it last wrote anything this reads (its records in the ledger, and its feed where that can be read): within
-`QUIET` seconds it is running, within `SILENT` idle, and after that ended. No process is asked: a run may be on any
-machine."""
+played every start has ended; one a training run's schedule asked for, and not done, is as that run is. A run whose
+runners never beat is running for `STALE` seconds after it started (its first beat is yet to come), and ended after.
+No process is asked: a run may be on any machine."""
 QUIET = 20 * 60
-SILENT = 3 * 3600
 FRESH = 5.0
 """Seconds what a monitor elsewhere said is kept before it is asked again."""
 UNANSWERED = 30.0
@@ -1004,7 +1002,8 @@ class System:
         if beaten is not None:  # (its runners beat: whether its process is there is known)
             state = (RUNNING if quiet < QUIET else IDLE) if beating else GONE
         else:
-            state = RUNNING if quiet < QUIET else IDLE if quiet < SILENT else GONE
+            began = latest.get("started")
+            state = RUNNING if isinstance(began, int | float) and now - began <= STALE else GONE
         return {
             **added,
             "state": state,
