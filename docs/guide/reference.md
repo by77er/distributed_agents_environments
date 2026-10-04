@@ -4932,6 +4932,10 @@ class System
   (`rollout_train.monitor.scores.evals_of`); None where there is no such checkpoint.
 - `async def path(self, checkpoint: str) -> dict[str, Any] | None` — A checkpoint's line from the base model, with each point's scores at each suite
   (`rollout_train.monitor.scores.path_of`); None where there is no such checkpoint.
+- `async def eval_subjects(self) -> dict[str, Any]` — Every subject that has had an eval, the one evaluated last first
+  (`rollout_train.monitor.scores.subjects_in`).
+- `async def history(self, kind: str, reference: str) -> dict[str, Any] | None` — A subject's history: every eval a checkpoint (by its id or the start of it) or a base model (by name) has had
+  (`rollout_train.monitor.scores.history_of`); None where there is no such subject.
 - `async def evals(self) -> dict[str, Any]` — Every suite (the version its name points to, with its environment and starts; every version; and each
   subject that played it, with the version it played and how it did at each start) and every eval (its suite, the
   version it played, its checkpoint, how far it has got), newest first (`rollout_train.evals`).

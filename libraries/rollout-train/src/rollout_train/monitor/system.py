@@ -72,7 +72,7 @@ from rollout_train.monitor.environments import Read, described, listed, page_of
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
 from rollout_train.monitor.machines import kind_of, machines
-from rollout_train.monitor.scores import entry_of, evals_of, path_of
+from rollout_train.monitor.scores import CHECKPOINT, entry_of, evals_of, history_of, path_of, subjects_in
 from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
 from rollout_train.record import (
@@ -597,6 +597,21 @@ class System:
         tables, called = await self._tables(), await names(registry_of(self._ledger))
         made = {each.id: each for each in await checkpoints_in(self._ledger)}
         return await asyncio.to_thread(path_of, tables, made, found, called)
+
+    async def eval_subjects(self) -> dict[str, Any]:
+        """Every subject that has had an eval, the one evaluated last first
+        (`rollout_train.monitor.scores.subjects_in`)."""
+        tables, called = await self._tables(), await names(registry_of(self._ledger))
+        made = {each.id: each for each in await checkpoints_in(self._ledger)}
+        return {"subjects": await asyncio.to_thread(subjects_in, tables, made, called)}
+
+    async def history(self, kind: str, reference: str) -> dict[str, Any] | None:
+        """A subject's history: every eval a checkpoint (by its id or the start of it) or a base model (by name) has had
+        (`rollout_train.monitor.scores.history_of`); None where there is no such subject."""
+        tables, called = await self._tables(), await names(registry_of(self._ledger))
+        made = {each.id: each for each in await checkpoints_in(self._ledger)}
+        found = (await self._checkpoint(reference) or reference) if kind == CHECKPOINT else reference
+        return await asyncio.to_thread(history_of, tables, made, kind, found, called)
 
     async def _checkpoint(self, reference: str) -> str | None:
         """A checkpoint's id, by the id or the start of one that no other begins with."""

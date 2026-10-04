@@ -15,6 +15,8 @@ A topic is a thing the page shows, by name:
   (`System.lineage`);
 - `checkpoint-evals/ID`, `path/ID`: every eval a checkpoint has had, and its line with each point's scores
   (`System.checkpoint_evals`, `System.path`);
+- `eval-subjects`: every subject (a checkpoint or a base model) that has had an eval (`System.eval_subjects`);
+- `history/checkpoint/ID`, `history/model/NAME`: every eval a subject has had (`System.history`);
 - `settings/RUN`: a training run's settings, and what is wanted of them (`System.settings`);
 - `group/RUN/NUMBER`: one group (`System.group`);
 - `episode/RUN_ID`: one episode's lines; its version is how many there are, where from and its state, and the page
@@ -35,6 +37,7 @@ from collections.abc import AsyncGenerator, Collection
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from rollout_train.monitor.scores import CHECKPOINT, MODEL
 from rollout_train.monitor.system import System
 
 BEAT = 1.5
@@ -127,6 +130,11 @@ class Hub:
             return await system.checkpoint_evals(topic.removeprefix("checkpoint-evals/"))
         if topic.startswith("path/"):
             return await system.path(topic.removeprefix("path/"))
+        if topic == "eval-subjects":
+            return await system.eval_subjects()
+        if topic.startswith("history/"):
+            kind, _, reference = topic.removeprefix("history/").partition("/")
+            return await system.history(kind, reference) if kind in (CHECKPOINT, MODEL) and reference else None
         if topic.startswith("settings/"):
             return await system.settings(topic.removeprefix("settings/"))
         if topic.startswith("group/"):

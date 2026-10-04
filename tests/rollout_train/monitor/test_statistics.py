@@ -28,13 +28,16 @@ def tables() -> dict[str, dict[str, JsonValue]]:
             }
         },
         "runs/b/starts": {"1": {"from": None, "started": 5.0}},
+        "runs/e/starts": {"1": {"kind": "eval", "suite": "words", "checkpoint": "pqrstuvw", "started": 55.0}},
+        "runs/e/groups": {"1": {"task": "t1", "decided": 55.0}},
+        "runs/e-1/starts": {"1": {"kind": "eval", "suite": "words", "part_of": "e", "started": 55.0}},
     }
 
 
 def test_a_runs_groups_are_joined_with_their_rows_and_what_their_steps_did() -> None:
     figures = statistics(tables(), now=60.0)
     runs = {run["run"]: run for run in figures["runs"]}
-    assert list(runs) == ["a", "b"] and runs["b"]["groups"] == [] and runs["b"]["wrote"] is None
+    assert list(runs) == ["a", "b"] and runs["b"]["groups"] == [] and runs["b"]["wrote"] is None  # (no eval, nor part)
     first, second, third = runs["a"]["groups"]
     assert first == {
         **first,

@@ -1,4 +1,4 @@
-"""Every run of a ledger in figures: what the monitor's statistics page draws.
+"""Every training run of a ledger in figures: what the monitor's statistics page draws (evals are on the evals page).
 
 For each run (`rollout_train.record`): its groups, each with its row, when it was decided and when its result was
 written, its episodes' rewards and whether each solved (null for each where none of the group's episodes said whether it
@@ -19,7 +19,8 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout_train.checkpoints import CHECKPOINTS
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, named_runs, table
+from rollout_train.launches import EVAL
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
 from rollout_train.rollouts.scheduler import EPISODES
 
 STEP_METRICS = (
@@ -53,7 +54,7 @@ def statistics(
     (`notes`, by run)."""
     now = time.time() if now is None else now
     made = _checkpoints(tables)
-    runs = named_runs(tables)
+    runs = [run for run in named_runs(tables) if not _evaluates(tables, run)]
     notes = notes or {}
     return {
         "now": round(now, 1),
@@ -67,6 +68,13 @@ def statistics(
             for run in runs
         ],
     }
+
+
+def _evaluates(tables: Mapping[str, Mapping[str, JsonValue]], run: str) -> bool:
+    """Whether a run is an eval, or a part of one: its newest start says so."""
+    starts = tables.get(table(run, STARTS), {})
+    newest: Any = starts[max(starts, key=int)] if starts else {}
+    return isinstance(newest, dict) and cast(dict[str, Any], newest).get("kind") == EVAL
 
 
 def _checkpoints(tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, dict[str, Any]]:

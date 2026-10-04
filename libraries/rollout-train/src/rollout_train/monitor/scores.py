@@ -12,6 +12,10 @@ every checkpoint on it builds on. It crosses runs (a run that starts from anothe
 checkpoint made from an adapter) and forks. Each point on it has its score at each entry of each version of a suite,
 pooled over every eval of it on that version (scores of two versions do not compare); the base model's are the evals of
 that model by name.
+
+A subject is what an eval played: a checkpoint (by id) or a base model (by name). The subjects (`subjects_in`) are every
+one that has had an eval, each with what it is and its evals; a subject's history (`history_of`) is every eval it has
+had, newest first, across suites, versions and environments.
 """
 
 from collections.abc import Mapping
@@ -26,6 +30,8 @@ from rollout_train.monitor.statistics import reported
 from rollout_train.record import EVALS, GROUPS, STARTS, table
 
 EVALUATIONS = "evaluations/"
+CHECKPOINT, MODEL = "checkpoint", "model"
+"""What a subject is: a checkpoint, or a base model."""
 BY_HAND, BY_SCHEDULE = "by hand", "schedule"
 """Who asked for an eval: someone, by hand (`rollout eval`, the page), or a training run's schedule."""
 
@@ -36,12 +42,45 @@ def evals_of(
     """Every eval whose subject is `checkpoint` (by id), newest first: the suite and the version it played, the eval's
     run, who asked for it (by hand, or the training run and step whose schedule did), episodes of each start, how far
     it got, its score, and its score at each entry (`entries`)."""
-    found = [each for each in _evals(tables, names or {}) if each["checkpoint"] == checkpoint]
-    return [
-        {key: value for key, value in each.items() if key != "rewards"}  # (each episode's reward stays here)
-        | {"entries": [{key: value for key, value in entry.items() if key != "rewards"} for entry in each["entries"]]}
-        for each in sorted(found, key=lambda each: -(each["started"] or 0.0))
+    return _shown([each for each in _evals(tables, names or {}) if _subject_of(each) == (CHECKPOINT, checkpoint)])
+
+
+def subjects_in(
+    tables: Mapping[str, Mapping[str, JsonValue]],
+    checkpoints: Mapping[str, Checkpoint],
+    names: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Every subject that has had an eval, the one evaluated last first: what it is, and its evals (`_subject`)."""
+    said = names or {}
+    evals: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for each in _evals(tables, said):
+        evals.setdefault(_subject_of(each), []).append(each)
+    shorter = short(checkpoints)
+    found = [
+        _subject(kind, reference, checkpoints, shorter, said, listed) for (kind, reference), listed in evals.items()
     ]
+    return sorted(found, key=lambda each: -(each["started"] or 0.0))
+
+
+def history_of(
+    tables: Mapping[str, Mapping[str, JsonValue]],
+    checkpoints: Mapping[str, Checkpoint],
+    kind: str,
+    reference: str,
+    names: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """A subject's history: what it is (`subject`) and every eval it has had (`evals`), newest first, each with its
+    suite, the version it played, who asked for it and when, and its score at each entry of that version. None for a
+    subject that is neither a checkpoint here, nor a base model a checkpoint here builds on, nor evaluated."""
+    said = names or {}
+    found = [each for each in _evals(tables, said) if _subject_of(each) == (kind, reference)]
+    known = (
+        reference in checkpoints if kind == CHECKPOINT else any(each.base == reference for each in checkpoints.values())
+    )
+    if not found and not known:
+        return None
+    subject = _subject(kind, reference, checkpoints, short(checkpoints), said, found)
+    return {"subject": subject, "evals": _shown(found)}
 
 
 def path_of(
@@ -107,6 +146,53 @@ def path_of(
         suites.append({"suite": version, "name": name, "number": number, "label": label}
                       | {"environments": _environments(tables, name, number or 1)})  # fmt: skip
     return {"checkpoint": checkpoint, "points": points if line else [], "suites": suites}
+
+
+def _shown(evals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Evals as the page lists them, newest first: without each episode's reward."""
+    return [
+        {key: value for key, value in each.items() if key != "rewards"}
+        | {"entries": [{key: value for key, value in entry.items() if key != "rewards"} for entry in each["entries"]]}
+        for each in sorted(evals, key=lambda each: -(each["started"] or 0.0))
+    ]
+
+
+def _subject_of(each: Mapping[str, Any]) -> tuple[str, str]:
+    """What an eval played: a base model by name, or a checkpoint by id."""
+    if each["kind"] == MODEL:
+        return MODEL, str(each["model"])
+    return CHECKPOINT, str(each["checkpoint"])
+
+
+def _subject(
+    kind: str,
+    reference: str,
+    checkpoints: Mapping[str, Checkpoint],
+    shorter: Mapping[str, str],
+    names: Mapping[str, Any],
+    evals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """What a subject is: a checkpoint (its shortest id, the run and step that made it, what it builds on, the bookmarks
+    that name it) or a base model (its name); and its evals (`evals`, by run, newest first), the suites they played,
+    when the newest began and how many are playing still."""
+    called: Mapping[str, str] = names.get("runs", {})
+    made = checkpoints.get(reference) if kind == CHECKPOINT else None
+    marks: Mapping[str, Any] = names.get("bookmarks", {}) if kind == CHECKPOINT else {}
+    newest = sorted(evals, key=lambda each: -(each["started"] or 0.0))
+    return {
+        "kind": kind,
+        "id": reference,
+        "short": shorter.get(reference, reference) if kind == CHECKPOINT else reference,
+        "run": made.run if made else None,
+        "name": called.get(made.run, made.run) if made and made.run else None,
+        "step": made.step if made else None,
+        "base": made.base if made else None,
+        "bookmarks": sorted(mark for mark, each in marks.items() if str(each) == reference),
+        "evals": [each["run"] for each in newest],
+        "suites": sorted({each["suite"] for each in evals}),
+        "started": newest[0]["started"] if newest else None,
+        "playing": sum(not each["done"] for each in evals),
+    }
 
 
 def evals_in(

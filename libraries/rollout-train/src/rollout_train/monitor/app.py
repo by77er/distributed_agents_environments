@@ -51,6 +51,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
       (`System.machines`);
     - `/api/evals`: the suites, their versions and the evals that played them (`System.evals`); `POST
       /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`);
+    - `/api/evals/subjects`: every subject (a checkpoint or a base model) that has had an eval
+      (`System.eval_subjects`); `/api/evals/checkpoint/{id}` and `/api/evals/model/{name}` a subject's history, every
+      eval it has had (`System.history`);
     - `/api/environments`: every environment the system knows of, with the versions seen, whether a launcher alive
       offers it, its training runs and suites, and when a run last started on it (`System.environments`); and
       `/api/environments/{name}` one environment's page: its rows, eval data and curriculum where it loads here, what
@@ -233,6 +236,13 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     async def evals(request: Request) -> Response:
         return answered(request, await hub.read("evals"))
 
+    async def eval_subjects(request: Request) -> Response:
+        return answered(request, await hub.read("eval-subjects"))
+
+    async def history(request: Request) -> Response:
+        kind, reference = request.path_params["kind"], request.path_params["reference"]
+        return answered(request, await hub.read(f"history/{kind}/{reference}"))
+
     async def suite(request: Request) -> Response:
         name = request.path_params["name"]
         try:
@@ -318,6 +328,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/machines", machines),
         Route("/api/launches", launches, methods=["GET", "POST"]),
         Route("/api/evals", evals),
+        Route("/api/evals/subjects", eval_subjects),
+        Route("/api/evals/{kind:str}/{reference:path}", history),
         Route("/api/suites/{name}", suite, methods=["POST"]),
         Route("/api/environments", environments),
         Route("/api/environments/{name}", environment),
