@@ -26,7 +26,7 @@ from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
 from rollout_train.registry import registry_of
 from rollout_train.rollouts.scheduler import episodes_of
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.training.test_loop import Counting, answering, here, made_by
+from tests.rollout_train.support import Counting, answering, here, made_by
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app

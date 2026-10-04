@@ -28,7 +28,7 @@ from rollout_train.launches import (
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import presence_of
 from rollout_train.profile import Profile
-from tests.rollout_train.test_profile import PROFILE
+from tests.rollout_train.support import Process, profiles
 
 
 def ledgers(tmp_path: Path) -> list[Ledger]:
@@ -110,16 +110,6 @@ def test_a_launch_asked_for_as_a_catalog_reads_as_its_environment() -> None:
     assert as_launch(written).asked == Asked("one-gpu", "c:c", "older")
 
 
-def profiles(tmp_path: Path) -> Path:
-    directory = tmp_path / "profiles"
-    directory.mkdir()
-    (directory / "small.toml").write_text(PROFILE.format(directory=tmp_path / "run"))
-    (directory / "not-a-profile.toml").write_text("nonsense = [")
-    without = PROFILE.format(directory=tmp_path / "run").split("[trainer]")[0]
-    (directory / "serving-only.toml").write_text(without)
-    return directory
-
-
 def test_a_launcher_offers_the_profiles_that_train_with_the_settings_a_launch_may_change(tmp_path: Path) -> None:
     (small,) = offered(profiles(tmp_path))  # (not one that is no profile, nor one that trains nothing)
     assert small["profile"] == "small" and small["model"] == "a-checkpoint"
@@ -154,22 +144,6 @@ def test_a_run_changes_settings_of_its_profile_by_dotted_key(tmp_path: Path) -> 
     assert _setting("x=[1, 2]") == ("x", [1, 2]) and _setting("flag=true") == ("flag", True)
     with pytest.raises(SystemExit):
         _setting("no-value")
-
-
-class Process:
-    """A started `rollout train`, as the launcher sees it: it ends with `code` once told to, or on an interrupt."""
-
-    def __init__(self, code: int) -> None:
-        self.pid, self.code, self.signals = 4242, code, list[int]()
-        self.done = asyncio.Event()
-
-    def send_signal(self, number: int) -> None:
-        self.signals.append(number)
-        self.done.set()
-
-    async def wait(self) -> int:
-        await self.done.wait()
-        return self.code
 
 
 async def test_a_launcher_starts_what_it_is_asked_for_and_notes_how_it_ends(

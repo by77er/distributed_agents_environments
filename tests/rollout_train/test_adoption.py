@@ -20,7 +20,7 @@ from rollout_train.rollouts import EpisodeRunner, episodes_of
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, INTERRUPTED, LAPSED, LOST
 from rollout_train.sandboxes import admits, leases_of
 from rollout_train.testing import plain_channel, recording
-from tests.rollout_train.test_sandboxes import BOX, GATES, ask
+from tests.rollout_train.support import BOX, BOX_GATES, ask_boxed
 
 pytest.importorskip("rollout_durable")
 from rollout_durable import DurableRunner
@@ -31,7 +31,7 @@ async def test_a_pool_beside_the_ledger_refuses_a_key_whose_claim_has_lapsed(tmp
     beats = FilePresence(ledger.directory)
     sandboxes = FakeSandboxes()
     pool = SandboxPool(sandboxes, leases=leases_of(ledger), admits=admits(ledger, beats))
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     fence = await ledger.take("runners/elsewhere")
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "elsewhere", "fence": fence.number}, fence)
     await beats.beat("elsewhere", {})
@@ -103,7 +103,7 @@ async def test_a_runner_started_again_adopts_its_durable_runs_and_they_play_on_i
     tmp_path: Path,
 ) -> None:
     played = Restarts(tmp_path)
-    await ask(played.ledger, {1: ({"gate": "adopted"}, 1)})
+    await ask_boxed(played.ledger, {1: ({"gate": "adopted"}, 1)})
     try:
         await played.start()
 
@@ -115,7 +115,7 @@ async def test_a_runner_started_again_adopts_its_durable_runs_and_they_play_on_i
         await played.stop()  # its run is left to be resumed, and keeps its sandbox
         assert await played.ledger.read(table("train", INTERRUPTED)) == {} and handle in played.sandboxes.sandboxes
         await played.start()
-        GATES.setdefault("adopted", asyncio.Event()).set()
+        BOX_GATES.setdefault("adopted", asyncio.Event()).set()
         (episode,) = await episodes_of(played.ledger, played.blobs, "train", 1, 1, every=0.02)
     finally:
         await played.stop()
@@ -128,7 +128,7 @@ async def test_a_runner_started_again_adopts_its_durable_runs_and_they_play_on_i
 
 async def test_a_run_whose_claim_lapsed_while_its_runner_was_stopped_is_cut_short(tmp_path: Path) -> None:
     played = Restarts(tmp_path)
-    await ask(played.ledger, {1: ({"gate": "lapsed"}, 1)})
+    await ask_boxed(played.ledger, {1: ({"gate": "lapsed"}, 1)})
     try:
         await played.start()
 
@@ -159,7 +159,7 @@ async def test_a_run_whose_claim_lapsed_while_its_runner_was_stopped_is_cut_shor
 
 async def test_an_adopted_run_whose_sandboxes_did_not_outlive_its_runner_is_played_again(tmp_path: Path) -> None:
     played = Restarts(tmp_path)
-    await ask(played.ledger, {1: ({"gate": "lost"}, 1)})
+    await ask_boxed(played.ledger, {1: ({"gate": "lost"}, 1)})
     try:
         await played.start()
 
@@ -169,7 +169,7 @@ async def test_an_adopted_run_whose_sandboxes_did_not_outlive_its_runner_is_play
         await until(leased)
         (handle,) = played.sandboxes.sandboxes
         await played.stop()
-        GATES.setdefault("lost", asyncio.Event()).set()
+        BOX_GATES.setdefault("lost", asyncio.Event()).set()
         await played.start(fresh_sandboxes=True)  # its world ended with the process
         (episode,) = await episodes_of(played.ledger, played.blobs, "train", 1, 1, every=0.02)
     finally:

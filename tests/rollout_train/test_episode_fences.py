@@ -32,7 +32,7 @@ from rollout_train.rollouts.scheduler import (
     runner_scope,
 )
 from rollout_train.sandboxes import admits, ending, keep, leases_of, pool_scope
-from tests.rollout_train.test_sandboxes import BOX, GATES, ask, episode_runner
+from tests.rollout_train.support import BOX, BOX_GATES, ask_boxed, episode_runner
 
 
 async def until(condition: Any, seconds: float = 5.0) -> None:
@@ -43,7 +43,7 @@ async def until(condition: Any, seconds: float = 5.0) -> None:
 
 async def test_each_episode_is_recorded_under_a_fence_of_its_own_taken_when_it_was_claimed(tmp_path: Path) -> None:
     played = episode_runner(tmp_path, SandboxPool(FakeSandboxes()))
-    await ask(played.ledger, {1: ({}, 2)})
+    await ask_boxed(played.ledger, {1: ({}, 2)})
     async with playing(played):
         await episodes_of(played.ledger, played.blobs, "train", 1, 2, every=0.01)
     fences = await played.ledger.fences()
@@ -56,7 +56,7 @@ async def test_each_episode_is_recorded_under_a_fence_of_its_own_taken_when_it_w
 async def test_an_attempt_whose_episode_was_claimed_again_meanwhile_is_not_recorded(tmp_path: Path) -> None:
     played = episode_runner(tmp_path, SandboxPool(FakeSandboxes()))
     ledger = played.ledger
-    await ask(ledger, {1: ({"gate": "superseded"}, 1)})
+    await ask_boxed(ledger, {1: ({"gate": "superseded"}, 1)})
     async with playing(played):
 
         async def claimed() -> bool:
@@ -67,7 +67,7 @@ async def test_an_attempt_whose_episode_was_claimed_again_meanwhile_is_not_recor
         claim: JsonValue = {"runner": "elsewhere", "fence": other.number}
         await ledger.append(table("train", CLAIMS), "1/1/2", claim, other)
         await ledger.take(episode_scope("train", "1/1"))
-        GATES.setdefault("superseded", asyncio.Event()).set()
+        BOX_GATES.setdefault("superseded", asyncio.Event()).set()
 
         async def cut() -> bool:
             return "1/1/1" in await ledger.read(table("train", INTERRUPTED))
@@ -80,7 +80,7 @@ async def test_an_attempt_whose_episode_was_claimed_again_meanwhile_is_not_recor
 async def test_claims_written_before_episodes_had_fences_hold_as_their_latest_attempt(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     beats = FilePresence(ledger.directory)
-    await ask(ledger, {1: ({}, 2)})
+    await ask_boxed(ledger, {1: ({}, 2)})
     first, second = await ledger.take(runner_scope("first")), await ledger.take(runner_scope("second"))
     for key, runner, fence in [("1/1/1", "first", first), ("1/2/1", "first", first), ("1/2/2", "second", second)]:
         await ledger.append(table("train", CLAIMS), key, {"runner": runner, "fence": fence.number}, fence)
@@ -122,7 +122,7 @@ class Forgetting:
 
 async def test_a_runner_started_again_takes_each_adopted_episodes_fence_anew(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await ask(ledger, {1: ({}, 2)})
+    await ask_boxed(ledger, {1: ({}, 2)})
     before = await ledger.take(runner_scope("here"))
     for key in ("1/1/1", "1/2/1"):  # claims from before episodes had fences, and one from after
         claim: JsonValue = {"runner": "here", "fence": before.number, "run_id": f"run-{key}", "at": time.time()}
@@ -143,7 +143,7 @@ async def test_the_keeper_reads_a_lapsed_claim_again_and_ends_it_in_the_ledger_b
 ) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     beats = FilePresence(ledger.directory)
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     before = await ledger.take(runner_scope("here"))
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "here", "fence": before.number}, before)
     episode = await ledger.take(episode_scope("train", "1/1"))  # (as its runner takes it once its claim is in)
@@ -166,7 +166,7 @@ async def test_the_keeper_reads_a_lapsed_claim_again_and_ends_it_in_the_ledger_b
 
 async def test_the_keeper_releases_nothing_whose_episode_another_fenced_meanwhile(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     before = await ledger.take(runner_scope("here"))
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "here", "fence": before.number}, before)
     await ledger.take(runner_scope("here"))  # (lapsed: its runner started again)
@@ -216,7 +216,7 @@ async def test_a_lease_acquired_under_a_lapsed_attempt_is_refused_beside_a_newer
     beats = FilePresence(ledger.directory)
 
     pool = SandboxPool(FakeSandboxes(), leases=leases_of(ledger), admits=admits(ledger, beats))
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     old, new = await ledger.take(runner_scope("old")), await ledger.take(runner_scope("new"))
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "old", "fence": old.number}, old)
     await ledger.append(table("train", CLAIMS), "1/1/2", {"runner": "new", "fence": new.number}, new)

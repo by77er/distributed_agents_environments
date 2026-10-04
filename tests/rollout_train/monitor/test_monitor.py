@@ -9,7 +9,7 @@ from pydantic import JsonValue
 from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, ToolCall, ToolResult, ToolResultBlock
 from rollout.local import LocalRunner
 from rollout_train.monitor import FeedReader, RunFeed, plain
-from tests.rollout.harness.test_hooks import Miner, specification
+from tests.rollout.harness.support import Miner, specification
 
 
 def test_messages_are_shown_plainly() -> None:

@@ -2,12 +2,10 @@
 process, and a durable one. The loop's code is the same; so is what it does."""
 
 import asyncio
-import contextlib
 import dataclasses
-import functools
 import json
 import random
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,7 +15,7 @@ from pydantic import JsonValue
 from rollout.curriculum import Curriculum
 from rollout.environment import Row, Start
 from rollout.harness import Runner
-from rollout.harness.blobs import Blobs, FileBlobStore
+from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout_train import (
     Budget,
@@ -26,63 +24,23 @@ from rollout_train import (
     Colocated,
     FileLedger,
     Files,
-    Ledger,
     Step,
-    StepFailed,
     Weighted,
     results,
     train,
     trained,
 )
-from rollout_train import loop as loop_module
 from rollout_train.checkpoints import Retention
 from rollout_train.ledger import Fenced
 from rollout_train.record import GROUPS, STARTS, STEPS, table
-from rollout_train.rollouts import EpisodeRunner, Hooks, Record, episodes_of, loaded, playing
+from rollout_train.rollouts import Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
-from rollout_train.trainer import STATE, WEIGHTS
+from rollout_train.trainer import WEIGHTS
 from tests.rollout_train.rollouts.games import Words
+from tests.rollout_train.support import Counting, Notes, Running, answering, here, made_by, quickly
 
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The loop looks for its groups' episodes in the ledger often (a run looks twice a second)."""
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
-
-
-class Counting:
-    """A trainer that trains nothing: it writes down what it was given and leaves files as a trainer would."""
-
-    budget = Budget(segments=3)
-    weights = "lora"
-
-    def __init__(self, fails: int = 0) -> None:
-        self.batches: list[list[Weighted]] = []
-        self.parents: list[str | None] = []
-        """What each step started from: the text of its parent's weights."""
-        self.fails = fails
-        """Steps that fail before one succeeds."""
-
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
-        if self.fails:
-            self.fails -= 1
-            raise StepFailed("the trainer failed:\nout of memory")
-        self.batches.append(list(batch))
-        self.parents.append((parent.weights / "adapter.bin").read_text() if parent else None)
-        (into / WEIGHTS).mkdir(parents=True)
-        (into / WEIGHTS / "adapter.bin").write_text(f"weights after {len(self.batches)} steps")
-        (into / STATE).mkdir()
-        (into / STATE / "optimizer.bin").write_text(f"moments after {len(self.batches)} steps")
-        return Step({"segments": float(len(batch))})
-
-
-class Notes(Hooks):
-    def __init__(self) -> None:
-        self.kinds: list[str] = []
-
-    def on_note(self, event: Mapping[str, JsonValue]) -> None:
-        self.kinds.append(str(event["kind"]))
+__all__ = ["quickly"]  # (the loop looks for its groups' episodes often)
 
 
 @dataclasses.dataclass
@@ -107,35 +65,6 @@ class Narrow(Words):
 
 def checkpoints_in(directory: Path) -> Checkpoints:
     return Checkpoints(FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs"))
-
-
-async def made_by(checkpoints: Checkpoints, run: str = "train") -> list[Checkpoint]:
-    """The checkpoints a run made, oldest first."""
-    return sorted((v for v in await checkpoints.all() if v.run == run), key=lambda checkpoint: checkpoint.depth)
-
-
-def answering() -> Policy:
-    return Policy(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]))
-
-
-@contextlib.asynccontextmanager
-async def here(
-    ledger: Ledger,
-    recorder: Policy,
-    blobs: Blobs,
-    *,
-    runner: Runner | None = None,
-    hooks: Sequence[Hooks] = (),
-    places: int = 6,
-    name: str = "here",
-) -> AsyncGenerator[EpisodeRunner]:
-    """A runner that plays what runs ask for in `ledger`, while the block runs, recording through a gateway in this
-    process over `recorder`'s channels."""
-    recorded = recorder.recording(ledger, blobs)
-    played = runner if runner is not None else LocalRunner(recorder=recorded)
-    episodes = EpisodeRunner(name, ledger, played, recorded, blobs, places, hooks=hooks, every=0.01)
-    async with playing(episodes):
-        yield episodes
 
 
 @pytest.fixture(params=["in process", "durable runner"])
@@ -238,24 +167,6 @@ async def test_a_step_waits_for_its_groups_and_takes_them_together(tmp_path: Pat
     assert all(len(groups) >= 2 for groups in covers[:-1]) and covers[-1]
     assert [len(batch) for batch in trainer.batches] == [4 * len(groups) for groups in covers]
     assert len(await made_by(checkpoints)) == len(covers)
-
-
-class Running(Hooks):
-    """Counts the episodes running, and the groups they are of, as the runner tells of them."""
-
-    def __init__(self) -> None:
-        self.running: dict[str, int] = {}
-        """Each episode running: its group."""
-        self.most = 0
-        self.groups_at_once = 0
-
-    def on_note(self, event: Mapping[str, JsonValue]) -> None:
-        if event["kind"] == "started":
-            self.running[str(event["run_id"])] = cast(int, event["group"])
-        elif event["kind"] == "ended":
-            self.running.pop(str(event["run_id"]), None)
-        self.most = max(self.most, len(self.running))
-        self.groups_at_once = max(self.groups_at_once, len(set(self.running.values())))
 
 
 async def test_episodes_of_any_groups_run_at_once_up_to_the_runners_places(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ from rollout_train.presence import presence_of
 from rollout_train.ray_cluster import prepare
 from rollout_train.record import scope
 from rollout_train.resharding import RESHARDED, RESHARDING, VERBATIM, on_ray, reshard, resharded
-from tests.rollout_train.test_launches import profiles
+from tests.rollout_train.support import profiles
 
 
 async def a_version(tmp_path: Path) -> tuple[Checkpoints, Any, str]:

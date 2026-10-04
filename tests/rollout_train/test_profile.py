@@ -4,7 +4,6 @@ documentation and the Minecraft environment give, which must load."""
 import functools
 import re
 import tomllib
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,58 +11,14 @@ import pytest
 
 from rollout.contracts import ModelEndpointError
 from rollout.environment import binding_for
-from rollout_train import Budget, Files, Step, Weighted, train
+from rollout_train import Budget, train
 from rollout_train import testing as support
 from rollout_train.gateway import GatewayEndpoints
 from rollout_train.profile import Profile
-from rollout_train.trainer import WEIGHTS
 from tests.rollout_train.rollouts.games import words
+from tests.rollout_train.support import PROFILE, write
 
 ROOT = Path(__file__).resolve().parents[2]
-
-PROFILE = """
-directory = "{directory}"
-
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-thinking_tokens = 64
-engines = [{{ device = 0 }}, {{ device = 1 }}]
-
-[channels.judge]
-model = "another-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-
-[trainer]
-kind = "tests.rollout_train.test_profile:Steps"
-channel = "policy"
-colocated = true
-bookmark = "best"
-segment_tokens = 900
-segments_per_step = 3
-"""
-
-
-class Steps:
-    """A trainer that trains nothing: what a profile's `[trainer]` names."""
-
-    def __init__(self, model: str, *, segment_tokens: int, segments_per_step: int) -> None:
-        self.model = model
-        self.budget = Budget(segment_tokens, segments_per_step)
-        self.weights = "lora"
-
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
-        (into / WEIGHTS).mkdir(parents=True)
-        (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
-        return Step({"segments": float(len(batch))})
-
-
-def write(tmp_path: Path, text: str = PROFILE) -> Path:
-    path = tmp_path / "profile.toml"
-    path.write_text(text.format(directory=tmp_path / "run"))
-    return path
 
 
 async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None:

@@ -33,9 +33,7 @@ from rollout_train.settings import (
 )
 from rollout_train.trainer import Changeable, Files, Step, Weighted
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.test_evals import ENVIRONMENT, a_schedule
-from tests.rollout_train.test_profile import write
-from tests.rollout_train.training.test_loop import Counting, answering, here, made_by
+from tests.rollout_train.support import ENVIRONMENT, Counting, a_schedule, answering, here, made_by, write
 
 
 @pytest.fixture(autouse=True)

@@ -20,7 +20,7 @@ from rollout_train.record import GROUPS, STEPS, table
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
 from tests.rollout_train.rollouts.games import Words
-from tests.rollout_train.training.test_loop import Counting, answering, here, made_by, quickly
+from tests.rollout_train.support import Counting, answering, here, made_by, quickly
 
 __all__ = ["quickly"]  # (the loop looks for its episodes often here too)
 

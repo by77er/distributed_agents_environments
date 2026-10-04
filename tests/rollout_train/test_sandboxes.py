@@ -12,81 +12,24 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness import (
-    ModelBinding,
     PoolBinding,
     Program,
     ProgramReference,
-    RecordedModel,
-    RunBinding,
     RunContext,
     SandboxPool,
     SandboxSpec,
     register,
 )
-from rollout.harness.blobs import FileBlobStore
-from rollout.local import LocalRunner
 from rollout.testing import FakeSandbox, FakeSandboxes
 from rollout_train import presence
 from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import FilePresence
 from rollout_train.record import GROUPS, scope, table
-from rollout_train.rollouts import EpisodeRunner, Plan, episodes_of, plan, playing
+from rollout_train.rollouts import Plan, episodes_of, plan, playing
 from rollout_train.rollouts.scheduler import CLAIMS
 from rollout_train.sandboxes import FileLeases, keep, leases_of, sweep
-from rollout_train.testing import plain_channel, recording
-
-BOX = SandboxSpec(kind="fake")
-GATES: dict[str, asyncio.Event] = {}
-
-
-class Boxed(Program):
-    """Waits at its gate, if it has one; then asks its box who it is, and says."""
-
-    def __init__(self, parameters: Mapping[str, JsonValue]) -> None:
-        self.gate = parameters.get("gate")
-
-    def sandboxes(self) -> Mapping[str, SandboxSpec]:
-        return {"box": BOX}
-
-    async def main(self, run: RunContext) -> None:
-        if self.gate:
-            await GATES.setdefault(str(self.gate), asyncio.Event()).wait()
-        described: Any = (await run.sandbox("box").call("describe")).structured
-        run.reward(1.0)
-        await run.emit("result", {"solved": True, "handle": described["handle"], "key": run.sandbox("box").lease.key})
-
-
-BINDING = RunBinding(
-    models={"policy": ModelBinding(recorded=RecordedModel(channel="policy"))},
-    pools={"fake": PoolBinding(local="boxes")},
-)
-
-
-async def ask(ledger: Ledger, groups: Mapping[int, tuple[JsonValue, int]], program: type[Program] = Boxed) -> None:
-    fence = await ledger.take(scope("train"))
-    await plan(ledger, "train", Plan(ProgramReference(program=register(program)), BINDING), fence)
-    for number, (row, count) in groups.items():
-        record: JsonValue = {"parameters": row, "episodes": count, "decided": float(number)}
-        await ledger.append(table("train", GROUPS), str(number), record, fence)
-
-
-def episode_runner(tmp_path: Path, pool: SandboxPool, url: str | None = None, **options: Any) -> EpisodeRunner:
-    """An episode runner over the ledger and blobs in `tmp_path`, recording through a gateway in this process (served
-    to harnesses at `url`, if given)."""
-    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs, url=url)
-    return EpisodeRunner(
-        "here",
-        ledger,
-        LocalRunner(recorder=recorder, pools={"boxes": pool}),
-        recorder,
-        blobs,
-        places=4,
-        pools={"boxes": pool},
-        every=0.02,
-        **options,
-    )
+from tests.rollout_train.support import BOX, BOX_GATES, Boxed, ask_boxed, episode_runner
 
 
 @contextlib.asynccontextmanager
@@ -110,7 +53,7 @@ async def test_an_episodes_sandboxes_are_leased_under_its_claim_and_released_whe
     sandboxes = FakeSandboxes()
     pool = SandboxPool(sandboxes, leases=FileLeases(tmp_path / "ledger"))
     played = episode_runner(tmp_path, pool)
-    await ask(played.ledger, {1: ({}, 2)})
+    await ask_boxed(played.ledger, {1: ({}, 2)})
     async with playing(played):
         episodes = await episodes_of(played.ledger, played.blobs, "train", 1, 2, every=0.01)
     assert sorted(str(episode.info["key"]) for episode in episodes) == ["train/1/1/1/box", "train/1/2/1/box"]
@@ -123,7 +66,7 @@ async def test_a_stale_claims_sandbox_is_deleted(tmp_path: Path, monkeypatch: py
     beats = FilePresence(ledger.directory)
     sandboxes = FakeSandboxes()
     pool = SandboxPool(sandboxes, leases=leases_of(ledger))
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     fence = await ledger.take("runners/elsewhere")  # a runner on a machine that has since died
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "elsewhere", "fence": fence.number}, fence)
     await beats.beat("elsewhere", {"places": 1})
@@ -140,7 +83,7 @@ async def test_a_new_attempt_gets_a_new_sandbox_and_the_old_one_is_deleted(tmp_p
     sandboxes = FakeSandboxes()
     ledger = FileLedger(tmp_path / "ledger")
     pool = SandboxPool(sandboxes, leases=leases_of(ledger))
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     fence = await ledger.take("runners/here")  # this runner, before it was started again
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "here", "fence": fence.number}, fence)
     old = await pool.acquire(BOX, "train/1/1/1/box")
@@ -163,7 +106,7 @@ async def test_a_runner_claims_only_what_its_pools_have_room_for(tmp_path: Path)
     held = await pool.acquire(BOX, "someone-else/box")  # the pool is full
     played = episode_runner(tmp_path, pool)
     ledger = played.ledger
-    await ask(ledger, {1: ({"gate": "room"}, 3)})
+    await ask_boxed(ledger, {1: ({"gate": "room"}, 3)})
 
     async def claimed() -> list[str]:
         return sorted(await ledger.read(table("train", CLAIMS)))
@@ -175,7 +118,7 @@ async def test_a_runner_claims_only_what_its_pools_have_room_for(tmp_path: Path)
         await until(lambda: _count(claimed, 1))
         await asyncio.sleep(0.1)
         assert await claimed() == ["1/1/1"]  # one at a time: the pool holds one
-        GATES.setdefault("room", asyncio.Event()).set()
+        BOX_GATES.setdefault("room", asyncio.Event()).set()
         episodes = await episodes_of(ledger, played.blobs, "train", 1, 3, every=0.01)
     assert sorted(episode.number for episode in episodes) == [1, 2, 3] and sandboxes.sandboxes == {}
 
@@ -186,7 +129,7 @@ async def _count(read: Any, at_least: int) -> bool:
 
 async def test_a_runner_serves_only_runs_whose_pools_it_has(tmp_path: Path) -> None:
     played = episode_runner(tmp_path, SandboxPool(FakeSandboxes()))
-    await ask(played.ledger, {1: ({}, 1)})
+    await ask_boxed(played.ledger, {1: ({}, 1)})
     assert [each.run for each in await played.open()] == ["train"]
     played.pools = {}
     assert await played.open() == []
@@ -241,7 +184,7 @@ async def test_a_harness_inside_a_sandbox_reaches_the_recorder_through_its_envir
 
     pool = SandboxPool(FakeSandboxes(operations={"play": play}))
     played = episode_runner(tmp_path, pool, "http://recorder")
-    await ask(played.ledger, {1: ({"word": "yes"}, 1)}, Contained)
+    await ask_boxed(played.ledger, {1: ({"word": "yes"}, 1)}, Contained)
     async with playing(played):
         (episode,) = await episodes_of(played.ledger, played.blobs, "train", 1, 1, every=0.01)
     assert episode.reward == 1.0 and episode.info == {"solved": True}

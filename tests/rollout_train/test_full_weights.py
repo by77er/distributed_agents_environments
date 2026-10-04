@@ -20,7 +20,7 @@ from rollout_train.record import STARTS, scope, table
 from rollout_train.stores import FILES
 from rollout_train.trainer import WEIGHTS, Files, Step, Weighted
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.test_profile import PROFILE
+from tests.rollout_train.support import a_ledger, a_profile, files
 
 
 async def test_a_channel_serves_full_weights_in_place_of_its_engines_and_drops_the_adapters_before() -> None:
@@ -37,13 +37,6 @@ async def test_a_channel_serves_full_weights_in_place_of_its_engines_and_drops_t
 
 async def checkpoints_in(tmp_path: Path) -> Checkpoints:
     return Checkpoints(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-
-
-def files(tmp_path: Path, name: str) -> Path:
-    directory = tmp_path / "made" / name
-    directory.mkdir(parents=True)
-    (directory / "model.safetensors").write_bytes(name.encode())
-    return directory
 
 
 async def test_what_a_checkpoint_builds_on_follows_its_kind(tmp_path: Path) -> None:
@@ -118,32 +111,6 @@ class Adapters(Full):
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         Adapters.began.append(parent.weights.parent.name if parent else None)
         return await super().step(batch, seed=seed, parent=parent, into=into)
-
-
-async def a_ledger(tmp_path: Path) -> tuple[str, dict[str, str]]:
-    """A ledger and blob store runs share (as a profile says them), holding a merged checkpoint ("merged"), an
-    adapter over the model ("plain") and one over the merged weights ("stacked"), each bookmarked by that name."""
-    shared = f'ledger = "{tmp_path / "ledger"}"\nblobs = {{ kind = "{FILES}", directory = "{tmp_path / "blobs"}" }}\n'
-    (tmp_path / "setup.toml").write_text(shared + PROFILE.format(directory=tmp_path / "setup"))
-    async with Profile.load(tmp_path / "setup.toml").open() as setup:
-        assert setup.registry is not None
-        fence = await setup.ledger.take(scope("elsewhere"))
-        add = setup.checkpoints.add
-        plain = await add(fence, "pppp" * 4, weights=files(tmp_path, "p"), run="elsewhere", base="a-checkpoint")
-        merged = await add(fence, "mmmm" * 4, weights=files(tmp_path, "m"), run=None, kind="full", parents=[plain.id])
-        stacked = await add(fence, "ssss" * 4, weights=files(tmp_path, "s"), run="elsewhere", parents=[merged.id])
-        made = {"plain": plain.id, "merged": merged.id, "stacked": stacked.id}
-        for name, id in made.items():
-            await setup.registry.bookmark(name, id)
-    return shared, made
-
-
-def a_profile(tmp_path: Path, shared: str, trainer: str, start: str) -> Path:
-    text = PROFILE.replace("tests.rollout_train.test_profile:Steps", f"tests.rollout_train.test_full_weights:{trainer}")
-    path = tmp_path / f"{trainer}-{start}.toml"
-    directory = tmp_path / f"{trainer}-{start}"
-    path.write_text(shared + text.replace('bookmark = "best"', f'start = "{start}"').format(directory=directory))
-    return path
 
 
 async def test_a_run_from_a_full_checkpoint_serves_and_trains_its_files_and_publishes_full_weights(

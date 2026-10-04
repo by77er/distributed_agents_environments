@@ -43,7 +43,7 @@ from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, holding, runner_scope
 from rollout_train.sandboxes import admits, leases_of, sweep
 from rollout_train.testing import plain_channel, recording
-from tests.rollout_train.test_sandboxes import ask
+from tests.rollout_train.support import ask_boxed
 
 pytest.importorskip("rollout_durable")
 from rollout_train.database import DatabaseLedger
@@ -387,7 +387,7 @@ async def test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_post
 async def test_a_lapsed_claim_does_not_hold_again_beside_a_newer_attempt(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     beats = FilePresence(ledger.directory)
-    await ask(ledger, {1: ({}, 1)})
+    await ask_boxed(ledger, {1: ({}, 1)})
     a = await ledger.take(runner_scope("a"))
     await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "a", "fence": a.number}, a)
     await beats.beat("a", {})
@@ -438,7 +438,7 @@ class NoRecorder:
 async def test_an_adoption_and_a_new_attempt_never_both_hold(tmp_path: Path) -> None:
     files = FileLedger(tmp_path / "ledger")
     beats = FilePresence(files.directory)
-    await ask(files, {1: ({}, 1)})
+    await ask_boxed(files, {1: ({}, 1)})
     before = await files.take(runner_scope("here"))  # the runner before it stopped: its claim, its run
     claim: JsonValue = {"runner": "here", "fence": before.number, "run_id": "run_1", "at": time.time()}
     await files.append(table("train", CLAIMS), "1/1/1", claim, before)
@@ -472,7 +472,7 @@ async def test_an_adoption_and_a_new_attempt_never_both_hold(tmp_path: Path) -> 
 async def test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again(tmp_path: Path) -> None:
     files = FileLedger(tmp_path / "ledger")
     beats = FilePresence(files.directory)
-    await ask(files, {1: ({}, 1)})
+    await ask_boxed(files, {1: ({}, 1)})
     before = await files.take(runner_scope("here"))
     claim: JsonValue = {"runner": "here", "fence": before.number, "run_id": "run_1", "at": time.time()}
     await files.append(table("train", CLAIMS), "1/1/1", claim, before)
@@ -493,7 +493,7 @@ async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path:
     sandboxes = FakeSandboxes()
     pool = SandboxPool(sandboxes, leases=leases_of(ledger), admits=admits(ledger, beats))
     blobs = FileBlobStore(tmp_path / "blobs")
-    await ask(ledger, {1: ({}, 1)}, KeyGated)
+    await ask_boxed(ledger, {1: ({}, 1)}, KeyGated)
 
     def runner(name: str) -> EpisodeRunner:
         recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs)
@@ -542,7 +542,7 @@ async def test_a_live_runner_whose_clock_is_behind_keeps_its_claims(
     ledger = DatabaseLedger(url)
     beats = ledger.presence
     try:
-        await ask(ledger, {1: ({}, 1)})
+        await ask_boxed(ledger, {1: ({}, 1)})
         fence = await ledger.take(runner_scope("behind"))
         await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "behind", "fence": fence.number}, fence)
         real = time.time

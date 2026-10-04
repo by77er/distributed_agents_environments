@@ -33,7 +33,7 @@ from rollout_train.rollouts import Episode, Outcome, Trajectory, stored
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.stores import FILES
 from rollout_train.testing import plain_renderer
-from tests.rollout_train.training.test_loop import Counting
+from tests.rollout_train.support import Counting
 
 WAY = "How to get there. Place the table."
 

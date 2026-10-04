@@ -151,7 +151,7 @@ def test_a_runner_refuses_a_channel_the_gateway_elsewhere_does_not_host(tmp_path
 
 
 def test_a_channel_the_gateway_elsewhere_hosts_is_not_trained(tmp_path: Path) -> None:
-    trained = PROFILE + '\n[trainer]\nkind = "tests.rollout_train.test_profile:Steps"\nchannel = "policy"\n'
+    trained = PROFILE + '\n[trainer]\nkind = "tests.rollout_train.support:Steps"\nchannel = "policy"\n'
     profile = Profile.load(a_profile(tmp_path, free_port(), trained))
     assert profile.hosted == ["policy"]
 

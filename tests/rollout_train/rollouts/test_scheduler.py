@@ -1,8 +1,7 @@
 """The scheduler: a run asks for each group's episodes in the ledger; runners claim them, play them and record them."""
 
 import asyncio
-import contextlib
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -11,66 +10,14 @@ from pydantic import JsonValue
 
 from rollout.contracts import RunEventType
 from rollout.harness import ModelBinding, RecordedModel, RunBinding, agent_program
-from rollout.harness.blobs import FileBlobStore
-from rollout.local import LocalRunner
 from rollout_train import presence
-from rollout_train.gateway import GatewayEndpoints
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import FileLedger
 from rollout_train.presence import Beat, FilePresence
 from rollout_train.record import GROUPS, scope, table
-from rollout_train.rollouts import EpisodeRunner, Outcome, Plan, Record, episodes_of, events_of, plan, playing
+from rollout_train.rollouts import Outcome, Plan, Record, episodes_of, events_of, plan
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, ended
-from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.rollouts.games import GATES, Gated, Guess
-
-BINDING = RunBinding(models={"policy": ModelBinding(recorded=RecordedModel(channel="policy"))})
-
-
-class Seen:
-    def __init__(self) -> None:
-        self.notes: list[Mapping[str, JsonValue]] = []
-
-    def on_note(self, event: Mapping[str, JsonValue]) -> None:
-        self.notes.append(event)
-
-
-def runner(
-    tmp_path: Path, *says: str, name: str = "here", places: int = 8, **options: Any
-) -> tuple[EpisodeRunner, GatewayEndpoints, Seen]:
-    """A runner over the ledger and blob store in `tmp_path`, whose policy says `says` in turn, for ever."""
-    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    channel = plain_channel(always=[(f"{word}\n", "stop") for word in says])
-    recorder = recording(channel, ledger=ledger, blobs=blobs)
-    seen = Seen()
-    played = EpisodeRunner(
-        name,
-        ledger,
-        LocalRunner(recorder=recorder),
-        recorder,
-        blobs,
-        places,
-        hooks=[seen],
-        every=0.02,
-        **options,
-    )
-    return played, recorder, seen
-
-
-async def ask(ledger: Ledger, run: str, groups: Mapping[int, tuple[JsonValue, int]], task: type = Guess) -> None:
-    """What a run's loop writes: how its episodes are played, and each group with how many episodes it wants."""
-    fence = await ledger.take(scope(run))
-    await plan(ledger, run, Plan(agent_program(task), BINDING), fence)
-    for number, (row, count) in groups.items():
-        record: JsonValue = {"parameters": row, "episodes": count, "decided": float(number)}
-        await ledger.append(table(run, GROUPS), str(number), record, fence)
-
-
-@contextlib.asynccontextmanager
-async def served(*runners: EpisodeRunner) -> AsyncGenerator[None]:
-    async with contextlib.AsyncExitStack() as stack:
-        for each in runners:
-            await stack.enter_async_context(playing(each))
-        yield
+from tests.rollout_train.support import ask, runner, served
 
 
 async def until(condition: Any) -> None:

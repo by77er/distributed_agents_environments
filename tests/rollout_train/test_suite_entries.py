@@ -41,8 +41,7 @@ from rollout_train.presence import presence_of
 from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, table
 from rollout_train.rollouts.scheduler import PLANS, Plan, episodes_of
 from tests.rollout_train.rollouts.games import guessing, words
-from tests.rollout_train.test_launches import Process, profiles
-from tests.rollout_train.training.test_loop import Counting, answering, here, made_by
+from tests.rollout_train.support import Counting, Process, answering, here, made_by, profiles
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app

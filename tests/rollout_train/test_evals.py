@@ -24,8 +24,6 @@ from rollout_train.evals import (
     EVAL,
     EVAL_DATA,
     NOTHING_TRAINED,
-    Schedule,
-    Suite,
     edit_suite,
     evaluate,
     make_suite,
@@ -47,17 +45,23 @@ from rollout_train.registry import registry_of
 from rollout_train.resuming import _asked  # pyright: ignore[reportPrivateUsage]
 from rollout_train.rollouts import EpisodeRunner, Record, loaded, playing
 from rollout_train.rollouts.scheduler import EPISODES, episodes_of
-from tests.rollout_train.monitor.test_launching import OFFERED
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.test_full_weights import a_ledger, a_profile
-from tests.rollout_train.test_launches import Process, profiles
-from tests.rollout_train.test_profile import write
-from tests.rollout_train.training.test_loop import Counting, answering, here, made_by
+from tests.rollout_train.support import (
+    OFFERED,
+    Counting,
+    Process,
+    a_ledger,
+    a_profile,
+    answering,
+    here,
+    made_by,
+    profiles,
+    write,
+)
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
-
-ENVIRONMENT = "tests.rollout_train.rollouts.games:words"
+from tests.rollout_train.support import ENVIRONMENT, a_schedule
 
 
 @pytest.fixture(autouse=True)
@@ -379,15 +383,6 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     ]
 
 
-def a_schedule(suite: Suite, every: int) -> Schedule:
-    """Evals of `suite` every `every` steps, two episodes of each start, each eval the run `eval-STEP`."""
-
-    async def run(step: int, part: int | None = None) -> str:
-        return f"eval-{step}" if part is None else f"eval-{step}-{part}"
-
-    return Schedule(suite, run, every=every, episodes=2)
-
-
 async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_step_and_the_next(
     tmp_path: Path,
 ) -> None:
@@ -501,7 +496,7 @@ renderer = "rollout_train.testing:plain_renderer"
 engine = "rollout_train.testing:scripted_engine"
 
 [trainer]
-kind = "tests.rollout_train.test_profile:Steps"
+kind = "tests.rollout_train.support:Steps"
 channel = "policy"
 segment_tokens = 900
 segments_per_step = 3

@@ -27,13 +27,7 @@ from rollout_train.stores import location
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
-
-OFFERED: dict[str, Any] = {
-    "profile": "one-gpu",
-    "path": "/profiles/one-gpu.toml",
-    "model": "m",
-    "settings": {"trainer.learning_rate": 5e-5, "episodes_at_once": 6, "trainer.start": None},
-}
+from tests.rollout_train.support import OFFERED
 
 
 async def a_run(ledger: Ledger, run: str, **start: JsonValue) -> None:

@@ -42,7 +42,7 @@ episodes_at_once = 0                              # its own runner plays nothing
     + SHARED
     + """
 [trainer]
-kind = "tests.rollout_train.test_profile:Steps"
+kind = "tests.rollout_train.support:Steps"
 channel = "policy"
 segment_tokens = 900
 segments_per_step = 3

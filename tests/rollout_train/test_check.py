@@ -16,7 +16,7 @@ from rollout_train.ledger import FileLedger
 from rollout_train.record import RESULTS, STARTS, table
 from rollout_train.testing import Policy, plain_channel
 from tests.rollout_train.rollouts.games import Words, guessing, words
-from tests.rollout_train.training.test_loop import answering, here
+from tests.rollout_train.support import answering, here
 
 ENVIRONMENT = "tests.rollout_train.rollouts.games:words"
 
