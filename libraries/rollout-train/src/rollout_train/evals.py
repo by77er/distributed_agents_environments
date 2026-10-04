@@ -522,6 +522,9 @@ def entry_scores(environment: str, rewards: Sequence[float], solved: Sequence[bo
 
 
 class Publisher(Protocol):
+    """Serves new weights on a channel from now on (with `full`, a full checkpoint's in place of the engines'); returns
+    the number its samples are stamped with (the checkpoint's depth)."""
+
     async def __call__(
         self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
     ) -> int: ...

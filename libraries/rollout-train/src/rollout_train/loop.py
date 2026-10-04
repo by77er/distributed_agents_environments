@@ -65,7 +65,7 @@ import time
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from pydantic import JsonValue
 
@@ -76,7 +76,7 @@ from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.bridges import bridge_of
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
-from rollout_train.evals import Schedule, evaluate
+from rollout_train.evals import Publisher, Schedule, evaluate
 from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.record import (
@@ -108,16 +108,6 @@ from rollout_train.settings import (
     applied,
 )
 from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, StepFailed, Trainer, Weighted
-
-
-class Publisher(Protocol):
-    """Serves new weights on a channel from now on (with `full`, a full checkpoint's in place of the engines'); returns
-    the number its samples are stamped with (the checkpoint's depth)."""
-
-    async def __call__(
-        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
-    ) -> int: ...
-
 
 FAILED_UPDATES = 3
 """Steps that may fail in a row (each is written down, and the weights stay as they were) before the loop stops."""
