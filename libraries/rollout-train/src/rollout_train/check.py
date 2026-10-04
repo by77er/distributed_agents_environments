@@ -38,7 +38,7 @@ from rollout.harness.sandboxes import Pool, PoolBinding
 from rollout.local import LocalRunner
 from rollout.testing import ScriptedModelEndpoint
 from rollout_train.ledger import Ledger
-from rollout_train.record import GROUPS, RESULTS, STARTS, Result, described, scope, table
+from rollout_train.record import GROUPS, PROCESS, RESULTS, STARTS, Result, described, scope, table
 from rollout_train.registry import Taken, valid
 from rollout_train.rollouts.episodes import Episode, assemble
 from rollout_train.rollouts.scheduler import Plan, episodes_of, plan
@@ -276,7 +276,8 @@ async def played(
     rows the environment's curriculum would choose first; a finding for each group, and one for them all."""
     fence = await ledger.take(scope(run))
     await plan(ledger, run, Plan(environment.program, binding), fence)
-    here: dict[str, JsonValue] = {"kind": CHECK, "host": socket.gethostname(), "started": round(time.time(), 1)}
+    here: dict[str, JsonValue] = {"kind": CHECK, "host": socket.gethostname(), "process": PROCESS}
+    here["started"] = round(time.time(), 1)
     await ledger.append(
         table(run, STARTS), str(fence.number), {**here, **described(environment), **(started or {})}, fence
     )

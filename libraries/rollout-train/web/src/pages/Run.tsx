@@ -10,7 +10,7 @@ import type { OpenGroup, Run as RunData, Step, Checkpoint } from "../api/types";
 import { RewardsChart, Sized } from "../components/charts";
 import { Card, Cells, Dots, Empty, Head, Kpi, Kpis, Legend, Mark, SectionTitle, Spec, Specs, Stages, Table, Tile } from "../components/ui";
 import { byNumber, figure, mean, shareOf, span } from "../lib/format";
-import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, reported, stateKind } from "../lib/model";
+import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, reported, runKind, stateKind } from "../lib/model";
 import { groupPlace, stepPlace } from "../lib/places";
 import { BaseName, CheckpointTag } from "../components/checkpoints";
 import { PathCard } from "../components/scores";
@@ -60,7 +60,7 @@ const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made:
   return (
     <Head title={<>Run <Rename id={run.run} name={nameOf(run)} /></>}>
       <Specs>
-        <Spec label="state" kind={run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}>{running(run, host)} · <Wrote run={run} /></Spec>
+        <Spec label="state" kind={runKind(run.state)}>{running(run, host)}{run.ending?.detail ? `: ${run.ending.detail}` : ""} · <Wrote run={run} /></Spec>
         {newest?.base ? <Spec label={known.checkpoint(newest.base) ? "over" : "base model"}><BaseName base={newest.base} /></Spec> : null}
         <Spec label="from"><CheckpointTag id={from} /></Spec>
         {newest ? <Spec label="now" kind="violet"><CheckpointTag id={newest.id} bare /></Spec> : null}

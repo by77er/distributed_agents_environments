@@ -25,7 +25,7 @@ export function EvalRun({ run }: { run: string }) {
   const said = played.filter(each => each.solved != null);
   const share = said.length ? said.filter(each => each.solved).length / said.length : null;
   const rewards = played.map(each => each.reward).filter(each => each != null);
-  const ended = entry?.state === "ended" || listed?.done;
+  const ended = (entry != null && !["running", "idle"].includes(entry.state)) || listed?.done;
   const by = entry?.by, step = entry?.by_step;
   const checkpoint = listed?.checkpoint ?? null;
   const name = entry ? nameOf(entry) : listed?.name ?? run;

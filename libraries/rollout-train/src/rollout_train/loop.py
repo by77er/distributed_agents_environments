@@ -65,6 +65,7 @@ from rollout_train.record import (
     EVALS,
     FAILURES,
     GROUPS,
+    PROCESS,
     RESULTS,
     STARTS,
     STEPS,
@@ -167,7 +168,8 @@ async def train(
     if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
         raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
-    here = {"from": start, "host": socket.gethostname(), "started": round(time.time(), 1)} | described(environment)
+    here = {"from": start, "host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1)}
+    here |= described(environment)
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
     asking = -(-(episodes_at_once + algorithm.group_size - 1) // algorithm.group_size)
     """Groups kept asked for: when one of the episodes running ends, another is waiting (a group is decided only once

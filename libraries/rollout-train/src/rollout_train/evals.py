@@ -36,7 +36,19 @@ from rollout.harness.runner import RunBinding
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.launches import EVAL
 from rollout_train.ledger import Fence, Ledger, between
-from rollout_train.record import GROUPS, RESULTS, STARTS, Result, described, results, scope, table
+from rollout_train.record import (
+    ENDS,
+    FINISHED,
+    GROUPS,
+    PROCESS,
+    RESULTS,
+    STARTS,
+    Result,
+    described,
+    results,
+    scope,
+    table,
+)
 from rollout_train.registry import valid
 from rollout_train.rollouts.episodes import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
@@ -193,7 +205,9 @@ async def evaluate(
     fence = await ledger.take(scope(run))
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
     here: dict[str, JsonValue] = {"kind": EVAL, "suite": suite.name, "checkpoint": subject, "from": subject}
-    here |= {"host": socket.gethostname(), "started": round(time.time(), 1)} | described(environment)
+    here |= {"host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1)} | described(
+        environment
+    )
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
     who: dict[str, JsonValue] = {
         "kind": "checkpoint" if subject else "model",
@@ -269,6 +283,7 @@ async def evaluate(
     every = await asyncio.gather(*(played(number) for number in range(1, len(suite.starts) + 1)))
     done = [episode for found in every for episode in found]
     rewards = [episode.reward for episode in done if episode.trainable]
+    await ledger.append(table(run, ENDS), str(fence.number), {"how": FINISHED, "at": round(time.time(), 1)}, fence)
     return {
         "played": len(done),
         "solved": sum(episode.solved for episode in done),

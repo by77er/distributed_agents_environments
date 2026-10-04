@@ -7,7 +7,7 @@ import type { Run } from "../api/types";
 import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
-import { episodeReward, nameOf, reported, slotRewards, stateKind } from "../lib/model";
+import { episodeReward, nameOf, reported, runKind, slotRewards, stateKind } from "../lib/model";
 import { Marks } from "../components/checkpoints";
 import { episodePlace, launchPlace, runPlace } from "../lib/places";
 import { LaunchList } from "../components/launches";
@@ -21,13 +21,13 @@ export function Runs() {
   const others = (feeds ?? []).filter(run => !run.labels.run);
   const runs = system.runs.filter(run => run.kind !== "eval");  // (evals are on their own page)
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind !== "eval");
-  const states = (["running", "idle", "ended"] as const).map(name => [name, runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
+  const states = (["running", "idle", "finished", "stopped", "failed", "lost", "ended"] as const).map(name => [name, runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
   return (
     <>
       <Head title={<span className="head-with-action">Runs<Link to={launchPlace} className="action">New run</Link></span>}>
         {states.length ? (
           <Specs>
-            {states.map(([name, count]) => <Spec key={name} label={name} kind={name === "running" ? "good" : name === "idle" ? "warm" : ""}>{count}</Spec>)}
+            {states.map(([name, count]) => <Spec key={name} label={name} kind={runKind(name)}>{count}</Spec>)}
           </Specs>
         ) : null}
       </Head>
@@ -45,7 +45,7 @@ const RunTile = memo(function RunTile({ run, host }: { run: Run; host: string })
   const head = run.steps.findLast(step => step.state === "committed")?.makes;
   const from = run.from ?? run.steps[0]?.parent ?? null;
   return (
-    <Tile to={runPlace(run.run)} className={`rail ${run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}`}>
+    <Tile to={runPlace(run.run)} className={`rail ${runKind(run.state)}`}>
       <header><RunDot run={run} host={host} /><b title={`id: ${run.run}`}>{nameOf(run)}</b><span className="what">from {from ? `${known.short(from)} (${known.origin(from)})` : known.base(known.checkpoint(head)?.base)}</span><span className="faint small">{running(run, host)}</span></header>
       <div className="cells four">
         <div className={`cell ${run.open.length ? "accent" : "waiting"}`}><span>in flight</span><b>{run.open.length}</b><small>{run.next.length} toward a step</small></div>

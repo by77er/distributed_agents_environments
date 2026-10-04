@@ -17,9 +17,9 @@ from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.evals import EVAL, make_suite, subject_table
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.monitor.scores import BY_HAND, BY_SCHEDULE, path_of
-from rollout_train.monitor.system import GONE, RUNNING, System
+from rollout_train.monitor.system import LOST, RUNNING, System
 from rollout_train.presence import Beat
-from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, STEPS, scope, table
+from rollout_train.record import EVALS, FINISHED, GROUPS, RESULTS, STARTS, STEPS, scope, table
 from rollout_train.registry import registry_of
 from rollout_train.rollouts.episodes import Episode, Outcome, Record
 from rollout_train.rollouts.scheduler import EPISODES, runner_scope
@@ -177,7 +177,7 @@ async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path
     assert desired is not None and (found := await desired.desired("train")) is not None and found.settings == wanted
 
 
-async def test_a_run_whose_runner_stopped_beating_has_ended_and_serves_nothing(tmp_path: Path) -> None:
+async def test_a_run_whose_runner_stopped_beating_without_saying_how_is_lost_and_serves_nothing(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     now = time.time()
     for run in ("alive", "stopped"):
@@ -191,10 +191,10 @@ async def test_a_run_whose_runner_stopped_beating_has_ended_and_serves_nothing(t
     (tmp_path / "ledger" / "presence.json").write_text(json.dumps([asdict(each) for each in beats]))
     runs = {run["run"]: run for run in (await System(ledger=ledger).snapshot())["runs"]}
     assert runs["alive"]["state"] == RUNNING and runs["alive"]["channels"][0]["adapter"] == "kpqx"
-    assert runs["stopped"]["state"] == GONE and runs["stopped"]["channels"] == []  # (though it wrote a minute ago)
+    assert runs["stopped"]["state"] == LOST and runs["stopped"]["channels"] == []  # (though it wrote a minute ago)
 
 
-async def test_an_eval_that_played_every_start_has_ended_and_a_scheduled_one_is_as_its_run(tmp_path: Path) -> None:
+async def test_an_eval_that_played_every_start_has_finished_and_a_scheduled_one_is_as_its_run(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     now = time.time()
     fence = await ledger.take(scope("train"))
@@ -208,5 +208,5 @@ async def test_an_eval_that_played_every_start_has_ended_and_a_scheduled_one_is_
     beats = [Beat("here/train", now, {"run": "train"}, [])]
     (tmp_path / "ledger" / "presence.json").write_text(json.dumps([asdict(each) for each in beats]))
     runs = {run["run"]: run for run in (await System(ledger=ledger).snapshot())["runs"]}
-    assert runs["done"]["state"] == GONE  # (it wrote just now, and played every start)
+    assert runs["done"]["state"] == FINISHED  # (it wrote just now, and played every start)
     assert runs["going"]["state"] == RUNNING and runs["going"]["by"] == "train"  # (quiet for hours, its run beats)

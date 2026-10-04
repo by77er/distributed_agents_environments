@@ -102,13 +102,20 @@ Everything but the live feed is in the database (with a database ledger) or the 
 reaches them shows every run, its machines and its finished episodes; only episodes still playing need the run's
 directory or the monitor on its machine.
 
-A run whose runners beat ([heartbeats](rollouts.md#heartbeats)) is **running** while one of them beat within the last 90 seconds
-(**idle** if nothing this reads was written for 20 minutes), and **ended** once none does: its process is gone. Only
-while it beats does its page say what its channels serve; a runner beats again as soon as a channel serves a new
-checkpoint, so that says the checkpoint served now. An eval that played every start has ended; one a training run's
-schedule asked for, and not done, is as that run is (that run's runner plays it). A run with no beat at all is told
-by when it last wrote (a record in the ledger, its start, or its feed): **running** within 20 minutes, **idle** until
-three hours have passed, and **ended** after. No process is asked, so a run on any machine is told apart the same way.
+A run's state:
+
+| State | When |
+|---|---|
+| **finished**, **stopped**, **failed** | its newest start said how it ended: it played what it was asked, it was interrupted or stopped, or it raised (the page shows the error). Every command that starts a run (`rollout train`, `eval`, `imitate`, `env check`) says so as it exits, in the run's `ends` table under the fence its start was written with (`rollout_train.record.ending`), so a process another has replaced says nothing of the newer start |
+| **running** | one of its runners beat ([heartbeats](rollouts.md#heartbeats)) within the last 90 seconds and something this reads was written within 20 minutes |
+| **idle** | one of its runners beat within 90 seconds, but nothing was written for 20 minutes: its process is there and waiting |
+| **lost** | its runners beat once and no longer do, and it never said how it ended: it crashed or was killed |
+| **ended** | a run with no beat and no word of how it ended, told by when it last wrote (a record in the ledger, its start, or its feed): **running** within 20 minutes, **idle** until three hours have passed, **ended** after |
+
+Only while it beats does its page say what its channels serve; a runner beats again as soon as a channel serves a
+new checkpoint, so that says the checkpoint served now. An eval that played every start has finished; one a training
+run's schedule asked for, and not done, is as that run is (that run's runner plays it). No process is asked, so a run
+on any machine is told apart the same way.
 
 ## The pages
 

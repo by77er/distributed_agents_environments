@@ -22,7 +22,13 @@ failed. A run that is started again reads the tables and goes on: whatever has a
 where it was left.
 """
 
-from collections.abc import Iterable, Mapping
+import asyncio
+import contextlib
+import os
+import secrets
+import socket
+import time
+from collections.abc import AsyncGenerator, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, cast
 
@@ -30,7 +36,7 @@ from pydantic import JsonValue
 
 from rollout.environment import Environment
 from rollout_train.checkpoints import checkpoints_in
-from rollout_train.ledger import Ledger, between
+from rollout_train.ledger import Fence, Fenced, Ledger, between
 
 
 @dataclass
@@ -90,6 +96,34 @@ JOINED = ("group", "task", "title", "rollout_seconds")
 """What a result is read with from its group (its key, and its record in the `groups` table), not kept twice."""
 
 
+async def end(ledger: Ledger, run: str, how: str, detail: str | None = None) -> None:
+    """Say how this process's start of `run` ended, under the fence it started with. Nothing is said if it wrote no
+    start, or if another process has taken the run since: that one says how its own start ends."""
+    starts = await ledger.read(table(run, STARTS))
+    mine = [int(key) for key, record in starts.items() if isinstance(record, dict) and record.get("process") == PROCESS]
+    if not mine:
+        return
+    number = str(max(mine))
+    said: JsonValue = {"how": how, "at": round(time.time(), 1), "detail": detail}
+    with contextlib.suppress(Fenced):
+        await ledger.append(table(run, ENDS), number, said, Fence(scope(run), max(mine)))
+
+
+@contextlib.asynccontextmanager
+async def ending(ledger: Ledger, run: str) -> AsyncGenerator[None]:
+    """Say how the work inside ends (`end`): finished, stopped (cancelled: an interrupt) or failed (it raised)."""
+    try:
+        yield
+    except asyncio.CancelledError:
+        await asyncio.shield(end(ledger, run, STOPPED))
+        raise
+    except (Exception, SystemExit) as error:
+        await end(ledger, run, FAILED, f"{type(error).__name__}: {error}"[:500])
+        raise
+    else:
+        await end(ledger, run, FINISHED)
+
+
 def scope(run: str) -> str:
     """The scope whose fence a run's loop holds."""
     return _RUNS + run
@@ -101,6 +135,14 @@ def table(run: str, name: str) -> str:
 
 
 GROUPS, RESULTS, STEPS, FAILURES, STARTS, EVALS = "groups", "results", "steps", "failures", "starts", "evals"
+ENDS = "ends"
+"""How each start of a run ended, under the same key (its fence's number): `how` (`ENDINGS`), `at`, and `detail`."""
+FINISHED, STOPPED, FAILED = "finished", "stopped", "failed"
+ENDINGS = (FINISHED, STOPPED, FAILED)
+"""It did what it was asked (played its groups, its suite, its step); it was stopped (an interrupt, a stop asked
+for); it raised (`detail` says what)."""
+PROCESS = f"{socket.gethostname()}/{os.getpid()}/{secrets.token_hex(4)}"
+"""This process, as the starts it writes name it (`process`), so that it says how its own start ended."""
 _RUNS = "runs/"
 
 

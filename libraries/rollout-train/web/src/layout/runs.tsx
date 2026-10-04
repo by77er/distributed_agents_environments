@@ -22,7 +22,7 @@ export function Ago({ at, otherwise = "–" }: { at: number | null | undefined; 
 }
 
 export const RunDot = ({ run, host }: { run: Run; host: string }) => (
-  <span className={`dot ${run.state === "running" ? "alive" : run.state === "idle" ? "idle" : ""}`} title={running(run, host)} />
+  <span className={`dot ${run.state === "running" ? "alive" : run.state === "idle" ? "idle" : run.state === "failed" || run.state === "lost" ? "gone" : ""}`} title={running(run, host)} />
 );
 
 /** A run's color: the categorical slots in order, by the run's place among every run (so it keeps its color whatever

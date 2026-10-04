@@ -167,3 +167,7 @@ export function lineOf(checkpoint: Checkpoint, find: (id: string | null | undefi
 /** The checkpoints a run made, oldest first. */
 export const madeBy = (checkpoints: Checkpoint[], run: string): Checkpoint[] =>
   checkpoints.filter(checkpoint => checkpoint.run === run).sort((a, b) => a.depth - b.depth || a.made - b.made);
+
+/** The color a run's state is said in. */
+export const runKind = (state: string): string =>
+  state === "running" ? "good" : state === "idle" ? "warm" : state === "failed" || state === "lost" ? "bad" : "";

@@ -39,7 +39,20 @@ from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[r
 from rollout_train.monitor.scores import evals_of, path_of
 from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, runs_in, table
+from rollout_train.record import (
+    ENDINGS,
+    ENDS,
+    FAILURES,
+    FINISHED,
+    GROUPS,
+    RESULTS,
+    STARTS,
+    STEPS,
+    Result,
+    named_runs,
+    runs_in,
+    table,
+)
 from rollout_train.record import scope as run_scope
 from rollout_train.registry import Bookmark, Entry, Registry, Taken, checked, found, names, registry_of, resolved
 from rollout_train.rollouts.episodes import Outcome, Record
@@ -65,7 +78,7 @@ FAILED = "failed"
 
 LOST = "lost"
 """How a launch is shown when its launcher stopped beating before it finished."""
-RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED)
+RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED, ENDS)
 """A run's tables, as the page reads them."""
 ARCHIVED = 8
 """Episodes read back from their events that are kept at a time."""
@@ -73,6 +86,9 @@ SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
 RUNNING, IDLE, GONE = "running", "idle", "ended"
+"""A run's process is there and writing; there and quiet; not heard from in long (a run from before runs said how
+they ended, or that never beat); its runners beat and stopped with no word of how it ended (it crashed or was
+killed). A run that said how it ended is in the state it said (`FINISHED`, `STOPPED`, `FAILED`)."""
 """A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds,
 and it is running (idle if it wrote nothing for `QUIET` seconds); none, and its process is gone: ended. An eval that
 played every start has ended; one a training run's schedule asked for, and not done, is as that run is. Otherwise by
@@ -597,10 +613,11 @@ class System:
             played[run] = _Played(run, own, fences, self._records)
             listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
             seen = self._read(run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run))
+            seen |= _how_it_ended(seen["state"], starts, own[ENDS], beaten.get(run) is not None)
             begun: Any = starts[max(starts, key=int)] if starts else {}
             kind = str(begun.get("kind") or "run")
-            if kind == EVAL and own[GROUPS] and set(own[GROUPS]) <= set(own[RESULTS]):
-                seen |= {"state": GONE, "channels": []}  # (an eval that played every start has ended)
+            if kind == EVAL and own[GROUPS] and set(own[GROUPS]) <= set(own[RESULTS]) and seen["state"] not in ENDINGS:
+                seen |= {"state": FINISHED, "channels": []}  # (an eval that played every start has ended)
                 finished.add(run)
             runs.append(
                 listed
@@ -612,8 +629,8 @@ class System:
         for run in runs:  # (an eval a training run's schedule asked for, not done, is played by that run's runner)
             if run["kind"] == EVAL and run["run"] not in finished and run["by"] in states and run["run"] not in beaten:
                 run["state"] = states[run["by"]]
-        rank = {RUNNING: 0, IDLE: 1, GONE: 2}
-        runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
+        rank = {RUNNING: 0, IDLE: 1}
+        runs.sort(key=lambda run: (rank.get(run["state"], 2), -(run["written"] or 0.0), run["run"]))
         return {
             "at": round(now, 1),
             "name": self.directory.name if self.directory else self.ledger,
@@ -1162,3 +1179,16 @@ def _noted(beats: list[Beat]) -> dict[str, list[dict[str, Any]]]:
                         {"kind": "inference", "at": point["at"], "channel": name, **counts}
                     )
     return notes
+
+
+def _how_it_ended(state: str, starts: Mapping[str, Any], ends: Mapping[str, Any], beat: bool) -> dict[str, Any]:
+    """A run's state as how its newest start ended says, if it said (with what it said, `ending`); else lost, if its
+    runners beat once and no longer do; else as its writes and beats say."""
+    newest = max(starts, key=int) if starts else None
+    said: Any = ends.get(newest) if newest is not None else None
+    ending = cast(dict[str, Any], said) if isinstance(said, dict) else {}
+    if ending.get("how") in ENDINGS:
+        return {"state": str(ending["how"]), "ending": ending, "channels": []}
+    if state == GONE and beat:
+        return {"state": LOST}
+    return {}

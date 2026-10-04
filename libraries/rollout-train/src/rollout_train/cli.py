@@ -75,6 +75,7 @@ async def _train(
     from rollout_train import train
     from rollout_train.evals import Schedule, suite_for
     from rollout_train.profile import Profile
+    from rollout_train.record import ending
     from rollout_train.settings import changeable, desired_settings_of, fixed
 
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
@@ -114,7 +115,8 @@ async def _train(
             "fixed": fixed(described, platform.trainer, groups=groups, seed=seed),
             "changeable": changeable(platform.trainer, groups_per_step=groups_per_step, evals=described.evals),
         }
-        await train(
+        async with ending(platform.ledger, platform.run.id):
+            await train(
             offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
             base=described.channels[channel].model,
             directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
@@ -142,6 +144,7 @@ async def _evaluate(
     from rollout.environment import binding_for
     from rollout_train.evals import evaluate, suite_for, suite_of
     from rollout_train.profile import Profile
+    from rollout_train.record import ending
     from rollout_train.registry import resolved
 
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
@@ -167,14 +170,15 @@ async def _evaluate(
                 raise SystemExit(error.args[0]) from None
             played = named(suite.environment)
             started |= {"blobs": platform.blobs_at, "environment": suite.environment}
-            said = await evaluate(
-                played, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
-                base=described.channels[channel].model, channel=channel,
-                directory=described.directory / "checkpoints", publish=platform.publish, episodes=episodes,
-                binding=binding_for(played, channel, platform.tool_bindings, platform.pool_bindings),
-                started=started,
-                reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
-            )  # fmt: skip
+            async with ending(platform.ledger, platform.run.id):
+                said = await evaluate(
+                    played, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
+                    base=described.channels[channel].model, channel=channel,
+                    directory=described.directory / "checkpoints", publish=platform.publish, episodes=episodes,
+                    binding=binding_for(played, channel, platform.tool_bindings, platform.pool_bindings),
+                    started=started,
+                    reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
+                )  # fmt: skip
     finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
         for fetched in ("bases", "checkpoints", "resharding"):
             await asyncio.to_thread(shutil.rmtree, described.directory / fetched, ignore_errors=True)
@@ -266,6 +270,7 @@ async def _check(
     from rollout_train.algorithm import Grpo
     from rollout_train.check import checked, played, scripted
     from rollout_train.profile import Profile
+    from rollout_train.record import ending
 
     offered = named(environment)
     found = checked(offered)
@@ -307,10 +312,12 @@ async def _check(
             binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
             started: dict[str, Any] = {"environment": environment, "profile": str(profile), "blobs": platform.blobs_at}
             started["directory"] = str(await asyncio.to_thread(scratch.absolute))
-            for each in await played(
-                offered, platform.ledger, platform.blobs, run=platform.run.id, binding=binding, groups=groups,
-                episodes=episodes or Grpo().group_size, seed=seed, started=started,
-            ):  # fmt: skip
+            async with ending(platform.ledger, platform.run.id):
+                groups_found = await played(
+                    offered, platform.ledger, platform.blobs, run=platform.run.id, binding=binding, groups=groups,
+                    episodes=episodes or Grpo().group_size, seed=seed, started=started,
+                )  # fmt: skip
+            for each in groups_found:
                 print(each, flush=True)
                 found.append(each)
     return 0 if all(each.passed for each in found) else 1
@@ -341,7 +348,7 @@ async def _imitate(
     from rollout_train.layout import BLOBS, LEDGER
     from rollout_train.ledger import opened
     from rollout_train.profile import Profile
-    from rollout_train.record import STARTS, scope, table
+    from rollout_train.record import PROCESS, STARTS, ending, scope, table
     from rollout_train.registry import registry_of, resolved, run_of
     from rollout_train.stores import location
 
@@ -387,16 +394,17 @@ async def _imitate(
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: Any = {
         "kind": IMITATION, "from": head.id if head else None, "dataset": made.id if made else None,
-        "host": socket.gethostname(), "started": round(time.time(), 1), "directory": str(where),
+        "host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1), "directory": str(where),
         "profile": str(profiled), "blobs": location(described.blobs, described.directory / BLOBS),
     }  # fmt: skip
     await ledger.append(table(run.id, STARTS), str(fence.number), started, fence)
     try:
-        checkpoint = await imitate(
-            checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
-            directory=described.directory / "checkpoints",
-            limit=limit, seed=seed, resume_optimizer=resume_optimizer,
-        )  # fmt: skip
+        async with ending(ledger, run.id):
+            checkpoint = await imitate(
+                checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
+                directory=described.directory / "checkpoints",
+                limit=limit, seed=seed, resume_optimizer=resume_optimizer,
+            )  # fmt: skip
     except ValueError as error:
         raise SystemExit(str(error)) from None
     parents = ", ".join(checkpoint.parents) or "the base model"

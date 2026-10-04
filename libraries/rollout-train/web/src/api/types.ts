@@ -126,7 +126,8 @@ export interface Run {
   steps: Step[];
   next: number[];
   channels: Channel[];
-  state: "running" | "idle" | "ended";
+  state: RunState;
+  ending?: { how: "finished" | "stopped" | "failed"; at: number; detail?: string | null };
   host: string | null;
   address: string | null;
   directory: string | null;
@@ -654,3 +655,7 @@ export interface RunSettings {
   changed: number | null;
   changes: { step: number; changed: Record<string, unknown> }[];
 }
+
+/** Running or idle while its process beats; how it ended, once it said; lost if it stopped beating without saying;
+ * ended for a run from before runs said how they ended. */
+export type RunState = "running" | "idle" | "finished" | "stopped" | "failed" | "lost" | "ended";
