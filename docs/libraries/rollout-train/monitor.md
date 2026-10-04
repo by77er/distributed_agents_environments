@@ -433,7 +433,7 @@ A checkpoint that something here starts from and that this ledger does not have 
 
 `rollout_train.monitor.lineage` reads it from the ledger's tables and the runners' heartbeats, at `/api/checkpoints`. What
 a ledger has today is read as it is: the checkpoints, the runs' steps, bookmarks. Each checkpoint says what its weights
-are (a LoRA adapter, or full weights: those are resharded for the engines' layout on their way there). A run's steps
+are (a LoRA adapter, or full weights: a bridge makes those into the engines' files on their way there). A run's steps
 stand for its trainer's queue (a run takes one step at a time), whose weights are what the run's checkpoints are, and
 the checkpoints its runners' beats say it published for what its engines serve: each until the next. Evals are on the
 Evals page ([a subject's history](#a-subjects-history)). Tables for distillation, shared trainers and inference workers

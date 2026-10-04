@@ -29,7 +29,6 @@ segment_tokens = 8000            # as one-gpu.toml (curriculum-9's longest segme
 segments_per_step = 384
 tokens_per_step = 16384          # about six updates a step (curriculum-9 made twenty at 4,096); one (a larger
                                  # number) needs no pass for where the step starts, and halves the training's cost
-# weights = "peft"               # keep each adapter too (downloaded each step): to serve or merge it here
 
 [pools.minecraft]                # the worlds, each a Paper server: no more at once than this machine's memory holds
 kind = "minecraft_team.worlds:worlds"
@@ -38,7 +37,7 @@ size = 6
 [memory]
 runs_gib = 6                     # each episode runs a Paper server
 
-# Serving on this machine instead, Tinker training (`weights = "peft"` above): the full model in FP8 does not fit the
+# Serving on this machine instead, Tinker training (its adapters bridged: `reshard` below): the full model in FP8 does not fit the
 # 16 GB card. Quantized as it loads (vLLM's `quantization = "fp8"`), its weights take 10.8 GiB, and at 0.88 of the card
 # (the most that is free beside the 1.5 GiB other programs hold) with 1,024-token batches, 0.25 GiB is left for the cache: not
 # one 8,192-token turn (0.35 GiB). What fits is one-gpu.toml's 4-bit checkpoint serving Tinker's adapter (trained over
@@ -49,6 +48,7 @@ runs_gib = 6                     # each episode runs a Paper server
 # model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
 # renderer = "rollout_qwen:qwen35"
 # engine = "rollout_vllm:VllmEngine"
+# reshard = "peft-from-tinker"   # each checkpoint's adapter downloaded and written in PEFT's layout
 # thinking_tokens = 1024
 # answer_tokens = 400
 # engines = [{ gpu_memory_utilization = 0.78, max_model_len = 8192, max_num_seqs = 20, max_lora_rank = 32 }]  # 128 for rank 96

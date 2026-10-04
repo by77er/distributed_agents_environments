@@ -120,8 +120,8 @@ it holds the eval's start, its subject and its results.
 
 1. It writes each part's plan and start (`kind: eval`, the suite, `part_of`: the eval's run, `entry`: its number, the
    environment), the eval's start, and a record of who plays, the version and the parts.
-2. If a checkpoint plays, it fetches the checkpoint's files into the run's `checkpoints/` (resharded into the
-   channel's layout when the profile has one, [resharding](checkpoints.md#resharding)) and publishes them on the
+2. If a checkpoint plays, it fetches the checkpoint's files into the run's `checkpoints/` (made by the
+   channel's bridge when the profile names one, [bridges](checkpoints.md#bridges)) and publishes them on the
    channel. A checkpoint whose weights were released cannot play. With `publish=None`, the channel serves the
    checkpoint already (a training run's newest), and nothing is fetched.
 3. It asks, in each part's `groups` table, for one group per start of its entry, `episodes` episodes each (the

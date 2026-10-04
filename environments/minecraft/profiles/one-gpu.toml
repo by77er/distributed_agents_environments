@@ -3,7 +3,7 @@
 directory = "~/.cache/rollout/runs/team"
 feed_runs = 80
 episodes_at_once = 6             # each with a world of its own (`[pools.minecraft]`), and up to four agents' requests
-ray = "auto"                     # reshards run as Ray tasks on this machine's Ray cluster (`ray start --head`)
+ray = "auto"                     # bridges run as Ray tasks on this machine's Ray cluster (`ray start --head`)
 
 [ledger]                         # one database for every run on this machine; `rollout ledger copy` moves it to Postgres
 kind = "rollout_train.database:DatabaseLedger"
@@ -13,7 +13,7 @@ url = "sqlite:///~/.cache/rollout/ledger.db"
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
 renderer = "rollout_qwen:qwen35"
 engine = "rollout_vllm:VllmEngine"
-reshard = "rollout_train.resharding:verbatim"   # vLLM loads the trainer's LoRA files as they are
+reshard = "verbatim"             # vLLM loads the trainer's LoRA files as they are
 thinking_tokens = 1024           # thoughts here run to a median of 530 tokens and a 95th percentile of 820
 answer_tokens = 400              # a tool call takes about 40; a summary of old turns up to this
 # At 0.85 of the card it was full. Twenty requests at once: six episodes of one to four agents ask for fifteen on

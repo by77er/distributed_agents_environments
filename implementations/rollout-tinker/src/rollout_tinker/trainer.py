@@ -29,7 +29,6 @@ began stops the pass; its gradient has been accumulated where no call clears it,
 import asyncio
 import json
 import random
-import shutil
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -45,13 +44,7 @@ from rollout_lora.step import minibatches, sampled
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
 from rollout_tinker.settings import CHANGEABLE, TinkerSettings
-from rollout_tinker.weights import (
-    checkpoint_name,
-    downloaded,
-    peft_adapter,
-    pointer,
-    write_pointer,
-)
+from rollout_tinker.weights import checkpoint_name, pointer, write_pointer
 from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
 
 __all__ = ["MINIBATCHES", "TinkerTrainer"]
@@ -75,10 +68,11 @@ class _Segment:
 class TinkerTrainer:
     """Trains a LoRA adapter over `model` at Thinking Machines, one step at a time: a step starts from the training
     state its parent names (its optimizer too, if it is given the parent's state) and leaves pointers to the new
-    checkpoints, and with `weights = "peft"` the adapter itself. A client from the step before is used again when the
-    parent is the state it saved. `service` is what calls Tinker: by default a session the SDK opens with the key it
-    finds; `module:name` of what makes another (a profile names a fake one so). `settings` are `TinkerSettings`';
-    those in `CHANGEABLE` it takes between steps (`rollout_train.trainer.Changeable`)."""
+    checkpoints (which Tinker's bridge, `rollout_tinker.bridges`, turns into an adapter engines here load). A client
+    from the step before is used again when the parent is the state it saved. `service` is what calls Tinker: by
+    default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
+    one so). `settings` are `TinkerSettings`'; those in `CHANGEABLE` it takes between steps
+    (`rollout_train.trainer.Changeable`)."""
 
     weights = "lora"
 
@@ -123,12 +117,10 @@ class TinkerTrainer:
                 self._live = None
                 raise
             try:
-                await self._write(into, sampler, state, minibatch_lines)
-            except Exception as error:  # (the download or the conversion: Tinker holds the checkpoints all the same)
+                await asyncio.to_thread(self._write, into, sampler, state, minibatch_lines)
+            except OSError as error:  # (Tinker holds the checkpoints all the same)
                 self._live = None
-                if unpaid(error):
-                    raise Unpaid(f"tinker refused the step's weights for billing: {said(error)}") from error
-                raise StepFailed(f"the step's weights could not be kept: {said(error)}") from error
+                raise StepFailed(f"the step's files could not be written: {error}") from error
             self._live = (state, client) if clean else None
             metrics["seconds"] = time.monotonic() - started
             return Step(metrics)
@@ -358,22 +350,12 @@ class TinkerTrainer:
             grad_clip_norm=settings.max_gradient_norm,
         )
 
-    async def _write(self, into: Path, sampler: str, state: str, lines: list[dict[str, float]]) -> None:
-        """The step's files: the pointers, what each minibatch did, and with `weights = "peft"` the adapter."""
+    def _write(self, into: Path, sampler: str, state: str, lines: list[dict[str, float]]) -> None:
+        """The step's files: the pointers, and what each minibatch did."""
         said = {"sampler": sampler, "state": state, "base_model": self.model, "rank": self.settings.rank}
         write_pointer(into / WEIGHTS, said)
         write_pointer(into / STATE, {"state": state, "sampler": sampler, "sdk": _sdk()})
         (into / STATE / MINIBATCHES).write_text("".join(json.dumps(each) + "\n" for each in lines))
-        if self.settings.weights == "peft":
-            archive = await self._service.create_rest_client().get_checkpoint_archive_url_from_tinker_path_async(
-                sampler
-            )
-            scratch = into / "archive"
-            try:
-                found = await downloaded(archive.url, scratch)
-                await asyncio.to_thread(peft_adapter, found, into / WEIGHTS, self.model)
-            finally:
-                await asyncio.to_thread(shutil.rmtree, scratch, ignore_errors=True)
 
 
 def _logprobs(found: Any) -> torch.Tensor:

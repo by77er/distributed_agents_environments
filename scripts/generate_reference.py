@@ -38,7 +38,7 @@ PUBLIC_MODULES = [
     ("rollout_train.pods", "GPU pods elsewhere: their identities, the training service's client."),
     ("rollout_train.cluster", "The cluster config: infrastructure, found, read strictly, with secrets only by name."),
     ("rollout_train.providers", "Inference providers and trainers: kinds, capabilities, auth, shared pools, routing."),
-    ("rollout_train.bridges", "Bridges between checkpoint formats, declared: the registry, paths, refused pairs."),
+    ("rollout_train.bridges", "Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks."),
     ("rollout_train.run_settings", "A run's settings: the schema, layers, flags and files, a full copy, diffs."),
     ("rollout_train.stores", "The ledger and the blob store a cluster config names, opened on this node."),
     ("rollout_train.presets", "Named, versioned run settings beside the ledger."),

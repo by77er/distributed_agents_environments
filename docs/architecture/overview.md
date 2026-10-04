@@ -26,7 +26,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, sandboxes and their pools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment and the curriculum |
-| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; recording (the thinking budget, segments) and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; resharding; evaluation suites and evals; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
+| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; recording (the thinking budget, segments) and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; bridges; evaluation suites and evals; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-team` | An environment to train on |
@@ -63,7 +63,7 @@ imports none of them.
 | [`Environment`](../guide/reference.md#rolloutenvironmentenvironment) | `rollout.environment` | training and evals → an environment's rows, starts, eval data, description and curriculum | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
 | [`RunHooks`](../libraries/rollout/hooks.md), `Hooks` | `rollout.harness`, `rollout_train.rollouts` | runners and runs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
 | `Presence`, `Launches` | `rollout_train.presence`, `rollout_train.launches` | runners and launchers → whoever watches or asks for runs | `FilePresence`, `DatabasePresence`; `FileLaunches`, `DatabaseLaunches` ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats), [launchers](../guide/deploying.md#launchers)) |
-| A layout (`module:name`) | `rollout_train.resharding` | checkpoints → the files their engines load | `verbatim`; run in the run's process or as a Ray task (`on_ray`) ([resharding](../libraries/rollout-train/checkpoints.md#resharding)) |
+| A bridge's task (`module:name`) | `rollout_train.bridges` | checkpoints → the files their engines load | `verbatim`, `rollout_tinker.bridges:peft`, `rollout_lora.bridges:merge_quantize`; run in the calling process or as Ray tasks (`on_ray`) ([bridges](../libraries/rollout-train/checkpoints.md#bridges)) |
 
 Types that cross these boundaries are defined once, in [contracts](../libraries/rollout/contracts/README.md).
 

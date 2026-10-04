@@ -9,15 +9,17 @@ This page describes what these modules provide:
 
 - `rollout_train.cluster`: the cluster config, found and read strictly into a `Cluster`;
 - `rollout_train.providers`: the kinds of inference provider and trainer, their capabilities, how each is reached;
-- `rollout_train.bridges`: how a checkpoint in one format becomes files a provider loads;
+- `rollout_train.bridges`: how a checkpoint in one format becomes files a provider loads, and the bridges' tasks;
 - `rollout_train.run_settings`: the schema of a run's settings, how they are given, and their recorded copy;
 - `rollout_train.presets`: named, versioned settings kept beside the ledger;
 - `rollout_train.validation`: `check`, with its rule table.
 
-They are declarations: none of them starts, imports or reaches anything. What opens and reaches things from them:
+They are declarations, but for the bridges' tasks: none of the rest starts, imports or reaches anything. What opens
+and reaches things from them:
 
 - `rollout_train.stores.Stores.open(cluster)` opens the ledger and the blob store the config names
   ([below](#the-stores));
+- `rollout_train.bridges.bridged` and `on_ray` run a chain of bridges, here or as Ray tasks ([below](#bridges));
 - `rollout cluster check` reads the config and says what of it does not resolve on this node;
 - the commands over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`,
   `preset`) take the cluster's with `--cluster`, in place of `--ledger`;
@@ -225,14 +227,16 @@ is `trainer.FIELD`, with its type and default, changeable when its module's `CHA
 |---|---|---|---|
 | `tinker` | `tinker` | `none` | none: the checkpoint's own files |
 | `tinker` | `peft` | `peft-from-tinker` | `rollout_tinker.bridges:peft`; 2 CPUs and the network; rank × 3 for Qwen3.5 |
-| `peft` | `peft` | `verbatim` | `rollout_train.resharding:verbatim` |
-| `full` | `full` | `full-reload` | `rollout_train.resharding:verbatim` |
-| `peft` | `full` | `merge-quantize` | `rollout_lora.bridges:merge_quantize`; 8 CPUs, 48 GiB; only with `channels.NAME.bridge = "merge-quantize"` |
+| `peft` | `peft` | `verbatim` | `rollout_train.bridges:verbatim` |
+| `full` | `full` | `full-reload` | `rollout_train.bridges:verbatim` |
+| `peft` | `full` | `merge-quantize` | `rollout_lora.bridges:merge_quantize`; 8 CPUs, 48 GiB; only with `channels.NAME.bridge = "merge-quantize"`; full weights a provider quantizes as it loads them |
 | `peft`, `full` | `tinker` | refused | Tinker samples only checkpoints Tinker trained: there is no upload |
 | `full` | `peft` | refused | full weights are not an adapter |
 
 `path(source, loads, wanted=…)` finds the cheapest chain; `rank_factor(chain, model)` is how many times the trained
-rank the provider sees; `format_of(files)` reads a checkpoint's formats from its files.
+rank the provider sees; `format_of(files)` reads a checkpoint's formats from its files. `bridged` runs a chain in
+the calling process and `on_ray` runs each bridge as a Ray task, each noted in the ledger under `CHECKPOINT@BRIDGE`
+([bridges](../libraries/rollout-train/checkpoints.md#bridges)).
 
 ## Run settings
 

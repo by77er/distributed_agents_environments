@@ -321,7 +321,7 @@ system memory. What each part is, and what it measures on that card, is on its o
 | Trainer | `rollout_lora:LoraTrainer` on the same checkpoint, `colocated`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
 | Tool set | `minecraft`, made in the process that runs episodes | [The tool set](#the-tool-set) |
 | Memory | `runs_gib` and `training_gib`: each episode runs a Paper server | [Deploying](../guide/deploying.md) |
-| Resharding | `reshard = "rollout_train.resharding:verbatim"` on the channel, and `ray = "auto"`: each checkpoint is resharded as a Ray task on the machine's Ray cluster (vLLM loads the LoRA files as they are), so a run with this profile needs `ray start --head` first | [Resharding](../libraries/rollout-train/checkpoints.md#resharding), [Ray](../guide/deploying.md#ray) |
+| Bridge | `reshard = "verbatim"` on the channel, and `ray = "auto"`: each checkpoint is bridged as a Ray task on the machine's Ray cluster (vLLM loads the LoRA files as they are), so a run with this profile needs `ray start --head` first | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
 
 Four agents take a turn in about 6 s. The thinking budget (`thinking_tokens`) is wide enough to be met rarely: on
 this environment's observations the model's thoughts run to a median of 530 tokens and a 95th percentile of 820. A

@@ -587,8 +587,8 @@ async def evaluate(
     entry, by its number from 1 (by default `RUN-NUMBER`). `publish` serves a checkpoint on the channel (a full one in
     place of the engines' weights; for an adapter over a full checkpoint, the engines must already hold that
     checkpoint's weights, as `rollout eval` sees to); None: the channel serves `subject` already (a training run's
-    newest checkpoint). `reshard` gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds
-    its files on this machine. What the eval's channel serves is written down for each of its runs
+    newest checkpoint). `reshard` gives the files its engines load (made by a bridge: `rollout_train.bridges`);
+    `directory` holds its files on this machine. What the eval's channel serves is written down for each of its runs
     (`rollout_train.serving`), so that runners anywhere play it on replicas that serve `subject` and no other
     checkpoint. Raises `KeyError` for an entry's environment that does not load here."""
     ledger, blobs = checkpoints.ledger, checkpoints.blobs

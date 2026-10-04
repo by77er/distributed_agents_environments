@@ -26,6 +26,7 @@ from tinker import ModelInput, SamplingParams
 from rollout.contracts import Message, ToolSpecification
 from rollout_qwen import qwen35
 from rollout_tinker import TinkerEngine, TinkerTrainer
+from rollout_tinker.bridges import converted
 from rollout_tinker.data import datum
 from rollout_tinker.service import Service, connected, has_key
 from rollout_tinker.weights import downloaded, pointer, ranks
@@ -181,18 +182,19 @@ async def test_its_adapter_serves_on_this_machines_vllm(service: Service, render
     from rollout_vllm import VllmEngine
 
     samples = await sampled(service, renderer, 4, max_tokens=48)
-    trainer = TinkerTrainer(MODEL, service=service, tokens_per_step=10**6, learning_rate=1e-4, weights="peft")
-    into = tmp_path / "peft"
+    trainer = TinkerTrainer(MODEL, service=service, tokens_per_step=10**6, learning_rate=1e-4)
+    into, peft = tmp_path / "made", tmp_path / "peft"
     try:
         await trainer.step(segments_of(samples), seed=0, parent=None, into=into)
+        await converted(into / WEIGHTS, peft, MODEL, service)  # (Tinker's bridge)
     finally:
         await forgotten(service, into)
-    largest = ranks(into / WEIGHTS)
-    noted("peft", {"largest_rank": largest, "config": json.loads((into / WEIGHTS / "adapter_config.json").read_text())})
+    largest = ranks(peft)
+    noted("peft", {"largest_rank": largest, "config": json.loads((peft / "adapter_config.json").read_text())})
     engine = VllmEngine(MODEL, gpu_memory_utilization=0.8, max_model_len=4096, max_num_seqs=4,
                         max_lora_rank=next(rank for rank in (32, 64, 128, 256) if rank >= largest))  # fmt: skip
     try:
-        await engine.load_adapter("smoke", str(into / WEIGHTS))
+        await engine.load_adapter("smoke", str(peft))
         made = await engine.generate(samples[0][0], max_tokens=8, temperature=1.0, top_p=1.0,
                                      stop_token_ids=renderer.stop_token_ids(), adapter="smoke")  # fmt: skip
         noted("local_vllm", {"tokens": made.tokens, "text": renderer.decode(made.tokens)})

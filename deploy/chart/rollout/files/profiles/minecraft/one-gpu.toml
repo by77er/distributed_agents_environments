@@ -3,7 +3,7 @@
 directory = "{{ .Values.state.path }}/runs/team"
 feed_runs = 80
 episodes_at_once = 6             # each with a world of its own (`[pools.minecraft]`), and up to four agents' requests
-ray = "auto"                     # reshards run as Ray tasks on the Ray cluster the run's job is part of
+ray = "auto"                     # bridges run as Ray tasks on the Ray cluster the run's job is part of
 
 [ledger]
 kind = "rollout_train.database:DatabaseLedger"
@@ -18,7 +18,7 @@ prefix = "{{ .Values.stores.prefix }}"
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
 renderer = "rollout_qwen:qwen35"
 engine = "rollout_vllm:VllmEngine"
-reshard = "rollout_train.resharding:verbatim"   # vLLM loads the trainer's LoRA files as they are
+reshard = "verbatim"             # vLLM loads the trainer's LoRA files as they are
 thinking_tokens = 1024           # thoughts here run to a median of 530 tokens and a 95th percentile of 820
 answer_tokens = 400              # a tool call takes about 40; a summary of old turns up to this
 engines = [{ gpu_memory_utilization = 0.78, max_model_len = 8192, max_num_seqs = 20, max_lora_rank = 32 }]

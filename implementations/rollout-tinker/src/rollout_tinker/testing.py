@@ -82,7 +82,7 @@ class _Response:
 class FakeService:
     """A fake of `tinker.ServiceClient` over a bigram of `vocabulary` tokens. `favored` tokens get `lift` more in
     the base model's logits (a test's environment wants some answers likelier than others). `adapter` makes the
-    tensors of a checkpoint's archive (Tinker's names, from its path), for tests of `weights = "peft"`."""
+    tensors of a checkpoint's archive (Tinker's names, from its path), for tests of Tinker's bridge."""
 
     def __init__(
         self,
@@ -151,6 +151,12 @@ class FakeService:
 
     def create_rest_client(self) -> "FakeRest":
         return FakeRest(self)
+
+    def archived(self, path: str, *, base_model: str) -> str:
+        """Hold a sampler checkpoint at `path` as a training run that changed nothing would have saved it, for a test
+        that asks for its archive alone (in another process, say); returns the path."""
+        self.saved[path] = _Saved(torch.zeros_like(self.base), base_model=base_model, rank=self.rank)
+        return path
 
     def logprobs(self, table: torch.Tensor, inputs: Sequence[int], targets: Sequence[int]) -> torch.Tensor:
         """Each target's logprob after its input token, under the base model plus `table`."""

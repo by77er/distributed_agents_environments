@@ -15,3 +15,17 @@ def prepare() -> None:
     os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
     if (Path.home() / ".ray" / "auth_token").exists():
         os.environ.setdefault("RAY_AUTH_MODE", "token")
+
+
+def connect(address: str) -> None:
+    """Connect this process to a Ray cluster (`auto`: the one this machine is part of), set up as `prepare` says."""
+    prepare()
+    import ray
+
+    ray.init(address=address, log_to_driver=False)  # pyright: ignore[reportUnknownMemberType]
+
+
+def disconnect() -> None:
+    import ray
+
+    ray.shutdown()  # pyright: ignore[reportUnknownMemberType]

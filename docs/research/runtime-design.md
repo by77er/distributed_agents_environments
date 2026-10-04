@@ -1025,7 +1025,7 @@ shared code changes (the loop, the gateway, contracts).
 | 3 | Provider and trainer declarations | `rollout_train.providers`: `Capabilities`, `ModelOffer`, `TrainerCapabilities`, `settings_of(trainer)`; declared by `VllmEngine`, `RemoteEngine`, `TinkerEngine`, `ResponsesEndpoint`, `LoraTrainer`, `FullTrainer`, `TinkerTrainer` | 1 | `tests/rollout_train/test_providers.py` (pure) | S, ~300 |
 | 4 | The cluster config | `rollout_train.cluster`: `Cluster`, `load`, discovery, secret references, `Stores.open`; `rollout cluster check` | 3 | `tests/rollout_train/test_cluster.py` (pure: unknown keys, kinds, secrets by reference, discovery order) | M, ~450 |
 | 5 | Run settings and presets | `RunSettings` (schema, fixed and changeable, kinds, precedence, `--settings` files); `Preset`, `FilePresets`, `DatabasePresets` (with the table); `rollout preset` | 3 | `tests/rollout_train/test_settings.py`, `test_presets.py` (versions, compare-and-set, deleted names) | M, ~550 |
-| 6 | Bridges | `rollout_train.resharding` becomes `rollout_train.bridges`: the registry by format pair, path search, `format_of`, `CHECKPOINT@BRIDGE` keys, `rank_factor`; `rollout_tinker.bridges:peft` as a task; `TinkerTrainer` drops `weights = "peft"` | 1, 2, 3 | `tests/rollout_train/test_bridges.py` (Ray: verbatim, tinker → peft on a fake archive, path choice, refused pairs) | M, ~450 |
+| 6 | Bridges (**done**) | `rollout_train.resharding` becomes `rollout_train.bridges`: the registry by format pair, path search, `format_of`, `CHECKPOINT@BRIDGE` keys, `rank_factor`; `rollout_tinker.bridges:peft` as a task; `TinkerTrainer` drops `weights = "peft"` | 1, 2, 3 | `tests/rollout_train/test_bridges.py` (Ray: verbatim, tinker → peft on a fake archive, path choice, refused pairs) | M, ~450 |
 | 7 | Turns say what they were sampled with | `TurnRecord.sampled_with`; segments carry it; the algorithm refuses segments without behaviour logprobs, with the reason in the group's result; datasets record `supervision`; imitation records it | 3 | `tests/rollout_train/gateway/test_turns.py`, `training/test_algorithm.py`, `test_datasets.py`, `training/test_imitation.py` | S, ~250 |
 | 8 | Validation | `rollout_train.validation.validate` with every rule of §6; `Plan` and `Refused` | 3, 4, 5, 6 | `tests/rollout_train/test_validation.py` (pure; one test per rule; the acceptance run's settings validate; `local-lora` + `openai` refused with its reason) | M, ~600 |
 | 9 | The environment worker | `rollout_train.environments`: the worker actor, `EnvironmentClient` (an `Environment`), Python builds (`project` → cached venv, `py_executable`), curricula per run rebuilt from the ledger; `loop.train`, `evaluate`, `check`, `suite make` take a client | 2, 4 | `tests/rollout_train/test_environment_worker.py` (Ray: the toy games through the worker; a curriculum rebuilt after the worker is killed; a build in a project venv with a stub environment) | L, ~800 |
@@ -1159,6 +1159,17 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   sockets are inside it, and a socket's path may be 107 bytes at most. The dashboard and its job agent listen on free
   ports, since a cluster already running on the machine holds Ray's defaults (`ray.init` does not take the agent's
   port: the fixture gives it to the node's parameters). No Serve (the decisions after review).
+- **6** (bridges as tasks): `rollout_train.bridges` holds the declarations and runs them
+  ([bridges](../libraries/rollout-train/checkpoints.md#bridges)). A task is `task(weights, into, context)`, where
+  `Context` says the checkpoint, the model its weights are over, the provider's model and the bridge's own settings
+  (Tinker's bridge takes the service it asks there). `bridged` runs a chain in the calling process (the profile path
+  still uses it until 13); `on_ray` runs each bridge of a chain as a Ray task of its own with the bridge's declared CPUs
+  and memory; overrides from `[bridges."NAME"]` are the job's to apply (13). Keys are `CHECKPOINT@NAME` with the
+  bridge's name (`kpqx…@peft-from-tinker`), not its task's `module:name`; the tables keep their names
+  (`checkpoints/resharding`, `checkpoints/resharded`), and `Serving.layout` holds the bridge's name. A profile's
+  `reshard` names a bridge (`verbatim`, `peft-from-tinker`). `merge-quantize` merges into the base and writes full
+  weights that a provider quantizing as it loads (fp8) serves; a provider model quantized beforehand (AWQ) is refused,
+  since nothing here quantizes offline. `rollout merge` of a Tinker checkpoint folds in its bridged PEFT files.
 
 ### What the acceptance run needs from each step
 

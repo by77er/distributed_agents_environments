@@ -8,7 +8,9 @@ import pytest
 import torch
 from safetensors.torch import load_file, save_file
 
+from rollout_lora.bridges import merge_quantize
 from rollout_lora.merge import merge
+from rollout_train.bridges import Context
 
 
 def a_model(directory: Path) -> dict[str, torch.Tensor]:
@@ -60,3 +62,16 @@ def test_an_adapter_for_layers_the_base_lacks_or_of_another_shape_is_refused(tmp
     an_adapter(tmp_path / "wrong", rank=2, alpha=4.0, layers={"model.layers.0.self_attn.q_proj": (5, 4)})
     with pytest.raises(ValueError, match="the adapter's update is"):
         merge(str(tmp_path / "base"), tmp_path / "wrong", tmp_path / "merged2", device="cpu")
+
+
+def test_the_merge_bridge_merges_for_a_provider_that_quantizes_as_it_loads(tmp_path: Path) -> None:
+    a_model(tmp_path / "base")
+    q = "model.layers.0.self_attn.q_proj"
+    an_adapter(tmp_path / "adapter", rank=2, alpha=4.0, layers={q: (6, 4)})
+    base = str(tmp_path / "base")
+    said = merge_quantize(tmp_path / "adapter", tmp_path / "merged", Context("kpqx", model=base, target=base))
+    assert said == {"model": base, "layers": 1, "copied": 2}
+    assert (tmp_path / "merged" / "model-00001-of-00002.safetensors").exists()
+    quantized = Context("kpqx", model=base, target="cyankiwi/Qwen3.5-9B-AWQ-4bit")
+    with pytest.raises(ValueError, match="quantized beforehand"):
+        merge_quantize(tmp_path / "adapter", tmp_path / "refused", quantized)

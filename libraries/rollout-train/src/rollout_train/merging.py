@@ -5,7 +5,9 @@ it was made by no run. A run started from it (`[trainer] start`) loads its files
 its trainer trains: new adapters stack on the merged weights, or every weight goes on being trained.
 
 What folds an adapter in is named as `module:name` (`rollout_lora.merge:merge` by default) and called with the base
-(a model's name or directory), the adapter's directory and where to write the merged model.
+(a model's name or directory), the adapter's directory and where to write the merged model. The adapter is the
+checkpoint's weights when they are in PEFT's layout, else what a bridge made of them in it (a Tinker checkpoint's
+adapter, once `peft-from-tinker` has bridged it: `rollout_train.bridges`).
 """
 
 import asyncio
@@ -14,7 +16,8 @@ import tempfile
 from pathlib import Path
 
 from rollout.names import named
-from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
+from rollout_train.bridges import BRIDGES, format_of, made
+from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, new_id
 from rollout_train.ledger import Fence
 
 MERGER = "rollout_lora.merge:merge"
@@ -53,7 +56,7 @@ async def merge(
                 raise ValueError(f"{over} was released: its weights were deleted")
             root = under.base
             over = str(await checkpoints.files(under.weights, work / "base"))
-        adapter = await checkpoints.files(made.weights, work / "adapter")
+        adapter = await checkpoints.files(await _adapter(checkpoints, lora, made.weights), work / "adapter")
         into = work / "merged"
         said = await asyncio.to_thread(named(merger), over, adapter, into)
         metrics = {f"merged_{key}": float(value) for key, value in dict(said).items()}
@@ -62,3 +65,17 @@ async def merge(
         )
     finally:
         await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
+
+
+async def _adapter(checkpoints: Checkpoints, lora: str, weights: Manifest) -> Manifest:
+    """The files of a LoRA checkpoint's adapter: its weights, or, where they are in a format a bridge turns into PEFT's
+    layout (a Tinker checkpoint's pointer), what that bridge made of them."""
+    formats = format_of(weights.files)
+    bridges = [each for each in BRIDGES if each.target == "peft" and each.source in formats]
+    if "peft" in formats or not bridges:
+        return weights
+    for bridge in bridges:
+        if (found := await made(checkpoints.ledger, lora, bridge.name)) is not None:
+            return found
+    said = ", ".join(sorted(formats))
+    raise ValueError(f"{lora}'s weights are not an adapter in PEFT's layout ({said}): bridge them to PEFT first")

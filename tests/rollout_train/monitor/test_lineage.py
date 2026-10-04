@@ -66,7 +66,7 @@ def tables() -> dict[str, dict[str, JsonValue]]:
             "3": step("diggerthree", "diggertwo", 3, 950.0),
         },
         "runs/fresh/steps": {"1": step("freshone", None, 1, 750.0)},
-        "checkpoints/resharding": {"bothone": {"at": 710.0}},
+        "checkpoints/resharding": {"bothone@verbatim": {"at": 710.0}},
         "runs/merge/steps": {"1": step("bothone", "minerthree", 1, 650.0)},
         "evaluations/suite/suite": {
             "suite": {"entries": [{"starts": [{"task": "t1", "seed": 1}, {"task": "t2", "seed": 1}]}]}

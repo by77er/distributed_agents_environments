@@ -2,8 +2,8 @@
 
 A run's channels are named within the run (`RUN/NAME`, `qualified`). Each time the training loop serves a checkpoint, it
 appends to the run's `serving` table, under its fence, that the channel serves it from now on (`Serving`): the
-checkpoint's id, depth and kind, the files its engines load (the checkpoint's weights, or what they were resharded
-into), the full checkpoint an adapter is served over, and the longest turn the trainer can train on. A run that starts
+checkpoint's id, depth and kind, the files its engines load (the checkpoint's weights, or what a bridge made of
+them), the full checkpoint an adapter is served over, and the longest turn the trainer can train on. A run that starts
 from the base model says so first, with no checkpoint.
 
 Whatever serves the channel, on any machine, reads `wanted` and loads what it says (`rollout_train.following`);
@@ -41,9 +41,9 @@ class Serving:
     kind: str = "lora"
     """`lora`, an adapter; `full`, weights loaded in place of the engines' own."""
     files: Manifest | None = None
-    """What the engines load: the checkpoint's weights, or the files they were resharded into."""
+    """What the engines load: the checkpoint's weights, or the files a bridge made of them."""
     layout: str | None = None
-    """The layout `files` are in (`rollout_train.resharding`), if they were resharded."""
+    """The bridge that made `files` (`rollout_train.bridges`), by name, if one did."""
     over: str | None = None
     """For an adapter over a full checkpoint, that checkpoint, by id: the engines hold its weights first."""
     model: str | None = None

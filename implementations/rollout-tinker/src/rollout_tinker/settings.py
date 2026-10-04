@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from rollout_lora.settings import Objective
 
-WEIGHTS = ("pointer", "peft")
 CHANGEABLE = (
     "learning_rate",
     "clip_low",
@@ -68,17 +67,12 @@ class TinkerSettings:
     train_unembed: bool = False
     """Also adapt the output layer. Off: an adapter of attention and MLP layers is what local engines and the merge
     take most simply."""
-    weights: str = "pointer"
-    """What a step leaves in its weights: `pointer`, a file naming the Tinker checkpoint to sample from; `peft`, that
-    and the adapter itself, downloaded and in PEFT's layout, for local engines, the merge and the blob store."""
     project: str | None = None
     """A Tinker project's id (not a secret); else `TINKER_PROJECT_ID`, if set."""
 
     def __post_init__(self) -> None:
         if self.passes < 1 or self.warmup_updates < 0:
             raise ValueError("passes is at least 1, and warmup_updates is not negative")
-        if self.weights not in WEIGHTS:
-            raise ValueError(f"weights is one of {', '.join(WEIGHTS)}, not {self.weights!r}")
         self.loss  # noqa: B018 (an objective or ratio it does not know is an error now, not at the first step)
 
     @property

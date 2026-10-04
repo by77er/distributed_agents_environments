@@ -105,7 +105,7 @@ run's `serving` table, under its fence and before it publishes to engines of its
 |---|---|
 | `channel` | the channel's name within the run |
 | `checkpoint`, `depth`, `kind` | the checkpoint by id (none: the model the engines are started with; the run's first record, when it starts from the base model), the version its samples are stamped with, and `lora` or `full` |
-| `files`, `layout` | the manifest of what the engines load (the checkpoint's weights, or what they were [resharded](checkpoints.md#resharding) into), and that layout |
+| `files`, `layout` | the manifest of what the engines load (the checkpoint's weights, or what a [bridge](checkpoints.md#bridges) made of them), and that bridge's name |
 | `over` | for an adapter over a full checkpoint, that checkpoint: the engines hold its weights first |
 | `model`, `sequence` | the model the line began from, by name, and the longest turn the trainer can train on, which every runner applies |
 | `max_lag` | how many checkpoints behind this a sample may be: 0 for an eval, which plays its checkpoint and no other |

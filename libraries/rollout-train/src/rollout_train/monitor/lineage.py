@@ -6,13 +6,13 @@ base model, which is the root its line hangs from. Each checkpoint was made by a
 run that starts from another run's checkpoint forks there. Beside the graph stand each run's trainer with its queue of
 steps, the engines and what each serves, and evaluations.
 
-What is read: the checkpoints (each says what its weights are: an adapter, or full weights, which are resharded for
-the engines), the runs' steps (which stand for their trainer's queue: a run takes one step at a time; its own trainer
-makes what the run's checkpoints are), bookmarks, each checkpoint's reshard (`checkpoints/resharding`,
-`checkpoints/resharded`, which `rollout_train.resharding` writes), the `published` notes read from the runners'
-heartbeats (which stand for what the run's engines serve), and the suites' versions with how each subject played them
-(`evaluations/SUITE/suite`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`;
-`rollout_train.evals`).
+What is read: the checkpoints (each says what its weights are: an adapter, or full weights, which a bridge makes into
+the engines' files), the runs' steps (which stand for their trainer's queue: a run takes one step at a time; its own
+trainer makes what the run's checkpoints are), bookmarks, each checkpoint's bridges (`checkpoints/resharding`,
+`checkpoints/resharded`, keyed `CHECKPOINT@BRIDGE`, which `rollout_train.bridges` writes), the `published` notes read
+from the runners' heartbeats (which stand for what the run's engines serve), and the suites' versions with how each
+subject played them (`evaluations/SUITE/suite`, `evaluations/SUITE/SUBJECT/subject`,
+`evaluations/SUITE/SUBJECT/results`; `rollout_train.evals`).
 """
 
 import time
@@ -22,6 +22,7 @@ from typing import Any, cast
 
 from pydantic import JsonValue, TypeAdapter
 
+from rollout_train.bridges import BRIDGED, BRIDGING, checkpoint_of
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
 from rollout_train.evals import (
     Suite,
@@ -82,6 +83,16 @@ class _Reading:
     def record(self, table: str, key: str) -> dict[str, Any]:
         """A table's record under `key`, or an empty one."""
         return cast(dict[str, Any], self.tables.get(table, {}).get(key) or {})
+
+    def bridged(self, table: str, checkpoint: str) -> dict[str, Any]:
+        """The newest record of a bridges' table (`rollout_train.bridges`) for a checkpoint, or an empty one."""
+        found: dict[str, Any] = {}
+        for entry, record in self.read(table).items():
+            if checkpoint_of(entry) == checkpoint and isinstance(record, dict):
+                said = cast(dict[str, Any], record)
+                if float(said.get("at") or 0) >= float(found.get("at") or 0):
+                    found = said
+        return found
 
     def payload(self) -> dict[str, Any]:
         made = self.checkpoints()
@@ -184,13 +195,11 @@ class _Reading:
         shown: list[dict[str, Any]] = []
         for checkpoint in made.values():
             run = by.get(checkpoint.run or "")
-            noted = checkpoint.id in self.read("checkpoints/resharding") or checkpoint.id in self.read(
-                "checkpoints/resharded"
-            )
+            begun, ended = self.bridged(BRIDGING, checkpoint.id), self.bridged(BRIDGED, checkpoint.id)
             life: dict[str, Any] = {
-                "reshard": checkpoint.kind == "full" or noted,
-                "resharding": self.record("checkpoints/resharding", checkpoint.id).get("at"),
-                "resharded": self.record("checkpoints/resharded", checkpoint.id).get("at"),
+                "reshard": checkpoint.kind == "full" or bool(begun or ended),
+                "resharding": begun.get("at"),
+                "resharded": ended.get("at"),
                 "latest_of": latest.get(checkpoint.id),
                 "workers": loads.get(checkpoint.id, {}),
             }

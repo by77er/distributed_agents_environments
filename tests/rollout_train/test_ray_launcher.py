@@ -1,4 +1,5 @@
-"""Resharding a checkpoint into its engines' layout, here and as a Ray task; and a launcher whose runs are Ray jobs."""
+"""A launcher whose runs are Ray jobs: each asks for a GPU, is followed until it ends, and is stopped by a launcher
+started again."""
 
 import asyncio
 from pathlib import Path
@@ -6,68 +7,11 @@ from typing import Any
 
 import pytest
 
-from rollout.harness.blobs import FileBlobStore
-from rollout_train.checkpoints import Checkpoints, Retention
 from rollout_train.launcher import OUTPUT, Launcher
 from rollout_train.launches import CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import presence_of
-from rollout_train.record import scope
-from rollout_train.resharding import RESHARDED, RESHARDING, VERBATIM, on_ray, reshard, resharded
-from tests.local_ray import LocalRay
 from tests.rollout_train.support import profiles
-
-
-async def a_version(tmp_path: Path) -> tuple[Checkpoints, Any, str]:
-    """A ledger and blob store with one checkpoint, its weights two files."""
-    checkpoints = Checkpoints(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    fence = await checkpoints.ledger.take(scope("run"))
-    weights = tmp_path / "made" / "weights"
-    weights.mkdir(parents=True)
-    (weights / "adapter_config.json").write_text('{"r": 8}')
-    (weights / "adapter_model.safetensors").write_bytes(b"\x00" * 64)
-    made = await checkpoints.add(fence, "kpqxrmtzwvolxqvu", weights=weights, run="run", step=1, base="tiny")
-    return checkpoints, fence, made.id
-
-
-async def test_a_version_is_resharded_once_into_its_engines_layout(tmp_path: Path) -> None:
-    checkpoints, fence, checkpoint = await a_version(tmp_path)
-    manifest = await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
-    assert sorted(manifest.files) == ["adapter_config.json", "adapter_model.safetensors"]
-    made = await checkpoints.checkpoint(checkpoint)
-    assert made.weights is not None
-    assert {name: blob.sha256 for name, blob in manifest.files.items()} == {
-        name: blob.sha256 for name, blob in made.weights.files.items()
-    }  # (verbatim: the same files, so the same blobs)
-    assert (
-        list(await checkpoints.ledger.read(RESHARDING))
-        == [checkpoint]
-        == list(await checkpoints.ledger.read(RESHARDED))
-    )
-    assert await resharded(checkpoints.ledger, checkpoint) == manifest
-    again = await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
-    assert again == manifest and len(await checkpoints.ledger.read(RESHARDING)) == 1  # not resharded again
-    assert not list((tmp_path / "scratch").iterdir())  # what it wrote there is gone
-
-
-async def test_a_released_version_cannot_be_resharded(tmp_path: Path) -> None:
-    checkpoints, fence, checkpoint = await a_version(tmp_path)
-    second = tmp_path / "second"
-    second.mkdir()
-    (second / "w").write_bytes(b"1")
-    later = await checkpoints.add(fence, "zzzzzzzzzzzzzzzz", weights=second, run="run", step=2, parents=[checkpoint])
-    await checkpoints.thin(fence, "run", Retention(recent=1, every=0), keep={later.id})
-    with pytest.raises(ValueError, match="weights were deleted"):
-        await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
-
-
-async def test_a_reshard_runs_as_a_ray_task(tmp_path: Path, local_ray: LocalRay) -> None:
-    checkpoints, fence, checkpoint = await a_version(tmp_path)
-    ledger_at = {"directory": str(tmp_path / "ledger")}
-    blobs_at = {"kind": "rollout.harness.blobs:FileBlobStore", "directory": str(tmp_path / "blobs")}
-    manifest = await on_ray(ledger_at, blobs_at, fence, checkpoint, VERBATIM)
-    assert sorted(manifest.files) == ["adapter_config.json", "adapter_model.safetensors"]
-    assert await resharded(checkpoints.ledger, checkpoint) == manifest  # (noted by the task, in the ledger)
 
 
 class Jobs:

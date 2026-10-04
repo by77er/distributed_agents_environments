@@ -67,10 +67,10 @@ besides where and by what it was started, the environment (as `module:name`), it
   ([evals during training](evals.md#evals-during-training)).
 - **A step that fails** (`StepFailed`) is written down with its `error`, its groups are done with, and the weights
   stay as they were. `FAILED_UPDATES` in a row stop the loop.
-- **Serving waits for the engines' layout.** With `reshard` (a function of a checkpoint and the run's fence, giving a
+- **Serving waits for the engines' files.** With `reshard` (a function of a checkpoint and the run's fence, giving a
   manifest), the channel is given the files `reshard` makes for a checkpoint
-  ([resharding](checkpoints.md#resharding)): the trainer's files rewritten into the layout its engines load, noted in
-  the ledger once per checkpoint. Without it, the engines load the trainer's files as they are. An open profile's
+  ([bridges](checkpoints.md#bridges)): the trainer's files made into what its engines load by a bridge, noted in
+  the ledger once per checkpoint and bridge. Without it, the engines load the trainer's files as they are. An open profile's
   `reshard` (when its trained channel names one) runs as a Ray task when the profile names `ray`.
 
 ## Dying and starting again

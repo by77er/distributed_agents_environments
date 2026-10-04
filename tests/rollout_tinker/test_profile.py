@@ -106,5 +106,5 @@ def test_the_minecraft_profile_for_tinker_loads() -> None:
     channel = profile.channels[trainer.channel]
     assert channel.engine == "rollout_tinker:TinkerEngine" and channel.model == "Qwen/Qwen3.5-9B"
     settings = dict(trainer.settings)
-    assert settings["rank"] == 32 and settings.get("weights", "pointer") == "pointer"
+    assert settings["rank"] == 32
     TinkerSettings(**settings)  # (every setting it gives is one the trainer takes)

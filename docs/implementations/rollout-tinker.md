@@ -16,7 +16,7 @@ the objective are the platform's own: Tinker holds the weights and does the arit
 beyond the workspace's is Tinker's SDK, pinned at `tinker==0.32.0`.
 
 ```bash
-uv sync --extra tinker                  # or --all-extras, with vLLM to serve Tinker's adapters here (`weights = "peft"`)
+uv sync --extra tinker                  # or --all-extras, with vLLM to serve Tinker's adapters here (its bridge)
 uv run pytest tests/rollout_tinker      # on a fake Tinker: no key, no network
 ```
 
@@ -99,8 +99,9 @@ thinking and 512 of answer) in four minutes, eight episodes at once:
 
 Qwen3.5-9B thinks past 1,024 tokens on most GSM8K problems, so the cap, not the problem, ends its thinking.
 
-`colocated`, `training_gib` and `reshard` do nothing for a remote trainer: there is nothing on this machine to share,
-and a step's files are pointers. An engine's options are `max_model_len` (the longest turn; Tinker's context for
+`colocated` and `training_gib` do nothing for a remote trainer: there is nothing on this machine to share, and a
+step's files are pointers. A channel served on engines here names Tinker's bridge (`reshard = "peft-from-tinker"`,
+[below](#serving-tinkers-adapters-here)). An engine's options are `max_model_len` (the longest turn; Tinker's context for
 `Qwen/Qwen3.5-9B` is 64K), `project` and `service`.
 
 ### Settings
@@ -118,7 +119,6 @@ mean the same, so a profile switches trainers by changing `kind`.
 | `strict_kl` | Read each minibatch's distance before its update is sent (true): two of Tinker's clock cycles a minibatch. False sends both at once, and a stop at `max_kl` comes one minibatch late |
 | `beta1`, `beta2`, `eps` | Adam's, as torch's AdamW has them (0.9, 0.999, 1e-8; Tinker's own defaults are 0.95 and 1e-12) |
 | `train_unembed` | Also adapt the output layer (false) |
-| `weights` | `pointer` (a step's weights name its Tinker checkpoints) or `peft` (and hold the adapter itself, below) |
 | `project` | A Tinker project's id |
 
 `service` (trainer and engine) is what calls Tinker: by default a session the SDK opens; `module:name` of what makes
@@ -181,15 +181,19 @@ its Tinker checkpoints have new names.
 | `weights/tinker.json` | `sampler` (`tinker://RUN/sampler_weights/ID`, what engines sample), `state` (`tinker://RUN/weights/ID`, weights and Adam's state), `base_model`, `rank` |
 | `state/tinker.json` | `state` again, `sampler`, the SDK's version |
 | `state/minibatches.jsonl` | What each update did |
-| `weights/adapter_config.json`, `weights/adapter_model.safetensors` | With `weights = "peft"`: the adapter, in PEFT's layout |
 
 Tinker's checkpoints are named after the checkpoint's id. The pointer files are blobs like any weights, so a checkpoint
 copied to another machine points at the same remote checkpoints, and the ledger needs nothing new. Releasing a
 checkpoint (retention) deletes its files from the blob store, not its checkpoints at Tinker, which are billed for
 storage until deleted: `uv run tinker checkpoint delete --run-id RUN` (or by path) deletes them.
 
-**`weights = "peft"`.** After saving, the step downloads the sampler checkpoint's archive (Tinker's own names), turns
-it into PEFT's layout (`rollout_tinker.weights.peft_adapter`, on the CPU), and keeps it beside the pointer. Tinker
+### Serving Tinker's adapters here
+
+The `peft-from-tinker` bridge ([bridges](../libraries/rollout-train/checkpoints.md#bridges)) runs
+`rollout_tinker.bridges:peft`, a Ray task of two CPUs: it asks Tinker for the archive of the sampler checkpoint the
+pointer names (Tinker's own names), turns it into PEFT's layout (`rollout_tinker.weights.peft_adapter`, on the CPU),
+and keeps it as blobs, noted under `CHECKPOINT@peft-from-tinker`. Its settings name the service it asks (`service`,
+by default a session with Tinker, which finds its key as the trainer does) and a `project`. Tinker
 names an adapted weight `base_model.model.` and its name in a plain text model (`model.layers.0.mlp.up_proj.weight`,
 `model.unembed_tokens.weight`); the adapter's names are the model's own, read from its configuration and its
 safetensors' headers: under `model.language_model.` for Qwen3.5, and the unembedding the model's `lm_head`, or its
@@ -200,8 +204,9 @@ joined name: the three are joined into one adapter (A stacked and B block-diagon
 rank when they share one A), which is the same update. `rollout_tinker.weights.ranks(directory)` says the largest
 rank, which an engine's `max_lora_rank` must reach. Then:
 
-- `rollout_vllm:VllmEngine` serves it, as the commented profile in `tinker.toml` shows;
-- `rollout merge CHECKPOINT --base Qwen/Qwen3.5-9B` folds it into the model, a full checkpoint of its own;
+- `rollout_vllm:VllmEngine` serves it, as the commented profile in `tinker.toml` shows (`reshard = "peft-from-tinker"`);
+- `rollout merge CHECKPOINT --base Qwen/Qwen3.5-9B` folds the bridged adapter into the model, a full checkpoint of
+  its own;
 - the blob store holds the adapter, so the policy outlives the model's retirement at Tinker.
 
 A rank-32 adapter of `Qwen/Qwen3.5-9B` without the output layer has 86.5 million parameters, about 0.35 GB in
@@ -274,8 +279,8 @@ documentation writes them. The tests (`tests/rollout_tinker`) show, with no netw
   optimizer; a parent's weights alone start a fresh optimizer;
 - a datum's rows: the shift by one, spans across turns, forced tokens left out;
 - the engine's contract, and a published version sampled at once through the channel and the gateway;
-- `weights = "peft"`: the renaming and the joining of q, k and v, on a tiny model laid out as Qwen3.5, and `rollout
-  merge` folding the result in exactly; and on the names and shapes of a real archive of `Qwen/Qwen3.5-4B`'s
+- Tinker's bridge: the renaming and the joining of q, k and v, on a tiny model laid out as Qwen3.5, in this process
+  and as a Ray task on the session's Ray, and `rollout merge` folding the bridged adapter in exactly; and on the names and shapes of a real archive of `Qwen/Qwen3.5-4B`'s
   (`qwen35_archive.json`), the adapter `tinker_cookbook` 0.5.7's converter made of it, name for name and shape for
   shape;
 - a profile naming the trainer and the engine, the loop playing groups and stepping on the fake;

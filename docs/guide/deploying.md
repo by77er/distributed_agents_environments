@@ -102,9 +102,9 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | Part | What it decides | To scale it |
 |---|---|---|
 | `directory` | Where the run's state is kept. `rollout train --directory` replaces it: one profile, many runs | |
-| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`: [`Limits`](reference.md#limits)' `thinking` and `answer`; either left out is no budget, and with neither a turn may fill all the context its prompt leaves, [limits](../libraries/rollout-train/channels.md#limits)). `reshard` names the layout its engines load a checkpoint's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each checkpoint is then [resharded](../libraries/rollout-train/checkpoints.md#resharding) before it is served. Without it, the engines load the trainer's files as they are. A channel whose `engine` is `rollout_train.inference:RemoteEngine` has its engines on other machines: vLLM servers, each entry of `engines` one's `address` (`via`, `max_lag`, `connection`: [engines on other machines](#engines-on-other-machines)) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one. Or serve them on machines of their own (`rollout engines`), behind a router |
+| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`: [`Limits`](reference.md#limits)' `thinking` and `answer`; either left out is no budget, and with neither a turn may fill all the context its prompt leaves, [limits](../libraries/rollout-train/channels.md#limits)). `reshard` names the bridge that makes the files its engines load from a checkpoint's (`verbatim`, `peft-from-tinker`, …): each checkpoint is then [bridged](../libraries/rollout-train/checkpoints.md#bridges) before it is served. Without it, the engines load the trainer's files as they are. A channel whose `engine` is `rollout_train.inference:RemoteEngine` has its engines on other machines: vLLM servers, each entry of `engines` one's `address` (`via`, `max_lag`, `connection`: [engines on other machines](#engines-on-other-machines)) | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one. Or serve them on machines of their own (`rollout engines`), behind a router |
 | `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the checkpoint a new run trains from, by any [reference](../libraries/rollout-train/checkpoints.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest checkpoint. `bookmark` names a bookmark the run moves to each checkpoint it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
-| `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
+| `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its bridges then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the gateway in the runner's own process listens for [harnesses](../libraries/rollout-train/harness-endpoint.md), and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the tool set should live |
@@ -189,8 +189,8 @@ is named. `profile.engines()` makes clients of the servers of the channels whose
 nothing else (what `rollout engines` loads checkpoints into).
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
 run's newest checkpoint (else the one it starts from) on its channel when it starts. `platform.layout` is the trained
-channel's `reshard`; `platform.reshard` reshards a checkpoint into it, as a Ray task when the profile names `ray`, else in
-this process, its scratch files under `directory/resharding`.
+channel's `reshard` (a bridge's name); `platform.reshard` runs that bridge on a checkpoint, as a Ray task when the profile
+names `ray`, else in this process, its scratch files under `directory/resharding`.
 
 `rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it
 and over every other run sharing its ledger (`rollout monitor` also takes the ledger itself: a database's URL or a
@@ -493,8 +493,8 @@ same `rollout train` (or `rollout eval`) command, run from the launcher's workin
 same environment and the same run directories. The launcher follows the job until it ends and writes its output to
 the run's `train.log`; the launch notes the job (`job`) in place of a process. Stop stops the job. `--as-job` submits
 the launcher itself as a long-lived Ray job and returns; it refuses when a launcher already runs as a Ray job on this
-host. A profile with `ray` connects its run to the cluster, and runs each checkpoint's reshard as a Ray task of one CPU
-([resharding](../libraries/rollout-train/checkpoints.md#resharding)).
+host. A profile with `ray` connects its run to the cluster, and runs each checkpoint's bridge as a Ray task, asking for the
+CPUs and memory the bridge declares ([bridges](../libraries/rollout-train/checkpoints.md#bridges)).
 
 Ray comes with `rollout-train` (`uv sync` installs it). On a machine, start a head node, its temporary directory
 on disk (Ray writes its sessions and spilled objects there, and `/tmp` may be memory), and stop it with `ray stop`:

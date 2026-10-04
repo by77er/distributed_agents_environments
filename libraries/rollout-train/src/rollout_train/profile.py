@@ -32,6 +32,7 @@ from rollout.harness.sandboxes import MemoryLeases, Pool, PoolBinding, SandboxPo
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
+from rollout_train.bridges import bridged, by_name, on_ray
 from rollout_train.following import Follower
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Connection, Engine, Limits, Route, Routes
@@ -41,8 +42,8 @@ from rollout_train.ledger import LOCATION
 from rollout_train.ledger import opened as ledger_at
 from rollout_train.machine import alive, measured
 from rollout_train.presence import presence_of
+from rollout_train.ray_cluster import connect, disconnect
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
-from rollout_train.resharding import connect, disconnect, on_ray, reshard
 from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.sandboxes import admits, keep, leases_of
 from rollout_train.stores import location, opened
@@ -66,8 +67,8 @@ class ChannelSpec:
     """Room for the answer after the thinking (`Limits.answer`); none: whatever room the turn has left. With neither,
     a turn may fill what the context leaves."""
     reshard: str | None = None
-    """`module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the
-    trainer's files as they are, with no reshard."""
+    """The bridge, by name (`rollout_train.bridges.BRIDGES`: `verbatim`, `peft-from-tinker`, …), that makes the files
+    the engines load from a checkpoint's; none: the trainer's files as they are, with no bridge."""
     max_lag: int = MAX_LAG
     """For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`, each entry of `engines` a server's
     `address`): how many checkpoints behind what the channel should serve a sample may be, where its server does not
@@ -83,6 +84,8 @@ class ChannelSpec:
             value = getattr(self, key)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
                 raise ValueError(f"{key} is a whole number, 1 at least, or none for no budget (not {value!r})")
+        if self.reshard is not None:
+            by_name(self.reshard)
 
     @property
     def routed(self) -> bool:
@@ -552,17 +555,18 @@ class Platform:
 
     @property
     def layout(self) -> str | None:
-        """The layout the trained channel's engines load checkpoints in, if they are resharded."""
+        """The bridge, by name, that makes the files the trained channel's engines load, if one does."""
         trainer = self.profile.trainer
         return self.profile.channels[trainer.channel].reshard if trainer is not None else None
 
     async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest:
-        """A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
-        cluster, else here."""
+        """The files the trained channel's engines load for a checkpoint, made by its bridge: as a Ray task when the
+        profile names a Ray cluster, else here."""
         assert self.layout is not None
+        chain = (by_name(self.layout),)
         if self.profile.ray:
-            return await on_ray(self.location, self.blobs_at, fence, checkpoint.id, self.layout)
-        return await reshard(self.checkpoints, fence, checkpoint.id, self.layout, self.profile.directory / "resharding")
+            return await on_ray(self.location, self.blobs_at, fence, checkpoint.id, chain)
+        return await bridged(self.checkpoints, fence, checkpoint.id, chain, self.profile.directory / "resharding")
 
     async def eval_run(self, step: int | None = None, part: int | None = None) -> str:
         """The run of an eval, by id, which the runner plays: with `step`, the eval of the checkpoint this run made at

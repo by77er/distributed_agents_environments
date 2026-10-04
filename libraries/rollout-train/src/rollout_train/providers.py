@@ -493,10 +493,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             auth=Auth("vendor", key=Secret(env="TINKER_API_KEY")),
             fields=("project",),
             secrets=("project",),
-            not_settings={
-                "project": "the cluster config says it ([trainers.NAME] project)",
-                "weights": "the bridge says what files a channel loads",
-            },
+            not_settings={"project": "the cluster config says it ([trainers.NAME] project)"},
         ),
         TrainerKind(
             "runpod-trainer",

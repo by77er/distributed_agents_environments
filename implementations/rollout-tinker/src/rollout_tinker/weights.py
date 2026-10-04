@@ -1,14 +1,14 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # (safetensors' loaders are partly untyped.)
-"""A checkpoint's files when its weights are at Thinking Machines: pointers, and the adapter itself if asked.
+"""A checkpoint's files when its weights are at Thinking Machines: pointers, and the adapter in PEFT's layout.
 
 `weights/tinker.json` names the sampler checkpoint to sample from and the training state a later step starts from;
 `state/tinker.json` names the state again (a step given the state goes on with its optimizer, one given the weights
 alone starts its optimizer afresh). The pointers are files like any other: the blob store keeps them, and a checkpoint
 copied to another machine points at the same remote checkpoints.
 
-With `weights = "peft"` the sampler checkpoint is downloaded too (its archive holds the adapter with Tinker's own
-names), turned into PEFT's layout (`peft_adapter`), and kept beside the pointer, so that vLLM serves it,
+The sampler checkpoint's archive holds the adapter with Tinker's own names. Tinker's bridge
+(`rollout_tinker.bridges`) downloads it and turns it into PEFT's layout (`peft_adapter`), so that vLLM serves it,
 `rollout merge` folds it in, and the blob store holds it. Tinker names each adapted weight `base_model.model.` and its
 name in a plain text model; renaming makes it the model's own name (Qwen3.5's weights are under
 `model.language_model.`). Qwen3.5's linear-attention layers hold one `in_proj_qkv` where Tinker adapts `in_proj_q`,

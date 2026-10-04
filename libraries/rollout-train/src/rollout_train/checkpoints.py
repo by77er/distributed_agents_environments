@@ -214,7 +214,7 @@ class Checkpoints:
         """Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
         nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
         release is appended to the ledger before its blobs are deleted, and a blob is deleted only if nothing still
-        names it (a checkpoint that was not released, or what one was resharded into), so this may be repeated after a
+        names it (a checkpoint that was not released, or what a bridge made of one), so this may be repeated after a
         crash at any point. Nor is a blob deleted that was put in the last `retention.grace` seconds: a checkpoint being
         added at the same moment, which found the blob stored and has not appended itself yet, names it next. A blob
         spared so is deleted by a later thinning, of this run or any other."""
@@ -239,16 +239,16 @@ class Checkpoints:
         return released
 
     async def _named(self) -> set[str]:
-        """The blobs that checkpoints not released name: their weights and trainer state, and what each was resharded
-        into (`rollout_train.resharding`), by hash."""
-        from rollout_train.resharding import RESHARDED  # (resharding reads checkpoints)
+        """The blobs that checkpoints not released name: their weights and trainer state, and what bridges made of
+        each (`rollout_train.bridges`), by hash."""
+        from rollout_train.bridges import BRIDGED, checkpoint_of  # (bridges read checkpoints)
 
         remaining = [checkpoint for checkpoint in await self.all() if checkpoint.released is None]
         manifests = [manifest for checkpoint in remaining for manifest in (checkpoint.weights, checkpoint.state)]
-        resharded = await self.ledger.read(RESHARDED)
-        for checkpoint in remaining:
-            record = resharded.get(checkpoint.id)
-            if isinstance(record, dict) and isinstance(files := record.get("files"), dict):
+        kept_ids = {checkpoint.id for checkpoint in remaining}
+        for entry, record in (await self.ledger.read(BRIDGED)).items():
+            files = record.get("files") if isinstance(record, dict) else None
+            if checkpoint_of(entry) in kept_ids and isinstance(files, dict):
                 manifests.append(_MANIFEST.validate_python(files))
         return {blob.sha256 for manifest in manifests if manifest for blob in manifest.files.values()}
 

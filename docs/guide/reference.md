@@ -23,7 +23,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`of_json`](#of_json), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`OBJECTIVES`](#objectives), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
-- **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats, declared: the registry, paths, refused pairs. [`Bridge`](#bridge), [`BRIDGES`](#bridges), [`format_of`](#format_of), [`FORMATS`](#formats), [`NoBridge`](#nobridge), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused)
+- **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
 - **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#preset), [`Presets`](#presets), [`presets_of`](#presets_of)
@@ -3221,7 +3221,7 @@ Every checkpoint, in a ledger, and their files in a blob store.
 - `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
   nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
   release is appended to the ledger before its blobs are deleted, and a blob is deleted only if nothing still
-  names it (a checkpoint that was not released, or what one was resharded into), so this may be repeated after a
+  names it (a checkpoint that was not released, or what a bridge made of one), so this may be repeated after a
   crash at any point. Nor is a blob deleted that was put in the last `retention.grace` seconds: a checkpoint being
   added at the same moment, which found the blob stored and has not appended itself yet, names it next. A blob
   spared so is deleted by a later thinning, of this run or any other.
@@ -3319,8 +3319,8 @@ binding takes its limits. A suite of several entries plays each in a run of its 
 entry, by its number from 1 (by default `RUN-NUMBER`). `publish` serves a checkpoint on the channel (a full one in
 place of the engines' weights; for an adapter over a full checkpoint, the engines must already hold that
 checkpoint's weights, as `rollout eval` sees to); None: the channel serves `subject` already (a training run's
-newest checkpoint). `reshard` gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds
-its files on this machine. What the eval's channel serves is written down for each of its runs
+newest checkpoint). `reshard` gives the files its engines load (made by a bridge: `rollout_train.bridges`);
+`directory` holds its files on this machine. What the eval's channel serves is written down for each of its runs
 (`rollout_train.serving`), so that runners anywhere play it on replicas that serve `subject` and no other
 checkpoint. Raises `KeyError` for an entry's environment that does not load here.
 
@@ -3627,8 +3627,8 @@ That a run's channel serves a checkpoint from now on (or, with no checkpoint, th
 | `checkpoint` | `str \| None` | `None` | By id; None: the model the channel's engines are started with. |
 | `depth` | `int` | `0` | The checkpoint's depth: the version its samples are stamped with. |
 | `kind` | `str` | `'lora'` | `lora`, an adapter; `full`, weights loaded in place of the engines' own. |
-| `files` | `Manifest \| None` | `None` | What the engines load: the checkpoint's weights, or the files they were resharded into. |
-| `layout` | `str \| None` | `None` | The layout `files` are in (`rollout_train.resharding`), if they were resharded. |
+| `files` | `Manifest \| None` | `None` | What the engines load: the checkpoint's weights, or the files a bridge made of them. |
+| `layout` | `str \| None` | `None` | The bridge that made `files` (`rollout_train.bridges`), by name, if one did. |
 | `over` | `str \| None` | `None` | For an adapter over a full checkpoint, that checkpoint, by id: the engines hold its weights first. |
 | `model` | `str \| None` | `None` | The model the channel's line began from, by name. |
 | `sequence` | `int \| None` | `None` | The longest turn the trainer can train on (`Limits.sequence`), for every runner that samples the channel. |
@@ -3783,7 +3783,7 @@ says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's 
 loop knows (where it starts from, this host, the time): where the run's directory is, where the monitor on its
 machine serves (`address`), and what profile started it, say. `hooks` are told of each result and step; `made` is
 called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
-load for a checkpoint (in their layout: `rollout_train.resharding`), told the run's fence to note it under; without
+load for a checkpoint (made by a bridge: `rollout_train.bridges`), told the run's fence to note it under; without
 it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
 and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
 `groups_per_step`, `evals.…`, `trainer.…`), each time a step is about to be decided; `scheduled` makes the schedule
@@ -4707,7 +4707,7 @@ class ChannelSpec
 | `engines` | `tuple[Mapping[str, Any], ...]` | `({},)` | One entry per replica: what that engine is told (its share of a GPU, which device, where it listens). |
 | `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn before it is closed by force (`Limits.thinking`); none: no thinking budget. |
 | `answer_tokens` | `int \| None` | `None` | Room for the answer after the thinking (`Limits.answer`); none: whatever room the turn has left. With neither, a turn may fill what the context leaves. |
-| `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
+| `reshard` | `str \| None` | `None` | The bridge, by name (`rollout_train.bridges.BRIDGES`: `verbatim`, `peft-from-tinker`, …), that makes the files the engines load from a checkpoint's; none: the trainer's files as they are, with no bridge. |
 | `max_lag` | `int` | `MAX_LAG` | For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`, each entry of `engines` a server's `address`): how many checkpoints behind what the channel should serve a sample may be, where its server does not have the newest yet. |
 | `via` | `str \| None` | `None` | For a channel whose engines serve elsewhere: the URL its runners send every request to (a router or a proxy in front of its servers); none: its servers' addresses. Its engine hosts load checkpoints at the addresses. |
 | `connection` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | How servers elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`, `key`. |
@@ -4784,9 +4784,9 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
   directory and no trainer is made; the runner plays those runs (by id), or with none named every run whose
   channels it reaches, and the channels whose engines serve in this process follow what the one run named says
   they should serve (`rollout_train.following`).
-- `@property def layout(self) -> str | None` — The layout the trained channel's engines load checkpoints in, if they are resharded.
-- `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
-  cluster, else here.
+- `@property def layout(self) -> str | None` — The bridge, by name, that makes the files the trained channel's engines load, if one does.
+- `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — The files the trained channel's engines load for a checkpoint, made by its bridge: as a Ray task when the
+  profile names a Ray cluster, else here.
 - `async def eval_run(self, step: int | None = None, part: int | None = None) -> str` — The run of an eval, by id, which the runner plays: with `step`, the eval of the checkpoint this run made at
   that step (`rollout_train.evals.Schedule`), registered the first time as `NAME-eval-STEP` and kept in
   `directory/evals`; else this run (an eval itself). With `part`, the run that plays that entry (by its number
@@ -5711,7 +5711,7 @@ The cluster's own certificate authority and the client certificate its gateway a
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none')), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_OBJECTIVE, True, frozenset({'tinker'})), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={'project': 'the cluster config says it ([trainers.NAME] project)', 'weights': 'the bridge says what files a channel loads'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',)))}
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none')), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_OBJECTIVE, True, frozenset({'tinker'})), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',)))}
 ```
 
 Every kind of trainer, by name.
@@ -5786,7 +5786,7 @@ A trainer as a cluster deploys it (`[trainers.NAME]`).
 
 ## `rollout_train.bridges`
 
-Bridges between checkpoint formats, declared: the registry, paths, refused pairs.
+Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks.
 
 ### `Bridge`
 
@@ -5812,15 +5812,96 @@ One bridge: from a format to another, the task that does it, and what the task n
 | `explicit` | `bool` | `False` | Chosen only when the run asks for it (`channels.NAME.bridge`), never by the path search alone. |
 | `cost` | `int` | `1` | Its weight in the path search. |
 
+### `bridge_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+async def bridge_of(ledger: Ledger, checkpoint: str) -> str | None
+```
+
+The bridge, by name, that last made files of a checkpoint, if one did.
+
+### `BRIDGED`
+
+*constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+BRIDGED = 'checkpoints/resharded'
+```
+
+The ledger's table of what each bridge made, keyed `CHECKPOINT@BRIDGE`.
+
+### `bridged`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+async def bridged(checkpoints: Checkpoints, fence: Fence, checkpoint: str, chain: Sequence[Bridge], scratch: Path, *, target: str | None = None, settings: Mapping[str, Mapping[str, JsonValue]] | None = None) -> Manifest
+```
+
+The files a provider loads for `checkpoint` (by id), made in this process by each bridge of `chain` (`path`'s)
+in turn, each from what the one before made, the first from the checkpoint's weights, unless it made them before.
+A bridge with no task (`none`) passes on the files it is given. `scratch` is where the files are read to and
+written, on this machine, for the while it takes; `target` is the model the provider serves, and `settings` each
+bridge's own, by its name.
+
 ### `BRIDGES`
 
 *constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
 
 ```python
-BRIDGES: tuple[Bridge, ...] = (Bridge('none', 'tinker', 'tinker', None, "served as it is: Tinker's sampler reads the checkpoint's pointer", cost=0), Bridge('peft-from-tinker', 'tinker', 'peft', 'rollout_tinker.bridges:peft', "Tinker's adapter downloaded and written in PEFT's layout", cpus=2, network=True, rank_factors=(('Qwen/Qwen3.5-*', 3),)), Bridge('verbatim', 'peft', 'peft', 'rollout_train.resharding:verbatim', "the adapter's files, linked as they are"), Bridge('full-reload', 'full', 'full', 'rollout_train.resharding:verbatim', "the full weights' files, linked as they are and loaded under the checkpoint's name, replica by replica"), Bridge(MERGE_QUANTIZE, 'peft', 'full', 'rollout_lora.bridges:merge_quantize', "the adapter merged into its base and quantized as the provider's model is", cpus=8, memory_gib=48, explicit=True, cost=10))
+BRIDGES: tuple[Bridge, ...] = (Bridge('none', 'tinker', 'tinker', None, "served as it is: Tinker's sampler reads the checkpoint's pointer", cost=0), Bridge('peft-from-tinker', 'tinker', 'peft', 'rollout_tinker.bridges:peft', "Tinker's adapter downloaded and written in PEFT's layout", cpus=2, network=True, rank_factors=(('Qwen/Qwen3.5-*', 3),)), Bridge('verbatim', 'peft', 'peft', VERBATIM, "the adapter's files, linked as they are"), Bridge('full-reload', 'full', 'full', VERBATIM, "the full weights' files, linked as they are and loaded under the checkpoint's name, replica by replica"), Bridge(MERGE_QUANTIZE, 'peft', 'full', 'rollout_lora.bridges:merge_quantize', 'the adapter merged into its base, as full weights a provider quantizes as it loads them', cpus=8, memory_gib=48, explicit=True, cost=10))
 ```
 
 Every bridge, by its pair of formats.
+
+### `BRIDGING`
+
+*constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+BRIDGING = 'checkpoints/resharding'
+```
+
+The ledger's table of bridges begun, keyed `CHECKPOINT@BRIDGE` (`key`).
+
+### `by_name`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def by_name(name: str) -> Bridge
+```
+
+The bridge of the registry called `name`; `KeyError`, saying the names, for none.
+
+### `checkpoint_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def checkpoint_of(entry: str) -> str
+```
+
+The checkpoint an entry of the bridges' tables is of (`key`).
+
+### `Context`
+
+*class* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+class Context
+```
+
+What a bridge's task is told beside the files it reads and writes.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `checkpoint` | `str` | required | The checkpoint it bridges, by id. |
+| `model` | `str \| None` | `None` | The model the checkpoint's weights are over (its record's `base`), by name or directory. |
+| `target` | `str \| None` | `None` | The model the provider serves it on (a copy of `model` quantized, say); none: `model`. |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The bridge's own settings, from whoever runs it (the service Tinker's bridge asks, say). |
 
 ### `format_of`
 
@@ -5845,6 +5926,26 @@ FORMATS = ('peft', 'full', 'tinker')
 The checkpoint formats: an adapter in PEFT's layout, full weights (safetensors and a `config.json`), and pointers
 to Tinker's sampler checkpoint and state.
 
+### `key`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def key(checkpoint: str, bridge: str) -> str
+```
+
+A checkpoint's entry in the bridges' tables, for a bridge by name: `CHECKPOINT@BRIDGE`.
+
+### `made`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+async def made(ledger: Ledger, checkpoint: str, bridge: str) -> Manifest | None
+```
+
+What a bridge, by name, made of a checkpoint, if it did.
+
 ### `NoBridge`
 
 *class* · `libraries/rollout-train/src/rollout_train/bridges.py`
@@ -5860,6 +5961,19 @@ A pair of formats with no path between them, and why.
 | `source` | `str` | required |  |
 | `target` | `str` | required |  |
 | `reason` | `str` | required |  |
+
+### `on_ray`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+async def on_ray(ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], fence: Fence, checkpoint: str, chain: Sequence[Bridge], *, target: str | None = None, settings: Mapping[str, Mapping[str, JsonValue]] | None = None, scratch: str = SCRATCH) -> Manifest
+```
+
+`bridged`, with each bridge of `chain` a Ray task of its own on the cluster this process is connected to
+(`ray.init`), asking for the CPUs and memory the bridge declares. `ledger_at` and `blobs_at` say where a worker
+finds the ledger and the blob store; `scratch` is where it works, on its own machine. A chain whose bridges write
+nothing (`none`) serves the checkpoint's own files.
 
 ### `path`
 
@@ -5892,6 +6006,16 @@ REFUSED: tuple[NoBridge, ...] = (NoBridge('peft', 'tinker', _NO_UPLOAD), NoBridg
 ```
 
 Pairs refused on purpose, with the reason a run is told.
+
+### `verbatim`
+
+*function* · `libraries/rollout-train/src/rollout_train/bridges.py`
+
+```python
+def verbatim(weights: Path, into: Path, context: Context) -> dict[str, JsonValue]
+```
+
+The provider loads the trainer's files as they are: each is linked (or copied) into `into`.
 
 ## `rollout_train.run_settings`
 
@@ -7362,7 +7486,6 @@ class TinkerSettings
 | `beta2` | `float` | `0.999` |  |
 | `eps` | `float` | `1e-08` | Adam's, as torch's AdamW has them (Tinker's own defaults are 0.95 and 1e-12). |
 | `train_unembed` | `bool` | `False` | Also adapt the output layer. Off: an adapter of attention and MLP layers is what local engines and the merge take most simply. |
-| `weights` | `str` | `'pointer'` | What a step leaves in its weights: `pointer`, a file naming the Tinker checkpoint to sample from; `peft`, that and the adapter itself, downloaded and in PEFT's layout, for local engines, the merge and the blob store. |
 | `project` | `str \| None` | `None` | A Tinker project's id (not a secret); else `TINKER_PROJECT_ID`, if set. |
 
 **Methods**
@@ -7381,10 +7504,11 @@ class TinkerTrainer
 
 Trains a LoRA adapter over `model` at Thinking Machines, one step at a time: a step starts from the training
 state its parent names (its optimizer too, if it is given the parent's state) and leaves pointers to the new
-checkpoints, and with `weights = "peft"` the adapter itself. A client from the step before is used again when the
-parent is the state it saved. `service` is what calls Tinker: by default a session the SDK opens with the key it
-finds; `module:name` of what makes another (a profile names a fake one so). `settings` are `TinkerSettings`';
-those in `CHANGEABLE` it takes between steps (`rollout_train.trainer.Changeable`).
+checkpoints (which Tinker's bridge, `rollout_tinker.bridges`, turns into an adapter engines here load). A client
+from the step before is used again when the parent is the state it saved. `service` is what calls Tinker: by
+default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
+one so). `settings` are `TinkerSettings`'; those in `CHANGEABLE` it takes between steps
+(`rollout_train.trainer.Changeable`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|

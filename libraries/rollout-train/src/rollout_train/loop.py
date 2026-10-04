@@ -74,6 +74,7 @@ from rollout.curriculum import Curriculum, curriculum_of
 from rollout.environment import Environment, binding_for, held_out, train_start
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
+from rollout_train.bridges import bridge_of
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.evals import Schedule, evaluate
 from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
@@ -93,7 +94,6 @@ from rollout_train.record import (
     start_header,
     table,
 )
-from rollout_train.resharding import RESHARDED
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
 from rollout_train.serving import Serving, record_serving
@@ -172,7 +172,7 @@ async def train(
     loop knows (where it starts from, this host, the time): where the run's directory is, where the monitor on its
     machine serves (`address`), and what profile started it, say. `hooks` are told of each result and step; `made` is
     called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
-    load for a checkpoint (in their layout: `rollout_train.resharding`), told the run's fence to note it under; without
+    load for a checkpoint (made by a bridge: `rollout_train.bridges`), told the run's fence to note it under; without
     it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
     and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
     `groups_per_step`, `evals.…`, `trainer.…`), each time a step is about to be decided; `scheduled` makes the schedule
@@ -241,9 +241,9 @@ async def train(
         if checkpoint.weights is None:
             raise ValueError(f"{checkpoint.id} was released: its weights are gone")
         manifest = await reshard(checkpoint, fence) if reshard is not None else checkpoint.weights
-        layout: Any = (await ledger.read(RESHARDED)).get(checkpoint.id) if reshard is not None else None
+        layout = await bridge_of(ledger, checkpoint.id) if reshard is not None else None
         wanted = Serving(
-            channel, checkpoint.id, checkpoint.depth, checkpoint.kind, manifest, layout and layout.get("layout"),
+            channel, checkpoint.id, checkpoint.depth, checkpoint.kind, manifest, layout,
             await _over(checkpoints, checkpoint), base, trainer.budget.segment_tokens,
             max_lag=int(str(settings[MAX_LAG])),
         )  # fmt: skip

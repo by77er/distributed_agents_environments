@@ -48,7 +48,7 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   of the engines' weights: [full weights](#full-weights-and-merges)); the checkpoint before stays
   loaded until the turns that began under it finish. It writes down that its channel serves it
   ([what a channel should serve](channels.md#what-a-channel-should-serve)), so that engines on other machines follow. Runs on other channels serve their own. When its channel names
-  a `reshard`, it serves the checkpoint's [resharded](#resharding) files, and waits for them.
+  a `reshard`, it serves the files its [bridge](#bridges) makes of the checkpoint's, and waits for them.
 - **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
   and trainer state, of the checkpoints a run made, but the newest `recent` and every `every`-th by depth. Whatever
   retention says, a checkpoint keeps its files while it is served (and its parent, for a turn in progress), while any
@@ -57,7 +57,7 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   metrics). A release is appended to `checkpoints/released` before its blobs are deleted. A released checkpoint reads
   with no `weights`, no `state` and the time it was `released`.
 - **A blob is deleted only if nothing names it, and nothing put it lately.** What names a blob: a checkpoint that was
-  not released (its weights and state), or what one was [resharded](#resharding) into. A checkpoint being added at the
+  not released (its weights and state), or what a [bridge](#bridges) made of one. A checkpoint being added at the
   same moment may have found a blob already stored (content addressing: it is not written again) and not have appended
   itself yet, so `thin` also spares every blob put in the last `Retention.grace` seconds (an hour by default). Every
   put of a blob, one that writes it or one that finds it, sets the blob's time to now: a store of files sets the file's
@@ -83,7 +83,8 @@ tokenizer), as a trainer of every weight writes it or a merge makes it.
   is the LoRA checkpoint, its base the model the merged weights came from, and no run made it. What folds an adapter
   in is named as `module:name` (`rollout_lora.merge:merge`). An adapter trained over a quantized model merges into
   the same model's unquantized weights (`--base Qwen/Qwen3.5-9B` for one trained over `…-AWQ-4bit`): the layers have
-  the same names.
+  the same names. A Tinker checkpoint's weights are a pointer: what merges is the adapter its
+  [bridge](#bridges) made of them (`peft-from-tinker`), which must have run first.
 - **A run started from a full checkpoint trains over it.** Its trained channel's engines and its trainer load that
   checkpoint's files as their model (fetched to `directory/bases/ID`). With a LoRA trainer, the run's first step
   begins a new adapter over those weights, and its checkpoints' base is the full checkpoint's id; with a trainer of
@@ -117,31 +118,43 @@ checkpoint, by their paths within it, to blobs.
   has it, as each run's start says where its store is: a run can start from a checkpoint another run kept in its own
   blob store, or from a merge of one.
 
-## Resharding
+## Bridges
 
-A trainer writes a checkpoint's weights in its own layout; the engines may load another (their division across devices,
-a merged checkpoint, a format of their own). `rollout_train.resharding` rewrites a checkpoint's files into its engines'
-layout, as a task of its own.
+A trainer writes a checkpoint's weights in its format (`peft`, `full`, `tinker`); a provider loads some formats
+([the cluster config](../../guide/cluster.md#bridges)). `rollout_train.bridges` holds every bridge by its pair of
+formats (`BRIDGES`), finds the cheapest chain from a checkpoint's format to one a provider loads (`path`), and runs it,
+each bridge once per checkpoint.
 
-- **A layout is a function**, named as `module:name`: `layout(weights, into)` writes the engines' files under `into`
-  from the trainer's under `weights`, and returns what it says about them. `verbatim` is the layout of engines that
-  load the trainer's files as they are, such as vLLM with a LoRA adapter: each file is linked (or copied) as it is,
-  so its blobs are the same.
-- **`reshard(checkpoints, fence, checkpoint, layout, scratch)`** appends to `checkpoints/resharding` when it begins (the
-  layout and the host), reads the checkpoint's weights to `scratch`, runs the layout, keeps the files it wrote in the
-  blob store, and appends what it made to `checkpoints/resharded` (the layout, what it said, and the manifest of the
-  files), both under the fence of the run that made the checkpoint. A checkpoint resharded before is not resharded again:
-  `resharded(ledger, checkpoint)` is what it was resharded into. A released checkpoint cannot be resharded: its weights
-  were deleted. The scratch files are removed once the files are kept.
-- **As a Ray task.** `on_ray(ledger_at, blobs_at, fence, checkpoint, layout)` runs `reshard` as a Ray task of one CPU on
-  the cluster the process is connected to (`connect(address)`, `disconnect()`): the worker opens the ledger and the
-  blob store from where they are, and keeps its scratch files on disk under `~/.cache/rollout/resharding`. `connect`
-  tells Ray not to start workers through `uv run`, so they run in the cluster's own environment.
+- **A bridge's work is a function**, named as `module:name` (`Bridge.task`): `task(weights, into, context)` writes the
+  target's files under `into` from the source's under `weights`, and returns what it says about them. `Context` says
+  the checkpoint, the model its weights are over (its `base`), the model the provider serves it on, and the bridge's
+  own settings.
 
-A profile turns it on for a channel (`[channels.NAME] reshard = "rollout_train.resharding:verbatim"`); with `ray`, the
-run's reshards are Ray tasks, else they run in its process, with scratch under `directory/resharding`
-([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint resharding and
-resharded.
+| Bridge | Task | What it does |
+|---|---|---|
+| `none` | none | Tinker's sampler reads the checkpoint's pointer: its own files are served |
+| `peft-from-tinker` | `rollout_tinker.bridges:peft` | Tinker's archive of the sampler checkpoint downloaded and written in PEFT's layout ([rollout-tinker](../../implementations/rollout-tinker.md#serving-tinkers-adapters-here)); its settings name the service it asks |
+| `verbatim`, `full-reload` | `rollout_train.bridges:verbatim` | each file linked (or copied) as it is, so its blobs are the same |
+| `merge-quantize` | `rollout_lora.bridges:merge_quantize` | the adapter merged into its base as full weights, which a provider that quantizes as it loads (vLLM's `quantization = "fp8"`) serves; refused for a provider model quantized beforehand |
+
+- **`bridged(checkpoints, fence, checkpoint, chain, scratch)`** runs each bridge of `chain` in this process, each from
+  what the one before made (the first from the checkpoint's weights). For each it appends to `checkpoints/resharding`
+  when it begins (the bridge and the host), reads the source's files to `scratch`, runs the task, keeps the files it
+  wrote in the blob store, and appends what it made to `checkpoints/resharded` (the bridge, its task, what it said, and
+  the manifest of the files), both keyed `CHECKPOINT@BRIDGE` under the fence of the run that made the checkpoint, so one
+  checkpoint is bridged once for each format it is served in. A checkpoint bridged before is not bridged again:
+  `made(ledger, checkpoint, bridge)` is what the bridge made of it, and `bridge_of(ledger, checkpoint)` the bridge that
+  last made its files. A released checkpoint cannot be bridged: its weights were deleted. The scratch files are
+  removed once the files are kept.
+- **As Ray tasks.** `on_ray(ledger_at, blobs_at, fence, checkpoint, chain)` runs each bridge as a Ray task of its own on
+  the cluster the process is connected to (`rollout_train.ray_cluster.connect(address)`), asking for the CPUs and
+  memory the bridge declares: the worker opens the ledger and the blob store from where they are, and works on its own
+  disk under `~/.cache/rollout/scratch/bridges`. A chain of `none` alone serves the checkpoint's own files.
+
+A profile names a bridge for a channel (`[channels.NAME] reshard = "verbatim"`); with `ray`, the run's bridges are Ray
+tasks, else they run in its process, with scratch under `directory/resharding`
+([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint being
+bridged and bridged.
 
 ## The ledger
 
