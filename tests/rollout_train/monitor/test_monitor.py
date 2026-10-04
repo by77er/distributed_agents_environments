@@ -1,5 +1,6 @@
 """The monitor: a feed written by hooks as runs happen, and the page's API over it."""
 
+import json
 from pathlib import Path
 
 import httpx
@@ -97,10 +98,14 @@ def test_what_runners_and_loops_note_is_in_the_feed_beside_its_runs(tmp_path: Pa
     feed.on_note({"kind": "started", "runner": "here", "run": "train", "group": 1, "episode": 1, "run_id": "r_1"})
     feed.on_note({"kind": "result", "run": "train", "group": 1, "rewards": [1.0, 0.0]})
     feed.close()
-    reader = FeedReader(tmp_path / "feed")
-    assert reader.runs() == [] and [line["kind"] for line in reader.notes()] == ["started", "result"]
+    notes = tmp_path / "feed" / "_notes.jsonl"
+
+    def noted() -> list[str]:
+        return [json.loads(line)["kind"] for line in notes.read_text().splitlines()]
+
+    assert FeedReader(tmp_path / "feed").runs() == [] and noted() == ["started", "result"]
     RunFeed(tmp_path / "feed")  # the next writer leaves the notes as they are (they are not a run that was cut off)
-    assert [line["kind"] for line in FeedReader(tmp_path / "feed").notes()] == ["started", "result"]
+    assert noted() == ["started", "result"]
 
 
 def test_readers_in_several_threads_read_each_line_once(tmp_path: Path) -> None:

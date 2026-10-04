@@ -51,8 +51,8 @@ def plain(message: Message) -> dict[str, JsonValue]:
 
 
 NOTES = "_notes"
-"""The feed file of notes beside the runs': episodes as runners start and end them, published weights, the loop's
-results and steps, the engines' throughput."""
+"""The feed file of notes beside the runs': episodes as runners start and end them, published weights, and the loop's
+results and steps."""
 
 
 class RunFeed(RunHooks, Hooks):
@@ -207,8 +207,6 @@ class FeedReader:
         self.directory = directory
         self._reading = threading.Lock()
         self._runs: dict[str, tuple[Appended, _Summary]] = {}
-        self._noted = Appended(directory / f"{NOTES}.jsonl")
-        self._notes: list[dict[str, Any]] = []
 
     def refresh(self) -> None:
         with self._reading:
@@ -225,19 +223,12 @@ class FeedReader:
                 summary.add(line)
         for run_id in set(self._runs) - here:
             del self._runs[run_id]
-        self._notes.extend(self._noted.more())
 
     def runs(self) -> list[dict[str, Any]]:
         """Every run in the feed, newest first: its labels, state, rewards and how much it has done."""
         self.refresh()
         summaries = [summary.of(run_id) for run_id, (_, summary) in self._runs.items()]
         return sorted(summaries, key=lambda run: run["started"], reverse=True)
-
-    def notes(self, after: int = 0) -> list[dict[str, Any]]:
-        """The notes from index `after` on: episodes as runners start and end them, published weights, the loop's
-        results and steps, the engines' throughput."""
-        self.refresh()
-        return self._notes[after:]
 
     def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         """A run's lines from index `after` on."""

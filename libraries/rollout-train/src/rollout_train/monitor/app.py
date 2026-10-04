@@ -313,12 +313,11 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
     @contextlib.asynccontextmanager
     async def measuring(app: Starlette) -> AsyncGenerator[None]:
-        tasks = [asyncio.create_task(hub.run())]
+        reading = asyncio.create_task(hub.run())
         try:
             yield
         finally:
-            for task in tasks:
-                task.cancel()
+            reading.cancel()
 
     routes = [
         Route("/", page),

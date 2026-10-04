@@ -137,14 +137,16 @@ RUNNING, IDLE, GONE, PAUSED = "running", "idle", "ended", "paused"
 """A run's process is there and writing; there and quiet; not heard from (its runners stopped beating, or never
 beat); there and paused, as a runner's beat says (`rollout_train.resuming`). Its runners
 beat and stopped with no word of how it ended: lost (it crashed or was killed). A run that said how it ended is in the
-state it said (`FINISHED`, `STOPPED`, `FAILED`)."""
-"""A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds
+state it said (`FINISHED`, `STOPPED`, `FAILED`).
+
+Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds
 (by the clock of the store that keeps the beats),
 and it is running (idle if it wrote nothing for `QUIET` seconds); none, and its process is gone: ended. An eval that
 played every start has ended; one a training run's schedule asked for, and not done, is as that run is. A run whose
 runners never beat is running for `STALE` seconds after it started (its first beat is yet to come), and ended after.
 No process is asked: a run may be on any machine."""
 QUIET = 20 * 60
+"""Seconds a run whose runners beat may write nothing before it is idle."""
 FRESH = 5.0
 """Seconds what a monitor elsewhere said is kept before it is asked again."""
 UNANSWERED = 30.0
@@ -183,9 +185,9 @@ class System:
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
         self._stores: dict[str, Blobs] = {}
+        """The blob stores the runs' starts name, opened once each."""
         self._turn_stores: dict[int, TurnStore] = {}
         """The turns the gateway recorded, read from each blob store (by its identity)."""
-        """The blob stores the runs' starts name, opened once each."""
         self._opened = _run_in(self.directory) if self.directory is not None else None
         """The id of the run in the directory this was opened on."""
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
