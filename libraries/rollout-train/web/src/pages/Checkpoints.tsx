@@ -1,8 +1,7 @@
 // Every checkpoint, as a graph: each base model a root, and under it a lane for each run with the checkpoints it made from
 // the left (folded to the ones that matter until it is opened); a run that starts from another's checkpoint hangs under
-// that run's lane, and the lines between lanes say what came from what. Below it the distillations, each with what its
-// mode means in words; the trainers with their queues, and the inference workers with what each serves.
-// What no run writes yet comes from the sample fixture, when it is asked for, and is marked so.
+// that run's lane, and the lines between lanes say what came from what. Below it each run's trainer with its queue of
+// steps, and what the runs' engines serve.
 
 import { memo, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -10,16 +9,15 @@ import { useLineage, useSystem } from "../api/queries";
 import type { Lineage, LineageRun, LineageCheckpoint, Trainer, Worker } from "../api/types";
 import { QueueChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
-import { Card, Empty, Head, Kpi, Kpis, Mark, SampleChip, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
-import { clock, mean, span } from "../lib/format";
-import { runPlace, checkpointPlace, checkpointsPlace } from "../lib/places";
+import { Card, Empty, Head, Kpi, Kpis, Mark, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
+import { clock, span } from "../lib/format";
+import { runPlace, checkpointPlace } from "../lib/places";
 import { useFolds } from "../lib/stored";
 
 const LANE = 78, COLUMN = 62, PAD = 34;
 const OUTSIDE = "(outside a run)";
 const short = (name: string | null | undefined) => (name ? String(name).split("/").at(-1) : "–");
-const modeKind = (mode: string | null | undefined) => (mode === "on-policy" ? "violet" : mode === "off-policy" ? "warm" : "accent");
-const lifeKind = (state: string) => ({ serving: "good", "rolling out": "warm", resharding: "violet", resharded: "accent" } as Record<string, string>)[state] ?? "";
+const lifeKind = (state: string) => ({ serving: "good", resharding: "violet", resharded: "accent" } as Record<string, string>)[state] ?? "";
 const ago = (lineage: Lineage, at: number | null | undefined) => (at ? span(Math.max(0, lineage.now - at)) : "–");
 
 interface Index {
@@ -49,7 +47,7 @@ interface Lane {
 }
 
 /** The lanes, in order: a lane for each base model (its root), and under it each run whose first checkpoint was trained
- * from it; under a run, each run that starts from one of its checkpoints (a fork, or a distillation's start). Checkpoints
+ * from it; under a run, each run that starts from one of its checkpoints (a fork). Checkpoints
  * this ledger does not have, but that something here starts from, are in a lane of their own at the top. */
 function lanesOf(lineage: Lineage, index: Index): Lane[] {
   const byRun = new Map<string, LineageCheckpoint[]>();
@@ -62,7 +60,7 @@ function lanesOf(lineage: Lineage, index: Index): Lane[] {
   const outside = new Set(lineage.outside);
   const source = (key: string): string => {  // (the lane a run's lane hangs under)
     const first = byRun.get(key)![0], run = index.runs.get(key);
-    const from = run?.kind === "distill" ? run.from ?? run.teachers[0] : first?.parents[0] ?? run?.from;
+    const from = first?.parents[0] ?? run?.from;
     if (!from) return `base:${first?.base ?? lineage.bases[0] ?? "the base model"}`;
     if (outside.has(from)) return "outside";
     const owner = index.checkpoints.get(from)?.by?.run ?? OUTSIDE;
@@ -90,22 +88,20 @@ function lanesOf(lineage: Lineage, index: Index): Lane[] {
 type Item =
   | { kind: "base"; name: string }
   | { kind: "checkpoint"; name: string; outside?: boolean }
-  | { kind: "distill"; run: LineageRun }
   | { kind: "gap"; count: number; names: string[] };
 
-const itemId = (item: Item) => item.kind === "checkpoint" ? `v:${item.name}` : item.kind === "distill" ? `d:${item.run.run}` : item.kind === "base" ? `b:${item.name}` : `g:${item.names[0]}`;
+const itemId = (item: Item) => item.kind === "checkpoint" ? `v:${item.name}` : item.kind === "base" ? `b:${item.name}` : `g:${item.names[0]}`;
 const edgeFrom = (edge: Lineage["edges"][number]) => (edge.from.startsWith("base:") ? `b:${edge.from.slice(5)}` : `v:${edge.from}`);
-const edgeTo = (edge: Lineage["edges"][number]) => (edge.kind === "teach" || edge.kind === "start" ? `d:${edge.to}` : `v:${edge.to}`);
+const edgeTo = (edge: Lineage["edges"][number]) => `v:${edge.to}`;
 
-/** A lane's items, left to right: a base's root; or a run's checkpoints, the distillation that made them (before the first
- * it made), and, while the lane is folded, a gap for each stretch of checkpoints that nothing points at. */
+/** A lane's items, left to right: a base's root; or a run's checkpoints, and, while the lane is folded, a gap for each
+ * stretch of checkpoints that nothing points at. */
 function itemsOf(lane: Lane, open: boolean, anchors: Set<string>): Item[] {
   if (lane.base) return [{ kind: "base", name: lane.base }];
   if (lane.outside) return lane.outside.map(name => ({ kind: "checkpoint", name, outside: true }));
   const items: Item[] = [], checkpoints = lane.checkpoints;
   let hidden: string[] = [];
   const flush = () => { if (hidden.length) items.push({ kind: "gap", count: hidden.length, names: hidden }); hidden = []; };
-  if (lane.run?.kind === "distill") items.push({ kind: "distill", run: lane.run });
   checkpoints.forEach((checkpoint, place) => {
     const shown = open || place === 0 || place === checkpoints.length - 1 || anchors.has(checkpoint.id) || checkpoint.bookmarks.length
       || !["written", "superseded"].includes(checkpoint.life.state);
@@ -120,9 +116,7 @@ function said(edge: Lineage["edges"][number], index: Index): string {
   switch (edge.kind) {
     case "base": return `${index.shortOf(edge.to)} was trained from the base model ${edge.from.slice(5)}`;
     case "trained": return `${index.shortOf(edge.to)} was trained from ${index.shortOf(edge.from)}: a fork`;
-    case "learned": return `${index.shortOf(edge.to)} also learned from ${index.shortOf(edge.from)}`;
-    case "teach": return `${index.shortOf(edge.from)} teaches ${index.runOf(edge.to)} — ${edge.says ?? edge.mode ?? ""}`;
-    default: return `${index.runOf(edge.to)} starts from ${index.shortOf(edge.from)} — ${edge.says ?? edge.mode ?? ""}`;
+    default: return `${index.shortOf(edge.to)} also learned from ${index.shortOf(edge.from)}`;
   }
 }
 
@@ -159,10 +153,6 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
   const columns = Math.max(0, ...column.values()) + 1;
   const width = Math.max(room - 252, PAD * 2 + (columns - 1) * COLUMN + 90), height = laid.length * LANE;
   const x = (id: string) => PAD + column.get(id)! * COLUMN, y = (row: number) => row * LANE + LANE / 2 + 8;
-  const kindOfCheckpoint = (name: string) => {
-    const checkpoint = index.checkpoints.get(name), run = checkpoint?.by ? index.runs.get(checkpoint.by.run) : undefined;
-    return run?.kind === "distill" ? modeKind(run.mode) : "accent";
-  };
   return (
     <div className="dag">
       <div className="dag-labels">
@@ -175,38 +165,35 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             return <div key={lane.key} className="lane-label base-label"><span /><b title={lane.base}>{short(lane.base)}</b><small>base model</small></div>;
           }
           const run = lane.run, first = lane.checkpoints[0], from = first?.parents[0];
-          const says = run?.kind === "distill" ? run.says ?? run.mode ?? "distilled"
-            : from && index.checkpoints.get(from)?.by?.run !== lane.key
-              ? `forked from ${index.shortOf(from)}${index.checkpoints.get(from)?.by ? ` (${index.checkpoints.get(from)!.by!.name})` : ""}` : "from the base model";
-          const sample = lane.checkpoints.some(checkpoint => checkpoint.sample) || run?.sample;
+          const says = from && index.checkpoints.get(from)?.by?.run !== lane.key
+            ? `forked from ${index.shortOf(from)}${index.checkpoints.get(from)?.by ? ` (${index.checkpoints.get(from)!.by!.name})` : ""}` : "from the base model";
           const name = run?.name ?? (lane.key === OUTSIDE ? "made outside a run" : lane.key);
           return (
-            <div key={lane.key} className={`lane-label${run?.kind === "distill" ? " distill-label" : ""}`} style={{ paddingLeft: 4 + Math.min(lane.depth, 3) * 10 }} onClick={toggle} title={lane.open ? "fold the lane" : "show every checkpoint"}>
+            <div key={lane.key} className="lane-label" style={{ paddingLeft: 4 + Math.min(lane.depth, 3) * 10 }} onClick={toggle} title={lane.open ? "fold the lane" : "show every checkpoint"}>
               <Twist open={lane.open} onToggle={toggle} />
-              <b title={run ? `id: ${run.run}` : undefined}>{run && !sample && inLedger.has(run.run) ? <Link to={runPlace(run.run)} onClick={event => event.stopPropagation()}>{name}</Link> : name}</b>
+              <b title={run ? `id: ${run.run}` : undefined}>{run && inLedger.has(run.run) ? <Link to={runPlace(run.run)} onClick={event => event.stopPropagation()}>{name}</Link> : name}</b>
               <small className="says">{lane.checkpoints.length} checkpoints · {says}</small>
-              <span className="lane-tags">{run?.kind === "distill" ? <span className={`chip t-${modeKind(run.mode)}`}>{run.mode}</span> : null}{sample ? <SampleChip /> : null}</span>
             </div>
           );
         })}
       </div>
       <div className="dag-frame">
         <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label="checkpoints as a graph, from their base models" className="dag-drawing">
-          {laid.map((lane, row) => <rect key={lane.key} x={0} y={row * LANE} width={width} height={LANE} className={`lane-band${row % 2 ? " odd" : ""}${lane.checkpoints.some(checkpoint => checkpoint.sample) ? " sample" : ""}`} />)}
-          {/* Along each lane: a line from item to item, in the color of what made the later one. */}
+          {laid.map((lane, row) => <rect key={lane.key} x={0} y={row * LANE} width={width} height={LANE} className={`lane-band${row % 2 ? " odd" : ""}`} />)}
+          {/* Along each lane: a line from item to item. */}
           {laid.map((lane, row) => lane.items.map((item, place) => {
             if (!place) return null;
             const from = lane.items[place - 1];
-            const kind = item.kind === "gap" || from.kind === "gap" || lane.outside ? "quiet dash" : item.kind === "checkpoint" ? kindOfCheckpoint(item.name) : "quiet";
+            const kind = item.kind === "gap" || from.kind === "gap" || lane.outside ? "quiet dash" : item.kind === "checkpoint" ? "accent" : "quiet";
             return <line key={`${lane.key}${itemId(item)}`} x1={x(itemId(from))} x2={x(itemId(item))} y1={y(row)} y2={y(row)} className={kind.split(" ").map(each => (each === "dash" ? "dash" : `s-${each}`)).join(" ")} />;
           }))}
-          {/* Between lanes: from a base model to the first checkpoint of a line, a fork, a teacher, a distillation's start. */}
+          {/* Between lanes: from a base model to the first checkpoint of a line, a fork, a merge's other parents. */}
           {lineage.edges.map((edge, place) => {
             if (!crossing(edge)) return null;
             const from = where.get(edgeFrom(edge))!, to = where.get(edgeTo(edge))!;
-            const x1 = x(edgeFrom(edge)), y1 = y(from.row), x2 = x(itemId(to.item)) - (to.item.kind === "distill" ? 9 : 7), y2 = y(to.row);
+            const x1 = x(edgeFrom(edge)), y1 = y(from.row), x2 = x(itemId(to.item)) - 7, y2 = y(to.row);
             const middle = x1 + Math.max(18, (x2 - x1) * 0.55);
-            const kind = edge.kind === "base" || edge.kind === "trained" ? "s-quiet" : edge.kind === "learned" ? "s-quiet dash" : `s-${modeKind(edge.mode)}${edge.kind === "start" ? " dash" : ""}`;
+            const kind = edge.kind === "learned" ? "s-quiet dash" : "s-quiet";
             return <path key={`e${place}`} d={`M ${x1} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${x2} ${y2}`} className={`edge ${kind}`}><title>{said(edge, index)}</title></path>;
           })}
           {/* The items, over the lines; and above each run's lane, its name where its stretch begins. */}
@@ -228,18 +215,6 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
                 </g>
               );
             }
-            if (item.kind === "distill") {
-              const run = item.run, kind = modeKind(run.mode);
-              return (
-                <g key={id}>
-                  <g className="distill">
-                    <path d={`M ${cx - 9} ${cy} L ${cx} ${cy - 9} L ${cx + 9} ${cy} L ${cx} ${cy + 9} Z`} className={`f-${kind}`} />
-                    <title>{`${run.name}: distil ${run.teachers.map(index.shortOf).join(" + ")}${run.from ? `, from ${index.shortOf(run.from)}` : ""}\n${run.says ?? ""}\nobjective ${run.objective ?? "–"}`}</title>
-                  </g>
-                  <text x={cx} y={cy + 23} textAnchor="middle" className={`t-${kind}`}>{run.mode}</text>
-                </g>
-              );
-            }
             const checkpoint = index.checkpoints.get(item.name);
             if (!checkpoint) {  // (a checkpoint this ledger does not have)
               return (
@@ -250,21 +225,21 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
               );
             }
             const life = checkpoint.life, workers = Object.entries(life.workers).filter(([, held]) => held.until == null).map(([worker]) => worker);
-            const real = !checkpoint.sample && inLedger.has(checkpoint.id);
-            const first = place === (lane.items[0]?.kind === "distill" ? 1 : 0);
+            const real = inLedger.has(checkpoint.id);
+            const first = place === 0;
             return (
               <g key={id}>
                 {first && lane.run ? <text x={cx - 6} y={cy - 26} className="stretch">{lane.run.name}</text> : null}
                 <g className={`checkpoint${real ? " link" : ""}`} onClick={() => { if (real) navigate(checkpointPlace(checkpoint.id)); }}>
-                  {["serving", "rolling out", "resharding"].includes(life.state) ? <circle cx={cx} cy={cy} r={10.5} className={`ring ring-${lifeKind(life.state)}`} /> : null}
-                  <circle cx={cx} cy={cy} r={6} className={checkpoint.kept ? `dot-${kindOfCheckpoint(item.name)}` : "dot-released"} />
+                  {["serving", "resharding"].includes(life.state) ? <circle cx={cx} cy={cy} r={10.5} className={`ring ring-${lifeKind(life.state)}`} /> : null}
+                  <circle cx={cx} cy={cy} r={6} className={checkpoint.kept ? "dot-accent" : "dot-released"} />
                   <text x={cx} y={cy + 22} textAnchor="middle" className="v">{checkpoint.by?.step != null ? `S${checkpoint.by.step}` : checkpoint.short}</text>
                   {checkpoint.bookmarks.length ? <text x={cx} y={cy - 13} textAnchor="middle" className="bookmark">{checkpoint.bookmarks.join(", ")}</text> : null}
                   <title>{[
-                    `${checkpoint.id} · depth ${checkpoint.depth}${checkpoint.kind === "full" ? " · full weights" : ""}${checkpoint.sample ? " (sample)" : ""}`,
+                    `${checkpoint.id} · depth ${checkpoint.depth}${checkpoint.kind === "full" ? " · full weights" : ""}`,
                     `made ${clock(checkpoint.made)}${checkpoint.by ? ` by ${checkpoint.by.name}${checkpoint.by.step != null ? ` at step ${checkpoint.by.step}` : ""}` : ""}, from ${checkpoint.parents.map(index.shortOf).join(" + ") || (checkpoint.base && index.checkpoints.has(checkpoint.base) ? index.shortOf(checkpoint.base) : `the base model ${checkpoint.base ?? ""}`)}`,
                     checkpoint.bookmarks.length ? `bookmarks: ${checkpoint.bookmarks.join(", ")}` : null,
-                    `${life.state}${workers.length ? ` on ${workers.join(", ")}` : ""}${life.waiting ? ` · ${life.waiting} requests waiting` : ""}${life.latest_of ? ` · ${index.runOf(life.latest_of)}'s latest` : ""}`,
+                    `${life.state}${workers.length ? ` on ${workers.join(", ")}` : ""}${life.latest_of ? ` · ${index.runOf(life.latest_of)}'s latest` : ""}`,
                     checkpoint.metrics.kl_moved != null ? `moved ${checkpoint.metrics.kl_moved.toFixed(4)} from its parent` : null,
                     checkpoint.kept ? "its weights are kept" : "released: its weights are gone, its record stays",
                   ].filter(Boolean).join("\n")}</title>
@@ -278,46 +253,19 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
   );
 });
 
-/** Every distillation, and what its mode means: whose samples the student is trained on, and who scores them. */
-function Distillations({ lineage, index }: { lineage: Lineage; index: Index }) {
-  const distills = lineage.runs.filter(run => run.kind === "distill");
-  if (!distills.length) return null;
-  return (
-    <div className="distills">
-      {distills.map(run => (
-        <div key={run.run} className={`tile rail ${modeKind(run.mode)}`}>
-          <header>
-            <span className="diamond" style={{ background: `var(--${modeKind(run.mode)})` }} />
-            <b>{run.name}</b><span className="what">{run.mode}</span>{run.sample ? <SampleChip /> : null}
-          </header>
-          <p className="says-text">{run.says ?? "a distillation"}</p>
-          <div className="facts">
-            <span>teachers <b className="mono">{run.teachers.map(index.shortOf).join(" + ") || "–"}</b></span>
-            <span>student starts from <b className="mono">{index.shortOf(run.from)}</b></span>
-            <span>objective <b>{run.objective ?? "–"}</b></span>
-            {run.data.runs ? <span>samples from <b>{run.data.runs.map(index.runOf).join(", ")}</b>{run.data.episodes ? ` (${run.data.episodes})` : ""}</span> : null}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function TrainerTile({ trainer, lineage, index }: { trainer: Trainer; lineage: Lineage; index: Index }) {
   const taking = trainer.queue.filter(entry => entry.state === "taking"), queued = trainer.queue.filter(entry => entry.state === "queued");
   const done = trainer.queue.filter(entry => entry.state === "made" || entry.state === "failed").slice(-3).reverse();
-  const waited = trainer.queue.filter(entry => entry.began && entry.queued).map(entry => entry.began! - entry.queued!);
   return (
     <div className={`tile rail ${taking.length ? "violet" : queued.length ? "warm" : ""}`}>
-      <header><b>{trainer.trainer}</b><span className="what">{trainer.weights === "full" ? "full weights" : trainer.weights === "lora" ? "LoRA" : "nothing made yet"}{trainer.base ? ` on ${index.checkpoints.has(trainer.base) ? index.shortOf(trainer.base) : short(trainer.base)}` : ""}</span>{trainer.sample ? <SampleChip /> : null}</header>
+      <header><b>{trainer.trainer}</b><span className="what">{trainer.weights === "full" ? "full weights" : trainer.weights === "lora" ? "LoRA" : "nothing made yet"}{trainer.base ? ` on ${index.checkpoints.has(trainer.base) ? index.shortOf(trainer.base) : short(trainer.base)}` : ""}</span></header>
       <div className="facts">
-        <span>{trainer.implicit ? "trains for " : trainer.weights === "full" ? "dedicated to " : "any adapter of its base: "}<b>{(trainer.runs ?? []).map(index.runOf).join(", ")}</b></span>
-        {trainer.colocated ? <span>shares the engines' accelerator</span> : trainer.where ? <span>{trainer.where}</span> : null}
+        <span>trains for <b>{trainer.runs.map(index.runOf).join(", ")}</b></span>
+        {trainer.colocated ? <span>shares the engines' accelerator</span> : null}
       </div>
-      <div className="cells four">
+      <div className="cells three">
         <div className={`cell ${taking.length ? "violet" : ""}`}><span>taking</span><b>{taking.length}</b><small className="mono">{taking[0] ? index.shortOf(taking[0].makes) : "idle"}</small></div>
         <div className={`cell ${queued.length ? "warm" : "waiting"}`}><span>queued</span><b>{queued.length}</b><small>{queued.length ? `oldest ${ago(lineage, queued[0].queued)}` : ""}</small></div>
-        <div className="cell"><span>waited</span><b>{waited.length && !trainer.implicit ? span(mean(waited)) : "–"}</b><small>{trainer.implicit ? "" : "mean"}</small></div>
         <div className="cell good"><span>made</span><b>{trainer.queue.filter(entry => entry.state === "made").length}</b><small>checkpoints</small></div>
       </div>
       <div>
@@ -342,30 +290,27 @@ function TrainerTile({ trainer, lineage, index }: { trainer: Trainer; lineage: L
   );
 }
 
-function WorkerTile({ worker, lineage, index }: { worker: Worker; lineage: Lineage; index: Index }) {
-  const holds = worker.holds?.run ? `${index.runOf(worker.holds.run)}'s line, full weights` : worker.holds?.base ? `${worker.serving.length} of ${worker.adapters ?? "?"} adapter slots` : "the run's engines";
-  const waiting = lineage.routing.waiting ?? {};
+function WorkerTile({ worker, index }: { worker: Worker; index: Index }) {
   return (
     <div className={`tile rail ${worker.serving.length ? "good" : ""}`}>
-      <header><b>{worker.worker}</b><span className="what">{holds}</span>{worker.share ? <Mark state={worker.share === "evaluations" ? "queued" : ""}>{worker.share}</Mark> : null}{worker.sample ? <SampleChip /> : null}</header>
-      {worker.machine ? <div className="facts"><span>{worker.machine}</span><span>{worker.accelerators}</span>{worker.holds?.base ? <span>{short(worker.holds.base)}</span> : null}</div> : null}
+      <header><b>{worker.worker}</b><span className="what">what its run published</span></header>
       <div className="chips">
         {worker.serving.length ? worker.serving.map(name => (
-          <span key={name} className="chip mono" title={`${name}: ${waiting[name] ?? 0} requests waiting for it`}>{index.shortOf(name)}{waiting[name] ? <b className="waits"> {waiting[name]} waiting</b> : null}</span>
+          <span key={name} className="chip mono" title={name}>{index.shortOf(name)}</span>
         )) : <span className="none">serves nothing</span>}
       </div>
     </div>
   );
 }
 
-/** A checkpoint's way to the engines, as stages: written, resharded (full weights only), rolling out, serving. */
+/** A checkpoint's way to the engines, as stages: written, resharded (full weights only), serving. */
 function Way({ checkpoint }: { checkpoint: LineageCheckpoint }) {
-  const life = checkpoint.life, at = ({ written: 0, resharding: 1, resharded: 1, "rolling out": 2, serving: 3, superseded: 4 } as Record<string, number>)[life.state] ?? 0;
-  const stages = ["written", life.reshard ? "resharded" : "no reshard", "rolling", "serving"];
+  const life = checkpoint.life, at = ({ written: 0, resharding: 1, resharded: 1, serving: 2, superseded: 3 } as Record<string, number>)[life.state] ?? 0;
+  const stages = ["written", life.reshard ? "resharded" : "no reshard", "serving"];
   return (
     <div className="stages way">
       {stages.map((name, place) => (
-        <div key={name} className={[place < at || (place === at && life.state === "resharded") ? "done" : place === at ? `now${life.state === "resharding" || life.state === "rolling out" ? " active" : ""}` : "",
+        <div key={name} className={[place < at || (place === at && life.state === "resharded") ? "done" : place === at ? `now${life.state === "resharding" ? " active" : ""}` : "",
           place === 1 && !life.reshard ? "skipped" : ""].join(" ")}>
           <span>{place === at && life.state === "resharding" ? "resharding" : name}</span>
         </div>
@@ -374,8 +319,8 @@ function Way({ checkpoint }: { checkpoint: LineageCheckpoint }) {
   );
 }
 
-export function Checkpoints({ sample }: { sample: boolean }) {
-  const { data: lineage } = useLineage(sample);
+export function Checkpoints() {
+  const { data: lineage } = useLineage();
   const { data: system } = useSystem();
   const [folds, , many] = useFolds();
   const index = useMemo(() => (lineage ? indexOf(lineage) : null), [lineage]);
@@ -389,7 +334,6 @@ export function Checkpoints({ sample }: { sample: boolean }) {
   const heads = new Set(lanes.filter(lane => lane.checkpoints.length).map(lane => lane.checkpoints.at(-1)!.id));
   const moving = lineage.checkpoints.filter(checkpoint => !["superseded", "written"].includes(checkpoint.life.state) || (checkpoint.life.state === "written" && heads.has(checkpoint.id)))
     .sort((a, b) => (order.get(laneOf(a)) ?? 0) - (order.get(laneOf(b)) ?? 0) || b.depth - a.depth);
-  const waiting = lineage.routing.waiting ?? {}, totalWaiting = Object.values(waiting).reduce((sum, count) => sum + count, 0);
   return (
     <>
       <Head title="Checkpoints">
@@ -398,21 +342,10 @@ export function Checkpoints({ sample }: { sample: boolean }) {
           <Spec label="checkpoints">{lineage.checkpoints.length}</Spec>
           <Spec label="runs">{lineage.runs.length}</Spec>
           <Spec label="bookmarks" kind="accent">{Object.keys(lineage.bookmarks).length}</Spec>
-          <Spec label="distillations" kind="warm">{lineage.runs.filter(run => run.kind === "distill").length}</Spec>
           <Spec label="trainers" kind="violet">{lineage.trainers.length}</Spec>
-          <Spec label="workers" kind="accent">{lineage.workers.length}</Spec>
+          <Spec label="engines" kind="accent">{lineage.workers.length}</Spec>
         </Specs>
-        <div className="segmented">
-          <Link to={checkpointsPlace(false)} className={`seg${sample ? "" : " current"}`}>The ledger</Link>
-          <Link to={checkpointsPlace(true)} className={`seg${sample ? " current" : ""}`}>With the sample fixture</Link>
-        </div>
       </Head>
-      {sample ? (
-        <div className="tile rail warm notice">
-          <header><b>Sample fixture</b><SampleChip /></header>
-          <p className="muted small">What is marked sample is from rollout_train/monitor/sample-lineage.json: tables no run writes yet.</p>
-        </div>
-      ) : null}
       <section className="card">
         <header>
           <h2>Lineage</h2>
@@ -422,45 +355,34 @@ export function Checkpoints({ sample }: { sample: boolean }) {
         <div className="legend dag-legend">
           <span><i className="rule" style={{ background: "var(--quiet)" }} />trained from</span>
           <span><i style={{ background: "var(--accent)" }} />trained on its own groups</span>
-          <span><i style={{ background: "var(--warm)" }} />distilled off-policy</span>
-          <span><i style={{ background: "var(--violet)" }} />distilled on-policy</span>
           <span><b className="t-accent">name</b> a bookmark</span>
           <span><i className="hollow" />released</span><span><i className="ring-good" />serving</span>
-          <span><i className="ring-warm" />rolling out</span><span><i className="ring-violet" />resharding</span>
+          <span><i className="ring-violet" />resharding</span>
         </div>
       </section>
-      {lineage.runs.some(run => run.kind === "distill") ? (
-        <>
-          <SectionTitle title="Distillations" />
-          <Distillations lineage={lineage} index={index} />
-        </>
-      ) : null}
       <SectionTitle title="Trainers" />
       <div className="tiles wide-tiles">{lineage.trainers.map(trainer => <TrainerTile key={trainer.trainer} trainer={trainer} lineage={lineage} index={index} />)}</div>
       <SectionTitle title="Serving" />
       <Kpis>
-        <Kpi label="Requests waiting" value={lineage.routing.history.length ? String(totalWaiting) : "–"} />
         <Kpi label="Serving" value={String(moving.filter(checkpoint => checkpoint.life.state === "serving").length)} />
-        <Kpi label="Rolling out" value={String(moving.filter(checkpoint => checkpoint.life.state === "rolling out").length)} />
         <Kpi label="Resharding" value={String(moving.filter(checkpoint => ["resharding", "resharded"].includes(checkpoint.life.state)).length)} />
-        <Kpi label="Workers" value={String(lineage.workers.length)} note={`${lineage.workers.filter(worker => worker.registered).length} registered`} />
+        <Kpi label="Engines" value={String(lineage.workers.length)} />
       </Kpis>
       <Card title="On their way to the engines, and served">
         <Table
-          heads={[["checkpoint"], ["made by"], ["way"], ["workers"], ["waiting", "n"], ["latest of"], ["made", "n"]]}
+          heads={[["checkpoint"], ["made by"], ["way"], ["engines"], ["latest of"], ["made", "n"]]}
           keys={moving.map(checkpoint => checkpoint.id)}
           rows={moving.map(checkpoint => {
             const workers = Object.entries(checkpoint.life.workers);
             return [
-              <span><b className="mono" title={checkpoint.id}>{checkpoint.short}</b> <Marks names={checkpoint.bookmarks} />{checkpoint.sample ? <> <SampleChip /></> : null}</span>,
+              <span><b className="mono" title={checkpoint.id}>{checkpoint.short}</b> <Marks names={checkpoint.bookmarks} /></span>,
               checkpoint.by ? `${checkpoint.by.name}${checkpoint.by.step != null ? ` S${checkpoint.by.step}` : ""}` : "–",
               <Way checkpoint={checkpoint} />,
               <div className="chips">
                 {workers.length ? workers.map(([worker, served]) => (
                   <span key={worker} className={`chip${served.until == null ? " on" : " off"}`} title={served.until == null ? `serving since ${clock(served.since)}` : `served ${clock(served.since)} to ${clock(served.until)}`}>{worker}</span>
-                )) : <span className="none">{checkpoint.life.state === "resharding" ? "files being rewritten" : "on no worker"}</span>}
+                )) : <span className="none">{checkpoint.life.state === "resharding" ? "files being rewritten" : "on no engine"}</span>}
               </div>,
-              checkpoint.life.waiting ? { text: String(checkpoint.life.waiting), kind: "bad" } : "0",
               checkpoint.life.latest_of ? index.runOf(checkpoint.life.latest_of) : "–",
               ago(lineage, checkpoint.made),
             ];
@@ -468,21 +390,18 @@ export function Checkpoints({ sample }: { sample: boolean }) {
           to={moving.map(checkpoint => (inLedger.has(checkpoint.id) ? checkpointPlace(checkpoint.id) : null))}
         />
       </Card>
-      <div className="tiles">{lineage.workers.map(worker => <WorkerTile key={worker.worker} worker={worker} lineage={lineage} index={index} />)}</div>
-      <Card title="Runs and distillations">
+      <div className="tiles">{lineage.workers.map(worker => <WorkerTile key={worker.worker} worker={worker} index={index} />)}</div>
+      <Card title="Runs">
         <Table
-          heads={[["run"], ["kind"], ["from"], ["teachers"], ["trains on"], ["objective"], ["checkpoints"], ["latest"]]}
+          heads={[["run"], ["from"], ["checkpoints"], ["latest"]]}
           keys={lineage.runs.map(run => run.run)}
           rows={lineage.runs.map(run => [
-            <span><b title={`id: ${run.run}`}>{run.name}</b>{run.sample ? <> <SampleChip /></> : null}</span>,
-            run.kind === "distill" ? <Mark state={modeKind(run.mode) === "violet" ? "stepping" : "queued"}>distil, {run.mode}</Mark> : "train",
-            index.shortOf(run.from), run.teachers.map(index.shortOf).join(", ") || "–",
-            run.kind === "distill" ? `${run.says ?? ""}${run.data.runs ? ` (from ${run.data.runs.map(index.runOf).join(", ")})` : ""}` : "its own groups",
-            run.objective ?? "policy gradient",
+            <b title={`id: ${run.run}`}>{run.name}</b>,
+            index.shortOf(run.from),
             run.checkpoints.length ? `${index.shortOf(run.checkpoints[0])}–${index.shortOf(run.checkpoints.at(-1))}` : "–",
             run.latest ? index.shortOf(run.latest) : "–",
           ])}
-          to={lineage.runs.map(run => (inLedger.has(run.run) && !run.sample ? runPlace(run.run) : null))}
+          to={lineage.runs.map(run => (inLedger.has(run.run) ? runPlace(run.run) : null))}
         />
       </Card>
     </>

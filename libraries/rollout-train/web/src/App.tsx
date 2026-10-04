@@ -27,7 +27,7 @@ function View() {
     case "episode": return <Episode key={place.id} id={place.id} slot={place.slot} />;
     case "outside": return <Outside />;
     case "launch": return <NewRun />;
-    case "checkpoints": return <Checkpoints sample={place.sample} />;
+    case "checkpoints": return <Checkpoints />;
     case "checkpoint": return <Checkpoint id={place.id} />;
     case "evals": return <Evals />;
     case "suite": return <Suite name={place.suite} />;

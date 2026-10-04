@@ -273,37 +273,33 @@
   .lane-label:nth-child(even) { background: var(--raised); }
   .lane-label:hover b { color: var(--accent); }
   .lane-label b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lane-label small, .lane-label .lane-tags { grid-column: 2; color: var(--quiet); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lane-tags { display: flex; gap: 4px; margin-top: 2px; } .lane-tags .chip { font-size: 10.5px; padding: 0 5px; }
+  .lane-label small { grid-column: 2; color: var(--quiet); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dag-frame { overflow-x: auto; min-width: 0; }
   .dag-drawing { max-width: none; }  /* (it scrolls across, rather than shrink until nothing reads) */
   .dag-drawing .lane-band { fill: var(--panel); } .dag-drawing .lane-band.odd { fill: var(--raised); }
-  .dag-drawing .lane-band.sample { fill: var(--warm-soft); opacity: .4; }
   .dag-drawing text.v { fill: var(--quiet); } .dag-drawing text.stretch { fill: var(--faint); font-size: 9.5px; letter-spacing: .04em; }
   .dag-drawing text.bookmark { fill: var(--accent); font-size: 9.5px; font-weight: 600; } .chip.bookmark { color: var(--accent); border-color: var(--accent); }
   .t-good { fill: var(--good); color: var(--good); } .t-warm { fill: var(--warm); color: var(--warm); } .t-bad { fill: var(--bad); color: var(--bad); }
   .t-quiet { fill: var(--quiet); color: var(--quiet); }
   .t-violet { fill: var(--violet); } .t-accent { fill: var(--accent); }
   .s-quiet { stroke: var(--quiet); stroke-width: 1.4; fill: none; } .dash { stroke-dasharray: 4 3; }
-  .dag-drawing line.s-accent, .dag-drawing line.s-warm, .dag-drawing line.s-violet { stroke-width: 2.5; }
+  .dag-drawing line.s-accent { stroke-width: 2.5; }
   .dag-drawing .edge { opacity: .85; } .dag-drawing .edge:hover { opacity: 1; stroke-width: 2.6; }
-  .dot-accent { fill: var(--accent); } .dot-warm { fill: var(--warm); } .dot-violet { fill: var(--violet); }
-  .dot-accent, .dot-warm, .dot-violet, .dot-released { stroke: var(--panel); stroke-width: 2; }
+  .dot-accent { fill: var(--accent); }
+  .dot-accent, .dot-released { stroke: var(--panel); stroke-width: 2; }
   .dot-released { fill: var(--panel); stroke: var(--faint); stroke-width: 1.5; }
   .dot-outside { fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-dasharray: 3 2; }
-  .ring { fill: none; stroke-width: 2; } .ring-good { stroke: var(--good); } .ring-warm { stroke: var(--warm); stroke-dasharray: 3 2.5; }
+  .ring { fill: none; stroke-width: 2; } .ring-good { stroke: var(--good); }
   .ring-violet { stroke: var(--violet); stroke-dasharray: 3 2.5; } .ring-accent { stroke: var(--accent); }
   .checkpoint.link { cursor: pointer; } .checkpoint.link:hover circle:not(.ring) { stroke: var(--ink); }
   .gap { cursor: pointer; } .gap rect { fill: var(--panel); stroke: var(--line-strong); } .gap:hover rect { stroke: var(--accent); }
   .gap text { fill: var(--quiet); font-weight: 600; }
   .dag-legend { padding: 10px 18px 12px; margin: 0; border-top: 1px solid var(--line); }
-  .legend i.ring-good, .legend i.ring-warm, .legend i.ring-violet { border-radius: 50%; background: none; border: 2px solid var(--good); width: 10px; height: 10px; vertical-align: -1px; }
-  .legend i.ring-warm { border: 2px dashed var(--warm); } .legend i.ring-violet { border: 2px dashed var(--violet); }
+  .legend i.ring-good, .legend i.ring-violet { border-radius: 50%; background: none; border: 2px solid var(--good); width: 10px; height: 10px; vertical-align: -1px; }
+  .legend i.ring-violet { border: 2px dashed var(--violet); }
   .linkish { border: 0; background: none; padding: 0; cursor: pointer; color: var(--accent); font-size: 12px; }
   .linkish:hover { text-decoration: underline; }
-  .chip.sample { color: var(--warm); border-color: var(--warm); background: var(--warm-soft); font: 600 9.5px var(--mono); text-transform: uppercase; letter-spacing: .07em; padding: 1px 5px; }
   .chip.on { border-color: var(--good); color: var(--ink); box-shadow: inset 2px 0 0 var(--good); } .chip.off { color: var(--faint); }
-  .chip .waits { color: var(--bad); font-weight: 600; }
   .notice p { margin: 0; }
   .cells.four { grid-template-columns: repeat(4, minmax(0, 1fr)); } .cells.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .members.queue .member { grid-template-columns: 36px minmax(0, 10em) auto minmax(0, 1fr); }
@@ -383,15 +379,12 @@
   .bookmarks .body { display: grid; gap: 12px; }
   .bookmark-form input { font: 13px var(--mono); padding: 3px 8px; width: min(26ch, 60vw); }
 
-  /* The checkpoints' graph: base models as roots, and what a distillation's mode means, in words */
+  /* The checkpoints' graph: base models as roots */
   .dag-drawing text.base-name { fill: var(--ink); font-weight: 600; font-size: 11px; }
   .lane-label.base-label b { font-family: var(--mono); font-size: 12.5px; }
   .lane-label.base-label small { white-space: normal; line-height: 1.3; }
   .head h1 .mono { font: inherit; font-family: var(--mono); letter-spacing: -.01em; }
   .lane-label small.says { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
-  .distills { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 14px; }
-  .distills .says-text { margin: 0; font-size: 14px; font-weight: 500; color: var(--ink); }
-  .diamond { width: 10px; height: 10px; transform: rotate(45deg); flex: none; border-radius: 1px; }
 
   /* A new run: the form that asks for it, the launches and how each goes */
   .head-with-action { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }

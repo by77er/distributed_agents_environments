@@ -26,11 +26,7 @@ export const topics = {
   history: (kind: SubjectKind, id: string): Topic => ({ topic: `history/${kind}/${id}`, key: ["history", kind, id], path: `api/evals/${kind}/${encodeURIComponent(id)}` }),
   environments: (): Topic => ({ topic: "environments", key: ["environments"], path: "api/environments" }),
   environment: (name: string): Topic => ({ topic: `environment/${name}`, key: ["environment", name], path: `api/environments/${encodeURIComponent(name)}` }),
-  checkpoints: (sample: boolean): Topic => ({
-    topic: sample ? "checkpoints/sample" : "checkpoints",
-    key: ["checkpoints", sample],
-    path: `api/checkpoints${sample ? "?sample=1" : ""}`,
-  }),
+  checkpoints: (): Topic => ({ topic: "checkpoints", key: ["checkpoints"], path: "api/checkpoints" }),
   checkpointEvals: (id: string): Topic => ({ topic: `checkpoint-evals/${id}`, key: ["checkpoint-evals", id], path: `api/checkpoints/${encodeURIComponent(id)}/evals` }),
   path: (id: string): Topic => ({ topic: `path/${id}`, key: ["path", id], path: `api/checkpoints/${encodeURIComponent(id)}/path` }),
   settings: (run: string): Topic => ({ topic: `settings/${run}`, key: ["settings", run], path: `api/runs/${encodeURIComponent(run)}/settings` }),
@@ -218,8 +214,8 @@ export function useWantSettings(run: string) {
   });
 }
 
-export const useLineage = (sample: boolean) =>
-  useQuery({ queryKey: topics.checkpoints(sample).key, queryFn: ({ signal }) => readJson<Lineage>(topics.checkpoints(sample).path, signal) });
+export const useLineage = () =>
+  useQuery({ queryKey: topics.checkpoints().key, queryFn: ({ signal }) => readJson<Lineage>(topics.checkpoints().path, signal) });
 
 export const useGroup = (run: string, number: number) =>
   useQuery({

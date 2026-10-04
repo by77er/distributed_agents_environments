@@ -635,7 +635,7 @@ class System:
         version it played, its checkpoint, how far it has got), newest first (`rollout_train.evals`)."""
         tables = await self._tables()
         called = await names(registry_of(self._ledger))
-        suites = _Reading(tables, set(), [], called, time.time()).evaluations()
+        suites = _Reading(tables, [], called, time.time()).evaluations()
         for each in suites:
             current = next(version for version in each["versions"] if version["id"] == each["version"])
             each |= {"environments": current["environments"], "made": current["made"]}
@@ -679,15 +679,13 @@ class System:
         evals.sort(key=lambda each: -(each["started"] or 0.0))
         return {"suites": suites, "evals": evals}
 
-    async def lineage(self, sample: bool = False) -> dict[str, Any]:
-        """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
-        With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
-        beside the ledger."""
+    async def lineage(self) -> dict[str, Any]:
+        """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`)."""
         tables = await self._tables()
         notes = _noted(await self._beats())
         every = [note for each in notes.values() for note in each]
         called = await names(registry_of(self._ledger))
-        return await asyncio.to_thread(lineage, tables, every, names=called, sample=sample)
+        return await asyncio.to_thread(lineage, tables, every, names=called)
 
     async def statistics(self) -> dict[str, Any]:
         """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'

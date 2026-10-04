@@ -29,7 +29,7 @@ function watched(place: Place, system: System | undefined): Topic[] {
   if (place.kind === "statistics") found.push(topics.statistics());
   if (place.page === "machines") found.push(topics.machines());
   if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches());
-  if (place.kind === "checkpoints") found.push(topics.checkpoints(place.sample));
+  if (place.kind === "checkpoints") found.push(topics.checkpoints());
   if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());
   if (place.page === "evals") found.push(topics.launches(), topics.evalSubjects());
   if (place.kind === "subject") {
@@ -139,7 +139,6 @@ function Crumbs({ place }: { place: Place }) {
   } else if (place.kind === "outside") crumbs.push(["Episodes outside a run", ""]);
   else if (place.kind === "launch") crumbs.push(["New run", ""]);
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
-  else if (place.kind === "checkpoints" && place.sample) crumbs.push(["Sample fixture", ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
   else if (place.kind === "subject") crumbs.push([place.subject === "checkpoint" ? `Checkpoint ${known.short(place.id)}` : `Base model ${place.id}`, ""]);
   else if (place.kind === "host") crumbs.push([place.host, ""]);

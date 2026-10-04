@@ -11,8 +11,7 @@ A topic is a thing the page shows, by name:
 - `environment/MODULE:NAME`: one environment's page (`System.environment`);
 - `feeds`: every episode in the runs' feeds, summarised (`System.feeds`);
 - `statistics`: every run in figures (`System.statistics`);
-- `checkpoints`, `checkpoints/sample`: the checkpoints as a graph, without or with the sample fixture
-  (`System.lineage`);
+- `checkpoints`: the checkpoints as a graph (`System.lineage`);
 - `checkpoint-evals/ID`, `path/ID`: every eval a checkpoint has had, and its line with each point's scores
   (`System.checkpoint_evals`, `System.path`);
 - `eval-subjects`: every subject (a checkpoint or a base model) that has had an eval (`System.eval_subjects`);
@@ -124,8 +123,8 @@ class Hub:
             return await asyncio.to_thread(system.feeds)
         if topic == "statistics":
             return await system.statistics()
-        if topic in ("checkpoints", "checkpoints/sample"):
-            return await system.lineage(sample=topic.endswith("/sample"))
+        if topic == "checkpoints":
+            return await system.lineage()
         if topic.startswith("checkpoint-evals/"):
             return await system.checkpoint_evals(topic.removeprefix("checkpoint-evals/"))
         if topic.startswith("path/"):

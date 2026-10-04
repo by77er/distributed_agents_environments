@@ -64,8 +64,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
-    - `/api/checkpoints?sample=1`: the checkpoints as a graph from their base models, with the trainers, the inference
-      workers and evaluations (`System.lineage`; `sample` adds the fixture of the tables proposed for them);
+    - `/api/checkpoints`: the checkpoints as a graph from their base models, with the runs' trainers, their engines
+      and evaluations (`System.lineage`);
     - `/api/checkpoints/{id}/evals`: every eval a checkpoint has had (`System.checkpoint_evals`), and
       `/api/checkpoints/{id}/path` its line from the base model with each point's scores (`System.path`);
     - `/api/runs/{run}/settings`: a training run's settings, fixed and changeable, and what is wanted of them
@@ -134,8 +134,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         return JSONResponse(await system.episode(request.path_params["run_id"], after, RELAYED in request.headers))
 
     async def checkpoints(request: Request) -> Response:
-        sample = request.query_params.get("sample") in ("1", "true")
-        return answered(request, await hub.read("checkpoints/sample" if sample else "checkpoints"))
+        return answered(request, await hub.read("checkpoints"))
 
     async def checkpoint_evals(request: Request) -> Response:
         return answered(request, await hub.read(f"checkpoint-evals/{request.path_params['id']}"))

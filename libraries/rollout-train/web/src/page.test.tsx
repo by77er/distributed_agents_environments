@@ -41,7 +41,7 @@ describe("places", () => {
     expect(placeOf("/run/a%2Fb/group/3")).toEqual({ page: "runs", kind: "group", run: "a/b", number: 3 });
     expect(placeOf("/run/x/step/2")).toEqual({ page: "runs", kind: "step", run: "x", number: 2 });
     expect(placeOf("/episode/r_1/agent-2")).toEqual({ page: "runs", kind: "episode", id: "r_1", slot: "agent-2" });
-    expect(placeOf("/checkpoints/sample")).toEqual({ page: "checkpoints", kind: "checkpoints", sample: true });
+    expect(placeOf("/checkpoints")).toEqual({ page: "checkpoints", kind: "checkpoints" });
     expect(placeOf("/checkpoint/kpqx")).toEqual({ page: "checkpoints", kind: "checkpoint", id: "kpqx" });
     expect(placeOf("/system")).toEqual({ page: "machines", kind: "machines" });
     expect(placeOf("/runs/new")).toEqual({ page: "runs", kind: "launch" });
@@ -288,7 +288,7 @@ describe("a suite", () => {
     const starts = [{ start: "1", task: "say-yes", seed: 1, title: "yes" }, { start: "2", task: "say-no", seed: 1, title: "no" }];
     const evals: Evals = {
       suites: [{
-        suite: "words-v1", environments: ["games:words"], made: 1, sample: false, starts,
+        suite: "words-v1", environments: ["games:words"], made: 1, starts,
         subjects: [
           { subject: "eval_a", kind: "checkpoint", checkpoint: "kpqxlmnoprstuvwx", model: "tiny", episodes: 1, played: 2, solved: 2, reward: 1,
             results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: true, reward: 1 }] } },
@@ -454,7 +454,7 @@ const versioned = (): EvalSuite => {
     results: Object.fromEntries(Object.entries(results).map(([start, solved]) => [start, solved.map(each => ({ solved: each, reward: each ? 1 : 0 }))])),
   });
   return {
-    suite: "words", version: "words@2", number: 2, environments: ["games:words"], made: 2, sample: false, starts: second.starts, versions: [first, second],
+    suite: "words", version: "words@2", number: 2, environments: ["games:words"], made: 2, starts: second.starts, versions: [first, second],
     subjects: [subject("old", "words@1", { "1": [true], "2": [false] }), subject("new", "words@2", { "1": [true], "2": [true] }),
       subject("newer", "words@2", { "1": [false], "2": [true] })],
   };
@@ -555,7 +555,7 @@ describe("a suite of several environments", () => {
       results: Object.fromEntries(Object.entries(results).map(([start, solved]) => [start, solved.map(each => ({ solved: each, reward: each ? 1 : 0 }))])),
     });
     return {
-      suite: "mixed", version: "mixed@2", number: 2, environments: ["games:words", "games:guessing"], made: 2, sample: false, starts: both.starts,
+      suite: "mixed", version: "mixed@2", number: 2, environments: ["games:words", "games:guessing"], made: 2, starts: both.starts,
       versions: [only, both],
       subjects: [
         subject("a", "mixed@2", { "1": [true], "2": [false], "3": [true] },

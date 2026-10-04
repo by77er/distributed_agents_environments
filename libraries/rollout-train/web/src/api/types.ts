@@ -552,7 +552,6 @@ export interface Life {
   resharded: number | null;
   latest_of: string | null;
   workers: Record<string, { since: number; until: number | null }>;
-  waiting: number;
 }
 
 export interface LineageCheckpoint {
@@ -567,25 +566,16 @@ export interface LineageCheckpoint {
   released: number | boolean | null;
   bookmarks: string[];
   metrics: Metrics;
-  by: { run: string; name: string; kind: string; step: number | null } | null;
+  by: { run: string; name: string; step: number | null } | null;
   life: Life;
-  sample?: boolean;
 }
 
 export interface LineageRun {
   run: string;
   name: string;
-  kind: string;
   from: string | null;
-  teachers: string[];
-  data: { sampled_by?: string[]; runs?: string[]; episodes?: number | string };
-  objective: string | null;
-  mode: string | null;
-  /** What its mode means, in words (a distillation's). */
-  says: string | null;
   checkpoints: string[];
   latest: string | null;
-  sample: boolean;
 }
 
 export interface QueueEntry {
@@ -597,31 +587,23 @@ export interface QueueEntry {
   began: number | null;
 }
 
+/** A run's own trainer, whose queue is the run's steps. */
 export interface Trainer {
   trainer: string;
-  /** What its steps make (`lora` or `full`); none: a run's own trainer that has made nothing yet. */
+  /** What its steps make (`lora` or `full`); none: it has made nothing yet. */
   weights: string | null;
   base: string | null;
-  runs?: string[];
-  colocated?: boolean;
-  where?: string;
-  implicit: boolean;
+  runs: string[];
+  colocated: boolean;
   queue: QueueEntry[];
   depth: [number, number, number][];
-  groups?: [number, number][];
-  sample: boolean;
+  groups: [number, number][];
 }
 
+/** A run's engines, and the checkpoints they serve now. */
 export interface Worker {
   worker: string;
-  registered: boolean;
   serving: string[];
-  holds?: { run?: string; base?: string };
-  adapters?: number;
-  share?: string;
-  machine?: string;
-  accelerators?: string;
-  sample: boolean;
 }
 
 /** A start of a suite's version: its number in the version, its entry's environment, its row and seed, and what it is in
@@ -706,7 +688,6 @@ export interface Suite {
     /** How it did at each entry of the version it played. */
     entries?: EntryScore[];
   }[];
-  sample: boolean;
 }
 
 /** A suite as the Evals page has it: a suite, with the environments its newest version plays and when it was made. */
@@ -738,18 +719,15 @@ export interface Evals {
 }
 
 /** What came from what: `base` (from `base:MODEL` to a line's first checkpoint), `trained` (from a checkpoint to one trained
- * from it), `learned` (to one that learned from it beside), `teach` and `start` (to a distillation, by its run). */
+ * from it), `learned` (to one that learned from it beside). */
 export interface Edge {
-  kind: "base" | "trained" | "learned" | "teach" | "start";
+  kind: "base" | "trained" | "learned";
   from: string;
   to: string;
-  mode?: string;
-  says?: string;
 }
 
 export interface Lineage {
   now: number;
-  sample: boolean;
   /** The base models every line grows from. */
   bases: string[];
   checkpoints: LineageCheckpoint[];
@@ -760,7 +738,6 @@ export interface Lineage {
   edges: Edge[];
   trainers: Trainer[];
   workers: Worker[];
-  routing: { waiting: Record<string, number>; history: [number, number][] };
   evaluations: Suite[];
 }
 

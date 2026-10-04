@@ -14,7 +14,7 @@ export type Place =
   | { page: "runs"; kind: "episode"; id: string; slot: string | null }
   | { page: "runs"; kind: "outside" }
   | { page: "runs"; kind: "launch" }
-  | { page: "checkpoints"; kind: "checkpoints"; sample: boolean }
+  | { page: "checkpoints"; kind: "checkpoints" }
   | { page: "checkpoints"; kind: "checkpoint"; id: string }
   | { page: "evals"; kind: "evals" }
   | { page: "evals"; kind: "suite"; suite: string }
@@ -35,7 +35,6 @@ export const launchPlace = "/runs/new";
 /** The new run's form, with an environment chosen. */
 export const launchOn = (environment: string) => `${launchPlace}?environment=${encodeURIComponent(environment)}`;
 export const checkpointPlace = (id: string) => `/checkpoint/${encodeURIComponent(id)}`;
-export const checkpointsPlace = (sample: boolean) => `/checkpoints${sample ? "/sample" : ""}`;
 export const evalsPlace = "/evals";
 export const suitePlace = (suite: string) => `/evals/${encodeURIComponent(suite)}`;
 export const evalPlace = (run: string) => `/eval/${encodeURIComponent(run)}`;
@@ -66,7 +65,7 @@ export function placeOf(pathname: string): Place {
   if (parts[0] === "episodes") return { page: "runs", kind: "outside" };
   if (parts[0] === "runs" && parts[1] === "new") return { page: "runs", kind: "launch" };
   // (`versions` and `version` are what these pages were called: links to them still open them)
-  if (parts[0] === "checkpoints" || parts[0] === "versions") return { page: "checkpoints", kind: "checkpoints", sample: parts[1] === "sample" };
+  if (parts[0] === "checkpoints" || parts[0] === "versions") return { page: "checkpoints", kind: "checkpoints" };
   if ((parts[0] === "checkpoint" || parts[0] === "version") && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
   if (parts[0] === "eval" && parts[1]) return { page: "evals", kind: "eval", run: parts[1] };
   if (parts[0] === "evals" && (parts[1] === "checkpoint" || parts[1] === "model") && parts[2]) return { page: "evals", kind: "subject", subject: parts[1], id: parts.slice(2).join("/") };

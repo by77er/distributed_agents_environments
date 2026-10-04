@@ -7,11 +7,11 @@ import { memo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEnvironments, useEpisode, useEvalSubjects, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { EvalRun, GroupEpisode, Run, System } from "../api/types";
-import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
+import { Avatar, Dots, EpisodeDots, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
-import { environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, subjectPlace, suitePlace } from "../lib/places";
+import { environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, subjectPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
 import { RunDot, running, useRunColor } from "./runs";
@@ -191,8 +191,7 @@ function EpisodeRow({ each, place, folds, fold }: { each: GroupEpisode; place: P
   );
 }
 
-/** The checkpoints: the graph of them all, with or without the sample fixture; then those bookmarks name, and each run's
- * newest. */
+/** The checkpoints: those bookmarks name, and each run's newest. */
 function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   const known = useKnown();
   const heads = system.runs.map(run => madeBy(system.checkpoints, run.run).at(-1)).filter(each => each !== undefined);
@@ -210,11 +209,6 @@ function CheckpointsTree({ place, system }: { place: Place; system: System }) {
       {heads.length ? <div className="label">Each run's newest</div> : null}
       {heads.map(checkpoint => row(checkpoint.id, known.origin(checkpoint.id), `h${checkpoint.id}`))}
       {system.checkpoints.length ? null : <div className="empty">No checkpoint yet.</div>}
-      <div className="label">Proposed</div>
-      <Node to={checkpointsPlace(true)} current={place.kind === "checkpoints" && place.sample}>
-        <span className="name">Sample fixture</span>
-        <SampleChip />
-      </Node>
     </>
   );
 }

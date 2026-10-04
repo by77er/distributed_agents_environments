@@ -42,7 +42,7 @@ package (`rollout_train/monitor/static`), and the monitor serves it as files: `r
 page draws each view from what it has read, and reads again only what the monitor says changed.
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
-  `feeds`, `machines`, `launches`, `statistics`, `checkpoints` (or `checkpoints/sample`), `environments`,
+  `feeds`, `machines`, `launches`, `statistics`, `checkpoints`, `environments`,
   `environment/MODULE:NAME`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
   `group/RUN/N`, `episode/RUN_ID`. The
   monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives each reading a **checkpoint**, a hash
@@ -152,7 +152,7 @@ so a reload stays there.
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
 | Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below ([an episode's rollouts](#an-episodes-rollouts)) |
 | Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
-| Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations ([the checkpoints view](#the-checkpoints-view)) |
+| Checkpoints | Every checkpoint, as a graph | `#/checkpoints` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; each run's trainer and its queue over time; each checkpoint's way to the engines and the run engines that serve it; the runs ([the checkpoints view](#the-checkpoints-view)) |
 | Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, each version of a suite's score along its line, each environment's apart for a suite of several ([scores along a line](#scores-along-a-line)), every eval it had (by hand or by its run's schedule: the suite and, for a suite of more than one version, the version played, the share solved where its episodes say, the mean reward, each environment's apart for a suite of several, episodes, who asked for it, when; each opening the eval; and **history**, opening its history on Evals), a **Run an eval** form (a suite, its version, newest by default, episodes per start, a profile and a name: it posts the same launch as a suite's **Run this suite** form), and the evals of it asked for so, with how each goes |
 | Evals | Every suite and eval | `#/evals` | a **New suite** form ([made, edited and asked for from the page](evals.md#made-edited-and-asked-for-from-the-page)); the evals asked for from the page; each suite (the version its name points to, where it has more than one, its environments, starts, subjects, and, for a suite of one environment, the subject that did best at that version); every checkpoint and base model that has had an eval, the one evaluated last first (where it came from, its evals counted and those playing, the suites they played, when the newest began), each opening its history; every eval, newest first (its suite and, for a suite of more than one version, the version it played, who played, episodes played of those asked for, the share solved, each environment's for a suite of several, whether it is done), each opening its page |
 | Evals | Eval | `#/eval/RUN` | the buttons its state allows, while it is not done ([pausing, resuming and stopping](#pausing-resuming-and-stopping)); who played (a checkpoint, or the base model), the suite and the version it played, who asked for it (by hand, or a run's schedule at a step), when it started; its share solved and mean reward (each environment's, for a suite of several), episodes played of those asked for, how long it took; and at each start of that version (by environment, for a suite of several), its episodes, how many solved and their mean reward. A run that plays one environment of an eval (`part_of`) shows its eval |
@@ -417,20 +417,16 @@ the step that covers it, if one does; a recorded group that no step covers waits
 
 Every checkpoint grows from a base model along its first parents ([checkpoints](checkpoints.md#checkpoints)). Each base model is a
 root, with a lane of its own; under it a lane for each run whose first checkpoint was trained from it, the run's checkpoints
-from the left; and under a run's lane, each run that starts from one of its checkpoints: a fork, or a distillation's
-start. A lane is folded to the checkpoints something points at (its first and newest, a checkpoint another run starts from,
-a teacher, a bookmarked checkpoint, one on its way to the engines), with a gap for the rest; a click on its
+from the left; and under a run's lane, each run that starts from one of its checkpoints: a fork. A lane is folded to the
+checkpoints something points at (its first and newest, a checkpoint another run starts from, another checkpoint's other
+parent, a bookmarked checkpoint, one on its way to the engines), with a gap for the rest; a click on its
 label opens it (what is open is remembered in the browser). A checkpoint opens its page. Between lanes:
 
 - from a **base model** to the first checkpoint of each line trained from it;
 - a **fork**: a checkpoint trained from another run's checkpoint;
-- **learned from**: a checkpoint's other parents (dashed): a distillation's teachers, or the checkpoints that sampled
-  the [dataset](datasets.md) a supervised step trained on, which the checkpoint names (`dataset`, served with each
-  checkpoint here and at `/api/system`);
-- a **distillation**: a diamond in its student's lane, before the checkpoints it made, with an edge from each teacher
-  and, dashed, from the checkpoint the student starts from. Its mode is said in words on its lane and in the
-  distillations below the graph: off-policy, the student is trained on its teachers' samples; on-policy, the student
-  samples and its teachers score every token it sampled; mixed, both.
+- **learned from**: a checkpoint's other parents (dashed): a merge's, or the checkpoints that sampled the
+  [dataset](datasets.md) a supervised step trained on, which the checkpoint names (`dataset`, served with each
+  checkpoint here and at `/api/system`).
 
 A checkpoint that something here starts from and that this ledger does not have stands in a lane of its own at the top.
 
@@ -438,11 +434,9 @@ A checkpoint that something here starts from and that this ledger does not have 
 a ledger has today is read as it is: the checkpoints, the runs' steps, bookmarks. Each checkpoint says what its weights
 are (a LoRA adapter, or full weights: those are resharded for the engines' layout on their way there). A run's steps
 stand for its trainer's queue (a run takes one step at a time), whose weights are what the run's checkpoints are, and
-the channels its runners' beats name for what its engines serve. The tables
-for distillation, trainers and inference workers are proposed in [the checkpoint graph](../../research/policy-dag.md),
-and nothing writes them yet. Evals are on the Evals page ([a subject's history](#a-subjects-history)). `#/checkpoints/sample` (`?sample=1`)
-shows the view with a fixture of them (`rollout_train/monitor/sample-lineage.json`) beside the ledger, everything from
-it marked sample.
+the checkpoints its runners' beats say it published for what its engines serve: each until the next. Evals are on the
+Evals page ([a subject's history](#a-subjects-history)). Tables for distillation, shared trainers and inference workers
+are proposed in [the checkpoint graph](../../research/policy-dag.md).
 
 ## The feed
 

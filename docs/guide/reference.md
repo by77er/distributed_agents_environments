@@ -4942,9 +4942,7 @@ class System
 - `async def evals(self) -> dict[str, Any]` — Every suite (the version its name points to, with its environment and starts; every version; and each
   subject that played it, with the version it played and how it did at each start) and every eval (its suite, the
   version it played, its checkpoint, how far it has got), newest first (`rollout_train.evals`).
-- `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
-  With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
-  beside the ledger.
+- `async def lineage(self) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
 - `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
   throughput from its runners' heartbeats, and what the runs are called.
 - `async def machines(self) -> dict[str, Any]` — Every machine that beats and the roles on it, as the heartbeats and the ledger say

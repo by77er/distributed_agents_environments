@@ -148,8 +148,6 @@ export const Avatar = memo(function Avatar({ name }: { name: string }) {
 /** An episode's square: solved, not solved, or ended where its task does not say. */
 export const solvedClass = (solved: boolean | null | undefined): string => (solved == null ? "played" : solved ? "solved" : "unsolved");
 
-export const SampleChip = () => <span className="chip sample" title="from the sample fixture: no run writes this yet">sample</span>;
-
 export const Dots = memo(function Dots({ line }: { line: DoneLine }) {
   return (
     <span className="dots">

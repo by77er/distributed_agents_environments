@@ -118,7 +118,7 @@ function SuiteTile({ suite }: { suite: EvalSuite }) {
         {one ? <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : ""}</small></div>
           : <div className="cell"><span>environments</span><b>{current.entries.length}</b><small /></div>}
       </div>
-      <div className="facts">{current.made ? <span>made {clock(current.made)}</span> : null}{suite.sample ? <span>sample</span> : null}</div>
+      <div className="facts">{current.made ? <span>made {clock(current.made)}</span> : null}</div>
     </Tile>
   );
 }
