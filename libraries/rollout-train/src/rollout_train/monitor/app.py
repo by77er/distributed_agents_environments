@@ -92,6 +92,13 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
             return HTMLResponse(UNBUILT, status_code=503)
         return HTMLResponse(await asyncio.to_thread(index.read_text), headers={"Cache-Control": "no-cache"})
 
+    async def icon(request: Request) -> Response:
+        found = STATIC / "favicon.svg"
+        if not found.exists():
+            return Response(status_code=404)
+        body = await asyncio.to_thread(found.read_bytes)
+        return Response(body, media_type="image/svg+xml", headers={"Cache-Control": "max-age=86400"})
+
     async def state(request: Request) -> Response:
         if RELAYED in request.headers:
             return JSONResponse(await system.snapshot(relayed=True))
@@ -259,6 +266,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
     routes = [
         Route("/", page),
+        Route("/favicon.svg", icon),
         Route("/api/system", state),
         Route("/api/machines", machines),
         Route("/api/launches", launches, methods=["GET", "POST"]),
@@ -282,6 +290,6 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     return Starlette(routes=routes, middleware=middleware, lifespan=measuring)
 
 
-UNBUILT = """<!doctype html><title>Runs monitor</title>
+UNBUILT = """<!doctype html><title>Rollout</title>
 <p>The monitor's page is not built: run <code>npm ci &amp;&amp; npm run build</code> in
 libraries/rollout-train/web.</p>"""

@@ -118,3 +118,14 @@ def test_readers_in_several_threads_read_each_line_once(tmp_path: Path) -> None:
     (run,) = reader.runs()
     assert run["samples"] == 2000 and len(reader.lines("r_one")) == 2001
     feed.close()
+
+
+async def test_the_page_has_an_icon(tmp_path: Path) -> None:
+    pytest.importorskip("starlette")
+    from rollout_train.monitor.app import create_app
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(tmp_path)), base_url="http://test"
+    ) as client:
+        answer = await client.get("/favicon.svg")
+    assert answer.status_code == 200 and answer.headers["content-type"] == "image/svg+xml" and b"<svg" in answer.content
