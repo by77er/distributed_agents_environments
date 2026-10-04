@@ -68,7 +68,7 @@ export const leftOf = (lease: { at: number; seconds: number | null }, now: numbe
 
 const GIB = 2 ** 30;
 
-export interface MachineSeries {
+interface MachineSeries {
   memory: [number, number][];
   disk: [number, number][];
   accelerators: { name: string; used: [number, number][]; busy: [number, number][] }[];

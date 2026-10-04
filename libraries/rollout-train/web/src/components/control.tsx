@@ -9,7 +9,7 @@ const RESUMABLE = new Set(["stopped", "failed", "lost", "ended"]);
 const LAUNCHING = new Set(["asked", "claimed", "running", "stopping"]);
 
 /** The launch going that plays a run: started in its directory, or resuming it. */
-export const launchOf = (launches: Launch[] | undefined, run: Run): Launch | undefined =>
+const launchOf = (launches: Launch[] | undefined, run: Run): Launch | undefined =>
   launches?.find(each => LAUNCHING.has(each.state) && ((run.directory != null && each.directory === run.directory) || each.asked.resumes === run.run));
 
 export function RunControls({ run }: { run: Run }) {

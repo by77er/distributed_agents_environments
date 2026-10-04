@@ -33,7 +33,7 @@ export function CheckpointTag({ id, base, bare = false, link = true }: { id: str
 
 /** What a checkpoint's weights are, where they are not an adapter over a model: `full` weights, or an adapter `over full`
  * weights (a checkpoint of its own). */
-export function WeightsChip({ id }: { id: string | null | undefined }) {
+function WeightsChip({ id }: { id: string | null | undefined }) {
   const known = useKnown();
   const checkpoint = known.checkpoint(id);
   if (checkpoint?.kind === "full") return <span className="chip" title="all of a model's weights">full</span>;

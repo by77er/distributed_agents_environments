@@ -71,10 +71,19 @@ export function useKnown(): Known {
   return knownOf(checkpoints, runs);
 }
 
-/** Change a name in the registry; every page open on the monitor hears of it through its stream, this one at once. */
-function useWrite<Asked, Answer>(write: (asked: Asked) => Promise<Answer>) {
+/** A topic's body, read from its path. */
+function useTopic<T>(topic: Topic, enabled = true) {
+  return useQuery({ queryKey: topic.key, enabled, queryFn: ({ signal }) => readJson<T>(topic.path, signal) });
+}
+
+/** Change something on the monitor, then read again the topics it changes (by default where everything stands); every
+ * page open on the monitor hears of it through its stream, this one at once. */
+function useWrite<Asked, Answer>(write: (asked: Asked) => Promise<Answer>, changes: Topic[] = [topics.system()]) {
   const client = useQueryClient();
-  return useMutation({ mutationFn: write, onSuccess: () => client.invalidateQueries({ queryKey: topics.system().key }) });
+  return useMutation({
+    mutationFn: write,
+    onSuccess: () => Promise.all(changes.map(topic => client.invalidateQueries({ queryKey: topic.key }))),
+  });
 }
 
 async function asked<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -97,17 +106,13 @@ export const useBookmark = () =>
 export const useUnbookmark = () =>
   useWrite(async (name: string) => asked<{ unbookmarked: string }>(`api/bookmarks/${encodeURIComponent(name)}`, "DELETE"));
 
-export const useFeeds = () =>
-  useQuery({ queryKey: topics.feeds().key, queryFn: ({ signal }) => readJson<FeedRun[]>(topics.feeds().path, signal) });
+export const useFeeds = () => useTopic<FeedRun[]>(topics.feeds());
 
-export const useMachines = () =>
-  useQuery({ queryKey: topics.machines().key, queryFn: ({ signal }) => readJson<Machines>(topics.machines().path, signal) });
+export const useMachines = () => useTopic<Machines>(topics.machines());
 
-export const useLaunches = () =>
-  useQuery({ queryKey: topics.launches().key, queryFn: ({ signal }) => readJson<Launches>(topics.launches().path, signal) });
+export const useLaunches = () => useTopic<Launches>(topics.launches());
 
-export const useEvals = (enabled = true) =>
-  useQuery({ queryKey: topics.evals().key, enabled, queryFn: ({ signal }) => readJson<Evals>(topics.evals().path, signal) });
+export const useEvals = (enabled = true) => useTopic<Evals>(topics.evals(), enabled);
 
 /** What the suites' forms and the new run's form need of an environment: its version, rows and eval data (an error where
  * it does not load on the monitor's machine). */
@@ -126,8 +131,7 @@ export const useEnvironment = (name: string) =>
   });
 
 /** An environment's page: what it says of itself and what was done with it. */
-export const useEnvironmentPage = (name: string) =>
-  useQuery({ queryKey: topics.environment(name).key, queryFn: ({ signal }) => readJson<EnvironmentInfo>(topics.environment(name).path, signal) });
+export const useEnvironmentPage = (name: string) => useTopic<EnvironmentInfo>(topics.environment(name));
 
 /** Every environment the system knows of: offered by a launcher alive, started on, or played by a suite (read again now
  * and then besides, for the pickers on pages that do not watch it: launchers come and go). */
@@ -139,41 +143,21 @@ export const useEnvironments = () =>
   });
 
 /** Make a suite, or its next version (which its name then points to). */
-export function useSaveSuite(name: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: Record<string, unknown>) =>
-      asked<{ suite: string; version: string; number: number }>(`api/suites/${encodeURIComponent(name)}`, "POST", body),
-    onSuccess: () => client.invalidateQueries({ queryKey: topics.evals().key }),
-  });
-}
+export const useSaveSuite = (name: string) =>
+  useWrite(async (body: Record<string, unknown>) =>
+    asked<{ suite: string; version: string; number: number }>(`api/suites/${encodeURIComponent(name)}`, "POST", body), [topics.evals()]);
 
 /** Ask for a run or an eval: a launcher alive that offers its profile starts it. */
-export function useLaunch() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (launch: LaunchAsked) => (await asked<{ launch: Launch }>("api/launches", "POST", launch)).launch,
-    onSuccess: () => client.invalidateQueries({ queryKey: topics.launches().key }),
-  });
-}
+export const useLaunch = () =>
+  useWrite(async (launch: LaunchAsked) => (await asked<{ launch: Launch }>("api/launches", "POST", launch)).launch, [topics.launches()]);
 
 /** Ask a launch to stop: one not started is stopped at once; a run going is stopped by its launcher. */
-export function useStop() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => (await asked<{ launch: Launch }>(`api/launches/${encodeURIComponent(id)}/stop`, "POST")).launch,
-    onSuccess: () => client.invalidateQueries({ queryKey: topics.launches().key }),
-  });
-}
+export const useStop = () =>
+  useWrite(async (id: string) => (await asked<{ launch: Launch }>(`api/launches/${encodeURIComponent(id)}/stop`, "POST")).launch, [topics.launches()]);
 
 /** Pause a run, or resume it: in place while its process is there, else launched again in its directory. */
-export function useRunControl(run: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (action: "pause" | "resume") => asked<unknown>(`api/runs/${encodeURIComponent(run)}/${action}`, "POST"),
-    onSuccess: () => Promise.all([topics.system(), topics.launches()].map(topic => client.invalidateQueries({ queryKey: topic.key }))),
-  });
-}
+export const useRunControl = (run: string) =>
+  useWrite(async (action: "pause" | "resume") => asked<unknown>(`api/runs/${encodeURIComponent(run)}/${action}`, "POST"), [topics.system(), topics.launches()]);
 
 export const useStatistics = () =>
   useQuery({
@@ -186,42 +170,27 @@ export const useStatistics = () =>
   });
 
 /** Every eval a checkpoint had. */
-export const useCheckpointEvals = (id: string | null | undefined) =>
-  useQuery({ queryKey: topics.checkpointEvals(id ?? "").key, enabled: Boolean(id), queryFn: ({ signal }) => readJson<CheckpointEvals>(topics.checkpointEvals(id!).path, signal) });
+export const useCheckpointEvals = (id: string | null | undefined) => useTopic<CheckpointEvals>(topics.checkpointEvals(id ?? ""), Boolean(id));
 
 /** Every subject (a checkpoint or a base model) that has had an eval. */
-export const useEvalSubjects = () =>
-  useQuery({ queryKey: topics.evalSubjects().key, queryFn: ({ signal }) => readJson<EvalSubjects>(topics.evalSubjects().path, signal) });
+export const useEvalSubjects = () => useTopic<EvalSubjects>(topics.evalSubjects());
 
 /** Every eval a subject has had. */
-export const useHistory = (kind: SubjectKind, id: string) =>
-  useQuery({ queryKey: topics.history(kind, id).key, queryFn: ({ signal }) => readJson<SubjectHistory>(topics.history(kind, id).path, signal) });
+export const useHistory = (kind: SubjectKind, id: string) => useTopic<SubjectHistory>(topics.history(kind, id));
 
 /** A checkpoint's line from the base model, with each point's scores. */
-export const usePath = (id: string | null | undefined) =>
-  useQuery({ queryKey: topics.path(id ?? "").key, enabled: Boolean(id), queryFn: ({ signal }) => readJson<Path>(topics.path(id!).path, signal) });
+export const usePath = (id: string | null | undefined) => useTopic<Path>(topics.path(id ?? ""), Boolean(id));
 
 /** A training run's settings, and what is wanted of them. */
-export const useRunSettings = (run: string) =>
-  useQuery({ queryKey: topics.settings(run).key, queryFn: ({ signal }) => readJson<RunSettings>(topics.settings(run).path, signal) });
+export const useRunSettings = (run: string) => useTopic<RunSettings>(topics.settings(run));
 
 /** Want some of a run's changeable settings from its next step on. */
-export function useWantSettings(run: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (settings: Record<string, unknown>) => asked<{ desired: unknown }>(topics.settings(run).path, "POST", { settings }),
-    onSuccess: () => client.invalidateQueries({ queryKey: topics.settings(run).key }),
-  });
-}
+export const useWantSettings = (run: string) =>
+  useWrite(async (settings: Record<string, unknown>) => asked<{ desired: unknown }>(topics.settings(run).path, "POST", { settings }), [topics.settings(run)]);
 
-export const useLineage = () =>
-  useQuery({ queryKey: topics.checkpoints().key, queryFn: ({ signal }) => readJson<Lineage>(topics.checkpoints().path, signal) });
+export const useLineage = () => useTopic<Lineage>(topics.checkpoints());
 
-export const useGroup = (run: string, number: number) =>
-  useQuery({
-    queryKey: topics.group(run, number).key,
-    queryFn: ({ signal }) => readJson<Group>(topics.group(run, number).path, signal),
-  });
+export const useGroup = (run: string, number: number) => useTopic<Group>(topics.group(run, number));
 
 /** An episode's lines, read as they grow: each reading asks only for the lines after those the page has. */
 export function useEpisode(id: string, enabled = true) {

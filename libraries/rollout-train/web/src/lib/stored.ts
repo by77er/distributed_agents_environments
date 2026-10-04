@@ -44,7 +44,7 @@ export function useStored<T>(key: string, otherwise: T): [T, (value: T) => void]
 
 /** Folds (a run, a step, a group, an episode, a lane of the checkpoints' graph): open or closed, where the reader said so. */
 export type Folds = Record<string, boolean>;
-export const FOLDS = "monitor.folds";
+const FOLDS = "monitor.folds";
 
 export function useFolds(): [Folds, (key: string, open: boolean) => void, (changes: Folds) => void] {
   const [folds, setFolds] = useStored<Folds>(FOLDS, {});

@@ -10,7 +10,7 @@ import { Card, Pairs, SectionTitle, Table } from "./ui";
 const FIRST = [GROUPS_PER_STEP, EVALS_SUITE, "evals.every", "evals.episodes"];
 
 /** The changeable settings in the order a form shows them: the loop's, the evals', then the trainer's by name. */
-export const changeableKeys = (settings: RunSettings): string[] =>
+const changeableKeys = (settings: RunSettings): string[] =>
   [...FIRST.filter(key => key in settings.changeable), ...Object.keys(settings.changeable).filter(key => !FIRST.includes(key)).sort()];
 
 /** A run's settings, where its start says them: a form for the changeable ones, and the fixed ones as they are. */

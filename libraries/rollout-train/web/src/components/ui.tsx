@@ -62,7 +62,7 @@ export const Head = ({ title, sub, children }: { title: ReactNode; sub?: ReactNo
   </div>
 );
 
-export type Cell = ReactNode | { text: ReactNode; kind?: string };
+type Cell = ReactNode | { text: ReactNode; kind?: string };
 const isKinded = (cell: Cell): cell is { text: ReactNode; kind?: string } =>
   typeof cell === "object" && cell !== null && !Array.isArray(cell) && "text" in cell;
 

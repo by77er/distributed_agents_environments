@@ -31,8 +31,6 @@ export const tick = (value: number): string =>
 export const tickSpan = (seconds: number): string =>
   seconds < 120 ? `${Math.round(seconds)} s` : seconds < 7200 ? `${+(seconds / 60).toPrecision(2)} min` : `${+(seconds / 3600).toPrecision(2)} h`;
 
-export const hue = (name: string): number => [...name].reduce((sum, letter) => (sum * 31 + letter.charCodeAt(0)) % 360, 7);
-
 /** A slot's hue, from its whole name: names that differ only in their number (`agent-1`, `agent-2`) are a wide step
  * apart, and the rest of the name moves them all (`red1` and `blue1` differ). */
 export function slotHue(name: string): number {

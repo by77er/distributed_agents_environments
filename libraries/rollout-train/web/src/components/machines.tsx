@@ -27,7 +27,7 @@ function RoleCard({ role, title, onHost, children }: { role: Role; title: ReactN
 }
 
 /** A machine's memory, accelerators and disk now. */
-export function Meters({ machine }: { machine: Measurement | null | undefined }) {
+function Meters({ machine }: { machine: Measurement | null | undefined }) {
   if (!machine) return null;
   return (
     <>
@@ -85,7 +85,7 @@ export const MachineCard = memo(function MachineCard({ host }: { host: Host }) {
 /** A channel's throughput since the beat before, as a table's cells. */
 const throughput = (channel: RoleChannel) => [figure(channel.tokens_per_second), figure(channel.mean_concurrency)];
 
-export const RunnerCard = memo(function RunnerCard({ runner, host, onHost }: { runner: RunnerRole; host: Host | undefined; onHost: boolean }) {
+const RunnerCard = memo(function RunnerCard({ runner, host, onHost }: { runner: RunnerRole; host: Host | undefined; onHost: boolean }) {
   const known = useKnown();
   return (
     <RoleCard role={runner} title={runner.name} onHost={onHost}>
@@ -109,7 +109,7 @@ export const RunnerCard = memo(function RunnerCard({ runner, host, onHost }: { r
   );
 });
 
-export const PoolCard = memo(function PoolCard({ pool, onHost }: { pool: PoolRole; onHost: boolean }) {
+const PoolCard = memo(function PoolCard({ pool, onHost }: { pool: PoolRole; onHost: boolean }) {
   const known = useKnown();
   const now = useNow();
   const says = pool.size == null ? `${pool.leases.length} leased · its size is not known` : `${pool.leased} of ${pool.size} leased · ${pool.free} free`;
@@ -133,7 +133,7 @@ export const PoolCard = memo(function PoolCard({ pool, onHost }: { pool: PoolRol
   );
 });
 
-export const EngineCard = memo(function EngineCard({ engines, host, onHost }: { engines: EngineRole; host: Host | undefined; onHost: boolean }) {
+const EngineCard = memo(function EngineCard({ engines, host, onHost }: { engines: EngineRole; host: Host | undefined; onHost: boolean }) {
   const known = useKnown();
   const behind = (count: number | null) => (count == null ? "–" : count === 0 ? { text: "0", kind: "t-good" } : { text: String(count), kind: "t-warm" });
   return (
@@ -156,7 +156,7 @@ export const EngineCard = memo(function EngineCard({ engines, host, onHost }: { 
   );
 });
 
-export const LauncherCard = memo(function LauncherCard({ launcher, onHost }: { launcher: LauncherRole; onHost: boolean }) {
+const LauncherCard = memo(function LauncherCard({ launcher, onHost }: { launcher: LauncherRole; onHost: boolean }) {
   const atOnce = launcher.at_once ?? 1, playing = launcher.playing ?? launcher.launches.length;
   return (
     <RoleCard role={launcher} title={launcher.name} onHost={onHost}>
@@ -173,7 +173,7 @@ export const LauncherCard = memo(function LauncherCard({ launcher, onHost }: { l
   );
 });
 
-export const GatewayCard = memo(function GatewayCard({ gateway, onHost }: { gateway: GatewayRole; onHost: boolean }) {
+const GatewayCard = memo(function GatewayCard({ gateway, onHost }: { gateway: GatewayRole; onHost: boolean }) {
   const known = useKnown();
   return (
     <RoleCard role={gateway} title={gateway.name} onHost={onHost}>
