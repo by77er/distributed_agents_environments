@@ -2808,7 +2808,8 @@ to be resumed, and starting again adopts them (`prepare`).
   runs survive it, left to be resumed).
 - `async def beat(self) -> None` — Beat now, beside the beats every `beating` seconds: after what it says of itself changed (a channel serves
   a new checkpoint, say), so that whoever reads the beats does not wait for the next.
-- `async def open(self) -> list[Open]` — The episodes nobody plays now, of the runs this runner serves, oldest group first.
+- `async def open(self) -> list[Open]` — The episodes nobody plays now, of the runs this runner serves that are not paused, oldest group first. Which
+  of them are paused is noted, and said at once in a beat when it changed.
 
 ### `episodes_of`
 
@@ -4874,6 +4875,9 @@ class System
 - `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
   done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
   the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
+- `async def pause(self, run: str) -> Desired` — Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run.
+- `async def resume(self, run: str) -> Resumed` — Resume a run: in place, or by a launch (`rollout_train.resuming.resume`). Raises `Taken` for a run that
+  cannot be resumed, `KeyError` where there is no such run or no launcher alive offers what it needs.
 - `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
   run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
   `KeyError` when there is no such run (or no registry).

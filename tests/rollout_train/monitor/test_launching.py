@@ -19,7 +19,7 @@ from rollout_train.launches import ASKED, STOPPED, STOPPING, launches_of
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.monitor.system import System
 from rollout_train.presence import presence_of
-from rollout_train.record import GROUPS, STARTS, scope, table
+from rollout_train.record import ENDS, GROUPS, STARTS, scope, table
 from rollout_train.registry import Taken, registry_of
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
 from rollout_train.rollouts.scheduler import EPISODES, runner_scope
@@ -188,3 +188,51 @@ async def test_a_launch_whose_launcher_stopped_beating_is_shown_lost(tmp_path: P
     assert shown[waiting.id]["state"] == ASKED  # (not claimed: nobody's to lose)
     stored = next(each for each in await launches.all() if each.id == asked.id)
     assert stored.state == RUNNING  # shown lost, kept as it was
+
+
+async def test_a_run_is_paused_resumed_in_place_and_once_stopped_launched_again_from_the_page(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    begun: dict[str, JsonValue] = {
+        "directory": "/runs/train",
+        "profile": "/profiles/one-gpu.toml",
+        "environment": "c:c",
+    }
+    begun["settings"] = {"fixed": {"groups": 10, "seed": 3}, "changeable": {"groups_per_step": 2}}
+    await a_run(ledger, "train", **begun)
+    await a_run(ledger, "train-eval-2", kind="eval", by="train", step=2)  # (an eval its schedule asked for)
+    heartbeats = presence_of(ledger)
+    assert heartbeats is not None
+    await heartbeats.beat("far/train", {"run": "train"})
+    about: JsonValue = {"kind": LAUNCHER, "profiles": [OFFERED], "environments": ["c:c"], "at_once": 1, "playing": 0}
+    await heartbeats.beat("launcher/far", about)
+    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
+
+    async def states() -> dict[str, tuple[str, bool]]:
+        runs = (await client.get("/api/system")).json()["runs"]
+        return {run["run"]: (run["state"], run["pause"]) for run in runs}
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+        assert (await states())["train"] == ("running", False)
+        assert (await client.post("/api/runs/train/pause")).json()["desired"]["settings"] == {"paused": True}
+        assert (await states())["train"] == ("running", True)  # (wanted paused: its runner has not said so yet)
+        await heartbeats.beat("far/train", {"run": "train", "paused": ["train", "train-eval-2"]})
+        assert await states() == {"train": ("paused", True), "train-eval-2": ("paused", False)}
+        resumed = (await client.post("/api/runs/train/resume")).json()["resumed"]
+        assert resumed["how"] == "in place" and resumed["launch"] is None
+        await heartbeats.beat("far/train", {"run": "train"})
+        assert (await states())["train"] == ("running", False)
+        refused = await client.post("/api/runs/train/resume")
+        assert refused.status_code == 409 and "is running" in refused.json()["error"]
+        assert (await client.post("/api/runs/nothing/pause")).status_code == 404
+        fence = await ledger.take(scope("train"))  # (stopped: its newest start says so)
+        await ledger.append(table("train", STARTS), str(fence.number), {**begun, "started": time.time()}, fence)
+        await ledger.append(table("train", ENDS), str(fence.number), {"how": "stopped", "at": time.time()}, fence)
+        assert (await states())["train"][0] == "stopped"
+        launch = (await client.post("/api/runs/train/resume")).json()["resumed"]["launch"]
+        asked = launch["asked"]
+        assert (asked["profile"], asked["directory"], asked["resumes"]) == ("one-gpu", "/runs/train", "train")
+        assert (asked["groups"], asked["groups_per_step"], asked["seed"]) == (10, 2, 3)
+        assert [each["id"] for each in (await client.get("/api/launches")).json()["launches"]] == [launch["id"]]
+        assert (await client.post("/api/runs/train/resume")).status_code == 409  # (being launched already)
+        eval_refused = await client.post("/api/runs/train-eval-2/resume")
+        assert eval_refused.status_code == 409 and "resume that run" in eval_refused.json()["error"]

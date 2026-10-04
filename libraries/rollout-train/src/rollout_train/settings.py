@@ -15,6 +15,11 @@ beside a ledger of files (`FileDesiredSettings`), a table in a database ledger's
 writes it there; the training loop reads them each time it is about to decide a step, takes the changeable ones it
 knows for that step and those after it, and writes the settings each step used in the step's record
 (`rollout_train.record`). A run that is not running takes them when it is started again.
+
+Beside them, a run's desired settings say whether it is paused (`PAUSED`). A paused run's loop decides no group and no
+step, and runners claim none of its episodes, nor those of the evals it asked for or is part of (`paused`); what is
+playing plays out and is recorded, and a step being taken is finished. Its process stays, beating and holding its
+engines. Paused false, it goes on.
 """
 
 import asyncio
@@ -30,6 +35,7 @@ from typing import Any, Protocol
 from pydantic import JsonValue
 
 from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.record import STARTS, table
 
 GROUPS_PER_STEP = "groups_per_step"
 MAX_LAG = "max_lag"
@@ -39,6 +45,8 @@ TRAINER = "trainer."
 """The start of a setting the trainer takes (`trainer.learning_rate`): what follows is its name for it."""
 CHANGEABLE = (GROUPS_PER_STEP, MAX_LAG, EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES)
 """The changeable settings every training run has; its trainer's (`trainer.…`) are beside them."""
+PAUSED = "paused"
+"""The key of a run's desired settings that says whether it is paused (`true`): not a setting a step takes."""
 
 
 @dataclass(frozen=True)
@@ -66,6 +74,30 @@ def desired_settings_of(ledger: Ledger) -> DesiredSettings | None:
     if isinstance(ledger, FileLedger):
         return FileDesiredSettings(ledger.directory)
     return getattr(ledger, "desired_settings", None)
+
+
+async def paused(ledger: Ledger, run: str, store: DesiredSettings | None = None) -> bool:
+    """Whether a run is paused: its desired settings (in `store`, by default those beside `ledger`) say so, or those of
+    a run its newest start says it is played for: the training run whose schedule asked for it (`by`), or the eval it
+    is a part of (`part_of`)."""
+    store = store if store is not None else desired_settings_of(ledger)
+    if store is None:
+        return False
+    seen: set[str] = set()
+    waiting = [run]
+    while waiting:
+        each = waiting.pop()
+        if each in seen:
+            continue
+        seen.add(each)
+        found = await store.desired(each)
+        if found is not None and found.settings.get(PAUSED) is True:
+            return True
+        starts = await ledger.read(table(each, STARTS))
+        newest = starts[max(starts, key=int)] if starts else None
+        if isinstance(newest, dict):
+            waiting += [str(newest[key]) for key in ("by", "part_of") if newest.get(key)]
+    return False
 
 
 def checked(key: str, value: JsonValue) -> JsonValue:

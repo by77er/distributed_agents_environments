@@ -48,6 +48,12 @@ evals, and the settings its trainer takes between steps. Each time it is about t
 of them (`desired`), and decides the step with them; the step's record says which settings it used, and a step taken
 again after a stop uses those. Whether a checkpoint is evaluated is the evals its step was decided with, and the
 version of the suite its name pointed to then (`rollout_train.evals`): an edit of the suite applies from the next step.
+
+**It can be paused** (`rollout_train.settings.PAUSED`, among the desired settings). Each time it is about to decide a
+group or a step it looks; paused, it decides neither, while the episodes playing play out and are recorded and a step
+being taken is finished (runners claim none of its episodes meanwhile: `rollout_train.rollouts.scheduler`). It looks
+again every `PAUSE_LOOK` seconds, and goes on once the run is no longer paused. A pause and a resume are noted to the
+hooks (`paused`, `resumed`).
 """
 
 import asyncio
@@ -91,7 +97,16 @@ from rollout_train.resharding import RESHARDED
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
 from rollout_train.serving import Serving, qualified, record_serving
-from rollout_train.settings import EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, GROUPS_PER_STEP, MAX_LAG, TRAINER, applied
+from rollout_train.settings import (
+    EVALS_EPISODES,
+    EVALS_EVERY,
+    EVALS_SUITE,
+    GROUPS_PER_STEP,
+    MAX_LAG,
+    PAUSED,
+    TRAINER,
+    applied,
+)
 from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, StepFailed, Trainer, Weighted
 
 
@@ -106,6 +121,8 @@ class Publisher(Protocol):
 
 FAILED_UPDATES = 3
 """Steps that may fail in a row (each is written down, and the weights stay as they were) before the loop stops."""
+PAUSE_LOOK = 1.0
+"""Seconds between a paused loop's looks at whether it is still paused."""
 
 
 async def train(
@@ -339,6 +356,15 @@ async def train(
             note("settings", {"changed": changes})
         settings = wanted
 
+    async def pausing() -> bool:
+        """Whether the run is paused now, as its desired settings say; a change is noted."""
+        nonlocal halted
+        now = desired is not None and (await desired()).get(PAUSED) is True
+        if now != halted:
+            note("paused" if now else "resumed", {})
+            halted = now
+        return now
+
     def trained_with(said: Mapping[str, JsonValue]) -> None:
         """Have the trainer take these of its settings from its next step on, where they differ from what it has."""
         if isinstance(trainer, Changeable):
@@ -347,6 +373,8 @@ async def train(
                 trainer.change(differ)
 
     served: Checkpoint | None = None
+    halted = False
+    """Whether the run was paused when last looked."""
     await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
     if (now := await current()) is not None:
         await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
@@ -524,19 +552,29 @@ async def train(
             await take(key, _groups(steps[key]))
         owed = groups - len(outstanding)
         while outstanding or owed > 0 or queue or stepping is not None:
-            while len(outstanding) < asking and owed > 0:
+            paused = await pausing()  # (paused, nothing is decided: what is in flight goes on)
+            while not paused and len(outstanding) < asking and owed > 0:
                 await decide()
                 owed -= 1
             last = not outstanding and owed <= 0
-            if stepping is None and queue:
+            if not paused and stepping is None and queue:
                 await refresh()
-            if stepping is None and queue and (len(queue) >= int(str(settings[GROUPS_PER_STEP])) or last):
+            if (
+                not paused
+                and stepping is None
+                and queue
+                and (len(queue) >= int(str(settings[GROUPS_PER_STEP])) or last)
+            ):
                 numbers, queue[:] = list(queue), []
                 stepping = asyncio.create_task(take(max(steps, default=0) + 1, numbers))
             waited: set[asyncio.Task[Any]] = {*outstanding, *([stepping] if stepping else [])}
             if not waited:
+                if paused:
+                    await asyncio.sleep(PAUSE_LOOK)
                 continue
-            finished, _ = await asyncio.wait(waited, return_when=asyncio.FIRST_COMPLETED)
+            finished, _ = await asyncio.wait(
+                waited, timeout=PAUSE_LOOK if paused else None, return_when=asyncio.FIRST_COMPLETED
+            )
             for task in sorted((task for task in finished if task in outstanding), key=lambda each: outstanding[each]):
                 await record(outstanding.pop(task), task.result())
             if stepping is not None and stepping in finished:

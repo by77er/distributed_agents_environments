@@ -6,7 +6,8 @@ and names a trainer), with what its trainer makes (`lora` or `full` weights) and
 their values in the profile; the environments; and whether it has room. It claims the oldest launch asked for one of its
 profiles, whose environments it offers each of, while it plays fewer than `--at-once`, starts `rollout train` for it in
 a directory of its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said
-so, as `evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch asked to stop is
+so, as `evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch that resumes a
+run is started in that run's own directory, which names the run: it goes on from the ledger. A launch asked to stop is
 sent an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
 
 Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
@@ -170,7 +171,9 @@ class Launcher:
     async def _start(self, launch: Launch) -> None:
         asked = launch.asked
         profile = next(each for each in self._offered if each["profile"] == asked.profile)
-        directory = self.runs / f"{slug(asked.name)}-{launch.id[-6:].lower()}"
+        directory = (
+            Path(asked.directory) if asked.directory else self.runs / f"{slug(asked.name)}-{launch.id[-6:].lower()}"
+        )
         settings: dict[str, Any] = dict(asked.settings)
         if asked.kind != EVAL:  # (an eval's checkpoint is what plays, not where training starts)
             settings |= {"trainer.start": asked.start} if asked.start else {}

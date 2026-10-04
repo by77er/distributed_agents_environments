@@ -68,6 +68,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/api/runs/{run}/settings`: a training run's settings, fixed and changeable, and what is wanted of them
       (`System.settings`); `POST` (`{"settings": {KEY: VALUE}}`) wants changeable ones from its next step on
       (`System.want`);
+    - `POST /api/runs/{run}/pause`: pauses a run (`System.pause`); `POST /api/runs/{run}/resume` resumes it, in place
+      while its process beats, else by a launch that starts it again in its directory (`System.resume`);
     - `/api/statistics`: every run of the ledger in figures and the engines' throughput (`System.statistics`);
     - `/api/runs`: every episode in the runs' feeds, summarised;
     - `/api/stream?topic=...`: server-sent events, a `version` event (`{"topic", "version"}`) for each topic at once
@@ -275,6 +277,22 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
         return await written(change)
 
+    async def pause(request: Request) -> Response:
+        run = request.path_params["run"]
+
+        async def change() -> Any:
+            return {"desired": asdict(await system.pause(run))}
+
+        return await written(change)
+
+    async def resume(request: Request) -> Response:
+        run = request.path_params["run"]
+
+        async def change() -> Any:
+            return {"resumed": asdict(await system.resume(run))}
+
+        return await written(change)
+
     async def unbookmark(request: Request) -> Response:
         name = request.path_params["name"]
 
@@ -310,6 +328,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/checkpoints/{id}/evals", checkpoint_evals),
         Route("/api/checkpoints/{id}/path", path),
         Route("/api/runs/{run}/settings", settings, methods=["GET", "POST"]),
+        Route("/api/runs/{run}/pause", pause, methods=["POST"]),
+        Route("/api/runs/{run}/resume", resume, methods=["POST"]),
         Route("/api/statistics", figures),
         Route("/api/runs", runs),
         Route("/api/stream", stream),

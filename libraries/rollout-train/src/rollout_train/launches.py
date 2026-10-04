@@ -7,6 +7,8 @@ suite it plays, the checkpoint that plays it and how many episodes of each start
 machine says in its heartbeat which profiles and environments it can run, claims a launch asked for one of its profiles
 whose environments it offers, starts `rollout train` (or `rollout eval`), and notes how it goes:
 claimed, running (with the process), ended or failed (with why). A launch asked to stop is stopped by its launcher.
+A launch may resume a run whose process is gone: it names the run (`resumes`) and the run's own directory, and the
+launcher starts it there again (`rollout_train.resuming`).
 Every change of a launch's state compares and sets: it is made only if the launch is where its writer expects, and may
 go where it is sent (`MOVES`), so a stop is never overwritten by a launcher that started the run meanwhile.
 
@@ -83,6 +85,10 @@ class Asked:
     environments: Sequence[str] = ()
     """Every environment it plays, as `module:name`, where they are more than `environment`: an eval's suite's entries'
     environments, a training run's and its evals' suite's. A launcher claims it only where it offers each."""
+    resumes: str | None = None
+    """The run it starts again (by id), for a launch that resumes one (`rollout_train.resuming`)."""
+    directory: str | None = None
+    """The directory it runs in: a resumed run's own. None: a new one under the launcher's `--runs`."""
 
     def plays(self) -> set[str]:
         """Every environment it plays."""

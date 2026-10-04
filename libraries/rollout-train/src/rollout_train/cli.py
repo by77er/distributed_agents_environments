@@ -13,6 +13,8 @@ rollout tools FACTORY               serve an environment's tool set over HTTP: F
 rollout pool FACTORY                serve a pool of an environment's sandboxes over HTTP: FACTORY makes their provider
 rollout engines PROFILE --run RUN   keep a profile's engines (vLLM servers) serving what the run says
 rollout runner PROFILE              play runs' episodes, and nothing else
+rollout pause RUN, rollout resume RUN
+                                    pause a run, and resume it (in place, or launched again in its directory)
 rollout gateway PROFILE             serve a replica of the gateway: it samples PROFILE's channels and records every turn
 
 `rollout COMMAND --help` lists each command's options.
@@ -715,6 +717,32 @@ async def _rename(who: str, name: str, where: str) -> None:
     print(f"the run {entry.id} is called {entry.name}")
 
 
+async def _pause_or_resume(command: str, who: str, where: str) -> None:
+    from rollout_train.record import runs_in
+    from rollout_train.registry import found, registry_of
+    from rollout_train.resuming import IN_PLACE, pause, resume
+
+    ledger = _ledger_at(where)
+    registry = registry_of(ledger)
+    entry = found(await registry.runs(), who) if registry is not None else None
+    run = entry.id if entry is not None else who
+    if entry is None and who not in await runs_in(ledger):
+        raise SystemExit(f"there is no run {who!r}")
+    try:
+        if command == "pause":
+            await pause(ledger, run)
+            print(f"{who} is paused: what is playing plays out, and nothing new starts")
+            return
+        resumed = await resume(ledger, run)
+    except (KeyError, ValueError) as error:
+        raise SystemExit(error.args[0]) from None
+    if resumed.how == IN_PLACE:
+        print(f"{who} goes on")
+    else:
+        assert resumed.launch is not None
+        print(f"{who} is asked to start again in {resumed.launch.asked.directory} ({resumed.launch.id})")
+
+
 async def _bookmark(name: str, reference: str | None, delete: bool, where: str) -> None:
     from rollout_train.registry import Taken, resolved
 
@@ -831,6 +859,14 @@ def main() -> None:
     renaming.add_argument("who", help="the run, by its name or its id")
     renaming.add_argument("name", help="what it is called from now on")
     renaming.add_argument("--ledger", default=".", help=where)
+    pausing = commands.add_parser("pause", help="pause a run: what is playing plays out, and nothing new starts")
+    pausing.add_argument("who", help="the run, by its name or its id")
+    pausing.add_argument("--ledger", default=".", help=where)
+    resuming = commands.add_parser(
+        "resume", help="resume a run: a paused one goes on; a stopped, failed or lost one is launched again"
+    )
+    resuming.add_argument("who", help="the run, by its name or its id")
+    resuming.add_argument("--ledger", default=".", help=where)
     marking = commands.add_parser("bookmark", help="name a checkpoint, move a bookmark, or take one away")
     marking.add_argument("name")
     marking.add_argument("checkpoint", nargs="?", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id or its start")
@@ -996,6 +1032,9 @@ def main() -> None:
         )))  # fmt: skip
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
+        return
+    if arguments.command in ("pause", "resume"):
+        asyncio.run(_pause_or_resume(arguments.command, arguments.who, arguments.ledger))
         return
     if arguments.command == "bookmark":
         if arguments.checkpoint is None and not arguments.delete:

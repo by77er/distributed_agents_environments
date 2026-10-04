@@ -28,6 +28,10 @@ it (`rollout_train.gateway`), so a stale attempt can record nothing more once a 
 Several runners, on one machine or many, share the work the same way: which machine plays a group's episodes is only
 a matter of where runners are.
 
+A runner claims nothing of a paused run (`rollout_train.settings.paused`: the run, or the run it is played for), and
+looks at whether each is paused every time it looks for work, whether or not it has room: an episode it plays already
+plays out. Each beat says which of the runs it serves are paused (`paused`), and it beats at once when that changes.
+
 A run's sandboxes (`rollout.harness.sandboxes`) are acquired under its claim's key, `RUN/GROUP/EPISODE/ATTEMPT`: a
 retried acquire gets the same sandbox, a new attempt a new one, and a sandbox's lease ends with the claim
 (`rollout_train.sandboxes`). A runner claims an episode only while the pools of the sandboxes its program declares
@@ -66,6 +70,7 @@ from rollout_train.presence import Beat, Presence, alive
 from rollout_train.record import GROUPS, RESULTS, runs_in, scope, table
 from rollout_train.recorder import Segment
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, assemble, loaded, stored
+from rollout_train.settings import desired_settings_of, paused
 
 PLANS, CLAIMS, EPISODES, INTERRUPTED, ADOPTED = "plans", "claims", "episodes", "interrupted", "adopted"
 """A run's tables beside its groups: how its episodes are played, who plays which, the episodes that ended, the
@@ -283,6 +288,8 @@ class EpisodeRunner:
     )
     _lapsed: list[str] = field(default_factory=list[str])
     """Runs found on starting again whose claims lapsed: cancelled once the runner is serving."""
+    _paused: frozenset[str] = frozenset()
+    """The runs it serves that were paused when it last looked."""
 
     @property
     def resumes(self) -> bool:
@@ -316,10 +323,12 @@ class EpisodeRunner:
         try:
             while True:
                 room = self.places - len(self._playing)
-                if room > 0 and self._fits():
+                claiming = room > 0 and self._fits()
+                found = await self._look(claiming)  # (looked at whatever its room: which runs are paused)
+                if claiming:
                     free: dict[str, int] = {}  # each pool's room, asked once a look
                     plans: dict[str, Plan] = {}  # each run's plan, read once a look
-                    for each in await self.open():
+                    for each in found:
                         if room == 0:
                             break
                         needs = await self._needs(each, plans)
@@ -354,20 +363,35 @@ class EpisodeRunner:
         assert self.presence is not None
         said: Mapping[str, JsonValue] = await asyncio.to_thread(self.about) if self.about is not None else {}
         about: dict[str, JsonValue] = {**said, "places": self.places, "playing": len(self._playing)}
+        if self._paused:
+            about["paused"] = list[JsonValue](sorted(self._paused))
         if self.pools:
             about["pools"] = {name: (await pool.capacity()).to_json() for name, pool in self.pools.items()}
         await self.presence.beat(self.name, about)
 
     async def open(self) -> list[Open]:
-        """The episodes nobody plays now, of the runs this runner serves, oldest group first."""
-        fences = await self.ledger.fences()
-        beats = {beat.runner: beat for beat in await self.presence.beats()} if self.presence is not None else None
+        """The episodes nobody plays now, of the runs this runner serves that are not paused, oldest group first. Which
+        of them are paused is noted, and said at once in a beat when it changed."""
+        return await self._look(True)
+
+    async def _look(self, claiming: bool) -> list[Open]:
+        """Note which of the runs this runner serves are paused (beating at once when that changed), and, `claiming`,
+        find the episodes nobody plays now of the others (`open`)."""
+        fences = await self.ledger.fences() if claiming else {}
+        beats = {beat.runner: beat for beat in await self.presence.beats()} if self.presence and claiming else None
+        desired = desired_settings_of(self.ledger)
         found: list[Open] = []
+        halted: set[str] = set()
         for run in await runs_in(self.ledger):
             if self.runs is not None and run not in self.runs:
                 continue
             plans = await self.ledger.read(table(run, PLANS))
             if not plans or not await self._serves(run, Plan.from_json(_mapping(plans[max(plans, key=int)]))):
+                continue
+            if await paused(self.ledger, run, desired):
+                halted.add(run)
+                continue
+            if not claiming:
                 continue
             groups = await self.ledger.read(table(run, GROUPS))
             results = await self.ledger.read(table(run, RESULTS))
@@ -384,6 +408,10 @@ class EpisodeRunner:
                         continue
                     decided = float(str(record.get("decided") or 0.0))
                     found.append(Open(run, int(key), number, claims.latest.get(episode, 0) + 1, decided))
+        if frozenset(halted) != self._paused:
+            self._paused = frozenset(halted)
+            with contextlib.suppress(Exception):  # (a beat missed: the next says it)
+                await self.beat()
         return sorted(found, key=lambda each: (each.decided, each.run, each.group, each.number))
 
     async def _serves(self, run: str, played: Plan) -> bool:

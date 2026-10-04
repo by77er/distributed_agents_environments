@@ -102,11 +102,13 @@ from rollout_train.registry import (
     resolved,
     valid,
 )
+from rollout_train.resuming import Resumed, pause, resume
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, Claims, of_episode
 from rollout_train.sandboxes import leases_of
 from rollout_train.serving import SERVING
 from rollout_train.settings import CHANGEABLE, EVALS_SUITE, TRAINER, Desired, desired_settings_of
+from rollout_train.settings import PAUSED as PAUSE
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
 
@@ -134,10 +136,11 @@ ARCHIVED = 8
 SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
-RUNNING, IDLE, GONE = "running", "idle", "ended"
+RUNNING, IDLE, GONE, PAUSED = "running", "idle", "ended", "paused"
 """A run's process is there and writing; there and quiet; not heard from in long (a run from before runs said how
-they ended, or that never beat); its runners beat and stopped with no word of how it ended (it crashed or was
-killed). A run that said how it ended is in the state it said (`FINISHED`, `STOPPED`, `FAILED`)."""
+they ended, or that never beat); there and paused, as a runner's beat says (`rollout_train.resuming`). Its runners
+beat and stopped with no word of how it ended: lost (it crashed or was killed). A run that said how it ended is in the
+state it said (`FINISHED`, `STOPPED`, `FAILED`)."""
 """A run's state. Where its runners beat (`rollout_train.presence`), by their newest beat: one within `STALE` seconds
 (by the clock of the store that keeps the beats),
 and it is running (idle if it wrote nothing for `QUIET` seconds); none, and its process is gone: ended. An eval that
@@ -240,7 +243,23 @@ class System:
         called = await names(registry_of(self._ledger))
         beats = await self._beats()
         snapshot = await asyncio.to_thread(self._assembled, tables, fences, checkpoints, called, beats, relayed)
+        store = desired_settings_of(self._ledger)
+        for run in snapshot["runs"]:  # (whether it is wanted paused: its process notes it in its beats, `state`)
+            wanted = await store.desired(run["run"]) if store is not None and tables else None
+            run["pause"] = wanted is not None and wanted.settings.get(PAUSE) is True
         return snapshot | {"names": called}
+
+    async def pause(self, run: str) -> Desired:
+        """Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run."""
+        return await pause(self._ledger, run)
+
+    async def resume(self, run: str) -> Resumed:
+        """Resume a run: in place, or by a launch (`rollout_train.resuming.resume`). Raises `Taken` for a run that
+        cannot be resumed, `KeyError` where there is no such run or no launcher alive offers what it needs."""
+        try:
+            return await resume(self._ledger, run)
+        except ValueError as error:
+            raise Taken(str(error)) from None
 
     async def rename(self, who: str, name: str) -> Entry:
         """Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
@@ -305,7 +324,8 @@ class System:
             elif not given.get("environment") or parsed(named_suite)[1] not in (None, 1):
                 raise KeyError(f"there is no suite {named_suite!r}")  # (else its eval data, frozen when first played)
         try:
-            asked = Asked(**{key: value for key, value in given.items() if key in Asked.__dataclass_fields__})
+            fields = set(Asked.__dataclass_fields__) - {"resumes", "directory"}  # (a resume's own: `resume`)
+            asked = Asked(**{key: value for key, value in given.items() if key in fields})
         except TypeError as error:
             raise Taken(f"a launch says its profile, its environment and its name ({error})") from None
         if asked.kind not in (TRAINING, EVAL):
@@ -872,6 +892,7 @@ class System:
         noted = _noted(beats)
         beaten: dict[str, float] = {}  # each run's runners' newest beat
         ages: dict[str, float] = {}  # and how old it is, by the clock of the store that keeps them
+        held = {str(run) for beat in beats if alive(beat) for run in cast(list[Any], beat.about.get("paused") or [])}
         for beat in beats:
             if beat.about.get("run"):
                 beaten[str(beat.about["run"])] = max(beaten.get(str(beat.about["run"]), 0.0), beat.at)
@@ -898,6 +919,8 @@ class System:
                 run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run), ages.get(run)
             )
             seen |= _how_it_ended(seen["state"], starts, own[ENDS], beaten.get(run) is not None)
+            if seen["state"] in (RUNNING, IDLE) and run in held:  # (its process is there, and a runner says it paused)
+                seen["state"] = PAUSED
             begun: Any = starts[max(starts, key=int)] if starts else {}
             kind = str(begun.get("kind") or "run")
             if kind == EVAL and own[GROUPS] and set(own[GROUPS]) <= set(own[RESULTS]) and seen["state"] not in ENDINGS:
@@ -912,8 +935,9 @@ class System:
         states = {run["run"]: run["state"] for run in runs}
         for run in runs:  # (an eval a training run's schedule asked for, not done, is played by that run's runner)
             if run["kind"] == EVAL and run["run"] not in finished and run["by"] in states and run["run"] not in beaten:
-                run["state"] = states[run["by"]]
-        rank = {RUNNING: 0, IDLE: 1}
+                by = states[run["by"]]
+                run["state"] = PAUSED if by in (RUNNING, IDLE) and run["run"] in held else by
+        rank = {RUNNING: 0, PAUSED: 1, IDLE: 1}
         runs.sort(key=lambda run: (rank.get(run["state"], 2), -(run["written"] or 0.0), run["run"]))
         return {
             "at": round(now, 1),
