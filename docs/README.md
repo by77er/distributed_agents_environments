@@ -87,6 +87,14 @@ Each implements one interface a library defines.
 `uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
 `rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone).
 
+## Research
+
+Proposals: what could be built, and the records it would need.
+
+| Page | What it covers |
+|---|---|
+| [The policy graph](research/policy-dag.md) | Every policy as a graph of versions: training, forks, distillation (on and off policy), trainers and their queues, the way from written weights to served ones, evaluations; the monitor's draft view |
+
 ## Conventions
 
 - **Pages describe the code as it is.** A page's `Code:` line names the code it describes.

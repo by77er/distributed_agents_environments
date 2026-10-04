@@ -6,7 +6,8 @@
   into it), each group (its episodes, its step, its outcome) and each episode (what it reported, and its rollouts: one
   per agent, each a trajectory to train on).
 - `create_app(directory)`: a web page over a run's directory, organised the same way: the run, its steps, their
-  groups, the groups' episodes and each episode's rollouts, turn by turn, beside the policy and the machine.
+  groups, the groups' episodes and each episode's rollouts, turn by turn, beside the policies (each alone, and all of
+  them as a graph: `rollout_train.monitor.lineage`) and the machine.
   `rollout monitor DIRECTORY` serves it.
 """
 

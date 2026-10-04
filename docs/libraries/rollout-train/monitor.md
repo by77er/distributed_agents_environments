@@ -11,7 +11,8 @@ The monitor is a web page over a run's directory, laid out as the run is:
 - an **episode**: one run of the program, with what it reported when it ended;
 - a **rollout**: one agent's (model slot's) part of an episode, turn by turn: what it was sent, what it thought, what
   it did and what came back. Each rollout becomes a **trajectory**, the tokens the trainer learns from;
-- beside them, the **policy** (its versions) and the **machine**, the engines and the ledger.
+- beside them, the **policies** (each one's versions, and all of them as a graph) and the **machine**, the engines and
+  the ledger.
 
 ```bash
 rollout monitor RUN                                   # http://localhost:8765
@@ -43,6 +44,7 @@ address names what is shown, so a reload stays there.
 | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported), the step it went into, what was done with it (the step's statistics and the version it made, or why it was skipped), and its start |
 | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below |
 | Policy | `#/policy/NAME` | how far each step moved the policy, and every version with the step that made it |
+| Policies | `#/policies`, `#/policies/sample` | every policy as a lane of versions, with forks and distillations between lanes; the trainers and their queues over time; each version's way to the engines and the workers that serve it; the runs and distillations; evaluation suites, a column per version or model ([the policies view](#the-policies-view)) |
 | Machine, engines and ledger | `#/system` | memory, accelerators and disk, each channel's throughput, the jobs, the fences and tables |
 | Episodes outside a run | `#/episodes` | runs in the feed that no training run asked for: evaluations, tests, programs run by hand |
 
@@ -51,8 +53,8 @@ and tool calls are there, and what each model was sent is not (it is kept as tok
 single characters in what a model sees (a map) is drawn with its symbols colored. An episode's reward is summed as the
 trainer sums it ([rewards](episodes.md#rewards)).
 
-`System(directory, feed)` reads the directory: `snapshot()` (where the run stands), `group(run, number)` and
-`episode(run_id)`. `create_app(directory)` serves them and the page; its routes are listed in
+`System(directory, feed)` reads the directory: `snapshot()` (where the run stands), `group(run, number)`,
+`episode(run_id)` and `lineage(sample)` (the policies view). `create_app(directory)` serves them and the page; its routes are listed in
 `rollout_train.monitor.app`.
 
 A group's stage is read from the records alone, so it is what a [loop](training.md) that started now would find:
@@ -68,6 +70,29 @@ A group's stage is read from the records alone, so it is what a [loop](training.
 A step's state is read likewise: `stepping` while it has neither made the version it names nor failed, then
 `committed` or `failed`. A group that is done carries the number and state of the step that covers it, if one does;
 a recorded group that no step covers waits toward the next one.
+
+## The policies view
+
+A lane for each policy, its versions from the left. A lane is folded to the versions something points at (its first
+and newest, the ends of each run's stretch, a fork's parent, a teacher, an evaluated version, one on its way to the
+engines), with a gap for the rest; a click on its label opens it (what is open is remembered in the browser). A
+version opens the step that made it. Between lanes:
+
+- a **fork**: a policy whose first version's parent is another policy's version;
+- a **distillation**: a diamond in its student's lane, before the versions it made, with an edge from each teacher
+  and, dashed, from the version the student starts from. It is off policy when it trains on others' samples, on
+  policy when on the student's own.
+
+A version that something here starts from and that this ledger does not have (a policy in another run's directory)
+stands in a lane of its own at the top.
+
+`rollout_train.monitor.lineage` reads it from the ledger's tables and the feed's job lines, at `/api/policies`. What a
+ledger has today is read as it is: the policies' versions and the runs' steps. A run's steps stand for its trainer's
+queue (a run takes one step at a time), and the `published` notes in the feed for what its engines serve. The tables
+for distillation, trainers, inference workers and evaluations are proposed in
+[the policy graph](../../research/policy-dag.md), and nothing writes them yet. `#/policies/sample` (`?sample=1`) shows
+the view with a fixture of them (`rollout_train/monitor/sample-lineage.json`) beside the ledger, everything from it
+marked sample.
 
 ## The feed
 

@@ -3320,6 +3320,9 @@ class System
 - `def __init__(self, directory: Path, feed: FeedReader) -> None`
 - `async def snapshot(self) -> dict[str, Any]` — Where everything stands now: the runs' groups that are not done with and the ones that are, the
   policies' versions, the jobs, what each channel serves and how fast, the machine, and what is kept.
+- `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
+  With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
+  beside the ledger.
 - `async def group(self, run: str, number: int) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
   its step and the version it made, and its outcome.
 - `async def episode(self, run_id: str, after: int = 0) -> dict[str, Any]` — One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its

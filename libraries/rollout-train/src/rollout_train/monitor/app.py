@@ -25,6 +25,8 @@ def create_app(directory: Path) -> Starlette:
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
+    - `/api/policies?sample=1`: the policies as a graph, with the trainers, the inference workers and evaluations
+      (`System.lineage`; `sample` adds the fixture of the tables proposed for them);
     - `/api/runs`: every run in the feed, summarised.
 
     It only reads the directory; the runs' own process writes it."""
@@ -48,6 +50,9 @@ def create_app(directory: Path) -> Starlette:
         after = int(request.query_params.get("after", "0"))
         return JSONResponse(await system.episode(request.path_params["run_id"], after))
 
+    async def policies(request: Request) -> Response:
+        return JSONResponse(await system.lineage(sample=request.query_params.get("sample") in ("1", "true")))
+
     async def runs(request: Request) -> Response:
         return JSONResponse(await asyncio.to_thread(reader.runs))
 
@@ -65,6 +70,7 @@ def create_app(directory: Path) -> Starlette:
         Route("/api/system", state),
         Route("/api/groups/{run}/{number:int}", group),
         Route("/api/episodes/{run_id}", episode),
+        Route("/api/policies", policies),
         Route("/api/runs", runs),
     ]
     return Starlette(routes=routes, lifespan=measuring)
