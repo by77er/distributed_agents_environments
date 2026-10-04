@@ -317,7 +317,8 @@ async def test_a_task_that_never_says_whether_it_solved_is_shown_saying_nothing_
     await ended(ledger, "words", 1, 2, "r_two")
     await ended(ledger, "words", 2, 1, "r_three", info={"solved": True})
     for number, solved in (("1", [False, False]), ("2", [True])):  # (training reads what is not said as not solved)
-        result: JsonValue = {"time": 9.0, "rewards": [1.0] * len(solved), "solved": list[JsonValue](solved)}
+        rewards: list[JsonValue] = [1.0] * len(solved)
+        result: JsonValue = {"time": 9.0, "rewards": rewards, "solved": list[JsonValue](solved)}
         await ledger.append(table("words", RESULTS), number, result, fence)
     system = System(ledger=ledger)
 
