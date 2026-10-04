@@ -115,3 +115,4 @@ nav:
       - "SFT datasets": research/sft-datasets.md
       - "Ledger guarantees": research/ledger-guarantees.md
       - "Cleanup inventory": research/cleanup-inventory.md
+      - "Runtime design": research/runtime-design.md
