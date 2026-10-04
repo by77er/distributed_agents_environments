@@ -190,7 +190,7 @@ def system_prompt(task: Task, team: Sequence[str]) -> str:
         opening=TEAM_OPENING.format(count=spelled(players), team=", ".join(team)) if players > 1
         else ALONE_OPENING.format(name=team[0]),
         goal=goal(task, players),
-        way="".join(f"\n\n{told['way']}" for _ in [0] if "way" in told),
+        way=f"\n\n{told['way']}" if "way" in told else "",
         turns=TEAM_TURNS.format(count=spelled(players)) if players > 1 else ALONE_TURNS,
         window=spelled(LIMITS.window_seconds),
         chat=CHAT.format(chat_lines=CHAT_LINES) if players > 1 else "",
@@ -441,9 +441,7 @@ def describe(
     if observation.get("animals"):
         animals = "; ".join(f"{a['animal']} (id {a['id']}) {a['distance']} away" for a in observation["animals"])
         lines.append(f"Animals: {animals}.")
-    if recalled:
-        return "\n".join(lines)
-    if chat is None:  # (a player on their own)
+    if recalled or chat is None:  # (`None`: a player on their own)
         return "\n".join(lines)
     if chat:
         lines.append("Team chat, oldest first:")

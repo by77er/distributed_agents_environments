@@ -16,7 +16,7 @@ reward. Three tiers:
 Progress is scored from Minecraft's own advancements, earned by any team member after the episode's start
 (advancements a kit grants are not counted): each milestone along the path to the dragon has a weight.
 
-`catalog()` generates the tasks; `build()` turns one into a starting state in a live world.
+`catalog()` generates the tasks (`TASKS` holds them by id); `build()` turns one into a starting state in a live world.
 """
 
 import math
@@ -487,6 +487,10 @@ def _task(
     )
 
 
+TASKS = {task.id: task for task in catalog()}
+"""Every task, by its id."""
+
+
 def kits(task: Task, team: Sequence[str], rng: random.Random) -> dict[str, list[dict[str, Any]]]:
     """Each agent's starting inventory."""
     supplies = [] if task.kit is Kit.NOTHING else SUPPLIES
@@ -578,12 +582,11 @@ class Site:
 
 @dataclass
 class Built:
-    """A task built in a world: where everyone stands and what they start with."""
+    """A task built in a world: what there is to find, and where it was built."""
 
-    task: Task
     available_diamonds: int
+    """As `Site.available_diamonds`: what `solved` and `saturated` measure laid-out diamonds against."""
     anchor: Point
-    world: str
 
 
 class BuildError(RuntimeError):
@@ -643,7 +646,7 @@ async def build(task: Task, control: Control, team: list[str], rng: random.Rando
     result = await control.episode(setup)
     if result["missing"]:
         raise BuildError(f"not online: {result['missing']}")
-    return Built(task, site.available_diamonds, site.anchor, site.world)
+    return Built(site.available_diamonds, site.anchor)
 
 
 def _anchor(rng: random.Random, y: int = DIAMOND_DEPTH, spread: int = 240) -> Point:
@@ -655,13 +658,13 @@ async def _spots(control: Control, point: Point, radius: int, world: str = "worl
     return [(spot["x"], spot["y"], spot["z"]) for spot in spots]
 
 
-def _spread(spots: Sequence[Point], count: int = len(TEAM)) -> list[Point]:
+def _spread(spots: Sequence[Point]) -> list[Point]:
     """Distinct spots a little apart (two agents cannot stand in one block): one for each of the team."""
     chosen: list[Point] = []
     for spot in spots:
         if all(math.dist(spot, other) >= 1.0 for other in chosen):
             chosen.append(spot)
-        if len(chosen) == count:
+        if len(chosen) == len(TEAM):
             break
     return chosen
 

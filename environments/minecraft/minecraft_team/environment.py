@@ -12,12 +12,9 @@ from dataclasses import dataclass, field
 from pydantic import JsonValue
 
 from minecraft_team.episode import TeamEpisode
-from minecraft_team.tasks import NAMES, TEAM, Coordination
-from minecraft_team.tasks import catalog as tasks
+from minecraft_team.tasks import NAMES, TASKS, TEAM, Coordination
 from rollout.environment import Description, Row, Start, drawn
 from rollout.harness import ProgramReference, register
-
-TASKS = {task.id: task for task in tasks()}
 
 
 @dataclass(frozen=True)
@@ -36,7 +33,7 @@ class Teams:
     def rows(self) -> Sequence[Row]:
         return [
             Row(task.id, task.title, {"task": task.id}, counts_for=() if task.guided else (task.id.removesuffix("u"),))
-            for task in tasks()
+            for task in TASKS.values()
             if not self.only or task.id in self.only
         ]
 

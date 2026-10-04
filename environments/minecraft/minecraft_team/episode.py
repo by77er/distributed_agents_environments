@@ -47,7 +47,7 @@ from minecraft_team.prompts import (
     guidance,
     system_prompt,
 )
-from minecraft_team.tasks import NAMES, TEAM, TURNS_PER_MINUTE, Task, catalog
+from minecraft_team.tasks import NAMES, TASKS, TEAM, TURNS_PER_MINUTE, Task
 from rollout.contracts import Message, Text, ToolCall
 from rollout.harness import Memory, ModelSlot, Program, RunContext, Sandbox, SandboxSpec
 
@@ -64,8 +64,7 @@ class TeamEpisode(Program):
 
     def __init__(self, parameters: Mapping[str, JsonValue] | None = None) -> None:
         parameters = parameters or {}
-        tasks = {task.id: task for task in catalog()}
-        self.task: Task = tasks[str(parameters.get("task", "t001"))]
+        self.task: Task = TASKS[str(parameters.get("task", "t001"))]
         self.world_seed = int(cast(int, parameters.get("world_seed", 12345)))
         self.layout_seed = int(cast(int, parameters.get("layout_seed", 0)))
         self.minutes = min(self.task.minutes, float(cast(float, parameters.get("minutes", self.task.minutes))))

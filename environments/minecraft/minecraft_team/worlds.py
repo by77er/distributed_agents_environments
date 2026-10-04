@@ -26,7 +26,7 @@ from minecraft_team.control import Control
 from minecraft_team.harness import Harness
 from minecraft_team.limits import LIMITS, TICKS_PER_SECOND
 from minecraft_team.paper import Installation, PaperServer, sweep
-from minecraft_team.tasks import TEAM, Built, Task, build, catalog, saturated, score, solved
+from minecraft_team.tasks import TASKS, TEAM, Built, Task, build, saturated, score, solved
 from rollout.contracts import RetryClass, Text, ToolResult, ToolSpecification
 from rollout.harness import Reach, SandboxSpec
 
@@ -34,6 +34,7 @@ WINDOW_TICKS = LIMITS.window_seconds * TICKS_PER_SECOND
 """The most game ticks a window runs: it is over sooner when every action has finished."""
 KIND = "minecraft"
 """The kind of sandbox a world is."""
+Arguments = Mapping[str, JsonValue]
 
 
 def world(task: str, world_seed: int, layout_seed: int, names: Sequence[str] = TEAM) -> SandboxSpec:
@@ -64,9 +65,7 @@ class MinecraftWorlds:
     """At most `size` worlds at once, each a Paper server of its own (1 to 2 GB of memory)."""
 
     installation: Installation = field(default_factory=Installation)
-    window_ticks: int = WINDOW_TICKS
     logs: Path | None = None
-    tasks: dict[str, Task] = field(default_factory=lambda: {task.id: task for task in catalog()})
     size: int = 6
     deduplicates: ClassVar[bool] = False
     """An operation asked for twice is performed twice: nothing here remembers an effect's id."""
@@ -96,7 +95,7 @@ class MinecraftWorlds:
         if handle in self._worlds:
             return self._reach(self._worlds[handle])
         parameters: Any = spec.parameters
-        task = self.tasks[str(parameters["task"])]
+        task = TASKS[str(parameters["task"])]
         team = [str(name) for name in parameters.get("names", TEAM)]
         server = PaperServer(self.installation, seed=int(parameters["world_seed"]))
         await server.start()
@@ -108,7 +107,7 @@ class MinecraftWorlds:
             await control.freeze()
             built = await build(task, control, team, random.Random(int(parameters["layout_seed"])))
             world = EpisodeWorld(handle, task, server, control, harness, built, team)
-            await self._run(world, ticks=20, settle=1.0)  # teleports reach the bots
+            await run_window(control, harness, ticks=20, settle=1.0)  # teleports reach the bots
             await loaded(control, harness)  # and so does the world around them, before anyone looks at it
             await control.baseline()  # advancements the kit granted are not the episode's
         except BaseException:
@@ -145,17 +144,21 @@ class MinecraftWorlds:
     async def close(self) -> None:
         await asyncio.gather(*(self.delete(handle) for handle in list(self._worlds)), return_exceptions=True)
 
-    async def observe(self, world: EpisodeWorld, agent: str) -> dict[str, Any]:
-        return await world.harness.observe(agent)
+    # The operations (`OPERATIONS`), each given the episode's world and the call's arguments
 
-    async def act(self, world: EpisodeWorld, agent: str, action: Mapping[str, JsonValue]) -> bool:
+    async def observe(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
+        return await world.harness.observe(str(arguments["agent"]))
+
+    async def act(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
+        action = arguments["action"]
         await world.harness.thaw()  # physics on while actions start; ticks still frozen
-        return await world.harness.act(agent, dict(action))
+        started = await world.harness.act(str(arguments["agent"]), dict(action) if isinstance(action, dict) else {})
+        return {"started": started}
 
-    async def window(self, world: EpisodeWorld) -> dict[str, Any]:
+    async def window(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
         """Run game time until every action has finished or the window is over; then freeze. `done` says there is
         nothing left to earn (`tasks.saturated`)."""
-        ran = await self._run(world, ticks=self.window_ticks, settle=0.3)
+        ran = await run_window(world.control, world.harness, ticks=WINDOW_TICKS, settle=0.3)
         state = await world.control.state()
         return {
             "ticks": ran,
@@ -164,7 +167,7 @@ class MinecraftWorlds:
             "team_advancements": list(state.get("team_advancements", [])),
         }
 
-    async def score(self, world: EpisodeWorld) -> dict[str, Any]:
+    async def score(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
         """Ground truth: the reward of the task's objective, the team's diamonds and advancements, and what
         happened."""
         state = await world.control.state()
@@ -190,9 +193,6 @@ class MinecraftWorlds:
             "events": dict(kinds),
             "mined": dict(mined),
         }
-
-    async def _run(self, world: EpisodeWorld, *, ticks: int, settle: float) -> int:
-        return await run_window(world.control, world.harness, ticks=ticks, settle=settle)
 
     def _world(self, handle: str) -> EpisodeWorld:
         world = self._worlds.get(handle)
@@ -255,7 +255,6 @@ def worlds(directory: Path, size: int = 6) -> MinecraftWorlds:
     return made
 
 
-Arguments = Mapping[str, JsonValue]
 STRING: JsonValue = {"type": "string"}
 
 
@@ -270,31 +269,18 @@ class Operation:
     perform: Callable[[MinecraftWorlds, EpisodeWorld, Arguments], Awaitable[JsonValue]]
 
 
-async def _observe(worlds: MinecraftWorlds, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
-    return await worlds.observe(world, str(arguments["agent"]))
-
-
-async def _act(worlds: MinecraftWorlds, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
-    action = arguments["action"]
-    started = await worlds.act(world, str(arguments["agent"]), action if isinstance(action, dict) else {})
-    return {"started": started}
-
-
-async def _window(worlds: MinecraftWorlds, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
-    return await worlds.window(world)
-
-
-async def _score(worlds: MinecraftWorlds, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
-    return await worlds.score(world)
-
-
 OPERATIONS: dict[str, Operation] = {
     # (Asked again before the game next runs, the harness answers the same: an observation uses nothing up.)
-    "observe": Operation("What an agent perceives.", {"agent": STRING}, RetryClass.PURE, _observe),
+    "observe": Operation("What an agent perceives.", {"agent": STRING}, RetryClass.PURE, MinecraftWorlds.observe),
     "act": Operation(
-        "Start an agent's action.", {"agent": STRING, "action": {"type": "object"}}, RetryClass.SIDE_EFFECTING, _act
+        "Start an agent's action.",
+        {"agent": STRING, "action": {"type": "object"}},
+        RetryClass.SIDE_EFFECTING,
+        MinecraftWorlds.act,
     ),
-    "window": Operation("Run game time while actions happen.", {}, RetryClass.SIDE_EFFECTING, _window),
-    "score": Operation("The task's reward, and the ground truth it is scored from.", {}, RetryClass.PURE, _score),
+    "window": Operation("Run game time while actions happen.", {}, RetryClass.SIDE_EFFECTING, MinecraftWorlds.window),
+    "score": Operation(
+        "The task's reward, and the ground truth it is scored from.", {}, RetryClass.PURE, MinecraftWorlds.score
+    ),
 }
 """The operations on a world, by name: their specifications and what a call does both come from here."""
