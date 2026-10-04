@@ -4,6 +4,10 @@
 # Run once, as root:   sudo bash deploy/k3s/install-wsl.sh
 # Undo:                sudo /usr/local/bin/k3s-uninstall.sh   (and: apt remove nvidia-container-toolkit)
 #
+# The uninstall script deletes /var/lib/rancher, and with it every volume under /var/lib/rancher/k3s/storage: the
+# ledger (Postgres), the blobs (S3) and the state volume, whatever their reclaim policy. Back them up first, with
+# pg_dump and a copy of the storage directories (deploy/k3s/README.md, "Undo").
+#
 # What it does:
 #   1. Installs NVIDIA's container toolkit from NVIDIA's apt repository, and writes a CDI spec for WSL2's GPU
 #      (WSL2 exposes the card as /dev/dxg with libcuda under /usr/lib/wsl/lib, not as /dev/nvidia*).

@@ -6,12 +6,18 @@ image:
   tag: dev
   pullPolicy: Always
 
+# The StorageClass of the platform's volumes: the state volume, the ledger's and the blob store's. Each is a directory
+# under /var/lib/rancher/k3s/storage on the node. K3s's `local-path` deletes that directory when its claim is deleted;
+# `local-path-retain` (deploy/k3s/storage-class.yaml) keeps it, and is what a fresh install should name. A claim's class
+# cannot change once it is made, so an install whose claims are `local-path` keeps that, with its volumes set to Retain
+# by hand (deploy/k3s/README.md).
+storageClass: local-path
+
 # Where every pod of the platform keeps local state: run directories, Minecraft's servers and worlds, the Hugging Face
-# cache. One node, so one local-path volume that every pod mounts (each mount is the same directory on the node).
+# cache. One node, so one volume that every pod mounts (each mount is the same directory on the node).
 state:
   claim: state
   size: 200Gi
-  storageClass: local-path
   path: /root/.cache/rollout  # where pods mount it: the code's `~/.cache/rollout`, the containers running as root
 
 secrets:

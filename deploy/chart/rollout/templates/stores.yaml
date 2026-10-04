@@ -1,5 +1,5 @@
 # The stores: Postgres for the ledger and versitygw (an S3 gateway; buckets are directories) for blobs, each on a
-# local-path volume. Credentials come from the Secret `secrets.stores`.
+# volume of `storageClass`. Credentials come from the Secret `secrets.stores`.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -30,7 +30,7 @@ spec:
     - metadata: {name: data}
       spec:
         accessModes: [ReadWriteOnce]
-        storageClassName: local-path
+        storageClassName: {{ .Values.storageClass }}
         resources: {requests: {storage: {{ .Values.stores.postgres.storage }}}}
 ---
 apiVersion: v1
@@ -71,7 +71,7 @@ spec:
     - metadata: {name: data}
       spec:
         accessModes: [ReadWriteOnce]
-        storageClassName: local-path
+        storageClassName: {{ .Values.storageClass }}
         resources: {requests: {storage: {{ .Values.stores.s3.storage }}}}
 ---
 apiVersion: v1

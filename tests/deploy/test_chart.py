@@ -1,5 +1,6 @@
 """The Helm chart (deploy/chart/rollout), rendered: its cluster config and profiles read as the code reads them and name
-the cluster's stores; every container says what it needs and the most memory it may take. Skipped where helm is not
+the cluster's stores; every container says what it needs and the most memory it may take; every volume is of the
+class `storageClass` names. Skipped where helm is not
 installed."""
 
 import shutil
@@ -22,15 +23,22 @@ BLOBS = {"kind": "rollout_s3:S3BlobStore", "bucket": "rollout-blobs", "prefix": 
 pytestmark = pytest.mark.skipif(HELM is None, reason="helm is not installed")
 
 
-@pytest.fixture(scope="module")
-def rendered() -> list[dict[str, Any]]:
+def render(*options: str) -> list[dict[str, Any]]:
     import subprocess
 
     assert HELM is not None
     out = subprocess.run(
-        [HELM, "template", "rollout", str(CHART), "--namespace", "rollout"], capture_output=True, text=True, check=True
+        [HELM, "template", "rollout", str(CHART), "--namespace", "rollout", *options],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     return [each for each in yaml.safe_load_all(out) if each]
+
+
+@pytest.fixture(scope="module")
+def rendered() -> list[dict[str, Any]]:
+    return render()
 
 
 def config_of(rendered: list[dict[str, Any]]) -> dict[str, str]:
@@ -92,3 +100,20 @@ def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(re
     (gpu,) = [group for group in ray["spec"]["workerGroupSpecs"] if group["groupName"] == "gpu"]
     assert (gpu["minReplicas"], gpu["maxReplicas"], gpu["template"]["spec"]["runtimeClassName"]) == (0, 1, "nvidia")
     assert ray["spec"]["enableInTreeAutoscaling"] is True
+
+
+def test_every_volume_is_of_the_class_storage_class_names(rendered: list[dict[str, Any]]) -> None:
+    def classes(rendered: list[dict[str, Any]]) -> list[str]:
+        claims = [each["spec"] for each in rendered if each["kind"] == "PersistentVolumeClaim"]
+        claims += [
+            template["spec"]
+            for each in rendered
+            if each["kind"] == "StatefulSet"
+            for template in each["spec"]["volumeClaimTemplates"]
+        ]
+        return [claim["storageClassName"] for claim in claims]
+
+    assert classes(rendered) == ["local-path"] * 3  # the state volume, the ledger's, the blob store's
+    retain = yaml.safe_load((ROOT / "deploy" / "k3s" / "storage-class.yaml").read_text())
+    assert (retain["provisioner"], retain["reclaimPolicy"]) == ("rancher.io/local-path", "Retain")
+    assert classes(render("--set", f"storageClass={retain['metadata']['name']}")) == ["local-path-retain"] * 3

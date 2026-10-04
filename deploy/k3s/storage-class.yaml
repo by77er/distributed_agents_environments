@@ -1,0 +1,10 @@
+# K3s's local-path volumes, kept when their claims are deleted: a directory under /var/lib/rancher/k3s/storage, made
+# by the same provisioner as `local-path`, which deletes it instead. The chart's volumes use it with
+# `--set storageClass=local-path-retain` on a fresh install (deploy/k3s/README.md).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path-retain
+provisioner: rancher.io/local-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer

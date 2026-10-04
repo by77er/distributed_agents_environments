@@ -9,7 +9,7 @@ metadata:
     helm.sh/resource-policy: keep  # (uninstalling the chart leaves the run directories)
 spec:
   accessModes: [ReadWriteOnce]  # one node: every pod mounts it there
-  storageClassName: {{ .Values.state.storageClass }}
+  storageClassName: {{ .Values.storageClass }}
   resources: {requests: {storage: {{ .Values.state.size }}}}
 ---
 apiVersion: v1
