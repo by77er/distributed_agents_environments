@@ -12,7 +12,8 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train.gateway import TurnStore
 from rollout_train.ledger import FileLedger
 from tests.rollout_train.gateway.support import bearer, grant, keyring
-from tests.rollout_train.gateway.test_hosted import a_profile, free_port, gateway
+from tests.rollout_train.gateway.test_hosted import a_profile, gateway
+from tests.rollout_train.support import free_port
 
 pytest.importorskip("uvicorn")
 
