@@ -17,6 +17,7 @@ dependencies = [
     "project-assistant",
     "agent-sessions",
     "minecraft-team",
+    "gridworld",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +26,7 @@ gemma = ["rollout-gemma"]
 ray = ["rollout-train[ray]"]  # a launcher that submits runs as Ray jobs, and resharding as Ray tasks
 
 [tool.uv.workspace]
-members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft"]
+members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft", "environments/gridworld"]
 exclude = ["implementations/rollout-verifiers", "implementations/rollout-tinker"]  # projects of their own, locked apart
 
 [tool.uv.sources]
@@ -42,6 +43,7 @@ rollout-s3 = { workspace = true }
 project-assistant = { workspace = true }
 agent-sessions = { workspace = true }
 minecraft-team = { workspace = true }
+gridworld = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -65,7 +67,7 @@ line-length = 120
 target-version = "py313"
 # Code in docs/ is illustrative and hand-aligned for reading; .claude/ holds agents' working copies.
 extend-exclude = ["docs", ".claude"]
-src = ["libraries/*/src", "implementations/*/src", "products/*/src", "environments/minecraft", "."]
+src = ["libraries/*/src", "implementations/*/src", "products/*/src", "environments/minecraft", "environments/gridworld", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
@@ -90,6 +92,7 @@ extraPaths = [
     "products/project-assistant/src",
     "products/agent-sessions/src",
     "environments/minecraft",
+    "environments/gridworld",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
