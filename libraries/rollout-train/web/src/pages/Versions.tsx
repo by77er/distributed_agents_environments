@@ -134,7 +134,8 @@ function said(edge: Lineage["edges"][number], index: Index): string {
 const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, inLedger }: { lineage: Lineage; index: Index; lanes: Lane[]; room: number; inLedger: Set<string> }) {
   const navigate = useNavigate();
   const [folds, fold] = useFolds();
-  const anchors = new Set<string>(lineage.edges.flatMap(edge => [edge.from, edge.kind === "learned" || edge.kind === "base" ? edge.to : null]).filter((each): each is string => Boolean(each)));
+  // (what an edge between lanes points at; an edge along a lane, from a version to the next its run made, pins nothing)
+  const anchors = new Set<string>(lineage.edges.filter(edge => edge.kind !== "trained").flatMap(edge => [edge.from, edge.kind === "learned" || edge.kind === "base" ? edge.to : null]).filter((each): each is string => Boolean(each)));
   for (const name of index.scores.keys()) anchors.add(name);
   for (const edge of lineage.edges) {
     if (edge.kind === "trained" && index.versions.get(edge.from)?.by?.run !== index.versions.get(edge.to)?.by?.run) { anchors.add(edge.from); anchors.add(edge.to); }
@@ -177,7 +178,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             return <div key={lane.key} className="lane-label"><span /><b className="muted">Outside this ledger</b><small>{lane.outside.length} version{lane.outside.length === 1 ? "" : "s"} something here starts from</small></div>;
           }
           if (lane.base) {
-            return <div key={lane.key} className="lane-label base-label"><span /><b title={lane.base}>{short(lane.base)}</b><small>base model: the root of the lines below it</small></div>;
+            return <div key={lane.key} className="lane-label base-label"><span /><b title={lane.base}>{short(lane.base)}</b><small>base model</small></div>;
           }
           const run = lane.run, first = lane.versions[0], from = first?.parents[0];
           const says = run?.kind === "distill" ? run.says ?? run.mode ?? "distilled"
@@ -221,7 +222,6 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
               return (
                 <g key={id}>
                   <g className="base"><rect x={cx - 8} y={cy - 8} width={16} height={16} rx={3} className="f-quiet" /><title>{`the base model ${item.name}: every line here grows from it`}</title></g>
-                  <text x={cx + 14} y={cy + 4} className="base-name">{item.name}</text>
                 </g>
               );
             }
@@ -266,7 +266,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
                 <g className={`version${real ? " link" : ""}`} onClick={() => { if (real) navigate(versionPlace(version.id)); }}>
                   {["serving", "rolling out", "resharding"].includes(life.state) ? <circle cx={cx} cy={cy} r={10.5} className={`ring ring-${lifeKind(life.state)}`} /> : null}
                   <circle cx={cx} cy={cy} r={6} className={version.kept ? `dot-${kindOfVersion(item.name)}` : "dot-released"} />
-                  <text x={cx} y={cy + 22} textAnchor="middle" className="v">{version.short}</text>
+                  <text x={cx} y={cy + 22} textAnchor="middle" className="v">{version.by?.step != null ? `S${version.by.step}` : version.short}</text>
                   {version.bookmarks.length ? <text x={cx} y={cy - 13} textAnchor="middle" className="bookmark">{version.bookmarks.join(", ")}</text> : null}
                   {score ? <text x={cx} y={cy - (version.bookmarks.length ? 24 : 13)} textAnchor="middle" className={`score t-${share >= 0.6 ? "good" : share >= 0.35 ? "warm" : "bad"}`}>{`${score.solved}/${score.played}${score.played < score.starts ? "…" : ""}`}</text> : null}
                   <title>{[

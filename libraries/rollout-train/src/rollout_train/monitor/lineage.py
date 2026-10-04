@@ -412,7 +412,6 @@ class _Reading:
                     made,
                 )
                 for step in run["steps"]
-                if step["decided"]
             ]
             trainers.append(
                 {
