@@ -42,10 +42,11 @@
   .pages a .count { font-weight: 400; color: var(--faint); letter-spacing: 0; }
   .top .live { padding: 0 24px; }
   .brand { display: flex; align-items: center; gap: 12px; padding: 0 18px; }
-  .brand .mark-logo { width: 26px; height: 26px; border-radius: 3px; background: var(--ink); color: var(--panel); display: grid; place-items: center;
-                      font: 700 12px var(--mono); flex: none; box-shadow: 3px 3px 0 var(--accent); }
-  .brand b { display: block; font-size: 14px; letter-spacing: -.01em; }
-  .brand small { display: block; color: var(--quiet); font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wordmark { display: flex; align-items: center; gap: 10px; color: var(--ink); white-space: nowrap;
+              font: italic 800 23px/1 "Archivo", var(--sans); font-stretch: 125%; letter-spacing: .02em; }
+  .wordmark .speed { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; transform: skewX(-14deg); }
+  .wordmark .speed i { display: block; height: 3px; border-radius: 1px; background: var(--accent); }
+  .wordmark .speed i:nth-child(1) { width: 14px; } .wordmark .speed i:nth-child(2) { width: 22px; } .wordmark .speed i:nth-child(3) { width: 9px; }
   .tree { overflow-y: auto; padding: 6px 10px 24px; flex: 1; }
   .tree .label { color: var(--faint); padding: 16px 8px 6px; }
   .tree a.label { display: block; border-radius: 3px; } .tree a.label:hover { color: var(--ink); background: var(--raised); }
@@ -434,7 +435,7 @@
     .shell { display: block; height: auto; }
     .frame { display: block; }
     .top { position: sticky; top: 0; z-index: 6; flex-wrap: wrap; }
-    .top .brand { width: auto; border-right: 0; padding: 10px 12px; } .top .brand small { display: none; }
+    .top .brand { width: auto; border-right: 0; padding: 10px 12px; } .wordmark { font-size: 18px; }
     .top .live { display: none; }
     .pages { order: 3; flex-basis: 100%; padding: 0; border-top: 1px solid var(--line); overflow-x: auto; }
     .pages a { padding: 10px 14px; }

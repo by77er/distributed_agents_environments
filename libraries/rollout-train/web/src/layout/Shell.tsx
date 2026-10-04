@@ -43,9 +43,8 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className={`shell${open ? " open" : ""}`}>
       <header className="top">
         <button type="button" className="menu" aria-label="show the sidebar" onClick={() => setOpen(!open)}>☰</button>
-        <Link className="brand" to="/runs">
-          <div className="mark-logo">R</div>
-          <div style={{ minWidth: 0 }}><b>Runs monitor</b><small>{system?.ledger_at ?? "connecting…"}</small></div>
+        <Link className="brand" to="/runs" title={system?.ledger_at ?? undefined} aria-label="Rollout">
+          <span className="wordmark" aria-hidden="true"><span className="speed"><i /><i /><i /></span>ROLLOUT</span>
         </Link>
         <nav className="pages" aria-label="pages">
           {PAGES.map(([page, name, to]) => {
