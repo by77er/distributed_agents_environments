@@ -186,11 +186,14 @@ async def test_a_program_reaches_its_sandboxes_by_name_and_a_harness_inside_is_g
         "OPENAI_BASE_URL": "http://models/v1", "OPENAI_API_KEY": "key-run_1/coder", "OPENAI_MODEL": "scripted",
         "OPENAI_BASE_URL_CODER": "http://models/v1", "OPENAI_API_KEY_CODER": "key-run_1/coder",
         "OPENAI_MODEL_CODER": "scripted",
+        "ANTHROPIC_BASE_URL": "http://models", "ANTHROPIC_AUTH_TOKEN": "key-run_1/coder", "ANTHROPIC_MODEL": "scripted",
+        "ANTHROPIC_BASE_URL_CODER": "http://models", "ANTHROPIC_AUTH_TOKEN_CODER": "key-run_1/coder",
+        "ANTHROPIC_MODEL_CODER": "scripted",
     }  # fmt: skip
-    assert environment["shared"]["OPENAI_API_KEY_ONE"] == "key-run_1/one"
-    assert (
-        environment["shared"]["OPENAI_API_KEY_TWO"] == "key-run_1/two" and "OPENAI_API_KEY" not in environment["shared"]
-    )
+    shared = environment["shared"]
+    assert shared["OPENAI_API_KEY_ONE"] == shared["ANTHROPIC_AUTH_TOKEN_ONE"] == "key-run_1/one"
+    assert shared["OPENAI_API_KEY_TWO"] == shared["ANTHROPIC_AUTH_TOKEN_TWO"] == "key-run_1/two"
+    assert "OPENAI_API_KEY" not in shared and "ANTHROPIC_AUTH_TOKEN" not in shared
     described: dict[str, JsonValue] = given["described"]  # type: ignore[assignment]
     assert described["environment"] == environment["box"]  # what the provider made it with
     (acquired,) = [payload(event)["sandboxes"] for event in events if event.type is RunEventType.SANDBOXES_ACQUIRED]
@@ -304,6 +307,9 @@ async def test_a_worker_for_an_environment_is_a_sandbox_like_a_world() -> None:
         "WORKER": "1", "OPENAI_BASE_URL": "http://models/v1", "OPENAI_API_KEY": "key-run_2/coder",
         "OPENAI_MODEL": "scripted", "OPENAI_BASE_URL_CODER": "http://models/v1",
         "OPENAI_API_KEY_CODER": "key-run_2/coder", "OPENAI_MODEL_CODER": "scripted",
+        "ANTHROPIC_BASE_URL": "http://models", "ANTHROPIC_AUTH_TOKEN": "key-run_2/coder",
+        "ANTHROPIC_MODEL": "scripted", "ANTHROPIC_BASE_URL_CODER": "http://models",
+        "ANTHROPIC_AUTH_TOKEN_CODER": "key-run_2/coder", "ANTHROPIC_MODEL_CODER": "scripted",
     }  # fmt: skip
     assert rest == [{"written": 1000}, "refused", "refused", "refused", {"reached": "pypi.org"}, "refused"]
     addresses: dict[str, str] = worked["addresses"]  # type: ignore[assignment]

@@ -90,9 +90,10 @@ class SandboxSpec(ContractModel):
     """What the pool makes it from: a task and its seeds, an image."""
     slots: FrozenSequence[str] = ()
     """Model slots a harness inside the sandbox samples. Each one's address is put in the sandbox's environment:
-    `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, suffixed with the slot's name in capitals (`_AGENT_1`),
-    and unsuffixed too when there is one slot. A key names the run's session of its slot, and stops working once it
-    expires or a newer attempt of its episode takes the episode's fence."""
+    `OPENAI_BASE_URL`, `OPENAI_API_KEY` and `OPENAI_MODEL`, and `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and
+    `ANTHROPIC_MODEL` (`harness_environment`), suffixed with the slot's name in capitals (`_AGENT_1`), and unsuffixed
+    too when there is one slot. A key names the run's session of its slot, and stops working once it expires or a
+    newer attempt of its episode takes the episode's fence."""
     process: Process | None = None
     mounts: FrozenSequence[Mount] = ()
     scratch: Scratch | None = None
@@ -500,11 +501,20 @@ class Sandbox:
 
 
 def harness_environment(slots: Sequence[str], addresses: Callable[[str], ModelAddress]) -> dict[str, str]:
-    """The environment variables that point a harness at its slots' models (`SandboxSpec.slots`)."""
+    """The environment variables that point a harness at its slots' models (`SandboxSpec.slots`): OpenAI's clients
+    read the `OPENAI_` ones, Anthropic's (Claude Code) the `ANTHROPIC_` ones, whose base URL is the address's without
+    its `/v1` (an Anthropic client adds `/v1/messages`) and whose key is sent as a bearer token."""
     environment: dict[str, str] = {}
     for slot in slots:
         address = addresses(slot)
-        values = {"OPENAI_BASE_URL": address.base_url, "OPENAI_API_KEY": address.api_key, "OPENAI_MODEL": address.model}
+        values = {
+            "OPENAI_BASE_URL": address.base_url,
+            "OPENAI_API_KEY": address.api_key,
+            "OPENAI_MODEL": address.model,
+            "ANTHROPIC_BASE_URL": address.base_url.rstrip("/").removesuffix("/v1"),
+            "ANTHROPIC_AUTH_TOKEN": address.api_key,
+            "ANTHROPIC_MODEL": address.model,
+        }
         suffix = "_" + re.sub(r"[^A-Z0-9]", "_", slot.upper())
         environment |= {name + suffix: value for name, value in values.items()}
         if len(slots) == 1:
