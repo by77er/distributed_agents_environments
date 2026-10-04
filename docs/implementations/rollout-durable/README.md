@@ -83,7 +83,10 @@ operations on sandboxes that are side-effecting and do not deduplicate ([tools](
 
 A run acquires its [sandboxes](../../libraries/rollout/sandboxes.md#the-runner) each time it is executed, before its
 program, under the lease it was started with: recovered or woken, it gets the same sandboxes back while their leases
-hold. It releases them when its program ends, and not when it is unloaded.
+hold. It releases them when its program ends, and not when it is unloaded. A replay that takes another way than the
+first execution (a sandbox refused on resuming, say) records its terminal event after every event stored, so the
+run's stream still ends. The runner says `resumes = True`: an episode runner over it leaves its runs to be resumed
+when it closes, and adopts them when it starts again.
 
 ## Messages
 

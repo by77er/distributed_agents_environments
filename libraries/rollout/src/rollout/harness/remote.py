@@ -14,7 +14,8 @@ A pool (`rollout.harness.sandboxes`):
 
     GET  /operations          {"operations", "deduplicates"}: what can be done to its sandboxes
     GET  /capacity            a `Capacity`
-    POST /acquire             {"spec", "key", "environment"} → a `Lease`; 503 when the pool is full
+    POST /acquire             {"spec", "key", "environment"} → a `Lease`; 503 when the pool is full, 409 when the key
+                              may hold no lease (`LeaseRefused`), 410 when its sandbox is gone (`SandboxLost`)
     POST /release             {"key"}
     POST /call                {"key", "name", "arguments", "effect_id", "arguments_digest"} → a `ToolResult`
 
@@ -31,7 +32,16 @@ from pydantic import JsonValue
 
 from rollout.contracts import ToolResult, ToolSpecification
 from rollout.harness.imports import ToolSet, deduplicates
-from rollout.harness.sandboxes import Capacity, Lease, NoCapacity, Pool, SandboxSpec, deduplicating
+from rollout.harness.sandboxes import (
+    Capacity,
+    Lease,
+    LeaseRefused,
+    NoCapacity,
+    Pool,
+    SandboxLost,
+    SandboxSpec,
+    deduplicating,
+)
 
 
 def serve(tool_set: ToolSet) -> Any:
@@ -141,6 +151,10 @@ def serve_pool(pool: Pool) -> Any:
             lease = await pool.acquire(SandboxSpec.model_validate(body["spec"]), body["key"], body.get("environment"))
         except NoCapacity as error:
             return JSONResponse({"error": str(error)}, status_code=503)
+        except LeaseRefused as error:
+            return JSONResponse({"error": str(error)}, status_code=409)
+        except SandboxLost as error:
+            return JSONResponse({"error": str(error)}, status_code=410)
         except Exception as error:
             return failed(error)
         return JSONResponse(lease.model_dump(mode="json"))
@@ -214,8 +228,9 @@ class RemotePool:
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
         body = {"spec": spec.model_dump(mode="json"), "key": key, "environment": dict(environment or {})}
         response = await self._http.post("/acquire", json=body)
-        if response.status_code == 503:
-            raise NoCapacity(response.json().get("error", "the pool is full"))
+        refused = {503: NoCapacity, 409: LeaseRefused, 410: SandboxLost}.get(response.status_code)
+        if refused is not None:
+            raise refused(response.json().get("error", f"the pool answered {response.status_code}"))
         return Lease.model_validate(self._checked(response))
 
     async def release(self, key: str) -> None:

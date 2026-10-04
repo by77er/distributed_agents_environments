@@ -171,7 +171,9 @@ Opening a profile starts an [episode runner](../libraries/rollout-train/rollouts
 sets and pools. It plays the episodes of the run in its directory, claiming them in the ledger and recording them
 there, with their trajectories and events in the blob store; it claims an episode only while the pools of its
 sandboxes have room for them, and leases them under the claim. Started again, it takes its fence anew, and what it
-had claimed is open to be played again; the sandboxes leased under those claims are deleted by their pools.
+had claimed is open to be played again; the sandboxes leased under those claims are deleted by their pools. With the
+durable runner, it first adopts the runs the runner recovers whose claims held until it stopped, and they play on
+([a runner started again](../libraries/rollout-train/rollouts.md#a-runner-started-again)).
 
 Runners on other machines share a run's work through the ledger and the blob store alone: a database ledger they
 all reach (`postgresql://…`) and a blob store they all reach (an object store), with the channels, tool sets and pools

@@ -189,12 +189,13 @@ async def _pool(factory: str, directory: Path, where: str | None, name: str | No
     from rollout.harness.remote import serve_pool
     from rollout.harness.sandboxes import MemoryLeases, SandboxPool
     from rollout_train.presence import presence_of
-    from rollout_train.sandboxes import keep, leases_of
+    from rollout_train.sandboxes import admits, keep, leases_of
 
     provider = named(factory)(directory)
     ledger = _ledger_at(where) if where else None
     leases = (leases_of(ledger) if ledger is not None else None) or MemoryLeases()
-    pool = SandboxPool(provider, name=name or f"{provider.kind}@{socket.gethostname()}", leases=leases)
+    admitted = admits(ledger, presence_of(ledger)) if ledger is not None else None
+    pool = SandboxPool(provider, name=name or f"{provider.kind}@{socket.gethostname()}", leases=leases, admits=admitted)
     keeping = (
         asyncio.ensure_future(keep(pool, ledger, presence_of(ledger), beat_as=f"pools/{pool.name}"))
         if ledger is not None

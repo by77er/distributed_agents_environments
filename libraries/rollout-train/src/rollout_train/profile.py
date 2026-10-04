@@ -41,7 +41,7 @@ from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
 from rollout_train.resharding import connect, disconnect, on_ray, reshard
 from rollout_train.rollouts.scheduler import EpisodeRunner
-from rollout_train.sandboxes import keep, leases_of
+from rollout_train.sandboxes import admits, keep, leases_of
 from rollout_train.stores import location, opened
 
 __all__ = ["ChannelSpec", "EvalsSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
@@ -353,8 +353,6 @@ class Platform:
             )
         else:
             raise ValueError(f"runner is {profile.runner!r}: it is local or durable")
-        await runner.launch()
-        stack.push_async_callback(runner.close)
         self.feed = feed
         self.runner = EpisodeRunner(
             f"{socket.gethostname()}/{directory.name}",  # (the same name when started again: what it claimed is free)
@@ -371,6 +369,9 @@ class Platform:
             presence=presence_of(self.ledger),
             about=lambda: self._about(record),
         )
+        await self.runner.prepare()  # (before the runner recovers its runs: they find their claims adopted)
+        await runner.launch()
+        stack.push_async_callback(runner.close)
         _background(stack, self.runner.serve())
         self.trainer = learner
         if learner is not None and described is not None and described.colocated:
@@ -382,7 +383,8 @@ class Platform:
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """The pools the profile names that live in this process, each with its keeper; the rest are bound by URL.
-        A pool's leases are kept beside the ledger, under a name of this machine and run."""
+        A pool's leases are kept beside the ledger, under a name of this machine and run; it refuses a key whose claim
+        has lapsed. Under a durable runner, closing leaves its leases for the runs resumed when it starts again."""
         pools: dict[str, Pool] = {}
         directory = self.profile.directory
         for kind, where in self.profile.pools.items():
@@ -392,8 +394,12 @@ class Platform:
             options = {"kind": where} if isinstance(where, str) else dict(where)
             provider = named(str(options.pop("kind")))(directory, **options)
             name = f"{kind}@{socket.gethostname()}/{directory.name}"
-            pool = SandboxPool(provider, name=name, leases=leases_of(self.ledger) or MemoryLeases())
-            stack.push_async_callback(pool.close)  # (after the runner: what its runs hold is released first)
+            beats = presence_of(self.ledger)
+            pool = SandboxPool(
+                provider, name=name, leases=leases_of(self.ledger) or MemoryLeases(), admits=admits(self.ledger, beats)
+            )
+            release = self.profile.runner != "durable"
+            stack.push_async_callback(pool.close, release=release)  # (after the runner: its runs release theirs first)
             _background(stack, keep(pool, self.ledger, presence_of(self.ledger)))
             pools[kind] = pool
             self.pool_bindings[kind] = PoolBinding(local=kind)

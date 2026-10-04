@@ -33,16 +33,18 @@ nothing more.
 
 | Table | Keyed by | Holds |
 |---|---|---|
-| `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when |
+| `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when, and the run that plays it (`run_id`) |
 | `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended |
-| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt its runner cut short by closing, and why |
+| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt its runner cut short, and why: it closed, the claim lapsed while it was stopped, or the run's sandboxes did not outlive it |
+| `runs/RUN/adopted` | `GROUP/EPISODE/ATTEMPT/FENCE` | an attempt whose run its runner, started again, took up under its new fence |
 
 - **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
   the one whose append is refused looks for other work.
 - **A claim holds while its runner keeps its fence and beats.** A runner takes the fence of `runners/NAME` when it
-  starts. Its claims hold until it is started again (under the same name, its fence moves on), it notes an attempt
-  as interrupted, or, where runners beat ([heartbeats](#heartbeats)), its newest beat is older than 90 seconds (its
-  machine died, say). An episode with no record and no claim that holds is open: the next claim is its next attempt.
+  starts. Its claims hold until it is started again (under the same name, its fence moves on) and does not adopt
+  them, it notes an attempt as interrupted, or, where runners beat ([heartbeats](#heartbeats)), its newest beat is
+  older than 90 seconds (its machine died, say). `holds(...)` is the rule, and `holding(ledger, run, ...)` the claims
+  of a run that hold; pools beside the ledger use them too ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)). An episode with no record and no claim that holds is open: the next claim is its next attempt.
   A runner does not wait on its own beat: its own claims hold for it while its fence is its own.
 - **Every attempt that ends is an episode**, whatever its outcome: completed, failed (the program raised, or the run
   could not start), cancelled. The first record of an episode is its record.
@@ -74,7 +76,26 @@ open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
   assembles the [episode](episodes.md), stores it and appends its record.
 - **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
   `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
-  is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop.
+  is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop. Over a runner whose runs
+  survive it (`resumes`: a durable runner), closing leaves its runs to be resumed.
+
+### A runner started again
+
+Over a runner whose runs survive it, a runner started again under its name takes its fence anew and adopts what it
+finds of its runs (`prepare()`, which `serve` calls if it has not been; a profile calls it before it launches the
+runner, so that the runs the runner recovers find their claims adopted):
+
+- **Adopted:** a run of its own claim that held until it stopped (made or adopted under its previous fence, not cut
+  short, its episode without a record, and no later attempt claimed since), found by the claim's `run_id`. The
+  adoption is noted in `adopted` under the new fence, and the claim holds again. The runner follows the run to its
+  end and records its episode, which is left out of training: what it sampled before its runner stopped is not
+  recorded (its outcome and result still count). A run that ended while its runner was stopped, unrecorded, is
+  recorded now.
+- **Cut short:** a run of its own claim that lapsed meanwhile (another runner took the episode up, say), still
+  going. The attempt is noted in `interrupted` and the run cancelled; a pool beside the ledger refuses it its
+  sandboxes and releases them.
+- **Played again:** an adopted run whose sandboxes did not outlive its runner (`SandboxLost`) is noted in
+  `interrupted`, and the episode is played as a new attempt.
 
 `serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
 [`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`

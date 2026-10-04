@@ -5,11 +5,15 @@ the run's sandboxes are leased under `RUN/GROUP/EPISODE/ATTEMPT/NAME` (`rollout.
 leases beside the ledger, as ordinary state changed in place: `sandboxes.json` beside a ledger of files
 (`FileLeases`), the `sandboxes` table of a database ledger's database (`rollout_train.database.DatabaseLeases`).
 
-A pool's keeper (`keep`) looks every few seconds. A lease whose claim no longer holds has ended: its runner took its
-fence anew, noted the attempt cut short, or stopped beating for `STALE` seconds, or the episode has its record. The
-keeper releases it, deleting its sandbox: a runner that dies leaves its sandboxes to their pools. A lease of a run the
-ledger does not know (a run started by hand, say) ends only when it is released. With a name to beat under, the
-keeper beats too, saying how full the pool is: a pool served from a machine of its own.
+A claim holds as the scheduler says (`rollout_train.rollouts.scheduler.holds`): it lapses when its runner takes its
+fence anew without adopting it, notes the attempt cut short, or stops beating for `STALE` seconds, or when the episode
+has its record. A pool beside the ledger (`admits`) refuses to acquire under a key whose claim does not hold, and
+releases the lease the key has: a run whose claim lapsed cannot have a sandbox, even for a moment. Its keeper (`keep`)
+looks every few seconds, and releases a lease whose claim it has found lapsed twice running (a runner started again
+adopts its claims a moment after taking its fence anew), deleting its sandbox: a runner that dies leaves its sandboxes
+to their pools. A lease of a run the ledger does not know (a run started by hand, say) is admitted, and ends only when
+it is released. With a name to beat under, the keeper beats too, saying how full the pool is: a pool served from a
+machine of its own.
 """
 
 import asyncio
@@ -18,7 +22,7 @@ import fcntl
 import json
 import logging
 import socket
-from collections.abc import Callable, Generator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -27,10 +31,10 @@ from pydantic import JsonValue
 from rollout.harness.sandboxes import Lease, Leases, SandboxPool
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import Presence
-from rollout_train.record import runs_in, table
-from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, holds
+from rollout_train.record import runs_in
+from rollout_train.rollouts.scheduler import holding
 
-__all__ = ["FileLeases", "ended", "keep", "leases_of", "sweep"]
+__all__ = ["FileLeases", "admits", "ended", "keep", "leases_of", "sweep"]
 
 logger = logging.getLogger(__name__)
 
@@ -45,28 +49,39 @@ def leases_of(ledger: Ledger) -> Leases | None:
     return getattr(ledger, "sandboxes", None)
 
 
+def _claim_of(key: str) -> tuple[str, str] | None:
+    """The run and the claim's key (`GROUP/EPISODE/ATTEMPT`) a lease's key names, if it names one."""
+    run, *rest = key.split("/", 4)
+    return (run, "/".join(rest[:3])) if len(rest) >= 4 else None
+
+
 async def ended(leases: list[Lease], ledger: Ledger, presence: Presence | None) -> Callable[[Lease], bool]:
     """Which of `leases` have ended, as the ledger says now: those whose run it knows and whose claim does not hold."""
-    named = {lease.key.split("/", 1)[0] for lease in leases}
+    named = {claim[0] for lease in leases if (claim := _claim_of(lease.key)) is not None}
     known = named & set(await runs_in(ledger))
     fences = await ledger.fences()
     beats = {beat.runner: beat for beat in await presence.beats()} if presence is not None else None
-    holding: dict[str, set[str]] = {}
-    for run in known:
-        claims = await ledger.read(table(run, CLAIMS))
-        cut = await ledger.read(table(run, INTERRUPTED))
-        done = await ledger.read(table(run, EPISODES))
-        holding[run] = {
-            key
-            for key, claim in claims.items()
-            if isinstance(claim, dict) and holds(claim, key, cut, fences, beats) and key.rsplit("/", 1)[0] not in done
-        }
+    held = {run: await holding(ledger, run, fences, beats) for run in known}
 
     def over(lease: Lease) -> bool:
-        run, *rest = lease.key.split("/", 4)
-        return run in holding and "/".join(rest[:3]) not in holding[run]
+        claim = _claim_of(lease.key)
+        return claim is not None and claim[0] in held and claim[1] not in held[claim[0]]
 
     return over
+
+
+def admits(ledger: Ledger, presence: Presence | None) -> Callable[[str], Awaitable[bool]]:
+    """For a pool beside a ledger (`SandboxPool(admits=...)`): whether a key may hold a lease now. A key whose run the
+    ledger knows may while its claim holds; any other key may."""
+
+    async def admitted(key: str) -> bool:
+        claim = _claim_of(key)
+        if claim is None or claim[0] not in await runs_in(ledger):
+            return True
+        beats = {beat.runner: beat for beat in await presence.beats()} if presence is not None else None
+        return claim[1] in await holding(ledger, claim[0], await ledger.fences(), beats)
+
+    return admitted
 
 
 async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None) -> list[str]:
@@ -83,10 +98,17 @@ async def keep(
     beat_as: str | None = None,
     every: float = 15.0,
 ) -> None:
-    """Sweep the pool every `every` seconds, until cancelled; with `beat_as`, beat under that name too."""
+    """Sweep the pool every `every` seconds, until cancelled, releasing a lease once its claim was found lapsed at two
+    looks running; with `beat_as`, beat under that name too."""
+    lapsed: set[str] = set()
     while True:
         try:
-            gone = await sweep(pool, ledger, presence)
+            held = await pool.held()
+            over = await ended(held, ledger, presence)
+            now = {lease.key for lease in held if over(lease)}
+            twice = now & lapsed
+            gone = await pool.sweep(lambda lease, twice=twice: lease.key in twice)
+            lapsed = now
             if gone:
                 logger.info("released the leases of claims that ended: %s", ", ".join(gone))
         except Exception:

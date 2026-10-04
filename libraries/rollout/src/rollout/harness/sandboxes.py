@@ -9,7 +9,7 @@ A `Pool` hands out sandboxes under leases. `acquire(spec, key)` returns the leas
 retried or replayed acquire gets the same sandbox. A pool says how many sandboxes it can hold and how many are free.
 `SandboxPool` is a pool over a `Provider`, which only makes, deletes and operates sandboxes of one kind; it keeps its
 leases in a `Leases` table: in memory, or beside a ledger (`rollout_train.sandboxes`), where a lease ends with the
-claim it was acquired under.
+claim it was acquired under and a key whose claim has lapsed is refused.
 """
 
 import asyncio
@@ -17,7 +17,7 @@ import contextlib
 import hashlib
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Protocol, Self
 
 from pydantic import Field, JsonValue, model_validator
@@ -126,6 +126,8 @@ class Lease(ContractModel):
     """When it was made, in seconds since the epoch."""
     ends: float | None = None
     """When its wall time is over (`SandboxLimits.seconds`), in seconds since the epoch."""
+    lost: bool = False
+    """Its sandbox is gone (it ended with the pool's process, say): the key cannot have it back."""
 
 
 class Capacity(ContractModel):
@@ -144,6 +146,14 @@ class Capacity(ContractModel):
 
 class NoCapacity(Exception):
     """The pool holds as many sandboxes as it can; an acquire may succeed once one is released."""
+
+
+class LeaseRefused(Exception):
+    """The key may hold no lease now: the claim it was acquired under no longer holds."""
+
+
+class SandboxLost(Exception):
+    """The key's sandbox is gone, and a new one would not be the one its run was using."""
 
 
 class PoolBinding(ContractModel):
@@ -210,7 +220,9 @@ class Pool(Protocol):
     def operations(self) -> Sequence[ToolSpecification]: ...
 
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
-        """The lease of `key`: the one there is, or a new sandbox. Raises `NoCapacity` when the pool is full."""
+        """The lease of `key`: the one there is, or a new sandbox. Raises `NoCapacity` when the pool is full,
+        `LeaseRefused` for a key that may hold no lease now (its claim lapsed), and `SandboxLost` for a key whose
+        sandbox is gone."""
         ...
 
     async def release(self, key: str) -> None:
@@ -264,10 +276,20 @@ class SandboxPool:
     """A `Pool` over a `Provider`: at most `provider.size` leases at once, kept in `leases` under the pool's `name`
     (by default the provider's kind; several pools sharing a table need names of their own)."""
 
-    def __init__(self, provider: Provider, *, name: str | None = None, leases: Leases | None = None) -> None:
+    def __init__(
+        self,
+        provider: Provider,
+        *,
+        name: str | None = None,
+        leases: Leases | None = None,
+        admits: Callable[[str], Awaitable[bool]] | None = None,
+    ) -> None:
+        """`admits` says whether a key may hold a lease now (beside a ledger: whether its claim holds,
+        `rollout_train.sandboxes.admits`); without it, every key may."""
         self.provider = provider
         self.name = name or provider.kind
         self.leases: Leases = leases or MemoryLeases()
+        self.admits = admits
         self._held: dict[str, Lease] = {}
         """This pool's leases, by key (read from `leases` once, then kept here)."""
         self._loaded = False
@@ -285,6 +307,8 @@ class SandboxPool:
         return self.provider.operations()
 
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
+        """The lease of `key`, or a new sandbox. Raises `LeaseRefused` for a key `admits` refuses (releasing a lease
+        it has), `SandboxLost` for a key whose sandbox is gone, and `NoCapacity` when the pool is full."""
         if spec.kind != self.provider.kind:
             raise ValueError(f"the pool {self.name} makes {self.provider.kind} sandboxes, not {spec.kind}")
         await self._load()
@@ -292,10 +316,17 @@ class SandboxPool:
             lease = self._held.get(key) or await self.leases.get(key)
             if lease is not None and lease.pool != self.name:
                 raise RuntimeError(f"{key} is leased from the pool {lease.pool}, not {self.name}")
-            if lease is not None and (lease.handle in self._made or lease.handle in await self.provider.held()):
-                self._held[key] = lease
-                return lease
-            if len(self._held.keys() - {key}) + len(self._making) >= self.provider.size:
+            if self.admits is not None and not await self.admits(key):
+                if lease is not None:
+                    await self._end(lease)
+                raise LeaseRefused(f"{key} may hold no sandbox: the claim it names no longer holds")
+            if lease is not None:
+                if not lease.lost and (lease.handle in self._made or lease.handle in await self.provider.held()):
+                    self._held[key] = lease
+                    return lease
+                await self._end(lease)
+                raise SandboxLost(f"the sandbox of {key} is gone")
+            if len(self._live() - {key}) + len(self._making) >= self.provider.size:
                 raise NoCapacity(f"the pool {self.name} holds {self.provider.size} sandboxes, as many as it can")
             handle = handle_of(key)
             self._making.add(key)
@@ -328,16 +359,12 @@ class SandboxPool:
         await self._load()
         async with self._lock(key):
             lease = self._held.get(key) or await self.leases.get(key)
-            if lease is None or lease.pool != self.name:
-                return
-            await self.provider.delete(lease.handle)
-            self._made.discard(lease.handle)
-            self._held.pop(key, None)
-            await self.leases.delete(key)
+            if lease is not None and lease.pool == self.name:
+                await self._end(lease)
 
     async def capacity(self) -> Capacity:
         await self._load()
-        return Capacity(size=self.provider.size, leased=len(self._held.keys() | self._making))
+        return Capacity(size=self.provider.size, leased=len(self._live() | self._making))
 
     async def call(
         self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
@@ -347,14 +374,14 @@ class SandboxPool:
         )
 
     async def held(self) -> list[Lease]:
-        """This pool's leases."""
+        """This pool's leases, those whose sandboxes are lost included."""
         await self._load()
         return list(self._held.values())
 
     async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]:
-        """Release the leases `ended` says have ended, and those past their wall time; forget those whose sandbox is
-        gone (the pool's process was started again, say); and delete the sandboxes no lease names. Returns the keys
-        released or forgotten."""
+        """Release the leases `ended` says have ended, and those past their wall time; mark lost those whose sandbox
+        is gone (the pool's process was started again, say), which their keys cannot have back; and delete the
+        sandboxes no lease names. Returns the keys released or marked lost."""
         await self._load()
         there = set(await self.provider.held())
         now = time.time()
@@ -365,24 +392,39 @@ class SandboxPool:
             if ended(lease) or (lease.ends is not None and now >= lease.ends):
                 await self.release(lease.key)
                 gone.append(lease.key)
-            elif lease.handle not in there and lease.handle not in self._made:
+            elif not lease.lost and lease.handle not in there and lease.handle not in self._made:
                 async with self._lock(lease.key):
-                    self._held.pop(lease.key, None)
-                    await self.leases.delete(lease.key)
+                    lost = lease.model_copy(update={"lost": True})
+                    await self.leases.put(lost)
+                    self._held[lease.key] = lost
                 gone.append(lease.key)
-        named = {lease.handle for lease in self._held.values()} | self._made
+        named = {lease.handle for lease in self._held.values() if not lease.lost} | self._made
         for handle in there - named:
             await self.provider.delete(handle)
         return gone
 
-    async def close(self) -> None:
-        """Release every lease the pool holds (deleting its sandboxes), and close the provider."""
-        for lease in await self.held():
+    async def close(self, *, release: bool = True) -> None:
+        """Release every lease the pool holds (deleting its sandboxes), and close the provider. With `release` False,
+        the leases stay, for runs a durable runner resumes to acquire again: a sandbox that outlived the provider is
+        theirs again, and one that did not is lost."""
+        for lease in await self.held() if release else []:
             with contextlib.suppress(Exception):
                 await self.release(lease.key)
         closing = getattr(self.provider, "close", None)
         if closing is not None:
             await closing()
+
+    async def _end(self, lease: Lease) -> None:
+        """Delete a lease's sandbox and forget the lease. Hold its key's lock."""
+        if not lease.lost:
+            await self.provider.delete(lease.handle)
+        self._made.discard(lease.handle)
+        self._held.pop(lease.key, None)
+        await self.leases.delete(lease.key)
+
+    def _live(self) -> set[str]:
+        """The keys of the leases whose sandboxes are there."""
+        return {key for key, lease in self._held.items() if not lease.lost}
 
     async def _load(self) -> None:
         if not self._loaded:

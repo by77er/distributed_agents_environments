@@ -11,6 +11,7 @@ from pydantic import JsonValue
 from rollout.contracts import ModelAddress, ModelEndpoint, RunEventType
 from rollout.harness import (
     DirectModel,
+    LeaseRefused,
     ModelBinding,
     ModelSlot,
     Mount,
@@ -26,6 +27,7 @@ from rollout.harness import (
     RunSpecification,
     RunStatus,
     SandboxLimits,
+    SandboxLost,
     SandboxPool,
     SandboxSpec,
     Scratch,
@@ -84,7 +86,35 @@ async def test_a_sweep_releases_what_has_ended_and_deletes_what_no_lease_names()
 
     restarted = SandboxPool(FakeSandboxes(), leases=pool.leases)  # the pool started again: its sandboxes are gone
     assert [lease.key for lease in await restarted.held()] == ["staying/box"]
-    assert await restarted.sweep() == ["staying/box"] and await restarted.held() == []
+    assert await restarted.sweep() == ["staying/box"]  # marked lost: its key cannot have it back
+    (lost,) = await restarted.held()
+    assert lost.lost and (await restarted.capacity()).leased == 0
+    with pytest.raises(SandboxLost):  # (a new one would not be the one its run was playing in)
+        await restarted.acquire(BOX, "staying/box")
+    assert await restarted.held() == [] and (await restarted.acquire(BOX, "staying/box")).key == "staying/box"
+
+
+async def test_a_pool_refuses_a_key_it_does_not_admit_and_releases_what_the_key_held() -> None:
+    sandboxes = FakeSandboxes()
+    lapsed: set[str] = set()
+
+    async def admitted(key: str) -> bool:
+        return key not in lapsed
+
+    pool = SandboxPool(sandboxes, admits=admitted)
+    lease = await pool.acquire(BOX, "run/1/1/1/box")
+    lapsed.add(lease.key)  # its claim lapsed (its runner was replaced, say)
+    with pytest.raises(LeaseRefused):
+        await pool.acquire(BOX, lease.key)
+    assert sandboxes.deleted == [lease.handle] and await pool.held() == []
+    with pytest.raises(LeaseRefused):  # nor is it made again, even for a moment
+        await pool.acquire(BOX, lease.key)
+    assert sandboxes.made == [lease.handle]
+
+    transport = httpx.ASGITransport(app=serve_pool(pool))
+    remote = RemotePool("http://pool", client=httpx.AsyncClient(transport=transport, base_url="http://pool"))
+    with pytest.raises(LeaseRefused):
+        await remote.acquire(BOX, lease.key)
 
 
 async def test_a_pool_over_http_is_the_same_pool() -> None:
