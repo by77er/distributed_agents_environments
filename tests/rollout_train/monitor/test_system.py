@@ -10,10 +10,13 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from rollout.contracts import Message
+from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout_train import Budget, Checkpoints, FileLedger, Files, Step, Weighted, train
 from rollout_train.evals import subject_table, suite_table
+from rollout_train.gateway import Attempt
 from rollout_train.launches import EVAL
 from rollout_train.layout import BLOBS, FEED, LEDGER
 from rollout_train.ledger import Ledger
@@ -24,9 +27,9 @@ from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, STEPS, scope, table
 from rollout_train.registry import registry_of
 from rollout_train.rollouts import EpisodeRunner, playing
-from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
+from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory, stored
 from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPTED, runner_scope
-from rollout_train.testing import Policy, plain_channel
+from rollout_train.testing import Policy, plain_channel, recording, sample_request
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
 
@@ -380,3 +383,35 @@ async def test_an_episode_playing_is_shown_with_its_reward_so_far_and_each_slots
     (episode,) = run["open"][0]["episodes"]
     assert episode["reward"] == 0.5 and episode["rewards"] == {"ada": 1.0, "bo": 0.0}
     feed.close()
+
+
+async def test_an_episode_whose_samples_a_gateway_elsewhere_recorded_shows_their_replies(tmp_path: Path) -> None:
+    ledger, blobs = FileLedger(tmp_path / LEDGER), FileBlobStore(tmp_path / BLOBS)
+    fence = await ledger.take(scope("train"))
+    start: JsonValue = {"from": None, "host": "here", "started": 5.0, "directory": str(tmp_path)}
+    await ledger.append(table("train", STARTS), str(fence.number), start, fence)
+    await ledger.append(table("train", GROUPS), "1", {"task": "t", "decided": 5.0, "episodes": 1}, fence)
+    feed = RunFeed(tmp_path / FEED)  # (what the runner's hooks saw: its events, none of its harness's samples)
+    created: JsonValue = {"labels": {"run": "train", "group": "1", "episode": "1"}}
+    feed._write("r_one", {"kind": "event", "type": "run.created", "at": 6.0, "payload": created})  # pyright: ignore[reportPrivateUsage]
+    feed.close()
+    endpoints = recording(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]), ledger=ledger, blobs=blobs)
+    endpoints.admit("r_one", Attempt("train", await ledger.take("runs/train/episodes/1/1"), "1/1", 1))
+    endpoint = endpoints.endpoint(RecordedModel(channel="policy"))
+    for turn in range(2):
+        await endpoint.sample(sample_request([Message.user(f"Go {turn}.")], f"h{turn}", session_id="r_one/policy"))
+
+    playing_now = await System(tmp_path, FeedReader(tmp_path / FEED)).episode("r_one")
+    assert playing_now["source"] == "turns" and playing_now["labels"]["run"] == "train"
+    said = [(line["slot"], line["reply"]["text"]) for line in playing_now["lines"]]
+    assert said == [("policy", "yes"), ("policy", "no")]
+    later = await System(tmp_path, FeedReader(tmp_path / FEED)).episode("r_one", after=1)
+    assert [line["effect_id"] for line in later["lines"]] == ["h1"]
+
+    # Once it ended, and the feed has let it go: its kept events hold no sample either, and the turns are read.
+    episode = Episode("train", 1, 1, "r_one", {"run": "train"}, Outcome.COMPLETED)
+    record = await stored(episode, [], blobs)
+    await ledger.append(table("train", EPISODES), "1/1", record.to_json(), fence)
+    ended = await System(tmp_path, FeedReader(tmp_path / "elsewhere")).episode("r_one")
+    assert ended["source"] == "turns" and ended["ended"]["state"] == "completed"
+    assert [line["reply"]["text"] for line in ended["lines"]] == ["yes", "no"]

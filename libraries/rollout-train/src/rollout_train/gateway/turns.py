@@ -134,6 +134,8 @@ class Reply:
     result: SampleResult
     replayed: bool = True
     """Whether it was recorded before (False: by the call that returned it)."""
+    timings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+    """The turn's timings (`TurnRecord.timings`), as recorded."""
 
 
 class TurnStore:
@@ -166,6 +168,7 @@ class TurnStore:
             str(header["checkpoint"]),
             int(header["depth"]),
             SampleResult.model_validate(header["result"]),
+            timings=header.get("timings", {}),
         )
 
     async def record(self, turn: TurnRecord, fence: Fence, index: Mapping[str, JsonValue] | None = None) -> Reply:

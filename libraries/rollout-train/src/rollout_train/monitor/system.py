@@ -50,6 +50,7 @@ from rollout_train.evals import (
     suites_among,
     versions_in,
 )
+from rollout_train.gateway.turns import TurnStore
 from rollout_train.inference.remote import ENGINES
 from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import (
@@ -185,6 +186,8 @@ class System:
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
         self._stores: dict[str, Blobs] = {}
+        self._turn_stores: dict[int, TurnStore] = {}
+        """The turns the gateway recorded, read from each blob store (by its identity)."""
         """The blob stores the runs' starts name, opened once each."""
         self._opened = _run_in(self.directory) if self.directory is not None else None
         """The id of the run in the directory this was opened on."""
@@ -768,9 +771,10 @@ class System:
 
     async def episode(self, run_id: str, after: int = 0, relayed: bool = False) -> dict[str, Any]:
         """One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
-        replies and tool calls from the events its runner kept), from which its rollouts (one per model slot) are
-        drawn; what it reported when it ended; and where it sits: its run, its group and its labels. An episode of a
-        run on another machine is asked of the monitor there."""
+        replies and tool calls from the events its runner kept; where neither has a sample, as a harness's are where a
+        gateway elsewhere recorded them, the replies of the turns the gateway recorded), from which its rollouts (one
+        per model slot) are drawn; what it reported when it ended; and where it sits: its run, its group and its
+        labels. An episode of a run on another machine is asked of the monitor there."""
         if run_id not in self._ended_by_id and await asyncio.to_thread(present, self._ledger):
             for name in await self._ledger.tables():
                 if (run := between(name, "runs/", f"/{EPISODES}")) is not None:
@@ -793,6 +797,15 @@ class System:
         else:
             source, lines = None, []
         labels: Any = (ended or {}).get("labels") or (summary or {}).get("labels") or {}  # (the record's, once kept)
+        run = known[0] if known is not None else labels.get("run")
+        unsampled = (
+            (summary or {}).get("samples") == 0
+            if source == "feed"
+            else source != "archive" or not any(line["kind"] == "sample" for line in self._archive.get(run_id, []))
+        )
+        turns = await self._turns(store, str(run), run_id) if run and store is not None and unsampled else []
+        if turns:  # (a harness's samples, which a gateway elsewhere recorded and the feed never had)
+            source, lines = "turns", turns[after:]
         return {
             "run_id": run_id,
             "labels": labels,
@@ -827,6 +840,35 @@ class System:
         if key not in self._stores:
             self._stores[key] = await asyncio.to_thread(opened, where)
         return self._stores[key]
+
+    async def _turns(self, store: Blobs, run: str, run_id: str) -> list[dict[str, Any]]:
+        """A run's samples as the gateway recorded them, in the order it recorded them, as the feed would have them:
+        each turn's reply (what it was sent is kept only as tokens, so a sample has no messages)."""
+        turns = self._turn_stores.setdefault(id(store), TurnStore(self._ledger, store, cached=1024))
+        index = await turns.index(run, run_id)
+        lines: list[dict[str, Any]] = []
+        for effect, entry in index.items():
+            reply = await turns.reply(run, run_id, effect, index)
+            if reply is None:
+                continue
+            at: Any = entry.get("at") if isinstance(entry, dict) else None
+            seconds: Any = reply.timings.get("seconds") or 0.0
+            lines.append(
+                {
+                    "kind": "sample",
+                    "slot": reply.slot,
+                    "effect_id": effect,
+                    "at": at,
+                    "seconds": round(float(seconds), 2),
+                    "messages": [],
+                    "tools": [],
+                    "reply": plain(reply.result.message),
+                    "finish_reason": reply.result.finish_reason.value,
+                    "checkpoint": reply.checkpoint,
+                    "depth": reply.depth,
+                }
+            )
+        return lines
 
     async def _archived(self, store: Blobs, run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
         if run_id not in self._archive:
