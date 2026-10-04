@@ -31,19 +31,20 @@ import json
 import random
 import shutil
 import time
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import torch
+from pydantic import JsonValue
 from tinker import AdamParams, Datum, ForwardBackwardOutput
 
 from rollout_lora.objectives import Terms, terms
 from rollout_lora.step import minibatches, sampled
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, said, service_of
-from rollout_tinker.settings import TinkerSettings
+from rollout_tinker.settings import CHANGEABLE, TinkerSettings
 from rollout_tinker.weights import (
     checkpoint_name,
     converted,
@@ -76,7 +77,8 @@ class TinkerTrainer:
     state its parent names (its optimizer too, if it is given the parent's state) and leaves pointers to the new
     checkpoints, and with `weights = "peft"` the adapter itself. A client from the step before is used again when the
     parent is the state it saved. `service` is what calls Tinker: by default a session the SDK opens with the key it
-    finds; `module:name` of what makes another (a profile names a fake one so). `settings` are `TinkerSettings`'."""
+    finds; `module:name` of what makes another (a profile names a fake one so). `settings` are `TinkerSettings`';
+    those in `CHANGEABLE` it takes between steps (`rollout_train.trainer.Changeable`)."""
 
     weights = "lora"
 
@@ -88,6 +90,17 @@ class TinkerTrainer:
         self._live: tuple[str, Trainable] | None = None
         """The training state the last step saved, and the client that saved it."""
         self._lock = asyncio.Lock()
+
+    @property
+    def changeable(self) -> Mapping[str, JsonValue]:
+        """The settings it takes between steps (`rollout_train.trainer.Changeable`), with their values now."""
+        said = asdict(self.settings)
+        return {name: said[name] for name in CHANGEABLE}
+
+    def change(self, settings: Mapping[str, JsonValue]) -> None:
+        if unknown := sorted(set(settings) - set(CHANGEABLE)):
+            raise ValueError(f"{', '.join(unknown)} cannot change between steps (these can: {', '.join(CHANGEABLE)})")
+        self.settings = replace(self.settings, **settings)  # (checked as any settings are; the live client goes on)
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         async with self._lock:

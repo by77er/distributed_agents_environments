@@ -6,6 +6,20 @@ from dataclasses import dataclass
 from rollout_lora.settings import Objective
 
 WEIGHTS = ("pointer", "peft")
+CHANGEABLE = (
+    "learning_rate",
+    "clip_low",
+    "clip_high",
+    "segment_clip_low",
+    "segment_clip_high",
+    "truncate",
+    "tokens_per_step",
+    "max_kl",
+    "strict_kl",
+    "max_gradient_norm",
+)
+"""The settings the trainer takes between steps (`LoraSettings`' own, and `strict_kl`): each step reads them afresh,
+and none changes what its weights are or what a step can hold."""
 
 
 @dataclass(frozen=True)

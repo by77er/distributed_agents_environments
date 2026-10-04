@@ -181,3 +181,23 @@ async def test_tinkers_errors_become_a_failed_step_and_the_live_client_is_let_go
         await trainer.step(
             segments(service, 4), seed=1, parent=Files(first / WEIGHTS, first / STATE), into=tmp_path / "b"
         )
+
+
+async def test_it_takes_some_settings_between_steps_and_goes_on_with_its_client(tmp_path: Path) -> None:
+    from rollout_train.trainer import Changeable
+
+    service = FakeService(vocabulary=24)
+    trainer = TinkerTrainer("tiny", service=service, **ours({"tokens_per_step": 40}))
+    assert isinstance(trainer, Changeable) and trainer.changeable["learning_rate"] == 0.05
+    first = tmp_path / "first"
+    await trainer.step(segments(service, 8), seed=1, parent=None, into=first)
+    trainer.change({"learning_rate": 0.01, "max_kl": 0.5})
+    with pytest.raises(ValueError, match="rank cannot change between steps"):
+        trainer.change({"rank": 8})
+    service.calls.clear()
+    second = tmp_path / "second"
+    taken = await trainer.step(segments(service, 8, seed=5), seed=2, parent=Files(first / WEIGHTS, first / STATE),
+                               into=second)  # fmt: skip
+    assert taken.metrics["learning_rate"] == 0.01 and trainer.changeable["max_kl"] == 0.5
+    assert not any(call.startswith(("lora", "state")) for call in service.calls)  # (the live client went on)
+    assert '"learning_rate": 0.01' in (second / STATE / "minibatches.jsonl").read_text()
