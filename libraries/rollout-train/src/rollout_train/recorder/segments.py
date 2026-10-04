@@ -1,15 +1,47 @@
 """What a session's turns export: segments, joined by prefix-continuation.
 
-A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues that turn's
-segment; a turn that repeats an earlier prompt exactly replaces it. `segments_of` applies the rule to turns in the
-order they were sampled. It is a pure function of the turns, so whoever has them (the recorder in memory, the gateway's
-turn store read back) exports the same segments.
+A `Segment` is a token sequence with the spans the policy sampled (`Span`), their behaviour logprobs and the version of
+the weights that sampled them (the served checkpoint's depth). A turn whose prompt begins with everything an earlier
+turn held (its prompt and what it sampled) continues that turn's segment: an append-only conversation is one segment,
+however many turns it has, and is trained in one pass. A turn whose context was edited (a compaction, a chat template
+that drops earlier thinking, an observation replaced by a shorter form) begins a new segment. A turn that repeats an
+earlier prompt exactly (a client's retry) replaces it.
+
+`segments_of` applies the rule to turns in the order they were sampled. It is a pure function of the turns: the
+gateway's turn store reads a session's turns back and exports them with it.
 """
 
 from collections.abc import Collection, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
-from rollout_train.recorder.recorder import Segment, Span
+
+@dataclass(frozen=True)
+class Span:
+    """Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version` (the depth
+    of the checkpoint served then)."""
+
+    start: int
+    end: int
+    version: int
+    effect_id: str = ""
+    """The sample that produced them: the `effect_id` its run's events know it by."""
+
+
+@dataclass(frozen=True)
+class Segment:
+    """A piece of a session's trajectory: tokens that only grew, as the policy saw and continued them."""
+
+    tokens: list[int]
+    spans: list[Span]
+    logprobs: list[float]
+    """Behavior logprobs of the tokens inside the spans, in order."""
+    channel: str = ""
+    """The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served."""
+
+    @property
+    def sampled(self) -> int:
+        return sum(span.end - span.start for span in self.spans)
 
 
 class Turn(Protocol):

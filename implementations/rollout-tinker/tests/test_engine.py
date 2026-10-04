@@ -8,12 +8,14 @@ import pytest
 
 from rollout.contracts import Message
 from rollout.harness import RecordedModel
+from rollout.harness.blobs import FileBlobStore
 from rollout_tinker import TinkerEngine, TinkerTrainer
 from rollout_tinker.testing import FakeService
 from rollout_tinker.weights import pointer
 from rollout_train.inference import Channel
-from rollout_train.recorder import Recorder, Renderer
-from rollout_train.testing import PlainRenderer, sample_request
+from rollout_train.ledger import FileLedger
+from rollout_train.recorder import Renderer
+from rollout_train.testing import PlainRenderer, admitted, recording, sample_request
 from rollout_train.trainer import WEIGHTS
 from tests.support import segments
 
@@ -48,16 +50,17 @@ async def test_a_version_published_on_the_channel_is_sampled_at_once_and_the_one
     await trainer.step(segments(service, 4, seed=2), seed=2, parent=None, into=second)
     engine = TinkerEngine("tiny", service=service)
     channel = Channel("policy", [engine], cast(Renderer, PlainRenderer()))
-    recorder = Recorder({"policy": channel})
+    recorder = recording(channel, ledger=FileLedger(tmp_path / "ledger"), blobs=FileBlobStore(tmp_path / "blobs"))
+    await admitted(recorder, "r_1")
     endpoint = recorder.endpoint(RecordedModel(channel="policy"))
 
-    assert await recorder.publish("policy", "v1", str(first / WEIGHTS), 1) == 1
+    assert await channel.publish("v1", str(first / WEIGHTS), 1) == 1
     await endpoint.sample(sample_request([Message.user("Say a.")], "e1"))
     assert service.sampled[-1] == pointer(first / WEIGHTS, "sampler")
-    (segment,) = recorder.export("r_1/ada")
+    (segment,) = (await recorder.sessions("train", "r_1"))["ada"]
     assert segment.spans[0].version == 1 and len(segment.logprobs) == segment.sampled  # (exact ids and logprobs)
 
-    await recorder.publish("policy", "v2", str(second / WEIGHTS), 2)
+    await channel.publish("v2", str(second / WEIGHTS), 2)
     made = await engine.generate(
         [ord("x")], max_tokens=4, temperature=1.0, top_p=1.0, stop_token_ids=[NEWLINE], adapter="v1"
     )  # fmt: skip  (a turn begun under v1 finishes under it)

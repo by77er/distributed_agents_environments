@@ -1,8 +1,9 @@
-"""The recorder over HTTP: a harness with its own loop talks Chat Completions, Responses or Messages through the
-official clients, and its samples are recorded."""
+"""The gateway over HTTP, as a harness with its own loop sees it: it talks Chat Completions, Responses or Messages
+through the official clients, and its samples are recorded."""
 
 import json
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -10,10 +11,13 @@ import pytest
 
 from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, ToolSpecification
 from rollout.harness import RecordedModel
+from rollout.harness.blobs import FileBlobStore
+from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.inference import Channel, Limits
-from rollout_train.recorder import Recorder, Renderer
+from rollout_train.ledger import FileLedger
+from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine
+from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine, admitted, recording
 
 pytest.importorskip("starlette")
 pytest.importorskip("openai")
@@ -24,8 +28,6 @@ from anthropic.types import Message as AnthropicMessage
 from openai.types.chat import ChatCompletion
 from openai.types.responses import Response as OpenAIResponse
 from starlette.applications import Starlette
-
-from rollout_train.recorder.compat import create_app
 
 GUESS: dict[str, Any] = {
     "type": "function",
@@ -56,18 +58,21 @@ class ThinkingRenderer(PlainRenderer):
         return (f"{thought}~" if thought else "") + PlainRenderer._said(message)
 
 
-def served(
-    script: Sequence[tuple[str, str]] = SCRIPT, **limits: Any
-) -> tuple[Recorder, str, httpx.AsyncClient, Starlette]:
-    """A recorder serving one session, the key that names it, an HTTP client that reaches the app in process, and
-    the app."""
+async def served(
+    directory: Path, script: Sequence[tuple[str, str]] = SCRIPT, **limits: Any
+) -> tuple[GatewayEndpoints, str, httpx.AsyncClient, Starlette]:
+    """A gateway serving one session (recording in `directory`), the key that names it, an HTTP client that reaches
+    the app in process, and the app."""
     engine = ScriptedEngine(cast(Tokenizer, Characters()), always=script)
     channel = Channel("policy", [engine], cast(Renderer, ThinkingRenderer()), Limits(**limits))
-    recorder = Recorder({"policy": channel}, base_url="http://recorder/v1")
-    address = recorder.endpoint(RecordedModel(channel="policy")).address("r_1/policy")
+    ledger, blobs = FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs")
+    endpoints = recording(channel, ledger=ledger, blobs=blobs, url="http://recorder")
+    await admitted(endpoints, "r_1")
+    address = endpoints.endpoint(RecordedModel(channel="policy")).address("r_1/policy")
     assert address.base_url == "http://recorder/v1" and address.model == "policy"
-    app = create_app(recorder)
-    return recorder, address.api_key, httpx.AsyncClient(transport=httpx.ASGITransport(app=app)), app
+    assert endpoints.gateway is not None
+    app = create_app(endpoints.gateway)
+    return endpoints, address.api_key, httpx.AsyncClient(transport=httpx.ASGITransport(app=app)), app
 
 
 def gpt(http: httpx.AsyncClient, key: str, **options: Any) -> openai.AsyncOpenAI:
@@ -88,18 +93,24 @@ def claude(app: Starlette, key: str, **options: Any) -> anthropic.AsyncAnthropic
     return anthropic.AsyncAnthropic(base_url="http://recorder", api_key=key, http_client=http, **options)
 
 
-def sampled(recorder: Recorder) -> list[str]:
+async def sampled(recorder: GatewayEndpoints) -> list[str]:
     """What the session's one segment holds that the policy sampled."""
-    (segment,) = recorder.export("r_1/policy")  # the harness only ever appended: one segment
+    (segment,) = await exported(recorder)  # the harness only ever appended: one segment
     text = "".join(chr(token) for token in segment.tokens)
     return [text[span.start : span.end] for span in segment.spans]
+
+
+async def exported(recorder: GatewayEndpoints) -> list[Any]:
+    return (await recorder.sessions("train", "r_1"))["policy"]
 
 
 # Chat Completions ---------------------------------------------------------------------------------------------------
 
 
-async def test_a_harness_plays_a_whole_exchange_over_chat_completions_and_it_is_one_recorded_sequence() -> None:
-    recorder, key, http, _app = served()
+async def test_a_harness_plays_a_whole_exchange_over_chat_completions_and_it_is_one_recorded_sequence(
+    tmp_path: Path,
+) -> None:
+    recorder, key, http, _app = await served(tmp_path)
     client = gpt(http, key)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": "Guess the number."},
@@ -126,14 +137,14 @@ async def test_a_harness_plays_a_whole_exchange_over_chat_completions_and_it_is_
     assert (said.content, said.model_extra) == ("It was five.", {"reasoning_content": "I knew it"})
     assert second.choices[0].finish_reason == "stop"
 
-    assert sampled(recorder) == ['call guess {"n": 5}\n', "I knew it~It was five.\n"]
-    (segment,) = recorder.export("r_1/policy")
+    assert await sampled(recorder) == ['call guess {"n": 5}\n', "I knew it~It was five.\n"]
+    (segment,) = await exported(recorder)
     text = "".join(chr(token) for token in segment.tokens)
     assert "tool: Right.\n" in text and text.startswith("tools: guess\nsystem: Guess the number.\nuser: Go.\n")
 
 
-async def test_a_chat_completions_stream_carries_the_same_reply() -> None:
-    _, key, http, _app = served()
+async def test_a_chat_completions_stream_carries_the_same_reply(tmp_path: Path) -> None:
+    _, key, http, _app = await served(tmp_path)
     client = gpt(http, key)
     chunks = [
         chunk
@@ -151,8 +162,8 @@ async def test_a_chat_completions_stream_carries_the_same_reply() -> None:
 # Responses ----------------------------------------------------------------------------------------------------------
 
 
-async def test_a_harness_plays_a_whole_exchange_over_responses_and_it_is_one_recorded_sequence() -> None:
-    recorder, key, http, _app = served()
+async def test_a_harness_plays_a_whole_exchange_over_responses_and_it_is_one_recorded_sequence(tmp_path: Path) -> None:
+    recorder, key, http, _app = await served(tmp_path)
     client = gpt(http, key)
     tool = {"type": "function", **GUESS["function"]}
     web = {"type": "web_search"}  # not a function: never offered to the model
@@ -183,11 +194,11 @@ async def test_a_harness_plays_a_whole_exchange_over_responses_and_it_is_one_rec
     await client.responses.create(
         model="x", instructions="Guess the number.", input=cast(Any, items), tools=cast(Any, [tool])
     )
-    assert sampled(recorder) == ['call guess {"n": 5}\n', "I knew it~It was five.\n", 'call guess {"n": 5}\n']
+    assert await sampled(recorder) == ['call guess {"n": 5}\n', "I knew it~It was five.\n", 'call guess {"n": 5}\n']
 
 
-async def test_a_responses_stream_has_the_events_the_official_client_builds_the_response_from() -> None:
-    _, key, http, _app = served([("I knew it~It was five.\n", "stop")])
+async def test_a_responses_stream_has_the_events_the_official_client_builds_the_response_from(tmp_path: Path) -> None:
+    _, key, http, _app = await served(tmp_path, [("I knew it~It was five.\n", "stop")])
     client = gpt(http, key)
     async with client.responses.stream(model="x", input="Go.") as stream:
         kinds = [event.type async for event in stream]
@@ -197,8 +208,8 @@ async def test_a_responses_stream_has_the_events_the_official_client_builds_the_
     assert "response.reasoning_text.delta" in kinds and "response.output_text.delta" in kinds
 
 
-async def test_a_responses_reply_cut_short_is_incomplete_and_stateful_requests_are_refused() -> None:
-    _, key, http, _app = served([("It was five, or six.\n", "length")])
+async def test_a_responses_reply_cut_short_is_incomplete_and_stateful_requests_are_refused(tmp_path: Path) -> None:
+    _, key, http, _app = await served(tmp_path, [("It was five, or six.\n", "length")])
     client = gpt(http, key)
     cut = await client.responses.create(model="x", input="Go.", max_output_tokens=4)
     assert cut.status == "incomplete" and cut.incomplete_details is not None
@@ -210,8 +221,8 @@ async def test_a_responses_reply_cut_short_is_incomplete_and_stateful_requests_a
 # Messages -----------------------------------------------------------------------------------------------------------
 
 
-async def test_a_harness_plays_a_whole_exchange_over_messages_and_it_is_one_recorded_sequence() -> None:
-    recorder, key, http, app = served()
+async def test_a_harness_plays_a_whole_exchange_over_messages_and_it_is_one_recorded_sequence(tmp_path: Path) -> None:
+    recorder, key, http, app = await served(tmp_path)
     client = claude(app, key)
     tool = {"name": "guess", "description": "Guess the number.", "input_schema": GUESS["function"]["parameters"]}
     search = {"type": "web_search_20250305", "name": "web_search"}  # a server tool: never offered to the model
@@ -248,11 +259,11 @@ async def test_a_harness_plays_a_whole_exchange_over_messages_and_it_is_one_reco
     await client.messages.create(
         model="x", max_tokens=1000, system="Guess the number.", messages=cast(Any, messages), tools=cast(Any, [tool])
     )
-    assert sampled(recorder) == ['call guess {"n": 5}\n', "I knew it~It was five.\n", 'call guess {"n": 5}\n']
+    assert await sampled(recorder) == ['call guess {"n": 5}\n', "I knew it~It was five.\n", 'call guess {"n": 5}\n']
 
 
-async def test_a_messages_stream_has_the_events_the_official_client_builds_the_message_from() -> None:
-    _, key, _http, app = served()
+async def test_a_messages_stream_has_the_events_the_official_client_builds_the_message_from(tmp_path: Path) -> None:
+    _, key, _http, app = await served(tmp_path)
     client = claude(app, key)
     tool = {"name": "guess", "description": "Guess the number.", "input_schema": GUESS["function"]["parameters"]}
     async with client.messages.stream(
@@ -272,8 +283,10 @@ async def test_a_messages_stream_has_the_events_the_official_client_builds_the_m
 # What every format shares -------------------------------------------------------------------------------------------
 
 
-async def test_a_key_names_one_session_and_a_full_context_is_refused_the_way_each_api_refuses_one() -> None:
-    recorder, key, http, app = served(answer=8, sequence=40)
+async def test_a_key_names_one_session_and_a_full_context_is_refused_the_way_each_api_refuses_one(
+    tmp_path: Path,
+) -> None:
+    recorder, key, http, app = await served(tmp_path, answer=8, sequence=40)
     chat = gpt(http, key)
     anthropic_client = claude(app, key)
     long = "word " * 40
@@ -304,15 +317,17 @@ async def test_a_key_names_one_session_and_a_full_context_is_refused_the_way_eac
         assert (await http.post(f"http://recorder/v1/{path}", json=body, headers=headers)).status_code == 400, path
     assert (await http.post("http://recorder/v1/responses", content=b"{", headers=headers)).status_code == 400
 
-    recorder.forget("r_1")  # the run is over: its key no longer names anything
+    await recorder.store.ledger.take("tests/r_1")  # another attempt took its fence: its key records no more
     with pytest.raises(openai.AuthenticationError):
         await chat.with_options(max_retries=0).chat.completions.create(
             model="x", messages=[{"role": "user", "content": "Go."}]
         )
 
 
-async def test_a_request_repeated_under_its_idempotency_key_gets_the_recorded_reply_in_every_format() -> None:
-    recorder, key, http, _app = served([("one\n", "stop"), ("two\n", "stop"), ("three\n", "stop")])
+async def test_a_request_repeated_under_its_idempotency_key_gets_the_recorded_reply_in_every_format(
+    tmp_path: Path,
+) -> None:
+    recorder, key, http, _app = await served(tmp_path, [("one\n", "stop"), ("two\n", "stop"), ("three\n", "stop")])
     requests = [
         ("chat/completions", {"messages": [{"role": "user", "content": "Go."}]}, "one"),
         ("responses", {"input": "Go."}, "two"),
@@ -327,12 +342,13 @@ async def test_a_request_repeated_under_its_idempotency_key_gets_the_recorded_re
         assert {key: value for key, value in first.items() if key not in ("created", "created_at")} == {
             key: value for key, value in again.items() if key not in ("created", "created_at")
         }
-    engine = cast(ScriptedEngine, recorder.channels["policy"].engines[0])
+    assert recorder.gateway is not None
+    engine = cast(ScriptedEngine, recorder.gateway.channels["policy"].engines[0])
     assert len(engine.prompts) == 3  # each turn sampled once; its repeats were answered from the record
 
 
-async def test_the_channels_are_listed_as_models_to_both_clients() -> None:
-    _, key, http, app = served()
+async def test_the_channels_are_listed_as_models_to_both_clients(tmp_path: Path) -> None:
+    _, key, http, app = await served(tmp_path)
     listed = await gpt(http, key).models.list()
     assert [model.id for model in listed.data] == ["policy"]
     anthropic_client = claude(app, key)

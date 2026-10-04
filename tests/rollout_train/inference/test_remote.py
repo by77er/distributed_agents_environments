@@ -10,18 +10,19 @@ from typing import Any, cast
 
 import pytest
 
-from rollout.contracts import Message
+from rollout.contracts import Message, ModelEndpointError
 from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
-from rollout_train.inference import Connection, RemoteEngine, Route, Routes, Unserved
-from rollout_train.inference.remote import ENGINES, NoReplica, NotLoaded
+from rollout_train.gateway import GatewayEndpoints
+from rollout_train.inference import Connection, RemoteEngine, Route, Routes
+from rollout_train.inference.remote import ENGINES, NotLoaded
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.presence import FilePresence
 from rollout_train.record import scope
-from rollout_train.recorder import Recorder, Renderer
+from rollout_train.recorder import Renderer
 from rollout_train.serving import Serving, qualified, record_serving, wanted
-from rollout_train.testing import PlainRenderer, sample_request
+from rollout_train.testing import PlainRenderer, admitted, recording, sample_request
 from tests.rollout_train.machines import MODEL, Saying, engine_host, fake_vllm, passing_on, served
 
 OPTIONS: dict[str, Any] = {"max_tokens": 20, "temperature": 1.0, "top_p": 1.0, "stop_token_ids": [10]}
@@ -61,27 +62,33 @@ def shared(tmp_path: Path) -> tuple[Checkpoints, FilePresence]:
     return Checkpoints(ledger, FileBlobStore(tmp_path / "blobs")), FilePresence(ledger.directory)
 
 
-def routed(checkpoints: Checkpoints, *servers: str, **route: Any) -> Recorder:
+def routed(checkpoints: Checkpoints, *servers: str, **route: Any) -> GatewayEndpoints:
     """A runner's recorder, whose channel `policy` is sampled on `servers` as `route` says."""
     channel = Route(cast(Renderer, PlainRenderer()), MODEL, servers, **route)
-    return Recorder({}, routes=Routes({"policy": channel}, checkpoints.ledger, every=0.05, patience=0.5))
+    routes = Routes({"policy": channel}, checkpoints.ledger, every=0.05, patience=0.5)
+    return recording(ledger=checkpoints.ledger, blobs=checkpoints.blobs, routes=routes)
 
 
-def routes_of(recorder: Recorder) -> Routes:
+def routes_of(recorder: GatewayEndpoints) -> Routes:
     assert isinstance(recorder.routes, Routes)
     return recorder.routes
 
 
-async def said(recorder: Recorder, session: str, turns: int = 1, run: str = "r") -> list[tuple[str, int]]:
+async def said(recorder: GatewayEndpoints, session: str, turns: int = 1, run: str = "r") -> list[tuple[str, int]]:
     """A session's turns on a run's channel (those sampled before are not sampled again): which checkpoint each turn's
     server said it sampled from, and the version its tokens are stamped with."""
+    run_id, slot = session.split("/")
+    try:
+        recorder.attempt(run_id)
+    except RuntimeError:
+        await admitted(recorder, run_id, run)
     endpoint = recorder.endpoint(RecordedModel(channel=qualified(run, "policy")))
     messages = [Message.user("Say.")]
     for _ in range(turns):
         effect = f"{session}:{len(messages)}"
         result = await endpoint.sample(sample_request(messages, effect_id=effect, session_id=session))
         messages += [result.message, Message.user("Again.")]
-    (segment,) = recorder.export(session)
+    (segment,) = (await recorder.sessions(run, run_id))[slot]
     text = "".join(map(chr, segment.tokens))
     return [(text[span.start : span.end].split()[0], span.version) for span in segment.spans]
 
@@ -188,7 +195,7 @@ async def test_turns_sample_the_newest_checkpoint_a_server_has_within_bounds_and
         await asyncio.sleep(0.5)  # (the server stops within a tenth of a second)
         assert await said(recorder, on_gpu_1, turns=2) == [(first.id, 1), (second.id, 2)]
         catching_up.cancel()
-    with pytest.raises(NoReplica):  # (no server answers: a turn waits, then gives up)
+    with pytest.raises(ModelEndpointError, match="no server"):  # (no server answers: a turn waits, then gives up)
         await said(recorder, "r_99/policy")
     routes.close()
 
@@ -248,7 +255,7 @@ async def test_servers_are_reached_directly_or_through_a_proxy_with_a_token_and_
             await serve(checkpoints, fence, second)
             await until(lambda: one.channel.serving == two.channel.serving == second.id)
             await routes_of(stale).channel("r", "policy").refresh(now=True)
-            with pytest.raises(Unserved, match=f"{second.id} was asked for, and {first.id} answered"):
+            with pytest.raises(ModelEndpointError, match=f"{second.id} was asked for, and {first.id} answered"):
                 await said(stale, "r_20/policy", turns=2)
             assert await said(through, "r_21/policy") == [(second.id, 2)]
 

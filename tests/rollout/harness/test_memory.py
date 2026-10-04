@@ -122,6 +122,24 @@ async def test_memory_is_compacted_when_the_model_says_its_context_is_nearly_ful
     assert texts(acting[-1])[1].endswith("SUMMARY 2") and memory.summary == "SUMMARY 2"
 
 
+async def test_each_request_says_how_it_follows_from_a_compaction() -> None:
+    endpoint, memory = Counting(), Memory()
+    await play(memory, model(endpoint), 24)
+    linked = [
+        (texts(request)[-1] == PROMPT, [(link.type, link.source) for link in request.links])
+        for request in endpoint.requests
+    ]
+    summaries = [index for index, (compacting, _) in enumerate(linked) if compacting]
+    assert len(summaries) == 2
+    for index in summaries:  # a summary's request names the latest reply's; the next request names the summary's
+        before, summary, after = endpoint.requests[index - 1], endpoint.requests[index], endpoint.requests[index + 1]
+        assert linked[index][1] == [("compaction_attempt", before.effect_id)]
+        assert linked[index + 1][1] == [("compaction", summary.effect_id)] and after is not summary
+    assert all(
+        not links for index, (_, links) in enumerate(linked) if index not in {*summaries, *(i + 1 for i in summaries)}
+    )
+
+
 async def test_a_context_the_model_refuses_is_compacted_and_tried_again() -> None:
     endpoint, memory = Counting(overflow=20), Memory()  # says nothing of its tokens; refuses more than 20 messages
     await play(memory, model(endpoint), 12)

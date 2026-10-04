@@ -27,8 +27,7 @@ from rollout_tinker import TinkerEngine, TinkerTrainer
 from rollout_tinker.data import datum
 from rollout_tinker.service import Service, connected, has_key
 from rollout_tinker.weights import downloaded, pointer, ranks
-from rollout_train.recorder import Renderer
-from rollout_train.recorder.recorder import Segment, Span
+from rollout_train.recorder import Renderer, Segment, Span
 from rollout_train.trainer import STATE, WEIGHTS, Weighted
 
 pytestmark = [

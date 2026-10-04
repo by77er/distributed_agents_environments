@@ -8,6 +8,7 @@ import shutil
 import sys
 import types
 from collections.abc import AsyncIterator, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,10 +18,11 @@ import uvicorn
 
 from rollout.environment import Description
 from rollout.harness import ProgramReference, RecordedModel, instantiate
+from rollout.harness.blobs import FileBlobStore
 from rollout_train.check import checked
-from rollout_train.recorder import Recorder
-from rollout_train.recorder.compat import create_app
-from rollout_train.testing import plain_channel
+from rollout_train.gateway import GatewayEndpoints, create_app
+from rollout_train.ledger import FileLedger
+from rollout_train.testing import admitted, plain_channel, recording
 from rollout_verifiers import VerifiersEnvironment, VerifiersProgram, play
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="the null harness runs as a uv script")
@@ -58,10 +60,15 @@ sys.modules["rollout_verifiers_echo"] = module  # verifiers imports a taskset by
 
 
 @pytest.fixture
-async def recorder() -> AsyncIterator[Recorder]:
-    """A recorder served over HTTP, whose policy says `apple` whatever it is asked."""
-    served = Recorder({"policy": plain_channel(always=[("apple\n", "stop")])}, base_url=f"http://127.0.0.1:{PORT}/v1")
-    server = uvicorn.Server(uvicorn.Config(create_app(served), host="127.0.0.1", port=PORT, log_level="warning"))
+async def recorder(tmp_path: Path) -> AsyncIterator[GatewayEndpoints]:
+    """A gateway served over HTTP, whose policy says `apple` whatever it is asked, with run `r_1` admitted."""
+    channel = plain_channel(always=[("apple\n", "stop")])
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    served = recording(channel, ledger=ledger, blobs=blobs, url=f"http://127.0.0.1:{PORT}")
+    await admitted(served, "r_1")
+    assert served.gateway is not None
+    app = create_app(served.gateway)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="warning"))
     serving = asyncio.create_task(server.serve())
     while not server.started:  # noqa: ASYNC110 - uvicorn says it has started by this flag alone
         await asyncio.sleep(0.02)
@@ -100,8 +107,8 @@ def test_the_training_tasks_are_the_starts_of_its_row_and_the_eval_tasks_its_eva
     assert isinstance(program, VerifiersProgram) and program.task["answer"] == starts[0]["task"]["answer"]
 
 
-async def test_an_episode_is_played_by_the_harness_through_the_recorder_and_scored_by_the_task(
-    recorder: Recorder,
+async def test_an_episode_is_played_by_the_harness_through_the_gateway_and_scored_by_the_task(
+    recorder: GatewayEndpoints,
 ) -> None:
     train = environment()
     (row,) = train.rows()
@@ -114,21 +121,24 @@ async def test_an_episode_is_played_by_the_harness_through_the_recorder_and_scor
             outcomes.append((start["task"]["answer"], reward))
             assert info["rewards"] == {"exact": reward} and info["turns"] == 1
     assert sorted(outcomes) == [("apple", 1.0), ("river", 0.0)]
-    segments: Sequence[Any] = recorder.export("r_1/policy")
+    segments: Sequence[Any] = (await recorder.sessions("train", "r_1"))["policy"]
     said = [
         "".join(chr(token) for token in segment.tokens[span.start : span.end])
         for segment in segments
         for span in segment.spans
     ]
-    assert said == ["apple\n", "apple\n"]  # each request was sampled, and recorded, by the recorder
+    assert said == ["apple\n", "apple\n"]  # each request was sampled, and recorded, by the gateway
     prompts = ["".join(chr(token) for token in segment.tokens) for segment in segments]
     assert sorted(prompts) == ["user: Say apple.\nassistant: apple\n", "user: Say river.\nassistant: apple\n"]
 
 
-async def test_an_episode_verifiers_could_not_play_fails() -> None:
+async def test_an_episode_verifiers_could_not_play_fails(tmp_path: Path) -> None:
     train = environment()
     start: Any = train.start(train.rows()[0], random.Random(0))
-    unserved = Recorder({"policy": plain_channel(always=[("apple\n", "stop")])}, base_url="http://127.0.0.1:9/v1")
+    channel = plain_channel(always=[("apple\n", "stop")])
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    unserved = recording(channel, ledger=ledger, blobs=blobs, url="http://127.0.0.1:9")
+    await admitted(unserved, "r_1")
     address = unserved.endpoint(RecordedModel(channel="policy")).address("r_1/policy")  # nothing listens there
     with pytest.raises(RuntimeError, match="the verifiers episode failed"):
         await play(start["environment"], start["task"], address)

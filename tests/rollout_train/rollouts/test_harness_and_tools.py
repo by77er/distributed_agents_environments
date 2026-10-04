@@ -23,14 +23,11 @@ from rollout.harness import (
 from rollout.harness.blobs import FileBlobStore
 from rollout.harness.remote import RemoteToolSet, serve
 from rollout.local import LocalRunner
+from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.ledger import FileLedger
 from rollout_train.record import GROUPS, scope, table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts import Episode, EpisodeRunner, Outcome, Plan, episodes_of, plan, playing
-from rollout_train.testing import plain_channel
-
-pytest.importorskip("starlette")
-from rollout_train.recorder.compat import create_app
+from rollout_train.testing import plain_channel, recording
 
 HARNESS: dict[str, Callable[[ModelAddress], Awaitable[str]]] = {}
 """The harness a test stands in for: given where the model is, it plays and returns what was said at the end."""
@@ -58,12 +55,12 @@ class Seen(RunHooks):
 
 
 async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded_and_watched(tmp_path: Path) -> None:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])}, base_url="http://recorder/v1")
-    app = create_app(recorder)
+    served: list[GatewayEndpoints] = []
 
     async def play(address: ModelAddress) -> str:
         headers = {"Authorization": f"Bearer {address.api_key}"}
-        transport = httpx.ASGITransport(app=app)
+        assert served[0].gateway is not None
+        transport = httpx.ASGITransport(app=create_app(served[0].gateway))
         async with httpx.AsyncClient(transport=transport, base_url=address.base_url, headers=headers) as client:
             body = {"model": address.model, "messages": [{"role": "user", "content": "Say the word."}]}
             reply = (await client.post("/chat/completions", json=body)).json()
@@ -72,22 +69,26 @@ async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded
     HARNESS["play"] = play
     seen = Seen()
     program = ProgramReference(program=register(Outsourced))
-    won, lost = await played(tmp_path / "served", LocalRunner(recorder=recorder, hooks=[seen]), recorder, program)
+    ledger, blobs = FileLedger(tmp_path / "served" / "ledger"), FileBlobStore(tmp_path / "served" / "blobs")
+    channel = plain_channel(always=[("yes\n", "stop")])
+    served.append(recording(channel, ledger=ledger, blobs=blobs, url="http://recorder", hooks=[seen]))
+    won, lost = await played(ledger, blobs, served[0], program)
     assert (won[0].reward, lost[0].reward) == (1.0, 0.0) and won[0].info == {"solved": True}
     (segment,) = won[0].trajectories["policy"].segments  # what the harness sampled is the slot's trajectory
     assert "".join(chr(token) for token in segment.tokens) == "user: Say the word.\nassistant: yes\n"
     assert len(seen.samples) == 2 and seen.samples[0].run_id == won[0].run_id and seen.samples[0].slot == "policy"
 
-    unserved = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})  # no base URL: nothing to hand out
-    failed, _ = await played(tmp_path / "alone", LocalRunner(recorder=unserved), unserved, program)
+    ledger, blobs = FileLedger(tmp_path / "alone" / "ledger"), FileBlobStore(tmp_path / "alone" / "blobs")
+    unserved = recording(channel, ledger=ledger, blobs=blobs)  # not served over HTTP: nothing to hand out
+    failed, _ = await played(ledger, blobs, unserved, program)
     assert failed[0].outcome is Outcome.FAILED and "not served over HTTP" in str(failed[0].detail)
 
 
 async def played(
-    where: Path, runner: LocalRunner, recorder: Recorder, program: ProgramReference
+    ledger: FileLedger, blobs: FileBlobStore, recorder: GatewayEndpoints, program: ProgramReference
 ) -> tuple[list[Episode], list[Episode]]:
-    """Two groups of one episode, a run's rows `yes` and `no`, played by a runner over a ledger of their own."""
-    ledger, blobs = FileLedger(where / "ledger"), FileBlobStore(where / "blobs")
+    """Two groups of one episode, a run's rows `yes` and `no`, played by a runner over `ledger`."""
+    runner = LocalRunner(recorder=recorder)
     fence = await ledger.take(scope("train"))
     await plan(ledger, "train", Plan(program, binding_of(program)), fence)
     for number, word in ((1, "yes"), (2, "no")):

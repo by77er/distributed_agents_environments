@@ -6,6 +6,10 @@ asked what to remember (`prompt`); its answer replaces them. That is a sample li
 slot, with room for the summary and none to think it over. A prompt that overflows all the same is compacted and
 tried again.
 
+Each request says how it follows from the ones before (`SampleLink`): a summary's request is a `compaction_attempt` of
+the latest reply's, and the request that goes on from a summary names that summary's as its `compaction`, so a recorder
+can tell what each sample was for.
+
 Code that uses it says nothing about tokens or limits. It says what a turn should look like once it is no longer
 the current one (`remember`: an observation without its bulky part, say), and what to ask when turns must go.
 
@@ -15,10 +19,20 @@ the current one (`remember`: an observation without its bulky part, say), and wh
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from rollout.contracts import ContextOverflow, Message, Role, Text, ToolResult, ToolResultBlock, ToolSpecification
+from rollout.contracts import (
+    ContextOverflow,
+    Message,
+    Role,
+    SampleLink,
+    Text,
+    ToolResult,
+    ToolResultBlock,
+    ToolSpecification,
+)
 from rollout.harness.agent import Agent
 from rollout.harness.context import Model, RunContext
 from rollout.harness.history import History
+from rollout.harness.model import EFFECT_ID_META
 
 PROMPT = (
     "The turns above are about to leave your memory. Write what you need to remember from them, and from your "
@@ -40,6 +54,10 @@ class Memory:
     compactions: int = 0
     _last: int | None = None
     _growth: int = 0
+    _sampled: str | None = None
+    """The latest reply's effect id."""
+    _summarised: str | None = None
+    """The effect id of the summary the next request goes on from."""
 
     def context(self, system: Message | None = None, current: Sequence[Message] = ()) -> list[Message]:
         """The system prompt, the summary, the remembered turns, and what is in front of the agent now."""
@@ -94,10 +112,12 @@ class Memory:
         context = [*Memory(summary=self.summary, turns=old, remembered=self.remembered).context(system)]
         try:
             room = min(model.capabilities.max_output_tokens, model.capabilities.context_limit // 20)
-            reply = await model.sample([*context, Message.user(self.prompt)], max_output_tokens=room)
+            compacted = [SampleLink(type="compaction_attempt", source=self._sampled)] if self._sampled else []
+            reply = await model.sample([*context, Message.user(self.prompt)], max_output_tokens=room, links=compacted)
             summary = reply.text.strip()
         except ContextOverflow:  # too much even to reread: it is forgotten unsummarized
-            summary = ""
+            reply, summary = None, ""
+        self._summarised = _effect_of(reply) if summary else None
         if summary:  # (a reply with no text keeps the earlier summary; the old turns go either way)
             self.summary = summary
         self.turns = self.turns[len(self.turns) - keep :]
@@ -116,13 +136,23 @@ class Memory:
         """One reply to the context. If the model refuses the context as too long, memory is compacted and the reply
         asked for again (the newest `keep` turns are never compacted)."""
         while True:
+            accepted = [SampleLink(type="compaction", source=self._summarised)] if self._summarised else []
             try:
-                return await model.sample(self.context(system, current), tools=tools)
+                reply = await model.sample(self.context(system, current), tools=tools, links=accepted)
             except ContextOverflow:
                 if len(self.turns) <= keep:
                     raise
                 spare = len(self.turns) - keep
                 await self.compact(model, system, keep=keep if spare == 1 else max(keep, len(self.turns) // 3))
+                continue
+            self._summarised, self._sampled = None, _effect_of(reply)
+            return reply
+
+
+def _effect_of(reply: Message | None) -> str | None:
+    """The effect id a reply carries, if it carries one."""
+    effect = reply.meta.get(EFFECT_ID_META) if reply is not None else None
+    return str(effect) if effect else None
 
 
 class CompactingAgent(Agent):

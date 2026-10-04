@@ -28,8 +28,8 @@ from rollout.harness.blobs import Blobs
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.record import table
-from rollout_train.recorder.recorder import Segment, Span
 from rollout_train.recorder.renderers import Renderer
+from rollout_train.recorder.segments import Segment, Span
 from rollout_train.rollouts.episodes import Episode, Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.trainer import STATE, WEIGHTS, Files, Trainer, Weighted

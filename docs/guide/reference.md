@@ -7,7 +7,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 ## Contents
 
 - **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#rolloutharnessenvironment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Priority`](#priority), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
-- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#rolloutenvironmentenvironment), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
@@ -16,11 +16,11 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
-- **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#refused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
-- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
+- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
@@ -347,7 +347,7 @@ A model slot bound to an endpoint. Every sample sends the full context.
 - `@property def capabilities(self) -> CapabilityContract`
 - `@property def usage(self) -> Usage | None`
 - `def address(self) -> ModelAddress`
-- `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None) -> Message`
+- `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None, links: Sequence[SampleLink] = ()) -> Message`
 
 ### `Envelope`
 
@@ -672,7 +672,8 @@ A model slot as code sees it. Nothing here identifies the policy, weights or eng
 
 - `@property def capabilities(self) -> CapabilityContract`
 - `@property def usage(self) -> Usage | None` — Usage reported by the latest sample, if any: drives compaction decisions.
-- `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None) -> Message`
+- `async def sample(self, messages: Sequence[Message], *, tools: Sequence[ToolSpecification] = (), max_output_tokens: int | None = None, tool_choice: ToolChoice | None = None, links: Sequence[SampleLink] = ()) -> Message` — A reply to `messages`; `links` say how the request follows from earlier ones of the slot (by the effect
+  ids its replies carry: `rollout.harness.model.EFFECT_ID_META`).
 - `def address(self) -> ModelAddress` — For a harness that brings its own loop (a coding agent running inside the environment, say): where it
   reaches this slot's model. Hand it the base URL and key; what it samples there is this slot's, recorded like
   any other sample. Raises if the deployment does not serve models over HTTP.
@@ -939,7 +940,7 @@ How a sandbox is reached, as its provider says once it has made it.
 class RecordedEndpoints(Protocol)
 ```
 
-Serves recorded bindings: the recorder (`rollout_train.recorder.Recorder`), as runners see it.
+Serves recorded bindings, as runners see it: the gateway (`rollout_train.gateway.GatewayEndpoints`).
 
 **Methods**
 
@@ -953,7 +954,7 @@ Serves recorded bindings: the recorder (`rollout_train.recorder.Recorder`), as r
 class RecordedModel(ContractModel)
 ```
 
-A channel served through the recorder.
+A channel served through the gateway, which records every sample.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -2008,6 +2009,23 @@ Why a run failed (the `class` of a `run.failed` event).
 | `TASK_ERROR` | `'task_error'` |  |
 | `INVALID_OBSERVATION` | `'invalid_observation'` |  |
 
+### `SampleLink`
+
+*class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
+
+```python
+class SampleLink(ContractModel)
+```
+
+How a request follows from an earlier one of its session, as its program says: `type` is a label
+(`compaction_attempt`, `compaction`, `subagent_call`, `subagent_return`, or any other), and `source` the earlier
+request's `effect_id`. A recording endpoint keeps it with the turn; others ignore it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | `str` | required |  |
+| `source` | `str` | required |  |
+
 ### `SampleRequest`
 
 *class* · `libraries/rollout/src/rollout/contracts/model_endpoint.py`
@@ -2027,6 +2045,7 @@ A request for one reply. Sampling parameters are not here: they belong to the po
 | `tools` | `FrozenSequence[ToolSpecification]` | `()` | The subset exposed this turn; endpoints use only the model-visible fields. |
 | `max_output_tokens` | `int \| None` | `None` | Must not exceed the contract's `max_output_tokens`. |
 | `tool_choice` | `ToolChoice \| None` | `None` |  |
+| `links` | `FrozenSequence[SampleLink]` | `()` | How it follows from earlier requests of its session. |
 
 ### `SampleResult`
 
@@ -2751,7 +2770,7 @@ class EpisodeRunner
 ```
 
 Claims the episodes runs ask for in `ledger` and plays them on `runner`, at most `places` at once: those of the
-runs it can serve (whose models its recorder's channels serve, whose imports are among `imports` and whose local
+runs it can serve (whose models its recorder samples, whose imports are among `imports` and whose local
 pools are among `pools`), and of `runs` only, if given. An episode is claimed only while the pools of its
 sandboxes have room for them, and its run's sandboxes are leased under its claim. `guard` is called before
 claiming and raises to wait (a machine short of memory, say). With `presence`, it beats every `beating` seconds,
@@ -2918,17 +2937,13 @@ An episode as it is logged and sent: everything but its trajectories, and where 
 class Recorded(Protocol)
 ```
 
-What a runner needs of the recorder: each run's segments, and the channels it serves. A recorder that routes
-channels to engines elsewhere (`rollout_train.recorder.Recorder` with `routes`) also says whether it reaches a
-run's (`reaches`), and names them within the run in its binding (`for_run`).
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `channels` | `Mapping[str, Any]` | required |  |
+What a runner needs of what records its runs' samples (`rollout_train.gateway.GatewayEndpoints`).
 
 **Methods**
 
-- `def sessions(self, run_id: str) -> dict[str, list[Segment]]`
+- `def admit(self, run_id: str, attempt: Attempt) -> None` — Say which attempt a run plays (its episode's fence), before it starts or is adopted.
+- `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled now.
+- `async def sessions(self, run: str, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run recorded, by slot.
 - `def forget(self, run_id: str) -> None`
 
 ### `stored`
@@ -4150,54 +4165,6 @@ class JsonToolCalls
 
 - `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
 
-### `RecordedEndpoint`
-
-*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
-
-```python
-class RecordedEndpoint
-```
-
-Implements `ModelEndpoint` for one channel.
-
-**Methods**
-
-- `def __init__(self, recorder: Recorder, channel: Sampler, sampling: SamplingParameters) -> None`
-- `def describe(self, session_id: str) -> CapabilityContract`
-- `def address(self, session_id: str, through: ModelEndpoint | None = None) -> ModelAddress` — Where a harness outside the run's own loop reaches this session, and the key that names it. Its samples
-  go `through` an endpoint wrapping this one, if one is given (a runner's, which reports them to its hooks).
-- `async def cancel(self, effect_id: str) -> None` — Nothing to do: the generation stops when the task awaiting `sample` is cancelled.
-- `async def sample(self, request: SampleRequest) -> SampleResult`
-
-### `Recorder`
-
-*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
-
-```python
-class Recorder
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `channels` | `Mapping[str, Channel]` | required | The channels whose engines this process publishes to, by name. |
-| `base_url` | `str \| None` | `None` | Where `rollout_train.recorder.compat` serves this recorder, as harnesses reach it (None: it is not served). |
-| `routes` | `Routes \| None` | `None` | The channels whose engines serve elsewhere: a binding names one within its run (`RUN/NAME`, `for_run`). |
-
-**Methods**
-
-- `def endpoint(self, binding: RecordedModel) -> 'RecordedEndpoint'`
-- `def for_run(self, run: str, binding: RunBinding) -> RunBinding` — A run's binding, with each recorded model on a routed channel named within the run (`RUN/NAME`), so that
-  its samples are of the checkpoints that run says its channel serves; the same binding if it names none.
-- `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled here: from a channel whose engines this
-  process publishes to, or from a routed channel whose servers have a checkpoint close enough to what the run
-  says it should serve.
-- `def export(self, session_id: str) -> list[Segment]` — The session's segments, oldest first (see the module's description).
-- `def sessions(self, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run exports, by slot.
-- `def forget(self, run_id: str) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel (an adapter, or with `full` a full checkpoint's weights); returns the
-  version they are served as (a checkpoint's depth).
-- `def served(self, key: str) -> tuple[str, ModelEndpoint] | None` — The session a harness's key names, and the endpoint that samples for it.
-
 ### `Renderer`
 
 *class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
@@ -4220,9 +4187,19 @@ class Renderer(Protocol)
 - `def thinking_end_token_ids(self) -> list[int]` — Tokens that end thinking (to stop a thinking phase on), or none if it is not a single token.
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message` — A sampled turn as a canonical assistant message.
 
+### `sample_turn`
+
+*function* · `libraries/rollout-train/src/rollout_train/recorder/sampling.py`
+
+```python
+async def sample_turn(request: SampleRequest, renderer: 'Renderer', limits: Limits, context_limit: int, generate: Generate) -> SampledTurn
+```
+
+Sample one reply to `request`. Raises `ContextOverflow` when the prompt leaves no room to answer.
+
 ### `Segment`
 
-*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/segments.py`
 
 ```python
 class Segment
@@ -4241,9 +4218,20 @@ A piece of a session's trajectory: tokens that only grew, as the policy saw and 
 
 - `@property def sampled(self) -> int`
 
+### `segments_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/recorder/segments.py`
+
+```python
+def segments_of(turns: Sequence[Turn], *, untrained: Collection[str] = ()) -> list[Segment]
+```
+
+The segments of a session's turns, oldest first, each with at least one sampled span. What the turns named in
+`untrained` (by effect id) sampled is kept as context, with no span: it is not trained on.
+
 ### `Span`
 
-*class* · `libraries/rollout-train/src/rollout_train/recorder/recorder.py`
+*class* · `libraries/rollout-train/src/rollout_train/recorder/segments.py`
 
 ```python
 class Span
@@ -4360,9 +4348,11 @@ from what it says its channel serves), and any other with its engines started he
 class Gateway
 ```
 
-What a replica serves: where it records, the keys it takes, and the channels it samples, as the recorder samples
-them: those whose engines this process publishes to (`channels`, by name; `models` names each one's base model),
-and those whose engines serve elsewhere (`routes`), each run's sampled from what that run says it serves.
+What a replica serves: where it records, the keys it takes, and the channels it samples: those whose engines this
+process publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve
+elsewhere (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
+harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
+its endpoints).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -4371,16 +4361,22 @@ and those whose engines serve elsewhere (`routes`), each run's sampled from what
 | `channels` | `Mapping[str, Channel]` | `field(default_factory=dict[str, Channel])` |  |
 | `routes` | `Routes \| None` | `None` |  |
 | `models` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` |  |
+| `hooks` | `Sequence[RunHooks]` | `()` |  |
 
 **Methods**
 
 - `def granted(self, key: str) -> Grant` — The grant a key carries; `Refused` if it is not one this gateway takes.
-- `def sampler(self, grant: Grant) -> Sampler` — What a grant's turns sample from: the channel of this process it names, else the grant's run's routed
-  channel of that name. A channel named within its run (`RUN/NAME`) is that run's.
+- `def sampler(self, grant: Grant) -> Sampler` — What a grant's turns sample from (`sampler_of` its run and channel).
+- `def sampler_of(self, run: str, channel: str) -> Sampler` — What a run's channel samples from: the channel of this process it names, else the run's routed channel of
+  that name. A channel named within its run (`RUN/NAME`) is that run's.
+- `async def reaches(self, run: str, channel: str) -> bool` — Whether a run's channel can be sampled now: one of this process, or a routed one whose servers have a
+  checkpoint close enough to what the run says it should serve.
 - `@property def names(self) -> list[str]` — The channels it samples, by name.
 - `def describe(self, grant: Grant) -> CapabilityContract`
 - `async def sample(self, grant: Grant, request: SampleRequest, links: Sequence[Link] = ()) -> Reply` — One reply, recorded before it is returned: the one recorded under the request's effect id, if there is one.
-  Raises `Refused`, or the endpoint's `ModelEndpointError` (`ContextOverflow` when the context is too long).
+  `links` are those its harness declared besides the request's own. Raises `Refused`, or the endpoint's
+  `ModelEndpointError` (`ContextOverflow` when the context is too long).
+- `def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None` — Tell the hooks of a sample a harness asked for, newly recorded.
 - `async def ready(self) -> dict[str, str]` — What is not ready, by part (empty: ready): the ledger and the blob store must answer.
 
 ### `GatewayEndpoint`
@@ -4398,8 +4394,9 @@ Implements `AddressableEndpoint` for one recorded binding, through the gateway.
 - `def __init__(self, endpoints: GatewayEndpoints, binding: RecordedModel) -> None`
 - `def describe(self, session_id: str) -> CapabilityContract`
 - `def address(self, session_id: str, *, through: ModelEndpoint | None = None) -> ModelAddress` — The gateway, and a key for the session. What a harness samples there is recorded by the gateway, so it does
-  not go `through` the runner's endpoint (its hooks do not see it).
-- `async def cancel(self, effect_id: str) -> None` — Nothing to do: the gateway records the turn whether or not it is awaited.
+  not go `through` the runner's endpoint (a gateway in this process tells the runner's hooks of it).
+- `async def cancel(self, effect_id: str) -> None` — Nothing to do: a turn whose sampling is cancelled in this process is not recorded, and a gateway elsewhere
+  records the turn whether or not it is awaited.
 - `async def sample(self, request: SampleRequest) -> SampleResult`
 
 ### `GatewayEndpoints`
@@ -4410,17 +4407,27 @@ Implements `AddressableEndpoint` for one recorded binding, through the gateway.
 class GatewayEndpoints
 ```
 
-Implements `RecordedEndpoints` over the gateway at `url` (its base URL, without `/v1`), with keys signed by
-`keyring`; `contracts` is each channel's capability contract, and `store` the turn store the gateway records in.
+Implements `RecordedEndpoints` over a gateway: the one in this process (`gateway`), else the one at `url` (its
+base URL, without `/v1`), with keys signed by `keyring`; `store` is the turn store the gateway records in. What a
+channel guarantees is the gateway's to say, in this process; else, for a routed channel, what `routes` say of it
+(the runner's view of the same servers), and for any other, `contracts`. `url` is also what a harness is handed:
+without one, a run cannot give a harness an address.
 
 **Methods**
 
-- `def __init__(self, url: str, keyring: Keyring, store: TurnStore, contracts: Mapping[str, CapabilityContract], *, lifetime: float = LIFETIME, http: httpx.AsyncClient | None = None, retries: int = 5, backoff: float = 0.5) -> None`
-- `@property def channels(self) -> Mapping[str, CapabilityContract]`
-- `def admit(self, run_id: str, attempt: Attempt) -> None` — Say which attempt a program's run plays, before it starts.
+- `def __init__(self, url: str | None, keyring: Keyring, store: TurnStore, contracts: Mapping[str, CapabilityContract] | None = None, *, gateway: Gateway | None = None, routes: Routes | None = None, lifetime: float = LIFETIME, http: httpx.AsyncClient | None = None, retries: int = 5, backoff: float = 0.5) -> None`
+- `@classmethod def of(cls, gateway: Gateway, url: str | None = None, *, lifetime: float = LIFETIME) -> 'GatewayEndpoints'` — Endpoints over a gateway in this process; `url`, where it is also served over HTTP, for harnesses.
+- `@property def http(self) -> httpx.AsyncClient`
+- `@property def channels(self) -> list[str]` — The channels it samples, by name.
+- `def admit(self, run_id: str, attempt: Attempt) -> None` — Say which attempt a program's run plays, before it starts (and again when the attempt is taken up anew).
 - `def forget(self, run_id: str) -> None`
 - `def endpoint(self, binding: RecordedModel) -> 'GatewayEndpoint'`
+- `def attempt(self, run_id: str) -> Attempt` — The attempt an admitted run plays.
 - `def key(self, session_id: str, binding: RecordedModel) -> str` — A key for a session of an admitted run.
+- `def contract(self, session_id: str, channel: str) -> CapabilityContract` — What a channel guarantees a session: a routed channel, as its run's servers say (the run is admitted).
+- `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled now: a channel the gateway in this process
+  samples (a routed one only once its servers have a checkpoint close enough to what the run says it should
+  serve), or one the gateway elsewhere serves (a routed one likewise, as this process sees its servers).
 - `async def sessions(self, run: str, run_id: str) -> dict[str, list[Segment]]` — What each slot of a program's run recorded, by slot.
 
 ### `Grant`
@@ -4601,8 +4608,8 @@ cache.
   (`replayed` if it was not this one). `index` is the run's records, if they were read. Raises `Fenced` if
   `fence` was taken again.
 - `async def turns(self, run: str, run_id: str) -> list[TurnRecord]` — A program's run's turns, in the order they were recorded.
-- `async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]` — What each model slot of a program's run exports, by slot (as `Recorder.sessions` does in memory). With
-  `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from it.
+- `async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]` — What each model slot of a program's run exports, by slot (`segments_of` its turns). With `accepted_only`,
+  what a compaction attempt sampled is trained on only if its harness went on from it.
 
 ### `unaccepted`
 
@@ -4671,13 +4678,15 @@ class GatewaySpec
 ```
 
 The gateway (`rollout_train.gateway`): a stateless service that samples the channels and records every turn,
-which `rollout gateway PROFILE` serves, as many replicas as wanted.
+which `rollout gateway PROFILE` serves, as many replicas as wanted. A run's runner records through it: through the
+replicas at `url`, or, with none, through a gateway in its own process (served to harnesses at the profile's
+`serve`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `url` | `str \| None` | `None` | Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it). |
+| `url` | `str \| None` | `None` | Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it); none: a runner samples through a gateway in its own process. A runner that records through replicas elsewhere has every channel routed (their engines serve elsewhere too). |
 | `listen` | `str` | `'127.0.0.1:8830'` | `host:port` a replica serves on. |
-| `keys` | `str \| None` | `None` | A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's. |
+| `keys` | `str \| None` | `None` | A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's, and for a gateway in a runner's own process with none there, a secret it makes when it starts. |
 | `lifetime` | `float` | `6 * 3600.0` | Seconds a key minted for a slot is good for. |
 
 ### `NotEnoughMemory`
@@ -4738,7 +4747,7 @@ class Profile
 | `channels` | `Mapping[str, ChannelSpec]` | required |  |
 | `trainer` | `TrainerSpec \| None` | `None` |  |
 | `runner` | `str` | `'local'` | `local` runs episodes in this process; `durable` records them so that they survive it. |
-| `serve` | `str \| None` | `None` | `host:port` to serve the model endpoint for harnesses on. |
+| `serve` | `str \| None` | `None` | `host:port` to serve the gateway in the runner's own process on, for harnesses (none: a harness cannot be given an address). |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
 | `pools` | `Mapping[str, str \| Mapping[str, Any]]` | `field(default_factory=dict[str, str \| Mapping[str, Any]])` | Each sandbox pool by the kind of sandbox it serves: a URL, or `module:name` of the provider that makes them, called with `directory`; or a table whose `kind` is that and whose other entries are passed to it too. |
@@ -4751,7 +4760,7 @@ class Profile
 | `ray` | `str \| None` | `None` | The Ray cluster to connect to (`auto`, or `ray://host:port`): reshards then run as Ray tasks on it. |
 | `name` | `str \| None` | `None` | What a run first started in `directory` is called (by default the directory's name). It is named again with `rollout rename`; its id, in the directory's `run.json`, never changes. |
 | `evals` | `EvalsSpec \| None` | `None` | The evals a training run makes of its checkpoints as it makes them. |
-| `gateway` | `GatewaySpec \| None` | `None` | The gateway that samples the channels and records turns, for `rollout gateway PROFILE`. A run's own runner does not use it yet: it records in its own process. |
+| `gateway` | `GatewaySpec \| None` | `None` | The gateway that samples the channels and records turns: what `rollout gateway PROFILE` serves, and what a run's runner records through (by default a gateway in its own process). |
 
 **Methods**
 
@@ -4926,6 +4935,16 @@ class System
 
 Test doubles: a scripted engine and a readable token format.
 
+### `admitted`
+
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+async def admitted(endpoints: GatewayEndpoints, run_id: str, run: str = 'train') -> Attempt
+```
+
+Admit a run that no episode runner plays (one a test starts on a runner itself), under a fence of its own.
+
 ### `Characters`
 
 *class* · `libraries/rollout-train/src/rollout_train/testing.py`
@@ -4984,6 +5003,37 @@ one segment.
 - `def stop_token_ids(self) -> list[int]`
 - `def thinking_end_token_ids(self) -> list[int]`
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message`
+
+### `Policy`
+
+*class* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+class Policy
+```
+
+Channels whose engines are in this process, as a test's training loop and its runners see them: `publish` serves
+new weights on one (what a loop is given to publish with), and `recording` is a runner's recorder over them.
+
+**Methods**
+
+- `def __init__(self, *channels: Channel) -> None`
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int`
+- `def recording(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints` — A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the
+  ledger is, so that a runner made first and an episode runner made after it over the same place share it (the
+  runs it admits are the runs the runner plays).
+
+### `recording`
+
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+def recording(*channels: Channel, ledger: Ledger, blobs: Blobs, url: str | None = None, routes: Routes | None = None, hooks: Sequence[RunHooks] = ()) -> GatewayEndpoints
+```
+
+A runner's recorder: endpoints over a gateway in this process that samples `channels` (and those `routes`
+route), recording in `ledger` and `blobs`; `url` is where it is served to harnesses, if it is, and `hooks` are told
+of the samples harnesses ask for there.
 
 ### `sample_request`
 

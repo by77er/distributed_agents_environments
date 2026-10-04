@@ -107,9 +107,13 @@ class Going:
 
 
 class Forgetting:
-    channels: dict[str, Any] = {"policy": None}
+    def admit(self, run_id: str, attempt: Any) -> None:
+        pass
 
-    def sessions(self, run_id: str) -> dict[str, list[Any]]:
+    async def reaches(self, run: str, binding: Any) -> bool:
+        return True
+
+    async def sessions(self, run: str, run_id: str) -> dict[str, list[Any]]:
         return {}
 
     def forget(self, run_id: str) -> None:

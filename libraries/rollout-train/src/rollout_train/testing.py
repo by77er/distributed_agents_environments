@@ -1,5 +1,6 @@
-"""Test doubles for what stands above a run: an engine that answers from a script, and a token format simple enough
-to read. With them an environment, an algorithm or a whole profile can be tried without a model or a GPU."""
+"""Test doubles for what stands above a run: an engine that answers from a script, a token format simple enough to
+read, and a gateway in this process that records what they sample. With them an environment, an algorithm or a whole
+profile can be tried without a model or a GPU."""
 
 import json
 from collections.abc import Sequence
@@ -16,19 +17,29 @@ from rollout.contracts import (
     ToolSpecification,
     context_digests,
 )
-from rollout_train.inference import Channel, Generation, Limits
+from rollout.harness.blobs import Blobs
+from rollout.harness.hooks import RunHooks
+from rollout_train.gateway import Attempt, Gateway, GatewayEndpoints, Keyring, TurnStore
+from rollout_train.inference import Channel, Generation, Limits, Routes
+from rollout_train.ledger import Ledger
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
 
 __all__ = [
     "Characters",
     "PlainRenderer",
+    "Policy",
     "ScriptedEngine",
+    "admitted",
     "plain_channel",
     "plain_renderer",
+    "recording",
     "sample_request",
     "scripted_engine",
 ]
+
+SECRETS = [("tests", "a-secret-that-only-tests-sign-with")]
+"""What `recording`'s gateway signs keys with."""
 
 
 class ScriptedEngine:
@@ -147,6 +158,52 @@ def plain_channel(script: Sequence[tuple[str, str]] = (), *, name: str = "policy
     """A channel over a scripted engine in the plain format; `always=` repeats a script for ever."""
     engine = ScriptedEngine(cast(Tokenizer, Characters()), script, always=options.pop("always", ()))
     return Channel(name, [engine], cast(Renderer, PlainRenderer()), Limits(**options))
+
+
+def recording(
+    *channels: Channel,
+    ledger: Ledger,
+    blobs: Blobs,
+    url: str | None = None,
+    routes: Routes | None = None,
+    hooks: Sequence[RunHooks] = (),
+) -> GatewayEndpoints:
+    """A runner's recorder: endpoints over a gateway in this process that samples `channels` (and those `routes`
+    route), recording in `ledger` and `blobs`; `url` is where it is served to harnesses, if it is, and `hooks` are told
+    of the samples harnesses ask for there."""
+    by_name = {channel.name: channel for channel in channels}
+    gateway = Gateway(TurnStore(ledger, blobs), Keyring.parse(SECRETS), by_name, routes, hooks=hooks)
+    return GatewayEndpoints.of(gateway, url)
+
+
+class Policy:
+    """Channels whose engines are in this process, as a test's training loop and its runners see them: `publish` serves
+    new weights on one (what a loop is given to publish with), and `recording` is a runner's recorder over them."""
+
+    def __init__(self, *channels: Channel) -> None:
+        self.channels = {channel.name: channel for channel in channels}
+        self._recorders: dict[str, GatewayEndpoints] = {}
+
+    async def publish(
+        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
+    ) -> int:
+        return await self.channels[channel].publish(adapter, path, version, full=full)
+
+    def recording(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints:
+        """A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the
+        ledger is, so that a runner made first and an episode runner made after it over the same place share it (the
+        runs it admits are the runs the runner plays)."""
+        where = str(getattr(ledger, "directory", id(ledger)))
+        if where not in self._recorders:
+            self._recorders[where] = recording(*self.channels.values(), ledger=ledger, blobs=blobs)
+        return self._recorders[where]
+
+
+async def admitted(endpoints: GatewayEndpoints, run_id: str, run: str = "train") -> Attempt:
+    """Admit a run that no episode runner plays (one a test starts on a runner itself), under a fence of its own."""
+    attempt = Attempt(run, await endpoints.store.ledger.take(f"tests/{run_id}"))
+    endpoints.admit(run_id, attempt)
+    return attempt
 
 
 def sample_request(

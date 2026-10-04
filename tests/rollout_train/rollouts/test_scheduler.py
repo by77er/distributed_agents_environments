@@ -14,13 +14,13 @@ from rollout.harness import ModelBinding, RecordedModel, RunBinding, agent_progr
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout_train import presence
+from rollout_train.gateway import GatewayEndpoints
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import Beat, FilePresence
 from rollout_train.record import GROUPS, scope, table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, Outcome, Plan, Record, episodes_of, events_of, plan, playing
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, ended
-from rollout_train.testing import plain_channel
+from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.rollouts.games import GATES, Gated, Guess
 
 BINDING = RunBinding(models={"policy": ModelBinding(recorded=RecordedModel(channel="policy"))})
@@ -36,16 +36,18 @@ class Seen:
 
 def runner(
     tmp_path: Path, *says: str, name: str = "here", places: int = 8, **options: Any
-) -> tuple[EpisodeRunner, Recorder, Seen]:
+) -> tuple[EpisodeRunner, GatewayEndpoints, Seen]:
     """A runner over the ledger and blob store in `tmp_path`, whose policy says `says` in turn, for ever."""
-    recorder = Recorder({"policy": plain_channel(always=[(f"{word}\n", "stop") for word in says])})
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    channel = plain_channel(always=[(f"{word}\n", "stop") for word in says])
+    recorder = recording(channel, ledger=ledger, blobs=blobs)
     seen = Seen()
     played = EpisodeRunner(
         name,
-        FileLedger(tmp_path / "ledger"),
+        ledger,
         LocalRunner(recorder=recorder),
         recorder,
-        FileBlobStore(tmp_path / "blobs"),
+        blobs,
         places,
         hooks=[seen],
         every=0.02,

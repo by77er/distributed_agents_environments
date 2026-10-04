@@ -45,8 +45,7 @@ from pydantic import JsonValue, TypeAdapter
 from rollout.contracts import BlobReference, SampleResult, SessionIdentity
 from rollout.harness.blobs import Blobs
 from rollout_train.ledger import Fence, Ledger
-from rollout_train.recorder.recorder import Segment
-from rollout_train.recorder.segments import segments_of
+from rollout_train.recorder.segments import Segment, segments_of
 
 TURNS = "turns"
 """A run's tables of turns: `runs/RUN/turns/RUN_ID`, one per program's run."""
@@ -243,8 +242,8 @@ class TurnStore:
         return turns
 
     async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]:
-        """What each model slot of a program's run exports, by slot (as `Recorder.sessions` does in memory). With
-        `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from it."""
+        """What each model slot of a program's run exports, by slot (`segments_of` its turns). With `accepted_only`,
+        what a compaction attempt sampled is trained on only if its harness went on from it."""
         by_slot: dict[str, list[TurnRecord]] = {}
         turns = await self.turns(run, run_id)
         for turn in turns:

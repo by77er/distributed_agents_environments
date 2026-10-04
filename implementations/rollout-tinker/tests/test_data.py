@@ -5,7 +5,7 @@ import torch
 
 from rollout_tinker.data import datum, rows
 from rollout_tinker.testing import FakeService
-from rollout_train.recorder.recorder import Segment, Span
+from rollout_train.recorder import Segment, Span
 from rollout_train.trainer import Weighted
 
 # A prompt (0-2), a turn the policy sampled (3-4), a token the recorder forced (5), a tool's result (6), a second turn

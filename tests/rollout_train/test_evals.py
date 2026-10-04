@@ -429,7 +429,8 @@ async def test_a_run_started_again_finishes_the_eval_it_left_before_it_steps_aga
         )  # fmt: skip
 
     # A runner that plays the training run's episodes and not the eval's: the loop waits in the first eval.
-    only = EpisodeRunner("training", ledger, LocalRunner(recorder=recorder), recorder, blobs, 6, runs={"train"})
+    recorded = recorder.recording(ledger, blobs)
+    only = EpisodeRunner("training", ledger, LocalRunner(recorder=recorded), recorded, blobs, 6, runs={"train"})
     async with playing(only):
         going = asyncio.create_task(training(8))
         async with asyncio.timeout(10):

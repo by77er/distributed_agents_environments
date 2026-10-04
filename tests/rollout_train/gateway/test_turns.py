@@ -1,5 +1,5 @@
 """The turn store and segment assembly: turns read back are the turns recorded, and the segments assembled from them
-are the segments the in-memory recorder exports for the same turns, whatever the session did."""
+are the segments of the turns as they were sampled, whatever the session did."""
 
 import asyncio
 import math
@@ -14,13 +14,8 @@ from rollout.contracts import FinishReason, Message, SampleResult, Usage
 from rollout_train.gateway import Link, TurnRecord, TurnStore, turns_table, unaccepted
 from rollout_train.gateway.turns import TURN, _Unpacked  # pyright: ignore[reportPrivateUsage]
 from rollout_train.ledger import Fenced
-from rollout_train.recorder import Recorder
-from rollout_train.recorder.recorder import _Turn  # pyright: ignore[reportPrivateUsage]
 from rollout_train.recorder.segments import segments_of
-from rollout_train.testing import plain_channel
 from tests.rollout_train.gateway.support import stores
-
-SESSION = "r_1/policy"
 
 
 def turn(
@@ -77,22 +72,6 @@ def session(seed: int, count: int = 24) -> list[TurnRecord]:
     return turns
 
 
-def exported(turns: list[TurnRecord]) -> list[object]:
-    """What the in-memory recorder exports for the same turns."""
-    recorder = Recorder({"policy": plain_channel()})
-    recorder._turns[SESSION] = [  # pyright: ignore[reportPrivateUsage]
-        _Turn(each.effect_id, each.prompt, each.completion, each.mask, each.logprobs, each.depth, each.channel)
-        for each in turns
-    ]
-    return list(recorder.export(SESSION))
-
-
-@pytest.mark.parametrize("seed", range(12))
-def test_segments_assembled_from_turns_are_the_segments_the_recorder_exports(seed: int) -> None:
-    turns = session(seed)
-    assert segments_of(turns) == exported(turns)
-
-
 @pytest.mark.parametrize("seed", range(6))
 async def test_turns_read_back_are_the_turns_recorded_and_assemble_to_the_same_segments(
     tmp_path: Path, seed: int
@@ -110,7 +89,7 @@ async def test_turns_read_back_are_the_turns_recorded_and_assemble_to_the_same_s
     assert [[value for value in each.logprobs if not math.isnan(value)] for each in back] == [
         [value for value in each.logprobs if not math.isnan(value)] for each in turns
     ]
-    assert (await store.sessions("train", "r_1"))["policy"] == exported(turns)
+    assert (await store.sessions("train", "r_1"))["policy"] == segments_of(turns)
 
 
 async def test_a_turn_stores_only_what_it_adds_to_the_turn_it_shares_the_most_with(tmp_path: Path) -> None:

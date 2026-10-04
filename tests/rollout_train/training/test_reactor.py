@@ -17,9 +17,8 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train import Checkpoints, Fence, Fenced, FileLedger, Files, Step, Weighted, results, train, trained
 from rollout_train.checkpoints import new_id
 from rollout_train.record import GROUPS, STEPS, table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
-from rollout_train.testing import ScriptedEngine, plain_channel
+from rollout_train.testing import Policy, ScriptedEngine, plain_channel
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.training.test_loop import Counting, answering, here, made_by, quickly
 
@@ -159,7 +158,7 @@ async def test_episodes_a_runner_was_playing_when_it_died_are_claimed_again(tmp_
         return await answer(*arguments, **options)
 
     engine.generate = slowly
-    recorder = Recorder({"policy": channel})
+    recorder = Policy(channel)
     runners = DeadAfterwards(tmp_path / "ledger")
     checkpoints = Checkpoints(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
     steps: list[str] = []

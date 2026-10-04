@@ -38,7 +38,6 @@ from tests.rollout_train.gateway.support import (
     gateway_over,
     grant,
     keyring,
-    recorded_in_process,
     stores,
 )
 from tests.rollout_train.machines import MODEL, engine_host
@@ -49,14 +48,15 @@ import anthropic
 import openai
 
 
-async def test_the_gateway_records_what_the_in_process_recorder_records(tmp_path: Path) -> None:
+async def test_the_gateway_records_a_conversation_as_its_segments(tmp_path: Path) -> None:
     ledger, blobs = stores(tmp_path)
     gateway = gateway_over(echo_channel(), ledger, blobs)
     granted = await grant(ledger)
     async with client(create_app(gateway)) as http:
         replies = await converse(http, keyring().mint(granted))
     segments = (await gateway.store.sessions("train", "r_1"))["policy"]
-    assert len(segments) == 2 and segments == await recorded_in_process()
+    trained = [list(dict.fromkeys(span.effect_id for span in segment.spans)) for segment in segments]
+    assert trained == [["e0", "e1", "e2"], ["e3", "e4", "e-again-later"]]  # (an edit begins one; a retry replaces)
     assert {reply["model"] for reply in replies} == {"anything"}  # (the reply echoes the name it was asked by)
 
 

@@ -38,12 +38,11 @@ from rollout_train.launches import CLAIMED, STOPPED, STOPPING, Asked, FileLaunch
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.presence import STALE, FilePresence, Presence
 from rollout_train.record import scope, table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, holding, runner_scope
 from rollout_train.sandboxes import admits, leases_of, sweep
-from rollout_train.testing import plain_channel
+from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.test_sandboxes import ask
 
 pytest.importorskip("rollout_durable")
@@ -423,9 +422,13 @@ class Resumable:
 
 @dataclass
 class NoRecorder:
-    channels: Mapping[str, Any] = field(default_factory=lambda: {"policy": None})
+    def admit(self, run_id: str, attempt: Any) -> None:
+        pass
 
-    def sessions(self, run_id: str) -> dict[str, list[Any]]:
+    async def reaches(self, run: str, binding: Any) -> bool:
+        return True
+
+    async def sessions(self, run: str, run_id: str) -> dict[str, list[Any]]:
         return {}
 
     def forget(self, run_id: str) -> None:
@@ -493,7 +496,7 @@ async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path:
     await ask(ledger, {1: ({}, 1)}, KeyGated)
 
     def runner(name: str) -> EpisodeRunner:
-        recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})
+        recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs)
         local = LocalRunner(recorder=recorder, pools={"boxes": pool})
         return EpisodeRunner(
             name, ledger, local, recorder, blobs, places=1, pools={"boxes": pool}, presence=beats, every=0.02,

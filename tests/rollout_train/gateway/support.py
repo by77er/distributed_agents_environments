@@ -1,5 +1,5 @@
 """What the gateway's tests share: an engine whose answer depends only on its prompt (so that replicas in other
-processes, and an in-process recorder, sample the same), a keyring, and a gateway over a channel of this process."""
+processes sample what one in this process does), a keyring, and a gateway over a channel of this process."""
 
 import asyncio
 import time
@@ -9,13 +9,11 @@ from typing import Any, cast
 
 import httpx
 
-from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.gateway import Gateway, Grant, Keyring, TurnStore
+from rollout_train.gateway import Gateway, Grant, Keyring, TurnStore, create_app
 from rollout_train.inference import Channel, Generation, Limits, Routes
 from rollout_train.ledger import Fence, FileLedger, Ledger
-from rollout_train.recorder import Recorder, Renderer
-from rollout_train.recorder.compat import create_app as recorder_app
+from rollout_train.recorder import Renderer
 from rollout_train.testing import PlainRenderer
 
 SECRETS = [("k2", "a-newer-secret-of-thirty-two-bytes!!"), ("k1", "an-older-secret-of-thirty-two-bytes!")]
@@ -171,10 +169,10 @@ async def converse(
     return replies
 
 
-async def recorded_in_process(turns: int = 5) -> list[Any]:
-    """What the in-process recorder exports for the same exchange."""
-    recorder = Recorder({"policy": echo_channel()}, base_url="http://recorder/v1")
-    address = recorder.endpoint(RecordedModel(channel="policy")).address("r_1/policy")
-    async with client(recorder_app(recorder)) as http:
-        await converse(http, address.api_key, turns)
-    return list(recorder.export("r_1/policy"))
+async def recorded_undisturbed(directory: Path, turns: int = 5) -> list[Any]:
+    """What one gateway in this process records of the same exchange, with nothing failing (in `directory`)."""
+    ledger, blobs = stores(directory)
+    gateway = gateway_over(echo_channel(), ledger, blobs)
+    async with client(create_app(gateway)) as http:
+        await converse(http, keyring().mint(await grant(ledger)), turns)
+    return (await gateway.store.sessions("train", "r_1"))["policy"]

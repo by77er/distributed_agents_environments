@@ -22,12 +22,11 @@ from rollout_train.monitor import FeedReader, RunFeed, System
 from rollout_train.monitor.system import DONE, ENDED, PLAYING, WAITING
 from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, STEPS, scope, table
-from rollout_train.recorder import Recorder
 from rollout_train.registry import registry_of
 from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
 from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPTED, runner_scope
-from rollout_train.testing import plain_channel
+from rollout_train.testing import Policy, plain_channel
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
 
@@ -55,14 +54,15 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     from rollout_train.monitor.app import create_app
 
     feed = RunFeed(tmp_path / FEED)
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
+    policy = Policy(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]))
     blobs = FileBlobStore(tmp_path / BLOBS)
     ledger = FileLedger(tmp_path / LEDGER)
+    recorder = policy.recording(ledger, blobs)
     checkpoints = Checkpoints(ledger, blobs)
     local = LocalRunner(recorder=recorder, hooks=[feed])
     presence = presence_of(ledger)
     assert presence is not None
-    channel = recorder.channels["policy"]
+    channel = policy.channels["policy"]
 
     def about() -> dict[str, Any]:  # (what the platform says of its machine and its channel in each beat)
         serving = {"channel": "policy", "adapter": channel.adapter, "version": channel.version, **channel.take()}
@@ -75,7 +75,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     async with playing(runner):
         await train(
             Words(), Trains(), checkpoints, base="tiny", channel="policy", directory=tmp_path / "checkpoints",
-            publish=recorder.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
+            publish=policy.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
             started={"directory": str(tmp_path)},
         )  # fmt: skip
     await presence.beat("here", {**about(), "places": 4, "playing": 0})  # (its last beat, the last checkpoint served)

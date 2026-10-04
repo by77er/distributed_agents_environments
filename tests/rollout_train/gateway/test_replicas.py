@@ -1,6 +1,6 @@
 """Two replicas of the gateway, each its own process started by `rollout gateway PROFILE`, sharing a ledger and a
 blob store, behind a pass-through proxy that sends requests to each in turn: one is killed in the middle of a turn,
-and the session still records exactly the segments a single in-process recorder records."""
+and the session still records exactly the segments a single gateway records when nothing fails."""
 
 import asyncio
 import contextlib
@@ -18,7 +18,7 @@ import pytest
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.gateway import TurnStore
 from rollout_train.ledger import FileLedger
-from tests.rollout_train.gateway.support import SECRETS, converse, grant, keyring, recorded_in_process
+from tests.rollout_train.gateway.support import SECRETS, converse, grant, keyring, recorded_undisturbed
 
 pytest.importorskip("uvicorn")
 import uvicorn
@@ -113,7 +113,7 @@ async def serving(app: Starlette, port: int) -> AsyncGenerator[None]:
         await task
 
 
-async def test_replicas_behind_a_proxy_one_killed_mid_turn_record_what_one_recorder_records(tmp_path: Path) -> None:
+async def test_replicas_behind_a_proxy_one_killed_mid_turn_record_what_one_undisturbed_records(tmp_path: Path) -> None:
     profile = tmp_path / "profile.toml"
     profile.write_text(PROFILE.format(directory=tmp_path))
     (tmp_path / "keys").write_text("".join(f"{name} {secret}\n" for name, secret in SECRETS))
@@ -134,6 +134,6 @@ async def test_replicas_behind_a_proxy_one_killed_mid_turn_record_what_one_recor
         assert first.poll() is not None and started[1].poll() is None
         assert failed == [upstreams[0]]  # (the turn the first was sampling when it died was asked again of the other)
     segments = (await TurnStore(ledger, blobs).sessions("train", "r_1"))["policy"]
-    assert segments == await recorded_in_process()
+    assert segments == await recorded_undisturbed(tmp_path / "undisturbed")
     turns = await TurnStore(ledger, blobs).turns("train", "r_1")
     assert [turn.effect_id for turn in turns] == ["e0", "e1", "e2", "e3", "e4", "e-again", "e-again-later"]

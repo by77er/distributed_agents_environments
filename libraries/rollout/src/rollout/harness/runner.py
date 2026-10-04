@@ -48,14 +48,14 @@ class DirectModel(ContractModel):
 
 
 class RecordedModel(ContractModel):
-    """A channel served through the recorder."""
+    """A channel served through the gateway, which records every sample."""
 
     channel: str
     sampling: SamplingParameters = SamplingParameters()
 
 
 class RecordedEndpoints(Protocol):
-    """Serves recorded bindings: the recorder (`rollout_train.recorder.Recorder`), as runners see it."""
+    """Serves recorded bindings, as runners see it: the gateway (`rollout_train.gateway.GatewayEndpoints`)."""
 
     def endpoint(self, binding: RecordedModel) -> ModelEndpoint: ...
 

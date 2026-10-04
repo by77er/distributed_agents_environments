@@ -1,5 +1,5 @@
-"""The recorder over HTTP, for harnesses that bring their own loop: OpenAI's Chat Completions and Responses, and
-Anthropic's Messages.
+"""OpenAI's Chat Completions and Responses, and Anthropic's Messages, read and answered: how the gateway
+(`rollout_train.gateway`) serves harnesses that bring their own loop.
 
 A coding agent running inside an environment, or any other program that already knows how to talk to a model, needs
 no agent loop from this library: it is given a base URL and a key (`Model.address()`), and what it samples there is
@@ -9,21 +9,17 @@ ignored, and so are its sampling parameters (a trainable channel samples as its 
     POST {base_url}/chat/completions      OpenAI's Chat Completions  (`chat`)
     POST {base_url}/responses             OpenAI's Responses  (`responses`)
     POST {base_url}/messages              Anthropic's Messages  (`messages`)
-    GET  {base_url}/models                every channel of the recorder, as a model  (`base_url` ends in `/v1`)
 
 Each answers with one reply, or the same reply as server-sent events in its API's own shapes. The reply is sampled
 before the first event is sent, so a recorded turn is kept whole or not at all. A context too long for the model is
 refused the way each API refuses one, which harnesses compact on.
 """
 
-import itertools
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, cast
 
-from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
 
 from rollout.contracts import (
     ContextDelta,
@@ -34,55 +30,12 @@ from rollout.contracts import (
     arguments_digest,
     context_digests,
 )
-from rollout_train.recorder.compat import chat, messages, responses
 from rollout_train.recorder.compat.wire import Failure, Format
-from rollout_train.recorder.recorder import SERVED_UNDER, Recorder
 
-__all__ = ["create_app", "key", "refused", "replied", "requested"]
+__all__ = ["SERVED_UNDER", "key", "refused", "replied", "requested"]
 
-
-def create_app(recorder: Recorder) -> Starlette:
-    """Serve `recorder` (whose `base_url` says where this app is reachable, path included)."""
-    counter = itertools.count()
-
-    async def models(request: Request) -> Response:
-        names = list(recorder.channels)
-        listed = [
-            {"id": name, "object": "model", "type": "model", "display_name": name, "created": 0, "owned_by": "rollout"}
-            for name in names
-        ]
-        page = {"has_more": False, "first_id": names[0] if names else None, "last_id": names[-1] if names else None}
-        return JSONResponse({"object": "list", "data": listed} | page)
-
-    def answering(format: Format) -> Callable[[Request], Awaitable[Response]]:
-        async def answer(request: Request) -> Response:
-            served = recorder.served(key(request))
-            if served is None:
-                return format.error(Failure.KEY, "this key names no session")
-            session_id, endpoint = served
-            allowed = endpoint.describe(session_id).max_output_tokens
-            try:
-                body, sample = await requested(
-                    request, format, session_id, allowed, f"{session_id}:harness:{next(counter)}"
-                )
-            except (KeyError, TypeError, ValueError) as error:
-                return format.error(Failure.REQUEST, f"the request could not be read: {error}")
-            try:
-                result = await endpoint.sample(sample)
-            except ModelEndpointError as error:
-                return refused(format, error)
-            return replied(format, result, sample.effect_id, body)
-
-        return answer
-
-    return Starlette(
-        routes=[
-            Route(f"{SERVED_UNDER}/models", models),
-            Route(f"{SERVED_UNDER}/chat/completions", answering(chat.FORMAT), methods=["POST"]),
-            Route(f"{SERVED_UNDER}/responses", answering(responses.FORMAT), methods=["POST"]),
-            Route(f"{SERVED_UNDER}/messages", answering(messages.FORMAT), methods=["POST"]),
-        ]
-    )
+SERVED_UNDER = "/v1"
+"""The path the APIs are served under: a base URL handed to a harness ends with it."""
 
 
 def key(request: Request) -> str:

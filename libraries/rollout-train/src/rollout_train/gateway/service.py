@@ -29,6 +29,7 @@ say how it follows from earlier ones (`X-Rollout-Links`: a JSON list of `{"type"
 import asyncio
 import itertools
 import json
+import logging
 import time
 import uuid
 from array import array
@@ -43,20 +44,25 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from rollout.contracts import CapabilityContract, ModelEndpointError, SampleRequest
+from rollout.harness.hooks import ModelSample, RunHooks
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
 from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore
-from rollout_train.inference import Channel, Generation
+from rollout_train.inference import Channel, Generation, Routes
 from rollout_train.inference.channel import Sampler, Unserved
 from rollout_train.inference.remote import NoReplica
 from rollout_train.ledger import Fenced
-from rollout_train.recorder.compat import chat, key, messages, refused, replied, requested, responses
+from rollout_train.recorder.compat import SERVED_UNDER, chat, key, messages, refused, replied, requested, responses
 from rollout_train.recorder.compat.wire import Failure, Format
-from rollout_train.recorder.recorder import ATTEMPTS, SERVED_UNDER, Routes
 from rollout_train.recorder.sampling import sample_turn
 from rollout_train.serving import BASE, parts
 
 LINKS = "x-rollout-links"
 """The header a request declares its links to earlier requests in."""
+ATTEMPTS = 3
+"""Times a turn is sampled before it fails, when the weights it began with stop being served (`Unserved`)."""
+
+
+logger = logging.getLogger(__name__)
 
 
 class Refused(Exception):
@@ -69,15 +75,18 @@ class Refused(Exception):
 
 @dataclass
 class Gateway:
-    """What a replica serves: where it records, the keys it takes, and the channels it samples, as the recorder samples
-    them: those whose engines this process publishes to (`channels`, by name; `models` names each one's base model),
-    and those whose engines serve elsewhere (`routes`), each run's sampled from what that run says it serves."""
+    """What a replica serves: where it records, the keys it takes, and the channels it samples: those whose engines this
+    process publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve
+    elsewhere (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
+    harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
+    its endpoints)."""
 
     store: TurnStore
     keyring: Keyring
     channels: Mapping[str, Channel] = field(default_factory=dict[str, Channel])
     routes: Routes | None = None
     models: Mapping[str, str] = field(default_factory=dict[str, str])
+    hooks: Sequence[RunHooks] = ()
 
     def granted(self, key: str) -> Grant:
         """The grant a key carries; `Refused` if it is not one this gateway takes."""
@@ -89,14 +98,26 @@ class Gateway:
         return grant
 
     def sampler(self, grant: Grant) -> Sampler:
-        """What a grant's turns sample from: the channel of this process it names, else the grant's run's routed
-        channel of that name. A channel named within its run (`RUN/NAME`) is that run's."""
-        run, name = parts(grant.channel) if "/" in grant.channel else (grant.run, grant.channel)
+        """What a grant's turns sample from (`sampler_of` its run and channel)."""
+        return self.sampler_of(grant.run, grant.channel)
+
+    def sampler_of(self, run: str, channel: str) -> Sampler:
+        """What a run's channel samples from: the channel of this process it names, else the run's routed channel of
+        that name. A channel named within its run (`RUN/NAME`) is that run's."""
+        run, name = parts(channel) if "/" in channel else (run, channel)
         if name in self.channels:
             return self.channels[name]
         if self.routes is not None and self.routes.routed(name):
             return self.routes.channel(run, name)
-        raise Refused(Failure.KEY, f"this gateway serves no channel {grant.channel!r}")
+        raise Refused(Failure.KEY, f"this gateway serves no channel {channel!r}")
+
+    async def reaches(self, run: str, channel: str) -> bool:
+        """Whether a run's channel can be sampled now: one of this process, or a routed one whose servers have a
+        checkpoint close enough to what the run says it should serve."""
+        name = parts(channel)[1] if "/" in channel else channel
+        if name in self.channels:
+            return True
+        return self.routes is not None and self.routes.routed(name) and await self.routes.reaches(run, name)
 
     @property
     def names(self) -> list[str]:
@@ -105,17 +126,18 @@ class Gateway:
         return [*self.channels, *(name for name in routed if name not in self.channels)]
 
     def describe(self, grant: Grant) -> CapabilityContract:
-        sampler = self.sampler(grant)
-        limits = sampler.limits
-        return CapabilityContract(
-            context_limit=sampler.context_limit, max_output_tokens=limits.thinking + limits.answer
-        )
+        return contract_of(self.sampler(grant))
 
     async def sample(self, grant: Grant, request: SampleRequest, links: Sequence[Link] = ()) -> Reply:
         """One reply, recorded before it is returned: the one recorded under the request's effect id, if there is one.
-        Raises `Refused`, or the endpoint's `ModelEndpointError` (`ContextOverflow` when the context is too long)."""
+        `links` are those its harness declared besides the request's own. Raises `Refused`, or the endpoint's
+        `ModelEndpointError` (`ContextOverflow` when the context is too long)."""
         if request.session_id != grant.session_id:
             raise Refused(Failure.KEY, f"this key is for session {grant.session_id}, not {request.session_id}")
+        try:
+            links = [*links, *(Link(link.type, link.source) for link in request.links)]
+        except ValueError as error:
+            raise Refused(Failure.REQUEST, str(error)) from None
         index = await self.store.index(grant.run, grant.run_id)
         recorded = await self.store.reply(grant.run, grant.run_id, request.effect_id, index)
         if recorded is None:
@@ -193,6 +215,17 @@ class Gateway:
             },
         )
 
+    def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None:
+        """Tell the hooks of a sample a harness asked for, newly recorded."""
+        if reply.replayed or not self.hooks:
+            return
+        sample = ModelSample(grant.run_id, grant.slot, request, reply.result, seconds)
+        for hook in self.hooks:
+            try:
+                hook.on_sample(sample)
+            except Exception:
+                logger.exception("a hook failed on a sample of %s in run %s", grant.slot, grant.run_id)
+
     async def ready(self) -> dict[str, str]:
         """What is not ready, by part (empty: ready): the ledger and the blob store must answer."""
         problems: dict[str, str] = {}
@@ -231,7 +264,9 @@ def create_app(gateway: Gateway) -> Starlette:
                     links = linked(request)
                 except (KeyError, TypeError, ValueError) as error:
                     raise Refused(Failure.REQUEST, f"the request could not be read: {error}") from None
+                began = time.monotonic()
                 reply = await gateway.sample(grant, sample, links)
+                gateway.observe(grant, sample, reply, time.monotonic() - began)
             except Refused as error:
                 return format.error(error.failure, str(error))
             except ModelEndpointError as error:
@@ -273,6 +308,12 @@ def create_app(gateway: Gateway) -> Starlette:
             Route(f"{SERVED_UNDER}/samples", samples, methods=["POST"]),
         ]
     )
+
+
+def contract_of(sampler: Sampler) -> CapabilityContract:
+    """What a channel guarantees a session: its context, and room for thinking and an answer."""
+    limits = sampler.limits
+    return CapabilityContract(context_limit=sampler.context_limit, max_output_tokens=limits.thinking + limits.answer)
 
 
 def linked(request: Request) -> list[Link]:

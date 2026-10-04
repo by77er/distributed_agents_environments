@@ -18,6 +18,7 @@ from rollout.contracts import (
     ModelAddress,
     ModelEndpoint,
     Overloaded,
+    SampleLink,
     SampleRequest,
     SampleResult,
     ToolChoice,
@@ -84,6 +85,7 @@ class EndpointModel:
         tools: Sequence[ToolSpecification] = (),
         max_output_tokens: int | None = None,
         tool_choice: ToolChoice | None = None,
+        links: Sequence[SampleLink] = (),
     ) -> Message:
         if max_output_tokens is not None and max_output_tokens > self._capabilities.max_output_tokens:
             raise ContractViolation(
@@ -111,6 +113,7 @@ class EndpointModel:
                 tools=tools,
                 max_output_tokens=max_output_tokens,
                 tool_choice=tool_choice,
+                links=links,
             )
             try:
                 return await self._sample_with_retries(request)

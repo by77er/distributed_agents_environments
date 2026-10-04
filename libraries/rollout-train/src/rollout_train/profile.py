@@ -15,6 +15,7 @@ import contextlib
 import dataclasses
 import json
 import math
+import secrets
 import socket
 import tomllib
 from collections.abc import AsyncGenerator, Callable, Collection, Coroutine, Mapping
@@ -32,6 +33,7 @@ from rollout.names import named
 from rollout.processes import end_orphans, note_processes
 from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
 from rollout_train.following import Follower
+from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Connection, Engine, Limits, Route, Routes
 from rollout_train.inference.remote import MAX_LAG
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
@@ -39,8 +41,6 @@ from rollout_train.ledger import LOCATION
 from rollout_train.ledger import opened as ledger_at
 from rollout_train.machine import alive, measured
 from rollout_train.presence import presence_of
-from rollout_train.recorder import Recorder
-from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
 from rollout_train.resharding import connect, disconnect, on_ray, reshard
 from rollout_train.rollouts.scheduler import EpisodeRunner
@@ -138,14 +138,19 @@ class EvalsSpec:
 @dataclass(frozen=True)
 class GatewaySpec:
     """The gateway (`rollout_train.gateway`): a stateless service that samples the channels and records every turn,
-    which `rollout gateway PROFILE` serves, as many replicas as wanted."""
+    which `rollout gateway PROFILE` serves, as many replicas as wanted. A run's runner records through it: through the
+    replicas at `url`, or, with none, through a gateway in its own process (served to harnesses at the profile's
+    `serve`)."""
 
     url: str | None = None
-    """Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it)."""
+    """Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it); none: a runner
+    samples through a gateway in its own process. A runner that records through replicas elsewhere has every channel
+    routed (their engines serve elsewhere too)."""
     listen: str = "127.0.0.1:8830"
     """`host:port` a replica serves on."""
     keys: str | None = None
-    """A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's."""
+    """A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's, and for
+    a gateway in a runner's own process with none there, a secret it makes when it starts."""
     lifetime: float = 6 * 3600.0
     """Seconds a key minted for a slot is good for."""
 
@@ -180,7 +185,8 @@ class Profile:
     runner: str = "local"
     """`local` runs episodes in this process; `durable` records them so that they survive it."""
     serve: str | None = None
-    """`host:port` to serve the model endpoint for harnesses on."""
+    """`host:port` to serve the gateway in the runner's own process on, for harnesses (none: a harness cannot be given
+    an address)."""
     address: str | None = None
     """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
@@ -214,8 +220,8 @@ class Profile:
     evals: EvalsSpec | None = None
     """The evals a training run makes of its checkpoints as it makes them."""
     gateway: GatewaySpec | None = None
-    """The gateway that samples the channels and records turns, for `rollout gateway PROFILE`. A run's own runner
-    does not use it yet: it records in its own process."""
+    """The gateway that samples the channels and records turns: what `rollout gateway PROFILE` serves, and what a
+    run's runner records through (by default a gateway in its own process)."""
 
     @classmethod
     def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> "Profile":
@@ -328,7 +334,10 @@ class Platform:
         """The channels whose engines serve in this process."""
         self.routes: Routes | None = None
         """The channels whose engines serve elsewhere, each run's sampled from the checkpoints it says they serve."""
-        self.recorder: Recorder
+        self.gateway: Gateway | None = None
+        """The gateway in this process, where the runner records through one here (no `[gateway] url`)."""
+        self.recorder: GatewayEndpoints
+        """What the runner's recorded slots sample through: the gateway here, or the one at `[gateway] url`."""
         self.runner: EpisodeRunner
         self.feed: Any
         """The monitor's feed (`RunFeed`): the loop's results and steps go there too."""
@@ -403,11 +412,9 @@ class Platform:
         if routes:
             self.routes = Routes(routes, self.ledger)
             stack.callback(self.routes.close)
-        address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
-        base_url = f"{address}{SERVED_UNDER}" if address else None
-        self.recorder = Recorder(self.channels, base_url=base_url, routes=self.routes)
         feed = RunFeed(directory / FEED, **({"keep": profile.feed_runs} if profile.feed_runs else {}))
         stack.callback(feed.close)
+        self.recorder = self._recording(feed)
         tool_sets: dict[str, ToolSet] = {}
         for name, where in profile.tools.items():
             if where.startswith(("http://", "https://")):
@@ -466,9 +473,34 @@ class Platform:
         if learner is not None and described is not None and described.colocated:
             ready = _needs(profile.training_gib, "to train")
             self.trainer = Colocated(learner, list(self.channels.values()), guard=ready)
-        if profile.serve:
-            _background(stack, self._serve(profile.serve))
+        if profile.serve and self.gateway is not None:
+            _background(stack, self._serve(profile.serve, self.gateway))
         return self
+
+    def _recording(self, feed: Any) -> GatewayEndpoints:
+        """What the runner records through: the gateway at `[gateway] url`, or one in this process over its channels
+        and routes, which tells the feed of the samples harnesses ask for (served to them at `serve`)."""
+        profile = self.profile
+        spec = profile.gateway or GatewaySpec()
+        if spec.keys:
+            keyring = Keyring.load(Path(spec.keys).expanduser())
+        else:
+            try:
+                keyring = Keyring.from_environment()
+            except KeyError:  # (keys only this process mints and takes: a secret of its own)
+                keyring = Keyring.parse([("local", secrets.token_urlsafe(32))])
+        store = TurnStore(self.ledger, self.blobs)
+        if spec.url is not None:
+            if unrouted := sorted(name for name, channel in profile.channels.items() if not channel.routed):
+                raise ValueError(
+                    f"channels {', '.join(unrouted)}: a runner that records through a gateway elsewhere "
+                    "([gateway] url) has every channel's engines serve elsewhere too"
+                )
+            return GatewayEndpoints(spec.url, keyring, store, routes=self.routes, lifetime=spec.lifetime)
+        models = {name: channel.model for name, channel in profile.channels.items()}
+        self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed])
+        address = profile.address or (f"http://{profile.serve}" if profile.serve else None)
+        return GatewayEndpoints.of(self.gateway, address, lifetime=spec.lifetime)
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """The pools the profile names that live in this process, each with its keeper; the rest are bound by URL.
@@ -542,7 +574,7 @@ class Platform:
         serves (`rollout_train.serving`), and this returns the version given."""
         if channel not in self.channels and self.routes is not None and self.routes.routed(channel):
             return version or 0
-        served = await self.recorder.publish(channel, adapter, path, version, full=full)
+        served = await self.channels[channel].publish(adapter, path, version, full=full)
         with contextlib.suppress(Exception):  # (a beat missed is said at the next)
             await self.runner.beat()
         return served
@@ -562,16 +594,15 @@ class Platform:
             channels.append({"channel": name, **channel.take(), "servers": servers})
         return {**said, **({"run": self.run.id} if self.plays is None else {}), "channels": channels}
 
-    async def _serve(self, address: str) -> None:
-        """The harness endpoint, over HTTP."""
+    async def _serve(self, address: str, gateway: Gateway) -> None:
+        """The gateway in this process, over HTTP, for harnesses."""
         import uvicorn
-        from starlette.applications import Starlette
 
-        from rollout_train.recorder.compat import create_app as harness_endpoint
+        from rollout_train.gateway import create_app
 
         host, _, port = address.rpartition(":")
-        app = Starlette(routes=list(harness_endpoint(self.recorder).routes))
-        await uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning")).serve()
+        config = uvicorn.Config(create_app(gateway), host=host, port=int(port), log_level="warning")
+        await uvicorn.Server(config).serve()
 
 
 def started_engines(

@@ -8,7 +8,7 @@ import numpy
 import torch
 
 from rollout_tinker.testing import FakeService
-from rollout_train.recorder.recorder import Segment, Span
+from rollout_train.recorder import Segment, Span
 from rollout_train.trainer import Weighted
 
 

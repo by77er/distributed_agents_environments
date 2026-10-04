@@ -1,5 +1,6 @@
 """Gemma 4's token format: what a prompt holds, what ends a turn, and what a sampled turn says."""
 
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -17,11 +18,12 @@ from rollout.contracts import (
     ToolSpecification,
 )
 from rollout.harness import RecordedModel
+from rollout.harness.blobs import FileBlobStore
 from rollout_gemma import arguments, gemma4
 from rollout_train.inference import Channel, Limits
-from rollout_train.recorder import Recorder
+from rollout_train.ledger import FileLedger
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import ScriptedEngine, sample_request
+from rollout_train.testing import ScriptedEngine, admitted, recording, sample_request
 
 MODEL = "google/gemma-4-12B-it"
 MINE = ToolSpecification(
@@ -105,10 +107,14 @@ def test_arguments_read_strings_numbers_flags_objects_and_lists() -> None:
     assert arguments("") == {}
 
 
-async def test_a_thinking_budget_closes_the_channel_and_the_turn_is_recorded(tokenizer: Tokenizer) -> None:
+async def test_a_thinking_budget_closes_the_channel_and_the_turn_is_recorded(
+    tokenizer: Tokenizer, tmp_path: Path
+) -> None:
     engine = ScriptedEngine(tokenizer, [("I could go on thinking", "length"), ("Done.<turn|>", "stop")])
-    recorder = Recorder({"policy": Channel("policy", [engine], gemma4(tokenizer), Limits(thinking=8, answer=32))})
+    channel = Channel("policy", [engine], gemma4(tokenizer), Limits(thinking=8, answer=32))
+    recorder = recording(channel, ledger=FileLedger(tmp_path / "ledger"), blobs=FileBlobStore(tmp_path / "blobs"))
+    await admitted(recorder, "r_1")
     result = await recorder.endpoint(RecordedModel(channel="policy")).sample(sample_request([Message.user("Hi")]))
     assert result.message.text == "Done." and result.finish_reason is FinishReason.STOP
-    (segment,) = recorder.export("r_1/ada")
+    (segment,) = (await recorder.sessions("train", "r_1"))["ada"]
     assert tokenizer.decode(segment.tokens).endswith("I could go on thinking\n<channel|>Done.<turn|>")

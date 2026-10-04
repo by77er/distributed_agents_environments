@@ -14,8 +14,7 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train.check import CHECK, checked, played, scripted
 from rollout_train.ledger import FileLedger
 from rollout_train.record import RESULTS, STARTS, table
-from rollout_train.recorder import Recorder
-from rollout_train.testing import plain_channel
+from rollout_train.testing import Policy, plain_channel
 from tests.rollout_train.rollouts.games import Words, guessing, words
 from tests.rollout_train.training.test_loop import answering, here
 
@@ -93,7 +92,7 @@ async def test_groups_whose_episodes_all_scored_the_same_are_flagged(tmp_path: P
     assert start["kind"] == CHECK and start["version"] == "1"
     assert len(await ledger.read(table("check-1", RESULTS))) == 3
 
-    never = Recorder({"policy": plain_channel(always=[("perhaps\n", "stop")])})
+    never = Policy(plain_channel(always=[("perhaps\n", "stop")]))
     async with here(ledger, never, blobs):
         found = await played(words, ledger, blobs, run="check-2", binding=binding, groups=2, episodes=4)
     assert all(each.flagged and "every episode scored the same" in each.said for each in found[:2])

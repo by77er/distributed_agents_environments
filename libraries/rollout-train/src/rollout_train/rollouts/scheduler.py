@@ -14,13 +14,16 @@ machine died stops beating; what either had claimed is claimed again by whoever 
 short by closing is noted (`runs/RUN/interrupted`) and claimed again too. A claim names the run that plays it. Over a
 runner whose runs survive it (a durable one), a runner started again adopts the runs it finds of its claims that are
 still their episodes' latest attempts (`runs/RUN/adopted`, under its new fence), and they play on; one whose claim
-lapsed meanwhile is cut short.
+lapsed meanwhile is cut short. An adopted run's turns survived with it: the gateway kept them, and answers a sample
+asked for again with the turn it recorded, so the episode trains like any other.
 
 Each episode has a fence of its own (`runs/RUN/episodes/GROUP/EPISODE`, `episode_scope`). The runner whose claim was
 appended takes it at once, and a runner started again takes it anew for each claim it adopts; the episode's record and
 the adoption are appended under it. So whoever took it last shuts out every attempt before: a runner that paused past
 its claim's lapse while another claimed the episode again finds its record refused (`Fenced`), and an adoption is
-refused once a newer attempt has taken the fence.
+refused once a newer attempt has taken the fence. The runner tells its recorder (`Recorded`: the gateway's endpoints)
+which attempt each run plays, under that fence, before the run starts or is adopted; the run's turns are appended under
+it (`rollout_train.gateway`), so a stale attempt can record nothing more once a newer one took the fence.
 
 Several runners, on one machine or many, share the work the same way: which machine plays a group's episodes is only
 a matter of where runners are.
@@ -38,7 +41,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Collection, Coroutine, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Protocol
 
@@ -57,6 +60,7 @@ from rollout.harness.runner import (
     with_row,
 )
 from rollout.harness.sandboxes import Pool, PoolBinding, SandboxLost
+from rollout_train.gateway.client import Attempt
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.presence import Beat, Presence, alive
 from rollout_train.record import GROUPS, RESULTS, runs_in, scope, table
@@ -72,8 +76,6 @@ LAPSED = "its claim lapsed while its runner was stopped"
 """Why a run its runner found on starting again was cut short: it is played again."""
 LOST = "its sandboxes did not outlive its runner"
 """Why a run its runner adopted was cut short: what it was playing in is gone, so it is played again."""
-RESUMED = "its runner was started again while it played: what was sampled before is not recorded"
-"""Why an episode a runner adopted is left out of training (its outcome and result still count)."""
 SUPERSEDED = "another took its episode's fence: its record was refused"
 """Why an attempt that ended was not recorded (a newer attempt claimed its episode meanwhile, say)."""
 RELEASED = "its claim lapsed, and its pool released its sandboxes"
@@ -204,13 +206,20 @@ async def episodes_of(
 
 
 class Recorded(Protocol):
-    """What a runner needs of the recorder: each run's segments, and the channels it serves. A recorder that routes
-    channels to engines elsewhere (`rollout_train.recorder.Recorder` with `routes`) also says whether it reaches a
-    run's (`reaches`), and names them within the run in its binding (`for_run`)."""
+    """What a runner needs of what records its runs' samples (`rollout_train.gateway.GatewayEndpoints`)."""
 
-    channels: Mapping[str, Any]
+    def admit(self, run_id: str, attempt: Attempt) -> None:
+        """Say which attempt a run plays (its episode's fence), before it starts or is adopted."""
+        ...
 
-    def sessions(self, run_id: str) -> dict[str, list[Segment]]: ...
+    async def reaches(self, run: str, binding: RunBinding) -> bool:
+        """Whether every recorded model of a run's binding can be sampled now."""
+        ...
+
+    async def sessions(self, run: str, run_id: str) -> dict[str, list[Segment]]:
+        """What each model slot of a run recorded, by slot."""
+        ...
+
     def forget(self, run_id: str) -> None: ...
 
 
@@ -237,7 +246,7 @@ class Open:
 @dataclass
 class EpisodeRunner:
     """Claims the episodes runs ask for in `ledger` and plays them on `runner`, at most `places` at once: those of the
-    runs it can serve (whose models its recorder's channels serve, whose imports are among `imports` and whose local
+    runs it can serve (whose models its recorder samples, whose imports are among `imports` and whose local
     pools are among `pools`), and of `runs` only, if given. An episode is claimed only while the pools of its
     sandboxes have room for them, and its run's sandboxes are leased under its claim. `guard` is called before
     claiming and raises to wait (a machine short of memory, say). With `presence`, it beats every `beating` seconds,
@@ -382,11 +391,7 @@ class EpisodeRunner:
         pools = {binding.local for binding in played.binding.pools.values() if binding.local}
         if not (local <= set(self.imports) and pools <= set(self.pools)):
             return False
-        reaches = getattr(self.recorder, "reaches", None)  # (a channel served elsewhere: whether a server has it)
-        if reaches is not None:
-            return await reaches(run, played.binding)
-        channels = {binding.recorded.channel for binding in played.binding.models.values() if binding.recorded}
-        return channels <= set(self.recorder.channels)
+        return await self.recorder.reaches(run, played.binding)
 
     async def _needs(self, each: Open, plans: dict[str, Plan]) -> Counter[str]:
         """The sandboxes an episode's run will acquire, as how many from each pool (by its binding: a local name or
@@ -498,6 +503,7 @@ class EpisodeRunner:
                         pass
                     else:
                         group, number = (int(part) for part in episode.split("/"))
+                        self.recorder.admit(handle.run_id, Attempt(run, fence, episode, int(attempt)))
                         self._adopting.append((Open(run, group, number, int(attempt), 0.0), key, handle, fence))
                         continue
                 if not handle.done:
@@ -514,13 +520,13 @@ class EpisodeRunner:
         plans = await self.ledger.read(table(each.run, PLANS))
         played = Plan.from_json(_mapping(plans[max(plans, key=int)]))
         group = _mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
-        for_run = getattr(self.recorder, "for_run", None)  # (its routed channels named within the run: `RUN/NAME`)
-        binding = for_run(each.run, played.binding) if for_run is not None else played.binding
-        specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=binding)
+        specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=played.binding)
         labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
+        self.recorder.admit(run_id, Attempt(each.run, fence, f"{each.group}/{each.number}", each.attempt))
         try:
             handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")
         except Exception as error:  # a run that cannot start is a failed episode like any other
+            self.recorder.forget(run_id)
             detail = f"{type(error).__name__}: {error}"
             failed = Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail)
             await self._ended(each, key, failed, [], fence)
@@ -528,9 +534,9 @@ class EpisodeRunner:
         await self._watch(each, key, handle, fence)
 
     async def _watch(self, each: Open, key: str, handle: RunHandle, fence: Fence, *, adopted: bool = False) -> None:
-        """Follow a run to its end, and record its episode under its episode's `fence`. An adopted run is left out of
-        training (what it sampled before its runner stopped is not recorded); one whose sandboxes are gone is cut
-        short, to be played again."""
+        """Follow a run to its end, and record its episode under its episode's `fence`, with what the gateway recorded
+        of its samples (an adopted run's too, from before its runner stopped). An adopted run whose sandboxes are gone
+        is cut short, to be played again."""
         assert self._fence is not None
         self._tell("started", run=each.run, group=each.group, episode=each.number, run_id=handle.run_id)
         events: list[RunEvent] = []
@@ -545,14 +551,14 @@ class EpisodeRunner:
             self.recorder.forget(handle.run_id)
             await self._interrupt(each, key, CLOSED)  # the attempt is noted, and played again by someone
             raise
-        segments = self.recorder.sessions(handle.run_id)
-        self.recorder.forget(handle.run_id)
+        try:
+            segments = await self.recorder.sessions(each.run, handle.run_id)
+        finally:
+            self.recorder.forget(handle.run_id)
         episode = assemble(events, segments, run=each.run, group=each.group, number=each.number)
         if adopted and episode.outcome is Outcome.FAILED and SandboxLost.__name__ in str(episode.detail):
             await self._interrupt(each, key, LOST)
             return
-        if adopted:
-            episode = replace(episode, excluded=episode.excluded or RESUMED)
         await self._ended(each, key, episode, events, fence)
 
     async def _interrupt(self, each: Open, key: str, why: str) -> None:

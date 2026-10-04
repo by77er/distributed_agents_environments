@@ -5,7 +5,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -27,17 +27,14 @@ from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout.testing import FakeSandbox, FakeSandboxes
 from rollout_train import presence
+from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import FilePresence
 from rollout_train.record import GROUPS, scope, table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, Plan, episodes_of, plan, playing
 from rollout_train.rollouts.scheduler import CLAIMS
 from rollout_train.sandboxes import FileLeases, keep, leases_of, sweep
-from rollout_train.testing import plain_channel
-
-pytest.importorskip("starlette")
-from rollout_train.recorder.compat import create_app
+from rollout_train.testing import plain_channel, recording
 
 BOX = SandboxSpec(kind="fake")
 GATES: dict[str, asyncio.Event] = {}
@@ -74,16 +71,17 @@ async def ask(ledger: Ledger, groups: Mapping[int, tuple[JsonValue, int]], progr
         await ledger.append(table("train", GROUPS), str(number), record, fence)
 
 
-def episode_runner(
-    tmp_path: Path, pool: SandboxPool, recorder: Recorder | None = None, **options: Any
-) -> EpisodeRunner:
-    recorder = recorder or Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})
+def episode_runner(tmp_path: Path, pool: SandboxPool, url: str | None = None, **options: Any) -> EpisodeRunner:
+    """An episode runner over the ledger and blobs in `tmp_path`, recording through a gateway in this process (served
+    to harnesses at `url`, if given)."""
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs, url=url)
     return EpisodeRunner(
         "here",
-        FileLedger(tmp_path / "ledger"),
+        ledger,
         LocalRunner(recorder=recorder, pools={"boxes": pool}),
         recorder,
-        FileBlobStore(tmp_path / "blobs"),
+        blobs,
         places=4,
         pools={"boxes": pool},
         every=0.02,
@@ -230,12 +228,11 @@ class Contained(Program):
 
 
 async def test_a_harness_inside_a_sandbox_reaches_the_recorder_through_its_environment(tmp_path: Path) -> None:
-    recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])}, base_url="http://recorder/v1")
-    app = create_app(recorder)
-
     async def play(sandbox: FakeSandbox, arguments: Mapping[str, JsonValue]) -> JsonValue:
         given = sandbox.environment  # all the harness is told: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL
-        transport = httpx.ASGITransport(app=app)
+        gateway = cast(GatewayEndpoints, played.recorder).gateway
+        assert gateway is not None
+        transport = httpx.ASGITransport(app=create_app(gateway))
         headers = {"Authorization": f"Bearer {given['OPENAI_API_KEY']}"}
         async with httpx.AsyncClient(transport=transport, base_url=given["OPENAI_BASE_URL"], headers=headers) as client:
             body = {"model": given["OPENAI_MODEL"], "messages": [{"role": "user", "content": arguments["prompt"]}]}
@@ -243,7 +240,7 @@ async def test_a_harness_inside_a_sandbox_reaches_the_recorder_through_its_envir
         return {"said": reply["choices"][0]["message"]["content"]}
 
     pool = SandboxPool(FakeSandboxes(operations={"play": play}))
-    played = episode_runner(tmp_path, pool, recorder)
+    played = episode_runner(tmp_path, pool, "http://recorder")
     await ask(played.ledger, {1: ({"word": "yes"}, 1)}, Contained)
     async with playing(played):
         (episode,) = await episodes_of(played.ledger, played.blobs, "train", 1, 1, every=0.01)

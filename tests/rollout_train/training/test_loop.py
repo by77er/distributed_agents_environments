@@ -38,10 +38,9 @@ from rollout_train import loop as loop_module
 from rollout_train.checkpoints import Retention
 from rollout_train.ledger import Fenced
 from rollout_train.record import GROUPS, STARTS, STEPS, table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, Hooks, Record, episodes_of, loaded, playing
 from rollout_train.rollouts.scheduler import EPISODES
-from rollout_train.testing import ScriptedEngine, plain_channel
+from rollout_train.testing import Policy, ScriptedEngine, plain_channel
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
 
@@ -115,14 +114,14 @@ async def made_by(checkpoints: Checkpoints, run: str = "train") -> list[Checkpoi
     return sorted((v for v in await checkpoints.all() if v.run == run), key=lambda checkpoint: checkpoint.depth)
 
 
-def answering() -> Recorder:
-    return Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
+def answering() -> Policy:
+    return Policy(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]))
 
 
 @contextlib.asynccontextmanager
 async def here(
     ledger: Ledger,
-    recorder: Recorder,
+    recorder: Policy,
     blobs: Blobs,
     *,
     runner: Runner | None = None,
@@ -130,23 +129,26 @@ async def here(
     places: int = 6,
     name: str = "here",
 ) -> AsyncGenerator[EpisodeRunner]:
-    """A runner that plays what runs ask for in `ledger`, while the block runs."""
-    played = runner if runner is not None else LocalRunner(recorder=recorder)
-    episodes = EpisodeRunner(name, ledger, played, recorder, blobs, places, hooks=hooks, every=0.01)
+    """A runner that plays what runs ask for in `ledger`, while the block runs, recording through a gateway in this
+    process over `recorder`'s channels."""
+    recorded = recorder.recording(ledger, blobs)
+    played = runner if runner is not None else LocalRunner(recorder=recorded)
+    episodes = EpisodeRunner(name, ledger, played, recorded, blobs, places, hooks=hooks, every=0.01)
     async with playing(episodes):
         yield episodes
 
 
 @pytest.fixture(params=["in process", "durable runner"])
-async def wiring(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[tuple[Runner, Recorder]]:
+async def wiring(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[tuple[Runner, Policy]]:
     recorder = answering()
+    recorded = recorder.recording(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
     if request.param == "in process":
-        yield LocalRunner(recorder=recorder), recorder
+        yield LocalRunner(recorder=recorded), recorder
         return
     pytest.importorskip("dbos")
     from rollout_durable import DurableRunner
 
-    runner = DurableRunner(tmp_path / "runs", recorder=recorder)
+    runner = DurableRunner(tmp_path / "runs", recorder=recorded)
     await runner.launch()
     try:
         yield cast(Runner, runner), recorder
@@ -155,7 +157,7 @@ async def wiring(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterato
 
 
 async def test_the_loop_records_each_group_and_steps_on_what_it_played(
-    wiring: tuple[Runner, Recorder], tmp_path: Path
+    wiring: tuple[Runner, Policy], tmp_path: Path
 ) -> None:
     runner, recorder = wiring
     checkpoints, trainer, notes = checkpoints_in(tmp_path), Counting(), Notes()
@@ -266,7 +268,7 @@ async def test_episodes_of_any_groups_run_at_once_up_to_the_runners_places(tmp_p
         return await answer(*arguments, **options)
 
     engine.generate = slowly
-    recorder = Recorder({"policy": channel})
+    recorder = Policy(channel)
     running = Running()
     checkpoints = checkpoints_in(tmp_path)
     async with here(checkpoints.ledger, recorder, checkpoints.blobs, hooks=[running], places=6):

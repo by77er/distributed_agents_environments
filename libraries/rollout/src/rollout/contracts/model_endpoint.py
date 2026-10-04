@@ -1,7 +1,7 @@
 """The model endpoint contract: the only thing code knows about models
 (docs/libraries/rollout/contracts/model-endpoint.md).
 
-Implemented by the recorder and by direct adapters; code cannot tell which serves a model slot.
+Implemented by the gateway's endpoints and by direct adapters; code cannot tell which serves a model slot.
 """
 
 from enum import StrEnum
@@ -55,6 +55,15 @@ class ContextDelta(ContractModel):
     """The last value of the chain `rollout.contracts.digests.context_digests` computes over `append`."""
 
 
+class SampleLink(ContractModel):
+    """How a request follows from an earlier one of its session, as its program says: `type` is a label
+    (`compaction_attempt`, `compaction`, `subagent_call`, `subagent_return`, or any other), and `source` the earlier
+    request's `effect_id`. A recording endpoint keeps it with the turn; others ignore it."""
+
+    type: str
+    source: str
+
+
 class SampleRequest(ContractModel):
     """A request for one reply. Sampling parameters are not here: they belong to the policy."""
 
@@ -68,6 +77,8 @@ class SampleRequest(ContractModel):
     max_output_tokens: int | None = None
     """Must not exceed the contract's `max_output_tokens`."""
     tool_choice: ToolChoice | None = None
+    links: FrozenSequence[SampleLink] = ()
+    """How it follows from earlier requests of its session."""
 
     @model_validator(mode="after")
     def _unique_tool_names(self) -> Self:

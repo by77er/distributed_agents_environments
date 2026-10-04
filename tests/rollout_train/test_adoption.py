@@ -16,11 +16,10 @@ from rollout.testing import FakeSandboxes
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import FilePresence
 from rollout_train.record import table
-from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, episodes_of
-from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, INTERRUPTED, LAPSED, LOST, RESUMED
+from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, INTERRUPTED, LAPSED, LOST
 from rollout_train.sandboxes import admits, leases_of
-from rollout_train.testing import plain_channel
+from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.test_sandboxes import BOX, GATES, ask
 
 pytest.importorskip("rollout_durable")
@@ -74,7 +73,7 @@ class Restarts:
             self.pool = SandboxPool(
                 self.sandboxes, leases=leases_of(self.ledger), admits=admits(self.ledger, self.beats)
             )
-        recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop")])})
+        recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=self.ledger, blobs=self.blobs)
         self.durable = DurableRunner(self.tmp_path / "runs", recorder=recorder, pools={"boxes": self.pool})
         self.runner = EpisodeRunner(
             "here", self.ledger, self.durable, recorder, self.blobs, places=4, pools={"boxes": self.pool},
@@ -123,7 +122,7 @@ async def test_a_runner_started_again_adopts_its_durable_runs_and_they_play_on_i
     assert sorted(await played.ledger.read(table("train", CLAIMS))) == ["1/1/1"]  # no new attempt
     assert sorted(await played.ledger.read(table("train", ADOPTED))) == ["1/1/1/2"]  # adopted under its new fence
     assert episode.info["key"] == "train/1/1/1/box" and episode.info["handle"] == handle  # the same sandbox
-    assert episode.trainable is False and episode.excluded == RESUMED  # (what it sampled before is not recorded)
+    assert episode.excluded is None  # (adopted, it trains like any other: the gateway kept what it sampled)
     assert played.sandboxes.made == [handle] and played.sandboxes.deleted == [handle]  # released when it ended
 
 

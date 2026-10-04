@@ -11,7 +11,15 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
-from rollout.contracts import CapabilityContract, Message, ModelAddress, ToolChoice, ToolSpecification, Usage
+from rollout.contracts import (
+    CapabilityContract,
+    Message,
+    ModelAddress,
+    SampleLink,
+    ToolChoice,
+    ToolSpecification,
+    Usage,
+)
 from rollout.harness.blobs import Blobs
 from rollout.harness.conversations import Address, ConversationKey, Envelope
 from rollout.harness.environments import Environments
@@ -39,7 +47,11 @@ class Model(Protocol):
         tools: Sequence[ToolSpecification] = (),
         max_output_tokens: int | None = None,
         tool_choice: ToolChoice | None = None,
-    ) -> Message: ...
+        links: Sequence[SampleLink] = (),
+    ) -> Message:
+        """A reply to `messages`; `links` say how the request follows from earlier ones of the slot (by the effect
+        ids its replies carry: `rollout.harness.model.EFFECT_ID_META`)."""
+        ...
 
     def address(self) -> ModelAddress:
         """For a harness that brings its own loop (a coding agent running inside the environment, say): where it
