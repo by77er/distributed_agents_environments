@@ -6,9 +6,10 @@ tokens, sampled tokens, behavior logprobs and the version of the weights that sa
 checkpoint served).
 
 Thinking has a budget: a first phase samples until thinking closes or the budget runs out; then the close is forced
-(not sampled, so never trained on) and a second phase samples the answer. A request may cap its own output
-(`max_output_tokens`): the answer's room comes first and thinking gets what is left, down to none (the block is closed
-before it starts).
+(not sampled, so never trained on) and a second phase samples the answer. Where the model opens its thinking itself
+(Qwen3) rather than the prompt, the first phase also has room to open it, and the close is forced only if it did. A
+request may cap its own output (`max_output_tokens`): the answer's room comes first and thinking gets what is left,
+down to none (the block is closed before it starts).
 
 **What a session exports** (`Recorder.export`) is a list of `Segment`s: token sequences with the spans the policy
 sampled. A turn whose prompt begins with everything an earlier turn held (its prompt and what it sampled) continues
@@ -194,7 +195,7 @@ class RecordedEndpoint:
         if request.max_output_tokens is not None:  # the request's own cap: the answer first, thinking with the rest
             answer = min(answer, request.max_output_tokens)
             budget = min(budget, request.max_output_tokens - answer)
-        closing = len(renderer.encode(thinking.forced_close)) if thinking is not None and thinking.prompt_opens else 0
+        closing = len(renderer.encode(thinking.forced_close)) if thinking is not None else 0
         if len(prompt) + closing + answer > channel.context_limit:  # no room left to answer: the caller must compact
             raise ContextOverflow(channel.context_limit)
         if limits.sequence is not None:  # what the prompt leaves, after room for the answer
@@ -204,6 +205,14 @@ class RecordedEndpoint:
         mask: list[bool] = []
         logprobs: list[float] = []
         adapter, version = channel.adapter, channel.version
+
+        def force() -> None:
+            """Close the thinking, unsampled: never trained on."""
+            assert thinking is not None
+            forced = renderer.encode(thinking.forced_close)
+            completion.extend(forced)
+            mask.extend([False] * len(forced))
+            logprobs.extend([math.nan] * len(forced))
 
         async def generate(context: Sequence[int], room: int, stop: Sequence[int]) -> str:
             generation = await channel.generate(
@@ -225,10 +234,14 @@ class RecordedEndpoint:
             if budget > 0:
                 spent = await generate(prompt, budget, [*renderer.thinking_end_token_ids(), *stops]) == "length"
             if spent:  # out of budget: close the thinking, unsampled
-                forced = renderer.encode(thinking.forced_close)
-                completion += forced
-                mask += [False] * len(forced)
-                logprobs += [math.nan] * len(forced)
+                force()
+            if not completion or completion[-1] not in stops:
+                await generate([*prompt, *completion], answer, stops)
+        elif thinking is not None and budget > 0:  # the model opens its thinking, if it thinks at all
+            opening = renderer.encode(thinking.open)
+            ended = await generate(prompt, budget + len(opening), [*renderer.thinking_end_token_ids(), *stops])
+            if ended == "length" and completion[: len(opening)] == opening:  # still thinking at the budget: close it
+                force()
             if not completion or completion[-1] not in stops:
                 await generate([*prompt, *completion], answer, stops)
         else:

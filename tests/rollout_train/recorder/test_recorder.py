@@ -215,3 +215,31 @@ async def test_a_channel_tells_programs_its_limit_and_refuses_what_is_over_it(to
     tight = channel(engine, answer=16, sequence=len(qwen35(tokenizer).render(messages, [MINE])) + 15)
     with pytest.raises(ContextOverflow):  # what tells a program to compact and try again
         await Recorder({"policy": tight}).endpoint(POLICY).sample(sample_request(messages, tools=[MINE]))
+
+
+async def test_thinking_the_model_opens_is_closed_at_its_budget_and_the_answer_follows(tokenizer: Tokenizer) -> None:
+    engine = ScriptedEngine(
+        tokenizer, [("<think>\nLet me weigh apple against river and", "length"), ("candle<|im_end|>", "stop")]
+    )
+    served = channel(engine, renderer="qwen3", thinking=8, answer=16)
+    recorder = Recorder({"policy": served})
+    result = await recorder.endpoint(POLICY).sample(sample_request([Message.user("Guess.")]))
+    assert result.message.text == "candle" and result.finish_reason is FinishReason.STOP
+    (segment,) = recorder.export("r_1/ada")
+    prompt, opened = engine.prompts[0], len(served.renderer.encode("<think>"))
+    forced = served.renderer.encode("\n</think>\n\n")
+    thought = len(prompt) + 8 + opened
+    assert segment.tokens[thought : thought + len(forced)] == forced  # closed unsampled, at the budget
+    assert segment.spans == [
+        Span(len(prompt), thought, 0, "r_1:0:0"),
+        Span(thought + len(forced), len(segment.tokens), 0, "r_1:0:0"),
+    ]
+
+
+async def test_an_answer_with_no_thinking_is_not_closed(tokenizer: Tokenizer) -> None:
+    engine = ScriptedEngine(tokenizer, [("candle<|im_end|>", "stop")])
+    recorder = Recorder({"policy": channel(engine, renderer="qwen3", thinking=8, answer=16)})
+    result = await recorder.endpoint(POLICY).sample(sample_request([Message.user("Guess.")]))
+    (segment,) = recorder.export("r_1/ada")
+    assert result.message.text == "candle" and len(engine.prompts) == 1
+    assert segment.spans == [Span(len(engine.prompts[0]), len(segment.tokens), 0, "r_1:0:0")]

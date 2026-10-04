@@ -41,10 +41,12 @@ content and records the turn.
 
 ### Thinking
 
-Thinking has a budget (`Limits.thinking`). For a model family whose prompt opens the thinking block:
+Thinking has a budget (`Limits.thinking`):
 
-1. A first phase samples until the thinking closes or the budget runs out.
-2. If the budget ran out, the close is forced. The forced tokens are not sampled, so they are never trained on.
+1. A first phase samples until the thinking closes or the budget runs out. For a model family that opens the block
+   itself (Qwen3), rather than its prompt (Qwen3.5), the phase also has room for the opening.
+2. If the budget ran out while thinking, the close is forced. The forced tokens are not sampled, so they are never
+   trained on. A model that opens no block and answers at once is not closed.
 3. A second phase samples the answer, unless the turn already ended.
 
 - A request may cap its own output (`max_output_tokens`). The answer's room comes first and thinking gets what is
@@ -53,8 +55,7 @@ Thinking has a budget (`Limits.thinking`). For a model family whose prompt opens
   ends the thinking: everything before it is kept as reasoning, and what follows is the answer.
 - A turn whose thinking never closes is all reasoning.
 
-For a family that opens the block itself, or has none, one phase samples with the thinking and answer room
-together.
+For a family with no thinking block, one phase samples with the thinking and answer room together.
 
 ## What a session exports
 
