@@ -1,5 +1,5 @@
 # What every pod of the platform mounts: the local state's volume, and the cluster config with the profiles the
-# commands still take (files/), which name the stores at their in-cluster addresses.
+# commands take (files/), which name the stores at their in-cluster addresses.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -25,7 +25,8 @@ data:
     {{- tpl ($.Files.Get $path) $ | nindent 4 }}
   {{- end }}
 ---
-# The launchers' account: they may manage RayJobs and RayClusters (and read their pods), for runs started as RayJobs.
+# The launchers' account: it may manage RayJobs and RayClusters (and read their pods), for runs started as RayJobs
+# (docs/research/runtime-design.md). The launchers submit runs to the Ray cluster's job server, which needs none of it.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

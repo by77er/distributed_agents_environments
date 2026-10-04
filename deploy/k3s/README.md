@@ -56,7 +56,7 @@ Every pod of the platform mounts the same things:
 - the volume `state` at `/root/.cache/rollout` (the code's `~/.cache/rollout`; the containers run as root): run
   directories, Minecraft's servers and worlds, the Hugging Face cache (`HF_HOME`), node-local scratch;
 - the ConfigMap `rollout` at `/etc/rollout`: `cluster.toml` (the cluster config, [docs/guide/cluster.md](../../docs/guide/cluster.md);
-  `ROLLOUT_CLUSTER` names it) and the profiles the commands still take, under `profiles/LAUNCHER/`, each naming the
+  `ROLLOUT_CLUSTER` names it) and the profiles the commands take, under `profiles/LAUNCHER/`, each naming the
   stores above. The chart's `files/` holds them;
 - the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`.
 
@@ -89,7 +89,7 @@ secret resolved.
 
 - the run directories, the evaluations' directories, `datasets/`, `gsm8k-tinker/`, Minecraft's files and the JDK onto
   the volume `state`; each run's `ledger.json` then names the cluster's ledger;
-- the stores of files the ledger's records point into into the bucket (`python -m rollout_s3.copying`): those named by
+- the stores of files that the ledger's records point into, into the bucket (`python -m rollout_s3.copying`): those named by
   a location in a record (`gsm8k-tinker/blobs` by the GSM8K eval's start, `datasets/blobs` by the dataset), and each
   run's own `RUN/blobs` (curriculum-9's episodes and checkpoints, named by their blobs' URIs). Blobs are named by their
   SHA-256, so the stores merge into `s3://rollout-blobs/blobs` without a clash;

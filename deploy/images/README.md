@@ -1,6 +1,8 @@
-# Pods' images
+# Images
 
-Two images for GPU pods rented elsewhere (RunPod), each reached at a public TCP port over mutual TLS:
+`platform/` is the image the K3s cluster runs (Ray's pods, the launchers, the gateway, the monitors), built in the
+cluster ([deploy/k3s](../k3s/README.md#images)). The other two are for GPU pods rented elsewhere (RunPod), each reached
+at a public TCP port over mutual TLS:
 
 | Image | Directory | What runs in it |
 |---|---|---|

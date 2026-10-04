@@ -1,4 +1,4 @@
-# The platform: every workspace package with every extra (vLLM, the trainers, Tinker, Ray) in /opt/rollout/venv,
+# The platform: every workspace package with every extra (vLLM, the trainers, Tinker) in /opt/rollout/venv,
 # rollout-verifiers (a project locked apart) in /opt/rollout/verifiers, a Java runtime for Paper and Node for the
 # Minecraft harness. Ray's pods (KubeRay), the gateway, the monitor and the launchers all run it.
 # Built from the repository's root:

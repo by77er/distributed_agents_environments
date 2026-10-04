@@ -99,8 +99,8 @@ uv run python -m rollout_train.cli launcher --ledger sqlite:///~/.cache/rollout/
 (cd implementations/rollout-verifiers && nohup uv run rollout launcher --ledger sqlite:///~/.cache/rollout/ledger.db \
   --profiles ~/.cache/rollout/launch-profiles/gsm8k --environment rollout_verifiers.environments:gsm8k \
   --runs ~/.cache/rollout/runs --at-once 2 --name gsm8k > ~/.cache/rollout/launcher-gsm8k.log 2>&1 &)
-(cd implementations/rollout-tinker && nohup uv run rollout gateway ../rollout-verifiers/examples/gsm8k_tinker.toml \
-  > ~/.cache/rollout/gateway-gsm8k-tinker.log 2>&1 &)
+nohup uv run --extra tinker rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.toml \
+  > ~/.cache/rollout/gateway-gsm8k-tinker.log 2>&1 &
 nohup uv run rollout monitor ~/.cache/rollout/runs/curriculum-9 --port 8765 > ~/.cache/rollout/monitor-8765.log 2>&1 &
 (cd ~/Code/distributed_agents_environments && nohup uv run rollout monitor ~/.cache/rollout/evaluations/astra-t054u \
   --port 8766 > ~/.cache/rollout/evaluations/astra-t054u/monitor.log 2>&1 &)
