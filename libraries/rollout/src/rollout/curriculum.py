@@ -8,9 +8,10 @@ order, the first `start` of them, and `reach` past the hardest one solved at lea
 its own row and for every row that row `counts_for`.
 
 The evals a run makes of its checkpoints (`rollout_train.evals.Schedule`) are folded in too (`evaluated`): the loop
-calls it with each eval's results as the eval ends, and again with every eval, in the order they ended, when the run is
-started again (a curriculum is the fold of a run's results, its evals' among them). The generic curriculum keeps the
-newest eval of each suite (`evaluations`) and decides nothing from it.
+calls it with each entry's results as the eval ends (an entry is an environment of the suite, named by `module:name`),
+and again with every eval, in the order they ended, when the run is started again (a curriculum is the fold of a run's
+results, its evals' among them). The generic curriculum keeps the newest eval of each suite's entry (`evaluations`) and
+decides nothing from it.
 
 An environment may supply a curriculum of its own (`environment.curriculum()`, `curriculum_of`): a `Curriculum` that
 decides differently, by overriding `unlocked`, `sample` or `weight`. One that gates on evals overrides `evaluated`:
@@ -19,8 +20,8 @@ decides differently, by overriding `unlocked`, `sample` or `weight`. One that ga
     class Gated(Curriculum):
         passed: bool = False
 
-        def evaluated(self, suite, checkpoint, results):
-            super().evaluated(suite, checkpoint, results)
+        def evaluated(self, suite, checkpoint, results, entry=None):
+            super().evaluated(suite, checkpoint, results, entry)
             self.passed = self.passed or (suite == "held-out" and solved_share(results) >= 0.6)
 
         def unlocked(self):
@@ -93,11 +94,11 @@ class Curriculum:
     """Weight of the newest group in the moving averages."""
     floor: float = 0.05
     records: dict[str, Record] = field(default_factory=dict[str, Record])
-    evaluations: dict[str, tuple[str | None, list[GroupResult]]] = field(
-        default_factory=dict[str, tuple[str | None, list[GroupResult]]]
+    evaluations: dict[tuple[str, str | None], tuple[str | None, list[GroupResult]]] = field(
+        default_factory=dict[tuple[str, str | None], tuple[str | None, list[GroupResult]]]
     )
-    """The newest eval of each suite, by the suite's name: the checkpoint that played it (None: the base model), and
-    how it did at each start."""
+    """The newest eval of each suite's entry, by the suite's name and the entry's environment: the checkpoint that
+    played it (None: the base model), and how it did at each start of that entry."""
 
     def unlocked(self) -> list[Row]:
         solved = [index for index, row in enumerate(self.rows) if self.record(row).success >= 0.5]
@@ -155,11 +156,14 @@ class Curriculum:
             record.attempts += 1
             record.failures = 0
 
-    def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None:
-        """Take an eval into account: `suite` played by `checkpoint` (None: the base model), one result per start of
-        the suite. The generic curriculum keeps the newest of each suite and decides nothing from it; one that gates on
-        evals overrides this."""
-        self.evaluations[suite] = (checkpoint, list(results))
+    def evaluated(
+        self, suite: str, checkpoint: str | None, results: Sequence[GroupResult], entry: str | None = None
+    ) -> None:
+        """Take an eval's entry into account: `suite` played by `checkpoint` (None: the base model), one result per
+        start of its entry of the environment `entry` (`module:name`; None where the eval does not say). The generic
+        curriculum keeps the newest of each suite's entry and decides nothing from it; one that gates on evals
+        overrides this."""
+        self.evaluations[(suite, entry)] = (checkpoint, list(results))
 
     def record(self, row: Row) -> Record:
         return self.records.setdefault(row.key, Record())

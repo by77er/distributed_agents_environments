@@ -89,13 +89,16 @@ def test_a_group_counts_for_the_rows_its_row_counts_for_as_well() -> None:
 
 @dataclass
 class Gated(Curriculum):
-    """Rows past the third wait until the suite `held-out` is solved at least 60% of the time by a checkpoint."""
+    """Rows past the third wait until the suite `held-out`'s entry of its own environment is solved at least 60% of
+    the time by a checkpoint."""
 
     opened_by: str | None = None
 
-    def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None:
-        super().evaluated(suite, checkpoint, results)
-        if suite == "held-out" and solved_share(results) >= 0.6 and self.opened_by is None:
+    def evaluated(
+        self, suite: str, checkpoint: str | None, results: Sequence[GroupResult], entry: str | None = None
+    ) -> None:
+        super().evaluated(suite, checkpoint, results, entry)
+        if (suite, entry) == ("held-out", "words:words") and solved_share(results) >= 0.6 and self.opened_by is None:
             self.opened_by = checkpoint
 
     def unlocked(self) -> list[Row]:
@@ -112,16 +115,21 @@ def test_a_curriculum_can_gate_rows_on_an_evals_results() -> None:
     assert isinstance(curriculum, Gated) and isinstance(curriculum_of(Words()), Curriculum)
     curriculum.update(ROWS[2], [1.0], [True])  # solved: the generic curriculum would unlock four more
     assert curriculum.unlocked() == ROWS[:3]
-    curriculum.evaluated("other", "c1", [Result(1, 0.0, "r01", rewards=[1.0], solved=[True])])
-    curriculum.evaluated("held-out", "c1", [Result(1, 0.0, "r01", rewards=[1.0, 0.0], solved=[True, False])])
+    curriculum.evaluated("other", "c1", [Result(1, 0.0, "r01", rewards=[1.0], solved=[True])], "words:words")
+    curriculum.evaluated(
+        "held-out", "c1", [Result(1, 0.0, "r01", rewards=[1.0, 0.0], solved=[True, False])], "words:words"
+    )
     assert curriculum.unlocked() == ROWS[:3]  # half solved is not enough
     played = [
         Result(1, 0.0, "r01", rewards=[1.0, 1.0], solved=[True, True]),
         Result(2, 0.0, "r02", solved=[True, False]),
     ]
-    curriculum.evaluated("held-out", "c2", played)
+    curriculum.evaluated("held-out", "c2", played, "games:other")  # (another environment's entry of the suite)
+    assert curriculum.opened_by is None
+    curriculum.evaluated("held-out", "c2", played, "words:words")
     assert curriculum.opened_by == "c2" and curriculum.unlocked() == ROWS[:7]
-    assert curriculum.evaluations["held-out"] == ("c2", played) and curriculum.evaluations["other"][0] == "c1"
+    assert curriculum.evaluations[("held-out", "words:words")] == ("c2", played)
+    assert curriculum.evaluations[("other", "words:words")][0] == "c1"
     generic = Curriculum(ROWS)
-    generic.evaluated("held-out", None, played)  # (the generic one keeps the newest of each suite, and decides nothing)
-    assert generic.evaluations == {"held-out": (None, played)} and generic.unlocked() == ROWS[:3]
+    generic.evaluated("held-out", None, played, "words:words")  # (the newest of each suite's entry, deciding nothing)
+    assert generic.evaluations == {("held-out", "words:words"): (None, played)} and generic.unlocked() == ROWS[:3]

@@ -14,7 +14,7 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
-from rollout_train.evals import EVAL, make_suite, subject_table
+from rollout_train.evals import EVAL, make_suite, subject_table, suite_entry
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.monitor.scores import BY_HAND, BY_SCHEDULE, path_of
 from rollout_train.monitor.system import LOST, RUNNING, System
@@ -82,7 +82,7 @@ async def a_line(tmp_path: Path) -> tuple[FileLedger, dict[str, Checkpoint]]:
     model, of each checkpoint by hand, and of the first step's by its run's schedule."""
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
+    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])])
     first = await a_checkpoint(checkpoints, tmp_path, "lora-run", 1, [])
     second = await a_checkpoint(checkpoints, tmp_path, "lora-run", 2, [first.id])
     merged = await a_checkpoint(checkpoints, tmp_path, None, None, [second.id], kind="full")
@@ -136,7 +136,7 @@ async def test_a_checkpoints_line_runs_from_the_base_model_through_merges_with_e
     assert [score["solved"] if score else None for score in scores] == [0.0, 0.5, 0.75, None, 1.0]
     assert scores[2]["played"] == 4 and sorted(scores[2]["evals"]) == ["eval-second", "eval-second-again"]  # (pooled)
     assert path["suites"] == [
-        {"suite": "words-v1@1", "name": "words-v1", "number": 1, "label": "words-v1", "environment": ENVIRONMENT}
+        {"suite": "words-v1@1", "name": "words-v1", "number": 1, "label": "words-v1", "environments": [ENVIRONMENT]}
     ]
     alone = path_of({}, {made["first"].id: made["first"]}, made["first"].id)
     assert alone["points"][0]["short"] == "base" and alone["suites"] == []
@@ -144,8 +144,8 @@ async def test_a_checkpoints_line_runs_from_the_base_model_through_merges_with_e
 
 async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
-    await make_suite(ledger, "other-words", "games:other", words, rows=["say-yes"], seeds=[1])
+    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
+    await make_suite(ledger, "other-words", [suite_entry("games:other", words, rows=["say-yes"], seeds=[1])])
     fence = await ledger.take(scope("train"))
     changeable: dict[str, JsonValue] = {"groups_per_step": 4, "evals.suite": None, "evals.every": 1,
                                         "evals.episodes": 1, "trainer.learning_rate": 5e-5}  # fmt: skip
@@ -169,7 +169,7 @@ async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path
         answer = await client.post("/api/runs/train/settings", json={"settings": wanted})
         assert answer.status_code == 200, answer.text
         assert (await client.get("/api/runs/train/settings")).json()["desired"] == wanted
-        for refused in ({"trainer.rank": 16}, {"model": "big"}, {"evals.every": 0}, {"evals.suite": "other-words"},
+        for refused in ({"trainer.rank": 16}, {"model": "big"}, {"evals.every": 0}, {"evals.suite": "other-words@2"},
                         {"trainer.learning_rate": [1]}):  # fmt: skip
             answer = await client.post("/api/runs/train/settings", json={"settings": refused})
             assert answer.status_code == 409, refused

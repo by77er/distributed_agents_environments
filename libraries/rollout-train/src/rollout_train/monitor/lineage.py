@@ -37,7 +37,16 @@ from typing import Any, cast
 from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
-from rollout_train.evals import Suite, played_version, start_identity, suites_among, version_id, versions_in
+from rollout_train.evals import (
+    Suite,
+    eval_episodes,
+    offsets,
+    played_version,
+    start_identity,
+    suites_among,
+    version_id,
+    versions_in,
+)
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
 
@@ -464,7 +473,7 @@ class _Reading:
         """Each suite: the version its name points to (`version`, by id; where the registry's `names` say, else its
         newest) with that version's starts, every version (`versions`, oldest first, each with its starts), and each
         subject that played it (a checkpoint, or another model), with the version it played and how it did at each
-        start (by the start's number in that version)."""
+        start (by the start's number in that version) and at each of that version's entries (`entries`)."""
         suites: list[dict[str, Any]] = []
         pointed: Mapping[str, str] = self.names.get("suites", {})
         for suite in suites_among(self.tables):
@@ -472,13 +481,13 @@ class _Reading:
             if not versions:
                 continue
             current = next((each for each in versions if each.id == pointed.get(suite)), versions[-1])
-            sizes = {each.id: len(each.starts) for each in versions}
+            by_id = {each.id: each for each in versions}
             subjects: list[dict[str, Any]] = []
             for subject in self.named(f"{_EVALUATIONS}{suite}/", "/results"):
                 about = self.record(f"{_EVALUATIONS}{suite}/{subject}/subject", "subject")
                 version = played_version(about, suite)
                 by_start: dict[str, list[dict[str, Any]]] = {}
-                episodes = self.read(f"{_RUNS}{subject}/episodes")  # (an eval's subject is its run)
+                episodes = eval_episodes(self.tables, suite, subject)  # (an eval's subject is its run)
                 for key, result in self.read(f"{_EVALUATIONS}{suite}/{subject}/results").items():
                     said = reported(episodes.get(key.replace("-", "/", 1))) is not False
                     by_start.setdefault(key.partition("-")[0], []).append(
@@ -497,8 +506,9 @@ class _Reading:
                         "episodes": int(about.get("episodes") or 1),
                         "asked_by": about.get("asked_by"),
                         "version": version,
-                        "starts": sizes.get(version, 0),
+                        "starts": len(by_id[version].starts) if version in by_id else 0,
                         "results": by_start,
+                        "entries": _entries(by_id.get(version), by_start),
                         "played": len(played),
                         "solved": sum(solved) if solved or not played else None,
                         "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
@@ -520,34 +530,67 @@ class _Reading:
 
 
 def _starts(suite: Suite) -> list[dict[str, Any]]:
-    """A version's starts as the page shows them: each by its number in the version, its row, title and seed, and what
-    it is in every version that has it (`identity`)."""
+    """A version's starts as the page shows them: each by its number in the version, its entry's environment, its row,
+    title and seed, and what it is in every version that has it (`identity`)."""
     return [
-        {"start": str(number), "task": start.task, "title": start.title, "seed": start.seed}
+        {"start": str(before + number), "environment": entry.environment or None, "task": start.task}
+        | {"title": start.title, "seed": start.seed}
         | {"identity": start_identity({"task": start.task, "parameters": start.parameters})}
-        for number, start in enumerate(suite.starts, start=1)
+        for entry, before in zip(suite.entries, offsets(suite), strict=True)
+        for number, start in enumerate(entry.starts, start=1)
     ]
 
 
 def _described(suite: Suite) -> dict[str, Any]:
-    """A version as the page shows it: what it is, and its starts."""
+    """A version as the page shows it: what it is, its entries (each with how many of its starts come before its
+    first: `offset`), and its starts."""
     return {
         "id": suite.id,
         "number": suite.number,
-        "environment": suite.environment or None,
-        "environment_version": suite.environment_version,
+        "environments": [each or None for each in suite.environments],
         "made": suite.made or None,
-        "chosen": suite.chosen,
-        "eval_data": suite.eval_data,
-        "rows": suite.rows,
-        "seeds": suite.seeds,
         "held_out": suite.held_out,
-        "episodes": suite.episodes,
-        "thinking_tokens": suite.thinking_tokens,
-        "answer_tokens": suite.answer_tokens,
         "edited_from": version_id(suite.name, suite.edited_from) if suite.edited_from else None,
+        "entries": [
+            {
+                "environment": entry.environment or None,
+                "environment_version": entry.environment_version,
+                "chosen": entry.chosen,
+                "eval_data": entry.eval_data,
+                "rows": entry.rows,
+                "seeds": entry.seeds,
+                "held_out": entry.held_out,
+                "episodes": entry.episodes,
+                "thinking_tokens": entry.thinking_tokens,
+                "answer_tokens": entry.answer_tokens,
+                "offset": before,
+                "starts": len(entry.starts),
+            }
+            for entry, before in zip(suite.entries, offsets(suite), strict=True)
+        ],
         "starts": _starts(suite),
     }
+
+
+def _entries(version: Suite | None, by_start: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """How a subject did at each entry of the version it played (each its environment, episodes played, solved where
+    its episodes say, and the mean reward), from its episodes by start."""
+    if version is None:
+        return []
+    found: list[dict[str, Any]] = []
+    for entry, before in zip(version.entries, offsets(version), strict=True):
+        played = [each for number in range(1, len(entry.starts) + 1) for each in by_start.get(str(before + number), [])]
+        solved = [each["solved"] for each in played if each["solved"] is not None]
+        rewards = [float(each["reward"]) for each in played if each["reward"] is not None]
+        found.append(
+            {
+                "environment": entry.environment or None,
+                "played": len(played),
+                "solved": sum(solved) if solved or not played else None,
+                "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
+            }
+        )
+    return found
 
 
 def _state(life: Mapping[str, Any], older: set[str]) -> str:

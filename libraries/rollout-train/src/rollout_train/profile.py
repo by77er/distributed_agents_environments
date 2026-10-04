@@ -508,11 +508,19 @@ class Platform:
             return await on_ray(self.location, self.blobs_at, fence, checkpoint.id, self.layout)
         return await reshard(self.checkpoints, fence, checkpoint.id, self.layout, self.profile.directory / "resharding")
 
-    async def eval_run(self, step: int) -> str:
-        """The run of the eval of the checkpoint this run made at `step` (`rollout_train.evals.Schedule`), by id:
-        registered the first time as `NAME-eval-STEP` and kept in `directory/evals`; the runner plays its episodes."""
-        where = self.profile.directory / "evals" / f"{self.run.id}-eval-{step}"
-        entry = await run_of(where, self.ledger, self.registry, f"{self.run.name}-eval-{step}")
+    async def eval_run(self, step: int | None = None, part: int | None = None) -> str:
+        """The run of an eval, by id, which the runner plays: with `step`, the eval of the checkpoint this run made at
+        that step (`rollout_train.evals.Schedule`), registered the first time as `NAME-eval-STEP` and kept in
+        `directory/evals`; else this run (an eval itself). With `part`, the run that plays that entry (by its number
+        from 1) of the eval of a suite of several: that eval's name and `-PART`, kept beside it."""
+        if step is None and part is None:
+            return self.run.id
+        where, name = self.profile.directory, self.run.name
+        if step is not None:
+            where, name = where / "evals" / f"{self.run.id}-eval-{step}", f"{name}-eval-{step}"
+        if part is not None:
+            where, name = where / "parts" / str(part), f"{name}-{part}"
+        entry = await run_of(where, self.ledger, self.registry, name)
         self._runs.add(entry.id)
         return entry.id
 

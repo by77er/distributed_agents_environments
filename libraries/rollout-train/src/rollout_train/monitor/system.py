@@ -18,7 +18,7 @@ import random
 import socket
 import time
 from collections.abc import Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
@@ -37,12 +37,18 @@ from rollout_train.evals import (
     EVAL_DATA,
     GIVEN,
     Suite,
+    SuiteEntry,
     edit_suite,
+    eval_episodes,
     make_suite,
     parsed,
+    parts_of,
     played_version,
     subject_table,
+    suite_entry,
     suite_of,
+    suites_among,
+    versions_in,
 )
 from rollout_train.inference.remote import ENGINES
 from rollout_train.launcher import LAUNCHER
@@ -288,11 +294,12 @@ class System:
         if launches is None:
             raise KeyError("this ledger keeps no launches")
         given = as_asked(body)  # (a page that asks for a `catalog` asks for that environment)
-        if given.get("kind") == EVAL:  # (an eval plays its suite's environment)
+        if given.get("kind") == EVAL:  # (an eval plays its suite's environments)
             named_suite = str(given.get("suite") or "")
             found = await suite_of(self._ledger, named_suite)
             if found is not None:
-                given |= {"environment": found.environment, "suite": found.id}
+                given |= {"environment": found.environments[0], "suite": found.id}
+                given["environments"] = found.environments[1:]
             elif not given.get("environment") or parsed(named_suite)[1] not in (None, 1):
                 raise KeyError(f"there is no suite {named_suite!r}")  # (else its eval data, frozen when first played)
         try:
@@ -309,9 +316,6 @@ class System:
         ]
         if not profiles:
             raise KeyError(f"no launcher alive offers the profile {asked.profile!r}")
-        environments = {environment for each in offered for environment in each.get("environments", [])}
-        if environments and asked.environment not in environments:
-            raise KeyError(f"no launcher alive offers the environment {asked.environment!r}")
         checked(asked.name, "", await registry.runs())  # (a name another run has, or no name)
         unknown = [
             key for key in asked.settings
@@ -319,38 +323,48 @@ class System:
         ]  # fmt: skip
         if unknown:
             raise Taken(f"the profile {asked.profile!r} has no setting {', '.join(unknown)}")
-        if asked.kind == TRAINING:
-            await self._checked_evals(asked, profiles[0]["settings"])
+        if asked.kind == TRAINING:  # (and the environments of the suite of its evals, which it plays too)
+            evaluated = await self._checked_evals(asked, profiles[0]["settings"])
+            asked = replace(asked, environments=sorted(set(evaluated) - {asked.environment}))
+        able = [
+            each for each in offered
+            if any(profile["profile"] == asked.profile for profile in each.get("profiles", []))
+            and (not each.get("environments") or asked.plays() <= set(each["environments"]))
+        ]  # fmt: skip
+        if not able:
+            missing = sorted(asked.plays() - {name for each in offered for name in each.get("environments", [])})
+            said = ", ".join(missing) if missing else ", ".join(sorted(asked.plays()))
+            raise KeyError(f"no launcher alive offers the profile {asked.profile!r} and the environments {said}")
         if asked.start:
             await resolved(self._ledger, registry, asked.start)  # (raises KeyError for a reference to nothing)
         return await launches.ask(asked)
 
-    async def _checked_evals(self, asked: Asked, offered: Mapping[str, Any]) -> None:
+    async def _checked_evals(self, asked: Asked, offered: Mapping[str, Any]) -> list[str]:
         """That a training run says the evals it makes, in the launch (`evals.suite`: a suite, or null for none) or in
         its profile's `[evals]` (`offered`: the settings its launcher offers, with their values in the profile); and
-        that the suite is one it can play: a suite of its environment in the ledger (by name, or a version by id), or
-        the environment's eval data of that name, where the environment loads here. Raises `Taken` otherwise."""
+        that the suite is one it can name: a suite in the ledger (by name, or a version by id), or the run's
+        environment's eval data of that name, where the environment loads here. Returns the environments the suite
+        plays (each played on the run's channel). Raises `Taken` otherwise."""
         said = asked.settings[EVALS_SUITE] if EVALS_SUITE in asked.settings else offered.get(EVALS_SUITE)
         if EVALS_SUITE not in asked.settings and not said:
             raise Taken(f"a run says the evals it makes: a suite ({EVALS_SUITE}), or none ({EVALS_SUITE} null)")
         if not said:
-            return
+            return []
         if not isinstance(said, str):
             raise Taken(f"{EVALS_SUITE} names a suite, or is null for none (not {said!r})")
         suite = await suite_of(self._ledger, said)
         if suite is not None:
-            if suite.environment and suite.environment != asked.environment:
-                raise Taken(f"the suite {said!r} is of {suite.environment}, not {asked.environment}")
-            return
+            return suite.environments
         name, number = parsed(said)
         if number not in (None, 1):
             raise Taken(f"there is no version {said!r} of a suite")
         try:
             data = (await self._loaded(asked.environment)).evals()
         except KeyError:  # (an environment that does not load here: its launcher's run finds out)
-            return
+            return [asked.environment]
         if name not in data:
             raise Taken(f"there is no suite {name!r}, and {asked.environment} has no eval data of that name")
+        return [asked.environment]
 
     async def _loaded(self, environment: str) -> Environment:
         """An environment, by `module:name`, loaded in this process once. Raises `KeyError` where it does not load."""
@@ -360,6 +374,35 @@ class System:
             except Exception as error:  # (whatever loading it raises: it is not here)
                 raise KeyError(f"the environment {environment!r} does not load here ({error})") from None
         return self._environments[environment]
+
+    async def environments(self) -> dict[str, Any]:
+        """Every environment the system knows of, by `module:name`, for the pages' pickers: those the launchers alive
+        offer, those runs were started on and those suites' versions play; each with a readable `name`, the versions of
+        it seen (in runs' starts and suites' entries), and whether a launcher alive offers it (`offered`)."""
+        tables = await self._tables()
+        offered = {
+            str(each) for beat in await self._beats() if beat.about.get("kind") == LAUNCHER and alive(beat)
+            for each in cast(list[Any], beat.about.get("environments") or [])
+        }  # fmt: skip
+        seen: dict[str, set[str]] = {each: set() for each in offered}
+        for run in named_runs(tables):
+            for start in tables.get(table(run, STARTS), {}).values():
+                if isinstance(start, dict) and start.get("environment"):
+                    found = seen.setdefault(str(start["environment"]), set())
+                    if start.get("version") is not None and start.get("kind") != EVAL:  # (an eval's is its suite's)
+                        found.add(str(start["version"]))
+        for suite in suites_among(tables):
+            for version in versions_in(tables, suite):
+                for entry in version.entries:
+                    if entry.environment:
+                        found = seen.setdefault(entry.environment, set())
+                        found |= {entry.environment_version} if entry.environment_version else set()
+        return {
+            "environments": [
+                {"environment": each, "name": _readable(each), "versions": sorted(versions), "offered": each in offered}
+                for each, versions in sorted(seen.items(), key=lambda item: (_readable(item[0]), item[0]))
+            ]
+        }
 
     async def environment(self, environment: str) -> dict[str, Any]:
         """What the forms that make and edit suites need of an environment: its version, its rows (each its key and
@@ -378,20 +421,41 @@ class System:
 
     async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite:
         """Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,
-        `edit_suite`): its `environment` (`module:name`: a new suite's; an edit's is the suite's), how its starts are
-        `chosen` (`eval data`, of the name `eval_data`; `rows and seeds`, `rows` (none: every row) and `seeds`;
-        `starts`, each a row (`task`) and its `seed`, drawn as the row's start with that seed unless it says its
-        `parameters`; or, for an edit, `same`: those of the version edited), the `episodes` of each start, the limits
-        (`thinking_tokens`, `answer_tokens`; null for the channel's own), and, for an edit, the version it was made from
-        (`base`, by number). Raises `Taken` for what cannot be: a name that is no name, an environment that does not
-        load here or is another than the suite's, eval data or a row the environment does not have, seeds that are no
-        whole numbers, counts below 1, an edit made from another version than the newest, or one that changes
-        nothing."""
+        `edit_suite`): its `entries`, each its `environment` (`module:name`), how its starts are `chosen` (`eval data`,
+        of the name `eval_data`; `rows and seeds`, `rows` (none: every row) and `seeds`; `starts`, each a row (`task`)
+        and its `seed`, drawn as the row's start with that seed unless it says its `parameters`; or, for an edit,
+        `same`: those of the edited version's entry of that environment), the `episodes` of each start and the limits
+        (`thinking_tokens`, `answer_tokens`; null for the channel's own); and, for an edit, the version it was made from
+        (`base`, by number). A body with no `entries` is one entry. Raises `Taken` for what cannot be: a name that is no
+        name, no entries, an environment that does not load here or is in two entries, eval data or a row an
+        environment does not have, seeds that are no whole numbers, counts below 1, an edit made from another version
+        than the newest, or one that changes nothing."""
         name = valid(name)
         current = await suite_of(self._ledger, name)
-        environment_name = str(body.get("environment") or (current.environment if current else "") or "")
+        listed = body.get("entries")
+        if listed is None:  # (one entry: its environment, a new suite's; an edit's, the suite's one)
+            sole = current.environments[0] if current is not None and len(current.entries) == 1 else ""
+            listed = [{**body, "environment": body.get("environment") or sole}]
+        if not isinstance(listed, list) or not listed:
+            raise Taken("say the suite's entries: an environment, as module:name, and its starts, each")
+        try:
+            entries = [await self._entry(cast(dict[str, Any], each), current) for each in cast(list[Any], listed)]
+            if current is None:
+                return await make_suite(self._ledger, name, entries)
+            base = body.get("base")
+            return await edit_suite(
+                self._ledger, name, entries, base=_whole(base, "base") if base is not None else None
+            )
+        except (KeyError, ValueError) as error:
+            raise Taken(str(error.args[0]) if error.args else str(error)) from None
+
+    async def _entry(self, body: Mapping[str, Any], current: Suite | None) -> SuiteEntry:
+        """An entry as a suite's form says it (`save_suite`). Raises `Taken` for what it cannot be."""
+        if not isinstance(body, dict):
+            raise Taken("an entry says its environment, as module:name, and its starts")
+        environment_name = str(body.get("environment") or "")
         if not environment_name:
-            raise Taken("say the suite's environment, as module:name")
+            raise Taken("say each entry's environment, as module:name")
         try:
             environment = await self._loaded(environment_name)
         except KeyError as error:
@@ -403,8 +467,9 @@ class System:
             "answer_tokens": _whole(body.get("answer_tokens"), "answer_tokens", optional=True),
         }
         starts: dict[str, Any] = {}
+        before = current.entry(environment_name) if current is not None else None
         if chosen == EVAL_DATA:
-            starts["eval_data"] = str(body.get("eval_data") or name)
+            starts["eval_data"] = str(body.get("eval_data") or "")
         elif chosen == DRAWN:
             rows, seeds = body.get("rows"), body.get("seeds")
             if rows is not None and not (
@@ -417,16 +482,14 @@ class System:
             starts |= {"rows": cast(list[str], rows) or None, "seeds": numbers}
         elif chosen == GIVEN:
             starts["starts"] = await asyncio.to_thread(_given, environment, body.get("starts"))
-        elif chosen != "same" or current is None:
+        elif chosen == "same" and before is not None:
+            starts["starts"] = before.starts
+        elif chosen == "same":
+            raise Taken(f"the suite has no entry of {environment_name} whose starts it keeps")
+        else:
             raise Taken(f"say how its starts are chosen: {EVAL_DATA!r}, {DRAWN!r}, {GIVEN!r} (or, editing, 'same')")
         try:
-            if current is None:
-                return await make_suite(self._ledger, name, environment_name, environment, **starts, **counts)
-            base = body.get("base")
-            return await edit_suite(
-                self._ledger, name, environment_name, environment, **starts, same_starts=chosen == "same", **counts,
-                base=_whole(base, "base") if base is not None else None,
-            )  # fmt: skip
+            return await asyncio.to_thread(lambda: suite_entry(environment_name, environment, **starts, **counts))
         except (KeyError, ValueError) as error:
             raise Taken(str(error.args[0]) if error.args else str(error)) from None
 
@@ -510,8 +573,6 @@ class System:
                 suite = await suite_of(self._ledger, str(given[key]))
                 if suite is None and parsed(str(given[key]))[1] not in (None, 1):
                     raise Taken(f"there is no version {given[key]!r} of a suite")
-                if suite is not None and found["environment"] and suite.environment not in ("", found["environment"]):
-                    raise Taken(f"the suite {given[key]!r} is of {suite.environment}, not {found['environment']}")
         return await store.want(run, given)
 
     async def checkpoint_evals(self, checkpoint: str) -> dict[str, Any] | None:
@@ -558,19 +619,22 @@ class System:
         suites = _Reading(tables, set(), [], called, time.time()).evaluations()
         for each in suites:
             current = next(version for version in each["versions"] if version["id"] == each["version"])
-            each |= {"environment": current["environment"], "made": current["made"]}
+            each |= {"environments": current["environments"], "made": current["made"]}
         evals: list[dict[str, Any]] = []
         for run in named_runs(tables):
             starts: Any = tables.get(table(run, STARTS), {})
             latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
-            if latest.get("kind") != EVAL:
+            if latest.get("kind") != EVAL or latest.get("part_of"):  # (a part is shown as its eval)
                 continue
-            groups: Any = tables.get(table(run, GROUPS), {})
             suite = str(latest.get("suite"))
             results: Any = tables.get(subject_table(suite, run, "results"), {})
             who: Any = tables.get(subject_table(suite, run, "subject"), {}).get("subject") or latest
-            expected = sum(int(group.get("episodes") or 0) for group in groups.values())
-            solved = _solved_count(results, tables.get(table(run, EPISODES), {}))
+            groups = [
+                group for part in parts_of(tables, suite, run)
+                for group in cast(dict[str, Any], tables.get(table(str(part["run"]), GROUPS), {})).values()
+            ]  # fmt: skip
+            expected = sum(int(group.get("episodes") or 0) for group in groups)
+            solved = _solved_count(results, eval_episodes(tables, suite, run))
             evals.append(
                 {
                     "run": run,
@@ -812,7 +876,7 @@ class System:
                 listed
                 | seen
                 | {"played": played[run].counts(), "name": called["runs"].get(run, run), "kind": kind}
-                | {"by": begun.get("by"), "by_step": begun.get("step")}
+                | {"by": begun.get("by"), "by_step": begun.get("step"), "part_of": begun.get("part_of")}
             )
         states = {run["run"]: run["state"] for run in runs}
         for run in runs:  # (an eval a training run's schedule asked for, not done, is played by that run's runner)
@@ -1199,6 +1263,18 @@ def _given(environment: Environment, listed: Any) -> list[Start]:
         parameters = given["parameters"] if "parameters" in given else environment.start(row, random.Random(seed))
         made.append(Start(row.key, row.title, seed, parameters))
     return made
+
+
+GENERIC = {"environment", "env", "environments", "main"}
+"""Names an environment's object is often given, which say nothing of it."""
+
+
+def _readable(environment: str) -> str:
+    """An environment's `module:name`, in a word: its object's name, or its package's where that name says nothing."""
+    module, _, attribute = environment.partition(":")
+    if attribute and attribute.lower() not in GENERIC:
+        return attribute
+    return module.split(".")[0] or environment
 
 
 def _solved_count(results: Mapping[str, Any], episodes: Mapping[str, Any]) -> int | None:

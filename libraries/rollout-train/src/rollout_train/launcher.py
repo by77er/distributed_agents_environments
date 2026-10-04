@@ -1,13 +1,13 @@
 """A launcher: it starts the runs asked for (`rollout_train.launches`) that it can run.
 
 `rollout launcher --ledger WHERE --profiles DIRECTORY --environment module:name … --runs DIRECTORY` beats like a runner
-(`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that
-loads and names a trainer), with what its trainer makes (`lora` or `full` weights) and the settings a launch may change
-and their values in the profile; the environments; and whether it has room. It claims the oldest launch asked for one of
-its profiles while it plays fewer than `--at-once`, starts `rollout train` for it in a directory of its own under
-`--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said so, as `evals.suite=""`, so
-that the profile's `[evals]` is not used), and notes how it goes. A launch asked to stop is sent an interrupt: the run
-stops as it does on Ctrl-C, at a group boundary of the ledger.
+(`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that loads
+and names a trainer), with what its trainer makes (`lora` or `full` weights) and the settings a launch may change and
+their values in the profile; the environments; and whether it has room. It claims the oldest launch asked for one of its
+profiles, whose environments it offers each of, while it plays fewer than `--at-once`, starts `rollout train` for it in
+a directory of its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said
+so, as `evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch asked to stop is
+sent an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
 
 Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
 cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
@@ -155,12 +155,17 @@ class Launcher:
                     await asyncio.to_thread(self._client().stop_job, self._jobs[launch.id])
         mine = {each["profile"] for each in self._offered}
         asked = sorted(
-            (each for each in launches if each.state == ASKED and each.asked.profile in mine), key=lambda each: each.at
+            (each for each in launches if each.state == ASKED and each.asked.profile in mine and self._plays(each)),
+            key=lambda each: each.at,
         )
         for launch in asked[: max(0, self.at_once - len(self._playing) - len(self._jobs))]:
             claimed = await self.launches.claim(launch.id, self.name)
             if claimed is not None:
                 await self._start(claimed)
+
+    def _plays(self, launch: Launch) -> bool:
+        """Whether it offers every environment a launch plays (one that names no environments offers any)."""
+        return not self.environments or launch.asked.plays() <= set(self.environments)
 
     async def _start(self, launch: Launch) -> None:
         asked = launch.asked

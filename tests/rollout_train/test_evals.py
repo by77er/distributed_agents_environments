@@ -29,6 +29,7 @@ from rollout_train.evals import (
     evaluate,
     make_suite,
     subject_table,
+    suite_entry,
     suite_for,
     suite_of,
     suite_table,
@@ -66,23 +67,26 @@ def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_a_suite_is_a_list_of_starts_of_an_environments_rows(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    made = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1, 2])
+    made = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1, 2])]
+    )
     assert [(start.task, start.seed) for start in made.starts] == [
         ("say-yes", 1), ("say-yes", 2), ("say-no", 1), ("say-no", 2),
     ]  # fmt: skip
     again = await suite_of(ledger, "words-v1")
-    assert again is not None and again.starts == made.starts and again.environment == ENVIRONMENT
-    assert again.rows == ["say-yes", "say-no"] and again.seeds == [1, 2]
+    assert again is not None and again.starts == made.starts and again.environments == [ENVIRONMENT]
+    (entry,) = again.entries
+    assert entry.rows == ["say-yes", "say-no"] and entry.seeds == [1, 2]
     assert await suites_in(ledger) == ["words-v1"]
-    assert (again.id, again.number, again.chosen, again.episodes) == ("words-v1@1", 1, DRAWN, 1)
+    assert (again.id, again.number, entry.chosen, entry.episodes) == ("words-v1@1", 1, DRAWN, 1)
     assert again.held_out  # (seeds 1 and 2 of these rows are its eval data's starts: training never draws them)
     with pytest.raises(ValueError, match="already: edit it"):
-        await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=None, seeds=[3])
+        await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[3])])
     with pytest.raises(ValueError, match="no row say-perhaps"):
-        await make_suite(ledger, "other", ENVIRONMENT, words, rows=["say-perhaps"], seeds=[1])
+        await make_suite(ledger, "other", [suite_entry(ENVIRONMENT, words, rows=["say-perhaps"], seeds=[1])])
     with pytest.raises(ValueError, match="cannot be a name"):
-        await make_suite(ledger, "a/b", ENVIRONMENT, words, rows=None, seeds=[1])
-    every = await make_suite(ledger, "every-row", ENVIRONMENT, words, rows=None, seeds=[7])
+        await make_suite(ledger, "a/b", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[1])])
+    every = await make_suite(ledger, "every-row", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[7])])
     assert [start.task for start in every.starts] == ["say-yes", "say-no", "say-maybe"]
 
 
@@ -90,17 +94,17 @@ async def test_an_environments_eval_data_is_frozen_as_a_suite_the_first_time_it_
     ledger = FileLedger(tmp_path / "ledger")
     assert await suite_of(ledger, "words-held-out") is None
     made = await suite_for(ledger, "words-held-out", ENVIRONMENT, words)
-    assert made.starts == list(words.evals()["words-held-out"]) and made.held_out and made.environment_version == "1"
-    assert (made.id, made.chosen, made.eval_data) == ("words-held-out@1", EVAL_DATA, "words-held-out")
+    (entry,) = made.entries
+    assert made.starts == list(words.evals()["words-held-out"]) and made.held_out and entry.environment_version == "1"
+    assert (made.id, entry.chosen, entry.eval_data) == ("words-held-out@1", EVAL_DATA, "words-held-out")
     again = await suite_of(ledger, "words-held-out")
-    assert again is not None and (again.starts, again.held_out, again.environment_version) == (made.starts, True, "1")
+    assert again is not None and (again.starts, again.held_out, again.entries) == (made.starts, True, made.entries)
     assert (await suite_for(ledger, "words-held-out", ENVIRONMENT, words)).made == made.made  # (frozen: not again)
-    with pytest.raises(ValueError, match="is of"):
-        await suite_for(ledger, "words-held-out", "other:environment", words)
+    assert (await suite_for(ledger, "words-held-out", "other:environment", words)).made == made.made  # (the ledger's)
     with pytest.raises(KeyError, match="no eval data of that name"):
         await suite_for(ledger, "words-v9", ENVIRONMENT, words)
-    by_hand = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[5])
-    assert not by_hand.held_out and by_hand.environment_version == "1"
+    by_hand = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[5])])
+    assert not by_hand.held_out and by_hand.entries[0].environment_version == "1"
 
 
 async def test_a_suite_made_as_a_catalogs_reads_as_its_environments(tmp_path: Path) -> None:
@@ -110,13 +114,13 @@ async def test_a_suite_made_as_a_catalogs_reads_as_its_environments(tmp_path: Pa
     start: Any = {"task": "say-yes", "title": "say yes", "seed": 1, "parameters": {"word": "yes", "seed": 1}}
     await ledger.append(suite_table("older", "starts"), "1", start, fence)
     found = await suite_of(ledger, "older")
-    assert found is not None and found.environment == ENVIRONMENT and len(found.starts) == 1
+    assert found is not None and found.environments == [ENVIRONMENT] and len(found.starts) == 1
 
 
 async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
     weights = tmp_path / "w"
     weights.mkdir()
     (weights / "model.safetensors").write_text("every weight")
@@ -130,7 +134,7 @@ async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tm
 
     async with here(ledger, answering(), blobs):
         await evaluate(
-            words, checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
+            checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
             directory=tmp_path / "files", publish=publish,
         )  # fmt: skip
     assert published == [(subject.id, True)]
@@ -139,7 +143,9 @@ async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tm
 async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
+    suite = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])]
+    )
     fence = await ledger.take(scope("trained"))
     weights = tmp_path / "w"
     weights.mkdir()
@@ -155,7 +161,7 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
     recorder = answering()
     async with here(ledger, recorder, blobs):
         said = await evaluate(
-            words, checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
+            checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
             directory=tmp_path / "files", publish=publish, episodes=2,
         )  # fmt: skip
     assert published == [("policy", subject.id, 1)]
@@ -172,14 +178,14 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
 
     async with here(ledger, recorder, blobs):  # started again: what it decided and recorded is not done twice
         again = await evaluate(
-            words, checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
+            checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
             directory=tmp_path / "files", publish=publish, episodes=2,
         )  # fmt: skip
     assert again == said and len(await ledger.read(table("eval-1", GROUPS))) == 2
 
     system = await System(ledger=ledger).evals()
     (listed,) = system["suites"]
-    assert listed["suite"] == "words-v1" and listed["environment"] == ENVIRONMENT and len(listed["starts"]) == 2
+    assert listed["suite"] == "words-v1" and listed["environments"] == [ENVIRONMENT] and len(listed["starts"]) == 2
     (played,) = listed["subjects"]
     assert played["checkpoint"] == subject.id and played["played"] == 4 and played["solved"] == said["solved"]
     (run,) = system["evals"]
@@ -194,14 +200,14 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
 
 async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-no"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-no"], seeds=[1])])
 
     async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
         raise AssertionError("the base model is served as it is")
 
     async with here(ledger, answering(), blobs):
         said = await evaluate(
-            words, Checkpoints(ledger, blobs), run="eval-base", suite=suite, subject=None, base="tiny",
+            Checkpoints(ledger, blobs), run="eval-base", suite=suite, subject=None, base="tiny",
             channel="policy", directory=tmp_path / "files", publish=publish,
         )  # fmt: skip
     assert said["played"] == 1
@@ -245,7 +251,7 @@ async def test_a_launcher_starts_an_eval_launch_as_rollout_eval(
 
 async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
+    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
     heartbeats, registry = presence_of(ledger), registry_of(ledger)
     assert heartbeats is not None and registry is not None
     about: JsonValue = {
@@ -308,6 +314,13 @@ def test_the_command_makes_and_lists_suites(
     assert run("list").splitlines()[-1].split() == ["words-v1@3", "1", "starts", ENVIRONMENT, "(3", "versions)"]
     with pytest.raises(SystemExit, match="nothing changed"):
         run("edit", "words-v1", "--thinking-tokens", "64", "--episodes", "3")
+    guessing = "tests.rollout_train.rollouts.games:guessing"  # (an entry added, then the first dropped)
+    added = run("edit", "words-v1", "--environment", guessing, "--seeds", "1", "--answer-tokens", "9")
+    assert added == f"the suite words-v1@4: 4 starts of {ENVIRONMENT}, {guessing}\n"
+    with pytest.raises(SystemExit, match="say the entry's environment"):
+        run("edit", "words-v1", "--episodes", "2")
+    dropped = run("edit", "words-v1", "--drop", ENVIRONMENT)
+    assert dropped == f"the suite words-v1@5: 3 starts of {guessing}, held out of training\n"
 
 
 class Unmade:
@@ -325,7 +338,9 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     from rollout_train.cli import main
 
     shared, made = asyncio.run(a_ledger(tmp_path))
-    asyncio.run(make_suite(FileLedger(tmp_path / "ledger"), "words-v1", ENVIRONMENT, words, rows=None, seeds=[1]))
+    asyncio.run(
+        make_suite(FileLedger(tmp_path / "ledger"), "words-v1", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[1])])
+    )
     profile = a_profile(tmp_path, shared, "Unmade", "plain")
     profile.write_text(profile.read_text().replace("test_full_weights:Unmade", "test_evals:Unmade"))
     support.STARTED.clear()
@@ -335,7 +350,7 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     with pytest.raises(SystemExit) as exited:
         main()
     assert exited.value.code == 0
-    assert capsys.readouterr().out.startswith("words-v1@1: solved ")
+    assert capsys.readouterr().out.startswith(f"words-v1@1 {ENVIRONMENT}: solved ")
     policy = support.STARTED[0]
     assert policy.told[0].startswith(f"started {directory / 'bases' / made['merged']}")  # (what the adapter is over)
     assert f"load {made['stacked']}" in policy.told
@@ -350,10 +365,10 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
 def a_schedule(suite: Suite, every: int) -> Schedule:
     """Evals of `suite` every `every` steps, two episodes of each start, each eval the run `eval-STEP`."""
 
-    async def run(step: int) -> str:
-        return f"eval-{step}"
+    async def run(step: int, part: int | None = None) -> str:
+        return f"eval-{step}" if part is None else f"eval-{step}-{part}"
 
-    return Schedule(suite, words, run, every=every, episodes=2)
+    return Schedule(suite, run, every=every, episodes=2)
 
 
 async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_step_and_the_next(
@@ -361,7 +376,9 @@ async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_
 ) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
+    suite = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])]
+    )
     recorder, curriculum = answering(), Curriculum(words.rows())
     async with here(ledger, recorder, blobs):
         await train(
@@ -389,7 +406,7 @@ async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_
         start: Any = next(iter((await ledger.read(table(said["run"], STARTS))).values()))
         assert (start["kind"], start["by"], start["from"]) == (EVAL, "train", None)
     newest = max(int(key) for key in evaluated)
-    last, lines = curriculum.evaluations["words-v1"]
+    last, lines = curriculum.evaluations[("words-v1", ENVIRONMENT)]
     assert last == made[newest].id and [line.task for line in lines] == ["say-yes", "say-no"]
     assert lines == await results(ledger, f"eval-{newest}")
     listed = (await System(ledger=ledger).evals())["suites"][0]["subjects"]
@@ -399,7 +416,9 @@ async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_
 async def test_a_run_started_again_finishes_the_eval_it_left_before_it_steps_again(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
+    suite = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])]
+    )
     recorder, trainer = answering(), Counting()
 
     async def training(groups: int, curriculum: Curriculum | None = None) -> None:
@@ -430,12 +449,12 @@ async def test_a_run_started_again_finishes_the_eval_it_left_before_it_steps_aga
     steps: Any = await ledger.read(table("train", STEPS))
     assert all(step["decided"] >= evaluated["1"]["at"] for key, step in steps.items() if key != "1")
     newest = max(evaluated, key=int)
-    assert curriculum.evaluations["words-v1"][0] == evaluated[newest]["checkpoint"]
+    assert curriculum.evaluations[("words-v1", ENVIRONMENT)][0] == evaluated[newest]["checkpoint"]
 
     again = Curriculum(words.rows())  # a run started again folds its evals into its curriculum
     async with here(ledger, recorder, blobs):
         await training(0, again)
-    assert again.evaluations["words-v1"] == curriculum.evaluations["words-v1"]
+    assert again.evaluations[("words-v1", ENVIRONMENT)] == curriculum.evaluations[("words-v1", ENVIRONMENT)]
 
 
 async def test_a_profile_says_what_its_run_evaluates_and_each_eval_is_a_run_its_runner_plays(tmp_path: Path) -> None:

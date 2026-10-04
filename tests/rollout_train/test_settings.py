@@ -15,7 +15,7 @@ from rollout_train import loop as loop_module
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.colocated import Colocated
-from rollout_train.evals import Schedule, make_suite
+from rollout_train.evals import Schedule, make_suite, suite_entry
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.profile import EvalsSpec, Profile
 from rollout_train.record import EVALS, STEPS, table
@@ -135,7 +135,7 @@ async def test_a_running_loop_takes_the_changeable_settings_wanted_from_the_next
 ) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
     desired = desired_settings_of(ledger)
     assert desired is not None
     read: list[int] = []

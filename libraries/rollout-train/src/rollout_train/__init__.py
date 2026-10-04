@@ -11,9 +11,9 @@
   that takes some of its settings between steps. `Colocated`: the wrapper for one that shares its accelerator with the
   engines.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
-- `evaluate`, `make_suite`, `edit_suite`, `suite_for`, `suite_of`, `Suite`, `Schedule` (`evals`): a suite, an eval
-  configuration kept in versions, an eval that plays one version with one checkpoint, training nothing, and the evals a
-  training run makes of its checkpoints.
+- `evaluate`, `make_suite`, `edit_suite`, `suite_entry`, `suite_for`, `suite_of`, `Suite`, `SuiteEntry`, `Schedule`
+  (`evals`): a suite, an eval configuration of one or more environments kept in versions, an eval that plays one
+  version with one checkpoint, training nothing, and the evals a training run makes of its checkpoints.
 - `make_dataset`, `dataset_of`, `Dataset` (`datasets`): examples chosen from runs' episodes by a rule and turn filters,
   made once, which a supervised step (`imitation`) trains on.
 - `Serving`, `record_serving`, `wanted` (`serving`): what each run's channel should serve, written down by the loop;
@@ -24,7 +24,17 @@ from rollout_train.algorithm import Algorithm, Batch, Grpo, group_advantages
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention
 from rollout_train.colocated import Colocated
 from rollout_train.datasets import Dataset, dataset_of, make_dataset
-from rollout_train.evals import Schedule, Suite, edit_suite, evaluate, make_suite, suite_for, suite_of
+from rollout_train.evals import (
+    Schedule,
+    Suite,
+    SuiteEntry,
+    edit_suite,
+    evaluate,
+    make_suite,
+    suite_entry,
+    suite_for,
+    suite_of,
+)
 from rollout_train.following import Follower
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
@@ -56,6 +66,7 @@ __all__ = [
     "Step",
     "StepFailed",
     "Suite",
+    "SuiteEntry",
     "Trained",
     "Trainer",
     "Weighted",
@@ -67,6 +78,7 @@ __all__ = [
     "make_suite",
     "record_serving",
     "results",
+    "suite_entry",
     "suite_for",
     "suite_of",
     "train",

@@ -37,10 +37,11 @@ the channel serves it from now on (the base model until the first), and then pub
 process, if it has any. Engines on other machines follow the record (`rollout_train.following`).
 
 **It can evaluate its checkpoints as it makes them** (`evals`, a `rollout_train.evals.Schedule`). After a step whose
-checkpoint the schedule names is served, the suite is asked for as an eval of that checkpoint, a run of its own, and
+checkpoint the schedule names is served, the suite is asked for as an eval of that checkpoint, a run of its own (and a
+run for each entry, for a suite of several environments: each played on the same channel, with its own binding), and
 the next step waits until every start has been played: all that time the channel serves that checkpoint, while
-training groups go on being played under it. The eval's results are folded into the curriculum. Started again, the
-loop finishes an eval it left unfinished before it decides anything.
+training groups go on being played under it. Each entry's results are folded into the curriculum, the entry named.
+Started again, the loop finishes an eval it left unfinished before it decides anything.
 
 **Its changeable settings can change while it runs** (`rollout_train.settings`): how many groups a step waits for, its
 evals, and the settings its trainer takes between steps. Each time it is about to decide a step it reads what is wanted
@@ -69,7 +70,7 @@ from rollout.environment import Environment, binding_for, held_out, train_start
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
-from rollout_train.evals import Schedule, evaluate
+from rollout_train.evals import Schedule, evaluate, suite_of
 from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.record import (
@@ -179,7 +180,8 @@ async def train(
         curriculum.recorded(recorded[number])
     for key in sorted(evaluated):
         said = evaluated[key]
-        curriculum.evaluated(str(said["suite"]), str(said["checkpoint"]), await results(ledger, str(said["run"])))
+        for entry, played_by in await _entries_of(ledger, said):
+            curriculum.evaluated(str(said["suite"]), str(said["checkpoint"]), await results(ledger, played_by), entry)
     if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
         raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
@@ -299,9 +301,14 @@ async def train(
         if schedule is None or not schedule.due(checkpoint, run):
             return
         eval_run = await schedule.run(step)
+
+        async def part(number: int) -> str:
+            return await schedule.run(step, number)
+
         said = await evaluate(
-            schedule.environment, checkpoints, run=eval_run, suite=schedule.suite, subject=checkpoint.id, base=base,
-            channel=channel, directory=directory, publish=None, episodes=schedule.episodes, binding=schedule.binding,
+            checkpoints, run=eval_run, suite=schedule.suite, subject=checkpoint.id, base=base, channel=channel,
+            directory=directory, publish=None, environments=schedule.environments, binding=schedule.binding,
+            parts=part, episodes=schedule.episodes,
             started={"from": None, "by": run, "step": step},  # (whether its files are kept is the run's retention's)
             asked_by="by its run's schedule", hooks=hooks, served_by=qualified(run, channel),
         )  # fmt: skip
@@ -309,9 +316,13 @@ async def train(
         record: dict[str, JsonValue] = {"suite": schedule.suite.name, "version": schedule.suite.id}
         record |= {"checkpoint": checkpoint.id, "run": eval_run}
         record |= summary | {"at": round(time.time(), 1)}
+        record["entries"] = [
+            {key: value for key, value in each.items() if key != "results"} for each in said["entries"]
+        ]
         await ledger.append(table(run, EVALS), str(step), record, fence)
         evaluated[step] = record
-        curriculum.evaluated(schedule.suite.name, checkpoint.id, said["results"])
+        for each in said["entries"]:
+            curriculum.evaluated(schedule.suite.name, checkpoint.id, each["results"], each["environment"])
 
     async def refresh() -> None:
         """Take what is wanted of the changeable settings, for the step about to be decided and those after it."""
@@ -536,6 +547,16 @@ async def train(
             task.cancel()
         if stepping is not None:
             await asyncio.gather(stepping, return_exceptions=True)
+
+
+async def _entries_of(ledger: Ledger, said: Mapping[str, JsonValue]) -> list[tuple[str | None, str]]:
+    """The entries an eval in a run's `evals` table played, each its environment and the run that played it; for one
+    whose record names no entries, its run, of the environment its version's one entry is."""
+    entries = said.get("entries")
+    if isinstance(entries, list):
+        return [(str(each["environment"]), str(each["run"])) for each in entries if isinstance(each, dict)]
+    version = await suite_of(ledger, str(said.get("version") or said["suite"]))
+    return [(version.environments[0] if version is not None else None, str(said["run"]))]
 
 
 async def _over(checkpoints: Checkpoints, checkpoint: Checkpoint) -> str | None:

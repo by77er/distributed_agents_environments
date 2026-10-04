@@ -52,6 +52,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/api/evals`: the suites, their versions and the evals that played them (`System.evals`); `POST
       /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`), and
       `/api/environments/{name}` says what the suites' forms need of an environment (`System.environment`);
+    - `/api/environments`: every environment the system knows of, with the versions seen and whether a launcher alive
+      offers it, for the pages' pickers (`System.environments`);
     - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run or an eval
       (`System.launch`), `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
@@ -242,6 +244,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
         return await written(change)
 
+    async def environments(request: Request) -> Response:
+        return JSONResponse(await system.environments())
+
     async def environment(request: Request) -> Response:
         try:
             return JSONResponse(await system.environment(request.path_params["name"]))
@@ -297,6 +302,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/launches", launches, methods=["GET", "POST"]),
         Route("/api/evals", evals),
         Route("/api/suites/{name}", suite, methods=["POST"]),
+        Route("/api/environments", environments),
         Route("/api/environments/{name}", environment),
         Route("/api/launches/{id}/stop", stop, methods=["POST"]),
         Route("/api/groups/{run}/{number:int}", group),

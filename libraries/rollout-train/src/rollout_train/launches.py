@@ -3,8 +3,9 @@
 Whoever wants a run (the monitor's page, say) asks for it: a `Launch` names a profile and an environment, what the run
 is called, the checkpoint it starts from, and the settings it changes (`rollout train --set`); or, for an eval, the
 suite it plays, the checkpoint that plays it and how many episodes of each start (`rollout eval`,
-`rollout_train.evals`). A launcher (`rollout_train.launcher`) on a training machine says in its heartbeat which profiles
-it can run, claims a launch asked for one of them, starts `rollout train` (or `rollout eval`), and notes how it goes:
+`rollout_train.evals`). A launch names every environment it plays. A launcher (`rollout_train.launcher`) on a training
+machine says in its heartbeat which profiles and environments it can run, claims a launch asked for one of its profiles
+whose environments it offers, starts `rollout train` (or `rollout eval`), and notes how it goes:
 claimed, running (with the process), ended or failed (with why). A launch asked to stop is stopped by its launcher.
 Every change of a launch's state compares and sets: it is made only if the launch is where its writer expects, and may
 go where it is sent (`MOVES`), so a stop is never overwritten by a launcher that started the run meanwhile.
@@ -17,7 +18,7 @@ import asyncio
 import fcntl
 import json
 import time
-from collections.abc import Callable, Collection, Generator, Mapping
+from collections.abc import Callable, Collection, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -79,6 +80,13 @@ class Asked:
     the suite's)."""
     episodes: int | None = None
     """For an eval: episodes of each of the suite's starts; none: the suite's own."""
+    environments: Sequence[str] = ()
+    """Every environment it plays, as `module:name`, where they are more than `environment`: an eval's suite's entries'
+    environments, a training run's and its evals' suite's. A launcher claims it only where it offers each."""
+
+    def plays(self) -> set[str]:
+        """Every environment it plays."""
+        return {each for each in (self.environment, *self.environments) if each}
 
 
 @dataclass(frozen=True)

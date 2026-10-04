@@ -27,6 +27,7 @@ from rollout_train.evals import (
     evaluate,
     make_suite,
     subject_table,
+    suite_entry,
     suite_for,
     suite_of,
     suite_table,
@@ -59,18 +60,22 @@ def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_an_edit_makes_a_new_version_and_moves_the_suites_name_to_it(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    first = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[5])
-    second = await edit_suite(ledger, "words-v1", ENVIRONMENT, words, same_starts=True, episodes=3, base=1)
-    assert (second.id, second.edited_from, second.starts, second.episodes) == ("words-v1@2", 1, first.starts, 3)
-    third = await edit_suite(
-        ledger, "words-v1", ENVIRONMENT, words, rows=["say-maybe"], seeds=[5, 6], thinking_tokens=64, base=2
+    first = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[5])]
     )
+    same = first.starts
+    second = await edit_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, starts=same, episodes=3)], base=1)
+    assert (second.id, second.edited_from, second.starts, second.entries[0].episodes) == ("words-v1@2", 1, same, 3)
+    assert second.entries[0].chosen == DRAWN  # (its starts as they were: chosen as they were)
+    redrawn = suite_entry(ENVIRONMENT, words, rows=["say-maybe"], seeds=[5, 6], thinking_tokens=64)
+    third = await edit_suite(ledger, "words-v1", [redrawn], base=2)
     assert [(start.task, start.seed) for start in third.starts] == [("say-maybe", 5), ("say-maybe", 6)]
-    assert third.limits == {"thinking_tokens": 64} and third.episodes == 1 and third.chosen == DRAWN
+    (entry,) = third.entries
+    assert entry.limits == {"thinking_tokens": 64} and entry.episodes == 1 and entry.chosen == DRAWN
     found = await suite_of(ledger, "words-v1")  # (the name: its newest version)
     assert found is not None and found.id == "words-v1@3"
     older = await suite_of(ledger, "words-v1@1")  # (a version, by id: never changed, never deleted)
-    assert older is not None and older.starts == first.starts and older.episodes == 1
+    assert older is not None and older.starts == first.starts and older.entries[0].episodes == 1
     assert [each.id for each in await versions_of(ledger, "words-v1")] == ["words-v1@1", "words-v1@2", "words-v1@3"]
     assert await suite_of(ledger, "words-v1@9") is None
     records: Any = await ledger.read(suite_table("words-v1", "suite"))
@@ -79,22 +84,24 @@ async def test_an_edit_makes_a_new_version_and_moves_the_suites_name_to_it(tmp_p
     assert registry is not None
     assert [(each.name, each.version) for each in await registry.suites()] == [("words-v1", "words-v1@3")]
 
+    kept = third.starts
     with pytest.raises(ValueError, match="edited meanwhile"):  # (made from version 2: the newest is 3)
-        await edit_suite(ledger, "words-v1", ENVIRONMENT, words, same_starts=True, episodes=4, base=2)
+        await edit_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, starts=kept, episodes=4)], base=2)
     with pytest.raises(ValueError, match="nothing changed"):
-        await edit_suite(ledger, "words-v1", ENVIRONMENT, words, same_starts=True, thinking_tokens=64)
-    with pytest.raises(ValueError, match="is of"):
-        await edit_suite(ledger, "words-v1", GUESSING, guessing, same_starts=True, episodes=2)
+        await edit_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, starts=kept, thinking_tokens=64)])
     with pytest.raises(ValueError, match="no row say-perhaps"):
-        await edit_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-perhaps"], seeds=[1])
+        suite_entry(ENVIRONMENT, words, rows=["say-perhaps"], seeds=[1])
     with pytest.raises(ValueError, match="1 at least"):
-        await edit_suite(ledger, "words-v1", ENVIRONMENT, words, same_starts=True, episodes=0)
+        suite_entry(ENVIRONMENT, words, starts=kept, episodes=0)
     with pytest.raises(KeyError, match="no eval data 'nothing'"):
-        await edit_suite(ledger, "words-v1", ENVIRONMENT, words, eval_data="nothing")
+        suite_entry(ENVIRONMENT, words, eval_data="nothing")
     with pytest.raises(KeyError, match="no suite"):
-        await edit_suite(ledger, "never-made", ENVIRONMENT, words, same_starts=True)
-    held = await edit_suite(ledger, "words-v1", ENVIRONMENT, words, eval_data="words-held-out")
-    assert (held.id, held.chosen, held.eval_data, held.held_out) == ("words-v1@4", EVAL_DATA, "words-held-out", True)
+        await edit_suite(ledger, "never-made", [suite_entry(ENVIRONMENT, words, starts=kept)])
+    with pytest.raises(ValueError, match="an entry at least"):
+        await edit_suite(ledger, "words-v1", [])
+    held = await edit_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, eval_data="words-held-out")])
+    (entry,) = held.entries
+    assert (held.id, entry.chosen, entry.eval_data, held.held_out) == ("words-v1@4", EVAL_DATA, "words-held-out", True)
 
     await registry.point_suite("words-v1", "words-v1@2")  # (a name moved back by hand is read where it points)
     assert (found := await suite_of(ledger, "words-v1")) is not None and found.id == "words-v1@2"
@@ -136,13 +143,16 @@ async def test_a_suite_made_before_versions_reads_as_its_version_1(tmp_path: Pat
     await ledger.append(subject_table("older", "eval-old", "results"), "1-1", {"reward": 1.0, "solved": True}, fence)
     older, oldest = await suite_of(ledger, "older"), await suite_of(ledger, "oldest@1")
     assert older is not None and oldest is not None
-    assert (older.id, older.environment_version) == ("older@1", "0.9")
-    assert (older.chosen, older.eval_data) == (EVAL_DATA, "older")  # (held out: its eval data of its name)
-    assert (oldest.id, oldest.chosen, len(oldest.starts), oldest.episodes) == ("oldest@1", DRAWN, 1, 1)
+    (was,), (first,) = older.entries, oldest.entries  # (a version of one entry)
+    assert (older.id, was.environment, was.environment_version) == ("older@1", ENVIRONMENT, "0.9")
+    assert (was.chosen, was.eval_data) == (EVAL_DATA, "older")  # (held out: its eval data of its name)
+    assert (oldest.id, first.chosen, len(oldest.starts), first.episodes) == ("oldest@1", DRAWN, 1, 1)
 
-    edited = await edit_suite(ledger, "older", ENVIRONMENT, words, same_starts=True, episodes=2)
-    assert edited.id == "older@2" and edited.environment_version == "1" and edited.starts == older.starts
-    assert (again := await suite_of(ledger, "older@1")) is not None and again.environment_version == "0.9"
+    edited = await edit_suite(ledger, "older", [suite_entry(ENVIRONMENT, words, starts=older.starts, episodes=2)])
+    assert edited.id == "older@2" and edited.entries[0].environment_version == "1" and edited.starts == older.starts
+    assert edited.entries[0].chosen == EVAL_DATA  # (the same starts: chosen as they were)
+    again = await suite_of(ledger, "older@1")
+    assert again is not None and again.entries[0].environment_version == "0.9"
     listed = await System(ledger=ledger).evals()
     (shown,) = [each for each in listed["suites"] if each["suite"] == "older"]
     assert shown["version"] == "older@2" and [each["id"] for each in shown["versions"]] == ["older@1", "older@2"]
@@ -153,8 +163,12 @@ async def test_a_suite_made_before_versions_reads_as_its_version_1(tmp_path: Pat
 async def test_every_eval_keeps_the_version_it_played(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    first = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[5])
-    second = await edit_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-no"], seeds=[5], episodes=2)
+    first = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[5])]
+    )
+    second = await edit_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-no"], seeds=[5], episodes=2)]
+    )
 
     async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
         raise AssertionError("the base model is served as it is")
@@ -162,8 +176,8 @@ async def test_every_eval_keeps_the_version_it_played(tmp_path: Path) -> None:
     async with here(ledger, answering(), blobs):
         for run, suite in (("eval-first", first), ("eval-second", second)):
             await evaluate(
-                words, checkpoints, run=run, suite=suite, subject=None, base="tiny", channel="policy",
-                directory=tmp_path / "files", publish=publish, limits=suite.limits or None,
+            checkpoints, run=run, suite=suite, subject=None, base="tiny", channel="policy",
+                directory=tmp_path / "files", publish=publish,
             )  # fmt: skip
     who: Any = (await ledger.read(subject_table("words-v1", "eval-second", "subject")))["subject"]
     assert (who["version"], who["episodes"]) == ("words-v1@2", 2)  # (the version's episodes of each start)
@@ -186,26 +200,29 @@ async def test_a_scheduled_eval_plays_the_version_its_suites_name_points_to_when
 ) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[5])
+    suite = await make_suite(
+        ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[5])]
+    )
     edited: list[str] = []
 
     async def wanted() -> dict[str, JsonValue]:
         if not edited and await ledger.read(table("train", STEPS)):  # (once the first step is decided, it is edited)
-            edited.append((await edit_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-no"], seeds=[5])).id)
+            again = [suite_entry(ENVIRONMENT, words, rows=["say-no"], seeds=[5])]
+            edited.append((await edit_suite(ledger, "words-v1", again)).id)
         return {}
 
-    async def run_of(step: int) -> str:
+    async def run_of(step: int, part: int | None = None) -> str:
         return f"eval-{step}"
 
     async def scheduled(name: str, every: int, episodes: int | None) -> Schedule | None:
-        return Schedule(await suite_for(ledger, name, ENVIRONMENT, words), words, run_of, every, episodes)
+        return Schedule(await suite_for(ledger, name, ENVIRONMENT, words), run_of, every, episodes)
 
     recorder = answering()
     async with here(ledger, recorder, blobs):
         await train(
             words, Counting(), checkpoints, base="tiny", channel="policy", directory=tmp_path / "files",
             publish=recorder.publish, groups=6, groups_per_step=1, seed=1, desired=wanted, scheduled=scheduled,
-            evals=Schedule(suite, words, run_of, named=named),
+            evals=Schedule(suite, run_of, named=named),
         )  # fmt: skip
     assert edited == ["words-v1@2"]
     steps: Any = await ledger.read(table("train", STEPS))
@@ -242,7 +259,7 @@ async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_pa
         assert (await client.post("/api/suites/words-given", json=given)).status_code == 200
         held = {"environment": ENVIRONMENT, "chosen": EVAL_DATA, "eval_data": "words-held-out"}
         assert (await client.post("/api/suites/words-held", json=held)).status_code == 200
-        refused = {
+        refused: dict[str, tuple[dict[str, Any], str]] = {
             "an environment that does not load": ({**drawn, "environment": "no.such:thing"}, "words-x"),
             "no environment": ({key: value for key, value in drawn.items() if key != "environment"}, "words-x"),
             "a row it lacks": ({**drawn, "rows": ["say-perhaps"]}, "words-x"),
@@ -255,7 +272,8 @@ async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_pa
             "no way of choosing": ({**drawn, "chosen": "somehow"}, "words-x"),
             "a name that is no name": (drawn, "a@b"),
             "the same starts of no suite": ({**drawn, "chosen": "same"}, "words-x"),
-            "an edit of another environment": ({**drawn, "environment": GUESSING, "rows": None}, "words-new"),
+            "an environment in two entries": ({"entries": [drawn, drawn]}, "words-x"),
+            "no entries": ({"entries": []}, "words-x"),
             "an edit made from another version": ({"chosen": "same", "episodes": 3, "base": 2}, "words-new"),
             "an edit that changes nothing": ({"chosen": "same", "episodes": 2, "base": 1}, "words-new"),
         }
@@ -272,13 +290,14 @@ async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_pa
     suites = {each["suite"]: each for each in listed["suites"]}
     assert set(suites) == {"words-new", "words-given", "words-held"}
     shown = suites["words-new"]
-    assert shown["version"] == "words-new@3" and len(shown["starts"]) == 3 and shown["environment"] == ENVIRONMENT
-    assert [(each["id"], each["episodes"], each["answer_tokens"]) for each in shown["versions"]] == [
+    assert shown["version"] == "words-new@3" and len(shown["starts"]) == 3 and shown["environments"] == [ENVIRONMENT]
+    entries = [(each["id"], each["entries"][0]) for each in shown["versions"]]
+    assert [(version, entry["episodes"], entry["answer_tokens"]) for version, entry in entries] == [
         ("words-new@1", 2, None), ("words-new@2", 3, None), ("words-new@3", 1, 32),
     ]  # fmt: skip
     assert shown["versions"][1]["edited_from"] == "words-new@1"
     given_suite = await suite_of(ledger, "words-given")
-    assert given_suite is not None and given_suite.chosen == GIVEN
+    assert given_suite is not None and given_suite.entries[0].chosen == GIVEN
     assert given_suite.starts[0].parameters == words.start(words.rows()[2], random.Random(3))  # (drawn as `drawn` does)
     assert suites["words-held"]["versions"][0]["held_out"] is True
 
@@ -293,8 +312,8 @@ OFFERED: dict[str, Any] = {
 
 async def test_a_training_run_is_launched_only_once_it_says_the_evals_it_makes(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[5])
-    await make_suite(ledger, "guesses", GUESSING, guessing, rows=["guess-apple"], seeds=[5])
+    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[5])])
+    await make_suite(ledger, "guesses", [suite_entry(GUESSING, guessing, rows=["guess-apple"], seeds=[5])])
     heartbeats = presence_of(ledger)
     assert heartbeats is not None
     with_evals = {**OFFERED, "profile": "evaluating", "settings": {**OFFERED["settings"], "evals.suite": "words-v1"}}
@@ -311,7 +330,7 @@ async def test_a_training_run_is_launched_only_once_it_says_the_evals_it_makes(t
         "a version it does not have": ({"evals.suite": "words-v1@4"}, 409),
         "its environment's eval data, not played yet": ({"evals.suite": "words-held-out"}, 200),
         "a suite neither has": ({"evals.suite": "words-v9"}, 409),
-        "a suite of another environment": ({"evals.suite": "guesses"}, 409),
+        "a suite of an environment no launcher offers": ({"evals.suite": "guesses"}, 404),
         "a suite named by no name": ({"evals.suite": 3}, 409),
     }
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:

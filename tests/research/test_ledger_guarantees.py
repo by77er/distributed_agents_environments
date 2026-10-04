@@ -32,7 +32,7 @@ from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout.testing import FakeSandboxes
 from rollout_train.checkpoints import Checkpoints, Retention, new_id
-from rollout_train.evals import make_suite, suite_of
+from rollout_train.evals import make_suite, suite_entry, suite_of
 from rollout_train.launcher import Launcher
 from rollout_train.launches import CLAIMED, STOPPED, STOPPING, Asked, FileLaunches, Launch
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
@@ -760,10 +760,10 @@ async def test_two_makers_of_one_suite_leave_one_of_their_suites(tmp_path: Path)
     first.after_take["suites/s"] = first_pauses
     second.after_read["evaluations/s/suite"] = second_pauses
     second.after_take["suites/s"] = second_has_taken
-    by_second = asyncio.create_task(make_suite(second, "s", "e:e", Versioned(), starts=_starts(100)))  # type: ignore[arg-type]
+    by_second = asyncio.create_task(make_suite(second, "s", [suite_entry("e:e", Versioned(), starts=_starts(100))]))  # type: ignore[arg-type]
     await asyncio.sleep(0)  # (the second looks first)
     with pytest.raises(Fenced):
-        await make_suite(first, "s", "e:e", Versioned(), starts=_starts(0))  # type: ignore[arg-type]
+        await make_suite(first, "s", [suite_entry("e:e", Versioned(), starts=_starts(0))])  # type: ignore[arg-type]
     assert (await by_second).starts == _starts(100)  # what the second maker plays
     found = await suite_of(files, "s")
     assert found is not None
@@ -780,9 +780,9 @@ async def test_a_maker_that_finds_the_suite_made_meanwhile_plays_that_one(tmp_pa
         await made.wait()
 
     late.after_read["evaluations/s/suite"] = late_pauses
-    by_late = asyncio.create_task(make_suite(late, "s", "e:e", Versioned(), starts=_starts(100)))  # type: ignore[arg-type]
+    by_late = asyncio.create_task(make_suite(late, "s", [suite_entry("e:e", Versioned(), starts=_starts(100))]))  # type: ignore[arg-type]
     await asyncio.sleep(0)
-    assert (await make_suite(files, "s", "e:e", Versioned(), starts=_starts(0))).starts == _starts(0)  # type: ignore[arg-type]
+    assert (await make_suite(files, "s", [suite_entry("e:e", Versioned(), starts=_starts(0))])).starts == _starts(0)  # type: ignore[arg-type]
     made.set()
     assert (await by_late).starts == _starts(0)  # the suite in the ledger, not its own
     found = await suite_of(files, "s")

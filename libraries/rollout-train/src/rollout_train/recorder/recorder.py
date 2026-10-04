@@ -26,7 +26,7 @@ import math
 import secrets
 from array import array
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from rollout.contracts import (
@@ -42,7 +42,7 @@ from rollout.contracts import (
 )
 from rollout.harness.runner import RecordedModel, RunBinding, SamplingParameters
 from rollout_train.inference import Channel
-from rollout_train.inference.channel import Sampler, Unserved
+from rollout_train.inference.channel import Limits, Sampler, Unserved
 from rollout_train.serving import parts, qualified
 
 SERVED_UNDER = "/v1"
@@ -221,8 +221,16 @@ class RecordedEndpoint:
         self._channel = channel
         self._sampling = sampling
 
+    @property
+    def _limits(self) -> Limits:
+        """The channel's limits, with those the binding gives in their place."""
+        said, limits = self._sampling, self._channel.limits
+        return replace(
+            limits, thinking=said.thinking_tokens or limits.thinking, answer=said.answer_tokens or limits.answer
+        )
+
     def describe(self, session_id: str) -> CapabilityContract:
-        limits = self._channel.limits
+        limits = self._limits
         return CapabilityContract(
             context_limit=self._channel.context_limit, max_output_tokens=limits.thinking + limits.answer
         )
@@ -259,7 +267,7 @@ class RecordedEndpoint:
         turn is stamped with is refused (`Unserved`)."""
         channel, renderer = self._channel, self._channel.renderer
         adapter, version = await channel.weights(request.session_id)  # (where it is routed, the checkpoint is chosen)
-        limits = channel.limits
+        limits = self._limits
         thinking = renderer.thinking
         budget, answer = limits.thinking, limits.answer
         if request.max_output_tokens is not None:  # the request's own cap: the answer first, thinking with the rest

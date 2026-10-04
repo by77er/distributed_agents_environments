@@ -32,6 +32,10 @@ class SamplingParameters(ContractModel):
     top_p: float = 1.0
     reasoning_effort: str | None = None
     """For providers with reasoning controls, e.g. `low`, `medium`, `high`."""
+    thinking_tokens: int | None = None
+    """For a recorded channel: tokens of thinking per turn, and of answer after it, in place of the channel's own (an
+    eval's, say); none: the channel's."""
+    answer_tokens: int | None = None
 
 
 class DirectModel(ContractModel):
