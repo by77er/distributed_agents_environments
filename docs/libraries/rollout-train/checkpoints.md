@@ -85,7 +85,9 @@ checkpoint, by their paths within it, to blobs.
 - **`layout`** says how the weights are divided among the files, where they are divided. A reader with the same
   division reads its own files and no others.
 - **`files(manifest, directory)`** puts a manifest's files under a directory, from the blob store, if they are not
-  there. The directory appears whole or not at all.
+  there. The directory appears whole or not at all. A file the store lacks is read from the store of any run that
+  has it, as each run's start says where its store is: a run can start from a checkpoint another run kept in its own
+  blob store, or from a merge of one.
 
 ## Resharding
 

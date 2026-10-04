@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
+from pydantic import JsonValue
 
 from rollout.catalog import binding_for
 from rollout.harness.blobs import FileBlobStore
@@ -14,7 +15,7 @@ from rollout_train.checkpoints import Checkpoints
 from rollout_train.ledger import FileLedger
 from rollout_train.merging import SCOPE, merge
 from rollout_train.profile import Profile
-from rollout_train.record import scope
+from rollout_train.record import STARTS, scope, table
 from rollout_train.stores import FILES
 from rollout_train.trainer import WEIGHTS, Files, Step, Weighted
 from tests.rollout_train.rollouts.games import words
@@ -206,3 +207,22 @@ async def test_every_weight_is_not_trained_from_an_adapter_before_it_is_merged(t
                 directory=tmp_path / "Full-plain" / "checkpoints", publish=platform.publish, run=platform.run.id,
                 groups=1, made=platform.made,
             )  # fmt: skip
+
+
+async def test_a_checkpoint_kept_in_another_runs_blob_store_is_read_from_there(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    theirs = Checkpoints(ledger, FileBlobStore(tmp_path / "their-blobs"))
+    fence = await ledger.take(scope("theirs"))
+    where: JsonValue = {"kind": FILES, "directory": str(tmp_path / "their-blobs")}
+    await ledger.append(
+        table("theirs", STARTS), str(fence.number), {"blobs": where}, fence
+    )  # (as every run's start says)
+    made = await theirs.add(fence, "tttt" * 4, weights=files(tmp_path, "t"), run="theirs", base="a-checkpoint")
+    assert made.weights is not None
+    mine = Checkpoints(ledger, FileBlobStore(tmp_path / "my-blobs"))
+    read = await mine.files(made.weights, tmp_path / "read")
+    assert (read / "model.safetensors").read_text() == "t"
+    with pytest.raises(FileNotFoundError):  # (a file no store has)
+        await Checkpoints(FileLedger(tmp_path / "other"), FileBlobStore(tmp_path / "my-blobs")).files(
+            made.weights, tmp_path / "again"
+        )

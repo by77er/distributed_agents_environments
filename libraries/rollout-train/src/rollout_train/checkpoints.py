@@ -18,6 +18,7 @@ the trainer wrote them; whoever needs them reads the files it needs.
 """
 
 import asyncio
+import json
 import os
 import secrets
 import shutil
@@ -33,6 +34,7 @@ from pydantic import JsonValue, TypeAdapter
 from rollout.contracts import BlobReference
 from rollout.harness.blobs import Blobs
 from rollout_train.ledger import Fence, Ledger
+from rollout_train.stores import opened
 
 CHECKPOINTS, RELEASED = "checkpoints", "checkpoints/released"
 """The ledger's tables of checkpoints, and of the checkpoints whose files were deleted."""
@@ -125,6 +127,7 @@ class Checkpoints:
     def __init__(self, ledger: Ledger, blobs: Blobs) -> None:
         self.ledger = ledger
         self.blobs = blobs
+        self._stores: list[Blobs] | None = None
 
     async def all(self) -> list[Checkpoint]:
         """Every checkpoint, oldest first."""
@@ -226,12 +229,40 @@ class Checkpoints:
 
     async def files(self, manifest: Manifest, directory: Path) -> Path:
         """A manifest's files under `directory`, read from the blob store if they are not there. The directory
-        appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint."""
+        appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint. A file this
+        store lacks is read from the store of any run that has it (a checkpoint made by a run that kept its blobs
+        elsewhere, or a merge of one), as each run's start says where its store is."""
         if await asyncio.to_thread(directory.exists):
             return directory
-        contents = {relative: await self.blobs.read(reference) for relative, reference in manifest.files.items()}
+        contents = {relative: await self._read(reference) for relative, reference in manifest.files.items()}
         await asyncio.to_thread(_written, contents, directory)
         return directory
+
+    async def _read(self, reference: BlobReference) -> bytes:
+        try:
+            return await self.blobs.read(reference)
+        except Exception:
+            for store in await self._elsewhere():
+                try:
+                    return await store.read(reference)
+                except Exception:  # (not in that one either)
+                    continue
+            raise
+
+    async def _elsewhere(self) -> list[Blobs]:
+        """The other runs' blob stores, from where their starts say they are."""
+        from rollout_train.record import STARTS  # (record reads checkpoints)
+
+        if self._stores is None:
+            where: dict[str, Any] = {}
+            for name in await self.ledger.tables():
+                if name.startswith("runs/") and name.endswith(f"/{STARTS}"):
+                    for record in (await self.ledger.read(name)).values():
+                        kept = record.get("blobs") if isinstance(record, dict) else None
+                        if isinstance(kept, dict):
+                            where[json.dumps(kept, sort_keys=True)] = kept
+            self._stores = [opened(each) for each in where.values()]
+        return self._stores
 
 
 def _base(first: Checkpoint | None, kind: str, base: str | None) -> str | None:
