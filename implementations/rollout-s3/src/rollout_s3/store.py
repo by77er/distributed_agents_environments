@@ -5,6 +5,11 @@ Each blob is an object named by its SHA-256 under a prefix, e.g. `s3://bucket/bl
 idempotent (an object that exists is not written again), and reads verify the hash. Since blobs are read by hash,
 stores are interchangeable: bytes copied from a `FileBlobStore` into this one serve the same references.
 
+A blob's time is its object's `LastModified`, judged by the service's clock (the `Date` of its answer). A put that finds
+the object copies it onto itself, which sets that time to now, unless it was set less than `refresh_after` seconds ago;
+deleting with `unused_for` deletes only an object older than that. The look at its time and the delete are two
+requests: a put that finds the object between them is not seen.
+
 Connection settings come from boto3's usual sources unless given: credentials (environment variables, `~/.aws`,
 instance and pod roles), the region, and the endpoint of an S3-compatible service (`AWS_ENDPOINT_URL_S3` or
 `AWS_ENDPOINT_URL`). With a custom endpoint, requests use path-style addressing (`endpoint/bucket/key`), which every
@@ -13,6 +18,8 @@ S3-compatible service accepts.
 
 import asyncio
 import os
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -22,7 +29,11 @@ from rollout.harness.blobs import blob_digest, verified
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
-__all__ = ["S3BlobStore"]
+__all__ = ["REFRESH_AFTER", "S3BlobStore"]
+
+REFRESH_AFTER = 60.0
+"""Seconds after which a put that finds a blob sets its time again: one put a minute of a blob much put (an image every
+episode stores) costs a copy, not every one."""
 
 
 class S3BlobStore:
@@ -36,11 +47,13 @@ class S3BlobStore:
         endpoint_url: str | None = None,
         region: str | None = None,
         client: "S3Client | None" = None,
+        refresh_after: float = REFRESH_AFTER,
     ) -> None:
         """`client` replaces the boto3 client this store would create (e.g. with custom credentials)."""
         self.bucket = bucket
         self.prefix = prefix if not prefix or prefix.endswith("/") else f"{prefix}/"
         self.client = client or _client(endpoint_url, region)
+        self.refresh_after = refresh_after
 
     @classmethod
     def from_url(cls, url: str, **options: Any) -> "S3BlobStore":
@@ -59,29 +72,57 @@ class S3BlobStore:
     async def read(self, reference: BlobReference) -> bytes:
         return verified(await asyncio.to_thread(self._get, self._key(reference.sha256)), reference)
 
-    async def delete(self, reference: BlobReference) -> None:
-        await asyncio.to_thread(self.client.delete_object, Bucket=self.bucket, Key=self._key(reference.sha256))
+    async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None:
+        await asyncio.to_thread(self._delete, self._key(reference.sha256), unused_for)
 
     def _key(self, digest: str) -> str:
         return f"{self.prefix}{digest[:2]}/{digest}"
 
     def _put_once(self, key: str, data: bytes, media_type: str, digest: str) -> None:
-        if self._exists(key):
+        if self._refreshed(key, media_type, digest):
             return  # content-addressed: the object already holds these bytes
         self.client.put_object(
             Bucket=self.bucket, Key=key, Body=data, ContentType=media_type, Metadata={"sha256": digest}
         )
 
-    def _exists(self, key: str) -> bool:
+    def _refreshed(self, key: str, media_type: str, digest: str) -> bool:
+        """Whether the object is there; if it is, its time is now (copied onto itself, unless it was set less than
+        `refresh_after` seconds ago)."""
         from botocore.exceptions import ClientError
 
+        if (age := self._age(key)) is None:
+            return False
+        if age < self.refresh_after:
+            return True
         try:
-            self.client.head_object(Bucket=self.bucket, Key=key)
+            self.client.copy_object(
+                Bucket=self.bucket, Key=key, CopySource={"Bucket": self.bucket, "Key": key},
+                MetadataDirective="REPLACE", ContentType=media_type, Metadata={"sha256": digest},
+            )  # fmt: skip
         except ClientError as error:
-            if _not_found(error):
+            if _not_found(error):  # (deleted since it was looked at: it is written again)
                 return False
             raise
         return True
+
+    def _delete(self, key: str, unused_for: float) -> None:
+        if unused_for > 0 and ((age := self._age(key)) is None or age < unused_for):
+            return
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def _age(self, key: str) -> float | None:
+        """Seconds since the object's time, by the service's clock; None if there is no such object."""
+        from botocore.exceptions import ClientError
+
+        try:
+            head = self.client.head_object(Bucket=self.bucket, Key=key)
+        except ClientError as error:
+            if _not_found(error):
+                return None
+            raise
+        said = head.get("ResponseMetadata", {}).get("HTTPHeaders", {}).get("date")
+        now = parsedate_to_datetime(said) if said else datetime.now(UTC)
+        return (now - head["LastModified"]).total_seconds()
 
     def _get(self, key: str) -> bytes:
         from botocore.exceptions import ClientError

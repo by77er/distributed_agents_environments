@@ -4,9 +4,12 @@ A **suite** is a named list of starts of an environment's rows, each a row's sta
 every subject plays, start for start, so that subjects compare. Most come from an environment's eval data
 (`Environment.evals()`), frozen under their name the first time they are played (`suite_for`): training never draws
 those starts. One can be made by hand too, of rows and seeds (`make_suite`), with no such promise. It is kept in the
-ledger, written once under the suite's fence (`suites/NAME`) and never changed: what it is (`evaluations/SUITE/suite`:
-its environment and its version, its rows and seeds, whether it is held out of training) and its starts
-(`evaluations/SUITE/starts`, by number from 1: the row's key and title, the seed, the start's parameters).
+ledger as one record, written once under the suite's fence (`suites/NAME`) and never changed
+(`evaluations/SUITE/suite`): its environment and its version, its rows and seeds, whether it is held out of training,
+and its starts in order (each the row's key and title, the seed, the start's parameters). Two makers of one suite at
+once leave one of their suites whole: the one whose record was appended, which the other then reads and plays. A suite
+made before suites were one record keeps its starts in a table of their own (`evaluations/SUITE/starts`, by number from
+1), and reads the same.
 
 An **eval** is one suite played by one subject: a checkpoint (by any reference `rollout_train.registry.resolved`
 takes), or the base model. It is a run of its own, registered and fenced like any run, whose start says what it is
@@ -24,10 +27,10 @@ run of its own (`rollout_train.loop.train`).
 import asyncio
 import socket
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -35,7 +38,7 @@ from rollout.environment import Environment, Start, binding_for, drawn
 from rollout.harness.runner import RunBinding
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.launches import EVAL
-from rollout_train.ledger import Fence, Ledger, between
+from rollout_train.ledger import Fence, Fenced, Ledger, appended, between
 from rollout_train.record import (
     ENDS,
     FINISHED,
@@ -112,12 +115,13 @@ async def make_suite(
         list(dict.fromkeys(start.seed for start in listed)), environment.version, held_out=starts is not None,
     )  # fmt: skip
     fence = await ledger.take(f"suites/{name}")
-    about: Any = {key: value for key, value in asdict(made).items() if key not in ("name", "starts")}
-    await ledger.append(suite_table(name, "suite"), "suite", about, fence)
-    for number, start in enumerate(listed, start=1):
-        record: Any = asdict(start)
-        await ledger.append(suite_table(name, "starts"), str(number), record, fence)
-    return made
+    whole: Any = {key: value for key, value in asdict(made).items() if key != "name"}
+    there = await appended(ledger, suite_table(name, "suite"), "suite", whole, fence)
+    if there.wrote:
+        return made
+    if "starts" in (record := _mapping(there.record)):  # another maker's, made meanwhile: the suite is that one
+        return _as_suite(name, record, {})
+    return await suite_of(ledger, name) or made  # (one made as a record and a table of starts)
 
 
 async def suite_for(ledger: Ledger, name: str, environment_name: str, environment: Environment) -> Suite:
@@ -132,25 +136,68 @@ async def suite_for(ledger: Ledger, name: str, environment_name: str, environmen
     if name not in data:
         known = ", ".join(sorted(data)) or "none"
         raise KeyError(f"there is no suite {name!r}, and {environment_name} has no eval data of that name ({known})")
-    return await make_suite(ledger, name, environment_name, environment, starts=data[name])
+    for attempt in range(MAKERS):  # (another process may make it at the same time: then it is read from the ledger)
+        try:
+            return await make_suite(ledger, name, environment_name, environment, starts=data[name])
+        except Fenced:  # another maker took the suite's fence after this one did
+            await asyncio.sleep(0.05 * (attempt + 1))
+        except ValueError:  # another maker made it since it was looked for
+            if (found := await suite_of(ledger, name)) is None:
+                raise
+            return found
+        if (found := await suite_of(ledger, name)) is not None:
+            return found
+    raise RuntimeError(f"the suite {name!r} was being made by others {MAKERS} times over, and none of them made it")
+
+
+MAKERS = 5
+"""How many times `suite_for` makes a suite that others are making at the same time, before it gives up."""
 
 
 async def suite_of(ledger: Ledger, name: str) -> Suite | None:
-    """A suite, if there is one by that name."""
-    about: Any = (await ledger.read(suite_table(name, "suite"))).get("suite")
-    starts = await ledger.read(suite_table(name, "starts"))
-    if about is None and not starts:
+    """A suite, if there is one by that name: one record (`suite`) holding all of it, or, for a suite made before
+    suites were, a record of what it is and its starts in a table of their own."""
+    found = (await ledger.read(suite_table(name, "suite"))).get("suite")
+    about = _mapping(found)
+    starts = {} if "starts" in about else await ledger.read(suite_table(name, "starts"))
+    if found is None and not starts:
         return None
-    about = about or {}
-    listed = [Start(**record) for _, record in sorted(starts.items(), key=lambda item: int(item[0]))]  # type: ignore[arg-type]
+    return _as_suite(name, about, starts)
+
+
+def _as_suite(name: str, about: Mapping[str, Any], starts: Mapping[str, JsonValue]) -> Suite:
+    """A suite from its record, and its starts by number where the record does not hold them."""
+    if "starts" in about:
+        listed = [Start(**record) for record in about["starts"]]
+    else:
+        listed = [Start(**record) for _, record in sorted(starts.items(), key=lambda item: int(item[0]))]  # type: ignore[arg-type]
     environment = str(about.get("environment") or about.get("catalog") or "")  # (a suite made as a catalog's says so)
     return Suite(name, environment, listed, float(about.get("made") or 0.0), about.get("rows"), about.get("seeds"),
                  about.get("version"), bool(about.get("held_out")))  # fmt: skip
 
 
+def starts_in(tables: Mapping[str, Mapping[str, Any]], suite: str) -> dict[str, Any]:
+    """A suite's starts by number from 1, from a ledger's tables as read (by name), whichever way the suite was
+    written."""
+    whole: Any = _mapping(tables.get(suite_table(suite, "suite"), {}).get("suite")).get("starts")
+    if isinstance(whole, list):
+        return {str(number): start for number, start in enumerate(cast(list[Any], whole), start=1)}
+    return dict(tables.get(suite_table(suite, "starts"), {}))
+
+
+def suites_among(names: Iterable[str]) -> list[str]:
+    """The suites tables are of, from their names."""
+    found = {between(each, EVALUATIONS, part) for each in names for part in ("/suite", "/starts")}
+    return sorted(name for name in found if name and "/" not in name)
+
+
+def _mapping(record: JsonValue) -> Mapping[str, Any]:
+    return record if isinstance(record, dict) else {}
+
+
 async def suites_in(ledger: Ledger) -> list[str]:
     """Every suite a ledger has, by name."""
-    return sorted({name for each in await ledger.tables() if (name := between(each, EVALUATIONS, "/starts"))})
+    return suites_among(await ledger.tables())
 
 
 class Publisher(Protocol):

@@ -4,7 +4,9 @@
 Two tables hold it: `ledger_records` (a row per record: its table's name, its key, the order it was appended in, the
 fence it was written under, and the record as JSON; a table has each key once) and `ledger_fences` (the newest fence
 of every scope). Taking a fence and appending run in transactions that hold the scope's lock, so a writer that was
-replaced is refused (`Fenced`) whichever process it is in. SQLite serves one machine; Postgres serves several.
+replaced is refused (`Fenced`) whichever process it is in. An append holds its table's lock too, while it numbers its
+record after the table's last, so records are numbered one each, in the order they commit, whichever scopes append to
+the table. SQLite serves one machine; Postgres serves several.
 
 `DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in three tables of the same database: `runs`
 (each run's id and name, a name once), `bookmarks` (each bookmark's name and checkpoint) and `dataset_names` (each
@@ -20,7 +22,7 @@ ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of ea
 import asyncio
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -30,8 +32,8 @@ from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease
 from rollout_durable.database import Connection, Database, fetch_all, fetch_one, sql
-from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, new_launch
-from rollout_train.ledger import Fence, Fenced, Ledger
+from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, changed, new_launch
+from rollout_train.ledger import Appended, Fence, Fenced, Ledger
 from rollout_train.presence import Beat, kept
 from rollout_train.registry import Bookmark, Entry, Named, Taken, checked, found, new_run_id, registry_of, valid
 from rollout_train.settings import Desired
@@ -118,6 +120,7 @@ class DatabaseLedger:
         self.url = url
         self.database = Database(url)
         self.database.create(METADATA)
+        self.database.write(_ordered, exclusive="schema")
 
     async def take(self, scope: str) -> Fence:
         def taken(connection: Connection) -> int:
@@ -132,14 +135,20 @@ class DatabaseLedger:
         return Fence(scope, await asyncio.to_thread(self.database.write, taken, exclusive=f"ledger:{scope}"))
 
     async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool:
+        return (await self.append_returning(table, key, record, fence)).wrote
+
+    async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended:
+        """`append`, saying what the table holds under `key` too, from the same transaction."""
         text = json.dumps(record)
 
-        def appended(connection: Connection) -> bool:
+        def appended(connection: Connection) -> Appended:
             newest = fetch_one(
                 connection, "SELECT number FROM ledger_fences WHERE scope = :scope", {"scope": fence.scope}
             )
             if (int(newest[0]) if newest else 0) != fence.number:
                 raise Fenced(f"{fence.scope} has a newer writer than fence {fence.number}")
+            if self.database.shared:  # (SQLite runs one write at a time anyway)
+                sql(connection, "SELECT pg_advisory_xact_lock(hashtextextended(:lock, 0))", {"lock": f"table:{table}"})
             inserted = sql(
                 connection,
                 "INSERT INTO ledger_records (name, key, position, fence, record) VALUES (:name, :key, "
@@ -147,13 +156,17 @@ class DatabaseLedger:
                 "ON CONFLICT (name, key) DO NOTHING",
                 {"name": table, "key": key, "fence": fence.number, "record": text},
             )
-            return inserted.rowcount == 1
+            if inserted.rowcount == 1:
+                return Appended(True, record)
+            query = "SELECT record FROM ledger_records WHERE name = :name AND key = :key"
+            there = fetch_one(connection, query, {"name": table, "key": key})
+            return Appended(False, json.loads(there[0]) if there else None)
 
         return await asyncio.to_thread(self.database.write, appended, exclusive=f"ledger:{fence.scope}")
 
     async def read(self, table: str) -> dict[str, JsonValue]:
         def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            query = "SELECT key, record FROM ledger_records WHERE name = :name ORDER BY position"
+            query = "SELECT key, record FROM ledger_records WHERE name = :name ORDER BY position, key"
             return fetch_all(connection, query, {"name": table})
 
         found = await asyncio.to_thread(self.database.read, rows)
@@ -310,26 +323,29 @@ class DatabaseLaunches:
             if row is None:
                 return None
             launch = replace(as_launch(json.loads(row[0])), state=CLAIMED, launcher=launcher, updated=time.time())
-            self._write(connection, launch)
+            self._write(connection, launch, ASKED)
             return launch
 
         return await asyncio.to_thread(self.database.write, claimed, exclusive="launches")
 
-    async def note(self, id: str, **changes: Any) -> Launch:
+    async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
         def noted(connection: Connection) -> Launch:
             row = fetch_one(connection, "SELECT launch FROM launches WHERE id = :id", {"id": id})
             if row is None:
                 raise KeyError(f"there is no launch {id}")
-            launch = replace(as_launch(json.loads(row[0])), **changes, updated=round(time.time(), 1))
-            self._write(connection, launch)
+            was = as_launch(json.loads(row[0]))
+            launch = changed(was, expect, changes)
+            if launch is None:
+                return was
+            self._write(connection, launch, was.state)
             return launch
 
         return await asyncio.to_thread(self.database.write, noted, exclusive="launches")
 
     @staticmethod
-    def _write(connection: Connection, launch: Launch) -> None:
-        sql(connection, "UPDATE launches SET state = :state, launch = :launch WHERE id = :id",
-            {"id": launch.id, "state": launch.state, "launch": json.dumps(asdict(launch))})  # fmt: skip
+    def _write(connection: Connection, launch: Launch, was: str) -> None:
+        sql(connection, "UPDATE launches SET state = :state, launch = :launch WHERE id = :id AND state = :was",
+            {"id": launch.id, "state": launch.state, "launch": json.dumps(asdict(launch)), "was": was})  # fmt: skip
 
 
 class DatabasePresence:
@@ -427,6 +443,11 @@ class DatabaseLeases:
             return fetch_all(connection, "SELECT lease FROM sandboxes ORDER BY key")
 
         return [Lease.model_validate_json(lease) for (lease,) in await asyncio.to_thread(self.database.read, rows)]
+
+
+def _ordered(connection: Connection) -> None:
+    """The index a table's records are read by, in order (made in a database made before it had one too)."""
+    sql(connection, "CREATE INDEX IF NOT EXISTS ledger_records_order ON ledger_records (name, position)")
 
 
 def _runs(connection: Connection) -> list[Entry]:

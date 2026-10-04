@@ -1,12 +1,16 @@
 """The ledger: tables that are only appended to, each key once, and fences that shut a replaced writer out."""
 
+import asyncio
+import fcntl
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
+from rollout_train.ledger import Appended, Fence, Fenced, FileLedger, Ledger, appended
 
 
 def in_files(directory: Path) -> Ledger:
@@ -60,6 +64,114 @@ async def test_a_half_written_line_was_never_appended(tmp_path: Path) -> None:
     with (tmp_path / "groups.jsonl").open("a") as file:
         file.write(json.dumps({"key": "2", "fence": 1, "record": {"row": "b"}})[:20])  # the writer died here
     assert await ledger.read("groups") == {"1": {"row": "a"}}
+
+
+async def test_an_append_after_a_line_cut_short_removes_it_and_is_kept(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path)
+    fence = await ledger.take("run")
+    for key in ("1", "2", "3"):
+        assert await ledger.append("groups", key, {"row": key * 300}, fence)
+    path = tmp_path / "groups.jsonl"
+    whole = path.read_bytes()
+    os.truncate(path, len(whole) - 200)  # the writer of "3" died mid-line (a large record, a full disk)
+    again = FileLedger(tmp_path)  # started again
+    assert list(await again.read("groups")) == ["1", "2"]
+    assert await again.append("groups", "4", {"row": "d"}, fence)
+    assert await again.append("groups", "3", {"row": "c"}, fence)  # "3" was never appended: its key is free
+    assert await again.read("groups") == {"1": {"row": "1" * 300}, "2": {"row": "2" * 300}, "4": {"row": "d"},
+                                          "3": {"row": "c"}}  # fmt: skip
+    assert all(json.loads(line) for line in path.read_text().splitlines())  # every line whole
+    assert await ledger.read("groups") == await again.read("groups")  # (and the first process sees the same)
+    assert not await ledger.append("groups", "4", {"row": "other"}, fence)
+
+
+async def test_a_record_whose_newline_was_cut_off_stands(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path)
+    fence = await ledger.take("run")
+    await ledger.append("groups", "1", {"row": "a"}, fence)
+    await ledger.append("groups", "2", {"row": "b"}, fence)
+    path = tmp_path / "groups.jsonl"
+    os.truncate(path, path.stat().st_size - 1)  # all of "2" but its newline
+    assert await ledger.read("groups") == {"1": {"row": "a"}, "2": {"row": "b"}}  # (readers saw it)
+    assert not await ledger.append("groups", "2", {"row": "other"}, fence)
+    assert await ledger.append("groups", "3", {"row": "c"}, fence)
+    assert await FileLedger(tmp_path).read("groups") == {"1": {"row": "a"}, "2": {"row": "b"}, "3": {"row": "c"}}
+
+
+async def test_a_ledger_of_files_sees_what_others_append_and_a_table_replaced(tmp_path: Path) -> None:
+    mine, theirs = FileLedger(tmp_path), FileLedger(tmp_path)
+    fence = await mine.take("run")
+    await mine.append("groups", "1", {}, fence)
+    await theirs.append("groups", "2", {}, fence)  # another process: this one knows only what it appended
+    assert not await mine.append("groups", "2", {"other": True}, fence)
+    path = tmp_path / "groups.jsonl"
+    replaced = tmp_path / "replaced.jsonl"
+    replaced.write_text(path.read_text().splitlines()[0] + "\n")  # (a table restored from a copy holding "1")
+    os.replace(replaced, path)
+    assert await mine.append("groups", "2", {"again": True}, fence)
+    assert await theirs.read("groups") == {"1": {}, "2": {"again": True}}
+
+
+async def test_fences_are_replaced_whole_when_one_is_taken(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path)
+    await ledger.take("run")
+    before = (tmp_path / "fences.json").stat().st_ino
+    await ledger.take("run")
+    assert (tmp_path / "fences.json").stat().st_ino != before  # another file, renamed over it: never written in place
+    assert await ledger.fences() == {"run": 2}
+    assert sorted(os.listdir(tmp_path)) == [".lock", "fences.json"]  # (nothing left beside it)
+
+
+async def test_a_ledger_of_files_does_not_hold_up_the_event_loop_while_another_holds_its_lock(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path)
+    fence = await ledger.take("run")
+    with (tmp_path / ".lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)  # another process holds the ledger
+        appending = asyncio.create_task(ledger.append("groups", "1", {}, fence))
+        ticks = 0
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            ticks += 1  # (the loop goes on meanwhile)
+        assert ticks == 5 and not appending.done()
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    assert await appending
+
+
+@KINDS
+async def test_an_append_says_whether_it_wrote_and_what_the_table_holds(
+    tmp_path: Path, opened: Callable[[Path], Ledger]
+) -> None:
+    ledger = opened(tmp_path)
+    fence = await ledger.take("run")
+    assert await appended(ledger, "groups", "1", {"row": "a"}, fence) == Appended(True, {"row": "a"})
+    assert await appended(ledger, "groups", "1", {"row": "b"}, fence) == Appended(False, {"row": "a"})
+    assert await ledger.read("groups") == {"1": {"row": "a"}}
+
+
+async def test_a_ledger_without_appends_that_say_what_is_there_is_read_back(tmp_path: Path) -> None:
+    class Plain:  # (a `Ledger` with only the protocol's operations)
+        def __init__(self) -> None:
+            self.inner = FileLedger(tmp_path)
+
+        async def take(self, scope: str) -> Fence:
+            return await self.inner.take(scope)
+
+        async def append(self, table: str, key: str, record: Any, fence: Fence) -> bool:
+            return await self.inner.append(table, key, record, fence)
+
+        async def read(self, table: str) -> dict[str, Any]:
+            return await self.inner.read(table)
+
+        async def tables(self) -> list[str]:
+            return await self.inner.tables()
+
+        async def fences(self) -> dict[str, int]:
+            return await self.inner.fences()
+
+    ledger = Plain()
+    fence = await ledger.take("run")
+    assert await appended(ledger, "groups", "1", 1, fence) == Appended(True, 1)
+    assert await appended(ledger, "groups", "1", 2, fence) == Appended(False, 1)
 
 
 async def test_a_ledger_in_postgres_is_shared_and_fenced_as_in_sqlite(postgres: str) -> None:

@@ -6,6 +6,8 @@ suite it plays, the checkpoint that plays it and how many episodes of each start
 `rollout_train.evals`). A launcher (`rollout_train.launcher`) on a training machine says in its heartbeat which profiles
 it can run, claims a launch asked for one of them, starts `rollout train` (or `rollout eval`), and notes how it goes:
 claimed, running (with the process), ended or failed (with why). A launch asked to stop is stopped by its launcher.
+Every change of a launch's state compares and sets: it is made only if the launch is where its writer expects, and may
+go where it is sent (`MOVES`), so a stop is never overwritten by a launcher that started the run meanwhile.
 
 This is ordinary state, changed in place, not part of the ledger's append-only record: a file beside a ledger of
 files (`FileLaunches`), a table in a database ledger's database (`rollout_train.database.DatabaseLaunches`).
@@ -15,7 +17,7 @@ import asyncio
 import fcntl
 import json
 import time
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -37,6 +39,15 @@ ASKED, CLAIMED, RUNNING, STOPPING, ENDED, FAILED, STOPPED = (
 )
 """Where a launch is: asked for; claimed by a launcher; its run going; asked to stop; and how it finished."""
 OPEN = (ASKED, CLAIMED, RUNNING, STOPPING)
+MOVES: Mapping[str, frozenset[str]] = {
+    ASKED: frozenset({CLAIMED, STOPPED}),
+    CLAIMED: frozenset({RUNNING, STOPPING, STOPPED, ENDED, FAILED}),
+    RUNNING: frozenset({STOPPING, STOPPED, ENDED, FAILED}),
+    STOPPING: frozenset({STOPPED, ENDED, FAILED}),
+}
+"""Where a launch may go from where it is. A launch that finished (ended, failed, stopped) goes nowhere, nothing goes
+back, and a launch asked to stop is not running again: a stop asked for while its launcher starts the run stays, and
+the launcher signals the run it started. A state may also be noted again (its details changed)."""
 RUN, EVAL = "run", "eval"
 """What a launch starts: a training run (`rollout train`), or an eval (`rollout eval`)."""
 
@@ -115,9 +126,22 @@ class Launches(Protocol):
         """Claim a launch that is asked for: the launch, claimed, or None if another launcher claimed it first."""
         ...
 
-    async def note(self, id: str, **changes: Any) -> Launch:
-        """Note how a launch goes (its state, directory, process, detail)."""
+    async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
+        """Note how a launch goes (its state, directory, process, detail), in one step that compares and sets: the
+        changes are written only if the launch is in a state of `expect` (any, if None) and may go to the state they
+        name (`MOVES`). Returns the launch as it is then, changed or not: whoever moves it compares the state it gets
+        with the state it asked for. Raises `KeyError` when there is no such launch."""
         ...
+
+
+def changed(launch: Launch, expect: Collection[str] | None, changes: Mapping[str, Any]) -> Launch | None:
+    """A launch with `changes`, if they may be made of it as it is (`Launches.note`); else None."""
+    if expect is not None and launch.state not in expect:
+        return None
+    state = changes.get("state", launch.state)
+    if state != launch.state and state not in MOVES.get(launch.state, frozenset()):
+        return None
+    return replace(launch, **changes, updated=round(time.time(), 1))
 
 
 def launches_of(ledger: Ledger) -> Launches | None:
@@ -163,12 +187,15 @@ class FileLaunches:
         await asyncio.to_thread(self._change, change)
         return claimed[0] if claimed else None
 
-    async def note(self, id: str, **changes: Any) -> Launch:
+    async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
         noted: list[Launch] = []
 
         def change(launches: dict[str, Launch]) -> dict[str, Launch]:
-            noted.append(replace(launches[id], **changes, updated=round(time.time(), 1)))
-            return {**launches, id: noted[0]}
+            if id not in launches:
+                raise KeyError(f"there is no launch {id}")
+            made = changed(launches[id], expect, changes)
+            noted.append(made or launches[id])
+            return {**launches, id: made} if made is not None else launches
 
         await asyncio.to_thread(self._change, change)
         return noted[0]

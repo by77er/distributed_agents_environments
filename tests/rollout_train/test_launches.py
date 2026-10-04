@@ -16,6 +16,8 @@ from rollout_train.launches import (
     CLAIMED,
     ENDED,
     FAILED,
+    MOVES,
+    OPEN,
     RUNNING,
     STOPPED,
     STOPPING,
@@ -51,6 +53,56 @@ async def test_a_launch_is_asked_for_claimed_once_and_noted_as_it_goes(tmp_path:
     assert (running.state, running.directory, running.pid, running.launcher) == (RUNNING, "/runs/d", 12, "launcher/a")
     (again,) = [each for each in await launches.all() if each.id == first.id]
     assert again == running and again.asked.settings == {"trainer.learning_rate": 3e-5}
+
+
+@pytest.mark.parametrize("kind", [0, 1], ids=["files", "database"])
+async def test_a_launch_moves_only_as_its_states_allow_and_as_its_writer_expects(tmp_path: Path, kind: int) -> None:
+    launches = launches_of(ledgers(tmp_path)[kind])
+    assert launches is not None
+    asked = await launches.ask(Asked("one-gpu", "c:c", "run"))
+    assert (await launches.note(asked.id, state=RUNNING)).state == ASKED  # (not claimed yet: not running)
+    claimed = await launches.claim(asked.id, "launcher/a")
+    assert claimed is not None
+    stopping = await launches.note(asked.id, expect=(CLAIMED, RUNNING), state=STOPPING)  # a stop, while it starts
+    assert stopping.state == STOPPING
+    refused = await launches.note(asked.id, expect=(CLAIMED,), state=RUNNING, pid=12)  # the launcher's, after it
+    assert (refused.state, refused.pid) == (STOPPING, None) and refused == stopping  # nothing written
+    assert (await launches.note(asked.id, state=RUNNING)).state == STOPPING  # (nor without an expectation)
+    assert (await launches.note(asked.id, expect=OPEN, pid=12)).pid == 12  # its details, in the state it is in
+    assert (await launches.note(asked.id, expect=(ASKED,), state=STOPPED)).state == STOPPING  # (a stop of one asked)
+    assert (await launches.note(asked.id, state=STOPPED, detail="stopped")).state == STOPPED
+    for state in (ASKED, CLAIMED, RUNNING, STOPPING, ENDED, FAILED):  # a launch that finished goes nowhere
+        assert (await launches.note(asked.id, state=state)).state == STOPPED
+    (stored,) = [each for each in await launches.all() if each.id == asked.id]
+    assert (stored.state, stored.pid, stored.detail) == (STOPPED, 12, "stopped")
+    with pytest.raises(KeyError):
+        await launches.note("launch_none", state=STOPPED)
+
+
+def test_every_state_a_launch_goes_to_is_written_down() -> None:
+    assert set(MOVES) == {ASKED, CLAIMED, RUNNING, STOPPING} == set(OPEN)  # (the finished ones go nowhere)
+    reached = {ASKED} | {state for moves in MOVES.values() for state in moves}
+    assert reached == {ASKED, CLAIMED, RUNNING, STOPPING, ENDED, FAILED, STOPPED}
+    assert all(ASKED not in moves for moves in MOVES.values())  # (nothing goes back)
+    assert all(CLAIMED not in moves for state, moves in MOVES.items() if state != ASKED)
+    assert RUNNING not in MOVES[STOPPING]
+
+
+@pytest.mark.parametrize("kind", [0, 1], ids=["files", "database"])
+async def test_concurrent_stops_and_starts_leave_a_launch_stopping_or_stopped_never_running(
+    tmp_path: Path, kind: int
+) -> None:
+    launches = launches_of(ledgers(tmp_path)[kind])
+    assert launches is not None
+    for _ in range(10):
+        asked = await launches.ask(Asked("one-gpu", "c:c", "run"))
+        await launches.claim(asked.id, "launcher/a")
+        await asyncio.gather(
+            launches.note(asked.id, expect=(CLAIMED, RUNNING), state=STOPPING),
+            launches.note(asked.id, expect=(CLAIMED,), state=RUNNING),
+        )
+        (now,) = [each for each in await launches.all() if each.id == asked.id]
+        assert now.state == STOPPING  # (whichever came first: a stop is never overwritten by RUNNING)
 
 
 def test_a_launch_asked_for_as_a_catalog_reads_as_its_environment() -> None:

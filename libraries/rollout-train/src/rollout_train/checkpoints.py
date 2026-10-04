@@ -94,6 +94,7 @@ class Checkpoint:
 
 
 _VERSION = TypeAdapter(Checkpoint)
+_MANIFEST = TypeAdapter(Manifest)
 
 
 def new_id() -> str:
@@ -207,8 +208,11 @@ class Checkpoints:
     async def thin(self, fence: Fence, run: str, retention: "Retention", keep: Collection[str] = ()) -> list[str]:
         """Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
         nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
-        release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no checkpoint
-        still names it, so this may be repeated after a crash at any point."""
+        release is appended to the ledger before its blobs are deleted, and a blob is deleted only if nothing still
+        names it (a checkpoint that was not released, or what one was resharded into), so this may be repeated after a
+        crash at any point. Nor is a blob deleted that was put in the last `retention.grace` seconds: a checkpoint being
+        added at the same moment, which found the blob stored and has not appended itself yet, names it next. A blob
+        spared so is deleted by a later thinning, of this run or any other."""
         every = await self.all()
         ours = [checkpoint for checkpoint in every if checkpoint.run == run]
         kept_depths = retention.kept([checkpoint.depth for checkpoint in ours])
@@ -219,18 +223,29 @@ class Checkpoints:
                 await self.ledger.append(RELEASED, checkpoint.id, record, fence)
                 released.append(checkpoint.id)
         records = await self.ledger.read(CHECKPOINTS)
-        remaining = await self.all()
-        named = {blob.sha256 for checkpoint in remaining for manifest in (checkpoint.weights, checkpoint.state) if
-        manifest
-                 for blob in manifest.files.values()}  # fmt: skip
+        named = await self._named()
         for id in await self.ledger.read(RELEASED):
             record = records.get(id)
             made = _VERSION.validate_python(record) if record is not None else None
             for manifest in (made.weights, made.state) if made is not None else ():
                 for reference in manifest.files.values() if manifest else ():
                     if reference.sha256 not in named:
-                        await self.blobs.delete(reference)
+                        await self.blobs.delete(reference, unused_for=retention.grace)
         return released
+
+    async def _named(self) -> set[str]:
+        """The blobs that checkpoints not released name: their weights and trainer state, and what each was resharded
+        into (`rollout_train.resharding`), by hash."""
+        from rollout_train.resharding import RESHARDED  # (resharding reads checkpoints)
+
+        remaining = [checkpoint for checkpoint in await self.all() if checkpoint.released is None]
+        manifests = [manifest for checkpoint in remaining for manifest in (checkpoint.weights, checkpoint.state)]
+        resharded = await self.ledger.read(RESHARDED)
+        for checkpoint in remaining:
+            record = resharded.get(checkpoint.id)
+            if isinstance(record, dict) and isinstance(files := record.get("files"), dict):
+                manifests.append(_MANIFEST.validate_python(files))
+        return {blob.sha256 for manifest in manifests if manifest for blob in manifest.files.values()}
 
     async def files(self, manifest: Manifest, directory: Path) -> Path:
         """A manifest's files under `directory`, read from the blob store if they are not there. The directory
@@ -304,10 +319,13 @@ def _written_file(target: Path, data: bytes) -> None:
 class Retention:
     """Which of a run's checkpoints keep their files, their weights and their trainer state (what can be served, and
     what a step can go on from): the newest `recent`, and every `every`-th by depth, so that saves thin out with
-    age."""
+    age. A blob put in the last `grace` seconds is not deleted yet (`Checkpoints.thin`): `grace` must be longer than
+    a checkpoint takes from its first file's put to its append, and a thinning from reading what is named to its
+    last delete, together."""
 
     recent: int = 2
     every: int = 20
+    grace: float = 3600.0
 
     def kept(self, depths: list[int]) -> set[int]:
         newest = sorted(depths)[-self.recent :] if self.recent > 0 else []

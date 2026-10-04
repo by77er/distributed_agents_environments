@@ -247,15 +247,40 @@ async def test_writers_on_connections_of_their_own_take_distinct_fences_and_stal
     assert fences == sorted(fences)  # no append committed under a fence older than one taken before it
 
 
+def _appends_of_a_scope_of_its_own(url: str, me: int, rounds: int) -> None:
+    ledger = DatabaseLedger(url)
+
+    async def work() -> None:
+        fence = await ledger.take(f"runners/{me}")
+        for index in range(rounds):
+            assert await ledger.append("claims", f"{me}/{index}", {"by": me}, fence)
+
+    try:
+        asyncio.run(work())
+    finally:
+        ledger.close()
+
+
+@pytest.mark.parametrize("kind", ["sqlite", "postgres"])
+async def test_writers_of_scopes_of_their_own_appending_to_one_table_take_positions_one_after_another(
+    tmp_path: Path, kind: str, request: pytest.FixtureRequest
+) -> None:
+    url = f"sqlite:///{tmp_path / 'ledger.db'}" if kind == "sqlite" else request.getfixturevalue("postgres")
+    DatabaseLedger(url).close()
+    await asyncio.to_thread(_in_threads, 4, lambda me: _appends_of_a_scope_of_its_own(url, me, 25))
+    assert _positions(url, "claims") == list(range(1, 101))  # one position each, none skipped
+    reader = DatabaseLedger(url)
+    try:
+        read = list(await reader.read("claims"))
+    finally:
+        reader.close()
+    for me in range(4):  # (each writer's appends in the order it made them)
+        assert [key for key in read if key.startswith(f"{me}/")] == [f"{me}/{index}" for index in range(25)]
+
+
 # --- Fencing and keys: what does not hold ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FileLedger: a writer that died mid-line leaves no newline, so the next append is glued to the torn line "
-    "and silently lost although append returned True; its key is then free, and a second, different record is "
-    "accepted as the first under it",
-)
 async def test_an_append_after_a_torn_line_is_kept(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path)
     fence = await ledger.take("runners/a")
@@ -267,18 +292,34 @@ async def test_an_append_after_a_torn_line_is_kept(tmp_path: Path) -> None:
     assert not second and await ledger.read("claims") == {"1/1/2": {"runner": "a"}}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FileLedger rewrites fences.json in place (truncate, then write): a crash between the two leaves an "
-    "empty file, and every take and append after it raises until someone repairs it by hand",
-)
-async def test_a_crash_while_taking_a_fence_leaves_the_ledger_usable(tmp_path: Path) -> None:
+class Died(BaseException):
+    """The process died here."""
+
+
+async def test_a_crash_while_taking_a_fence_leaves_the_ledger_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rollout_train import ledger as module
+
     ledger = FileLedger(tmp_path)
     fence = await ledger.take("run")
     await ledger.append("groups", "1", {}, fence)
-    (tmp_path / "fences.json").write_text("")  # what a crash after the truncate and before the write leaves
-    newer = await ledger.take("run")
-    assert newer.number > fence.number
+    replaced = os.replace
+
+    def dies_before_the_new_fences_are_in_place(source: Any, target: Any) -> None:
+        if Path(target).name == "fences.json":  # the new fences are written (beside the old ones), and then:
+            raise Died
+        replaced(source, target)
+
+    monkeypatch.setattr(module.os, "replace", dies_before_the_new_fences_are_in_place)
+    with pytest.raises(Died):
+        await ledger.take("run")
+    monkeypatch.undo()
+    assert json.loads((tmp_path / "fences.json").read_text()) == {"run": 1}  # as they were
+    again = FileLedger(tmp_path)  # started again
+    assert await again.fences() == {"run": 1} and await again.read("groups") == {"1": {}}
+    newer = await again.take("run")
+    assert newer.number > fence.number and await again.append("groups", "2", {}, newer)
 
 
 def _positions(url: str, name: str) -> list[int]:
@@ -292,18 +333,25 @@ def _positions(url: str, name: str) -> list[int]:
         database.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="DatabaseLedger on Postgres: an append computes its position as MAX(position) + 1 under the lock of its "
-    "fence's scope, not of its table; two writers of different scopes appending to one table at once (two runners' "
-    "claims, two runs' checkpoints) read the same MAX under READ COMMITTED and take the same position, so 'in the "
-    "order they were appended' is not defined",
-)
+def _keys_by_position(url: str, name: str) -> list[tuple[int, str]]:
+    from rollout_durable.database import Database, fetch_all
+
+    database = Database(url)
+    try:
+        query = "SELECT position, key FROM ledger_records WHERE name = :name ORDER BY position"
+        return [
+            (int(position), str(key)) for position, key in database.read(lambda c: fetch_all(c, query, {"name": name}))
+        ]
+    finally:
+        database.close()
+
+
 async def test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_postgres(postgres: str) -> None:
     first, second = DatabaseLedger(postgres), DatabaseLedger(postgres)
     try:
         a, b = await first.take("runners/a"), await second.take("runners/b")
         write = first.database.write
+        other: list[threading.Thread] = []
 
         def with_another_append_before_commit(change: Callable[[Any], Any], *, exclusive: str | None = None) -> Any:
             def changed(connection: Any) -> Any:
@@ -311,15 +359,19 @@ async def test_appends_of_two_scopes_to_one_table_get_distinct_positions_on_post
                 if exclusive == "ledger:runners/a":  # the other runner appends while this transaction is open
                     done = threading.Thread(target=lambda: asyncio.run(second.append("claims", "1/2/1", {}, b)))
                     done.start()
-                    done.join()
+                    done.join(timeout=1.0)  # (it waits for this transaction to end, if appends to a table queue)
+                    other.append(done)
                 return result
 
             return write(changed, exclusive=exclusive)
 
         first.database.write = with_another_append_before_commit  # type: ignore[method-assign]
         await first.append("claims", "1/1/1", {}, a)
+        other[0].join()
         positions = _positions(postgres, "claims")
         assert len(positions) == 2 and len(set(positions)) == 2
+        assert _keys_by_position(postgres, "claims") == [(1, "1/1/1"), (2, "1/2/1")]  # in the order they committed
+        assert list(await second.read("claims")) == ["1/1/1", "1/2/1"]
     finally:
         first.close()
         second.close()
@@ -554,43 +606,53 @@ class DeletingAfter(FileBlobStore):
         super().__init__(directory)
         self.before_delete: Callable[[], Awaitable[None]] | None = None
 
-    async def delete(self, reference: BlobReference) -> None:
+    async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None:
         if (hook := self.before_delete) is not None:
             self.before_delete = None
             await hook()
-        await super().delete(reference)
+        await super().delete(reference, unused_for=unused_for)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Checkpoints.thin reads which blobs checkpoints name, then deletes the others: an add that finds the "
-    "blob already stored (content addressing: it is not written again) and appends its checkpoint in between "
-    "names a blob that is then deleted",
-)
-async def test_thin_never_deletes_a_blob_a_concurrent_add_names(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
+def _aged(store: Path, seconds: float) -> None:
+    """Every blob in a store of files as if last put `seconds` ago."""
+    then = time.time() - seconds
+    for each in store.rglob("*"):
+        if each.is_file():
+            os.utime(each, (then, then))
+
+
+@pytest.mark.parametrize("kind", ["files", "sqlite"])
+async def test_thin_never_deletes_a_blob_a_concurrent_add_names(tmp_path: Path, kind: str) -> None:
+    ledger: Ledger = (
+        FileLedger(tmp_path / "ledger") if kind == "files" else DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")
+    )
     store = DeletingAfter(tmp_path / "blobs")
     ours, theirs = Checkpoints(ledger, store), Checkpoints(ledger, FileBlobStore(tmp_path / "blobs"))
     x, y = await ledger.take(scope("x")), await ledger.take(scope("y"))
 
-    def weights(name: str, content: bytes) -> Path:
+    def weights(name: str, files: Mapping[str, bytes]) -> Path:
         directory = tmp_path / name
         directory.mkdir()
-        (directory / "adapter.bin").write_bytes(content)
+        for file, content in files.items():
+            (directory / file).write_bytes(content)
         return directory
 
-    first = await ours.add(x, new_id(), weights=weights("x1", b"shared bytes"), run="x")
-    await ours.add(x, new_id(), weights=weights("x2", b"newer bytes"), run="x", parents=[first.id])
+    first = await ours.add(x, new_id(), weights=weights("x1", {"a.bin": b"shared bytes", "b.bin": b"x1's"}), run="x")
+    await ours.add(x, new_id(), weights=weights("x2", {"a.bin": b"newer bytes"}), run="x", parents=[first.id])
+    _aged(tmp_path / "blobs", 2 * 3600)  # (put long ago: thinning deletes them unless something names them)
     made: list[Any] = []
 
-    async def another_run_adds_now() -> None:
-        made.append(await theirs.add(y, new_id(), weights=weights("y1", b"shared bytes"), run="y"))
+    async def another_run_adds_now() -> None:  # it finds "shared bytes" stored, and names it
+        made.append(await theirs.add(y, new_id(), weights=weights("y1", {"a.bin": b"shared bytes"}), run="y"))
 
     store.before_delete = another_run_adds_now
-    assert await ours.thin(x, "x", Retention(recent=1, every=0)) == [first.id]
+    assert await ours.thin(x, "x", Retention(recent=1, every=0, grace=60.0)) == [first.id]
     (checkpoint,) = made
-    reference = checkpoint.weights.files["adapter.bin"]
-    assert await theirs.blobs.read(reference) == b"shared bytes"
+    assert await theirs.blobs.read(checkpoint.weights.files["a.bin"]) == b"shared bytes"
+    with pytest.raises(FileNotFoundError):  # (what only the released checkpoint named is deleted)
+        await theirs.blobs.read(first.weights.files["b.bin"])  # type: ignore[union-attr]
+    if isinstance(ledger, DatabaseLedger):
+        ledger.close()
 
 
 # --- Launches -------------------------------------------------------------------------------------------------------
@@ -625,11 +687,6 @@ async def _launch(launches: FileLaunches, id: str) -> Launch:
     return next(each for each in await launches.all() if each.id == id)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Launches.note overwrites a launch's state unconditionally: a stop asked for while the launcher starts "
-    "the run (state STOPPING, over CLAIMED) is overwritten by the launcher's RUNNING, and the run is never stopped",
-)
 async def test_a_stop_asked_for_while_a_run_starts_stops_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     launches = FileLaunches(tmp_path / "ledger")
     asked = await launches.ask(Asked(profile="p", environment="e:e", name="run"))
@@ -653,12 +710,6 @@ async def test_a_stop_asked_for_while_a_run_starts_stops_it(tmp_path: Path, monk
         await asyncio.gather(*starting._watching, return_exceptions=True)  # pyright: ignore[reportPrivateUsage]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the monitor's stop reads a launch's state and then writes STOPPED (for one asked for) or STOPPING: a "
-    "launcher that claims and starts it in between has its run marked STOPPED, a final state, while it runs on, "
-    "and never signalled",
-)
 async def test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -704,39 +755,52 @@ class Versioned:
     version: str = "1"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="make_suite checks the name is free, takes the suite's fence, then appends its record and each start "
-    "under its own key: a second maker that takes the fence midway is refused nothing it appends to new keys, so "
-    "the suite in the ledger is the first maker's record and first starts with the second's other starts, which "
-    "neither maker made (and the second plays its own list)",
-)
+def _starts(seed: int) -> list[Start]:
+    return [Start(task="t", title="T", seed=seed + index, parameters={"seed": seed + index}) for index in range(3)]
+
+
 async def test_two_makers_of_one_suite_leave_one_of_their_suites(tmp_path: Path) -> None:
     files = FileLedger(tmp_path / "ledger")
     first, second = Hooked(files), Hooked(files)  # two processes making the suite `s` at once
-    first_wrote_a_start, second_took = asyncio.Event(), asyncio.Event()
+    first_took, second_took = asyncio.Event(), asyncio.Event()
 
-    def starts(seed: int) -> list[Start]:
-        return [Start(task="t", title="T", seed=seed + index, parameters={"seed": seed + index}) for index in range(3)]
-
-    async def first_pauses() -> None:
-        first_wrote_a_start.set()
+    async def first_pauses() -> None:  # it has taken the suite's fence, and is about to write
+        first_took.set()
         await second_took.wait()
 
     async def second_pauses() -> None:  # it has found no suite `s`
-        await first_wrote_a_start.wait()
+        await first_took.wait()
 
     async def second_has_taken() -> None:
         second_took.set()
 
-    first.after_append[("evaluations/s/starts", "1")] = first_pauses
-    second.after_read["evaluations/s/starts"] = second_pauses
+    first.after_take["suites/s"] = first_pauses
+    second.after_read["evaluations/s/suite"] = second_pauses
     second.after_take["suites/s"] = second_has_taken
-    by_second = asyncio.create_task(make_suite(second, "s", "e:e", Versioned(), starts=starts(100)))  # type: ignore[arg-type]
+    by_second = asyncio.create_task(make_suite(second, "s", "e:e", Versioned(), starts=_starts(100)))  # type: ignore[arg-type]
     await asyncio.sleep(0)  # (the second looks first)
     with pytest.raises(Fenced):
-        await make_suite(first, "s", "e:e", Versioned(), starts=starts(0))  # type: ignore[arg-type]
-    assert (await by_second).starts == starts(100)  # what the second maker plays
+        await make_suite(first, "s", "e:e", Versioned(), starts=_starts(0))  # type: ignore[arg-type]
+    assert (await by_second).starts == _starts(100)  # what the second maker plays
     found = await suite_of(files, "s")
     assert found is not None
-    assert found.starts in (starts(0), starts(100)), [start.seed for start in found.starts]
+    assert found.starts in (_starts(0), _starts(100)), [start.seed for start in found.starts]
+    assert found.starts == _starts(100)
+
+
+async def test_a_maker_that_finds_the_suite_made_meanwhile_plays_that_one(tmp_path: Path) -> None:
+    files = FileLedger(tmp_path / "ledger")
+    late = Hooked(files)
+    made = asyncio.Event()
+
+    async def late_pauses() -> None:  # it has found no suite `s`, and the other maker writes all of its own now
+        await made.wait()
+
+    late.after_read["evaluations/s/suite"] = late_pauses
+    by_late = asyncio.create_task(make_suite(late, "s", "e:e", Versioned(), starts=_starts(100)))  # type: ignore[arg-type]
+    await asyncio.sleep(0)
+    assert (await make_suite(files, "s", "e:e", Versioned(), starts=_starts(0))).starts == _starts(0)  # type: ignore[arg-type]
+    made.set()
+    assert (await by_late).starts == _starts(0)  # the suite in the ledger, not its own
+    found = await suite_of(files, "s")
+    assert found is not None and found.starts == _starts(0)

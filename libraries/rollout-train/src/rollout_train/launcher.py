@@ -28,7 +28,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rollout_train.launches import ASKED, CLAIMED, ENDED, EVAL, FAILED, RUNNING, STOPPED, STOPPING, Launch, Launches
+from rollout_train.launches import (
+    ASKED,
+    CLAIMED,
+    ENDED,
+    EVAL,
+    FAILED,
+    OPEN,
+    RUNNING,
+    STOPPED,
+    STOPPING,
+    Launch,
+    Launches,
+)
 from rollout_train.machine import alive, measured
 from rollout_train.presence import Presence
 from rollout_train.ray_cluster import prepare
@@ -188,7 +200,10 @@ class Launcher:
             )
             return
         self._playing[launch.id] = process
-        await self.launches.note(launch.id, state=RUNNING, directory=str(directory), pid=process.pid)
+        where: dict[str, Any] = {"directory": str(directory), "pid": process.pid}
+        noted = await self.launches.note(launch.id, expect=(CLAIMED,), state=RUNNING, **where)
+        if noted.state != RUNNING:  # asked to stop while it started: it stays so, and the next step signals it
+            await self.launches.note(launch.id, expect=OPEN, **where)
         watching = asyncio.create_task(self._watch(launch.id, process, directory))
         self._watching.add(watching)
         watching.add_done_callback(self._watching.discard)
@@ -196,10 +211,10 @@ class Launcher:
     async def _watch(self, id: str, process: asyncio.subprocess.Process, directory: Path) -> None:
         code = await process.wait()
         self._playing.pop(id, None)
-        now = next((each for each in await self.launches.all() if each.id == id), None)
-        if now is not None and now.state == STOPPING:
-            await self.launches.note(id, state=STOPPED, detail=f"stopped (exit {code})")
-        elif code == 0:
+        stopped = await self.launches.note(id, expect=(STOPPING,), state=STOPPED, detail=f"stopped (exit {code})")
+        if stopped.state == STOPPED:
+            return
+        if code == 0:
             await self.launches.note(id, state=ENDED, detail="ended")
         else:
             tail = await asyncio.to_thread(_tail, directory / OUTPUT)
@@ -248,18 +263,18 @@ class Launcher:
             status = await asyncio.to_thread(client.get_job_status, job)
             if status == JobStatus.RUNNING and not running:
                 running = True
-                now = next((each for each in await self.launches.all() if each.id == id), None)
-                if now is not None and now.state == CLAIMED:  # (not over a stop asked for meanwhile)
-                    await self.launches.note(id, state=RUNNING)
+                await self.launches.note(id, expect=(CLAIMED,), state=RUNNING)  # (not over a stop asked for meanwhile)
             if status.is_terminal():
                 break
             await asyncio.sleep(self.every)
         self._jobs.pop(id, None)
         output: str = await asyncio.to_thread(client.get_job_logs, job)
         await asyncio.to_thread((directory / OUTPUT).write_text, output)
-        now = next((each for each in await self.launches.all() if each.id == id), None)
-        if status == JobStatus.STOPPED or (now is not None and now.state == STOPPING):
-            await self.launches.note(id, state=STOPPED, detail=f"stopped (Ray job {job})")
+        stopped = f"stopped (Ray job {job})"
+        if (await self.launches.note(id, expect=(STOPPING,), state=STOPPED, detail=stopped)).state == STOPPED:
+            return
+        if status == JobStatus.STOPPED:
+            await self.launches.note(id, state=STOPPED, detail=stopped)
         elif status == JobStatus.SUCCEEDED:
             await self.launches.note(id, state=ENDED, detail="ended")
         else:
@@ -275,8 +290,9 @@ class Launcher:
                 self._follow(launch.id, launch.job, Path(launch.directory or self.runs))
             elif launch.pid and not alive(launch.pid):
                 await self.launches.note(
-                    launch.id, state=ENDED, detail="its end was not seen: the launcher was restarted"
-                )
+                    launch.id, expect=(CLAIMED, RUNNING, STOPPING), state=ENDED,
+                    detail="its end was not seen: the launcher was restarted",
+                )  # fmt: skip
 
     async def _beats(self) -> None:
         while True:

@@ -1,5 +1,6 @@
 """Blob stores: content-addressed, idempotent, verified on read; a file store and an S3 store behave the same."""
 
+import asyncio
 import hashlib
 from pathlib import Path
 
@@ -29,6 +30,36 @@ async def test_a_missing_blob_is_not_found(blob_store: Blobs) -> None:
     )
     with pytest.raises(FileNotFoundError):
         await blob_store.read(missing)
+
+
+async def test_a_blob_found_by_a_put_is_spared_and_one_unused_long_enough_is_deleted(blob_store: Blobs) -> None:
+    if isinstance(blob_store, S3BlobStore):
+        blob_store.refresh_after = 0.0  # (every put that finds it sets its time)
+    reference = await blob_store.put(b"shared", "text/plain")
+    await asyncio.sleep(2.2)
+    await blob_store.put(b"shared", "text/plain")  # found: put now
+    await blob_store.delete(reference, unused_for=2.0)
+    assert await blob_store.read(reference) == b"shared"
+    await asyncio.sleep(2.2)
+    await blob_store.delete(reference, unused_for=2.0)
+    with pytest.raises(FileNotFoundError):
+        await blob_store.read(reference)
+    await blob_store.delete(reference, unused_for=2.0)  # (one that is not there: nothing)
+
+
+async def test_a_put_that_finds_a_blob_put_lately_does_not_copy_it(s3_bucket: str) -> None:
+    store = S3BlobStore.from_url(f"s3://{s3_bucket}/blobs")
+    reference = await store.put(b"often", "text/plain")
+    key = reference.uri.removeprefix(f"s3://{s3_bucket}/")
+    client = boto3.client("s3")  # pyright: ignore[reportUnknownMemberType]
+    before = client.head_object(Bucket=s3_bucket, Key=key)["LastModified"]  # pyright: ignore[reportUnknownMemberType]
+    await asyncio.sleep(1.1)
+    await store.put(b"often", "text/plain")  # (within REFRESH_AFTER: left as it is)
+    assert client.head_object(Bucket=s3_bucket, Key=key)["LastModified"] == before  # pyright: ignore[reportUnknownMemberType]
+    store.refresh_after = 0.0
+    await store.put(b"often", "text/plain")
+    head = client.head_object(Bucket=s3_bucket, Key=key)  # pyright: ignore[reportUnknownMemberType]
+    assert head["LastModified"] > before and head["Metadata"] == {"sha256": reference.sha256}
 
 
 async def test_objects_are_named_by_their_hash_under_the_prefix(s3_bucket: str) -> None:

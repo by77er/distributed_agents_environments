@@ -30,8 +30,21 @@ from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Manifest, checkpoints_in, short
 from rollout_train.evals import EVAL, subject_table, suite_of, suite_table
 from rollout_train.launcher import LAUNCHER
-from rollout_train.launches import ASKED, OPEN, STOPPED, STOPPING, Asked, Launch, as_asked, launches_of
+from rollout_train.launches import (
+    ASKED,
+    CLAIMED,
+    OPEN,
+    STOPPED,
+    STOPPING,
+    Asked,
+    Launch,
+    as_asked,
+    launches_of,
+)
 from rollout_train.launches import RUN as TRAINING
+from rollout_train.launches import (
+    RUNNING as GOING,
+)
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
@@ -282,7 +295,14 @@ class System:
         found = next((each for each in await launches.all() if each.id == id), None) if launches else None
         if launches is None or found is None or found.state not in OPEN:
             raise KeyError(f"there is no launch {id} going")
-        return await launches.note(id, state=STOPPED if found.state == ASKED else STOPPING)
+        if found.state == ASKED:  # (stopped at once, unless a launcher claims it first: then as a run going)
+            noted = await launches.note(id, expect=(ASKED,), state=STOPPED)
+            if noted.state == STOPPED:
+                return noted
+        noted = await launches.note(id, expect=(CLAIMED, GOING, STOPPING), state=STOPPING)
+        if noted.state != STOPPING:
+            raise KeyError(f"there is no launch {id} going")
+        return noted
 
     async def settings(self, run: str) -> dict[str, Any] | None:
         """A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest

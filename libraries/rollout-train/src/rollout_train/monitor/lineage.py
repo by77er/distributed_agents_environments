@@ -37,6 +37,7 @@ from typing import Any, cast
 from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
+from rollout_train.evals import starts_in, suites_among
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
 
@@ -463,8 +464,8 @@ class _Reading:
         """Each suite: its starts, and each subject that played it (a checkpoint, or another model), with how it did
         at each start."""
         suites: list[dict[str, Any]] = []
-        for suite in self.named(_EVALUATIONS, "/starts"):
-            starts = self.read(f"{_EVALUATIONS}{suite}/starts")
+        for suite in suites_among(self.tables):
+            starts = starts_in(self.tables, suite)
             subjects: list[dict[str, Any]] = []
             for subject in self.named(f"{_EVALUATIONS}{suite}/", "/results"):
                 about = self.record(f"{_EVALUATIONS}{suite}/{subject}/subject", "subject")
@@ -502,7 +503,7 @@ class _Reading:
                         for key, record in sorted(starts.items(), key=lambda item: int(item[0]))
                     ],
                     "subjects": subjects,
-                    "sample": f"{_EVALUATIONS}{suite}/starts" in self.sampled,
+                    "sample": bool({f"{_EVALUATIONS}{suite}/{part}" for part in ("suite", "starts")} & self.sampled),
                 }
             )
         return suites

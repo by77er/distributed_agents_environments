@@ -18,6 +18,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoint, short
+from rollout_train.evals import starts_in
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
 from rollout_train.record import EVALS, GROUPS, STARTS, table
@@ -124,7 +125,7 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
         rewards = [float(result["reward"]) for result in results.values() if result.get("reward") is not None]
         each_start = int(about.get("episodes") or 1)
         expected = sum(int(group.get("episodes") or 0) for group in groups.values()) or each_start * len(
-            tables.get(f"{EVALUATIONS}{suite}/starts", {})
+            starts_in(tables, suite)
         )
         found.append(
             {
