@@ -213,7 +213,9 @@ class Launcher:
             status = await asyncio.to_thread(client.get_job_status, job)
             if status == JobStatus.RUNNING and not running:
                 running = True
-                await self.launches.note(id, state=RUNNING)
+                now = next((each for each in await self.launches.all() if each.id == id), None)
+                if now is not None and now.state == CLAIMED:  # (not over a stop asked for meanwhile)
+                    await self.launches.note(id, state=RUNNING)
             if status.is_terminal():
                 break
             await asyncio.sleep(self.every)

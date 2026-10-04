@@ -1,18 +1,18 @@
-"""Versions of a model: each made from the ones before it, each saying where it came from.
+"""Checkpoints of a model: each made from the ones before it, each saying where it came from.
 
-A **version** is a node of a graph. It has an id of its own, which never changes and means the same thing in every
+A **checkpoint** is a node of a graph. It has an id of its own, which never changes and means the same thing in every
 process and on every machine: it is what a channel serves and what a request to an engine names. It says what it was
-made from (its `parents`: the version it was trained from first, then any others it learned from; none, the base model),
-the base model it adapts, which run made it and at which step, where its weights are, what a trainer goes on from, and
-what it was trained on. Its `depth` counts the steps from the base model along its first parents: the number stamped on
-the tokens it samples, which grows along any line of training.
+made from (its `parents`: the checkpoint it was trained from first, then any others it learned from; none, the base
+model), the base model it adapts, which run made it and at which step, where its weights are, what a trainer goes on
+from, and what it was trained on. Its `depth` counts the steps from the base model along its first parents: the number
+stamped on the tokens it samples, which grows along any line of training.
 
-Nothing about a version is a name. A run trains from a version (or the base model) and goes on from the newest it
-made; another run started from any version forks there. A **bookmark** (`rollout_train.registry`) is a name for a
-version, which a run can carry forward as it trains; a version is otherwise found by its id (or the start of it), or
-by the run and step that made it (`resolved`).
+Nothing about a checkpoint is a name. A run trains from a checkpoint (or the base model) and goes on from the newest it
+made; another run started from any checkpoint forks there. A **bookmark** (`rollout_train.registry`) is a name for a
+checkpoint, which a run can carry forward as it trains; a checkpoint is otherwise found by its id (or the start of it),
+or by the run and step that made it (`resolved`).
 
-All versions are one append-only table of the ledger (`versions`), each appended under the fence of the run that
+All checkpoints are one append-only table of the ledger (`checkpoints`), each appended under the fence of the run that
 made it. Weights are kept as a `Manifest`: a map from the files of a checkpoint to blobs, each file its own blob, as
 the trainer wrote them; whoever needs them reads the files it needs.
 """
@@ -34,12 +34,12 @@ from rollout.contracts import BlobReference
 from rollout.harness.blobs import Blobs
 from rollout_train.ledger import Fence, Ledger
 
-VERSIONS, RELEASED = "versions", "versions/released"
-"""The ledger's tables of versions, and of the versions whose files were deleted."""
+CHECKPOINTS, RELEASED = "checkpoints", "checkpoints/released"
+"""The ledger's tables of checkpoints, and of the checkpoints whose files were deleted."""
 SHORTEST = 4
-"""The fewest characters of an id a version is shown by."""
+"""The fewest characters of an id a checkpoint is shown by."""
 _ALPHABET = "klmnopqrstuvwxyz"
-"""What a version's id is written in: sixteen letters, so that it reads as no word and no number."""
+"""What a checkpoint's id is written in: sixteen letters, so that it reads as no word and no number."""
 
 
 @dataclass(frozen=True)
@@ -53,12 +53,12 @@ class Manifest:
 
 
 @dataclass(frozen=True)
-class Version:
+class Checkpoint:
     id: str
     weights: Manifest | None
-    """None once it was released (`Versions.thin`)."""
+    """None once it was released (`Checkpoints.thin`)."""
     parents: tuple[str, ...] = ()
-    """What it was made from, by id: first the version it was trained from, then any others it learned from (the
+    """What it was made from, by id: first the checkpoint it was trained from, then any others it learned from (the
     teachers of a distillation, say). None: from the base model."""
     depth: int = 1
     """Steps from the base model along its first parents: its first parent's depth and one."""
@@ -67,7 +67,7 @@ class Version:
     run: str | None = None
     """The run that made it, by id."""
     step: int | None = None
-    """The run's step that made it (none for a version made outside a run's steps, such as by imitation)."""
+    """The run's step that made it (none for a checkpoint made outside a run's steps, such as by imitation)."""
     state: Manifest | None = None
     """What a trainer goes on from: the optimizer's state, say."""
     batch: BlobReference | None = None
@@ -76,27 +76,27 @@ class Version:
     made: float = 0.0
     """When, in seconds since the epoch."""
     released: float | None = None
-    """When its files were deleted (`Versions.thin`), if they were: its weights and its trainer state are then None.
+    """When its files were deleted (`Checkpoints.thin`), if they were: its weights and its trainer state are then None.
     Its record stays: where it came from, what it was trained on, and its metrics."""
 
     @property
     def parent(self) -> str | None:
-        """The version it was trained from, if any."""
+        """The checkpoint it was trained from, if any."""
         return self.parents[0] if self.parents else None
 
 
-_VERSION = TypeAdapter(Version)
+_VERSION = TypeAdapter(Checkpoint)
 
 
 def new_id() -> str:
-    """A new version's id: sixteen random letters."""
+    """A new checkpoint's id: sixteen random letters."""
     return "".join(secrets.choice(_ALPHABET) for _ in range(16))
 
 
 def short(ids: Iterable[str]) -> dict[str, str]:
     """Each id by the shortest start of it (at least `SHORTEST` characters) that no other id begins with. An id of
-    the form `NAME@N` (a version recorded before versions had ids of their own) is shown as `@N`, unless another id
-    would be shown so too: then whole."""
+    the form `NAME@N` (a checkpoint recorded before checkpoints had ids of their own) is shown as `@N`, unless another
+    id would be shown so too: then whole."""
     every = sorted(set(ids))
     shown: dict[str, str] = {}
     for index, each in enumerate(every):
@@ -116,28 +116,28 @@ def _common(one: str, other: str) -> int:
     )
 
 
-class Versions:
-    """Every version, in a ledger, and their files in a blob store."""
+class Checkpoints:
+    """Every checkpoint, in a ledger, and their files in a blob store."""
 
     def __init__(self, ledger: Ledger, blobs: Blobs) -> None:
         self.ledger = ledger
         self.blobs = blobs
 
-    async def all(self) -> list[Version]:
-        """Every version, oldest first."""
-        return await versions_in(self.ledger)
+    async def all(self) -> list[Checkpoint]:
+        """Every checkpoint, oldest first."""
+        return await checkpoints_in(self.ledger)
 
-    async def version(self, id: str) -> Version:
-        """The version an id says."""
-        found = (await self.ledger.read(VERSIONS)).get(id)
+    async def checkpoint(self, id: str) -> Checkpoint:
+        """The checkpoint an id says."""
+        found = (await self.ledger.read(CHECKPOINTS)).get(id)
         if found is None:
-            raise KeyError(f"there is no version {id}")
+            raise KeyError(f"there is no checkpoint {id}")
         return _as_released(_VERSION.validate_python(found), await self.ledger.read(RELEASED))
 
-    async def head(self, run: str) -> Version | None:
-        """The newest version a run made, if it made one."""
-        made = [version for version in await self.all() if version.run == run]
-        return max(made, key=lambda version: (version.depth, version.made)) if made else None
+    async def head(self, run: str) -> Checkpoint | None:
+        """The newest checkpoint a run made, if it made one."""
+        made = [checkpoint for checkpoint in await self.all() if checkpoint.run == run]
+        return max(made, key=lambda checkpoint: (checkpoint.depth, checkpoint.made)) if made else None
 
     async def add(
         self,
@@ -152,13 +152,13 @@ class Versions:
         parents: Sequence[str] = (),
         batch: BlobReference | None = None,
         metrics: Mapping[str, float] | None = None,
-    ) -> Version:
-        """Keep a checkpoint's files and append the version that names them, under `fence` (the run's that makes it).
-        Its base is its first parent's; `base` names it for a version made from the base model. The append is what makes
-        the version exist: a writer that dies before it has made nothing, and one that repeats it (the same id, decided
-        before) gets the version that is there."""
-        first = await self.version(parents[0]) if parents else None
-        version = Version(
+    ) -> Checkpoint:
+        """Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
+        Its base is its first parent's; `base` names it for a checkpoint made from the base model. The append is what
+        makes the checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id,
+        decided before) gets the checkpoint that is there."""
+        first = await self.checkpoint(parents[0]) if parents else None
+        checkpoint = Checkpoint(
             id,
             weights=await kept(weights, self.blobs),
             parents=tuple(parents),
@@ -171,28 +171,29 @@ class Versions:
             metrics=dict(metrics or {}),
             made=round(time.time(), 1),
         )
-        record: Any = _VERSION.dump_python(version, mode="json")
-        if not await self.ledger.append(VERSIONS, id, record, fence):
-            return await self.version(id)
-        return version
+        record: Any = _VERSION.dump_python(checkpoint, mode="json")
+        if not await self.ledger.append(CHECKPOINTS, id, record, fence):
+            return await self.checkpoint(id)
+        return checkpoint
 
     async def thin(self, fence: Fence, run: str, retention: "Retention", keep: Collection[str] = ()) -> list[str]:
-        """Delete the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
+        """Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
         nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
-        release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no version
+        release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no checkpoint
         still names it, so this may be repeated after a crash at any point."""
         every = await self.all()
-        ours = [version for version in every if version.run == run]
-        kept_depths = retention.kept([version.depth for version in ours])
+        ours = [checkpoint for checkpoint in every if checkpoint.run == run]
+        kept_depths = retention.kept([checkpoint.depth for checkpoint in ours])
         released: list[str] = []
-        for version in ours:
-            if version.released is None and version.depth not in kept_depths and version.id not in keep:
+        for checkpoint in ours:
+            if checkpoint.released is None and checkpoint.depth not in kept_depths and checkpoint.id not in keep:
                 record: JsonValue = {"at": round(time.time(), 1)}
-                await self.ledger.append(RELEASED, version.id, record, fence)
-                released.append(version.id)
-        records = await self.ledger.read(VERSIONS)
+                await self.ledger.append(RELEASED, checkpoint.id, record, fence)
+                released.append(checkpoint.id)
+        records = await self.ledger.read(CHECKPOINTS)
         remaining = await self.all()
-        named = {blob.sha256 for version in remaining for manifest in (version.weights, version.state) if manifest
+        named = {blob.sha256 for checkpoint in remaining for manifest in (checkpoint.weights, checkpoint.state) if
+        manifest
                  for blob in manifest.files.values()}  # fmt: skip
         for id in await self.ledger.read(RELEASED):
             record = records.get(id)
@@ -228,7 +229,7 @@ def _written(contents: Mapping[str, bytes], directory: Path) -> None:
 
 @dataclass(frozen=True)
 class Retention:
-    """Which of a run's versions keep their files, their weights and their trainer state (what can be served, and
+    """Which of a run's checkpoints keep their files, their weights and their trainer state (what can be served, and
     what a step can go on from): the newest `recent`, and every `every`-th by depth, so that saves thin out with
     age."""
 
@@ -240,18 +241,22 @@ class Retention:
         return {*newest, *(depth for depth in depths if self.every > 0 and depth % self.every == 0)}
 
 
-async def versions_in(ledger: Ledger) -> list[Version]:
-    """Every version a ledger has, oldest first (for a reader that has no use for their files)."""
+async def checkpoints_in(ledger: Ledger) -> list[Checkpoint]:
+    """Every checkpoint a ledger has, oldest first (for a reader that has no use for their files)."""
     released = await ledger.read(RELEASED)
     return [
-        _as_released(_VERSION.validate_python(record), released) for record in (await ledger.read(VERSIONS)).values()
+        _as_released(_VERSION.validate_python(record), released) for record in (await ledger.read(CHECKPOINTS)).values()
     ]
 
 
-def _as_released(version: Version, released: Mapping[str, JsonValue]) -> Version:
-    """A version as it is once its files were deleted, if they were."""
-    record: Any = released.get(version.id)
-    return replace(version, weights=None, state=None, released=float(record["at"])) if record is not None else version
+def _as_released(checkpoint: Checkpoint, released: Mapping[str, JsonValue]) -> Checkpoint:
+    """A checkpoint as it is once its files were deleted, if they were."""
+    record: Any = released.get(checkpoint.id)
+    return (
+        replace(checkpoint, weights=None, state=None, released=float(record["at"]))
+        if record is not None
+        else checkpoint
+    )
 
 
 async def kept(path: Path, blobs: Blobs) -> Manifest:

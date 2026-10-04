@@ -12,7 +12,7 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import Budget, Checkpoint, FileLedger, Step, Versions, Weighted, train
+from rollout_train import Budget, Checkpoints, FileLedger, Files, Step, Weighted, train
 from rollout_train.layout import BLOBS, FEED, LEDGER
 from rollout_train.ledger import Ledger
 from rollout_train.machine import measured
@@ -38,7 +38,7 @@ class Trains:
     def __init__(self) -> None:
         self.steps = 0
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         self.steps += 1
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"weights after {self.steps} steps")
@@ -55,7 +55,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     recorder = Recorder({"policy": plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")])})
     blobs = FileBlobStore(tmp_path / BLOBS)
     ledger = FileLedger(tmp_path / LEDGER)
-    versions = Versions(ledger, blobs)
+    checkpoints = Checkpoints(ledger, blobs)
     local = LocalRunner(recorder=recorder, hooks=[feed])
     presence = presence_of(ledger)
     assert presence is not None
@@ -71,16 +71,16 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     )  # fmt: skip
     async with playing(runner):
         await train(
-            Words(), Trains(), versions, base="tiny", channel="policy", directory=tmp_path / "versions",
+            Words(), Trains(), checkpoints, base="tiny", channel="policy", directory=tmp_path / "checkpoints",
             publish=recorder.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
             started={"directory": str(tmp_path)},
         )  # fmt: skip
-    await presence.beat("here", {**about(), "places": 4, "playing": 0})  # (its last beat, the last version served)
+    await presence.beat("here", {**about(), "places": 4, "playing": 0})  # (its last beat, the last checkpoint served)
     await local.close()
     feed.close()
     registry = registry_of(ledger)
     assert registry is not None
-    head = await versions.head("train")
+    head = await checkpoints.head("train")
     assert head is not None
     await registry.bookmark("best", head.id)
 
@@ -129,8 +129,8 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     made = {step["step"]: step["makes"] for step in run["steps"]}
     assert all(line["adapter"] == made[line["step"]] for line in trained)
 
-    shown = system["versions"]
-    assert [version["id"] for version in shown] == [step["makes"] for step in run["steps"]]
+    shown = system["checkpoints"]
+    assert [checkpoint["id"] for checkpoint in shown] == [step["makes"] for step in run["steps"]]
     first, last = shown[0], shown[-1]
     assert first["parents"] == [] and first["base"] == "tiny" and first["depth"] == 1 and first["run"] == "train"
     assert first["weights"]["files"] == 1 and first["state"]["files"] == 1 and first["batch"]
@@ -144,7 +144,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert channel["channel"] == "policy" and channel["adapter"] == head.id
     assert system["ledger"]["fences"] == {scope("train"): 1, runner_scope("here"): 1}
     assert system["ledger"]["tables"][table("train", GROUPS)] == 3
-    assert system["kept"]["versions"] > 0 and system["kept"]["episodes"] > 0
+    assert system["kept"]["checkpoints"] > 0 and system["kept"]["episodes"] > 0
     (machine,) = machines
     assert machine["runner"] == "here" and machine["alive"] and machine["run"] == "train"
     assert machine["machine"]["disk"]["total"] > 0 and machine["places"] == 4 and len(machine["history"]) > 1
@@ -163,7 +163,7 @@ async def ended(ledger: Ledger, run: str, group: int, number: int, run_id: str, 
 
 async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_it_at(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / LEDGER)
-    versions = Versions(ledger, FileBlobStore(tmp_path / BLOBS))
+    checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / BLOBS))
     fence = await ledger.take(scope("train"))
     feed = RunFeed(tmp_path / FEED)
     system = System(tmp_path, FeedReader(tmp_path / FEED))
@@ -245,7 +245,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")
-    await versions.add(fence, "minerone", weights=weights, run="train", step=1)  # the step's version: it is done
+    await checkpoints.add(fence, "minerone", weights=weights, run="train", step=1)  # the step's checkpoint: it is done
     (run,) = (await system.snapshot())["runs"]
     (done,) = run["done"]
     assert run["open"] == [] and {key: done[key] for key in ("group", "task", "failures", "adapter")} == {
@@ -265,7 +265,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
 
 async def test_a_directory_that_is_no_run_has_nothing_to_show_and_is_left_as_it_is(tmp_path: Path) -> None:
     system = await System(tmp_path, FeedReader(tmp_path / FEED)).snapshot()
-    assert system["runs"] == system["versions"] == system["runners"] == system["channels"] == []
+    assert system["runs"] == system["checkpoints"] == system["runners"] == system["channels"] == []
     assert system["bookmarks"] == {}
     assert system["written"] is None and "processes" not in system
     assert not (tmp_path / LEDGER).exists()  # (reading makes no ledger)

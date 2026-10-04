@@ -21,10 +21,10 @@ export const topics = {
   machines: (): Topic => ({ topic: "machines", key: ["machines"], path: "api/machines" }),
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
-  versions: (sample: boolean): Topic => ({
-    topic: sample ? "versions/sample" : "versions",
-    key: ["versions", sample],
-    path: `api/versions${sample ? "?sample=1" : ""}`,
+  checkpoints: (sample: boolean): Topic => ({
+    topic: sample ? "checkpoints/sample" : "checkpoints",
+    key: ["checkpoints", sample],
+    path: `api/checkpoints${sample ? "?sample=1" : ""}`,
   }),
   group: (run: string, number: number): Topic => ({
     topic: `group/${run}/${number}`,
@@ -59,12 +59,12 @@ const systemQuery = {
 
 export const useSystem = () => useQuery(systemQuery);
 
-/** What the page knows of runs and versions, to say them (`Known`); a view over it draws again only when a version, a
+/** What the page knows of runs and checkpoints, to say them (`Known`); a view over it draws again only when a checkpoint, a
  * bookmark or a run's name changes. */
 export function useKnown(): Known {
-  const { data: versions } = useQuery({ ...systemQuery, select: (system: System) => system.versions });
+  const { data: checkpoints } = useQuery({ ...systemQuery, select: (system: System) => system.checkpoints });
   const { data: runs } = useQuery({ ...systemQuery, select: (system: System) => system.names?.runs });
-  return knownOf(versions, runs);
+  return knownOf(checkpoints, runs);
 }
 
 /** Change a name in the registry; every page open on the monitor hears of it through its stream, this one at once. */
@@ -84,12 +84,12 @@ async function asked<T>(path: string, method: string, body?: unknown): Promise<T
 export const useRename = () =>
   useWrite(async ({ id, name }: { id: string; name: string }) => (await asked<{ entry: Entry }>("api/rename", "POST", { id, name })).entry);
 
-/** Make a bookmark name a version, or move it there. */
+/** Make a bookmark name a checkpoint, or move it there. */
 export const useBookmark = () =>
-  useWrite(async ({ name, version }: { name: string; version: string }) =>
-    (await asked<{ bookmark: Bookmark }>("api/bookmarks", "POST", { name, version })).bookmark);
+  useWrite(async ({ name, checkpoint }: { name: string; checkpoint: string }) =>
+    (await asked<{ bookmark: Bookmark }>("api/bookmarks", "POST", { name, checkpoint })).bookmark);
 
-/** Take a bookmark away (the version stays). */
+/** Take a bookmark away (the checkpoint stays). */
 export const useUnbookmark = () =>
   useWrite(async (name: string) => asked<{ unbookmarked: string }>(`api/bookmarks/${encodeURIComponent(name)}`, "DELETE"));
 
@@ -131,7 +131,7 @@ export const useStatistics = () =>
   });
 
 export const useLineage = (sample: boolean) =>
-  useQuery({ queryKey: topics.versions(sample).key, queryFn: ({ signal }) => readJson<Lineage>(topics.versions(sample).path, signal) });
+  useQuery({ queryKey: topics.checkpoints(sample).key, queryFn: ({ signal }) => readJson<Lineage>(topics.checkpoints(sample).path, signal) });
 
 export const useGroup = (run: string, number: number) =>
   useQuery({

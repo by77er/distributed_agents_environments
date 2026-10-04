@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Version } from "./api/types";
+import type { Run, System, Checkpoint } from "./api/types";
 import { knownOf } from "./lib/model";
 import { placeOf } from "./lib/places";
 import { Runs } from "./pages/Runs";
@@ -15,13 +15,13 @@ const run = (name: string, done: number): Run => ({
   done: Array.from({ length: done }, (_, index) => ({
     group: index + 1, time: 10 + index, task: "t003", title: "chests", rollout_seconds: 5, rewards: [1, 0], solved: [true, false],
     durations: [1, 2], failed: 0, failures: [], segments_recorded: 4, segments: 4, skipped: null, unlocked: 3, adapter: null,
-    step: null, step_state: null, version: null, update: null, segments_trained: 0, error: null, seconds: 5,
+    step: null, step_state: null, depth: null, update: null, segments_trained: 0, error: null, seconds: 5,
   })),
 });
 
 const system = (runs: Run[]): System => ({
-  at: 100, name: "runs", directory: null, ledger_at: "/ledger", host: "here", written: 10, runs, versions: [], bookmarks: {}, runners: [],
-  channels: [], ledger: { fences: {}, tables: {} }, kept: { versions: 0, episodes: 0 }, names: { runs: {}, bookmarks: {} },
+  at: 100, name: "runs", directory: null, ledger_at: "/ledger", host: "here", written: 10, runs, checkpoints: [], bookmarks: {}, runners: [],
+  channels: [], ledger: { fences: {}, tables: {} }, kept: { checkpoints: 0, episodes: 0 }, names: { runs: {}, bookmarks: {} },
 });
 
 describe("places", () => {
@@ -29,30 +29,30 @@ describe("places", () => {
     expect(placeOf("/run/a%2Fb/group/3")).toEqual({ page: "runs", kind: "group", run: "a/b", number: 3 });
     expect(placeOf("/run/x/step/2")).toEqual({ page: "runs", kind: "step", run: "x", number: 2 });
     expect(placeOf("/episode/r_1/agent-2")).toEqual({ page: "runs", kind: "episode", id: "r_1", slot: "agent-2" });
-    expect(placeOf("/versions/sample")).toEqual({ page: "versions", kind: "versions", sample: true });
-    expect(placeOf("/version/kpqx")).toEqual({ page: "versions", kind: "version", id: "kpqx" });
+    expect(placeOf("/checkpoints/sample")).toEqual({ page: "checkpoints", kind: "checkpoints", sample: true });
+    expect(placeOf("/checkpoint/kpqx")).toEqual({ page: "checkpoints", kind: "checkpoint", id: "kpqx" });
     expect(placeOf("/system")).toEqual({ page: "statistics", kind: "statistics", section: "machines" });
     expect(placeOf("/runs/new")).toEqual({ page: "runs", kind: "launch" });
     expect(placeOf("")).toEqual({ page: "runs", kind: "runs" });
   });
 });
 
-const version = (id: string, short: string, run: string | null, step: number | null, parents: string[] = [], bookmarks: string[] = []): Version => ({
+const checkpoint = (id: string, short: string, run: string | null, step: number | null, parents: string[] = [], bookmarks: string[] = []): Checkpoint => ({
   id, short, depth: parents.length + 1, parents, base: "Qwen/Qwen3.5-9B", run, step, made: 1, metrics: {}, weights: null, state: null,
   released: null, batch: false, bookmarks,
 });
 
-describe("versions", () => {
+describe("checkpoints", () => {
   it("are said by where they came from and the shortest start of their id, runs by their names", () => {
-    const versions = [version("kpqxlmnoprstuvwx", "kpqx", "run_1", 3, [], ["good"]), version("klmnopqrstuvwxyz", "klmn", null, null, ["kpqxlmnoprstuvwx"])];
-    const runs = { run_1: "first" }, known = knownOf(versions, runs);
+    const checkpoints = [checkpoint("kpqxlmnoprstuvwx", "kpqx", "run_1", 3, [], ["good"]), checkpoint("klmnopqrstuvwxyz", "klmn", null, null, ["kpqxlmnoprstuvwx"])];
+    const runs = { run_1: "first" }, known = knownOf(checkpoints, runs);
     expect([known.run("run_1"), known.run("other"), known.short("kpqxlmnoprstuvwx"), known.short(null), known.short("zzzzzzzzzzzz")])
       .toEqual(["first", "other", "kpqx", "base", "zzzzzzzz"]);
     expect([known.origin("kpqxlmnoprstuvwx"), known.origin("klmnopqrstuvwxyz"), known.origin("zzzz"), known.origin(null)])
       .toEqual(["first · S3", "made outside a run", "not in this ledger", "the base model"]);
     expect(known.bookmarks("kpqxlmnoprstuvwx")).toEqual(["good"]);
     expect(known.title("klmnopqrstuvwxyz")).toBe("klmnopqrstuvwxyz · depth 2\nmade outside a run, from kpqx");
-    expect(knownOf(versions, runs)).toBe(known);  // (the same answer, the same helpers: nothing draws again)
+    expect(knownOf(checkpoints, runs)).toBe(known);  // (the same answer, the same helpers: nothing draws again)
   });
 });
 

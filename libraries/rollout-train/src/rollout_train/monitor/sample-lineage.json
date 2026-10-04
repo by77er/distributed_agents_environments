@@ -1,5 +1,5 @@
 {
- "about": "A sample of the tables proposed in docs/research/policy-dag.md, which no run writes yet, of the router's notes, and of the registry's names: the monitor reads it only when asked (/api/policies?sample=1; the page's #/policies/sample). Times are seconds before now.",
+ "about": "A sample of the tables proposed in docs/research/policy-dag.md, which no run writes yet, of the router's notes, and of the registry's names: the monitor reads it only when asked (/api/checkpoints?sample=1; the page's #/checkpoints/sample). Times are seconds before now.",
  "tables": {
   "runs/scout-train/steps": {
    "1": {
@@ -2045,45 +2045,1087 @@
     "time": -4573.3
    }
   },
-  "versions/resharding": {
-   "msvpvrurqrwrqzvk": {
-    "at": -68340.0,
-    "worker": "reshard-1"
-   },
-   "kszsqvyvvmrnrzqu": {
-    "at": -46740.0,
-    "worker": "reshard-1"
-   },
-   "qzkzvmnwqzpxumwy": {
-    "at": -2940.0,
-    "worker": "reshard-1"
-   },
-   "wmppokoyozvookkn": {
-    "at": -300.0,
-    "worker": "reshard-1"
+  "evaluations/unguided-v1/curriculum-9@10/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "by hand",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "curriculum-9@10"
    }
   },
-  "versions/resharded": {
-   "msvpvrurqrwrqzvk": {
-    "at": -67500.0,
-    "layout": {
-     "tensor_parallel": 2
-    }
+  "evaluations/unguided-v1/curriculum-9@10/results": {
+   "1-1": {
+    "run_id": "r_sample58701728",
+    "reward": 0.011,
+    "solved": false,
+    "duration": 23.7,
+    "outcome": "completed",
+    "time": -3921.5
    },
-   "kszsqvyvvmrnrzqu": {
-    "at": -45800.0,
-    "layout": {
-     "tensor_parallel": 2
-    }
+   "2-1": {
+    "run_id": "r_sample60800794",
+    "reward": 0.587,
+    "solved": false,
+    "duration": 18.0,
+    "outcome": "completed",
+    "time": -2458.7
    },
-   "qzkzvmnwqzpxumwy": {
-    "at": -1920.0,
-    "layout": {
-     "tensor_parallel": 2
-    }
+   "3-1": {
+    "run_id": "r_sample35069324",
+    "reward": 0.262,
+    "solved": false,
+    "duration": 17.1,
+    "outcome": "completed",
+    "time": -4376.5
+   },
+   "4-1": {
+    "run_id": "r_sample73981487",
+    "reward": 0.577,
+    "solved": false,
+    "duration": 7.7,
+    "outcome": "completed",
+    "time": -5036.4
+   },
+   "5-1": {
+    "run_id": "r_sample35773625",
+    "reward": 0.348,
+    "solved": false,
+    "duration": 17.4,
+    "outcome": "completed",
+    "time": -2430.0
+   },
+   "6-1": {
+    "run_id": "r_sample70280195",
+    "reward": 0.142,
+    "solved": false,
+    "duration": 7.5,
+    "outcome": "completed",
+    "time": -5318.8
+   },
+   "7-1": {
+    "run_id": "r_sample11927701",
+    "reward": 0.1,
+    "solved": false,
+    "duration": 18.1,
+    "outcome": "completed",
+    "time": -3327.3
+   },
+   "8-1": {
+    "run_id": "r_sample86327556",
+    "reward": 0.088,
+    "solved": false,
+    "duration": 19.0,
+    "outcome": "completed",
+    "time": -4995.1
+   },
+   "9-1": {
+    "run_id": "r_sample81411986",
+    "reward": 0.222,
+    "solved": false,
+    "duration": 24.3,
+    "outcome": "completed",
+    "time": -979.0
+   },
+   "10-1": {
+    "run_id": "r_sample86849289",
+    "reward": 0.138,
+    "solved": false,
+    "duration": 29.5,
+    "outcome": "completed",
+    "time": -6012.6
+   },
+   "11-1": {
+    "run_id": "r_sample42688159",
+    "reward": 1.085,
+    "solved": true,
+    "duration": 10.1,
+    "outcome": "completed",
+    "time": -6084.0
+   },
+   "12-1": {
+    "run_id": "r_sample38607653",
+    "reward": 0.074,
+    "solved": false,
+    "duration": 6.8,
+    "outcome": "completed",
+    "time": -1900.0
+   },
+   "13-1": {
+    "run_id": "r_sample53317299",
+    "reward": 0.415,
+    "solved": false,
+    "duration": 14.8,
+    "outcome": "completed",
+    "time": -3631.8
+   },
+   "14-1": {
+    "run_id": "r_sample30675472",
+    "reward": 0.307,
+    "solved": false,
+    "duration": 25.1,
+    "outcome": "completed",
+    "time": -1376.6
+   },
+   "15-1": {
+    "run_id": "r_sample85195654",
+    "reward": 0.107,
+    "solved": false,
+    "duration": 6.0,
+    "outcome": "completed",
+    "time": -3785.4
+   },
+   "16-1": {
+    "run_id": "r_sample15816508",
+    "reward": 0.18,
+    "solved": false,
+    "duration": 9.4,
+    "outcome": "completed",
+    "time": -654.1
    }
   },
-  "versions": {
+  "evaluations/unguided-v1/curriculum-9@20/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "by hand",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "curriculum-9@20"
+   }
+  },
+  "evaluations/unguided-v1/curriculum-9@20/results": {
+   "1-1": {
+    "run_id": "r_sample47581518",
+    "reward": 0.359,
+    "solved": false,
+    "duration": 11.7,
+    "outcome": "completed",
+    "time": -1402.6
+   },
+   "2-1": {
+    "run_id": "r_sample86420212",
+    "reward": 0.549,
+    "solved": false,
+    "duration": 21.0,
+    "outcome": "completed",
+    "time": -896.4
+   },
+   "3-1": {
+    "run_id": "r_sample90516834",
+    "reward": 1.189,
+    "solved": true,
+    "duration": 15.5,
+    "outcome": "completed",
+    "time": -5365.0
+   },
+   "4-1": {
+    "run_id": "r_sample03973825",
+    "reward": 1.077,
+    "solved": true,
+    "duration": 5.8,
+    "outcome": "completed",
+    "time": -3834.7
+   },
+   "5-1": {
+    "run_id": "r_sample95364695",
+    "reward": 0.504,
+    "solved": false,
+    "duration": 25.4,
+    "outcome": "completed",
+    "time": -2989.9
+   },
+   "6-1": {
+    "run_id": "r_sample66873069",
+    "reward": 0.582,
+    "solved": false,
+    "duration": 6.5,
+    "outcome": "completed",
+    "time": -5978.7
+   },
+   "7-1": {
+    "run_id": "r_sample04917371",
+    "reward": 0.125,
+    "solved": false,
+    "duration": 16.2,
+    "outcome": "completed",
+    "time": -3431.2
+   },
+   "8-1": {
+    "run_id": "r_sample26279402",
+    "reward": 0.421,
+    "solved": false,
+    "duration": 7.1,
+    "outcome": "completed",
+    "time": -4624.4
+   },
+   "9-1": {
+    "run_id": "r_sample52011132",
+    "reward": 0.575,
+    "solved": false,
+    "duration": 18.6,
+    "outcome": "completed",
+    "time": -5266.5
+   },
+   "10-1": {
+    "run_id": "r_sample00456153",
+    "reward": 0.101,
+    "solved": false,
+    "duration": 18.5,
+    "outcome": "completed",
+    "time": -2774.4
+   },
+   "11-1": {
+    "run_id": "r_sample08139599",
+    "reward": 0.599,
+    "solved": false,
+    "duration": 20.1,
+    "outcome": "completed",
+    "time": -2882.1
+   },
+   "12-1": {
+    "run_id": "r_sample37572853",
+    "reward": 0.359,
+    "solved": false,
+    "duration": 16.2,
+    "outcome": "completed",
+    "time": -3006.1
+   },
+   "13-1": {
+    "run_id": "r_sample33344867",
+    "reward": 0.19,
+    "solved": false,
+    "duration": 9.8,
+    "outcome": "completed",
+    "time": -1358.2
+   },
+   "14-1": {
+    "run_id": "r_sample47780544",
+    "reward": 0.333,
+    "solved": false,
+    "duration": 9.8,
+    "outcome": "completed",
+    "time": -3931.3
+   },
+   "15-1": {
+    "run_id": "r_sample55471958",
+    "reward": 1.111,
+    "solved": true,
+    "duration": 17.2,
+    "outcome": "completed",
+    "time": -1207.9
+   },
+   "16-1": {
+    "run_id": "r_sample52563180",
+    "reward": 0.577,
+    "solved": false,
+    "duration": 10.4,
+    "outcome": "completed",
+    "time": -928.6
+   }
+  },
+  "evaluations/unguided-v1/curriculum-9@30/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "by hand",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "curriculum-9@30"
+   }
+  },
+  "evaluations/unguided-v1/curriculum-9@30/results": {
+   "1-1": {
+    "run_id": "r_sample75553067",
+    "reward": 1.195,
+    "solved": true,
+    "duration": 25.2,
+    "outcome": "completed",
+    "time": -4737.1
+   },
+   "2-1": {
+    "run_id": "r_sample03037329",
+    "reward": 1.094,
+    "solved": true,
+    "duration": 10.3,
+    "outcome": "completed",
+    "time": -4786.6
+   },
+   "3-1": {
+    "run_id": "r_sample18287367",
+    "reward": 1.033,
+    "solved": true,
+    "duration": 6.6,
+    "outcome": "completed",
+    "time": -1706.6
+   },
+   "4-1": {
+    "run_id": "r_sample63624612",
+    "reward": 1.207,
+    "solved": true,
+    "duration": 18.9,
+    "outcome": "completed",
+    "time": -1682.0
+   },
+   "5-1": {
+    "run_id": "r_sample18652466",
+    "reward": 0.407,
+    "solved": false,
+    "duration": 6.1,
+    "outcome": "completed",
+    "time": -4468.3
+   },
+   "6-1": {
+    "run_id": "r_sample80838024",
+    "reward": 1.112,
+    "solved": true,
+    "duration": 8.0,
+    "outcome": "completed",
+    "time": -867.9
+   },
+   "7-1": {
+    "run_id": "r_sample28987166",
+    "reward": 0.54,
+    "solved": false,
+    "duration": 29.0,
+    "outcome": "completed",
+    "time": -1758.1
+   },
+   "8-1": {
+    "run_id": "r_sample07498383",
+    "reward": 0.488,
+    "solved": false,
+    "duration": 23.0,
+    "outcome": "completed",
+    "time": -4227.0
+   },
+   "9-1": {
+    "run_id": "r_sample95818521",
+    "reward": 0.576,
+    "solved": false,
+    "duration": 21.9,
+    "outcome": "completed",
+    "time": -1298.5
+   },
+   "10-1": {
+    "run_id": "r_sample80249193",
+    "reward": 1.193,
+    "solved": true,
+    "duration": 9.0,
+    "outcome": "completed",
+    "time": -948.3
+   },
+   "11-1": {
+    "run_id": "r_sample92592383",
+    "reward": 0.007,
+    "solved": false,
+    "duration": 18.5,
+    "outcome": "completed",
+    "time": -6193.1
+   },
+   "12-1": {
+    "run_id": "r_sample56905797",
+    "reward": 1.068,
+    "solved": true,
+    "duration": 5.6,
+    "outcome": "completed",
+    "time": -3902.0
+   },
+   "13-1": {
+    "run_id": "r_sample41385683",
+    "reward": 0.341,
+    "solved": false,
+    "duration": 20.3,
+    "outcome": "completed",
+    "time": -1428.9
+   },
+   "14-1": {
+    "run_id": "r_sample99540080",
+    "reward": 0.308,
+    "solved": false,
+    "duration": 11.8,
+    "outcome": "completed",
+    "time": -1359.2
+   },
+   "15-1": {
+    "run_id": "r_sample76346854",
+    "reward": 0.47,
+    "solved": false,
+    "duration": 6.3,
+    "outcome": "completed",
+    "time": -3622.4
+   },
+   "16-1": {
+    "run_id": "r_sample75427164",
+    "reward": 0.158,
+    "solved": false,
+    "duration": 4.6,
+    "outcome": "completed",
+    "time": -3522.8
+   }
+  },
+  "evaluations/unguided-v1/slpxmskmsmrmsnyk/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "by hand",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "slpxmskmsmrmsnyk"
+   }
+  },
+  "evaluations/unguided-v1/slpxmskmsmrmsnyk/results": {
+   "1-1": {
+    "run_id": "r_sample75315994",
+    "reward": 1.136,
+    "solved": true,
+    "duration": 25.2,
+    "outcome": "completed",
+    "time": -3546.7
+   },
+   "2-1": {
+    "run_id": "r_sample74372512",
+    "reward": 1.165,
+    "solved": true,
+    "duration": 25.1,
+    "outcome": "completed",
+    "time": -4388.1
+   },
+   "3-1": {
+    "run_id": "r_sample24896310",
+    "reward": 1.141,
+    "solved": true,
+    "duration": 9.9,
+    "outcome": "completed",
+    "time": -3686.5
+   },
+   "4-1": {
+    "run_id": "r_sample83126165",
+    "reward": 1.1,
+    "solved": true,
+    "duration": 27.1,
+    "outcome": "completed",
+    "time": -1241.2
+   },
+   "5-1": {
+    "run_id": "r_sample93872131",
+    "reward": 0.067,
+    "solved": false,
+    "duration": 18.9,
+    "outcome": "completed",
+    "time": -1937.2
+   },
+   "6-1": {
+    "run_id": "r_sample58227385",
+    "reward": 1.196,
+    "solved": true,
+    "duration": 25.6,
+    "outcome": "completed",
+    "time": -2814.4
+   },
+   "7-1": {
+    "run_id": "r_sample44287535",
+    "reward": 1.017,
+    "solved": true,
+    "duration": 12.7,
+    "outcome": "completed",
+    "time": -2875.4
+   },
+   "8-1": {
+    "run_id": "r_sample75009214",
+    "reward": 1.08,
+    "solved": true,
+    "duration": 15.4,
+    "outcome": "completed",
+    "time": -1224.1
+   },
+   "9-1": {
+    "run_id": "r_sample52462888",
+    "reward": 0.267,
+    "solved": false,
+    "duration": 5.6,
+    "outcome": "completed",
+    "time": -4370.8
+   },
+   "10-1": {
+    "run_id": "r_sample60895033",
+    "reward": 0.572,
+    "solved": false,
+    "duration": 22.3,
+    "outcome": "completed",
+    "time": -732.1
+   },
+   "11-1": {
+    "run_id": "r_sample23374767",
+    "reward": 0.354,
+    "solved": false,
+    "duration": 21.2,
+    "outcome": "completed",
+    "time": -2944.3
+   },
+   "12-1": {
+    "run_id": "r_sample85592853",
+    "reward": 1.137,
+    "solved": true,
+    "duration": 5.6,
+    "outcome": "completed",
+    "time": -5655.0
+   },
+   "13-1": {
+    "run_id": "r_sample26290563",
+    "reward": 0.067,
+    "solved": false,
+    "duration": 8.6,
+    "outcome": "completed",
+    "time": -1668.2
+   },
+   "14-1": {
+    "run_id": "r_sample51319328",
+    "reward": 0.575,
+    "solved": false,
+    "duration": 16.7,
+    "outcome": "completed",
+    "time": -1596.2
+   },
+   "15-1": {
+    "run_id": "r_sample46682294",
+    "reward": 0.564,
+    "solved": false,
+    "duration": 27.4,
+    "outcome": "completed",
+    "time": -1353.0
+   },
+   "16-1": {
+    "run_id": "r_sample74133516",
+    "reward": 0.301,
+    "solved": false,
+    "duration": 19.8,
+    "outcome": "completed",
+    "time": -6374.5
+   }
+  },
+  "evaluations/unguided-v1/vkyvpnzlqtorwwzm/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "by hand",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "vkyvpnzlqtorwwzm"
+   }
+  },
+  "evaluations/unguided-v1/vkyvpnzlqtorwwzm/results": {
+   "1-1": {
+    "run_id": "r_sample73045842",
+    "reward": 0.162,
+    "solved": false,
+    "duration": 11.1,
+    "outcome": "completed",
+    "time": -1443.5
+   },
+   "2-1": {
+    "run_id": "r_sample75038696",
+    "reward": 0.344,
+    "solved": false,
+    "duration": 17.5,
+    "outcome": "completed",
+    "time": -5813.6
+   },
+   "3-1": {
+    "run_id": "r_sample97732222",
+    "reward": 1.275,
+    "solved": true,
+    "duration": 12.7,
+    "outcome": "completed",
+    "time": -5749.3
+   },
+   "4-1": {
+    "run_id": "r_sample44286173",
+    "reward": 1.144,
+    "solved": true,
+    "duration": 15.1,
+    "outcome": "completed",
+    "time": -683.6
+   },
+   "5-1": {
+    "run_id": "r_sample59273803",
+    "reward": 0.404,
+    "solved": false,
+    "duration": 28.5,
+    "outcome": "completed",
+    "time": -5191.4
+   },
+   "6-1": {
+    "run_id": "r_sample93870833",
+    "reward": 0.153,
+    "solved": false,
+    "duration": 17.9,
+    "outcome": "completed",
+    "time": -2136.1
+   },
+   "7-1": {
+    "run_id": "r_sample82076519",
+    "reward": 0.392,
+    "solved": false,
+    "duration": 23.4,
+    "outcome": "completed",
+    "time": -5146.3
+   },
+   "8-1": {
+    "run_id": "r_sample70757366",
+    "reward": 1.233,
+    "solved": true,
+    "duration": 18.8,
+    "outcome": "completed",
+    "time": -1876.5
+   },
+   "9-1": {
+    "run_id": "r_sample20085856",
+    "reward": 1.014,
+    "solved": true,
+    "duration": 24.5,
+    "outcome": "completed",
+    "time": -6543.0
+   },
+   "10-1": {
+    "run_id": "r_sample96864493",
+    "reward": 0.369,
+    "solved": false,
+    "duration": 22.6,
+    "outcome": "completed",
+    "time": -3399.3
+   },
+   "11-1": {
+    "run_id": "r_sample01247611",
+    "reward": 0.016,
+    "solved": false,
+    "duration": 7.3,
+    "outcome": "completed",
+    "time": -5708.9
+   },
+   "12-1": {
+    "run_id": "r_sample67690945",
+    "reward": 0.32,
+    "solved": false,
+    "duration": 11.8,
+    "outcome": "completed",
+    "time": -2241.3
+   },
+   "13-1": {
+    "run_id": "r_sample92742999",
+    "reward": 0.497,
+    "solved": false,
+    "duration": 15.0,
+    "outcome": "completed",
+    "time": -3329.1
+   },
+   "14-1": {
+    "run_id": "r_sample86141940",
+    "reward": 0.44,
+    "solved": false,
+    "duration": 19.8,
+    "outcome": "completed",
+    "time": -1921.5
+   },
+   "15-1": {
+    "run_id": "r_sample23408226",
+    "reward": 1.2,
+    "solved": true,
+    "duration": 27.3,
+    "outcome": "completed",
+    "time": -1515.1
+   },
+   "16-1": {
+    "run_id": "r_sample57247448",
+    "reward": 0.319,
+    "solved": false,
+    "duration": 22.6,
+    "outcome": "completed",
+    "time": -1983.4
+   }
+  },
+  "evaluations/unguided-v1/wwnzwlqmqypnulnk/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "distill-merged, after its last step",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "wwnzwlqmqypnulnk"
+   }
+  },
+  "evaluations/unguided-v1/wwnzwlqmqypnulnk/results": {
+   "1-1": {
+    "run_id": "r_sample22078931",
+    "reward": 1.001,
+    "solved": true,
+    "duration": 9.5,
+    "outcome": "completed",
+    "time": -6345.2
+   },
+   "2-1": {
+    "run_id": "r_sample83116905",
+    "reward": 1.159,
+    "solved": true,
+    "duration": 16.5,
+    "outcome": "completed",
+    "time": -6541.4
+   },
+   "3-1": {
+    "run_id": "r_sample38276095",
+    "reward": 1.276,
+    "solved": true,
+    "duration": 5.8,
+    "outcome": "completed",
+    "time": -3098.2
+   },
+   "4-1": {
+    "run_id": "r_sample83545948",
+    "reward": 1.204,
+    "solved": true,
+    "duration": 6.6,
+    "outcome": "completed",
+    "time": -6547.5
+   },
+   "5-1": {
+    "run_id": "r_sample98665162",
+    "reward": 0.334,
+    "solved": false,
+    "duration": 9.7,
+    "outcome": "completed",
+    "time": -6544.9
+   },
+   "6-1": {
+    "run_id": "r_sample27295600",
+    "reward": 1.071,
+    "solved": true,
+    "duration": 19.2,
+    "outcome": "completed",
+    "time": -5987.9
+   },
+   "7-1": {
+    "run_id": "r_sample82462694",
+    "reward": 0.233,
+    "solved": false,
+    "duration": 23.3,
+    "outcome": "completed",
+    "time": -5962.7
+   },
+   "8-1": {
+    "run_id": "r_sample61238391",
+    "reward": 0.263,
+    "solved": false,
+    "duration": 19.1,
+    "outcome": "completed",
+    "time": -1384.0
+   },
+   "9-1": {
+    "run_id": "r_sample42016737",
+    "reward": 0.464,
+    "solved": false,
+    "duration": 18.7,
+    "outcome": "completed",
+    "time": -1856.4
+   },
+   "10-1": {
+    "run_id": "r_sample46690528",
+    "reward": 1.041,
+    "solved": true,
+    "duration": 16.8,
+    "outcome": "completed",
+    "time": -6154.7
+   },
+   "11-1": {
+    "run_id": "r_sample21081462",
+    "reward": 1.008,
+    "solved": true,
+    "duration": 4.6,
+    "outcome": "completed",
+    "time": -4920.7
+   },
+   "12-1": {
+    "run_id": "r_sample87283404",
+    "reward": 1.091,
+    "solved": true,
+    "duration": 5.8,
+    "outcome": "completed",
+    "time": -5650.1
+   },
+   "13-1": {
+    "run_id": "r_sample16069466",
+    "reward": 0.591,
+    "solved": false,
+    "duration": 9.4,
+    "outcome": "completed",
+    "time": -2146.7
+   },
+   "14-1": {
+    "run_id": "r_sample64695545",
+    "reward": 0.387,
+    "solved": false,
+    "duration": 6.4,
+    "outcome": "completed",
+    "time": -1513.1
+   },
+   "15-1": {
+    "run_id": "r_sample06187375",
+    "reward": 0.564,
+    "solved": false,
+    "duration": 9.7,
+    "outcome": "completed",
+    "time": -1694.7
+   },
+   "16-1": {
+    "run_id": "r_sample39719637",
+    "reward": 1.162,
+    "solved": true,
+    "duration": 20.8,
+    "outcome": "completed",
+    "time": -3118.2
+   }
+  },
+  "evaluations/unguided-v1/zztmonuszpkqvokt/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "distill-merged-on, every 2 versions",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "zztmonuszpkqvokt"
+   }
+  },
+  "evaluations/unguided-v1/zztmonuszpkqvokt/results": {
+   "1-1": {
+    "run_id": "r_sample46262881",
+    "reward": 1.29,
+    "solved": true,
+    "duration": 13.5,
+    "outcome": "completed",
+    "time": -3164.8
+   },
+   "2-1": {
+    "run_id": "r_sample08439771",
+    "reward": 1.193,
+    "solved": true,
+    "duration": 17.3,
+    "outcome": "completed",
+    "time": -2403.4
+   },
+   "3-1": {
+    "run_id": "r_sample97185613",
+    "reward": 1.208,
+    "solved": true,
+    "duration": 18.3,
+    "outcome": "completed",
+    "time": -640.3
+   },
+   "4-1": {
+    "run_id": "r_sample08756206",
+    "reward": 1.049,
+    "solved": true,
+    "duration": 28.6,
+    "outcome": "completed",
+    "time": -5666.8
+   },
+   "5-1": {
+    "run_id": "r_sample57691512",
+    "reward": 0.185,
+    "solved": false,
+    "duration": 5.7,
+    "outcome": "completed",
+    "time": -4374.5
+   },
+   "6-1": {
+    "run_id": "r_sample85167042",
+    "reward": 1.235,
+    "solved": true,
+    "duration": 28.1,
+    "outcome": "completed",
+    "time": -1617.2
+   },
+   "7-1": {
+    "run_id": "r_sample06796116",
+    "reward": 1.092,
+    "solved": true,
+    "duration": 28.6,
+    "outcome": "completed",
+    "time": -1587.9
+   },
+   "8-1": {
+    "run_id": "r_sample02736325",
+    "reward": 0.37,
+    "solved": false,
+    "duration": 19.4,
+    "outcome": "completed",
+    "time": -1637.1
+   },
+   "9-1": {
+    "run_id": "r_sample18379347",
+    "reward": 1.031,
+    "solved": true,
+    "duration": 8.1,
+    "outcome": "completed",
+    "time": -5520.6
+   },
+   "10-1": {
+    "run_id": "r_sample61802044",
+    "reward": 1.057,
+    "solved": true,
+    "duration": 11.6,
+    "outcome": "completed",
+    "time": -669.3
+   },
+   "11-1": {
+    "run_id": "r_sample09148842",
+    "reward": 1.146,
+    "solved": true,
+    "duration": 6.9,
+    "outcome": "completed",
+    "time": -2621.8
+   },
+   "12-1": {
+    "run_id": "r_sample42673168",
+    "reward": 1.013,
+    "solved": true,
+    "duration": 4.2,
+    "outcome": "completed",
+    "time": -4077.9
+   }
+  },
+  "evaluations/unguided-v1/kszsqvyvvmrnrzqu/subject": {
+   "subject": {
+    "kind": "checkpoint",
+    "asked_by": "by hand",
+    "episodes": 1,
+    "decided": -7200.0,
+    "checkpoint": "kszsqvyvvmrnrzqu"
+   }
+  },
+  "evaluations/unguided-v1/kszsqvyvvmrnrzqu/results": {
+   "1-1": {
+    "run_id": "r_sample18864938",
+    "reward": 1.217,
+    "solved": true,
+    "duration": 13.7,
+    "outcome": "completed",
+    "time": -4805.4
+   },
+   "2-1": {
+    "run_id": "r_sample22945424",
+    "reward": 1.197,
+    "solved": true,
+    "duration": 15.4,
+    "outcome": "completed",
+    "time": -872.6
+   },
+   "3-1": {
+    "run_id": "r_sample75066118",
+    "reward": 1.158,
+    "solved": true,
+    "duration": 18.0,
+    "outcome": "completed",
+    "time": -3831.4
+   },
+   "4-1": {
+    "run_id": "r_sample31121317",
+    "reward": 1.111,
+    "solved": true,
+    "duration": 13.7,
+    "outcome": "completed",
+    "time": -2429.4
+   },
+   "5-1": {
+    "run_id": "r_sample42939955",
+    "reward": 1.07,
+    "solved": true,
+    "duration": 16.7,
+    "outcome": "completed",
+    "time": -1042.9
+   },
+   "6-1": {
+    "run_id": "r_sample12319113",
+    "reward": 1.053,
+    "solved": true,
+    "duration": 20.7,
+    "outcome": "completed",
+    "time": -1013.1
+   },
+   "7-1": {
+    "run_id": "r_sample97323039",
+    "reward": 1.146,
+    "solved": true,
+    "duration": 5.3,
+    "outcome": "completed",
+    "time": -4014.6
+   },
+   "8-1": {
+    "run_id": "r_sample20647054",
+    "reward": 1.275,
+    "solved": true,
+    "duration": 25.1,
+    "outcome": "completed",
+    "time": -6194.7
+   },
+   "9-1": {
+    "run_id": "r_sample99697688",
+    "reward": 1.071,
+    "solved": true,
+    "duration": 6.2,
+    "outcome": "completed",
+    "time": -4685.3
+   },
+   "10-1": {
+    "run_id": "r_sample01641088",
+    "reward": 0.457,
+    "solved": false,
+    "duration": 18.4,
+    "outcome": "completed",
+    "time": -4357.1
+   },
+   "11-1": {
+    "run_id": "r_sample89969686",
+    "reward": 0.088,
+    "solved": false,
+    "duration": 17.8,
+    "outcome": "completed",
+    "time": -4186.6
+   },
+   "12-1": {
+    "run_id": "r_sample51008428",
+    "reward": 1.138,
+    "solved": true,
+    "duration": 24.2,
+    "outcome": "completed",
+    "time": -3006.3
+   },
+   "13-1": {
+    "run_id": "r_sample66118970",
+    "reward": 1.102,
+    "solved": true,
+    "duration": 26.9,
+    "outcome": "completed",
+    "time": -2962.4
+   },
+   "14-1": {
+    "run_id": "r_sample81957017",
+    "reward": 1.077,
+    "solved": true,
+    "duration": 24.7,
+    "outcome": "completed",
+    "time": -6479.4
+   },
+   "15-1": {
+    "run_id": "r_sample04511247",
+    "reward": 0.028,
+    "solved": false,
+    "duration": 29.5,
+    "outcome": "completed",
+    "time": -6238.7
+   },
+   "16-1": {
+    "run_id": "r_sample33142453",
+    "reward": 0.144,
+    "solved": false,
+    "duration": 13.5,
+    "outcome": "completed",
+    "time": -1027.2
+   }
+  },
+  "checkpoints": {
    "uowlmnvlqlmxxmrm": {
     "id": "uowlmnvlqlmxxmrm",
     "weights": null,
@@ -2571,7 +3613,7 @@
     "released": null
    }
   },
-  "versions/released": {
+  "checkpoints/released": {
    "uowlmnvlqlmxxmrm": {
     "at": -84714.6
    },
@@ -2591,1084 +3633,42 @@
     "at": -74826.7
    }
   },
-  "evaluations/unguided-v1/curriculum-9@10/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "curriculum-9@10",
-    "asked_by": "by hand",
-    "episodes": 1,
-    "decided": -7200.0
+  "checkpoints/resharding": {
+   "msvpvrurqrwrqzvk": {
+    "at": -68340.0,
+    "worker": "reshard-1"
+   },
+   "kszsqvyvvmrnrzqu": {
+    "at": -46740.0,
+    "worker": "reshard-1"
+   },
+   "qzkzvmnwqzpxumwy": {
+    "at": -2940.0,
+    "worker": "reshard-1"
+   },
+   "wmppokoyozvookkn": {
+    "at": -300.0,
+    "worker": "reshard-1"
    }
   },
-  "evaluations/unguided-v1/curriculum-9@10/results": {
-   "1-1": {
-    "run_id": "r_sample58701728",
-    "reward": 0.011,
-    "solved": false,
-    "duration": 23.7,
-    "outcome": "completed",
-    "time": -3921.5
-   },
-   "2-1": {
-    "run_id": "r_sample60800794",
-    "reward": 0.587,
-    "solved": false,
-    "duration": 18.0,
-    "outcome": "completed",
-    "time": -2458.7
-   },
-   "3-1": {
-    "run_id": "r_sample35069324",
-    "reward": 0.262,
-    "solved": false,
-    "duration": 17.1,
-    "outcome": "completed",
-    "time": -4376.5
-   },
-   "4-1": {
-    "run_id": "r_sample73981487",
-    "reward": 0.577,
-    "solved": false,
-    "duration": 7.7,
-    "outcome": "completed",
-    "time": -5036.4
-   },
-   "5-1": {
-    "run_id": "r_sample35773625",
-    "reward": 0.348,
-    "solved": false,
-    "duration": 17.4,
-    "outcome": "completed",
-    "time": -2430.0
-   },
-   "6-1": {
-    "run_id": "r_sample70280195",
-    "reward": 0.142,
-    "solved": false,
-    "duration": 7.5,
-    "outcome": "completed",
-    "time": -5318.8
-   },
-   "7-1": {
-    "run_id": "r_sample11927701",
-    "reward": 0.1,
-    "solved": false,
-    "duration": 18.1,
-    "outcome": "completed",
-    "time": -3327.3
-   },
-   "8-1": {
-    "run_id": "r_sample86327556",
-    "reward": 0.088,
-    "solved": false,
-    "duration": 19.0,
-    "outcome": "completed",
-    "time": -4995.1
-   },
-   "9-1": {
-    "run_id": "r_sample81411986",
-    "reward": 0.222,
-    "solved": false,
-    "duration": 24.3,
-    "outcome": "completed",
-    "time": -979.0
-   },
-   "10-1": {
-    "run_id": "r_sample86849289",
-    "reward": 0.138,
-    "solved": false,
-    "duration": 29.5,
-    "outcome": "completed",
-    "time": -6012.6
-   },
-   "11-1": {
-    "run_id": "r_sample42688159",
-    "reward": 1.085,
-    "solved": true,
-    "duration": 10.1,
-    "outcome": "completed",
-    "time": -6084.0
-   },
-   "12-1": {
-    "run_id": "r_sample38607653",
-    "reward": 0.074,
-    "solved": false,
-    "duration": 6.8,
-    "outcome": "completed",
-    "time": -1900.0
-   },
-   "13-1": {
-    "run_id": "r_sample53317299",
-    "reward": 0.415,
-    "solved": false,
-    "duration": 14.8,
-    "outcome": "completed",
-    "time": -3631.8
-   },
-   "14-1": {
-    "run_id": "r_sample30675472",
-    "reward": 0.307,
-    "solved": false,
-    "duration": 25.1,
-    "outcome": "completed",
-    "time": -1376.6
-   },
-   "15-1": {
-    "run_id": "r_sample85195654",
-    "reward": 0.107,
-    "solved": false,
-    "duration": 6.0,
-    "outcome": "completed",
-    "time": -3785.4
-   },
-   "16-1": {
-    "run_id": "r_sample15816508",
-    "reward": 0.18,
-    "solved": false,
-    "duration": 9.4,
-    "outcome": "completed",
-    "time": -654.1
-   }
-  },
-  "evaluations/unguided-v1/curriculum-9@20/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "curriculum-9@20",
-    "asked_by": "by hand",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/curriculum-9@20/results": {
-   "1-1": {
-    "run_id": "r_sample47581518",
-    "reward": 0.359,
-    "solved": false,
-    "duration": 11.7,
-    "outcome": "completed",
-    "time": -1402.6
-   },
-   "2-1": {
-    "run_id": "r_sample86420212",
-    "reward": 0.549,
-    "solved": false,
-    "duration": 21.0,
-    "outcome": "completed",
-    "time": -896.4
-   },
-   "3-1": {
-    "run_id": "r_sample90516834",
-    "reward": 1.189,
-    "solved": true,
-    "duration": 15.5,
-    "outcome": "completed",
-    "time": -5365.0
-   },
-   "4-1": {
-    "run_id": "r_sample03973825",
-    "reward": 1.077,
-    "solved": true,
-    "duration": 5.8,
-    "outcome": "completed",
-    "time": -3834.7
-   },
-   "5-1": {
-    "run_id": "r_sample95364695",
-    "reward": 0.504,
-    "solved": false,
-    "duration": 25.4,
-    "outcome": "completed",
-    "time": -2989.9
-   },
-   "6-1": {
-    "run_id": "r_sample66873069",
-    "reward": 0.582,
-    "solved": false,
-    "duration": 6.5,
-    "outcome": "completed",
-    "time": -5978.7
-   },
-   "7-1": {
-    "run_id": "r_sample04917371",
-    "reward": 0.125,
-    "solved": false,
-    "duration": 16.2,
-    "outcome": "completed",
-    "time": -3431.2
-   },
-   "8-1": {
-    "run_id": "r_sample26279402",
-    "reward": 0.421,
-    "solved": false,
-    "duration": 7.1,
-    "outcome": "completed",
-    "time": -4624.4
-   },
-   "9-1": {
-    "run_id": "r_sample52011132",
-    "reward": 0.575,
-    "solved": false,
-    "duration": 18.6,
-    "outcome": "completed",
-    "time": -5266.5
-   },
-   "10-1": {
-    "run_id": "r_sample00456153",
-    "reward": 0.101,
-    "solved": false,
-    "duration": 18.5,
-    "outcome": "completed",
-    "time": -2774.4
-   },
-   "11-1": {
-    "run_id": "r_sample08139599",
-    "reward": 0.599,
-    "solved": false,
-    "duration": 20.1,
-    "outcome": "completed",
-    "time": -2882.1
-   },
-   "12-1": {
-    "run_id": "r_sample37572853",
-    "reward": 0.359,
-    "solved": false,
-    "duration": 16.2,
-    "outcome": "completed",
-    "time": -3006.1
-   },
-   "13-1": {
-    "run_id": "r_sample33344867",
-    "reward": 0.19,
-    "solved": false,
-    "duration": 9.8,
-    "outcome": "completed",
-    "time": -1358.2
-   },
-   "14-1": {
-    "run_id": "r_sample47780544",
-    "reward": 0.333,
-    "solved": false,
-    "duration": 9.8,
-    "outcome": "completed",
-    "time": -3931.3
-   },
-   "15-1": {
-    "run_id": "r_sample55471958",
-    "reward": 1.111,
-    "solved": true,
-    "duration": 17.2,
-    "outcome": "completed",
-    "time": -1207.9
-   },
-   "16-1": {
-    "run_id": "r_sample52563180",
-    "reward": 0.577,
-    "solved": false,
-    "duration": 10.4,
-    "outcome": "completed",
-    "time": -928.6
-   }
-  },
-  "evaluations/unguided-v1/curriculum-9@30/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "curriculum-9@30",
-    "asked_by": "by hand",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/curriculum-9@30/results": {
-   "1-1": {
-    "run_id": "r_sample75553067",
-    "reward": 1.195,
-    "solved": true,
-    "duration": 25.2,
-    "outcome": "completed",
-    "time": -4737.1
-   },
-   "2-1": {
-    "run_id": "r_sample03037329",
-    "reward": 1.094,
-    "solved": true,
-    "duration": 10.3,
-    "outcome": "completed",
-    "time": -4786.6
-   },
-   "3-1": {
-    "run_id": "r_sample18287367",
-    "reward": 1.033,
-    "solved": true,
-    "duration": 6.6,
-    "outcome": "completed",
-    "time": -1706.6
-   },
-   "4-1": {
-    "run_id": "r_sample63624612",
-    "reward": 1.207,
-    "solved": true,
-    "duration": 18.9,
-    "outcome": "completed",
-    "time": -1682.0
-   },
-   "5-1": {
-    "run_id": "r_sample18652466",
-    "reward": 0.407,
-    "solved": false,
-    "duration": 6.1,
-    "outcome": "completed",
-    "time": -4468.3
-   },
-   "6-1": {
-    "run_id": "r_sample80838024",
-    "reward": 1.112,
-    "solved": true,
-    "duration": 8.0,
-    "outcome": "completed",
-    "time": -867.9
-   },
-   "7-1": {
-    "run_id": "r_sample28987166",
-    "reward": 0.54,
-    "solved": false,
-    "duration": 29.0,
-    "outcome": "completed",
-    "time": -1758.1
-   },
-   "8-1": {
-    "run_id": "r_sample07498383",
-    "reward": 0.488,
-    "solved": false,
-    "duration": 23.0,
-    "outcome": "completed",
-    "time": -4227.0
-   },
-   "9-1": {
-    "run_id": "r_sample95818521",
-    "reward": 0.576,
-    "solved": false,
-    "duration": 21.9,
-    "outcome": "completed",
-    "time": -1298.5
-   },
-   "10-1": {
-    "run_id": "r_sample80249193",
-    "reward": 1.193,
-    "solved": true,
-    "duration": 9.0,
-    "outcome": "completed",
-    "time": -948.3
-   },
-   "11-1": {
-    "run_id": "r_sample92592383",
-    "reward": 0.007,
-    "solved": false,
-    "duration": 18.5,
-    "outcome": "completed",
-    "time": -6193.1
-   },
-   "12-1": {
-    "run_id": "r_sample56905797",
-    "reward": 1.068,
-    "solved": true,
-    "duration": 5.6,
-    "outcome": "completed",
-    "time": -3902.0
-   },
-   "13-1": {
-    "run_id": "r_sample41385683",
-    "reward": 0.341,
-    "solved": false,
-    "duration": 20.3,
-    "outcome": "completed",
-    "time": -1428.9
-   },
-   "14-1": {
-    "run_id": "r_sample99540080",
-    "reward": 0.308,
-    "solved": false,
-    "duration": 11.8,
-    "outcome": "completed",
-    "time": -1359.2
-   },
-   "15-1": {
-    "run_id": "r_sample76346854",
-    "reward": 0.47,
-    "solved": false,
-    "duration": 6.3,
-    "outcome": "completed",
-    "time": -3622.4
-   },
-   "16-1": {
-    "run_id": "r_sample75427164",
-    "reward": 0.158,
-    "solved": false,
-    "duration": 4.6,
-    "outcome": "completed",
-    "time": -3522.8
-   }
-  },
-  "evaluations/unguided-v1/slpxmskmsmrmsnyk/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "slpxmskmsmrmsnyk",
-    "asked_by": "by hand",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/slpxmskmsmrmsnyk/results": {
-   "1-1": {
-    "run_id": "r_sample75315994",
-    "reward": 1.136,
-    "solved": true,
-    "duration": 25.2,
-    "outcome": "completed",
-    "time": -3546.7
-   },
-   "2-1": {
-    "run_id": "r_sample74372512",
-    "reward": 1.165,
-    "solved": true,
-    "duration": 25.1,
-    "outcome": "completed",
-    "time": -4388.1
-   },
-   "3-1": {
-    "run_id": "r_sample24896310",
-    "reward": 1.141,
-    "solved": true,
-    "duration": 9.9,
-    "outcome": "completed",
-    "time": -3686.5
-   },
-   "4-1": {
-    "run_id": "r_sample83126165",
-    "reward": 1.1,
-    "solved": true,
-    "duration": 27.1,
-    "outcome": "completed",
-    "time": -1241.2
-   },
-   "5-1": {
-    "run_id": "r_sample93872131",
-    "reward": 0.067,
-    "solved": false,
-    "duration": 18.9,
-    "outcome": "completed",
-    "time": -1937.2
-   },
-   "6-1": {
-    "run_id": "r_sample58227385",
-    "reward": 1.196,
-    "solved": true,
-    "duration": 25.6,
-    "outcome": "completed",
-    "time": -2814.4
-   },
-   "7-1": {
-    "run_id": "r_sample44287535",
-    "reward": 1.017,
-    "solved": true,
-    "duration": 12.7,
-    "outcome": "completed",
-    "time": -2875.4
-   },
-   "8-1": {
-    "run_id": "r_sample75009214",
-    "reward": 1.08,
-    "solved": true,
-    "duration": 15.4,
-    "outcome": "completed",
-    "time": -1224.1
-   },
-   "9-1": {
-    "run_id": "r_sample52462888",
-    "reward": 0.267,
-    "solved": false,
-    "duration": 5.6,
-    "outcome": "completed",
-    "time": -4370.8
-   },
-   "10-1": {
-    "run_id": "r_sample60895033",
-    "reward": 0.572,
-    "solved": false,
-    "duration": 22.3,
-    "outcome": "completed",
-    "time": -732.1
-   },
-   "11-1": {
-    "run_id": "r_sample23374767",
-    "reward": 0.354,
-    "solved": false,
-    "duration": 21.2,
-    "outcome": "completed",
-    "time": -2944.3
-   },
-   "12-1": {
-    "run_id": "r_sample85592853",
-    "reward": 1.137,
-    "solved": true,
-    "duration": 5.6,
-    "outcome": "completed",
-    "time": -5655.0
-   },
-   "13-1": {
-    "run_id": "r_sample26290563",
-    "reward": 0.067,
-    "solved": false,
-    "duration": 8.6,
-    "outcome": "completed",
-    "time": -1668.2
-   },
-   "14-1": {
-    "run_id": "r_sample51319328",
-    "reward": 0.575,
-    "solved": false,
-    "duration": 16.7,
-    "outcome": "completed",
-    "time": -1596.2
-   },
-   "15-1": {
-    "run_id": "r_sample46682294",
-    "reward": 0.564,
-    "solved": false,
-    "duration": 27.4,
-    "outcome": "completed",
-    "time": -1353.0
-   },
-   "16-1": {
-    "run_id": "r_sample74133516",
-    "reward": 0.301,
-    "solved": false,
-    "duration": 19.8,
-    "outcome": "completed",
-    "time": -6374.5
-   }
-  },
-  "evaluations/unguided-v1/vkyvpnzlqtorwwzm/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "vkyvpnzlqtorwwzm",
-    "asked_by": "by hand",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/vkyvpnzlqtorwwzm/results": {
-   "1-1": {
-    "run_id": "r_sample73045842",
-    "reward": 0.162,
-    "solved": false,
-    "duration": 11.1,
-    "outcome": "completed",
-    "time": -1443.5
-   },
-   "2-1": {
-    "run_id": "r_sample75038696",
-    "reward": 0.344,
-    "solved": false,
-    "duration": 17.5,
-    "outcome": "completed",
-    "time": -5813.6
-   },
-   "3-1": {
-    "run_id": "r_sample97732222",
-    "reward": 1.275,
-    "solved": true,
-    "duration": 12.7,
-    "outcome": "completed",
-    "time": -5749.3
-   },
-   "4-1": {
-    "run_id": "r_sample44286173",
-    "reward": 1.144,
-    "solved": true,
-    "duration": 15.1,
-    "outcome": "completed",
-    "time": -683.6
-   },
-   "5-1": {
-    "run_id": "r_sample59273803",
-    "reward": 0.404,
-    "solved": false,
-    "duration": 28.5,
-    "outcome": "completed",
-    "time": -5191.4
-   },
-   "6-1": {
-    "run_id": "r_sample93870833",
-    "reward": 0.153,
-    "solved": false,
-    "duration": 17.9,
-    "outcome": "completed",
-    "time": -2136.1
-   },
-   "7-1": {
-    "run_id": "r_sample82076519",
-    "reward": 0.392,
-    "solved": false,
-    "duration": 23.4,
-    "outcome": "completed",
-    "time": -5146.3
-   },
-   "8-1": {
-    "run_id": "r_sample70757366",
-    "reward": 1.233,
-    "solved": true,
-    "duration": 18.8,
-    "outcome": "completed",
-    "time": -1876.5
-   },
-   "9-1": {
-    "run_id": "r_sample20085856",
-    "reward": 1.014,
-    "solved": true,
-    "duration": 24.5,
-    "outcome": "completed",
-    "time": -6543.0
-   },
-   "10-1": {
-    "run_id": "r_sample96864493",
-    "reward": 0.369,
-    "solved": false,
-    "duration": 22.6,
-    "outcome": "completed",
-    "time": -3399.3
-   },
-   "11-1": {
-    "run_id": "r_sample01247611",
-    "reward": 0.016,
-    "solved": false,
-    "duration": 7.3,
-    "outcome": "completed",
-    "time": -5708.9
-   },
-   "12-1": {
-    "run_id": "r_sample67690945",
-    "reward": 0.32,
-    "solved": false,
-    "duration": 11.8,
-    "outcome": "completed",
-    "time": -2241.3
-   },
-   "13-1": {
-    "run_id": "r_sample92742999",
-    "reward": 0.497,
-    "solved": false,
-    "duration": 15.0,
-    "outcome": "completed",
-    "time": -3329.1
-   },
-   "14-1": {
-    "run_id": "r_sample86141940",
-    "reward": 0.44,
-    "solved": false,
-    "duration": 19.8,
-    "outcome": "completed",
-    "time": -1921.5
-   },
-   "15-1": {
-    "run_id": "r_sample23408226",
-    "reward": 1.2,
-    "solved": true,
-    "duration": 27.3,
-    "outcome": "completed",
-    "time": -1515.1
-   },
-   "16-1": {
-    "run_id": "r_sample57247448",
-    "reward": 0.319,
-    "solved": false,
-    "duration": 22.6,
-    "outcome": "completed",
-    "time": -1983.4
-   }
-  },
-  "evaluations/unguided-v1/wwnzwlqmqypnulnk/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "wwnzwlqmqypnulnk",
-    "asked_by": "distill-merged, after its last step",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/wwnzwlqmqypnulnk/results": {
-   "1-1": {
-    "run_id": "r_sample22078931",
-    "reward": 1.001,
-    "solved": true,
-    "duration": 9.5,
-    "outcome": "completed",
-    "time": -6345.2
-   },
-   "2-1": {
-    "run_id": "r_sample83116905",
-    "reward": 1.159,
-    "solved": true,
-    "duration": 16.5,
-    "outcome": "completed",
-    "time": -6541.4
-   },
-   "3-1": {
-    "run_id": "r_sample38276095",
-    "reward": 1.276,
-    "solved": true,
-    "duration": 5.8,
-    "outcome": "completed",
-    "time": -3098.2
-   },
-   "4-1": {
-    "run_id": "r_sample83545948",
-    "reward": 1.204,
-    "solved": true,
-    "duration": 6.6,
-    "outcome": "completed",
-    "time": -6547.5
-   },
-   "5-1": {
-    "run_id": "r_sample98665162",
-    "reward": 0.334,
-    "solved": false,
-    "duration": 9.7,
-    "outcome": "completed",
-    "time": -6544.9
-   },
-   "6-1": {
-    "run_id": "r_sample27295600",
-    "reward": 1.071,
-    "solved": true,
-    "duration": 19.2,
-    "outcome": "completed",
-    "time": -5987.9
-   },
-   "7-1": {
-    "run_id": "r_sample82462694",
-    "reward": 0.233,
-    "solved": false,
-    "duration": 23.3,
-    "outcome": "completed",
-    "time": -5962.7
-   },
-   "8-1": {
-    "run_id": "r_sample61238391",
-    "reward": 0.263,
-    "solved": false,
-    "duration": 19.1,
-    "outcome": "completed",
-    "time": -1384.0
-   },
-   "9-1": {
-    "run_id": "r_sample42016737",
-    "reward": 0.464,
-    "solved": false,
-    "duration": 18.7,
-    "outcome": "completed",
-    "time": -1856.4
-   },
-   "10-1": {
-    "run_id": "r_sample46690528",
-    "reward": 1.041,
-    "solved": true,
-    "duration": 16.8,
-    "outcome": "completed",
-    "time": -6154.7
-   },
-   "11-1": {
-    "run_id": "r_sample21081462",
-    "reward": 1.008,
-    "solved": true,
-    "duration": 4.6,
-    "outcome": "completed",
-    "time": -4920.7
-   },
-   "12-1": {
-    "run_id": "r_sample87283404",
-    "reward": 1.091,
-    "solved": true,
-    "duration": 5.8,
-    "outcome": "completed",
-    "time": -5650.1
-   },
-   "13-1": {
-    "run_id": "r_sample16069466",
-    "reward": 0.591,
-    "solved": false,
-    "duration": 9.4,
-    "outcome": "completed",
-    "time": -2146.7
-   },
-   "14-1": {
-    "run_id": "r_sample64695545",
-    "reward": 0.387,
-    "solved": false,
-    "duration": 6.4,
-    "outcome": "completed",
-    "time": -1513.1
-   },
-   "15-1": {
-    "run_id": "r_sample06187375",
-    "reward": 0.564,
-    "solved": false,
-    "duration": 9.7,
-    "outcome": "completed",
-    "time": -1694.7
-   },
-   "16-1": {
-    "run_id": "r_sample39719637",
-    "reward": 1.162,
-    "solved": true,
-    "duration": 20.8,
-    "outcome": "completed",
-    "time": -3118.2
-   }
-  },
-  "evaluations/unguided-v1/zztmonuszpkqvokt/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "zztmonuszpkqvokt",
-    "asked_by": "distill-merged-on, every 2 versions",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/zztmonuszpkqvokt/results": {
-   "1-1": {
-    "run_id": "r_sample46262881",
-    "reward": 1.29,
-    "solved": true,
-    "duration": 13.5,
-    "outcome": "completed",
-    "time": -3164.8
-   },
-   "2-1": {
-    "run_id": "r_sample08439771",
-    "reward": 1.193,
-    "solved": true,
-    "duration": 17.3,
-    "outcome": "completed",
-    "time": -2403.4
-   },
-   "3-1": {
-    "run_id": "r_sample97185613",
-    "reward": 1.208,
-    "solved": true,
-    "duration": 18.3,
-    "outcome": "completed",
-    "time": -640.3
-   },
-   "4-1": {
-    "run_id": "r_sample08756206",
-    "reward": 1.049,
-    "solved": true,
-    "duration": 28.6,
-    "outcome": "completed",
-    "time": -5666.8
-   },
-   "5-1": {
-    "run_id": "r_sample57691512",
-    "reward": 0.185,
-    "solved": false,
-    "duration": 5.7,
-    "outcome": "completed",
-    "time": -4374.5
-   },
-   "6-1": {
-    "run_id": "r_sample85167042",
-    "reward": 1.235,
-    "solved": true,
-    "duration": 28.1,
-    "outcome": "completed",
-    "time": -1617.2
-   },
-   "7-1": {
-    "run_id": "r_sample06796116",
-    "reward": 1.092,
-    "solved": true,
-    "duration": 28.6,
-    "outcome": "completed",
-    "time": -1587.9
-   },
-   "8-1": {
-    "run_id": "r_sample02736325",
-    "reward": 0.37,
-    "solved": false,
-    "duration": 19.4,
-    "outcome": "completed",
-    "time": -1637.1
-   },
-   "9-1": {
-    "run_id": "r_sample18379347",
-    "reward": 1.031,
-    "solved": true,
-    "duration": 8.1,
-    "outcome": "completed",
-    "time": -5520.6
-   },
-   "10-1": {
-    "run_id": "r_sample61802044",
-    "reward": 1.057,
-    "solved": true,
-    "duration": 11.6,
-    "outcome": "completed",
-    "time": -669.3
-   },
-   "11-1": {
-    "run_id": "r_sample09148842",
-    "reward": 1.146,
-    "solved": true,
-    "duration": 6.9,
-    "outcome": "completed",
-    "time": -2621.8
-   },
-   "12-1": {
-    "run_id": "r_sample42673168",
-    "reward": 1.013,
-    "solved": true,
-    "duration": 4.2,
-    "outcome": "completed",
-    "time": -4077.9
-   }
-  },
-  "evaluations/unguided-v1/kszsqvyvvmrnrzqu/subject": {
-   "subject": {
-    "kind": "version",
-    "version": "kszsqvyvvmrnrzqu",
-    "asked_by": "by hand",
-    "episodes": 1,
-    "decided": -7200.0
-   }
-  },
-  "evaluations/unguided-v1/kszsqvyvvmrnrzqu/results": {
-   "1-1": {
-    "run_id": "r_sample18864938",
-    "reward": 1.217,
-    "solved": true,
-    "duration": 13.7,
-    "outcome": "completed",
-    "time": -4805.4
-   },
-   "2-1": {
-    "run_id": "r_sample22945424",
-    "reward": 1.197,
-    "solved": true,
-    "duration": 15.4,
-    "outcome": "completed",
-    "time": -872.6
-   },
-   "3-1": {
-    "run_id": "r_sample75066118",
-    "reward": 1.158,
-    "solved": true,
-    "duration": 18.0,
-    "outcome": "completed",
-    "time": -3831.4
-   },
-   "4-1": {
-    "run_id": "r_sample31121317",
-    "reward": 1.111,
-    "solved": true,
-    "duration": 13.7,
-    "outcome": "completed",
-    "time": -2429.4
-   },
-   "5-1": {
-    "run_id": "r_sample42939955",
-    "reward": 1.07,
-    "solved": true,
-    "duration": 16.7,
-    "outcome": "completed",
-    "time": -1042.9
-   },
-   "6-1": {
-    "run_id": "r_sample12319113",
-    "reward": 1.053,
-    "solved": true,
-    "duration": 20.7,
-    "outcome": "completed",
-    "time": -1013.1
-   },
-   "7-1": {
-    "run_id": "r_sample97323039",
-    "reward": 1.146,
-    "solved": true,
-    "duration": 5.3,
-    "outcome": "completed",
-    "time": -4014.6
-   },
-   "8-1": {
-    "run_id": "r_sample20647054",
-    "reward": 1.275,
-    "solved": true,
-    "duration": 25.1,
-    "outcome": "completed",
-    "time": -6194.7
-   },
-   "9-1": {
-    "run_id": "r_sample99697688",
-    "reward": 1.071,
-    "solved": true,
-    "duration": 6.2,
-    "outcome": "completed",
-    "time": -4685.3
-   },
-   "10-1": {
-    "run_id": "r_sample01641088",
-    "reward": 0.457,
-    "solved": false,
-    "duration": 18.4,
-    "outcome": "completed",
-    "time": -4357.1
-   },
-   "11-1": {
-    "run_id": "r_sample89969686",
-    "reward": 0.088,
-    "solved": false,
-    "duration": 17.8,
-    "outcome": "completed",
-    "time": -4186.6
-   },
-   "12-1": {
-    "run_id": "r_sample51008428",
-    "reward": 1.138,
-    "solved": true,
-    "duration": 24.2,
-    "outcome": "completed",
-    "time": -3006.3
-   },
-   "13-1": {
-    "run_id": "r_sample66118970",
-    "reward": 1.102,
-    "solved": true,
-    "duration": 26.9,
-    "outcome": "completed",
-    "time": -2962.4
-   },
-   "14-1": {
-    "run_id": "r_sample81957017",
-    "reward": 1.077,
-    "solved": true,
-    "duration": 24.7,
-    "outcome": "completed",
-    "time": -6479.4
-   },
-   "15-1": {
-    "run_id": "r_sample04511247",
-    "reward": 0.028,
-    "solved": false,
-    "duration": 29.5,
-    "outcome": "completed",
-    "time": -6238.7
-   },
-   "16-1": {
-    "run_id": "r_sample33142453",
-    "reward": 0.144,
-    "solved": false,
-    "duration": 13.5,
-    "outcome": "completed",
-    "time": -1027.2
+  "checkpoints/resharded": {
+   "msvpvrurqrwrqzvk": {
+    "at": -67500.0,
+    "layout": {
+     "tensor_parallel": 2
+    }
+   },
+   "kszsqvyvvmrnrzqu": {
+    "at": -45800.0,
+    "layout": {
+     "tensor_parallel": 2
+    }
+   },
+   "qzkzvmnwqzpxumwy": {
+    "at": -1920.0,
+    "layout": {
+     "tensor_parallel": 2
+    }
    }
   }
  },

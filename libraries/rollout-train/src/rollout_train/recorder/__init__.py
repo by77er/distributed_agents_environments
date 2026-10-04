@@ -3,7 +3,7 @@
 
 - `renderers`: what a model family's token format must provide, and the pieces most are built from.
 - `recorder`: `Recorder` serves a run's recorded bindings; a session exports `Segment`s (token sequences with the
-  spans the policy sampled, their logprobs and weights versions).
+  spans the policy sampled, their logprobs and the version of the weights: the served checkpoint's depth).
 - `compat`: the recorder over HTTP, for harnesses that bring their own loop.
 """
 

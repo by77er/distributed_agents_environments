@@ -75,7 +75,7 @@ export interface DoneLine {
   adapter: string | null;
   step: number | null;
   step_state: string | null;
-  version: number | null;
+  depth: number | null;
   update: Metrics | null;
   segments_trained: number;
   error: string | null;
@@ -128,7 +128,7 @@ export interface Run {
   episodes_at: string | null;
   reached: boolean | null;
   profile: string | null;
-  /** The version it started from (none: the base model). */
+  /** The checkpoint it started from (none: the base model). */
   from: string | null;
   started: number | null;
   starts: number;
@@ -136,10 +136,10 @@ export interface Run {
   played?: Played;
 }
 
-/** A version: where it came from, what made it, and what is kept of it. */
-export interface Version {
+/** A checkpoint: where it came from, what made it, and what is kept of it. */
+export interface Checkpoint {
   id: string;
-  /** The shortest start of its id that no other version's has. */
+  /** The shortest start of its id that no other checkpoint's has. */
   short: string;
   /** Steps from its base model along its first parents. */
   depth: number;
@@ -173,14 +173,14 @@ export interface System {
   host: string;
   written: number | null;
   runs: Run[];
-  versions: Version[];
-  /** Each bookmark's version, by name. */
+  checkpoints: Checkpoint[];
+  /** Each bookmark's checkpoint, by name. */
   bookmarks: Record<string, string>;
   runners: Runner[];
   channels: Channel[];
   ledger: { fences: Record<string, number>; tables: Record<string, number> };
-  kept: { versions: number; episodes: number };
-  /** Every registered run's name, by id, and every bookmark's version, by name. */
+  kept: { checkpoints: number; episodes: number };
+  /** Every registered run's name, by id, and every bookmark's checkpoint, by name. */
   names?: { runs: Record<string, string>; bookmarks: Record<string, string> };
 }
 
@@ -192,7 +192,7 @@ export interface Entry {
 
 export interface Bookmark {
   name: string;
-  version: string;
+  checkpoint: string;
   moved: number;
 }
 
@@ -318,7 +318,7 @@ export interface Group extends OpenGroup {
   parameters: Record<string, unknown> | null;
   outcome: DoneLine | null;
   result: DoneLine | null;
-  version: Version | null;
+  checkpoint: Checkpoint | null;
 }
 
 export interface Call {
@@ -384,7 +384,7 @@ export interface StatisticsGroup {
 
 export interface StatisticsStep {
   step: number;
-  version: string | null;
+  checkpoint: string | null;
   decided: number | null;
   made: number | null;
   state: string;
@@ -409,7 +409,7 @@ export interface Statistics {
   names?: { runs: Record<string, string> };
 }
 
-// The versions as a graph
+// The checkpoints as a graph
 export interface Life {
   state: string;
   reshard: boolean;
@@ -420,7 +420,7 @@ export interface Life {
   waiting: number;
 }
 
-export interface LineageVersion {
+export interface LineageCheckpoint {
   id: string;
   short: string;
   depth: number;
@@ -447,7 +447,7 @@ export interface LineageRun {
   mode: string | null;
   /** What its mode means, in words (a distillation's). */
   says: string | null;
-  versions: string[];
+  checkpoints: string[];
   latest: string | null;
   sample: boolean;
 }
@@ -493,7 +493,7 @@ export interface Suite {
   subjects: {
     subject: string;
     kind: string;
-    version?: string;
+    checkpoint?: string;
     model?: string;
     asked_by?: string;
     played: number;
@@ -503,7 +503,7 @@ export interface Suite {
   sample: boolean;
 }
 
-/** What came from what: `base` (from `base:MODEL` to a line's first version), `trained` (from a version to one trained
+/** What came from what: `base` (from `base:MODEL` to a line's first checkpoint), `trained` (from a checkpoint to one trained
  * from it), `learned` (to one that learned from it beside), `teach` and `start` (to a distillation, by its run). */
 export interface Edge {
   kind: "base" | "trained" | "learned" | "teach" | "start";
@@ -518,8 +518,8 @@ export interface Lineage {
   sample: boolean;
   /** The base models every line grows from. */
   bases: string[];
-  versions: LineageVersion[];
-  /** Versions something here starts from that this ledger does not have. */
+  checkpoints: LineageCheckpoint[];
+  /** Checkpoints something here starts from that this ledger does not have. */
   outside: string[];
   bookmarks: Record<string, string>;
   runs: LineageRun[];

@@ -7,7 +7,7 @@ import type { Launch, System } from "../api/types";
 import { Ago } from "../layout/runs";
 import { runPlace } from "../lib/places";
 import { Mark, SectionTitle, Tile } from "./ui";
-import { VersionTag } from "./versions";
+import { CheckpointTag } from "./checkpoints";
 
 const GOING = new Set(["asked", "claimed", "running", "stopping"]);
 const FINISHED_SHOWN = 6;
@@ -48,7 +48,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
         <Mark state={launch.state} />
       </header>
       <div className="facts">
-        <span>from <VersionTag id={asked.start ?? null} /></span>
+        <span>from <CheckpointTag id={asked.start ?? null} /></span>
         {asked.bookmark ? <span>carries <span className="chip bookmark">{asked.bookmark}</span></span> : null}
         <span>{asked.groups ?? 100} groups · {asked.groups_per_step ?? 4} a step · seed {asked.seed ?? 0}</span>
       </div>

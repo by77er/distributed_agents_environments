@@ -2,7 +2,8 @@
 
 A run's `RecordedModel` binding names a channel (`rollout_train.inference.Channel`). The recorder's endpoint renders the
 context to tokens, samples from the channel, parses the result into canonical content and records the turn: prompt
-tokens, sampled tokens, behavior logprobs and the weights version that sampled them.
+tokens, sampled tokens, behavior logprobs and the version of the weights that sampled them (the depth of the
+checkpoint served).
 
 Thinking has a budget: a first phase samples until thinking closes or the budget runs out; then the close is forced
 (not sampled, so never trained on) and a second phase samples the answer. A request may cap its own output
@@ -46,7 +47,8 @@ SERVED_UNDER = "/v1"
 
 @dataclass(frozen=True)
 class Span:
-    """Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version`."""
+    """Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version` (the depth
+    of the checkpoint served then)."""
 
     start: int
     end: int
@@ -64,7 +66,7 @@ class Segment:
     logprobs: list[float]
     """Behavior logprobs of the tokens inside the spans, in order."""
     channel: str = ""
-    """The channel that sampled them. Its policy's versions are what the spans' `version`s count."""
+    """The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served."""
 
     @property
     def sampled(self) -> int:
@@ -144,7 +146,7 @@ class Recorder:
             del self._keys[key]
 
     async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
-        """Serve new weights on a channel; returns the version they are served as."""
+        """Serve new weights on a channel; returns the version they are served as (a checkpoint's depth)."""
         return await self.channels[channel].publish(adapter, path, version)
 
     def served(self, key: str) -> tuple[str, ModelEndpoint] | None:

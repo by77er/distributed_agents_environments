@@ -1,7 +1,7 @@
 """Where every run of a ledger stands: what the monitor shows.
 
 A ledger (`rollout_train.ledger`) may be shared by many runs. It holds what each training loop decided and what happened
-(`rollout_train.record`), where and when each run was started, the versions and the fences. Each run's
+(`rollout_train.record`), where and when each run was started, the checkpoints and the fences. Each run's
 episodes are in the ledger too, as runners claim, play and record them (`rollout_train.rollouts.scheduler`). Each run
 keeps the rest in its own directory, as an open profile lays it out (`rollout_train.layout`): the feed (what is
 happening now) and the episodes' events. A run's `starts` record says where its directory is and where the monitor on
@@ -27,6 +27,7 @@ from pydantic import JsonValue
 
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
 from rollout.harness.blobs import Blobs, FileBlobStore
+from rollout_train.checkpoints import Checkpoint, Manifest, checkpoints_in, short
 from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import ASKED, OPEN, STOPPED, STOPPING, Asked, Launch, launches_of
 from rollout_train.layout import BLOBS, FEED, RUN
@@ -41,7 +42,6 @@ from rollout_train.registry import Bookmark, Entry, Registry, Taken, checked, fo
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.stores import opened
-from rollout_train.versions import Manifest, Version, short, versions_in
 
 WAITING = "waiting"
 """Asked for; no runner has claimed any of its episodes."""
@@ -53,7 +53,7 @@ DONE = "done"
 """Its result is written. What is trained on it is its step's business: a step of its own stage (`STEPPING`,
 `COMMITTED` or `FAILED`), or none yet (it waits toward the next one)."""
 STEPPING = "stepping"
-"""A step decided that has neither made its version nor failed: the trainer has it, or a loop that starts now takes
+"""A step decided that has neither made its checkpoint nor failed: the trainer has it, or a loop that starts now takes
 it again."""
 COMMITTED = "committed"
 FAILED = "failed"
@@ -150,18 +150,18 @@ class System:
 
     async def snapshot(self, relayed: bool = False) -> dict[str, Any]:
         """Where everything stands now: every run (where it is and whether it is running; its groups that are not
-        done with and the ones that are), the versions (each with where it came from and the bookmarks that name it),
+        done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
         the runners and what they play, what each channel serves and how fast, the machine, and what is kept."""
         tables: dict[str, dict[str, JsonValue]] = {}
         fences: dict[str, int] = {}
-        versions: list[Version] = []
+        checkpoints: list[Checkpoint] = []
         if await asyncio.to_thread(present, self._ledger):
             fences = await self._ledger.fences()
             tables = await self._tables()
-            versions = await versions_in(self._ledger)
+            checkpoints = await checkpoints_in(self._ledger)
         called = await names(registry_of(self._ledger))
         beats = await self._beats()
-        snapshot = await asyncio.to_thread(self._assembled, tables, fences, versions, called, beats, relayed)
+        snapshot = await asyncio.to_thread(self._assembled, tables, fences, checkpoints, called, beats, relayed)
         return snapshot | {"names": called}
 
     async def rename(self, who: str, name: str) -> Entry:
@@ -173,18 +173,18 @@ class System:
             await registry.create(who, id=who)
         return await registry.rename(who, name)
 
-    async def bookmark(self, name: str, version: str) -> Bookmark:
-        """Make a bookmark name the version `version` says (its id, the start of one, `RUN:STEP`, `RUN` or another
+    async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
+        """Make a bookmark name the checkpoint `checkpoint` says (its id, the start of one, `RUN:STEP`, `RUN` or another
         bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
-        says no version (or no registry)."""
+        says no checkpoint (or no registry)."""
         registry = self._registry()
-        found_version = await resolved(self._ledger, registry, version)
-        if found_version is None:
-            raise KeyError("a bookmark names a version, not the base model")
-        return await registry.bookmark(name, found_version)
+        found_checkpoint = await resolved(self._ledger, registry, checkpoint)
+        if found_checkpoint is None:
+            raise KeyError("a bookmark names a checkpoint, not the base model")
+        return await registry.bookmark(name, found_checkpoint)
 
     async def unbookmark(self, name: str) -> None:
-        """Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark."""
+        """Take a bookmark away (the checkpoint stays). Raises `KeyError` when there is no such bookmark."""
         await self._registry().unbookmark(name)
 
     async def launches(self) -> dict[str, Any]:
@@ -211,7 +211,7 @@ class System:
     async def launch(self, body: Mapping[str, Any]) -> Launch:
         """Ask for a run (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile and its
         catalog starts it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the
-        profile does not have), `KeyError` for what no launcher offers or a version no reference says."""
+        profile does not have), `KeyError` for what no launcher offers or a checkpoint no reference says."""
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
@@ -291,7 +291,7 @@ class System:
 
     async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
-        its step and the version it made, and its outcome."""
+        its step and the checkpoint it made, and its outcome."""
         if not await asyncio.to_thread(present, self._ledger):
             return None
         tables = {name: await self._ledger.read(table(run, name)) for name in (*RUN_TABLES, STARTS)}
@@ -301,9 +301,9 @@ class System:
         found = await asyncio.to_thread(self._source, run, tables[STARTS], relayed)
         if isinstance(found, _Remote) and (answer := await asyncio.to_thread(found.group, run, number)) is not None:
             return answer | {"episodes_at": found.address}
-        versions = {version.id: version for version in await versions_in(self._ledger)}
+        checkpoints = {checkpoint.id: checkpoint for checkpoint in await checkpoints_in(self._ledger)}
         fences = await self._ledger.fences()
-        return await asyncio.to_thread(self._group, run, str(number), record, tables, fences, versions, found)
+        return await asyncio.to_thread(self._group, run, str(number), record, tables, fences, checkpoints, found)
 
     def _group(
         self,
@@ -312,14 +312,14 @@ class System:
         record: Mapping[str, Any],
         tables: Mapping[str, Mapping[str, JsonValue]],
         fences: Mapping[str, int],
-        versions: Mapping[str, Version],
+        checkpoints: Mapping[str, Checkpoint],
         found: "_Place | _Remote | None",
     ) -> dict[str, Any]:
         place = found if isinstance(found, _Place) else None
         played = _Played(run, tables, fences, self._records)
-        group = _group(number, record, tables, versions, played, place.feed.runs() if place else [])
+        group = _group(number, record, tables, checkpoints, played, place.feed.runs() if place else [])
         step: Any = group["step"]
-        made = versions.get(str(step.get("makes"))) if step else None
+        made = checkpoints.get(str(step.get("makes"))) if step else None
         result: Any = tables[RESULTS].get(number)
         return {
             **group,
@@ -330,7 +330,7 @@ class System:
             if group["stage"] == DONE and result
             else None,
             "result": _outcome(number, record, result) if result else None,
-            "version": _version(made, short(versions)) if made else None,
+            "checkpoint": _checkpoint(made, short(checkpoints)) if made else None,
         }
 
     def feeds(self, relayed: bool = False) -> list[dict[str, Any]]:
@@ -416,7 +416,7 @@ class System:
         self,
         tables: Mapping[str, Mapping[str, JsonValue]],
         fences: Mapping[str, int],
-        versions: list[Version],
+        checkpoints: list[Checkpoint],
         called: Mapping[str, Any],
         beats: list[Beat],
         relayed: bool,
@@ -426,12 +426,12 @@ class System:
         for beat in beats:
             if beat.about.get("run"):
                 beaten[str(beat.about["run"])] = max(beaten.get(str(beat.about["run"]), 0.0), beat.at)
-        made = {version.id: version for version in versions}
+        made = {checkpoint.id: checkpoint for checkpoint in checkpoints}
         shorter = short(made)
-        blobs = {digest: size for version in versions for digest, size in _blobs(version)}  # (each kept once)
+        blobs = {digest: size for checkpoint in checkpoints for digest, size in _blobs(checkpoint)}  # (each kept once)
         marks: dict[str, list[str]] = {}
-        for mark, version in called["bookmarks"].items():
-            marks.setdefault(str(version), []).append(mark)
+        for mark, checkpoint in called["bookmarks"].items():
+            marks.setdefault(str(checkpoint), []).append(mark)
         now = time.time()
         runs: list[dict[str, Any]] = []
         played: dict[str, _Played] = {}
@@ -454,15 +454,16 @@ class System:
             "host": self.host,
             "written": newest(run["written"] for run in runs),
             "runs": runs,
-            "versions": [
-                _version(version, shorter) | {"bookmarks": sorted(marks.get(version.id, []))} for version in versions
+            "checkpoints": [
+                _checkpoint(checkpoint, shorter) | {"bookmarks": sorted(marks.get(checkpoint.id, []))}
+                for checkpoint in checkpoints
             ],
             "bookmarks": dict(called["bookmarks"]),
             "runners": _runners(fences, played),
             "channels": [channel | {"run": run} for run, notes in noted.items() for channel in _channels(notes)],
             "ledger": {"fences": dict(fences), "tables": {name: len(records) for name, records in tables.items()}},
             "kept": {
-                "versions": sum(blobs.values()),
+                "checkpoints": sum(blobs.values()),
                 "episodes": sum(each.kept for each in played.values()),
             },
         }
@@ -567,7 +568,7 @@ def _run(
     run: str,
     tables: Mapping[str, Mapping[str, JsonValue]],
     fence: int | None,
-    versions: Mapping[str, Version],
+    checkpoints: Mapping[str, Checkpoint],
     played: "_Played",
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -576,12 +577,14 @@ def _run(
     that gave nothing to train on is listed with the first step decided after it, and until there is one, with
     those the next step will cover (`next`)."""
     groups: Any = tables[GROUPS]
-    entries = [_group(number, groups[number], tables, versions, played, in_feed) for number in sorted(groups, key=int)]
+    entries = [
+        _group(number, groups[number], tables, checkpoints, played, in_feed) for number in sorted(groups, key=int)
+    ]
     done: list[dict[str, Any]] = []
     for entry in entries:
         if entry["stage"] == DONE:
             step: Any = entry["step"]
-            made = versions.get(str(step.get("makes"))) if step else None
+            made = checkpoints.get(str(step.get("makes"))) if step else None
             key = str(entry["number"])
             line = _done(key, tables[RESULTS][key], groups[key], step, made, entry["error"])
             shown = ("run_id", "episode", "state", "reward", "solved", "interrupted", "slots", "outcome")
@@ -597,7 +600,7 @@ def _run(
             "parent": intent.get("parent"),
             "segments": intent.get("segments"),
             "decided": intent.get("decided"),
-            "state": _state(key, intent, failures, versions),
+            "state": _state(key, intent, failures, checkpoints),
             "error": failures[key].get("error") if key in failures else None,
         }
         for key, intent in sorted(steps.items(), key=lambda item: int(item[0]))
@@ -626,7 +629,7 @@ def _run(
             [group.get("decided") for group in groups.values()]
             + [result.get("time") for result in results.values()]
             + [step["decided"] for step in listed]
-            + [versions[step["makes"]].made for step in listed if step["makes"] in versions]
+            + [checkpoints[step["makes"]].made for step in listed if step["makes"] in checkpoints]
         ),
         "decided": len(groups),
         "open": [entry for entry in entries if entry["stage"] != DONE],
@@ -640,7 +643,7 @@ def _group(
     number: str,
     group: Mapping[str, Any],
     tables: Mapping[str, Mapping[str, JsonValue]],
-    versions: Mapping[str, Version],
+    checkpoints: Mapping[str, Checkpoint],
     played: "_Played",
     in_feed: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -683,7 +686,7 @@ def _group(
         step = {name: value for name, value in intent.items() if name != "batch"} | {
             "step": int(str(key)),
             "makes": _makes(intent),
-            "state": _state(str(key), intent, failures, versions),
+            "state": _state(str(key), intent, failures, checkpoints),
         }
     return {
         "number": int(number),
@@ -701,9 +704,9 @@ def _group(
 
 
 def _done(
-    number: str, result: Any, group: Mapping[str, Any], step: Any, made: Version | None, error: str | None
+    number: str, result: Any, group: Mapping[str, Any], step: Any, made: Checkpoint | None, error: str | None
 ) -> dict[str, Any]:
-    """A group that is done with, as the page shows it: its result, and what was done with it (the version its step
+    """A group that is done with, as the page shows it: its result, and what was done with it (the checkpoint its step
     made and the trainer's statistics, or why the step failed), with how long it all took."""
     line = _outcome(number, group, result)
     ended = made.made if made else float(result.get("time") or 0.0)
@@ -713,7 +716,7 @@ def _done(
         "adapter": made.id if made else None,
         "step": step.get("step") if step else None,
         "step_state": step.get("state") if step else None,
-        "version": made.depth if made else None,
+        "depth": made.depth if made else None,
         "update": dict(made.metrics) if made else None,
         "segments_trained": int(step.get("segments") or 0) if made and step else 0,
         "error": error,
@@ -721,9 +724,11 @@ def _done(
     }
 
 
-def _state(key: str, step: Mapping[str, Any], failures: Mapping[str, Any], versions: Mapping[str, Version]) -> str:
-    """Where a step stands: failed, committed (its version made), or stepping."""
-    return FAILED if key in failures else COMMITTED if _makes(step) in versions else STEPPING
+def _state(
+    key: str, step: Mapping[str, Any], failures: Mapping[str, Any], checkpoints: Mapping[str, Checkpoint]
+) -> str:
+    """Where a step stands: failed, committed (its checkpoint made), or stepping."""
+    return FAILED if key in failures else COMMITTED if _makes(step) in checkpoints else STEPPING
 
 
 def _covers(step: Mapping[str, Any]) -> list[int]:
@@ -733,7 +738,7 @@ def _covers(step: Mapping[str, Any]) -> list[int]:
 
 
 def _makes(step: Mapping[str, Any]) -> str | None:
-    """The version a step's decision names, by id."""
+    """The checkpoint a step's decision names, by id."""
     makes = step.get("makes")
     return str(makes) if makes else None
 
@@ -783,31 +788,33 @@ def _run_in(directory: Path) -> str:
     return str(json.loads(path.read_text())["id"]) if path.exists() else directory.name
 
 
-def _version(version: Version, shorter: Mapping[str, str]) -> dict[str, Any]:
-    """A version as the page shows it: where it came from, what it was trained on, and what is kept of it."""
+def _checkpoint(checkpoint: Checkpoint, shorter: Mapping[str, str]) -> dict[str, Any]:
+    """A checkpoint as the page shows it: where it came from, what it was trained on, and what is kept of it."""
 
     def size(manifest: Manifest | None) -> int:
         return sum(blob.size for blob in manifest.files.values()) if manifest else 0
 
     return {
-        "id": version.id,
-        "short": shorter.get(version.id, version.id),
-        "depth": version.depth,
-        "parents": list(version.parents),
-        "base": version.base,
-        "run": version.run,
-        "step": version.step,
-        "made": version.made,
-        "metrics": dict(version.metrics),
-        "weights": {"files": len(version.weights.files), "bytes": size(version.weights)} if version.weights else None,
-        "state": {"files": len(version.state.files), "bytes": size(version.state)} if version.state else None,
-        "released": version.released,
-        "batch": version.batch is not None,
+        "id": checkpoint.id,
+        "short": shorter.get(checkpoint.id, checkpoint.id),
+        "depth": checkpoint.depth,
+        "parents": list(checkpoint.parents),
+        "base": checkpoint.base,
+        "run": checkpoint.run,
+        "step": checkpoint.step,
+        "made": checkpoint.made,
+        "metrics": dict(checkpoint.metrics),
+        "weights": {"files": len(checkpoint.weights.files), "bytes": size(checkpoint.weights)}
+        if checkpoint.weights
+        else None,
+        "state": {"files": len(checkpoint.state.files), "bytes": size(checkpoint.state)} if checkpoint.state else None,
+        "released": checkpoint.released,
+        "batch": checkpoint.batch is not None,
     }
 
 
-def _blobs(version: Version) -> list[tuple[str, int]]:
-    return [(blob.sha256, blob.size) for manifest in (version.weights, version.state) if manifest
+def _blobs(checkpoint: Checkpoint) -> list[tuple[str, int]]:
+    return [(blob.sha256, blob.size) for manifest in (checkpoint.weights, checkpoint.state) if manifest
             for blob in manifest.files.values()]  # fmt: skip
 
 

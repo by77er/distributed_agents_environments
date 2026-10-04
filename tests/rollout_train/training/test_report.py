@@ -9,12 +9,12 @@ from pydantic import JsonValue
 
 from rollout.catalog import Row
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Curriculum, FileLedger, Result, Trained, Version, Versions, results, trained
+from rollout_train import Checkpoint, Checkpoints, Curriculum, FileLedger, Result, Trained, results, trained
 from rollout_train.record import GROUPS, RESULTS, STEPS, table
 from rollout_train.report import chart, hours, post, report, summary
 
 MADE = "kmnopqrstuvwxyzk"
-"""The version the run's step made."""
+"""The checkpoint the run's step made."""
 ROWS = [Row(f"r{number}", f"row {number}") for number in range(1, 8)]
 METRICS = {
     "loss": -0.002,
@@ -39,8 +39,8 @@ def groups() -> list[dict[str, Any]]:
     ]  # fmt: skip
 
 
-async def run(tmp_path: Path) -> tuple[Path, list[Result], Curriculum, dict[int, Trained], dict[str, Version]]:
-    """A run's directory with two groups in its ledger, the second trained on in a step that made a version; its
+async def run(tmp_path: Path) -> tuple[Path, list[Result], Curriculum, dict[int, Trained], dict[str, Checkpoint]]:
+    """A run's directory with two groups in its ledger, the second trained on in a step that made a checkpoint; its
     results and what was done with them; and the curriculum they fold to."""
     directory = tmp_path / "run-1"
     ledger = FileLedger(directory / "ledger")
@@ -56,21 +56,21 @@ async def run(tmp_path: Path) -> tuple[Path, list[Result], Curriculum, dict[int,
         await ledger.append(table("train", RESULTS), key, kept, fence)
     step: JsonValue = {"groups": [2], "parent": None, "makes": MADE, "segments": 384, "seed": 1}
     await ledger.append(table("train", STEPS), "1", step, fence)
-    versions = Versions(ledger, FileBlobStore(directory / "blobs"))
+    checkpoints = Checkpoints(ledger, FileBlobStore(directory / "blobs"))
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")
-    version = await versions.add(fence, MADE, weights=weights, run="train", step=1, metrics=METRICS)
+    checkpoint = await checkpoints.add(fence, MADE, weights=weights, run="train", step=1, metrics=METRICS)
     lines = await results(ledger)
     curriculum = Curriculum(ROWS)
     for line in lines:
         curriculum.recorded(line)
-    return directory, lines, curriculum, await trained(ledger), {version.id: version}
+    return directory, lines, curriculum, await trained(ledger), {checkpoint.id: checkpoint}
 
 
 async def test_the_summary_gives_the_latest_group_what_was_done_with_it_and_each_rows_record(tmp_path: Path) -> None:
-    _, lines, curriculum, steps, versions = await run(tmp_path)
+    _, lines, curriculum, steps, checkpoints = await run(tmp_path)
     assert [line.group for line in lines] == [1, 2] and hours(lines) == [0.5, 1.0]
-    text = summary("run-1", lines, curriculum, steps, versions)
+    text = summary("run-1", lines, curriculum, steps, checkpoints)
     assert f"**run-1** — group 2, 1.0 h in, 1 updates (serving {MADE})" in text
     assert "rewards 0 / 2 / 10 / 11 (mean 5.75, sd 4.82); solved 3/4" in text
     assert "kmnopqrs (depth 1), 384 of 680 segments, 6800 sampled tokens" in text
@@ -85,8 +85,8 @@ async def test_the_summary_gives_the_latest_group_what_was_done_with_it_and_each
 
 async def test_a_report_writes_the_summary_and_the_chart_into_the_runs_directory(tmp_path: Path) -> None:
     pytest.importorskip("matplotlib")
-    directory, lines, _, _, versions = await run(tmp_path)
-    image = chart(lines, ROWS, list(versions.values()))
+    directory, lines, _, _, checkpoints = await run(tmp_path)
+    image = chart(lines, ROWS, list(checkpoints.values()))
     assert image.startswith(b"\x89PNG") and len(image) > 10_000
     await report(directory, ROWS, None, run="train")
     assert (directory / "progress.png").read_bytes().startswith(b"\x89PNG")

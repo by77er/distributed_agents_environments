@@ -8,12 +8,12 @@
   group's number. Written before the group is asked for.
 - `results`: how each group went (a `Result`), by the group's number. Written when its last episode ends, before
   anything is trained on it.
-- `steps`: what the run decided to train on, by the step's number: the groups it covers, the version it starts
-  from, the one it will make, the batch. Written before the trainer is called. The version it makes, in the
+- `steps`: what the run decided to train on, by the step's number: the groups it covers, the checkpoint it starts
+  from, the one it will make, the batch. Written before the trainer is called. The checkpoint it makes, in the
   policy's table, is its outcome.
 - `failures`: the steps whose trainer failed, and why, by the step's number.
 
-A group is done with once it has a result that trains on nothing, or a step that covers it has made its version or
+A group is done with once it has a result that trains on nothing, or a step that covers it has made its checkpoint or
 failed. A run that is started again reads the tables and goes on: whatever has a decision and no outcome is taken up
 where it was left.
 """
@@ -24,8 +24,8 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
+from rollout_train.checkpoints import checkpoints_in
 from rollout_train.ledger import Ledger, between
-from rollout_train.versions import versions_in
 
 
 @dataclass
@@ -118,10 +118,10 @@ async def results(ledger: Ledger, run: str = "train") -> list[Result]:
 
 @dataclass(frozen=True)
 class Trained:
-    """What was done with a group: the step that covered it, and the version that step made or why it failed."""
+    """What was done with a group: the step that covered it, and the checkpoint that step made or why it failed."""
 
     step: int
-    version: str | None = None
+    checkpoint: str | None = None
     """By id, once made."""
     error: str | None = None
 
@@ -130,14 +130,14 @@ async def trained(ledger: Ledger, run: str = "train") -> dict[int, Trained]:
     """For each group a step covers: that step, and its outcome if it has one."""
     steps = await ledger.read(table(run, STEPS))
     failures: Any = await ledger.read(table(run, FAILURES))
-    made = {version.id for version in await versions_in(ledger)}
+    made = {checkpoint.id for checkpoint in await checkpoints_in(ledger)}
     covered: dict[int, Trained] = {}
     for key, record in steps.items():
         intent: Any = record
         makes = str(intent.get("makes"))
         error = failures[key].get("error") if key in failures else None
         outcome = Trained(int(key), makes if error is None and makes in made else None, error)  # (a failed step made
-        # nothing: the next one makes a version of its own)
+        # nothing: the next one makes a checkpoint of its own)
         listed: list[Any] = intent.get("groups") or []
         for group in listed:
             covered[int(group)] = outcome

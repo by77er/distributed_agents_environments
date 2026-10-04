@@ -1,13 +1,13 @@
 # Deploying
 
 A deployment is described once, in a profile: the channels and the engines behind them, the trainer, the runner, and
-where each environment's tool set lives. Whoever trains gets a trainer, the versions and a way to publish versions
+where each environment's tool set lives. Whoever trains gets a trainer, the checkpoints and a way to publish checkpoints
 from it, while a runner it opens plays the episodes the run asks for, and never learns what stands behind them; an
 environment is named in it only by its tool set. This page is the one place the profile file is
 described. The code is `rollout_train.profile`, and the command is `rollout` (`rollout_train.cli`).
 
 ```toml
-directory = "~/.cache/rollout/runs/first"     # the run's own: run.json, versions in use, the monitor's feed
+directory = "~/.cache/rollout/runs/first"     # the run's own: run.json, checkpoints in use, the monitor's feed
 runner = "local"                              # or "durable": runs survive this process
 serve = "0.0.0.0:8900"                        # optional: the model endpoint for harnesses, over HTTP
 address = "http://trainer-1:8900"             # what others reach it at, if not http://{serve}
@@ -25,8 +25,8 @@ answer_tokens = 400
 [trainer]
 kind = "rollout_lora:LoraTrainer"             # what trains; the keys below it does not name here are its settings
 channel = "policy"                            # the channel that serves what it trains
-start = "diamonds"                            # optional: the version a new run trains from (by default the base model)
-bookmark = "diamonds, unguided"               # optional: a bookmark the run carries to each version it makes
+start = "diamonds"                            # optional: the checkpoint a new run trains from (by default the base model)
+bookmark = "diamonds, unguided"               # optional: a bookmark the run carries to each checkpoint it makes
 colocated = true                              # it shares the engines' GPU: they sleep while it steps
 rank = 32
 learning_rate = 5e-5
@@ -46,8 +46,8 @@ uv run rollout train profile.toml minecraft_team.catalog:catalog --groups 100 --
 uv run rollout monitor RUN                     # the web page over RUN's ledger and its runs: http://localhost:8765
 uv run rollout report RUN minecraft_team.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
-uv run rollout versions --ledger RUN                                 # every version: where it came from, its bookmarks
-uv run rollout bookmark diamonds first:20 --ledger RUN               # name the version run "first" made at step 20
+uv run rollout checkpoints --ledger RUN                                 # every checkpoint: where it came from, its bookmarks
+uv run rollout bookmark diamonds first:20 --ledger RUN               # name the checkpoint run "first" made at step 20
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 uv run rollout train profile.toml CATALOG --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
@@ -58,8 +58,8 @@ uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --run
 
 `rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
 profile or the command is told by name. `train --name NAME` names a new run (by default after its directory);
-`rename` names a run again, by its name or its id; `bookmark` names a version by any reference, and `versions` lists
-them all ([versions, runs and the ledger](../libraries/rollout-train/versions.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
+`rename` names a run again, by its name or its id; `bookmark` names a checkpoint by any reference, and `checkpoints` lists
+them all ([checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
 of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)); `report` and
 `imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
 [imitation](../libraries/rollout-train/training.md#imitation).
@@ -71,13 +71,13 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | Part | What it decides | To scale it |
 |---|---|---|
 | `directory` | Where the run's state is kept. `rollout train --directory` replaces it: one profile, many runs | |
-| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own). `reshard` names the layout its engines load a version's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each version is then [resharded](../libraries/rollout-train/versions.md#resharding) before it is served. Without it, the engines load the trainer's files as they are | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
-| `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the version a new run trains from, by any [reference](../libraries/rollout-train/versions.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest version. `bookmark` names a bookmark the run moves to each version it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
+| `channels` | Which model each channel serves, its token format, what serves it, and how much it may think and answer (`thinking_tokens`, `answer_tokens`, in place of [`Limits`](reference.md#limits)' own). `reshard` names the layout its engines load a checkpoint's files in (`module:name`, such as `rollout_train.resharding:verbatim`): each checkpoint is then [resharded](../libraries/rollout-train/checkpoints.md#resharding) before it is served. Without it, the engines load the trainer's files as they are | Add entries to `engines`, each with its own options (a device, an address): sessions spread over them, each staying with one |
+| `trainer` | What trains which channel, and its settings. The longest segment it can train on becomes that channel's longest turn. `start` is the checkpoint a new run trains from, by any [reference](../libraries/rollout-train/checkpoints.md#references) (by default the base model: the channel's `model`); a run started again goes on from its own newest checkpoint. `bookmark` names a bookmark the run moves to each checkpoint it makes | `colocated = false` when it has an accelerator of its own: engines then serve through a step |
 | `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
-| `ledger` | Where the run's tables and the versions are kept ([the ledger](../libraries/rollout-train/versions.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, and the launches | Runs that share a ledger and a blob store share one graph of versions, and can start from each other's |
+| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, and the launches | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
@@ -108,23 +108,23 @@ In code, a profile opens into a platform:
 async with Profile.load(Path("profile.toml")).open() as platform:
     binding = binding_for(catalog, "policy", platform.tool_bindings)
     await train(
-        catalog, platform.trainer, platform.versions, start=platform.origin, channel="policy",
+        catalog, platform.trainer, platform.checkpoints, start=platform.origin, channel="policy",
         base=platform.profile.channels["policy"].model,
-        directory=platform.profile.directory / "versions", publish=platform.publish, binding=binding,
+        directory=platform.profile.directory / "checkpoints", publish=platform.publish, binding=binding,
         run=platform.run.id, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
         reshard=platform.reshard if platform.layout else None,
     )
 ```
 
-Opening starts, in order: the run (registered the first time: `run.json`) and the version it starts from; with
+Opening starts, in order: the run (registered the first time: `run.json`) and the checkpoint it starts from; with
 `ray`, the connection to the Ray cluster; the engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
 the trained one with the trainer's longest segment as its longest turn; the recorder; the monitor's feed in
-`directory/feed`; the tool sets; the blob store and the versions; the runner, and the
+`directory/feed`; the tool sets; the blob store and the checkpoints; the runner, and the
 [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
 listens there.
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
-run's newest version (else the one it starts from) on its channel when it starts. `platform.layout` is the trained
-channel's `reshard`; `platform.reshard` reshards a version into it, as a Ray task when the profile names `ray`, else in
+run's newest checkpoint (else the one it starts from) on its channel when it starts. `platform.layout` is the trained
+channel's `reshard`; `platform.reshard` reshards a checkpoint into it, as a Ray task when the profile names `ray`, else in
 this process, its scratch files under `directory/resharding`.
 
 `rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it
@@ -176,7 +176,7 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
 `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`); its catalogs; and how many runs it plays.
-A launch (`rollout_train.launches`) names a profile, a catalog, the run's name, the version it starts from, a
+A launch (`rollout_train.launches`) names a profile, a catalog, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, or one
 the profile offers). The launcher claims the oldest launch asked for one of its profiles while it has room (a claim
 is one change, so two launchers never start one launch), and starts
@@ -203,8 +203,8 @@ same `rollout train` command, run from the launcher's working directory, so ever
 same environment and the same run directories. The launcher follows the job until it ends and writes its output to
 the run's `train.log`; the launch notes the job (`job`) in place of a process. Stop stops the job. `--as-job` submits
 the launcher itself as a long-lived Ray job and returns; it refuses when a launcher already runs as a Ray job on this
-host. A profile with `ray` connects its run to the cluster, and runs each version's reshard as a Ray task of one CPU
-([resharding](../libraries/rollout-train/versions.md#resharding)).
+host. A profile with `ray` connects its run to the cluster, and runs each checkpoint's reshard as a Ray task of one CPU
+([resharding](../libraries/rollout-train/checkpoints.md#resharding)).
 
 Ray is the `ray` extra (`uv sync --all-extras` installs it). On a machine, start a head node, its temporary directory
 on disk (Ray writes its sessions and spilled objects there, and `/tmp` may be memory), and stop it with `ray stop`:

@@ -12,7 +12,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#events_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Version`](#version), [`Versions`](#versions), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -2430,18 +2430,57 @@ class Budget
 
 ### `Checkpoint`
 
-*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+*class* · `libraries/rollout-train/src/rollout_train/checkpoints.py`
 
 ```python
 class Checkpoint
 ```
 
-A version's files on this machine: what a step starts from.
-
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `weights` | `Path` | required |  |
-| `state` | `Path \| None` | `None` | What the trainer left for itself beside the weights (an optimizer's state, say), if it left any. |
+| `id` | `str` | required |  |
+| `weights` | `Manifest \| None` | required | None once it was released (`Checkpoints.thin`). |
+| `parents` | `tuple[str, ...]` | `()` | What it was made from, by id: first the checkpoint it was trained from, then any others it learned from (the teachers of a distillation, say). None: from the base model. |
+| `depth` | `int` | `1` | Steps from the base model along its first parents: its first parent's depth and one. |
+| `base` | `str \| None` | `None` | The model it adapts, by name (`Qwen/Qwen3.5-9B`, say): its first parent's, or the one its line began from. |
+| `run` | `str \| None` | `None` | The run that made it, by id. |
+| `step` | `int \| None` | `None` | The run's step that made it (none for a checkpoint made outside a run's steps, such as by imitation). |
+| `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
+| `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
+| `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
+| `made` | `float` | `0.0` | When, in seconds since the epoch. |
+| `released` | `float \| None` | `None` | When its files were deleted (`Checkpoints.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
+
+**Methods**
+
+- `@property def parent(self) -> str | None` — The checkpoint it was trained from, if any.
+
+### `Checkpoints`
+
+*class* · `libraries/rollout-train/src/rollout_train/checkpoints.py`
+
+```python
+class Checkpoints
+```
+
+Every checkpoint, in a ledger, and their files in a blob store.
+
+**Methods**
+
+- `def __init__(self, ledger: Ledger, blobs: Blobs) -> None`
+- `async def all(self) -> list[Checkpoint]` — Every checkpoint, oldest first.
+- `async def checkpoint(self, id: str) -> Checkpoint` — The checkpoint an id says.
+- `async def head(self, run: str) -> Checkpoint | None` — The newest checkpoint a run made, if it made one.
+- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
+  Its base is its first parent's; `base` names it for a checkpoint made from the base model. The append is what
+  makes the checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id,
+  decided before) gets the checkpoint that is there.
+- `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
+  nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
+  release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no checkpoint
+  still names it, so this may be repeated after a crash at any point.
+- `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
+  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
 ### `Colocated`
 
@@ -2458,7 +2497,7 @@ start (too little memory, say).
 **Methods**
 
 - `def __init__(self, trainer: Trainer, channels: Sequence[Pausable], *, guard: Callable[[], None] | None = None) -> None`
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step`
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
 
 ### `Curriculum`
 
@@ -2536,6 +2575,21 @@ on one machine may share it: every operation holds a lock on the directory.
 - `async def tables(self) -> list[str]`
 - `async def fences(self) -> dict[str, int]`
 
+### `Files`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Files
+```
+
+A checkpoint's files on this machine: what a step starts from.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `weights` | `Path` | required |  |
+| `state` | `Path \| None` | `None` | What the trainer left for itself beside the weights (an optimizer's state, say), if it left any. |
+
 ### `group_advantages`
 
 *function* · `libraries/rollout-train/src/rollout_train/algorithm.py`
@@ -2583,7 +2637,7 @@ class Ledger(Protocol)
 
 ### `Manifest`
 
-*class* · `libraries/rollout-train/src/rollout_train/versions.py`
+*class* · `libraries/rollout-train/src/rollout_train/checkpoints.py`
 
 ```python
 class Manifest
@@ -2639,13 +2693,13 @@ How a run's groups went, by their numbers.
 
 ### `Retention`
 
-*class* · `libraries/rollout-train/src/rollout_train/versions.py`
+*class* · `libraries/rollout-train/src/rollout_train/checkpoints.py`
 
 ```python
 class Retention
 ```
 
-Which of a run's versions keep their files, their weights and their trainer state (what can be served, and
+Which of a run's checkpoints keep their files, their weights and their trainer state (what can be served, and
 what a step can go on from): the newest `recent`, and every `every`-th by depth, so that saves thin out with
 age.
 
@@ -2685,27 +2739,27 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(catalog: Catalog, trainer: Trainer, versions: Versions, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Version], Awaitable[object]] | None = None, reshard: Callable[[Version, Fence], Awaitable[Manifest]] | None = None) -> None
+async def train(catalog: Catalog, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None) -> None
 ```
 
-Train from `start` (a version's id; else the base model, named `base`) on `catalog` until `groups` more groups
+Train from `start` (a checkpoint's id; else the base model, named `base`) on `catalog` until `groups` more groups
 have been played (those a stopped loop left unplayed among them) and every group played has been trained on, serving
-each version made on `channel`; a run started again goes on from the newest version it made. A step is taken over
-the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
-`directory` is where versions' files are kept on this machine while they are in use: the one being served and
-the one before it (a turn in progress finishes under the weights it began with); every version's files are in
-the blob store; `publish` serves a version on `channel`. `algorithm` is `Grpo()` unless given. `episodes_at_once` is
-how many episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once
-as each has places). `binding` says how the program's model slots and imports are
-served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
-one that has recorded nothing: the run's results are folded into it. `retention` says which of the versions the
-run made keep their files (weights and trainer state) once a newer one is served (`Retention()` unless given);
-besides those, what is served, what any run starts from, and whatever `kept` says (the bookmarked versions, say)
-keep theirs. `started` is what the run's `starts` record says beside what the loop knows (where it starts from,
-this host, the time): where the run's directory is, where the monitor on its machine serves (`address`), and what
-profile started it, say. `hooks` are told of each result and step; `made` is called with each version made, once
-it is served (to move a bookmark, say). `reshard` gives the files the engines load for a version (in their
-layout: `rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's.
+each checkpoint made on `channel`; a run started again goes on from the newest checkpoint it made. A step is taken
+over the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what is
+left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being served
+and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files are in
+the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is `Grpo()` unless given. `episodes_at_once`
+is how many episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once
+as each has places). `binding` says how the program's model slots and imports are served (by default: every slot
+from `channel`, each import from the tool set of its own name). `curriculum` is one that has recorded nothing: the
+run's results are folded into it. `retention` says which of the checkpoints the run made keep their files (weights
+and trainer state) once a newer one is served (`Retention()` unless given); besides those, what is served, what any
+run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's
+`starts` record says beside what the loop knows (where it starts from, this host, the time): where the run's
+directory is, where the monitor on its machine serves (`address`), and what profile started it, say. `hooks` are
+told of each result and step; `made` is called with each checkpoint made, once it is served (to move a bookmark,
+say). `reshard` gives the files the engines load for a checkpoint (in their layout: `rollout_train.resharding`),
+told the run's fence to note it under; without it, they load the trainer's.
 
 ### `Trained`
 
@@ -2715,12 +2769,12 @@ layout: `rollout_train.resharding`), told the run's fence to note it under; with
 class Trained
 ```
 
-What was done with a group: the step that covered it, and the version that step made or why it failed.
+What was done with a group: the step that covered it, and the checkpoint that step made or why it failed.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `step` | `int` | required |  |
-| `version` | `str \| None` | `None` | By id, once made. |
+| `checkpoint` | `str \| None` | `None` | By id, once made. |
 | `error` | `str \| None` | `None` |  |
 
 ### `trained`
@@ -2750,63 +2804,9 @@ where its files go, so any trainer can take any step of any policy.
 
 **Methods**
 
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step` — Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step` — Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
   `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
   produced no weights.
-
-### `Version`
-
-*class* · `libraries/rollout-train/src/rollout_train/versions.py`
-
-```python
-class Version
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `id` | `str` | required |  |
-| `weights` | `Manifest \| None` | required | None once it was released (`Versions.thin`). |
-| `parents` | `tuple[str, ...]` | `()` | What it was made from, by id: first the version it was trained from, then any others it learned from (the teachers of a distillation, say). None: from the base model. |
-| `depth` | `int` | `1` | Steps from the base model along its first parents: its first parent's depth and one. |
-| `base` | `str \| None` | `None` | The model it adapts, by name (`Qwen/Qwen3.5-9B`, say): its first parent's, or the one its line began from. |
-| `run` | `str \| None` | `None` | The run that made it, by id. |
-| `step` | `int \| None` | `None` | The run's step that made it (none for a version made outside a run's steps, such as by imitation). |
-| `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
-| `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
-| `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
-| `made` | `float` | `0.0` | When, in seconds since the epoch. |
-| `released` | `float \| None` | `None` | When its files were deleted (`Versions.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
-
-**Methods**
-
-- `@property def parent(self) -> str | None` — The version it was trained from, if any.
-
-### `Versions`
-
-*class* · `libraries/rollout-train/src/rollout_train/versions.py`
-
-```python
-class Versions
-```
-
-Every version, in a ledger, and their files in a blob store.
-
-**Methods**
-
-- `def __init__(self, ledger: Ledger, blobs: Blobs) -> None`
-- `async def all(self) -> list[Version]` — Every version, oldest first.
-- `async def version(self, id: str) -> Version` — The version an id says.
-- `async def head(self, run: str) -> Version | None` — The newest version a run made, if it made one.
-- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Version` — Keep a checkpoint's files and append the version that names them, under `fence` (the run's that makes it).
-  Its base is its first parent's; `base` names it for a version made from the base model. The append is what makes
-  the version exist: a writer that dies before it has made nothing, and one that repeats it (the same id, decided
-  before) gets the version that is there.
-- `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
-  nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
-  release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no version
-  still names it, so this may be repeated after a crash at any point.
-- `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
-  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint.
 
 ### `Weighted`
 
@@ -2851,7 +2851,7 @@ class Channel
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '') -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
   beginnings are cached.
 - `async def publish(self, adapter: str, path: str, version: int | None = None) -> int` — Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the version it
-  is served as: `version` if one is given (a policy's own numbering, which means the same in every process),
+  is served as: `version` if one is given (the checkpoint's depth, which means the same in every process),
   or one more than the last. The adapter before stays loaded, so that a turn in progress finishes under the
   weights it began with; the one before that is dropped. Publishing what is being served changes nothing.
 - `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
@@ -3002,7 +3002,7 @@ class Recorder
 - `def export(self, session_id: str) -> list[Segment]` — The session's segments, oldest first (see the module's description).
 - `def sessions(self, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run exports, by slot.
 - `def forget(self, run_id: str) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel; returns the version they are served as.
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel; returns the version they are served as (a checkpoint's depth).
 - `def served(self, key: str) -> tuple[str, ModelEndpoint] | None` — The session a harness's key names, and the endpoint that samples for it.
 
 ### `Renderer`
@@ -3042,7 +3042,7 @@ A piece of a session's trajectory: tokens that only grew, as the policy saw and 
 | `tokens` | `list[int]` | required |  |
 | `spans` | `list[Span]` | required |  |
 | `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
-| `channel` | `str` | `''` | The channel that sampled them. Its policy's versions are what the spans' `version`s count. |
+| `channel` | `str` | `''` | The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served. |
 
 **Methods**
 
@@ -3056,7 +3056,8 @@ A piece of a session's trajectory: tokens that only grew, as the policy saw and 
 class Span
 ```
 
-Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version`.
+Tokens `start` to `end` (exclusive) of a segment were sampled by the policy, at weights `version` (the depth
+of the checkpoint served then).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -3135,7 +3136,7 @@ class ChannelSpec
 | `engines` | `tuple[Mapping[str, Any], ...]` | `({},)` | One entry per replica: what that engine is told (its share of a GPU, which device, where it listens). |
 | `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own. |
 | `answer_tokens` | `int \| None` | `None` |  |
-| `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a version's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
+| `reshard` | `str \| None` | `None` | `module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the trainer's files as they are, with no reshard. |
 
 ### `NotEnoughMemory`
 
@@ -3155,20 +3156,21 @@ Stopping is better than exhausting the machine (a host may shut down rather than
 class Platform
 ```
 
-An open profile: its `run`, the version it trains from (`origin`), the `versions`, a `trainer` to step,
-`publish` to serve a version, and a `runner` that plays the episodes its run asks for
+An open profile: its `run`, the checkpoint it trains from (`origin`), the `checkpoints`, a `trainer` to step,
+`publish` to serve a checkpoint, and a `runner` that plays the episodes its run asks for
 (`rollout_train.rollouts.scheduler.EpisodeRunner`).
 
 **Methods**
 
 - `def __init__(self, profile: Profile) -> None`
 - `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> 'Platform'` — Start everything, registering with `stack` how each thing is stopped (the engines last).
-- `@property def layout(self) -> str | None` — The layout the trained channel's engines load versions in, if they are resharded.
-- `async def reshard(self, version: Version, fence: Fence) -> Manifest` — A version's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
+- `@property def layout(self) -> str | None` — The layout the trained channel's engines load checkpoints in, if they are resharded.
+- `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
   cluster, else here.
-- `async def bookmarked(self) -> set[str]` — The versions bookmarks name (which keep their files).
-- `async def made(self, version: Version) -> None` — Carry the profile's bookmark, if it names one, to a version the run made.
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel from now on; returns the version they are served as.
+- `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
+- `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel from now on; returns the number its samples are stamped with (a
+  checkpoint's depth).
 
 ### `Profile`
 
@@ -3180,14 +3182,14 @@ class Profile
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `directory` | `Path` | required | The run's state: versions' files while in use, the monitor's feed, and (unless the profile names other places) its ledger and blobs. |
+| `directory` | `Path` | required | The run's state: checkpoints' files while in use, the monitor's feed, and (unless the profile names other places) its ledger and blobs. |
 | `channels` | `Mapping[str, ChannelSpec]` | required |  |
 | `trainer` | `TrainerSpec \| None` | `None` |  |
 | `runner` | `str` | `'local'` | `local` runs episodes in this process; `durable` records them so that they survive it. |
 | `serve` | `str \| None` | `None` | `host:port` to serve the model endpoint for harnesses on. |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
-| `ledger` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a ledger see each other's versions. |
+| `ledger` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where the run's tables and the checkpoints are kept (`rollout_train.ledger.opened`): `{"directory": …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a ledger see each other's checkpoints. |
 | `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
 | `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
@@ -3215,8 +3217,8 @@ class TrainerSpec
 |---|---|---|---|
 | `kind` | `str` | required | `module:name` of what makes the trainer, called with the channel's model and `settings`. |
 | `channel` | `str` | required | The channel that serves the policy it trains. |
-| `start` | `str \| None` | `None` | The version a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a version's id or the start of one); by default the base model. A run started again goes on from the newest version it made. |
-| `bookmark` | `str \| None` | `None` | A bookmark the run carries: moved to each version it makes. |
+| `start` | `str \| None` | `None` | The checkpoint a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id or the start of one); by default the base model. A run started again goes on from the newest checkpoint it made. |
+| `bookmark` | `str \| None` | `None` | A bookmark the run carries: moved to each checkpoint it makes. |
 | `colocated` | `bool` | `False` | Whether it shares the channels' accelerator: their engines then sleep while it steps. |
 | `settings` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` |  |
 
@@ -3293,21 +3295,21 @@ class System
   monitors on other machines for their runs' episodes.
 - `@property def ledger(self) -> str` — Where the ledger is: its directory, or its database's URL.
 - `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
-  done with and the ones that are), the versions (each with where it came from and the bookmarks that name it),
+  done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
   the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
 - `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger. A
   run from before the registry is registered under its key first. Raises `Taken` for a name it cannot have,
   `KeyError` when there is no such run (or no registry).
-- `async def bookmark(self, name: str, version: str) -> Bookmark` — Make a bookmark name the version `version` says (its id, the start of one, `RUN:STEP`, `RUN` or another
+- `async def bookmark(self, name: str, checkpoint: str) -> Bookmark` — Make a bookmark name the checkpoint `checkpoint` says (its id, the start of one, `RUN:STEP`, `RUN` or another
   bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
-  says no version (or no registry).
-- `async def unbookmark(self, name: str) -> None` — Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark.
+  says no checkpoint (or no registry).
+- `async def unbookmark(self, name: str) -> None` — Take a bookmark away (the checkpoint stays). Raises `KeyError` when there is no such bookmark.
 - `async def launches(self) -> dict[str, Any]` — The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
   settings a launch may change, its catalogs, and whether it has room). A launch whose launcher stopped beating
   while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
 - `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile and its
   catalog starts it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the
-  profile does not have), `KeyError` for what no launcher offers or a version no reference says.
+  profile does not have), `KeyError` for what no launcher offers or a checkpoint no reference says.
 - `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
   group boundary. Raises `KeyError` when there is no such launch going.
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
@@ -3317,7 +3319,7 @@ class System
   throughput from its runners' heartbeats, what the runs are called, and the runners' machines.
 - `async def machines(self) -> dict[str, Any]` — Every runner's machine, as its heartbeats say: now, and over its recent beats.
 - `async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
-  its step and the version it made, and its outcome.
+  its step and the checkpoint it made, and its outcome.
 - `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the
   monitors elsewhere serve), summarised, newest first.
 - `async def episode(self, run_id: str, after: int = 0, relayed: bool = False) -> dict[str, Any]` — One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
@@ -3630,7 +3632,7 @@ state it is given and leaves the new ones where it is told. `settings` are `Lora
 **Methods**
 
 - `def __init__(self, model: str, **settings: Any) -> None`
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step`
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
 
 ## `rollout_qwen`
 

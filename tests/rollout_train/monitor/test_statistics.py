@@ -6,7 +6,7 @@ from rollout_train.monitor.statistics import THROUGHPUT, statistics
 
 
 def tables() -> dict[str, dict[str, JsonValue]]:
-    """A run of three groups: one trained on, one skipped, one in flight; one step, its version made."""
+    """A run of three groups: one trained on, one skipped, one in flight; one step, its checkpoint made."""
     return {
         "runs/a/groups": {
             "1": {"task": "t1", "title": "first", "decided": 10.0, "parameters": {"names": ["ada", "bo"]}},
@@ -18,7 +18,7 @@ def tables() -> dict[str, dict[str, JsonValue]]:
             "2": {"time": 25.0, "rewards": [2.0, 2.0], "solved": [True, True], "segments": 0, "skipped": "same"},
         },
         "runs/a/steps": {"1": {"makes": "pqrstuvw", "parent": None, "groups": [1], "decided": 40.0}},
-        "versions": {
+        "checkpoints": {
             "pqrstuvw": {
                 "id": "pqrstuvw",
                 "run": "a",
@@ -47,7 +47,7 @@ def test_a_runs_groups_are_joined_with_their_rows_and_what_their_steps_did() -> 
     assert first["names"] == 2 and second["names"] is None and second["skipped"] == "same" and second["step"] is None
     assert third["time"] is None and third["rewards"] == []  # (in flight)
     (step,) = runs["a"]["steps"]
-    assert step == {**step, "version": "pqrstuvw", "made": 50.0, "state": "committed", "groups": 1}
+    assert step == {**step, "checkpoint": "pqrstuvw", "made": 50.0, "state": "committed", "groups": 1}
     assert step["metrics"] == {"kl_moved": 0.01, "update_seconds": 9.0}
     assert runs["a"]["wrote"] == 50.0
     # In flight from each decision to its result; group 1 waited from its result to its step, group 2 never did.

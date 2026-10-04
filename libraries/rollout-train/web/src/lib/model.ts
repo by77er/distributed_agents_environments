@@ -1,7 +1,7 @@
 // What the views work out from a run: its groups by number, the step a group went into, what was done with a group,
 // and the episodes a group asked for that have not started.
 
-import type { DoneLine, GroupEpisode, OpenGroup, Run, Step, Version } from "../api/types";
+import type { DoneLine, GroupEpisode, OpenGroup, Run, Step, Checkpoint } from "../api/types";
 
 export interface GroupEntry {
   number: number;
@@ -87,34 +87,34 @@ export function episodeClass(each: Asked): string {
 /** What a run is called: its name, or its id. */
 export const nameOf = (run: { run: string; name?: string | null }): string => run.name || run.run;
 
-/** What the page knows of runs and versions, to say them: a run by its name, and a version by where it came from
+/** What the page knows of runs and checkpoints, to say them: a run by its name, and a checkpoint by where it came from
  * (the run that made it and its step) and the shortest start of its id that no other has. */
 export interface Known {
   run: (id: string | null | undefined) => string;
-  version: (id: string | null | undefined) => Version | undefined;
-  /** The shortest start of a version's id (`kpqx`), or "base" for none. */
+  checkpoint: (id: string | null | undefined) => Checkpoint | undefined;
+  /** The shortest start of a checkpoint's id (`kpqx`), or "base" for none. */
   short: (id: string | null | undefined) => string;
-  /** Where a version came from: `RUN · S31`, or that it was made outside a run, or that this ledger lacks it. */
+  /** Where a checkpoint came from: `RUN · S31`, or that it was made outside a run, or that this ledger lacks it. */
   origin: (id: string | null | undefined) => string;
-  /** Everything about a version in a line or two, for under the pointer. */
+  /** Everything about a checkpoint in a line or two, for under the pointer. */
   title: (id: string | null | undefined) => string;
-  /** The bookmarks that name a version. */
+  /** The bookmarks that name a checkpoint. */
   bookmarks: (id: string | null | undefined) => string[];
 }
 
 const knownCache = new WeakMap<object, WeakMap<object, Known>>();
-const NOTHING: Version[] = [];
+const NOTHING: Checkpoint[] = [];
 const NO_NAMES: Record<string, string> = {};
 
-export function knownOf(versions: Version[] | undefined, runs: Record<string, string> | undefined): Known {
-  const list = versions ?? NOTHING, names = runs ?? NO_NAMES;
+export function knownOf(checkpoints: Checkpoint[] | undefined, runs: Record<string, string> | undefined): Known {
+  const list = checkpoints ?? NOTHING, names = runs ?? NO_NAMES;
   let byNames = knownCache.get(list);
   if (!byNames) knownCache.set(list, (byNames = new WeakMap()));
   let found = byNames.get(names);
   if (!found) {
-    const byId = new Map(list.map(version => [version.id, version]));
+    const byId = new Map(list.map(checkpoint => [checkpoint.id, checkpoint]));
     const run = (id: string | null | undefined) => (id ? names[id] ?? id : "");
-    const version = (id: string | null | undefined) => (id ? byId.get(id) : undefined);
+    const checkpoint = (id: string | null | undefined) => (id ? byId.get(id) : undefined);
     const short = (id: string | null | undefined) => (id ? byId.get(id)?.short ?? id.slice(0, 8) : "base");
     const origin = (id: string | null | undefined) => {
       if (!id) return "the base model";
@@ -123,10 +123,10 @@ export function knownOf(versions: Version[] | undefined, runs: Record<string, st
       return each.run ? `${run(each.run)}${each.step != null ? ` · S${each.step}` : ""}` : "made outside a run";
     };
     found = {
-      run, version, short, origin,
-      bookmarks: id => version(id)?.bookmarks ?? [],
+      run, checkpoint, short, origin,
+      bookmarks: id => checkpoint(id)?.bookmarks ?? [],
       title: id => {
-        const each = version(id);
+        const each = checkpoint(id);
         if (!each) return id ?? "the base model";
         const from = each.parents.length ? each.parents.map(short).join(" + ") : each.base ?? "the base model";
         return [`${each.id} · depth ${each.depth}`, `${origin(id)}, from ${from}`, each.bookmarks.length ? `bookmarks: ${each.bookmarks.join(", ")}` : null]
@@ -138,6 +138,6 @@ export function knownOf(versions: Version[] | undefined, runs: Record<string, st
   return found;
 }
 
-/** The versions a run made, oldest first. */
-export const madeBy = (versions: Version[], run: string): Version[] =>
-  versions.filter(version => version.run === run).sort((a, b) => a.depth - b.depth || a.made - b.made);
+/** The checkpoints a run made, oldest first. */
+export const madeBy = (checkpoints: Checkpoint[], run: string): Checkpoint[] =>
+  checkpoints.filter(checkpoint => checkpoint.run === run).sort((a, b) => a.depth - b.depth || a.made - b.made);

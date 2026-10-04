@@ -59,9 +59,9 @@ group = {"parameters": catalog.start(row, rng), "episodes": 4, "task": row.key}
 await ledger.append(table("miner-1", GROUPS), "12", group, fence)      # runners play it from here
 episodes = await episodes_of(ledger, blobs, "miner-1", 12, 4)          # when all four have ended
 batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
-makes = new_id()                                            # the version's id, chosen before the step
-await trainer.step(batch.segments, seed=12, parent=checkpoint, into=Path(f"versions/{makes}"))
-await publish("policy", makes, f"versions/{makes}/weights", 3)  # served under its id, at depth 3
+makes = new_id()                                            # the checkpoint's id, chosen before the step
+await trainer.step(batch.segments, seed=12, parent=files, into=Path(f"checkpoints/{makes}"))  # files: `Files`
+await publish("policy", makes, f"checkpoints/{makes}/weights", 3)  # served under its id, at depth 3
 ```
 
 - A run asks for a **group** of episodes in the ledger, and **runners**, wherever they are, claim them, play them
@@ -72,7 +72,7 @@ await publish("policy", makes, f"versions/{makes}/weights", 3)  # served under i
 - `rollout_train.train` is the loop most runs use: a curriculum over a catalog picks rows, each start is played as a
   group of episodes, and a step is taken over several groups at a time, while play goes on
   ([training](../libraries/rollout-train/training.md)).
-- Watching: the ledger (each group, its claims and its episodes, the versions), the runners' heartbeats (their
+- Watching: the ledger (each group, its claims and its episodes, the checkpoints), the runners' heartbeats (their
   machines, and what each channel serves and how fast), and each run's feed of the episodes playing now, on one page
   (`rollout monitor RUN`).
 

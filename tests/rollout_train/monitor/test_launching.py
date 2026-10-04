@@ -13,6 +13,7 @@ from pydantic import JsonValue
 
 from rollout.contracts import RunEvent, RunEventType
 from rollout.harness.blobs import FileBlobStore
+from rollout_train.checkpoints import Checkpoints, new_id
 from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import ASKED, STOPPED, STOPPING, launches_of
 from rollout_train.ledger import FileLedger, Ledger
@@ -23,7 +24,6 @@ from rollout_train.registry import Taken, registry_of
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
 from rollout_train.rollouts.scheduler import EPISODES, runner_scope
 from rollout_train.stores import location
-from rollout_train.versions import Versions, new_id
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -106,10 +106,10 @@ async def launching(tmp_path: Path) -> tuple[FileLedger, httpx.AsyncClient]:
     weights = tmp_path / "w"
     weights.mkdir()
     (weights / "adapter.bin").write_text("weights")
-    version = await Versions(ledger, FileBlobStore(tmp_path / "blobs")).add(
+    checkpoint = await Checkpoints(ledger, FileBlobStore(tmp_path / "blobs")).add(
         fence, new_id(), weights=weights, run="train"
     )
-    await registry.bookmark("best", version.id)
+    await registry.bookmark("best", checkpoint.id)
     about: JsonValue = {"kind": LAUNCHER, "profiles": [OFFERED], "catalogs": ["c:c"], "at_once": 1, "playing": 0}
     await heartbeats.beat("launcher/far", about)
     transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
@@ -134,7 +134,7 @@ async def test_a_run_is_asked_for_from_the_page_with_its_settings_and_stopped(tm
             "taken name": ({**asked, "name": "taken name"}, 409),
             "no name": ({**asked, "name": " "}, 409),
             "unknown setting": ({**asked, "settings": {"episodes_at_onc": 2}}, 409),
-            "no such version": ({**asked, "start": "nothing-like-it"}, 404),
+            "no such checkpoint": ({**asked, "start": "nothing-like-it"}, 404),
             "missing fields": ({"profile": "one-gpu"}, 409),
         }
         for why, (body, status) in refused.items():

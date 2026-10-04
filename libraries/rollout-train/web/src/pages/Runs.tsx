@@ -8,7 +8,7 @@ import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
 import { nameOf, stateKind } from "../lib/model";
-import { Marks } from "../components/versions";
+import { Marks } from "../components/checkpoints";
 import { episodePlace, launchPlace, runPlace } from "../lib/places";
 import { LaunchList } from "../components/launches";
 import { RunDot, running, Wrote } from "../layout/runs";
@@ -48,7 +48,7 @@ const RunTile = memo(function RunTile({ run, host }: { run: Run; host: string })
   const from = run.from ?? run.steps[0]?.parent ?? null;
   return (
     <Tile to={runPlace(run.run)} className={`rail ${run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}`}>
-      <header><RunDot run={run} host={host} /><b title={`id: ${run.run}`}>{nameOf(run)}</b><span className="what">from {from ? `${known.short(from)} (${known.origin(from)})` : known.version(head)?.base ?? "the base model"}</span><span className="faint small">{running(run, host)}</span></header>
+      <header><RunDot run={run} host={host} /><b title={`id: ${run.run}`}>{nameOf(run)}</b><span className="what">from {from ? `${known.short(from)} (${known.origin(from)})` : known.checkpoint(head)?.base ?? "the base model"}</span><span className="faint small">{running(run, host)}</span></header>
       <div className="cells four">
         <div className={`cell ${run.open.length ? "accent" : "waiting"}`}><span>in flight</span><b>{run.open.length}</b><small>{run.next.length} toward a step</small></div>
         <div className="cell"><span>groups done</span><b>{run.done.length}</b><small>of {run.decided} decided</small></div>

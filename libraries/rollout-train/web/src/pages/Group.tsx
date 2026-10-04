@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import { useGroup, useKnown, useSystem } from "../api/queries";
-import { VersionTag } from "../components/versions";
+import { CheckpointTag } from "../components/checkpoints";
 import type { GroupEpisode, Metrics } from "../api/types";
 import { NotFound } from "../api/client";
 import { Card, Dots, Empty, Head, Kpi, Kpis, Mark, Pairs, SectionTitle, Spec, Specs, Stages, Tile } from "../components/ui";
@@ -24,14 +24,14 @@ export function StepView({ run: name, number }: { run: string; number: number })
   if (!system) return <Empty>Reading the step…</Empty>;
   const run = system.runs.find(each => each.run === name), step = run?.steps.find(each => each.step === number);
   if (!run || !step) return <Empty>There is no step {number}.</Empty>;
-  const version = known.version(step.makes), metrics = version?.metrics, groups = groupsOf(run);
+  const checkpoint = known.checkpoint(step.makes), metrics = checkpoint?.metrics, groups = groupsOf(run);
   const solved = step.groups.map(each => groups.get(each)?.line).filter(Boolean).flatMap(line => line!.solved);
   return (
     <>
       <Head title={`Step ${step.step}`}>
         <Specs>
-          <Spec label="makes" kind="violet">{step.makes ? <VersionTag id={step.makes} bare /> : "–"}</Spec>
-          <Spec label="from"><VersionTag id={step.parent} /></Spec>
+          <Spec label="makes" kind="violet">{step.makes ? <CheckpointTag id={step.makes} bare /> : "–"}</Spec>
+          <Spec label="from"><CheckpointTag id={step.parent} /></Spec>
           <Spec label="state" kind={stateKind(step.state)}>{step.state}</Spec>
           <Spec label="decided">{clock(step.decided) || "–"}</Spec>
         </Specs>
@@ -60,7 +60,7 @@ export function StepView({ run: name, number }: { run: string; number: number })
           );
         })}
       </div>
-      <Card title="The update" note={version ? `${version.short}, from ${version.parents.length ? version.parents.map(known.short).join(" + ") : version.base ?? "the base model"}` : step.state === "failed" ? "the step failed" : "being taken"}>
+      <Card title="The update" note={checkpoint ? `${checkpoint.short}, from ${checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : checkpoint.base ?? "the base model"}` : step.state === "failed" ? "the step failed" : "being taken"}>
         {metrics ? <Pairs entries={updatePairs(metrics)} /> : step.error ? <p className="error-text">{step.error}</p> : <p className="muted">The trainer is working on it.</p>}
       </Card>
     </>
@@ -73,11 +73,11 @@ export function GroupView({ run: name, number }: { run: string; number: number }
   const known = useKnown();
   if (error instanceof NotFound) return <Empty>There is no group {number}.</Empty>;
   if (!group || !system) return <Empty>Reading the group…</Empty>;
-  const { outcome, version, result } = group;
+  const { outcome, checkpoint, result } = group;
   const rewards = result?.rewards ?? group.episodes.filter(each => each.outcome === "completed").map(each => each.reward ?? 0);
   const run = system.runs.find(each => each.run === group.run), step = run && stepOf(run, group.number);
   const kept = step && !step.groups.includes(group.number);
-  const metrics = version?.metrics ?? outcome?.update;
+  const metrics = checkpoint?.metrics ?? outcome?.update;
   const runners = [...new Set(group.playing.map(claim => claim.runner))];
   return (
     <>
@@ -115,13 +115,13 @@ export function GroupView({ run: name, number }: { run: string; number: number }
         <Card title="What was done" note={outcome ? outcomeOf(outcome).text : "nothing yet"}>
           {metrics ? (
             <Pairs entries={[
-              ["version", version ? <VersionTag id={version.id} bare /> : outcome?.adapter ? <VersionTag id={outcome.adapter} bare /> : "–"],
-              ["from", <VersionTag id={version?.parents[0] ?? group.step?.parent} />],
+              ["checkpoint", checkpoint ? <CheckpointTag id={checkpoint.id} bare /> : outcome?.adapter ? <CheckpointTag id={outcome.adapter} bare /> : "–"],
+              ["from", <CheckpointTag id={checkpoint?.parents[0] ?? group.step?.parent} />],
               ...updatePairs(metrics),
             ]} />
           ) : group.step ? (
             <Pairs entries={[
-              ["makes", group.step.makes ? <VersionTag id={group.step.makes} bare /> : "–"], ["from", <VersionTag id={group.step.parent} />], ["segments", figure(group.step.segments)],
+              ["makes", group.step.makes ? <CheckpointTag id={group.step.makes} bare /> : "–"], ["from", <CheckpointTag id={group.step.parent} />], ["segments", figure(group.step.segments)],
               ["decided", group.step.decided ? <><Ago at={group.step.decided} /> ago</> : "–"],
             ]} />
           ) : result?.skipped ? <p className="muted">{result.skipped}</p>

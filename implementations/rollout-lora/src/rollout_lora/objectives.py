@@ -4,14 +4,14 @@
 
 Three logprobs of each sampled token meet here:
 
-- `behavior`: what the engine recorded while sampling it, under whichever version was served then;
+- `behavior`: what the engine recorded while sampling it, under whichever checkpoint was served then;
 - `old`: what the trainer gives it at the start of the step, on the weights the step starts from (no gradient);
 - `logprobs`: what the trainer gives it now, as the step updates the weights (with gradient).
 
 They differ for two separate reasons, and each has its own term. `old` against `behavior` is where the data came
-from: an older version, and the engine computing differently from the trainer. It is corrected by an importance weight
-`old / behavior`, truncated at `truncate` (a constant: no gradient flows through it). `logprobs` against `old` is how
-far the step has moved the policy: the ratio PPO clips, which is exactly 1 when the step begins.
+from: an older checkpoint, and the engine computing differently from the trainer. It is corrected by an importance
+weight `old / behavior`, truncated at `truncate` (a constant: no gradient flows through it). `logprobs` against `old` is
+how far the step has moved the policy: the ratio PPO clips, which is exactly 1 when the step begins.
 
 `policy_gradient` with `ratio = "token"`: each token's ratio clipped to 1 - `clip_low` .. 1 + `clip_high`
 (DAPO's clip-higher), the loss a mean over the minibatch's tokens. With `ratio = "segment"` (GSPO): one ratio for the

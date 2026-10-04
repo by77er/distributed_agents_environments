@@ -1,7 +1,7 @@
 """A deployment, described: the channels and the engines behind them, the trainer, the runner, where tool sets live.
 
 Whoever deploys writes this down once (a TOML file, or the dataclasses below) and opens it; whoever trains gets the
-`policies`, a `trainer` and a way to `publish` versions, while a runner plays the episodes the run asks for in the
+`policies`, a `trainer` and a way to `publish` checkpoints, while a runner plays the episodes the run asks for in the
 ledger, and never learns what stands behind them. Scaling is a change here: more engines behind a
 channel, a durable runner instead of an in-process one, a tool set at a URL instead of in this process.
 
@@ -27,7 +27,7 @@ from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
-from rollout_train import Colocated, Fence, Ledger, Manifest, Trainer, Version, Versions
+from rollout_train import Checkpoint, Checkpoints, Colocated, Fence, Ledger, Manifest, Trainer
 from rollout_train.inference import Channel, Engine, Limits
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION
@@ -58,7 +58,7 @@ class ChannelSpec:
     """Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own."""
     answer_tokens: int | None = None
     reshard: str | None = None
-    """`module:name` of the layout the engines load a version's files in (`rollout_train.resharding`); none: the
+    """`module:name` of the layout the engines load a checkpoint's files in (`rollout_train.resharding`); none: the
     trainer's files as they are, with no reshard."""
 
 
@@ -69,11 +69,11 @@ class TrainerSpec:
     channel: str
     """The channel that serves the policy it trains."""
     start: str | None = None
-    """The version a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a
-    version's id or the start of one); by default the base model. A run started again goes on from the newest version
-    it made."""
+    """The checkpoint a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a
+    checkpoint's id or the start of one); by default the base model. A run started again goes on from the newest
+    checkpoint it made."""
     bookmark: str | None = None
-    """A bookmark the run carries: moved to each version it makes."""
+    """A bookmark the run carries: moved to each checkpoint it makes."""
     colocated: bool = False
     """Whether it shares the channels' accelerator: their engines then sleep while it steps."""
     settings: Mapping[str, Any] = field(default_factory=dict[str, Any])
@@ -102,7 +102,7 @@ def require_memory(gib: float, purpose: str) -> None:
 @dataclass(frozen=True)
 class Profile:
     directory: Path
-    """The run's state: versions' files while in use, the monitor's feed, and (unless the profile names other places)
+    """The run's state: checkpoints' files while in use, the monitor's feed, and (unless the profile names other places)
     its ledger and blobs."""
     channels: Mapping[str, ChannelSpec]
     trainer: TrainerSpec | None = None
@@ -115,10 +115,10 @@ class Profile:
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
     """Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`."""
     ledger: Mapping[str, Any] = field(default_factory=dict[str, Any])
-    """Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`,
-    in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database
-    (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share
-    a ledger see each other's versions."""
+    """Where the run's tables and the checkpoints are kept (`rollout_train.ledger.opened`): `{"directory":
+    …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database
+    (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a
+    ledger see each other's checkpoints."""
     blobs: Mapping[str, Any] = field(default_factory=dict[str, Any])
     """Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called
     with the other entries. Without one, files under `directory/blobs`."""
@@ -199,8 +199,8 @@ def _only(table: dict[str, Any], where: str, *known: str) -> dict[str, Any]:
 
 
 class Platform:
-    """An open profile: its `run`, the version it trains from (`origin`), the `versions`, a `trainer` to step,
-    `publish` to serve a version, and a `runner` that plays the episodes its run asks for
+    """An open profile: its `run`, the checkpoint it trains from (`origin`), the `checkpoints`, a `trainer` to step,
+    `publish` to serve a checkpoint, and a `runner` that plays the episodes its run asks for
     (`rollout_train.rollouts.scheduler.EpisodeRunner`)."""
 
     def __init__(self, profile: Profile) -> None:
@@ -208,14 +208,14 @@ class Platform:
         self.location: dict[str, Any] = dict(profile.ledger) or {"directory": str(profile.directory / LEDGER)}
         """Where the ledger is; written into the run's directory, for whatever reads the run."""
         self.ledger: Ledger = ledger_at(self.location)
-        self.versions: Versions
-        """The versions, in the ledger and the blob store."""
+        self.checkpoints: Checkpoints
+        """The checkpoints, in the ledger and the blob store."""
         self.registry: Registry | None = registry_of(self.ledger)
         """What the runs are called, and the bookmarks."""
         self.run: Entry
         """The run in the profile's directory."""
         self.origin: str | None = None
-        """The version a new run trains from, by id (None: the base model)."""
+        """The checkpoint a new run trains from, by id (None: the base model)."""
         self.channels: dict[str, Channel] = {}
         self.recorder: Recorder
         self.runner: EpisodeRunner
@@ -225,7 +225,7 @@ class Platform:
         self.tool_bindings: dict[str, ToolBinding] = {}
         """Where a run finds each tool set the profile names (for a run's binding)."""
         self.blobs: Blobs
-        """Where episodes' trajectories and events, and versions' files, are kept."""
+        """Where episodes' trajectories and events, and checkpoints' files, are kept."""
         self.blobs_at: dict[str, Any] = {}
         """Where that is, as any process opens it (`rollout_train.stores`), for the run's `starts` record."""
 
@@ -284,7 +284,7 @@ class Platform:
             stack.push_async_callback(_closed, tool_sets[name])
         self.blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(directory / BLOBS)
         self.blobs_at = location(profile.blobs, directory / BLOBS)
-        self.versions = Versions(self.ledger, self.blobs)
+        self.checkpoints = Checkpoints(self.ledger, self.blobs)
         runner: Runner
         if profile.runner == "durable":
             from rollout_durable import DurableRunner
@@ -326,29 +326,30 @@ class Platform:
 
     @property
     def layout(self) -> str | None:
-        """The layout the trained channel's engines load versions in, if they are resharded."""
+        """The layout the trained channel's engines load checkpoints in, if they are resharded."""
         trainer = self.profile.trainer
         return self.profile.channels[trainer.channel].reshard if trainer is not None else None
 
-    async def reshard(self, version: Version, fence: Fence) -> Manifest:
-        """A version's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
+    async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest:
+        """A checkpoint's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
         cluster, else here."""
         assert self.layout is not None
         if self.profile.ray:
-            return await on_ray(self.location, self.blobs_at, fence, version.id, self.layout)
-        return await reshard(self.versions, fence, version.id, self.layout, self.profile.directory / "resharding")
+            return await on_ray(self.location, self.blobs_at, fence, checkpoint.id, self.layout)
+        return await reshard(self.checkpoints, fence, checkpoint.id, self.layout, self.profile.directory / "resharding")
 
     async def bookmarked(self) -> set[str]:
-        """The versions bookmarks name (which keep their files)."""
-        return {mark.version for mark in await self.registry.bookmarks()} if self.registry else set()
+        """The checkpoints bookmarks name (which keep their files)."""
+        return {mark.checkpoint for mark in await self.registry.bookmarks()} if self.registry else set()
 
-    async def made(self, version: Version) -> None:
-        """Carry the profile's bookmark, if it names one, to a version the run made."""
+    async def made(self, checkpoint: Checkpoint) -> None:
+        """Carry the profile's bookmark, if it names one, to a checkpoint the run made."""
         if self.registry is not None and self.profile.trainer is not None and self.profile.trainer.bookmark:
-            await self.registry.bookmark(self.profile.trainer.bookmark, version.id)
+            await self.registry.bookmark(self.profile.trainer.bookmark, checkpoint.id)
 
     async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
-        """Serve new weights on a channel from now on; returns the version they are served as."""
+        """Serve new weights on a channel from now on; returns the number its samples are stamped with (a
+        checkpoint's depth)."""
         return await self.recorder.publish(channel, adapter, path, version)
 
     def _about(self, record: Path) -> dict[str, JsonValue]:

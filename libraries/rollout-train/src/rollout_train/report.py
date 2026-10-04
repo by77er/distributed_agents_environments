@@ -1,6 +1,6 @@
 """Report a training run's progress: a chart of the climb through the curriculum, and a summary in words.
 
-Reads the run's results, steps and versions from its ledger and can post both to a Discord webhook, once
+Reads the run's results, steps and checkpoints from its ledger and can post both to a Discord webhook, once
 or after every group (`rollout report RUN CATALOG --watch`). The webhook's address comes from `--webhook` or the
 environment variable `DISCORD_WEBHOOK_URL`; it is a secret and is never written anywhere.
 """
@@ -16,11 +16,11 @@ from typing import Any
 import httpx
 
 from rollout.catalog import Row
+from rollout_train.checkpoints import Checkpoint, checkpoints_in
 from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Ledger, of_run
 from rollout_train.record import Result, Trained, results, trained
 from rollout_train.registry import registry_of, run_of
-from rollout_train.versions import Version, versions_in
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
@@ -39,17 +39,17 @@ def summary(
     lines: Sequence[Result],
     curriculum: Curriculum,
     steps: Mapping[int, Trained] | None = None,
-    versions: Mapping[str, Version] | None = None,
+    checkpoints: Mapping[str, Checkpoint] | None = None,
 ) -> str:
     """The run in words: the latest group, what was done with it, and each unlocked row's record. `steps` says
-    what was done with each group, and `versions` holds the versions those steps made, by id."""
+    what was done with each group, and `checkpoints` holds the checkpoints those steps made, by id."""
     if not lines:
         return f"**{name}** — no group has finished yet."
-    steps, versions = steps or {}, versions or {}
+    steps, checkpoints = steps or {}, checkpoints or {}
     last = lines[-1]
     titles = {row.key: row.title for row in curriculum.rows}
-    names = {outcome.version for outcome in steps.values() if outcome.version}
-    made: list[str] = sorted((name for name in names if name in versions), key=lambda name: versions[name].made)
+    names = {outcome.checkpoint for outcome in steps.values() if outcome.checkpoint}
+    made: list[str] = sorted((name for name in names if name in checkpoints), key=lambda name: checkpoints[name].made)
     serving = f" (serving {made[-1]})" if made else ""
     text = [f"**{name}** — group {last.group}, {hours(lines)[-1]:.1f} h in, {len(made)} updates{serving}"]
     text.append(
@@ -59,9 +59,9 @@ def summary(
         + (f"; {last.failed} episodes failed" if last.failed else "")
     )
     outcome = steps.get(last.group)
-    version = versions.get(outcome.version or "") if outcome is not None else None
-    if version is not None:
-        text.append("**Update:** " + _update(last, version))
+    checkpoint = checkpoints.get(outcome.checkpoint or "") if outcome is not None else None
+    if checkpoint is not None:
+        text.append("**Update:** " + _update(last, checkpoint))
     elif outcome is not None and outcome.error:
         text.append(f"**Update:** failed: {outcome.error}")
     elif last.segments:
@@ -90,12 +90,12 @@ def _statistics(rewards: Sequence[float]) -> str:
     return f"mean {statistics.fmean(rewards):.2f}, sd {spread:.2f}"
 
 
-def _update(line: Result, version: Version) -> str:
-    update = version.metrics
+def _update(line: Result, checkpoint: Checkpoint) -> str:
+    update = checkpoint.metrics
     of = f" of {line.segments_recorded}" if line.segments_recorded else ""
     trained = update.get("segments", line.segments)
     tokens = update.get("tokens", 0)
-    parts = [f"{version.id[:8]} (depth {version.depth}), {trained:g}{of} segments, {tokens:g} sampled tokens"]
+    parts = [f"{checkpoint.id[:8]} (depth {checkpoint.depth}), {trained:g}{of} segments, {tokens:g} sampled tokens"]
     if "kl_moved" in update:
         parts.append(f"moved the policy by KL ≈ {update['kl_moved']:.4f} (floor {update.get('kl_floor', 0.0):.4f})")
         parts.append(f"{update.get('optimizer_steps', 0):g} steps")
@@ -107,9 +107,11 @@ def _update(line: Result, version: Version) -> str:
     return ", ".join(parts)
 
 
-def chart(lines: Sequence[Result], rows: Sequence[Row], versions: Sequence[Version] = (), *, title: str = "") -> bytes:
+def chart(
+    lines: Sequence[Result], rows: Sequence[Row], checkpoints: Sequence[Checkpoint] = (), *, title: str = ""
+) -> bytes:
     """The climb as a PNG: which row each group trained on and how far the curriculum has unlocked; each group's
-    rewards; and the trainer's statistics per update (each of `versions`, when it was made)."""
+    rewards; and the trainer's statistics per update (each of `checkpoints`, when it was made)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -151,7 +153,9 @@ def chart(lines: Sequence[Result], rows: Sequence[Row], versions: Sequence[Versi
     reward.set_ylabel("reward per episode\n(mean in red; rows differ)")
 
     began = lines[0].time - lines[0].rollout_seconds if lines else 0.0
-    trainings = [((version.made - began) / 3600, version.metrics) for version in versions if version.made >= began]
+    trainings = [
+        ((checkpoint.made - began) / 3600, checkpoint.metrics) for checkpoint in checkpoints if checkpoint.made >= began
+    ]
     if trainings:
         times = [at for at, _ in trainings]
         if any("kl_moved" in update for _, update in trainings):
@@ -213,7 +217,7 @@ async def report(
     interval: float = 30.0,
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
-    `watch`, again after every new group, until interrupted. The run's results, steps and versions are read from
+    `watch`, again after every new group, until interrupted. The run's results, steps and checkpoints are read from
     `ledger` (by default the run's own, wherever its directory says it is); the run is `run` (its id), by default the
     one in the directory."""
     ledger = ledger or of_run(directory)
@@ -223,14 +227,14 @@ async def report(
     while True:
         lines = await results(ledger, run)
         steps = await trained(ledger, run)
-        versions = [version for version in await versions_in(ledger) if version.run == run]
-        if (len(lines), len(versions)) != reported:
-            reported = (len(lines), len(versions))
+        checkpoints = [checkpoint for checkpoint in await checkpoints_in(ledger) if checkpoint.run == run]
+        if (len(lines), len(checkpoints)) != reported:
+            reported = (len(lines), len(checkpoints))
             curriculum = Curriculum(rows)
             for line in lines:
                 curriculum.recorded(line)
-            text = summary(title, lines, curriculum, steps, {version.id: version for version in versions})
-            image = chart(lines, rows, versions, title=f"{title}: climb through the curriculum") if lines else None
+            text = summary(title, lines, curriculum, steps, {checkpoint.id: checkpoint for checkpoint in checkpoints})
+            image = chart(lines, rows, checkpoints, title=f"{title}: climb through the curriculum") if lines else None
             (directory / "progress.md").write_text(text + "\n")
             if image is not None:
                 (directory / "progress.png").write_bytes(image)

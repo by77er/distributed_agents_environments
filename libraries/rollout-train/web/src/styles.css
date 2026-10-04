@@ -290,7 +290,7 @@
   .dot-outside { fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-dasharray: 3 2; }
   .ring { fill: none; stroke-width: 2; } .ring-good { stroke: var(--good); } .ring-warm { stroke: var(--warm); stroke-dasharray: 3 2.5; }
   .ring-violet { stroke: var(--violet); stroke-dasharray: 3 2.5; } .ring-accent { stroke: var(--accent); }
-  .version.link { cursor: pointer; } .version.link:hover circle:not(.ring) { stroke: var(--ink); }
+  .checkpoint.link { cursor: pointer; } .checkpoint.link:hover circle:not(.ring) { stroke: var(--ink); }
   .gap { cursor: pointer; } .gap rect { fill: var(--panel); stroke: var(--line-strong); } .gap:hover rect { stroke: var(--accent); }
   .gap text { fill: var(--quiet); font-weight: 600; }
   .dag-legend { padding: 10px 18px 12px; margin: 0; border-top: 1px solid var(--line); }
@@ -357,11 +357,11 @@
   .rename .faint, .rename .error-text { font: 11px var(--mono); letter-spacing: 0; text-transform: none; }
   a.seg { display: inline-flex; align-items: center; }
 
-  /* A version, said by where it came from and the start of its id, with its bookmarks */
-  .version-tag { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
-  .version-tag a, .version-tag > span:first-child { display: inline-flex; align-items: baseline; gap: 6px; }
-  .version-tag .origin { color: var(--quiet); font-weight: 500; }
-  .version-tag b.mono { color: inherit; }
+  /* A checkpoint, said by where it came from and the start of its id, with its bookmarks */
+  .checkpoint-tag { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
+  .checkpoint-tag a, .checkpoint-tag > span:first-child { display: inline-flex; align-items: baseline; gap: 6px; }
+  .checkpoint-tag .origin { color: var(--quiet); font-weight: 500; }
+  .checkpoint-tag b.mono { color: inherit; }
   .chip.bookmark { font-size: 11px; padding: 0 6px; }
   .cell .chip, .kpi .chip { text-transform: none; letter-spacing: 0; font-weight: 500; }
   .chip.removable { display: inline-flex; align-items: center; gap: 4px; padding-right: 2px; }
@@ -370,7 +370,7 @@
   .bookmarks .body { display: grid; gap: 12px; }
   .bookmark-form input { font: 13px var(--mono); padding: 3px 8px; width: min(26ch, 60vw); }
 
-  /* The versions' graph: base models as roots, and what a distillation's mode means, in words */
+  /* The checkpoints' graph: base models as roots, and what a distillation's mode means, in words */
   .dag-drawing text.base-name { fill: var(--ink); font-weight: 600; font-size: 11px; }
   .lane-label.base-label b { font-family: var(--mono); font-size: 12.5px; }
   .lane-label.base-label small { white-space: normal; line-height: 1.3; }

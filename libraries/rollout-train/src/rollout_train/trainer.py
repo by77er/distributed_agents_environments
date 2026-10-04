@@ -32,8 +32,8 @@ class Budget:
 
 
 @dataclass(frozen=True)
-class Checkpoint:
-    """A version's files on this machine: what a step starts from."""
+class Files:
+    """A checkpoint's files on this machine: what a step starts from."""
 
     weights: Path
     state: Path | None = None
@@ -61,7 +61,7 @@ class Trainer(Protocol):
 
     budget: Budget
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         """Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
         `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
         produced no weights."""

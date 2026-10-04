@@ -53,14 +53,14 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
-    - `/api/versions?sample=1`: the versions as a graph from their base models, with the trainers, the inference
+    - `/api/checkpoints?sample=1`: the checkpoints as a graph from their base models, with the trainers, the inference
       workers and evaluations (`System.lineage`; `sample` adds the fixture of the tables proposed for them);
     - `/api/statistics`: every run of the ledger in figures and the engines' throughput (`System.statistics`);
     - `/api/runs`: every episode in the runs' feeds, summarised;
     - `/api/stream?topic=...`: server-sent events, a `version` event (`{"topic", "version"}`) for each topic at once
       and then each time it changes (`rollout_train.monitor.stream`);
     - `POST /api/rename` (`{"id", "name"}`): calls a run by a new name (`System.rename`);
-    - `POST /api/bookmarks` (`{"name", "version"}`): makes a bookmark name a version, or moves it there
+    - `POST /api/bookmarks` (`{"name", "checkpoint"}`): makes a bookmark name a checkpoint, or moves it there
       (`System.bookmark`); `DELETE /api/bookmarks/{name}` takes it away (`System.unbookmark`). Each answers 200 with
       what the registry now says, 409 for a name that cannot be one, 404 when what it names is not there.
 
@@ -107,9 +107,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         after = int(request.query_params.get("after", "0"))
         return JSONResponse(await system.episode(request.path_params["run_id"], after, RELAYED in request.headers))
 
-    async def versions(request: Request) -> Response:
+    async def checkpoints(request: Request) -> Response:
         sample = request.query_params.get("sample") in ("1", "true")
-        return answered(request, await hub.read("versions/sample" if sample else "versions"))
+        return answered(request, await hub.read("checkpoints/sample" if sample else "checkpoints"))
 
     async def figures(request: Request) -> Response:
         return answered(request, await hub.read("statistics"))
@@ -175,9 +175,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         return await written(change)
 
     async def bookmark(request: Request) -> Response:
-        said = await asked(request, "name", "version")
+        said = await asked(request, "name", "checkpoint")
         if said is None:
-            return JSONResponse({"error": "say the bookmark's name and the version"}, status_code=400)
+            return JSONResponse({"error": "say the bookmark's name and the checkpoint"}, status_code=400)
 
         async def change() -> Any:
             return {"bookmark": asdict(await system.bookmark(*said))}
@@ -233,7 +233,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/launches/{id}/stop", stop, methods=["POST"]),
         Route("/api/groups/{run}/{number:int}", group),
         Route("/api/episodes/{run_id}", episode),
-        Route("/api/versions", versions),
+        Route("/api/checkpoints", checkpoints),
         Route("/api/statistics", figures),
         Route("/api/runs", runs),
         Route("/api/stream", stream),

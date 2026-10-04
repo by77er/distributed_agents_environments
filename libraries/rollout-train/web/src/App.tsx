@@ -8,8 +8,8 @@ import { GroupView, StepView } from "./pages/Group";
 import { Run } from "./pages/Run";
 import { Outside, Runs } from "./pages/Runs";
 import { Statistics } from "./pages/Statistics";
-import { Version } from "./pages/Version";
-import { Versions } from "./pages/Versions";
+import { Checkpoint } from "./pages/Checkpoint";
+import { Checkpoints } from "./pages/Checkpoints";
 
 function View() {
   const place = usePlace();
@@ -21,8 +21,8 @@ function View() {
     case "episode": return <Episode key={place.id} id={place.id} slot={place.slot} />;
     case "outside": return <Outside />;
     case "launch": return <NewRun />;
-    case "versions": return <Versions sample={place.sample} />;
-    case "version": return <Version id={place.id} />;
+    case "checkpoints": return <Checkpoints sample={place.sample} />;
+    case "checkpoint": return <Checkpoint id={place.id} />;
     case "statistics": return <Statistics />;
     default: return <Runs />;
   }

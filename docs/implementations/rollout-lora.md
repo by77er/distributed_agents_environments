@@ -56,8 +56,8 @@ A step is told where its files go (`into`) and leaves:
 | `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, KL estimate, gradient norm |
 
 The trainer keeps nothing of its own between steps: a step starts from the adapter and the optimizer's state of
-the version it is given, so any `LoraTrainer` can take any step from any version. A run keeps each step's files as a
-[version](../libraries/rollout-train/versions.md), named by its id, whose parent is the version the step began from.
+the checkpoint it is given, so any `LoraTrainer` can take any step from any checkpoint. A run keeps each step's files as a
+[checkpoint](../libraries/rollout-train/checkpoints.md), named by its id, whose parent is the checkpoint the step began from.
 
 ## A fresh process per step
 
@@ -117,11 +117,11 @@ Three logprobs of each sampled token meet in it:
 
 | Logprob | Computed by | When |
 |---|---|---|
-| behavior | the engine | while sampling, under whichever version was served then (recorded in the segment) |
+| behavior | the engine | while sampling, under whichever checkpoint was served then (recorded in the segment) |
 | start | the trainer, without a gradient | at the start of the step, on the weights the step starts from |
 | now | the trainer, with a gradient | in each minibatch, as the step updates the weights |
 
-Behavior and start differ because the data came from elsewhere: an older version, and the engine computing
+Behavior and start differ because the data came from elsewhere: an older checkpoint, and the engine computing
 differently from the trainer. Start and now differ by how far the step has moved the policy.
 
 1. The trainer computes every sampled token's logprob at the start (the recorded spans; forced tokens and prompts are
@@ -144,7 +144,7 @@ segment's advantage, with no weight, ratio, clip or stop at `max_kl`, and record
 
 ## Metrics
 
-A step returns these. The training loop keeps them with the version the step made, and sends them to its hooks in its
+A step returns these. The training loop keeps them with the checkpoint the step made, and sends them to its hooks in its
 `step` note ([the record](../libraries/rollout-train/training.md#the-record)). Under the likelihood objective the
 weight, ratio, clip, mismatch and KL metrics are zero.
 

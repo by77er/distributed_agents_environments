@@ -310,7 +310,7 @@ system memory. What each part is, and what it measures on that card, is on its o
 | Trainer | `rollout_lora:LoraTrainer` on the same checkpoint, `colocated`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
 | Tool set | `minecraft`, made in the process that runs episodes | [The tool set](#the-tool-set) |
 | Memory | `runs_gib` and `training_gib`: each episode runs a Paper server | [Deploying](../guide/deploying.md) |
-| Resharding | `reshard = "rollout_train.resharding:verbatim"` on the channel, and `ray = "auto"`: each version is resharded as a Ray task on the machine's Ray cluster (vLLM loads the LoRA files as they are), so a run with this profile needs `ray start --head` first | [Resharding](../libraries/rollout-train/versions.md#resharding), [Ray](../guide/deploying.md#ray) |
+| Resharding | `reshard = "rollout_train.resharding:verbatim"` on the channel, and `ray = "auto"`: each checkpoint is resharded as a Ray task on the machine's Ray cluster (vLLM loads the LoRA files as they are), so a run with this profile needs `ray start --head` first | [Resharding](../libraries/rollout-train/checkpoints.md#resharding), [Ray](../guide/deploying.md#ray) |
 
 Four agents take a turn in about 6 s. The thinking budget (`thinking_tokens`) is wide enough to be met rarely: on
 this environment's observations the model's thoughts run to a median of 530 tokens and a 95th percentile of 820. A
@@ -319,7 +319,7 @@ tool call takes about 40 tokens. No turn is longer than the trainer's `segment_t
 A group's turns may be a step or two old when it is trained on, and a straggler plays on under newer weights; during
 a step every running episode waits, its world frozen between turns.
 
-A run started again in the same directory goes on where it stopped, from the newest version it made and its
+A run started again in the same directory goes on where it stopped, from the newest checkpoint it made and its
 curriculum, and plays the groups it had decided from the same starts
 ([dying and starting again](../libraries/rollout-train/training.md#dying-and-starting-again)). Episodes the stopped
 run left unfinished are claimed and played again (its feed shows them cancelled), and servers it left behind are

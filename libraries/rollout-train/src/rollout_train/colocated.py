@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol
 
-from rollout_train.trainer import Checkpoint, Step, Trainer, Weighted
+from rollout_train.trainer import Files, Step, Trainer, Weighted
 
 
 class Pausable(Protocol):
@@ -30,7 +30,7 @@ class Colocated:
         self._guard = guard
         self.budget = trainer.budget
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         started = time.monotonic()
         for channel in self._channels:
             await channel.pause()  # no request may be in flight when an engine goes to sleep

@@ -1,5 +1,5 @@
-"""The registry: a run's id never changes and its name can be chosen and changed; bookmarks name versions; and a
-reference to a version finds one by a bookmark, by the run and step that made it, or by its id."""
+"""The registry: a run's id never changes and its name can be chosen and changed; bookmarks name checkpoints; and a
+reference to a checkpoint finds one by a bookmark, by the run and step that made it, or by its id."""
 
 import json
 from pathlib import Path
@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 
 from rollout.harness.blobs import FileBlobStore
+from rollout_train.checkpoints import Checkpoint, Checkpoints
 from rollout_train.database import DatabaseLedger, copy
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.record import GROUPS, STEPS, scope, table
 from rollout_train.registry import BASE, Registry, Taken, found, names, registry_of, resolved, run_of
-from rollout_train.versions import Version, Versions
 
 
 def ledger_of(tmp_path: Path, kind: str) -> Ledger:
@@ -51,8 +51,8 @@ async def test_a_bookmark_names_a_version_and_moves(tmp_path: Path, kind: str) -
     first = await registry.bookmark("best", "kkkkkkkk")
     moved = await registry.bookmark("best", "mmmmmmmm")
     await registry.bookmark("alpha", "kkkkkkkk")
-    assert first.version == "kkkkkkkk" and moved.version == "mmmmmmmm"
-    assert [(mark.name, mark.version) for mark in await registry.bookmarks()] == [
+    assert first.checkpoint == "kkkkkkkk" and moved.checkpoint == "mmmmmmmm"
+    assert [(mark.name, mark.checkpoint) for mark in await registry.bookmarks()] == [
         ("alpha", "kkkkkkkk"),
         ("best", "mmmmmmmm"),
     ]
@@ -87,22 +87,24 @@ async def test_a_run_from_before_the_registry_keeps_its_key_as_its_id(tmp_path: 
     assert (old.id, old.name) == ("curriculum-9", "curriculum-9")
 
 
-async def made(ledger: Ledger, tmp_path: Path, run: str, steps: int, after: Version | None = None) -> list[Version]:
-    """`steps` versions a run made, each at a step of its own (recorded as its loop records them)."""
-    versions = Versions(ledger, FileBlobStore(tmp_path / "blobs"))
+async def made(
+    ledger: Ledger, tmp_path: Path, run: str, steps: int, after: Checkpoint | None = None
+) -> list[Checkpoint]:
+    """`steps` checkpoints a run made, each at a step of its own (recorded as its loop records them)."""
+    checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / "blobs"))
     weights = tmp_path / "weights.bin"
     weights.write_text("w")
     fence = await ledger.take(scope(run))
-    line: list[Version] = []
+    line: list[Checkpoint] = []
     for step in range(1, steps + 1):
         parent = line[-1] if line else after
-        version = await versions.add(
+        checkpoint = await checkpoints.add(
             fence, f"{run[0] * 4}{'klmnopqrstuvwxyz'[step]}{'z' * 11}", weights=weights, run=run, step=step,
             parents=[parent.id] if parent else [],
         )  # fmt: skip
         await ledger.append(table(run, GROUPS), str(step), {"episodes": 1}, fence)
-        await ledger.append(table(run, STEPS), str(step), {"makes": version.id, "groups": [step]}, fence)
-        line.append(version)
+        await ledger.append(table(run, STEPS), str(step), {"makes": checkpoint.id, "groups": [step]}, fence)
+        line.append(checkpoint)
     return line
 
 
@@ -122,16 +124,16 @@ async def test_a_reference_finds_a_version_by_bookmark_run_and_step_or_id(tmp_pa
     assert await resolved(ledger, registry, scout[0].id) == scout[0].id
     assert await resolved(ledger, registry, scout[0].id[:6]) == scout[0].id  # a start no other id shares
     for unknown, says in [
-        ("scout:9", "no version at step 9"),
-        (scout[0].id[:4], "more than one version"),  # every scout version begins the same
-        ("xx", "no version"),
+        ("scout:9", "no checkpoint at step 9"),
+        (scout[0].id[:4], "more than one checkpoint"),  # every scout checkpoint begins the same
+        ("xx", "no checkpoint"),
         (fork[0].id[:2], "too short"),
-        ("nothing-like-it", "no version"),
+        ("nothing-like-it", "no checkpoint"),
     ]:
         with pytest.raises(KeyError, match=says):
             await resolved(ledger, registry, unknown)
     await registry.create("idle")
-    with pytest.raises(KeyError, match="has made no version"):
+    with pytest.raises(KeyError, match="has made no checkpoint"):
         await resolved(ledger, registry, "idle")
 
 
@@ -145,7 +147,9 @@ async def test_a_copy_into_a_database_keeps_the_runs_and_the_bookmarks(tmp_path:
     assert isinstance(database, DatabaseLedger)
     await copy(files, database)
     assert await database.registry.runs() == [run]
-    assert [(each.name, each.version) for each in await database.registry.bookmarks()] == [(mark.name, mark.version)]
+    assert [(each.name, each.checkpoint) for each in await database.registry.bookmarks()] == [
+        (mark.name, mark.checkpoint)
+    ]
 
 
 def test_the_command_lists_versions_and_moves_bookmarks(
@@ -157,7 +161,7 @@ def test_the_command_lists_versions_and_moves_bookmarks(
 
     ledger = FileLedger(tmp_path / "ledger")
 
-    async def set_up() -> list[Version]:
+    async def set_up() -> list[Checkpoint]:
         named = await registered(ledger).create("scout")
         return await made(ledger, tmp_path, named.id, 2)
 
@@ -169,10 +173,10 @@ def test_the_command_lists_versions_and_moves_bookmarks(
         return capsys.readouterr().out
 
     assert run("bookmark", "best", "scout:1") == f"best is {line[0].id}\n"
-    listed = run("versions").splitlines()
+    listed = run("checkpoints").splitlines()
     assert len(listed) == 2 and "scout:1" in listed[1] and "[best]" in listed[1] and "the base model" in listed[1]
     assert "scout:2" in listed[0] and "from " + line[0].id[:5] in listed[0]
     assert "is called scouting" in run("rename", "scout", "scouting")
     assert run("bookmark", "best", "--delete") == "no bookmark best any more\n"
-    with pytest.raises(SystemExit, match="says no version"):
+    with pytest.raises(SystemExit, match="says no checkpoint"):
         run("bookmark", "best", "nothing-like-it")

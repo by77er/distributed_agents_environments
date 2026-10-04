@@ -6,7 +6,7 @@ from typing import Any
 
 from rollout_lora.settings import LoraSettings
 from rollout_lora.worker import TrainerProcess
-from rollout_train.trainer import Budget, Checkpoint, Step, Weighted
+from rollout_train.trainer import Budget, Files, Step, Weighted
 
 
 class LoraTrainer:
@@ -19,5 +19,5 @@ class LoraTrainer:
         self.budget = Budget(self.settings.segment_tokens, self.settings.segments_per_step)
         self._process = TrainerProcess(model, self.settings)
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         return Step(await self._process.step(batch, seed=seed, parent=parent, into=into))

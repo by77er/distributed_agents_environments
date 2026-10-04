@@ -1,7 +1,7 @@
 """Training runs asked for from anywhere, and started by a launcher on a machine that can run them.
 
 Whoever wants a run (the monitor's page, say) asks for it: a `Launch` names a profile and a catalog, what the run is
-called, the version it starts from, and the settings it changes (`rollout train --set`). A launcher
+called, the checkpoint it starts from, and the settings it changes (`rollout train --set`). A launcher
 (`rollout_train.launcher`) on a training machine says in its heartbeat which profiles it can run, claims a launch
 asked for one of them, starts `rollout train`, and notes how it goes: claimed, running (with the process), ended or
 failed (with why). A launch asked to stop is stopped by its launcher.
@@ -49,7 +49,7 @@ class Asked:
     name: str
     """What the run is called."""
     start: str | None = None
-    """The version it trains from (a reference, `rollout_train.registry.resolved`); None: the base model."""
+    """The checkpoint it trains from (a reference, `rollout_train.registry.resolved`); None: the base model."""
     bookmark: str | None = None
     """A bookmark the run carries forward."""
     groups: int = 100

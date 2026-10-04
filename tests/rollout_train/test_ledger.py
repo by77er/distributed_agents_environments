@@ -43,14 +43,14 @@ async def test_a_writer_that_was_replaced_is_refused(tmp_path: Path, opened: Cal
     old_ledger, new_ledger = opened(tmp_path), opened(tmp_path)
     old = await old_ledger.take("policy/a")
     other = await old_ledger.take("policy/b")
-    assert await old_ledger.append("versions/a", "1", {}, old)
+    assert await old_ledger.append("checkpoints/a", "1", {}, old)
     new = await new_ledger.take("policy/a")  # a new process takes its place
     assert new.number == old.number + 1
     with pytest.raises(Fenced):
-        await old_ledger.append("versions/a", "2", {}, old)
-    assert await new_ledger.append("versions/a", "2", {}, new)
-    assert await old_ledger.append("versions/b", "1", {}, other)  # another scope's fence is its own
-    assert list(await new_ledger.read("versions/a")) == ["1", "2"]
+        await old_ledger.append("checkpoints/a", "2", {}, old)
+    assert await new_ledger.append("checkpoints/a", "2", {}, new)
+    assert await old_ledger.append("checkpoints/b", "1", {}, other)  # another scope's fence is its own
+    assert list(await new_ledger.read("checkpoints/a")) == ["1", "2"]
 
 
 async def test_a_half_written_line_was_never_appended(tmp_path: Path) -> None:
@@ -100,7 +100,7 @@ async def test_a_ledger_moves_from_files_to_sqlite_to_postgres_whole(tmp_path: P
     run = await files.take("runs/a")
     for key in ("2", "1", "3"):
         await files.append("runs/a/groups", key, {"group": key}, run)
-    await files.append("policies/p/versions", "1", {"number": 1}, policy)
+    await files.append("policies/p/checkpoints", "1", {"number": 1}, policy)
     sqlite = DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")
     assert await copy(files, sqlite) == 4
     assert await copy(sqlite, DatabaseLedger(postgres)) == 4

@@ -79,9 +79,9 @@ async def _train(
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
-            rows, platform.trainer, platform.versions, start=platform.origin, channel=channel,
+            rows, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
             base=described.channels[channel].model,
-            directory=described.directory / "versions", publish=platform.publish, groups=groups,
+            directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
             run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
             reshard=platform.reshard if platform.layout else None,
@@ -90,13 +90,13 @@ async def _train(
 
 async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
     from rollout.harness.blobs import FileBlobStore
+    from rollout_train.checkpoints import Checkpoints
     from rollout_train.imitation import examples, imitate
     from rollout_train.layout import BLOBS, LEDGER
     from rollout_train.ledger import opened
     from rollout_train.profile import Profile
     from rollout_train.record import scope
     from rollout_train.registry import registry_of, resolved, run_of
-    from rollout_train.versions import Versions
 
     described = Profile.load(profile, directory=directory)
     if described.trainer is None:
@@ -106,7 +106,7 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     store = dict(described.blobs)
     blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(described.directory / BLOBS)
     ledger = opened(dict(described.ledger) or {"directory": str(described.directory / LEDGER)})
-    versions, registry = Versions(ledger, blobs), registry_of(ledger)
+    checkpoints, registry = Checkpoints(ledger, blobs), registry_of(ledger)
     run = await run_of(described.directory, ledger, registry)
     start = await resolved(ledger, registry, described.trainer.start) if described.trainer.start else None
     taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
@@ -116,12 +116,12 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     settings = {**described.trainer.settings, "objective": "likelihood"}
     trainer = named(described.trainer.kind)(spec.model, **settings)
     fence = await ledger.take(scope(run.id))  # (the run is stopped: imitation writes as it)
-    version = await imitate(
-        versions, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
-        directory=described.directory / "versions",
+    checkpoint = await imitate(
+        checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
+        directory=described.directory / "checkpoints",
         limit=limit, seed=seed,
     )  # fmt: skip
-    print(f"made {version.id}: {json.dumps({key: round(value, 4) for key, value in version.metrics.items()})}")
+    print(f"made {checkpoint.id}: {json.dumps({key: round(value, 4) for key, value in checkpoint.metrics.items()})}")
 
 
 def _setting(given: str) -> tuple[str, Any]:
@@ -236,32 +236,32 @@ async def _bookmark(name: str, reference: str | None, delete: bool, where: str) 
             await registry.unbookmark(name)
             print(f"no bookmark {name} any more")
             return
-        version = await resolved(ledger, registry, reference or "")
-        if version is None:
-            raise SystemExit("a bookmark names a version, not the base model")
-        await registry.bookmark(name, version)
+        checkpoint = await resolved(ledger, registry, reference or "")
+        if checkpoint is None:
+            raise SystemExit("a bookmark names a checkpoint, not the base model")
+        await registry.bookmark(name, checkpoint)
     except (KeyError, Taken) as error:
         raise SystemExit(error.args[0]) from None
-    print(f"{name} is {version}")
+    print(f"{name} is {checkpoint}")
 
 
-async def _versions(where: str) -> None:
+async def _checkpoints(where: str) -> None:
+    from rollout_train.checkpoints import checkpoints_in, short
     from rollout_train.registry import names
-    from rollout_train.versions import short, versions_in
 
     ledger, registry = _registry_at(where)
-    every, called = await versions_in(ledger), await names(registry)
-    shown = short(version.id for version in every)
+    every, called = await checkpoints_in(ledger), await names(registry)
+    shown = short(checkpoint.id for checkpoint in every)
     marks: dict[str, list[str]] = {}
-    for mark, version in called["bookmarks"].items():
-        marks.setdefault(version, []).append(mark)
-    for version in sorted(every, key=lambda each: (each.made, each.depth), reverse=True):
-        origin = called["runs"].get(version.run, version.run) if version.run else "made outside a run"
-        at = f":{version.step}" if version.step is not None else ""
-        parents = ", ".join(shown.get(parent, parent) for parent in version.parents) or "the base model"
-        kept = "" if version.weights is not None else "  (released)"
-        bookmarked = f"  [{', '.join(marks[version.id])}]" if version.id in marks else ""
-        print(f"{shown[version.id]:<8} depth {version.depth:<4} {origin}{at}  from {parents}{bookmarked}{kept}")
+    for mark, checkpoint in called["bookmarks"].items():
+        marks.setdefault(checkpoint, []).append(mark)
+    for checkpoint in sorted(every, key=lambda each: (each.made, each.depth), reverse=True):
+        origin = called["runs"].get(checkpoint.run, checkpoint.run) if checkpoint.run else "made outside a run"
+        at = f":{checkpoint.step}" if checkpoint.step is not None else ""
+        parents = ", ".join(shown.get(parent, parent) for parent in checkpoint.parents) or "the base model"
+        kept = "" if checkpoint.weights is not None else "  (released)"
+        bookmarked = f"  [{', '.join(marks[checkpoint.id])}]" if checkpoint.id in marks else ""
+        print(f"{shown[checkpoint.id]:<8} depth {checkpoint.depth:<4} {origin}{at}  from {parents}{bookmarked}{kept}")
 
 
 def main() -> None:
@@ -306,10 +306,10 @@ def main() -> None:
     renaming.add_argument("who", help="the run, by its name or its id")
     renaming.add_argument("name", help="what it is called from now on")
     renaming.add_argument("--ledger", default=".", help=where)
-    marking = commands.add_parser("bookmark", help="name a version, move a bookmark, or take one away")
+    marking = commands.add_parser("bookmark", help="name a checkpoint, move a bookmark, or take one away")
     marking.add_argument("name")
-    marking.add_argument("version", nargs="?", help="a bookmark, RUN:STEP, RUN, or a version's id or its start")
-    marking.add_argument("--delete", action="store_true", help="take the bookmark away (the version stays)")
+    marking.add_argument("checkpoint", nargs="?", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id or its start")
+    marking.add_argument("--delete", action="store_true", help="take the bookmark away (the checkpoint stays)")
     marking.add_argument("--ledger", default=".", help=where)
     launching = commands.add_parser("launcher", help="start the training runs asked for that this machine can run")
     launching.add_argument("--ledger", required=True, help="the database's URL (or a ledger's directory)")
@@ -320,7 +320,7 @@ def main() -> None:
     launching.add_argument("--ray", help="a Ray cluster's job server (http://127.0.0.1:8265): each run is a Ray job")
     launching.add_argument("--gpus", type=float, default=1.0, help="accelerators each run's Ray job asks for (1)")
     launching.add_argument("--as-job", action="store_true", help="submit the launcher itself as a Ray job (with --ray)")
-    listing = commands.add_parser("versions", help="every version, newest first: where it came from")
+    listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
     serving.add_argument("factory")
@@ -345,9 +345,9 @@ def main() -> None:
         asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
         return
     if arguments.command == "bookmark":
-        if arguments.version is None and not arguments.delete:
-            parser.error("bookmark: name a version, or --delete")
-        asyncio.run(_bookmark(arguments.name, arguments.version, arguments.delete, arguments.ledger))
+        if arguments.checkpoint is None and not arguments.delete:
+            parser.error("bookmark: name a checkpoint, or --delete")
+        asyncio.run(_bookmark(arguments.name, arguments.checkpoint, arguments.delete, arguments.ledger))
         return
     if arguments.command == "launcher":
         if arguments.as_job:
@@ -360,8 +360,8 @@ def main() -> None:
             arguments.ray, arguments.gpus,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
-    if arguments.command == "versions":
-        asyncio.run(_versions(arguments.ledger))
+    if arguments.command == "checkpoints":
+        asyncio.run(_checkpoints(arguments.ledger))
         return
     if arguments.command == "ledger":
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))

@@ -1,4 +1,4 @@
-"""Resharding a version into its engines' layout, here and as a Ray task; and a launcher whose runs are Ray jobs."""
+"""Resharding a checkpoint into its engines' layout, here and as a Ray task; and a launcher whose runs are Ray jobs."""
 
 import asyncio
 import shutil
@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from rollout.harness.blobs import FileBlobStore
+from rollout_train.checkpoints import Checkpoints, Retention
 from rollout_train.launcher import OUTPUT, Launcher
 from rollout_train.launches import CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
 from rollout_train.ledger import FileLedger
@@ -15,53 +16,56 @@ from rollout_train.presence import presence_of
 from rollout_train.ray_cluster import prepare
 from rollout_train.record import scope
 from rollout_train.resharding import RESHARDED, RESHARDING, VERBATIM, on_ray, reshard, resharded
-from rollout_train.versions import Retention, Versions
 from tests.rollout_train.test_launches import profiles
 
 
-async def a_version(tmp_path: Path) -> tuple[Versions, Any, str]:
-    """A ledger and blob store with one version, its weights two files."""
-    versions = Versions(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    fence = await versions.ledger.take(scope("run"))
+async def a_version(tmp_path: Path) -> tuple[Checkpoints, Any, str]:
+    """A ledger and blob store with one checkpoint, its weights two files."""
+    checkpoints = Checkpoints(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
+    fence = await checkpoints.ledger.take(scope("run"))
     weights = tmp_path / "made" / "weights"
     weights.mkdir(parents=True)
     (weights / "adapter_config.json").write_text('{"r": 8}')
     (weights / "adapter_model.safetensors").write_bytes(b"\x00" * 64)
-    made = await versions.add(fence, "kpqxrmtzwvolxqvu", weights=weights, run="run", step=1, base="tiny")
-    return versions, fence, made.id
+    made = await checkpoints.add(fence, "kpqxrmtzwvolxqvu", weights=weights, run="run", step=1, base="tiny")
+    return checkpoints, fence, made.id
 
 
 async def test_a_version_is_resharded_once_into_its_engines_layout(tmp_path: Path) -> None:
-    versions, fence, version = await a_version(tmp_path)
-    manifest = await reshard(versions, fence, version, VERBATIM, tmp_path / "scratch")
+    checkpoints, fence, checkpoint = await a_version(tmp_path)
+    manifest = await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
     assert sorted(manifest.files) == ["adapter_config.json", "adapter_model.safetensors"]
-    made = await versions.version(version)
+    made = await checkpoints.checkpoint(checkpoint)
     assert made.weights is not None
     assert {name: blob.sha256 for name, blob in manifest.files.items()} == {
         name: blob.sha256 for name, blob in made.weights.files.items()
     }  # (verbatim: the same files, so the same blobs)
-    assert list(await versions.ledger.read(RESHARDING)) == [version] == list(await versions.ledger.read(RESHARDED))
-    assert await resharded(versions.ledger, version) == manifest
-    again = await reshard(versions, fence, version, VERBATIM, tmp_path / "scratch")
-    assert again == manifest and len(await versions.ledger.read(RESHARDING)) == 1  # not resharded again
+    assert (
+        list(await checkpoints.ledger.read(RESHARDING))
+        == [checkpoint]
+        == list(await checkpoints.ledger.read(RESHARDED))
+    )
+    assert await resharded(checkpoints.ledger, checkpoint) == manifest
+    again = await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
+    assert again == manifest and len(await checkpoints.ledger.read(RESHARDING)) == 1  # not resharded again
     assert not list((tmp_path / "scratch").iterdir())  # what it wrote there is gone
 
 
 async def test_a_released_version_cannot_be_resharded(tmp_path: Path) -> None:
-    versions, fence, version = await a_version(tmp_path)
+    checkpoints, fence, checkpoint = await a_version(tmp_path)
     second = tmp_path / "second"
     second.mkdir()
     (second / "w").write_bytes(b"1")
-    later = await versions.add(fence, "zzzzzzzzzzzzzzzz", weights=second, run="run", step=2, parents=[version])
-    await versions.thin(fence, "run", Retention(recent=1, every=0), keep={later.id})
+    later = await checkpoints.add(fence, "zzzzzzzzzzzzzzzz", weights=second, run="run", step=2, parents=[checkpoint])
+    await checkpoints.thin(fence, "run", Retention(recent=1, every=0), keep={later.id})
     with pytest.raises(ValueError, match="weights were deleted"):
-        await reshard(versions, fence, version, VERBATIM, tmp_path / "scratch")
+        await reshard(checkpoints, fence, checkpoint, VERBATIM, tmp_path / "scratch")
 
 
 async def test_a_reshard_runs_as_a_ray_task(tmp_path: Path) -> None:
     prepare()  # (before Ray is imported: workers run in this environment)
     ray = pytest.importorskip("ray")
-    versions, fence, version = await a_version(tmp_path)
+    checkpoints, fence, checkpoint = await a_version(tmp_path)
     sessions = Path.home() / ".cache" / "ray-tests"  # (on disk: /tmp may be memory)
     ray.init(
         num_cpus=1, object_store_memory=80 * 2**20, include_dashboard=False, log_to_driver=False,
@@ -70,12 +74,12 @@ async def test_a_reshard_runs_as_a_ray_task(tmp_path: Path) -> None:
     try:
         ledger_at = {"directory": str(tmp_path / "ledger")}
         blobs_at = {"kind": "rollout.harness.blobs:FileBlobStore", "directory": str(tmp_path / "blobs")}
-        manifest = await on_ray(ledger_at, blobs_at, fence, version, VERBATIM)
+        manifest = await on_ray(ledger_at, blobs_at, fence, checkpoint, VERBATIM)
     finally:
         ray.shutdown()
         shutil.rmtree(sessions, ignore_errors=True)
     assert sorted(manifest.files) == ["adapter_config.json", "adapter_model.safetensors"]
-    assert await resharded(versions.ledger, version) == manifest  # (noted by the task, in the ledger)
+    assert await resharded(checkpoints.ledger, checkpoint) == manifest  # (noted by the task, in the ledger)
 
 
 class Jobs:

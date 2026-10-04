@@ -87,7 +87,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const defaults = chosen?.profile.settings ?? {};
   const settingKeys = Object.keys(defaults).filter(key => key !== "trainer.start" && key !== "trainer.bookmark").sort();
   const room = chosen ? chosen.launchers.some(each => (each.playing ?? 0) < (each.at_once ?? 1)) : false;
-  const versions = [...(system?.versions ?? [])].sort((a, b) => b.made - a.made);
+  const checkpoints = [...(system?.checkpoints ?? [])].sort((a, b) => b.made - a.made);
   const bookmarks = Object.keys(system?.bookmarks ?? {}).sort();
 
   const changed = (): Record<string, unknown> => {
@@ -148,21 +148,21 @@ function Form({ launchers }: { launchers: Launcher[] }) {
                     {bookmarks.map(mark => <option key={`b${mark}`} value={mark}>{mark} · {known.origin(system!.bookmarks[mark])} · {known.short(system!.bookmarks[mark])}</option>)}
                   </optgroup>
                 ) : null}
-                {versions.length ? (
-                  <optgroup label="Versions, newest first">
-                    {versions.map(version => (
-                      <option key={version.id} value={version.id} disabled={version.weights == null}>
-                        {known.origin(version.id)} · {version.short}{version.bookmarks.length ? ` [${version.bookmarks.join(", ")}]` : ""}{version.weights == null ? " (released)" : ""}
+                {checkpoints.length ? (
+                  <optgroup label="Checkpoints, newest first">
+                    {checkpoints.map(checkpoint => (
+                      <option key={checkpoint.id} value={checkpoint.id} disabled={checkpoint.weights == null}>
+                        {known.origin(checkpoint.id)} · {checkpoint.short}{checkpoint.bookmarks.length ? ` [${checkpoint.bookmarks.join(", ")}]` : ""}{checkpoint.weights == null ? " (released)" : ""}
                       </option>
                     ))}
                   </optgroup>
                 ) : null}
               </select>
-              <small>a version whose weights were deleted cannot be started from</small>
+              <small>a checkpoint whose weights were deleted cannot be started from</small>
             </label>
             <label className="field">
               <span>Carries a bookmark</span>
-              <input value={bookmark} onChange={event => setBookmark(event.target.value)} placeholder="optional: moved to each version it makes" spellCheck={false} />
+              <input value={bookmark} onChange={event => setBookmark(event.target.value)} placeholder="optional: moved to each checkpoint it makes" spellCheck={false} />
             </label>
             <div className="field-row">
               <label className="field"><span>Groups</span><input type="number" min={1} value={groups} onChange={event => setGroups(event.target.value)} /></label>

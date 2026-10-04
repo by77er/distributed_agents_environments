@@ -21,7 +21,7 @@ const solvedShare = (groups: StatisticsGroup[]): number | null => {
 };
 const meanReward = (groups: StatisticsGroup[]) => mean(groups.flatMap(group => group.rewards));
 const STEP_FIGURES: [string, string, string][] = [
-  ["kl_moved", "KL moved", "from the version before"], ["kl_floor", "KL floor", "the update's noise floor"], ["clip_fraction", "Clip fraction", "of tokens clipped"],
+  ["kl_moved", "KL moved", "from the checkpoint before"], ["kl_floor", "KL floor", "the update's noise floor"], ["clip_fraction", "Clip fraction", "of tokens clipped"],
   ["mean_mismatch", "Mean mismatch", "sampler against trainer"], ["mean_weight", "Mean weight", "the off-policy correction"], ["truncated_fraction", "Truncated fraction", "of weights truncated"],
   ["loss", "Loss", "the objective"], ["seconds", "Step time", "the update, start to end"], ["start_seconds", "Start time", "before the first optimizer step"],
 ];
@@ -182,7 +182,7 @@ export function Statistics() {
             );
           })}
         </div>
-      ) : <Empty>No step has made a version yet.</Empty>}
+      ) : <Empty>No step has made a checkpoint yet.</Empty>}
 
       {title("pace", "Pace", "counted when each group's result was written")}
       <Halves>
@@ -293,7 +293,7 @@ const MachineSection = memo(function MachineSection({ system }: { system: System
             ) : null}
           </Card>
         ))}
-        <Card title="Ledger" note={`${system.ledger_at} · ${bytes(system.kept.versions)} of versions and ${bytes(system.kept.episodes)} of episodes kept`}>
+        <Card title="Ledger" note={`${system.ledger_at} · ${bytes(system.kept.checkpoints)} of checkpoints and ${bytes(system.kept.episodes)} of episodes kept`}>
           <Table heads={[["scope"], ["fence", "n"]]} rows={Object.entries(system.ledger.fences)} keys={Object.keys(system.ledger.fences)} />
           <div style={{ height: 14 }} />
           <Table heads={[["table"], ["records", "n"]]} rows={Object.entries(system.ledger.tables)} keys={Object.keys(system.ledger.tables)} />

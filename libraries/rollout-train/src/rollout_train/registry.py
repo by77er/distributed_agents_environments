@@ -1,17 +1,18 @@
-"""What runs and versions are called: a run's name, which can be chosen and changed, and bookmarks, names for versions.
+"""What runs and checkpoints are called: a run's name, which can be chosen and changed, and bookmarks, names for
+checkpoints.
 
-Everything a ledger keeps of a run is under its id (`runs/ID/...`), and a version is its id
-(`rollout_train.versions`), so naming either moves nothing. The registry beside the ledger holds the names: a file
+Everything a ledger keeps of a run is under its id (`runs/ID/...`), and a checkpoint is its id
+(`rollout_train.checkpoints`), so naming either moves nothing. The registry beside the ledger holds the names: a file
 beside a ledger of files (`FileRegistry`), tables in a database ledger's database
 (`rollout_train.database.DatabaseRegistry`). It is ordinary state, changed in place.
 
 - A **run** has an id and a name. A name is one no other run has, as its name or as its id, so that either finds one
   run. A run's directory says which run it is (`run.json`); `run_of` finds it, or registers the run the first time it
   is started. A run recorded before there was a registry keeps its key as its id, and is registered under it.
-- A **bookmark** names a version, and is moved to another by whoever moves it: a run told to carry one moves it to
-  each version it makes. A version needs none: it is shown by where it came from.
+- A **bookmark** names a checkpoint, and is moved to another by whoever moves it: a run told to carry one moves it to
+  each checkpoint it makes. A checkpoint needs none: it is shown by where it came from.
 
-A name says neither `/`, `@` nor `:` (they are what a reference to a version is made of: `resolved`).
+A name says neither `/`, `@` nor `:` (they are what a reference to a checkpoint is made of: `resolved`).
 """
 
 import asyncio
@@ -26,13 +27,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from rollout.contracts import new_ulid
+from rollout_train.checkpoints import SHORTEST, checkpoints_in
 from rollout_train.layout import RUN
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.record import STEPS, runs_in, table
-from rollout_train.versions import SHORTEST, versions_in
 
 BASE = "base"
-"""The reference to the base model: no version."""
+"""The reference to the base model: no checkpoint."""
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class Entry:
 @dataclass(frozen=True)
 class Bookmark:
     name: str
-    version: str
+    checkpoint: str
     """By id."""
     moved: float
 
@@ -74,12 +75,12 @@ class Registry(Protocol):
         """Every bookmark, by name."""
         ...
 
-    async def bookmark(self, name: str, version: str) -> Bookmark:
-        """Make a bookmark name `version`, or move it there. Raises `Taken` for a name that cannot be one."""
+    async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
+        """Make a bookmark name `checkpoint`, or move it there. Raises `Taken` for a name that cannot be one."""
         ...
 
     async def unbookmark(self, name: str) -> None:
-        """Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark."""
+        """Take a bookmark away (the checkpoint stays). Raises `KeyError` when there is no such bookmark."""
         ...
 
 
@@ -156,11 +157,11 @@ class FileRegistry:
     async def bookmarks(self) -> list[Bookmark]:
         return await asyncio.to_thread(lambda: sorted(self._read()[1], key=lambda mark: mark.name))
 
-    async def bookmark(self, name: str, version: str) -> Bookmark:
+    async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
         def moved() -> Bookmark:
             with self._locked():
                 runs, marks = self._read()
-                mark = Bookmark(valid(name), version, round(time.time(), 1))
+                mark = Bookmark(valid(name), checkpoint, round(time.time(), 1))
                 self._write(runs, [each for each in marks if each.name != mark.name] + [mark])
                 return mark
 
@@ -237,45 +238,45 @@ async def _registered(registry: Registry | None, id: str, name: str) -> Entry:
 
 
 async def resolved(ledger: Ledger, registry: Registry | None, reference: str) -> str | None:
-    """The version a reference says, by id; None for `base` (the base model). A reference is, in this order:
-    `base`; a bookmark's name; `RUN:STEP`, the version a run (by its name or its id) made at a step; `RUN`, the newest
-    version a run made; or a version's id, or the start of one (at least `SHORTEST` characters) that no other id
-    begins with. Raises `KeyError` for one that says no version, or more than one."""
+    """The checkpoint a reference says, by id; None for `base` (the base model). A reference is, in this order:
+    `base`; a bookmark's name; `RUN:STEP`, the checkpoint a run (by its name or its id) made at a step; `RUN`, the
+    newest checkpoint a run made; or a checkpoint's id, or the start of one (at least `SHORTEST` characters) that no
+    other id begins with. Raises `KeyError` for one that says no checkpoint, or more than one."""
     if reference == BASE:
         return None
-    marks = {mark.name: mark.version for mark in await registry.bookmarks()} if registry else {}
+    marks = {mark.name: mark.checkpoint for mark in await registry.bookmarks()} if registry else {}
     if reference in marks:
         return marks[reference]
     runs = await registry.runs() if registry else []
     who, _, step = reference.partition(":")
     run = found(runs, who) or (Entry(who, who, 0.0) if who in await runs_in(ledger) else None)
-    versions = await versions_in(ledger)
+    checkpoints = await checkpoints_in(ledger)
     if run is not None:
         if step:
             intent: Any = (await ledger.read(table(run.id, STEPS))).get(step)
             made = str(intent.get("makes")) if intent else None
-            if made is None or not any(version.id == made for version in versions):
-                raise KeyError(f"the run {who!r} made no version at step {step}")
+            if made is None or not any(checkpoint.id == made for checkpoint in checkpoints):
+                raise KeyError(f"the run {who!r} made no checkpoint at step {step}")
             return made
-        ours = [version for version in versions if version.run == run.id]
+        ours = [checkpoint for checkpoint in checkpoints if checkpoint.run == run.id]
         if not ours:
-            raise KeyError(f"the run {who!r} has made no version")
-        return max(ours, key=lambda version: (version.depth, version.made)).id
-    if any(version.id == reference for version in versions):
+            raise KeyError(f"the run {who!r} has made no checkpoint")
+        return max(ours, key=lambda checkpoint: (checkpoint.depth, checkpoint.made)).id
+    if any(checkpoint.id == reference for checkpoint in checkpoints):
         return reference
-    starting = [version.id for version in versions if version.id.startswith(reference)]
+    starting = [checkpoint.id for checkpoint in checkpoints if checkpoint.id.startswith(reference)]
     if len(reference) >= SHORTEST and len(starting) == 1:
         return starting[0]
     if len(starting) == 1:
-        raise KeyError(f"{reference!r} is too short to say a version: at least {SHORTEST} characters")
-    raise KeyError(f"{reference!r} says {'more than one version' if starting else 'no version'}")
+        raise KeyError(f"{reference!r} is too short to say a checkpoint: at least {SHORTEST} characters")
+    raise KeyError(f"{reference!r} says {'more than one checkpoint' if starting else 'no checkpoint'}")
 
 
 async def names(registry: Registry | None) -> dict[str, Any]:
-    """Every registered run's name, by id, and every bookmark's version, by name."""
+    """Every registered run's name, by id, and every bookmark's checkpoint, by name."""
     if registry is None:
         return {"runs": {}, "bookmarks": {}}
     return {
         "runs": {each.id: each.name for each in await registry.runs()},
-        "bookmarks": {mark.name: mark.version for mark in await registry.bookmarks()},
+        "bookmarks": {mark.name: mark.checkpoint for mark in await registry.bookmarks()},
     }

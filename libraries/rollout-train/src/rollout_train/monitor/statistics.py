@@ -2,7 +2,7 @@
 
 For each run (`rollout_train.record`): its groups, each with its row, when it was decided and when its result was
 written, its episodes' rewards and whether each solved, what it gave to train on (or why nothing) and what its step
-did with it; its steps, each with the version it made and the trainer's statistics; how many groups were in flight
+did with it; its steps, each with the checkpoint it made and the trainer's statistics; how many groups were in flight
 and how many waited toward a step, over time; and its engines' throughput, from the `inference` notes in its feed
 (for a run whose directory is where the feed can be read).
 
@@ -17,8 +17,8 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
+from rollout_train.checkpoints import CHECKPOINTS
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, named_runs, table
-from rollout_train.versions import VERSIONS
 
 STEP_METRICS = (
     "kl_moved",
@@ -35,7 +35,7 @@ STEP_METRICS = (
     "update_seconds",
     "seconds",
 )
-"""What a step's version says of the update, as far as it says it (older versions say less)."""
+"""What a step's checkpoint says of the update, as far as it says it (older checkpoints say less)."""
 THROUGHPUT = 720
 """Throughput measurements of a channel at most: more are merged, neighbours together."""
 COMMITTED, STEPPING, FAILED = "committed", "stepping", "failed"
@@ -50,7 +50,7 @@ def statistics(
     """The figures a ledger's tables (by name) hold, with each run's engines' throughput from its feed's job lines
     (`notes`, by run)."""
     now = time.time() if now is None else now
-    made = _versions(tables)
+    made = _checkpoints(tables)
     runs = named_runs(tables)
     notes = notes or {}
     return {
@@ -67,9 +67,9 @@ def statistics(
     }
 
 
-def _versions(tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, dict[str, Any]]:
-    """Every version's record, by its id."""
-    return {key: cast(dict[str, Any], record) for key, record in tables.get(VERSIONS, {}).items()}
+def _checkpoints(tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, dict[str, Any]]:
+    """Every checkpoint's record, by its id."""
+    return {key: cast(dict[str, Any], record) for key, record in tables.get(CHECKPOINTS, {}).items()}
 
 
 def _makes(step: Mapping[str, Any]) -> str | None:
@@ -82,14 +82,14 @@ def _run(run: str, tables: Mapping[str, Mapping[str, Any]], made: Mapping[str, d
     covering: dict[int, dict[str, Any]] = {}
     for key, intent in sorted(tables[STEPS].items(), key=lambda item: int(item[0])):
         makes = _makes(intent)
-        version = made.get(makes or "")
-        metrics: Mapping[str, Any] = (version or {}).get("metrics") or {}
+        checkpoint = made.get(makes or "")
+        metrics: Mapping[str, Any] = (checkpoint or {}).get("metrics") or {}
         step = {
             "step": int(key),
-            "version": makes,
+            "checkpoint": makes,
             "decided": intent.get("decided"),
-            "made": version.get("made") if version else None,
-            "state": FAILED if key in tables[FAILURES] else COMMITTED if version else STEPPING,
+            "made": checkpoint.get("made") if checkpoint else None,
+            "state": FAILED if key in tables[FAILURES] else COMMITTED if checkpoint else STEPPING,
             "groups": len(intent.get("groups") or []),
             "segments": intent.get("segments"),
             "metrics": {name: metrics[name] for name in STEP_METRICS if name in metrics},
@@ -146,7 +146,7 @@ def newest(times: Iterable[Any]) -> float | None:
 def _flight(groups: list[dict[str, Any]], steps: list[dict[str, Any]]) -> list[list[float]]:
     """How many groups were in flight (decided, their result not written) and how many waited toward a step (their
     result written with something to train on, and no step begun over them), over time: `[time, in flight, waiting]`
-    at every change. A step begins when it was decided, or, where it did not say, once its version was made less
+    at every change. A step begins when it was decided, or, where it did not say, once its checkpoint was made less
     the update's time."""
 
     def began(step: Mapping[str, Any]) -> float | None:

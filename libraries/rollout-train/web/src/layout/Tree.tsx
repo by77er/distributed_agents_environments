@@ -1,15 +1,15 @@
 // The hierarchy, on the left, for the page shown: the runs (each run, its steps, their groups, their episodes and
-// the episodes' rollouts), the policies, or the statistics' sections and the runs drawn. What is folded is remembered
+// the episodes' rollouts), the checkpoints, or the statistics' sections and the runs drawn. What is folded is remembered
 // in this browser.
 
 import { memo, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useEpisode, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
 import { byNumber, figure } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range } from "../lib/model";
-import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, versionPlace, versionsPlace } from "../lib/places";
+import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { RunDot, running, useRunColor } from "./runs";
 
@@ -34,7 +34,7 @@ export function Tree({ place }: { place: Place }) {
   if (!system) return null;
   return (
     <nav className="tree" aria-label="hierarchy">
-      {place.page === "versions" ? <VersionsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} /> : <RunsTree place={place} system={system} />}
+      {place.page === "checkpoints" ? <CheckpointsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} /> : <RunsTree place={place} system={system} />}
     </nav>
   );
 }
@@ -184,28 +184,27 @@ function EpisodeRow({ each, place, folds, fold }: { each: GroupEpisode; place: P
   );
 }
 
-/** The versions: the graph of them all, with or without the sample fixture; then those bookmarks name, and each run's
+/** The checkpoints: the graph of them all, with or without the sample fixture; then those bookmarks name, and each run's
  * newest. */
-function VersionsTree({ place, system }: { place: Place; system: System }) {
+function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   const known = useKnown();
-  const heads = system.runs.map(run => madeBy(system.versions, run.run).at(-1)).filter(each => each !== undefined);
-  const bookmarked = system.versions.filter(version => version.bookmarks.length);
+  const heads = system.runs.map(run => madeBy(system.checkpoints, run.run).at(-1)).filter(each => each !== undefined);
+  const bookmarked = system.checkpoints.filter(checkpoint => checkpoint.bookmarks.length);
   const row = (id: string, tag: string, key: string) => (
-    <Node key={key} to={versionPlace(id)} current={place.kind === "version" && place.id === id}>
+    <Node key={key} to={checkpointPlace(id)} current={place.kind === "checkpoint" && place.id === id}>
       <span className="name mono" title={known.title(id)}>{known.short(id)}</span>
       <span className="tag">{tag}</span>
     </Node>
   );
   return (
     <>
-      <Link to={versionsPlace(false)} className={`label${place.kind === "versions" && !place.sample ? " here" : ""}`}>Versions · {system.versions.length}</Link>
       {bookmarked.length ? <div className="label">Bookmarks</div> : null}
-      {bookmarked.map(version => row(version.id, version.bookmarks.join(", "), `b${version.id}`))}
+      {bookmarked.map(checkpoint => row(checkpoint.id, checkpoint.bookmarks.join(", "), `b${checkpoint.id}`))}
       {heads.length ? <div className="label">Each run's newest</div> : null}
-      {heads.map(version => row(version.id, known.origin(version.id), `h${version.id}`))}
-      {system.versions.length ? null : <div className="empty">No version yet.</div>}
+      {heads.map(checkpoint => row(checkpoint.id, known.origin(checkpoint.id), `h${checkpoint.id}`))}
+      {system.checkpoints.length ? null : <div className="empty">No checkpoint yet.</div>}
       <div className="label">Proposed</div>
-      <Node to={versionsPlace(true)} current={place.kind === "versions" && place.sample}>
+      <Node to={checkpointsPlace(true)} current={place.kind === "checkpoints" && place.sample}>
         <span className="name">Sample fixture</span>
         <SampleChip />
       </Node>
@@ -227,7 +226,6 @@ function StatisticsTree({ place, system }: { place: Place; system: System }) {
   const toggle = (run: string) => setHidden(hidden.includes(run) ? hidden.filter(each => each !== run) : [...hidden, run]);
   return (
     <>
-      <div className="label">Sections</div>
       {SECTIONS.map(([key, name]) => (
         <Node key={key} to={statisticsPlace(key)} current={place.kind === "statistics" && place.section === key}><span className="name">{name}</span></Node>
       ))}

@@ -78,7 +78,7 @@ nav:
               - "Model endpoint contract": libraries/rollout/contracts/model-endpoint.md
       - rollout-train:
           - "Rollouts": libraries/rollout-train/rollouts.md
-          - "Versions and the ledger": libraries/rollout-train/versions.md
+          - "Checkpoints and the ledger": libraries/rollout-train/checkpoints.md
           - "Episodes": libraries/rollout-train/episodes.md
           - "Training": libraries/rollout-train/training.md
           - "Channels": libraries/rollout-train/channels.md

@@ -42,7 +42,7 @@ export function useStored<T>(key: string, otherwise: T): [T, (value: T) => void]
   return [value, set];
 }
 
-/** Folds (a run, a step, a group, an episode, a lane of the versions' graph): open or closed, where the reader said so. */
+/** Folds (a run, a step, a group, an episode, a lane of the checkpoints' graph): open or closed, where the reader said so. */
 export type Folds = Record<string, boolean>;
 export const FOLDS = "monitor.folds";
 

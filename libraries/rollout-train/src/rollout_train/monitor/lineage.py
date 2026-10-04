@@ -1,27 +1,27 @@
-"""The versions as a graph, with what trains, serves and evaluates them: what the monitor's lineage view draws.
+"""The checkpoints as a graph, with what trains, serves and evaluates them: what the monitor's lineage view draws.
 
-Every version grows from a base model, along its parents (`rollout_train.versions`): its first parent is what it was
-trained from, any others what it learned from beside (a distillation's teachers). A version with no parent was
-trained from its base model, which is the root its line hangs from. Each version was made by a step of some run, and
-says which. A run that starts from another run's version forks there. Beside the graph stand the trainers that take
+Every checkpoint grows from a base model, along its parents (`rollout_train.checkpoints`): its first parent is what it
+was trained from, any others what it learned from beside (a distillation's teachers). A checkpoint with no parent was
+trained from its base model, which is the root its line hangs from. Each checkpoint was made by a step of some run, and
+says which. A run that starts from another run's checkpoint forks there. Beside the graph stand the trainers that take
 the steps, the inference workers and what each serves, and evaluations.
 
-What a ledger has today is read as it is: the versions, the runs' steps (which stand for their trainer's queue: a run
-takes one step at a time), bookmarks, each version's reshard (`versions/resharding`, `versions/resharded`, which
-`rollout_train.resharding` writes), and the `published` notes read from the runners' heartbeats (which stand for what
-the run's engines serve). The other tables read here are proposed in docs/research/policy-dag.md, and nothing appends
-them yet:
+What a ledger has today is read as it is: the checkpoints, the runs' steps (which stand for their trainer's queue: a run
+takes one step at a time), bookmarks, each checkpoint's reshard (`checkpoints/resharding`, `checkpoints/resharded`,
+which `rollout_train.resharding` writes), and the `published` notes read from the runners' heartbeats (which stand for
+what the run's engines serve). The other tables read here are proposed in docs/research/policy-dag.md, and nothing
+appends them yet:
 
 - `runs/RUN/plan`, `runs/RUN/published`: what a run was set up to do (a distillation's teachers, whose samples it
-  trains on, its objective), and the version a request for the run's latest goes to, from when;
+  trains on, its objective), and the checkpoint a request for the run's latest goes to, from when;
 - `trainers/NAME/registered`, `trainers/NAME/queue`, `trainers/NAME/taken`: a trainer, the steps queued for it, and
   when it began each;
 - `workers/NAME/registered`, `workers/NAME/loaded`, `workers/NAME/unloaded`: an inference worker (what it holds, its
-  adapter slots), and each version it loaded and unloaded;
+  adapter slots), and each checkpoint it loaded and unloaded;
 - `evaluations/SUITE/starts`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`: a fixed suite
-  of starts, and how a version (or another model) played it.
+  of starts, and how a checkpoint (or another model) played it.
 
-The router's `routing` notes in the feed (requests waiting, by the version they name) are proposed there too.
+The router's `routing` notes in the feed (requests waiting, by the checkpoint they name) are proposed there too.
 `SAMPLE` holds such tables and notes as a fixture, so that the view can be seen with them; it is read only when
 asked for (`sample=True`), and everything read from it is marked `sample`.
 """
@@ -35,8 +35,8 @@ from typing import Any, cast
 
 from pydantic import JsonValue, TypeAdapter
 
+from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
 from rollout_train.ledger import between
-from rollout_train.versions import RELEASED, VERSIONS, Version, short
 
 SAMPLE = Path(__file__).with_name("sample-lineage.json")
 """A fixture of the proposed tables: two more LoRA runs sharing a trainer, a full-weight run with a trainer of its
@@ -53,7 +53,7 @@ SAYS = {
 }
 """What a distillation's mode means, in words, for whoever reads the graph."""
 STUDENT = "student"
-"""Whose samples a distillation trains on: the student's own (`data.sampled_by`), else its teachers' by version."""
+"""Whose samples a distillation trains on: the student's own (`data.sampled_by`), else its teachers' by checkpoint."""
 QUEUED, TAKING, MADE, FAILED = "queued", "taking", "made", "failed"
 WRITTEN, RESHARDING, RESHARDED, ROLLING, SERVING, SUPERSEDED = (
     "written",
@@ -63,11 +63,11 @@ WRITTEN, RESHARDING, RESHARDED, ROLLING, SERVING, SUPERSEDED = (
     "serving",
     "superseded",
 )
-"""A version's way to the engines: its files are written (its append), rewritten as the engines load them (where
+"""A checkpoint's way to the engines: its files are written (its append), rewritten as the engines load them (where
 they need to be), loaded by workers one by one once it is its run's latest (or as requests name it exactly), then
 unloaded."""
 
-_VERSION = TypeAdapter(Version)
+_VERSION = TypeAdapter(Checkpoint)
 _RUNS, _TRAINERS, _WORKERS, _EVALUATIONS = "runs/", "trainers/", "workers/", "evaluations/"
 
 
@@ -88,12 +88,12 @@ def lineage(
     sampled: set[str] = set()
     if sample:
         fixture: dict[str, Any] = _moved(json.loads(SAMPLE.read_text()), now)
-        own = set(tables.get(VERSIONS, {}))
+        own = set(tables.get(CHECKPOINTS, {}))
         sampled = (set(fixture["tables"]) - set(tables)) | {
-            f"{VERSIONS}/{key}" for key in fixture["tables"][VERSIONS] if key not in own
+            f"{CHECKPOINTS}/{key}" for key in fixture["tables"][CHECKPOINTS] if key not in own
         }
         tables = {**fixture["tables"], **tables}
-        for name in (VERSIONS, RELEASED):
+        for name in (CHECKPOINTS, RELEASED):
             tables[name] = {**fixture["tables"].get(name, {}), **tables.get(name, {})}
         notes = [*notes, *fixture["notes"]]
         names = {kind: {**fixture["names"].get(kind, {}), **names.get(kind, {})} for kind in ("runs", "bookmarks")}
@@ -116,7 +116,7 @@ def _moved(value: Any, now: float) -> Any:
 
 def mode(sampled_by: Iterable[str]) -> str:
     """Whether a distillation is on policy or off it, by whose samples it trains on: the student's own (`student`),
-    its teachers' (by version), or both."""
+    its teachers' (by checkpoint), or both."""
     whose = set(sampled_by) or {STUDENT}
     if whose == {STUDENT}:
         return ON_POLICY
@@ -148,18 +148,18 @@ class _Reading:
         return cast(dict[str, Any], self.tables.get(table, {}).get(key) or {})
 
     def payload(self) -> dict[str, Any]:
-        made = self.versions()
+        made = self.checkpoints()
         runs = self.runs(made)
         loads = self.loads()
         waiting: dict[str, int] = self.routing[-1]["waiting"] if self.routing else {}
-        versions = self.shown(made, runs, loads, waiting)
+        checkpoints = self.shown(made, runs, loads, waiting)
         edges, outside = self.edges(made, runs)
-        bases = sorted({version.base or "the base model" for version in made.values() if not version.parents})
+        bases = sorted({checkpoint.base or "the base model" for checkpoint in made.values() if not checkpoint.parents})
         return {
             "now": round(self.now, 1),
             "sample": bool(self.sampled),
             "bases": bases,
-            "versions": versions,
+            "checkpoints": checkpoints,
             "outside": outside,
             "runs": runs,
             "edges": edges,
@@ -173,20 +173,20 @@ class _Reading:
             "evaluations": self.evaluations(),
         }
 
-    def versions(self) -> dict[str, Version]:
-        """Every version, by id, oldest first."""
+    def checkpoints(self) -> dict[str, Checkpoint]:
+        """Every checkpoint, by id, oldest first."""
         released = self.read(RELEASED)
         return {
-            key: replace(version, weights=None, state=None, released=float(released[key]["at"]))
+            key: replace(checkpoint, weights=None, state=None, released=float(released[key]["at"]))
             if key in released
-            else version
-            for key, record in self.read(VERSIONS).items()
-            if (version := _VERSION.validate_python(record))
+            else checkpoint
+            for key, record in self.read(CHECKPOINTS).items()
+            if (checkpoint := _VERSION.validate_python(record))
         }
 
-    def runs(self, made: Mapping[str, Version]) -> list[dict[str, Any]]:
+    def runs(self, made: Mapping[str, Checkpoint]) -> list[dict[str, Any]]:
         """Every run that decided steps: what it was set up to do (a training run, unless its plan says otherwise),
-        what it started from, its steps, the versions they made, and its latest (what a request for the run's latest
+        what it started from, its steps, the checkpoints they made, and its latest (what a request for the run's latest
         goes to)."""
         runs: list[dict[str, Any]] = []
         called: Mapping[str, str] = self.names.get("runs", {})
@@ -230,7 +230,7 @@ class _Reading:
                     "mode": distilled,
                     "says": SAYS[distilled] if distilled else None,
                     "steps": listed,
-                    "versions": [step["makes"] for step in listed if step["state"] == MADE],
+                    "checkpoints": [step["makes"] for step in listed if step["state"] == MADE],
                     "latest": latest or (str(fed[-1]["adapter"]) if fed else None),
                     "groups": self.waiting(run, listed),
                     "sample": f"{_RUNS}{run}/steps" in self.sampled,
@@ -254,79 +254,85 @@ class _Reading:
 
     def shown(
         self,
-        made: Mapping[str, Version],
+        made: Mapping[str, Checkpoint],
         runs: list[dict[str, Any]],
         loads: Mapping[str, dict[str, dict[str, Any]]],
         waiting: Mapping[str, int],
     ) -> list[dict[str, Any]]:
-        """Every version as the graph shows it: where it came from (its parents, its base, the run and step that made
+        """Every checkpoint as the graph shows it: where it came from (its parents, its base, the run and step that made
         it), the bookmarks that name it, and where it is on its way to the engines."""
         shorter = short(made)
         by = {run["run"]: run for run in runs}
         marks: dict[str, list[str]] = {}
-        for mark, version in self.names.get("bookmarks", {}).items():
-            marks.setdefault(str(version), []).append(mark)
+        for mark, checkpoint in self.names.get("bookmarks", {}).items():
+            marks.setdefault(str(checkpoint), []).append(mark)
         latest = {run["latest"]: run["run"] for run in runs if run["latest"]}
-        """The version a request for each run's latest goes to."""
+        """The checkpoint a request for each run's latest goes to."""
         shown: list[dict[str, Any]] = []
-        for version in made.values():
-            run = by.get(version.run or "")
-            older = {  # workers serving an older version of the same run in this one's place
+        for checkpoint in made.values():
+            run = by.get(checkpoint.run or "")
+            older = {  # workers serving an older checkpoint of the same run in this one's place
                 worker
                 for each in made.values()
-                if each.run == version.run and each.depth < version.depth
+                if each.run == checkpoint.run and each.depth < checkpoint.depth
                 for worker, span in loads.get(each.id, {}).items()
                 if span["until"] is None
             }
-            full = (self.record(f"{_RUNS}{version.run}/plan", "plan").get("weights") or "lora") == "full"
-            noted = version.id in self.read("versions/resharding") or version.id in self.read("versions/resharded")
+            full = (self.record(f"{_RUNS}{checkpoint.run}/plan", "plan").get("weights") or "lora") == "full"
+            noted = checkpoint.id in self.read("checkpoints/resharding") or checkpoint.id in self.read(
+                "checkpoints/resharded"
+            )
             life: dict[str, Any] = {
                 "reshard": full or noted,
-                "resharding": self.record("versions/resharding", version.id).get("at"),
-                "resharded": self.record("versions/resharded", version.id).get("at"),
-                "latest_of": latest.get(version.id),
-                "workers": loads.get(version.id, {}),
-                "waiting": waiting.get(version.id, 0),
+                "resharding": self.record("checkpoints/resharding", checkpoint.id).get("at"),
+                "resharded": self.record("checkpoints/resharded", checkpoint.id).get("at"),
+                "latest_of": latest.get(checkpoint.id),
+                "workers": loads.get(checkpoint.id, {}),
+                "waiting": waiting.get(checkpoint.id, 0),
             }
             life["state"] = _state(life, older)
             shown.append(
                 {
-                    "id": version.id,
-                    "short": shorter[version.id],
-                    "depth": version.depth,
-                    "parents": list(version.parents),
-                    "base": version.base,
-                    "made": version.made,
-                    "kept": version.weights is not None,
-                    "released": version.released,
-                    "bookmarks": sorted(marks.get(version.id, [])),
+                    "id": checkpoint.id,
+                    "short": shorter[checkpoint.id],
+                    "depth": checkpoint.depth,
+                    "parents": list(checkpoint.parents),
+                    "base": checkpoint.base,
+                    "made": checkpoint.made,
+                    "kept": checkpoint.weights is not None,
+                    "released": checkpoint.released,
+                    "bookmarks": sorted(marks.get(checkpoint.id, [])),
                     "metrics": {
-                        name: version.metrics[name] for name in ("kl_moved", "loss") if name in version.metrics
+                        name: checkpoint.metrics[name] for name in ("kl_moved", "loss") if name in checkpoint.metrics
                     },
                     "by": {
-                        "run": version.run,
-                        "name": run["name"] if run else self.names.get("runs", {}).get(version.run, version.run),
+                        "run": checkpoint.run,
+                        "name": run["name"] if run else self.names.get("runs", {}).get(checkpoint.run, checkpoint.run),
                         "kind": run["kind"] if run else None,
-                        "step": version.step,
+                        "step": checkpoint.step,
                     }
-                    if version.run
+                    if checkpoint.run
                     else None,
                     "life": life,
-                    "sample": f"{VERSIONS}/{version.id}" in self.sampled,
+                    "sample": f"{CHECKPOINTS}/{checkpoint.id}" in self.sampled,
                 }
             )
         return shown
 
-    def edges(self, made: Mapping[str, Version], runs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-        """What each version grew from: its first parent (`trained`), or its base model (`base`, from `base:MODEL`);
+    def edges(
+        self, made: Mapping[str, Checkpoint], runs: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """What each checkpoint grew from: its first parent (`trained`), or its base model (`base`, from `base:MODEL`);
         its other parents (`learned`); and each distillation's teachers and what its student starts from, each with
-        what the distillation's mode means. With the versions they name that this ledger does not have."""
+        what the distillation's mode means. With the checkpoints they name that this ledger does not have."""
         edges: list[dict[str, Any]] = []
-        for version in made.values():
-            if not version.parents:
-                edges.append({"kind": "base", "from": f"base:{version.base or 'the base model'}", "to": version.id})
-            for index, parent in enumerate(version.parents):
-                edges.append({"kind": "trained" if index == 0 else "learned", "from": parent, "to": version.id})
+        for checkpoint in made.values():
+            if not checkpoint.parents:
+                edges.append(
+                    {"kind": "base", "from": f"base:{checkpoint.base or 'the base model'}", "to": checkpoint.id}
+                )
+            for index, parent in enumerate(checkpoint.parents):
+                edges.append({"kind": "trained" if index == 0 else "learned", "from": parent, "to": checkpoint.id})
         for run in runs:
             if run["kind"] != "distill":
                 continue
@@ -340,15 +346,15 @@ class _Reading:
         return edges, outside
 
     def loads(self) -> dict[str, dict[str, dict[str, Any]]]:
-        """Each version's workers: when each loaded it, and unloaded it (None: it still serves it). Where no worker
+        """Each checkpoint's workers: when each loaded it, and unloaded it (None: it still serves it). Where no worker
         is registered, a run's engines stand for one worker that loads what the feed says the run published, and
         lets each go at the next."""
         loads: dict[str, dict[str, dict[str, Any]]] = {}
         for worker in self.named(_WORKERS, "/loaded"):
             for key, record in self.read(f"{_WORKERS}{worker}/loaded").items():
-                version = key.rpartition("/")[0] or key  # (keyed `VERSION/N`: a worker may load a version again)
+                checkpoint = key.rpartition("/")[0] or key  # (keyed `VERSION/N`: a worker may load a checkpoint again)
                 until = self.record(f"{_WORKERS}{worker}/unloaded", key).get("at")
-                loads.setdefault(version, {})[worker] = {"since": record["at"], "until": until}
+                loads.setdefault(checkpoint, {})[worker] = {"since": record["at"], "until": until}
         by_run: dict[str, list[Mapping[str, Any]]] = {}
         for note in self.published:
             by_run.setdefault(f"{note.get('run') or note['channel']} engines", []).append(note)
@@ -360,12 +366,12 @@ class _Reading:
 
     def workers(self, loads: Mapping[str, dict[str, dict[str, Any]]]) -> list[dict[str, Any]]:
         """Each inference worker: what it holds (a base, with slots for adapters, or one full-weight model), and the
-        versions it serves now."""
+        checkpoints it serves now."""
         serving: dict[str, list[str]] = {}
-        for version, spans in loads.items():
+        for checkpoint, spans in loads.items():
             for worker, span in spans.items():
                 if span["until"] is None:
-                    serving.setdefault(worker, []).append(version)
+                    serving.setdefault(worker, []).append(checkpoint)
         workers: list[dict[str, Any]] = []
         for worker in sorted({*self.named(_WORKERS, "/registered"), *serving}):
             registrations = self.read(f"{_WORKERS}{worker}/registered")
@@ -382,7 +388,7 @@ class _Reading:
             )
         return workers
 
-    def trainers(self, runs: list[dict[str, Any]], made: Mapping[str, Version]) -> list[dict[str, Any]]:
+    def trainers(self, runs: list[dict[str, Any]], made: Mapping[str, Checkpoint]) -> list[dict[str, Any]]:
         """The registered trainers, each with its queue; and for a run whose steps name no trainer, the run's own,
         whose queue is the run's steps (one at a time: each is decided once the one before is done with)."""
         trainers: list[dict[str, Any]] = []
@@ -405,7 +411,7 @@ class _Reading:
         for run in runs:
             if run["kind"] != "train" or any(step["trainer"] for step in run["steps"]):
                 continue
-            line = [version for id, version in made.items() if id in run["versions"]]
+            line = [checkpoint for id, checkpoint in made.items() if id in run["checkpoints"]]
             queue = [
                 self.entry(
                     {"run": run["run"], "step": step["step"], "makes": step["makes"]} | {"at": step["decided"]},
@@ -419,9 +425,9 @@ class _Reading:
                 {
                     "trainer": f"{run['name']} (the run's own)",
                     "weights": "lora",  # (a channel serves LoRA adapters only)
-                    "base": next((version.base for version in line if version.base), None),
+                    "base": next((checkpoint.base for checkpoint in line if checkpoint.base), None),
                     "runs": [run["run"]],
-                    "colocated": any("waited_for_requests_seconds" in version.metrics for version in line),
+                    "colocated": any("waited_for_requests_seconds" in checkpoint.metrics for checkpoint in line),
                     "implicit": True,
                     "queue": queue,
                     "depth": _depth(queue),
@@ -432,12 +438,12 @@ class _Reading:
         return trainers
 
     def entry(
-        self, entry: Mapping[str, Any], began: float | None, runs: list[dict[str, Any]], made: Mapping[str, Version]
+        self, entry: Mapping[str, Any], began: float | None, runs: list[dict[str, Any]], made: Mapping[str, Checkpoint]
     ) -> dict[str, Any]:
-        """A queued step, with when it began and ended: its version made, or its failure written."""
+        """A queued step, with when it began and ended: its checkpoint made, or its failure written."""
         run = next((each for each in runs if each["run"] == entry["run"]), None)
         step = next((each for each in run["steps"] if each["step"] == int(entry["step"])), None) if run else None
-        version = made.get(str(entry["makes"]))
+        checkpoint = made.get(str(entry["makes"]))
         failure = self.record(f"{_RUNS}{entry['run']}/failures", str(entry["step"]))
         return {
             "run": entry["run"],
@@ -445,13 +451,13 @@ class _Reading:
             "makes": entry["makes"],
             "queued": entry.get("at"),
             "began": began,
-            "done": version.made if version else failure.get("at"),
-            "state": MADE if version else FAILED if failure else TAKING if began else QUEUED,
+            "done": checkpoint.made if checkpoint else failure.get("at"),
+            "state": MADE if checkpoint else FAILED if failure else TAKING if began else QUEUED,
             "segments": step["segments"] if step else None,
         }
 
     def evaluations(self) -> list[dict[str, Any]]:
-        """Each suite: its starts, and each subject that played it (a version, or another model), with how it did
+        """Each suite: its starts, and each subject that played it (a checkpoint, or another model), with how it did
         at each start."""
         suites: list[dict[str, Any]] = []
         for suite in self.named(_EVALUATIONS, "/starts"):
@@ -470,8 +476,8 @@ class _Reading:
                 subjects.append(
                     {
                         "subject": subject,
-                        "kind": about.get("kind", "version"),
-                        "version": about.get("version"),
+                        "kind": about.get("kind", "checkpoint"),
+                        "checkpoint": about.get("checkpoint"),
                         "model": about.get("model"),
                         "episodes": int(about.get("episodes") or 1),
                         "asked_by": about.get("asked_by"),
@@ -497,9 +503,9 @@ class _Reading:
 
 
 def _state(life: Mapping[str, Any], older: set[str]) -> str:
-    """Where a version is on its way to the engines (`WRITTEN` to `SERVING`, or `SUPERSEDED`). A run's latest rolls
-    out until no worker serves an older version of that run in its place (`older`: those that serve one now); any
-    other version serves where requests name it exactly."""
+    """Where a checkpoint is on its way to the engines (`WRITTEN` to `SERVING`, or `SUPERSEDED`). A run's latest rolls
+    out until no worker serves an older checkpoint of that run in its place (`older`: those that serve one now); any
+    other checkpoint serves where requests name it exactly."""
     workers: Mapping[str, Any] = life["workers"]
     now = {worker for worker, span in workers.items() if span["until"] is None}
     if life["latest_of"]:

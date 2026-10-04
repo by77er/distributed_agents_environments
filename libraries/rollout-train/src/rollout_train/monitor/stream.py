@@ -8,7 +8,8 @@ A topic is a thing the page shows, by name:
 - `launches`: the runs asked for, and the launchers alive with what each offers (`System.launches`);
 - `feeds`: every episode in the runs' feeds, summarised (`System.feeds`);
 - `statistics`: every run in figures (`System.statistics`, without the machines);
-- `versions`, `versions/sample`: the versions as a graph, without or with the sample fixture (`System.lineage`);
+- `checkpoints`, `checkpoints/sample`: the checkpoints as a graph, without or with the sample fixture
+  (`System.lineage`);
 - `group/RUN/NUMBER`: one group (`System.group`);
 - `episode/RUN_ID`: one episode's lines; its version is how many there are, where from and its state, and the page
   asks for the lines it lacks (`System.episode` with `after`).
@@ -110,7 +111,7 @@ class Hub:
             figures = await system.statistics()
             figures.pop("machines", None)
             return figures
-        if topic in ("versions", "versions/sample"):
+        if topic in ("checkpoints", "checkpoints/sample"):
             return await system.lineage(sample=topic.endswith("/sample"))
         if topic.startswith("group/"):
             run, _, number = topic.removeprefix("group/").rpartition("/")

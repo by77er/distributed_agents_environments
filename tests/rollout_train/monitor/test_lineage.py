@@ -1,4 +1,4 @@
-"""The versions as a graph: growing from base models, forks and distillations, trainers, workers and evaluations."""
+"""The checkpoints as a graph: growing from base models, forks and distillations, trainers, workers and evaluations."""
 
 from pathlib import Path
 
@@ -25,7 +25,7 @@ from rollout_train.monitor.lineage import (
 NOW = 1_800_000_000.0
 
 
-def version(
+def checkpoint(
     id: str, parents: list[str], depth: int, run: str, step: int, made: float, base: str = "small"
 ) -> dict[str, JsonValue]:
     return {
@@ -45,18 +45,19 @@ def step(makes: str, parent: str | None, number: int, decided: float, **more: Js
 
 
 def tables() -> dict[str, dict[str, JsonValue]]:
-    """A run's line of versions, a run forked from it, a distillation of both, and a second line from the same base."""
+    """A run's line of checkpoints, a run forked from it, a distillation of both, and a second line from the same
+    base."""
     return {
-        "versions": {
-            "minerone": version("minerone", [], 1, "train", 1, 100.0),
-            "minertwo": version("minertwo", ["minerone"], 2, "train", 2, 200.0),
-            "minerthree": version("minerthree", ["minertwo"], 3, "train", 3, 300.0),
-            "diggerone": version("diggerone", ["minertwo"], 3, "dig", 1, 400.0),
-            "diggertwo": version("diggertwo", ["diggerone"], 4, "dig", 2, 500.0),
-            "bothone": version("bothone", ["minerthree", "diggertwo"], 4, "merge", 1, 700.0),
-            "freshone": version("freshone", [], 1, "fresh", 1, 800.0),
+        "checkpoints": {
+            "minerone": checkpoint("minerone", [], 1, "train", 1, 100.0),
+            "minertwo": checkpoint("minertwo", ["minerone"], 2, "train", 2, 200.0),
+            "minerthree": checkpoint("minerthree", ["minertwo"], 3, "train", 3, 300.0),
+            "diggerone": checkpoint("diggerone", ["minertwo"], 3, "dig", 1, 400.0),
+            "diggertwo": checkpoint("diggertwo", ["diggerone"], 4, "dig", 2, 500.0),
+            "bothone": checkpoint("bothone", ["minerthree", "diggertwo"], 4, "merge", 1, 700.0),
+            "freshone": checkpoint("freshone", [], 1, "fresh", 1, 800.0),
         },
-        "versions/released": {"minerone": {"at": 900.0}},
+        "checkpoints/released": {"minerone": {"at": 900.0}},
         "runs/train/steps": {
             "1": step("minerone", None, 1, 50.0),
             "2": step("minertwo", "minerone", 2, 150.0),
@@ -70,7 +71,7 @@ def tables() -> dict[str, dict[str, JsonValue]]:
             "3": step("diggerthree", "diggertwo", 3, 950.0, trainer="shared"),
         },
         "runs/fresh/steps": {"1": step("freshone", None, 1, 750.0)},
-        "versions/resharding": {"bothone": {"at": 710.0}},
+        "checkpoints/resharding": {"bothone": {"at": 710.0}},
         "runs/merge/plan": {
             "plan": {
                 "kind": "distill",
@@ -94,7 +95,7 @@ def tables() -> dict[str, dict[str, JsonValue]]:
         "workers/a/unloaded": {"diggerone/1": {"at": 520.0}},
         "workers/b/loaded": {"diggerone/1": {"at": 430.0}},
         "evaluations/suite/starts": {"1": {"task": "t1", "seed": 1}, "2": {"task": "t2", "seed": 1}},
-        "evaluations/suite/minerthree/subject": {"subject": {"kind": "version", "version": "minerthree"}},
+        "evaluations/suite/minerthree/subject": {"subject": {"kind": "checkpoint", "checkpoint": "minerthree"}},
         "evaluations/suite/minerthree/results": {
             "1-1": {"solved": True, "reward": 1.0},
             "2-1": {"solved": False, "reward": 0.2},
@@ -118,8 +119,8 @@ def test_every_version_grows_from_its_base_model_along_its_parents() -> None:
     graph = lineage(tables(), names=NAMES, now=NOW)
     edges = {(edge["kind"], edge["from"], edge["to"]) for edge in graph["edges"]}
     roots = {edge["to"] for edge in graph["edges"] if edge["kind"] == "base"}
-    # Every version with no parent hangs from its base; two lines from the same base share that root.
-    no_parent = {each["id"] for each in graph["versions"] if not each["parents"]}
+    # Every checkpoint with no parent hangs from its base; two lines from the same base share that root.
+    no_parent = {each["id"] for each in graph["checkpoints"] if not each["parents"]}
     assert roots == no_parent == {"minerone", "freshone"}
     assert {("base", "base:small", "minerone"), ("base", "base:small", "freshone")} <= edges
     assert graph["bases"] == ["small"]
@@ -129,7 +130,7 @@ def test_every_version_grows_from_its_base_model_along_its_parents() -> None:
         ("trained", "minerthree", "bothone"),
         ("learned", "diggertwo", "bothone"),
     } <= edges
-    shown = {each["id"]: each for each in graph["versions"]}
+    shown = {each["id"]: each for each in graph["checkpoints"]}
     assert shown["diggertwo"]["by"] == {"run": "dig", "name": "digger", "kind": "train", "step": 2}
     assert shown["diggertwo"]["depth"] == 4 and shown["diggertwo"]["short"] == "diggert"
     assert shown["minerthree"]["bookmarks"] == ["best"] and shown["diggertwo"]["bookmarks"] == ["dig"]
@@ -147,7 +148,7 @@ def test_the_graph_has_each_runs_versions_its_distillations_and_what_trains_serv
     } <= edges
     runs = {run["run"]: run for run in graph["runs"]}
     merge = runs["merge"]
-    assert merge["kind"] == "distill" and merge["mode"] == OFF_POLICY and merge["versions"] == ["bothone"]
+    assert merge["kind"] == "distill" and merge["mode"] == OFF_POLICY and merge["checkpoints"] == ["bothone"]
     assert merge["says"] == SAYS[OFF_POLICY] and "teachers' samples" in merge["says"]
     assert all(edge["says"] == SAYS[OFF_POLICY] for edge in graph["edges"] if edge["kind"] in ("teach", "start"))
     assert runs["dig"]["from"] == "minertwo" and runs["dig"]["name"] == "digger" and runs["train"]["name"] == "miner"
@@ -164,8 +165,8 @@ def test_the_graph_has_each_runs_versions_its_distillations_and_what_trains_serv
     )
     assert runs["dig"]["latest"] == "diggertwo"
 
-    # The way to the engines: a run's latest serves once no worker serves an older version in its place.
-    life = {each["id"]: each["life"]["state"] for each in graph["versions"]}
+    # The way to the engines: a run's latest serves once no worker serves an older checkpoint in its place.
+    life = {each["id"]: each["life"]["state"] for each in graph["checkpoints"]}
     assert life["diggertwo"] == ROLLING  # (worker b still serves diggerone)
     assert life["diggerone"] == SERVING and life["bothone"] == RESHARDING and life["minerthree"] == WRITTEN
 
@@ -186,23 +187,23 @@ def test_the_graph_has_each_runs_versions_its_distillations_and_what_trains_serv
     assert (
         subjects["minerthree"]["solved"] == 1
         and subjects["minerthree"]["played"] == 2
-        and subjects["minerthree"]["version"] == "minerthree"
+        and subjects["minerthree"]["checkpoint"] == "minerthree"
     )
-    assert subjects["model.big"]["kind"] == "model" and subjects["model.big"]["version"] is None
-    assert not graph["sample"] and not any(each["sample"] for each in graph["versions"])
+    assert subjects["model.big"]["kind"] == "model" and subjects["model.big"]["checkpoint"] is None
+    assert not graph["sample"] and not any(each["sample"] for each in graph["checkpoints"])
 
 
 def test_without_proposed_tables_a_runs_steps_stand_for_its_trainer_and_its_published_notes_for_what_it_serves() -> (
     None
 ):
-    only = {name: records for name, records in tables().items() if name.startswith(("versions", "runs/train/"))}
-    only["versions"] = {key: each for key, each in only["versions"].items() if key.startswith("miner")}
+    only = {name: records for name, records in tables().items() if name.startswith(("checkpoints", "runs/train/"))}
+    only["checkpoints"] = {key: each for key, each in only["checkpoints"].items() if key.startswith("miner")}
     notes = [
         {"kind": "published", "run": "train", "channel": "policy", "adapter": "minertwo", "at": 260.0},
         {"kind": "published", "run": "train", "channel": "policy", "adapter": "minerthree", "at": 310.0},
     ]
     graph = lineage(only, notes, now=NOW)
-    life = {each["id"]: each["life"] for each in graph["versions"]}
+    life = {each["id"]: each["life"] for each in graph["checkpoints"]}
     assert life["minerthree"]["state"] == SERVING and life["minerthree"]["latest_of"] == "train"
     assert life["minertwo"]["state"] == SUPERSEDED and life["minerone"]["state"] == WRITTEN
     assert [worker["worker"] for worker in graph["workers"]] == ["train engines"]
@@ -213,7 +214,7 @@ def test_the_sample_fixture_is_read_only_when_asked_for_is_marked_and_never_repl
     own = tables()
     graph = lineage(own, names=NAMES, sample=True, now=NOW)
     assert graph["sample"]
-    shown = {each["id"]: each for each in graph["versions"]}
+    shown = {each["id"]: each for each in graph["checkpoints"]}
     assert not shown["minerthree"]["sample"] and sum(each["sample"] for each in shown.values()) >= 20
     names = {run["name"] for run in graph["runs"] if run["sample"]}
     assert {"scout", "crafter", "planner"} <= names and "miner" in {run["name"] for run in graph["runs"]}
@@ -225,12 +226,12 @@ def test_the_sample_fixture_is_read_only_when_asked_for_is_marked_and_never_repl
     assert [entry["state"] for entry in lora["queue"]].count(QUEUED) >= 2 and max(
         point[1] for point in lora["depth"]
     ) >= 2
-    states = {each["life"]["state"] for each in graph["versions"]}
+    states = {each["life"]["state"] for each in graph["checkpoints"]}
     assert {RESHARDING, ROLLING, SERVING} <= states
     assert any(suite["sample"] and len(suite["subjects"]) > 3 for suite in graph["evaluations"])
     assert graph["routing"]["waiting"] and graph["routing"]["history"]
     assert all(0 < each["made"] <= NOW for each in shown.values())  # (the fixture's times are moved to before now)
-    # Nothing dangles but the real ledger's versions the sample forks from; lines from one base share its root.
+    # Nothing dangles but the real ledger's checkpoints the sample forks from; lines from one base share its root.
     assert graph["outside"] and all(name.startswith("curriculum-") for name in graph["outside"])
     referenced = {edge["from"] for edge in graph["edges"]} | {edge["to"] for edge in graph["edges"]}
     runs = {run["run"] for run in graph["runs"]}
@@ -241,7 +242,7 @@ def test_the_sample_fixture_is_read_only_when_asked_for_is_marked_and_never_repl
     }
     sample_marks = {"scout", "crafter", "merged", "planner"}
     assert sample_marks <= set(graph["bookmarks"]) and graph["bookmarks"]["best"] == "minerthree"
-    assert all(mark in shown[version]["bookmarks"] for mark, version in graph["bookmarks"].items())
+    assert all(mark in shown[checkpoint]["bookmarks"] for mark, checkpoint in graph["bookmarks"].items())
 
 
 async def test_the_page_asks_for_the_graph_with_or_without_the_sample(tmp_path: Path) -> None:
@@ -250,8 +251,8 @@ async def test_the_page_asks_for_the_graph_with_or_without_the_sample(tmp_path: 
 
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
-        plain = (await client.get("/api/versions")).json()
-        sampled = (await client.get("/api/versions?sample=1")).json()
-    assert plain["versions"] == [] and plain["bases"] == [] and not plain["sample"]
-    assert sampled["sample"] and sampled["versions"] and all(each["sample"] for each in sampled["versions"])
+        plain = (await client.get("/api/checkpoints")).json()
+        sampled = (await client.get("/api/checkpoints?sample=1")).json()
+    assert plain["checkpoints"] == [] and plain["bases"] == [] and not plain["sample"]
+    assert sampled["sample"] and sampled["checkpoints"] and all(each["sample"] for each in sampled["checkpoints"])
     assert not (tmp_path / "ledger").exists()  # (a reader makes no ledger where none is)

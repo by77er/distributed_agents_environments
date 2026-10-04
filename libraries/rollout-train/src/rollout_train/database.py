@@ -7,7 +7,7 @@ of every scope). Taking a fence and appending run in transactions that hold the 
 replaced is refused (`Fenced`) whichever process it is in. SQLite serves one machine; Postgres serves several.
 
 `DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in two tables of the same database: `runs`
-(each run's id and name, a name once) and `bookmarks` (each bookmark's name and version); a database ledger's is its
+(each run's id and name, a name once) and `bookmarks` (each bookmark's name and checkpoint); a database ledger's is its
 `registry`. `DatabasePresence` holds the runners' heartbeats (`rollout_train.presence`) in a third, `presence`: a row
 per runner, changed in place; a database ledger's is its `presence`. `DatabaseLaunches` holds the runs asked for
 (`rollout_train.launches`) in a fourth, `launches`; a database ledger's is its `launches`.
@@ -57,7 +57,7 @@ BOOKMARKS = sa.Table(
     "bookmarks",
     METADATA,
     sa.Column("name", sa.Text, primary_key=True),
-    sa.Column("version", sa.Text, nullable=False),
+    sa.Column("checkpoint", sa.Text, nullable=False),
     sa.Column("moved", sa.Float(), nullable=False),
 )
 LAUNCHES = sa.Table(
@@ -196,18 +196,18 @@ class DatabaseRegistry:
 
     async def bookmarks(self) -> list[Bookmark]:
         def rows(connection: Connection) -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT name, version, moved FROM bookmarks ORDER BY name")
+            return fetch_all(connection, "SELECT name, checkpoint, moved FROM bookmarks ORDER BY name")
 
         return [Bookmark(*row) for row in await asyncio.to_thread(self.database.read, rows)]
 
-    async def bookmark(self, name: str, version: str) -> Bookmark:
-        mark = Bookmark(valid(name), version, round(time.time(), 1))
+    async def bookmark(self, name: str, checkpoint: str) -> Bookmark:
+        mark = Bookmark(valid(name), checkpoint, round(time.time(), 1))
 
         def moved(connection: Connection) -> Bookmark:
             sql(
                 connection,
-                "INSERT INTO bookmarks (name, version, moved) VALUES (:name, :version, :moved) "
-                "ON CONFLICT (name) DO UPDATE SET version = excluded.version, moved = excluded.moved",
+                "INSERT INTO bookmarks (name, checkpoint, moved) VALUES (:name, :checkpoint, :moved) "
+                "ON CONFLICT (name) DO UPDATE SET checkpoint = excluded.checkpoint, moved = excluded.moved",
                 asdict(mark),
             )
             return mark
@@ -352,5 +352,5 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
         for entry in await registered.runs():
             await target.registry.create(entry.name, entry.id)
         for mark in await registered.bookmarks():
-            await target.registry.bookmark(mark.name, mark.version)
+            await target.registry.bookmark(mark.name, mark.checkpoint)
     return count

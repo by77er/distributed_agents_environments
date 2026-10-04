@@ -5,13 +5,13 @@ import { memo } from "react";
 import { Link } from "react-router-dom";
 import { useKnown, useSystem } from "../api/queries";
 import { Rename } from "../components/Rename";
-import type { OpenGroup, Run as RunData, Step, Version } from "../api/types";
+import type { OpenGroup, Run as RunData, Step, Checkpoint } from "../api/types";
 import { RewardsChart, Sized } from "../components/charts";
 import { Card, Cells, Dots, Empty, Head, Kpi, Kpis, Legend, Mark, SectionTitle, Spec, Specs, Stages, Table, Tile } from "../components/ui";
 import { byNumber, figure, mean, shareOf, span } from "../lib/format";
 import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, stateKind } from "../lib/model";
 import { groupPlace, stepPlace } from "../lib/places";
-import { VersionTag } from "../components/versions";
+import { CheckpointTag } from "../components/checkpoints";
 import { Ago, Elsewhere, running, Wrote } from "../layout/runs";
 
 export function Run({ name }: { name: string }) {
@@ -19,7 +19,7 @@ export function Run({ name }: { name: string }) {
   if (!system) return <Empty>Reading the run…</Empty>;
   const run = system.runs.find(each => each.run === name);
   if (!run) return <Empty>There is no run {name}.</Empty>;
-  const made = madeBy(system.versions, run.run);  // (the versions it made, oldest first)
+  const made = madeBy(system.checkpoints, run.run);  // (the checkpoints it made, oldest first)
   return (
     <>
       <RunHead run={run} made={made} host={system.host} />
@@ -46,7 +46,7 @@ export function Run({ name }: { name: string }) {
   );
 }
 
-const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made: Version[]; host: string }) {
+const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made: Checkpoint[]; host: string }) {
   const channel = run.channels.find(each => each.adapter) ?? run.channels[0];
   const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1);
   return (
@@ -54,9 +54,9 @@ const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made:
       <Specs>
         <Spec label="state" kind={run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}>{running(run, host)} · <Wrote run={run} /></Spec>
         {newest?.base ? <Spec label="base model">{newest.base}</Spec> : null}
-        <Spec label="from"><VersionTag id={from} /></Spec>
-        {newest ? <Spec label="now" kind="violet"><VersionTag id={newest.id} bare /></Spec> : null}
-        {channel?.adapter ? <Spec label="serving" kind="accent"><VersionTag id={channel.adapter} bare /></Spec> : null}
+        <Spec label="from"><CheckpointTag id={from} /></Spec>
+        {newest ? <Spec label="now" kind="violet"><CheckpointTag id={newest.id} bare /></Spec> : null}
+        {channel?.adapter ? <Spec label="serving" kind="accent"><CheckpointTag id={channel.adapter} bare /></Spec> : null}
         <Spec label="id">{run.run}</Spec>
         <Spec label="fence">{run.fence ?? "–"}</Spec>
         <Spec label="directory">{run.directory ?? "–"}</Spec>
@@ -67,7 +67,7 @@ const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made:
 });
 
 /** From what it started, where it is now, and how its groups went, early and late. */
-const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made: Version[] }) {
+const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made: Checkpoint[] }) {
   const known = useKnown();
   const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1);
   const trained = run.done.filter(line => line.update).length, last = run.done.at(-1);
@@ -158,7 +158,7 @@ const StepsCard = memo(function StepsCard({ run }: { run: RunData }) {
         heads={[["step"], ["made"], ["groups"], ["solved"], ["segments", "n"], ["moved", "n"], ["took", "n"]]}
         keys={recent.map(step => step.step)}
         rows={recent.map(step => {
-          const version = known.version(step.makes);
+          const checkpoint = known.checkpoint(step.makes);
           const solved = step.groups.map(number => groups.get(number)?.line).filter(Boolean).flatMap(line => line!.solved);
           return [
             { text: `S${step.step}`, kind: "key" },
@@ -166,8 +166,8 @@ const StepsCard = memo(function StepsCard({ run }: { run: RunData }) {
             <span>{range(step.groups)}{step.skipped.length ? <span className="faint"> + {step.skipped.length} skipped</span> : null}</span>,
             solved.length ? `${solved.filter(Boolean).length}/${solved.length}` : "–",
             figure(step.segments),
-            version?.metrics.kl_moved?.toFixed(4) ?? "–",
-            span(version?.metrics.update_seconds ?? version?.metrics.seconds),
+            checkpoint?.metrics.kl_moved?.toFixed(4) ?? "–",
+            span(checkpoint?.metrics.update_seconds ?? checkpoint?.metrics.seconds),
           ];
         })}
         to={recent.map(step => stepPlace(run.run, step.step))}

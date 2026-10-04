@@ -5,7 +5,7 @@
 First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`).
 Then the segments are taken in shuffled minibatches of about `tokens_per_step` sampled tokens, an optimizer step
 each, under the objective the settings name (`rollout_lora.objectives`): a ratio to `old` that bounds how far the
-step moves the policy, and an importance weight `old / behavior` for where each token was sampled (an older version,
+step moves the policy, and an importance weight `old / behavior` for where each token was sampled (an older checkpoint,
 and the engine computing differently from the trainer). No KL penalty; the pass stops early if a minibatch finds the
 policy further than `max_kl` from where the step began. Only tokens the policy sampled are trained on. The numbers
 are `LoraSettings`'; which segments, and with what advantages, is the algorithm's business.

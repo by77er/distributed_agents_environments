@@ -1,16 +1,16 @@
-"""The training loop: a curriculum over a catalog's rows, groups of episodes, steps over the groups played, versions.
+"""The training loop: a curriculum over a catalog's rows, groups of episodes, steps over the groups played, checkpoints.
 
-It is written against the ledger, a `Trainer`, an `Algorithm` and `Versions` only: it asks for each group's episodes in
-the ledger, and runners, wherever they are, play them (`rollout_train.rollouts.scheduler`). The same loop runs with
+It is written against the ledger, a `Trainer`, an `Algorithm` and `Checkpoints` only: it asks for each group's episodes
+in the ledger, and runners, wherever they are, play them (`rollout_train.rollouts.scheduler`). The same loop runs with
 everything in one process and with the runners, the engines and the trainer on machines of their own.
 
 **Play and training go their own ways.** Enough groups are kept asked for that `episodes_at_once` episodes have work
 waiting, whatever groups they are of. When a group's last episode ends its result is written down at once, and what the
 algorithm finds to train on in it joins a queue. A step is taken over every group queued once there are at least
 `groups_per_step` (so that no step leans toward one task), while play goes on; at the end of the run, over whatever is
-left. Tokens sampled under an older version than the one a step starts from are corrected for by the trainer's
-objective. One step is taken at a time, each from the version the one before made; the first from the version the
-run starts from (`start`: any version, of this run or another; the base model if none).
+left. Tokens sampled under an older checkpoint than the one a step starts from are corrected for by the trainer's
+objective. One step is taken at a time, each from the checkpoint the one before made; the first from the checkpoint the
+run starts from (`start`: any checkpoint, of this run or another; the base model if none).
 
 **It can die at any moment and be started again.** It keeps nothing it cannot read back: what it decides and what
 happens are appended to the run's tables in the ledger (`rollout_train.record`), and every action is one that can be
@@ -21,10 +21,10 @@ taken twice.
 | after deciding a group, or while it played | waits for its episodes: runners play them (again, any a runner dropped) |
 | after a group ended | finds no result, and writes it |
 | with groups queued | finds results to train on that no step covers, and queues them again |
-| during a step | finds the step decided and no version made, and takes it again over the same groups |
-| after the step | finds the version, serves it, and goes on |
+| during a step | finds the step decided and no checkpoint made, and takes it again over the same groups |
+| after the step | finds the checkpoint, serves it, and goes on |
 
-Taking the run's fence when it starts shuts out a loop it replaced: that one's next write is refused. The versions it
+Taking the run's fence when it starts shuts out a loop it replaced: that one's next write is refused. The checkpoints it
 makes are appended under that fence.
 """
 
@@ -44,17 +44,18 @@ from rollout.catalog import Catalog, binding_for
 from rollout.contracts import BlobReference
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
+from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Fence
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, scope, table
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
-from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Trainer, Weighted
-from rollout_train.versions import Manifest, Retention, Version, Versions, new_id
+from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Trainer, Weighted
 
 
 class Publisher(Protocol):
-    """Serves new weights on a channel from now on; returns the version they are served as."""
+    """Serves new weights on a channel from now on; returns the number its samples are stamped with (the checkpoint's
+    depth)."""
 
     async def __call__(self, channel: str, adapter: str, path: str, version: int | None = None) -> int: ...
 
@@ -66,7 +67,7 @@ FAILED_UPDATES = 3
 async def train(
     catalog: Catalog,
     trainer: Trainer,
-    versions: Versions,
+    checkpoints: Checkpoints,
     *,
     start: str | None = None,
     base: str | None = None,
@@ -85,30 +86,30 @@ async def train(
     started: Mapping[str, JsonValue] | None = None,
     hooks: Sequence[Hooks] = (),
     kept: Callable[[], Awaitable[Collection[str]]] | None = None,
-    made: Callable[[Version], Awaitable[object]] | None = None,
-    reshard: Callable[[Version, Fence], Awaitable[Manifest]] | None = None,
+    made: Callable[[Checkpoint], Awaitable[object]] | None = None,
+    reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None,
 ) -> None:
-    """Train from `start` (a version's id; else the base model, named `base`) on `catalog` until `groups` more groups
+    """Train from `start` (a checkpoint's id; else the base model, named `base`) on `catalog` until `groups` more groups
     have been played (those a stopped loop left unplayed among them) and every group played has been trained on, serving
-    each version made on `channel`; a run started again goes on from the newest version it made. A step is taken over
-    the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what is left).
-    `directory` is where versions' files are kept on this machine while they are in use: the one being served and
-    the one before it (a turn in progress finishes under the weights it began with); every version's files are in
-    the blob store; `publish` serves a version on `channel`. `algorithm` is `Grpo()` unless given. `episodes_at_once` is
-    how many episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once
-    as each has places). `binding` says how the program's model slots and imports are
-    served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
-    one that has recorded nothing: the run's results are folded into it. `retention` says which of the versions the
-    run made keep their files (weights and trainer state) once a newer one is served (`Retention()` unless given);
-    besides those, what is served, what any run starts from, and whatever `kept` says (the bookmarked versions, say)
-    keep theirs. `started` is what the run's `starts` record says beside what the loop knows (where it starts from,
-    this host, the time): where the run's directory is, where the monitor on its machine serves (`address`), and what
-    profile started it, say. `hooks` are told of each result and step; `made` is called with each version made, once
-    it is served (to move a bookmark, say). `reshard` gives the files the engines load for a version (in their
-    layout: `rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's."""
+    each checkpoint made on `channel`; a run started again goes on from the newest checkpoint it made. A step is taken
+    over the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what is
+    left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being served
+    and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files are in
+    the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is `Grpo()` unless given. `episodes_at_once`
+    is how many episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once
+    as each has places). `binding` says how the program's model slots and imports are served (by default: every slot
+    from `channel`, each import from the tool set of its own name). `curriculum` is one that has recorded nothing: the
+    run's results are folded into it. `retention` says which of the checkpoints the run made keep their files (weights
+    and trainer state) once a newer one is served (`Retention()` unless given); besides those, what is served, what any
+    run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's
+    `starts` record says beside what the loop knows (where it starts from, this host, the time): where the run's
+    directory is, where the monitor on its machine serves (`address`), and what profile started it, say. `hooks` are
+    told of each result and step; `made` is called with each checkpoint made, once it is served (to move a bookmark,
+    say). `reshard` gives the files the engines load for a checkpoint (in their layout: `rollout_train.resharding`),
+    told the run's fence to note it under; without it, they load the trainer's."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
-    ledger, blobs = versions.ledger, versions.blobs
+    ledger, blobs = checkpoints.ledger, checkpoints.blobs
     fence = await ledger.take(scope(run))  # whoever ran this before can no longer write
     decided = {int(number): _mapping(group) for number, group in (await ledger.read(table(run, GROUPS))).items()}
     recorded = {
@@ -132,36 +133,36 @@ async def train(
         for hook in hooks:
             hook.on_note(event)
 
-    async def files(version: Version) -> Checkpoint:
-        """A version's files on this machine, read from the blob store if they are not here."""
-        here = directory / version.id
-        if version.weights is None:
-            raise ValueError(f"{version.id} was released: its weights are gone")
-        weights = await versions.files(version.weights, here / WEIGHTS)
-        return Checkpoint(weights, await versions.files(version.state, here / STATE) if version.state else None)
+    async def files(checkpoint: Checkpoint) -> Files:
+        """A checkpoint's files on this machine, read from the blob store if they are not here."""
+        here = directory / checkpoint.id
+        if checkpoint.weights is None:
+            raise ValueError(f"{checkpoint.id} was released: its weights are gone")
+        weights = await checkpoints.files(checkpoint.weights, here / WEIGHTS)
+        return Files(weights, await checkpoints.files(checkpoint.state, here / STATE) if checkpoint.state else None)
 
-    async def serve(version: Version) -> None:
+    async def serve(checkpoint: Checkpoint) -> None:
         nonlocal served
-        if served is not None and version.depth <= served.depth:
+        if served is not None and checkpoint.depth <= served.depth:
             return  # (the channel does not go back)
         if reshard is not None:
-            loaded = await versions.files(await reshard(version, fence), directory / version.id / "resharded")
+            loaded = await checkpoints.files(await reshard(checkpoint, fence), directory / checkpoint.id / "resharded")
         else:
-            loaded = (await files(version)).weights
-        served_as = await publish(channel, version.id, str(loaded), version.depth)
-        note("published", {"channel": channel, "adapter": version.id, "version": served_as})
-        served = version
-        keep = {version.id, version.parent}
+            loaded = (await files(checkpoint)).weights
+        served_as = await publish(channel, checkpoint.id, str(loaded), checkpoint.depth)
+        note("published", {"channel": channel, "adapter": checkpoint.id, "version": served_as})
+        served = checkpoint
+        keep = {checkpoint.id, checkpoint.parent}
         for old in await asyncio.to_thread(lambda: [each for each in directory.iterdir() if each.name not in keep]):
             await asyncio.to_thread(shutil.rmtree, old, ignore_errors=True)
 
-    async def current() -> Version | None:
-        """The version the next step goes on from: the newest the run made, else the one it starts from."""
-        head = await versions.head(run)
-        return head if head is not None else await versions.version(start) if start else None
+    async def current() -> Checkpoint | None:
+        """The checkpoint the next step goes on from: the newest the run made, else the one it starts from."""
+        head = await checkpoints.head(run)
+        return head if head is not None else await checkpoints.checkpoint(start) if start else None
 
     async def keeping() -> set[str]:
-        """The versions that keep their files whatever retention says."""
+        """The checkpoints that keep their files whatever retention says."""
         starts = [await ledger.read(name) for name in await ledger.tables() if name.endswith(f"/{STARTS}")]
         begun = {
             str(record["from"]) for each in starts for record in map(_mapping, each.values()) if record.get("from")
@@ -169,10 +170,10 @@ async def train(
         serving = {served.id, *served.parents} if served is not None else set[str]()
         return begun | serving | set(await kept() if kept is not None else ())
 
-    served: Version | None = None
+    served: Checkpoint | None = None
     await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
     if (now := await current()) is not None:
-        await serve(now)  # (a loop that died between making a version and serving it serves it now)
+        await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
 
     outstanding: dict[asyncio.Task[list[Episode]], int] = {}
     """Groups being played, by the task that waits for their episodes."""
@@ -269,10 +270,10 @@ async def train(
         intent = steps[key]
         makes = str(intent["makes"])
         try:
-            version = await versions.version(makes)  # made before this loop died: not made again
+            checkpoint = await checkpoints.checkpoint(makes)  # made before this loop died: not made again
         except KeyError:
             parent_id = str(intent["parent"]) if intent["parent"] else None
-            begin = await files(await versions.version(parent_id)) if parent_id else None
+            begin = await files(await checkpoints.checkpoint(parent_id)) if parent_id else None
             into = directory / makes
             await asyncio.to_thread(shutil.rmtree, into, ignore_errors=True)  # (what a step that died left)
             try:
@@ -290,7 +291,7 @@ async def train(
                 if failed_updates >= FAILED_UPDATES:
                     raise
                 return
-            version = await versions.add(
+            checkpoint = await checkpoints.add(
                 fence,
                 makes,
                 weights=into / WEIGHTS,
@@ -303,12 +304,12 @@ async def train(
                 metrics=step.metrics,
             )
         failed_updates = 0
-        await serve(version)
+        await serve(checkpoint)
         if made is not None:
-            await made(version)
-        await versions.thin(fence, run, retention, await keeping())
-        metrics: dict[str, JsonValue] = {name: round(value, 5) for name, value in version.metrics.items()}
-        note("step", {"step": key, "groups": list[JsonValue](numbers), "version": version.id, "metrics": metrics})
+            await made(checkpoint)
+        await checkpoints.thin(fence, run, retention, await keeping())
+        metrics: dict[str, JsonValue] = {name: round(value, 5) for name, value in checkpoint.metrics.items()}
+        note("step", {"step": key, "groups": list[JsonValue](numbers), "checkpoint": checkpoint.id, "metrics": metrics})
         done_with(numbers)
 
     failed_updates = 0
@@ -317,7 +318,7 @@ async def train(
         # What a stopped loop left: groups decided and not played out, groups played out and not done with, a step
         # decided and not finished.
         covered = {group: key for key, step in steps.items() for group in _groups(step)}
-        unfinished = [key for key in sorted(steps) if key not in failures and not await _made(versions, steps[key])]
+        unfinished = [key for key in sorted(steps) if key not in failures and not await _made(checkpoints, steps[key])]
         for number in sorted(decided):
             if number not in recorded:
                 ask(number)
@@ -352,9 +353,9 @@ async def train(
             await asyncio.gather(stepping, return_exceptions=True)
 
 
-async def _made(versions: Versions, step: dict[str, JsonValue]) -> bool:
+async def _made(checkpoints: Checkpoints, step: dict[str, JsonValue]) -> bool:
     try:
-        await versions.version(str(step["makes"]))
+        await checkpoints.checkpoint(str(step["makes"]))
     except KeyError:
         return False
     return True

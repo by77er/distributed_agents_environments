@@ -150,7 +150,7 @@ class Channel:
 
     async def publish(self, adapter: str, path: str, version: int | None = None) -> int:
         """Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the version it
-        is served as: `version` if one is given (a policy's own numbering, which means the same in every process),
+        is served as: `version` if one is given (the checkpoint's depth, which means the same in every process),
         or one more than the last. The adapter before stays loaded, so that a turn in progress finishes under the
         weights it began with; the one before that is dropped. Publishing what is being served changes nothing."""
         if adapter == self.adapter:

@@ -14,12 +14,12 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout_train import FileLedger
+from rollout_train.checkpoints import Checkpoints, new_id
 from rollout_train.layout import BLOBS, FEED, LEDGER
 from rollout_train.monitor.feed import FeedReader
 from rollout_train.monitor.stream import MISSING, Hub, version_of
 from rollout_train.monitor.system import System
 from rollout_train.record import GROUPS, STARTS, scope, table
-from rollout_train.versions import Versions, new_id
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -95,7 +95,7 @@ async def test_an_answer_names_its_version_and_one_asked_again_with_it_is_told_n
             "/api/system",
             "/api/runs",
             "/api/statistics",
-            "/api/versions",
+            "/api/checkpoints",
             "/api/machines",
             "/api/groups/train/1",
         ):
@@ -128,28 +128,32 @@ async def test_a_run_is_named_again_and_the_page_hears_of_it(tmp_path: Path) -> 
 async def test_a_bookmark_is_made_moved_and_taken_away_and_the_page_hears_of_it(tmp_path: Path) -> None:
     ledger = await a_run(tmp_path)
     fence = await ledger.take(scope("train"))
-    versions = Versions(ledger, FileBlobStore(tmp_path / BLOBS))
+    checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / BLOBS))
     (tmp_path / "weights").mkdir()
     (tmp_path / "weights" / "adapter.bin").write_text("weights")
-    first = await versions.add(fence, new_id(), weights=tmp_path / "weights", run="train", base="model", step=1)
-    second = await versions.add(fence, new_id(), weights=tmp_path / "weights", run="train", step=2, parents=[first.id])
+    first = await checkpoints.add(fence, new_id(), weights=tmp_path / "weights", run="train", base="model", step=1)
+    second = await checkpoints.add(
+        fence, new_id(), weights=tmp_path / "weights", run="train", step=2, parents=[first.id]
+    )
     transport = httpx.ASGITransport(app=create_app(tmp_path, beat=60.0))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
 
         async def marked() -> dict[str, list[str]]:
             system = (await client.get("/api/system")).json()
-            assert system["bookmarks"] == {mark: version for mark, version in system["names"]["bookmarks"].items()}
-            return {version["id"]: version["bookmarks"] for version in system["versions"]}
+            assert system["bookmarks"] == {
+                mark: checkpoint for mark, checkpoint in system["names"]["bookmarks"].items()
+            }
+            return {checkpoint["id"]: checkpoint["bookmarks"] for checkpoint in system["checkpoints"]}
 
         assert await marked() == {first.id: [], second.id: []}
-        made = await client.post("/api/bookmarks", json={"name": "good", "version": first.id[:6]})
-        assert made.status_code == 200 and made.json()["bookmark"]["version"] == first.id  # (an id's start says it)
+        made = await client.post("/api/bookmarks", json={"name": "good", "checkpoint": first.id[:6]})
+        assert made.status_code == 200 and made.json()["bookmark"]["checkpoint"] == first.id  # (an id's start says it)
         assert await marked() == {first.id: ["good"], second.id: []}
-        moved = await client.post("/api/bookmarks", json={"name": "good", "version": "train"})  # (the run's newest)
+        moved = await client.post("/api/bookmarks", json={"name": "good", "checkpoint": "train"})  # (the run's newest)
         assert moved.status_code == 200 and await marked() == {first.id: [], second.id: ["good"]}
-        assert (await client.post("/api/bookmarks", json={"name": "a:b", "version": first.id})).status_code == 409
-        assert (await client.post("/api/bookmarks", json={"name": "x", "version": "nothing"})).status_code == 404
-        assert (await client.post("/api/bookmarks", json={"name": "x", "version": "base"})).status_code == 404
+        assert (await client.post("/api/bookmarks", json={"name": "a:b", "checkpoint": first.id})).status_code == 409
+        assert (await client.post("/api/bookmarks", json={"name": "x", "checkpoint": "nothing"})).status_code == 404
+        assert (await client.post("/api/bookmarks", json={"name": "x", "checkpoint": "base"})).status_code == 404
         assert (await client.delete("/api/bookmarks/good")).status_code == 200
         assert await marked() == {first.id: [], second.id: []}
         assert (await client.delete("/api/bookmarks/good")).status_code == 404

@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from rollout.catalog import binding_for
-from rollout_train import Budget, Checkpoint, Step, Weighted, train
+from rollout_train import Budget, Files, Step, Weighted, train
 from rollout_train import testing as support
 from rollout_train.profile import Profile
 from rollout_train.trainer import WEIGHTS
@@ -50,7 +50,7 @@ class Steps:
         self.model = model
         self.budget = Budget(segment_tokens, segments_per_step)
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
         return Step({"segments": float(len(batch))})
@@ -84,11 +84,11 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
         await train(
             words,
             platform.trainer,
-            platform.versions,
+            platform.checkpoints,
             start=platform.origin,
             base="a-checkpoint",
             channel="policy",
-            directory=tmp_path / "run" / "versions",
+            directory=tmp_path / "run" / "checkpoints",
             publish=platform.publish,
             run=platform.run.id,
             groups=2,
@@ -96,17 +96,19 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
             kept=platform.bookmarked,
             made=platform.made,
         )  # fmt: skip  (the platform's runner plays the run in its directory)
-        versions = [version for version in await platform.versions.all() if version.run == platform.run.id]
+        checkpoints = [
+            checkpoint for checkpoint in await platform.checkpoints.all() if checkpoint.run == platform.run.id
+        ]
         steps = await platform.ledger.read(f"runs/{platform.run.id}/steps")
         played = await platform.ledger.read(f"runs/{platform.run.id}/episodes")
-        assert versions and [version.depth for version in versions] == list(range(1, len(steps) + 1))
-        assert all(version.base == "a-checkpoint" for version in versions)
-        assert policy.adapter == versions[-1].id and judge.version == 0  # served on the trained channel only
-        assert platform.registry is not None  # the bookmark the profile names went with each version made
-        assert [(mark.name, mark.version) for mark in await platform.registry.bookmarks()] == [
-            ("best", versions[-1].id)
+        assert checkpoints and [checkpoint.depth for checkpoint in checkpoints] == list(range(1, len(steps) + 1))
+        assert all(checkpoint.base == "a-checkpoint" for checkpoint in checkpoints)
+        assert policy.adapter == checkpoints[-1].id and judge.version == 0  # served on the trained channel only
+        assert platform.registry is not None  # the bookmark the profile names went with each checkpoint made
+        assert [(mark.name, mark.checkpoint) for mark in await platform.registry.bookmarks()] == [
+            ("best", checkpoints[-1].id)
         ]
-        assert await platform.bookmarked() == {versions[-1].id}
+        assert await platform.bookmarked() == {checkpoints[-1].id}
         assert "sleep" in support.STARTED[0].told and "sleep" in support.STARTED[2].told  # colocated: all of them
     assert all(engine.told[-1] == "close" for engine in support.STARTED)
     assert (tmp_path / "run" / "engine.json").exists() and (tmp_path / "run" / "feed" / "_notes.jsonl").exists()
@@ -115,16 +117,16 @@ async def test_an_open_profile_trains_with_what_it_names(tmp_path: Path) -> None
 
 async def test_a_new_run_starts_from_the_version_its_profile_names(tmp_path: Path) -> None:
     support.STARTED.clear()
-    shared = f'ledger = "{tmp_path / "ledger"}"\n'  # (the two runs share a ledger, and so its versions)
+    shared = f'ledger = "{tmp_path / "ledger"}"\n'  # (the two runs share a ledger, and so its checkpoints)
     first = Profile.load(write(tmp_path, shared + PROFILE))
     async with first.open() as platform:
         assert platform.trainer is not None
         binding = binding_for(words, "policy", platform.tool_bindings)
         await train(
-            words, platform.trainer, platform.versions, channel="policy", directory=tmp_path / "run" / "versions",
+            words, platform.trainer, platform.checkpoints, channel="policy", directory=tmp_path / "run" / "checkpoints",
             publish=platform.publish, run=platform.run.id, groups=1, binding=binding, made=platform.made,
         )  # fmt: skip
-        (made,) = await platform.versions.all()
+        (made,) = await platform.checkpoints.all()
     forked = (shared + PROFILE).replace('bookmark = "best"', 'start = "best"').format(directory=tmp_path / "fork")
     path = tmp_path / "fork.toml"
     path.write_text(forked)

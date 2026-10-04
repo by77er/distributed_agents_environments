@@ -23,7 +23,7 @@ from typing import Any
 
 from rollout.processes import end_with_parent
 from rollout_lora.settings import LoraSettings
-from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Weighted
 
 
 class TrainerProcess:
@@ -34,7 +34,7 @@ class TrainerProcess:
         self._process: BaseProcess | None = None
 
     async def step(
-        self, segments: Sequence[Weighted], *, seed: int, parent: Checkpoint | None, into: Path
+        self, segments: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path
     ) -> dict[str, float]:
         """Train one step on the GPU (the engine must have freed it) from `parent`, and leave the adapter in
         `into/weights` and the optimizer's state in `into/state`."""
@@ -46,7 +46,7 @@ class TrainerProcess:
                     self._process.terminate()
                 raise
 
-    def _run(self, segments: list[Weighted], seed: int, parent: Checkpoint | None, into: Path) -> dict[str, float]:
+    def _run(self, segments: list[Weighted], seed: int, parent: Files | None, into: Path) -> dict[str, float]:
         context = multiprocessing.get_context("spawn")
         ours, child = context.Pipe()
         arguments = (child, self.checkpoint, self.settings, segments, seed, parent, into)
@@ -79,7 +79,7 @@ def _step(
     settings: LoraSettings,
     segments: list[Weighted],
     seed: int,
-    parent: Checkpoint | None,
+    parent: Files | None,
     into: Path,
 ) -> None:
     try:

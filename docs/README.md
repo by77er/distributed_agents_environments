@@ -36,7 +36,7 @@ Interfaces, and what runs with no implementation beyond this process.
 | Package | Pages |
 |---|---|
 | `rollout` | [Harness](libraries/rollout/README.md): the loop, programs and runners. [Determinism](libraries/rollout/determinism.md), [hooks](libraries/rollout/hooks.md), [memory](libraries/rollout/memory.md). [Contracts](libraries/rollout/contracts/README.md): [identifiers](libraries/rollout/contracts/identifiers.md), [canonical content](libraries/rollout/contracts/canonical-content.md), [run events](libraries/rollout/contracts/run-events.md), [effects](libraries/rollout/contracts/effects.md), the [model endpoint](libraries/rollout/contracts/model-endpoint.md) |
-| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [versions, runs and the ledger](libraries/rollout-train/versions.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [channels](libraries/rollout-train/channels.md), the [recorder](libraries/rollout-train/recorder.md) and its [endpoint for harnesses](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
+| `rollout-train` | [Rollouts](libraries/rollout-train/rollouts.md), [checkpoints, runs and the ledger](libraries/rollout-train/checkpoints.md), [episodes](libraries/rollout-train/episodes.md), [training](libraries/rollout-train/training.md), [channels](libraries/rollout-train/channels.md), the [recorder](libraries/rollout-train/recorder.md) and its [endpoint for harnesses](libraries/rollout-train/harness-endpoint.md), the [monitor](libraries/rollout-train/monitor.md) |
 
 ## Implementations
 
@@ -93,7 +93,7 @@ Proposals: what could be built, and the records it would need.
 
 | Page | What it covers |
 |---|---|
-| [The policy graph](research/policy-dag.md) | The graph of versions with what trains, serves and evaluates them: distillation (on and off policy), trainers and their queues, the way from written weights to served ones, evaluations |
+| [The policy graph](research/policy-dag.md) | The graph of checkpoints with what trains, serves and evaluates them: distillation (on and off policy), trainers and their queues, the way from written weights to served ones, evaluations |
 | [Curricula](research/curricula.md) | Building training curricula and frozen evaluation suites from a run's data |
 | [Thinking Machines' API](research/thinking-machines.md) | Training and sampling through Tinker as a trainer and an engine of their own |
 
