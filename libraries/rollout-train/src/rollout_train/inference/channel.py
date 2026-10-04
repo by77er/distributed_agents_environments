@@ -77,9 +77,9 @@ class NotLoaded(Unserved):
     """The server does not have the model a request names (yet)."""
 
 
-KEEP = 2
-"""Adapters a channel keeps loaded unless it is told otherwise: the one served, and the one before (a run's
-`max_lag` of one, plus one)."""
+MAX_LAG = 1
+"""Checkpoints behind what its channel should serve a sample may be, unless a profile or the run says otherwise: one,
+the checkpoint before, which a server serves while it loads the newest."""
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ class Channel:
     """How many times weights have been published; recorded with every sampled token."""
     held: str | None = None
     """The full checkpoint the engines hold, by name (None: the model's own)."""
-    keep: int = KEEP
+    keep: int = MAX_LAG + 1
     """Adapters kept loaded: the one served and those before it a turn may still sample from (a run's
     `max_lag + 1`)."""
     model: str | None = None

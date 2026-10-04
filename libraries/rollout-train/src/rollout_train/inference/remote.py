@@ -36,19 +36,15 @@ import httpx
 from pydantic import JsonValue
 
 from rollout_train.http import error_of
-from rollout_train.inference.channel import Generation, Limits, NotLoaded, Throughput, Unserved
+from rollout_train.inference.channel import MAX_LAG, Generation, Limits, NotLoaded, Throughput, Unserved
 from rollout_train.ledger import Ledger
-from rollout_train.record import table
-from rollout_train.serving import SERVING, Serving, qualified
+from rollout_train.serving import Serving, qualified, serving_of
 
 if TYPE_CHECKING:
     from rollout_train.recorder.renderers import Renderer
 
 ENGINES = "engines"
 """The `kind` of an engine host's heartbeat (`rollout_train.following`)."""
-MAX_LAG = 1
-"""Checkpoints behind what its channel should serve a sample may be, unless a profile says otherwise: one, the
-checkpoint before, which a server serves while it loads the newest."""
 EVERY = 2.0
 """Seconds between asks of what a routed channel should serve and what its servers have, unless it is told otherwise."""
 
@@ -506,16 +502,6 @@ class RemoteChannel:
 
     def close(self) -> None:
         _closing(self._http)
-
-
-async def serving_of(ledger: Ledger, run: str, channel: str) -> list[Serving]:
-    """Every checkpoint a run has said its channel serves (once each, as the ledger keys them): what a routed channel
-    chooses from."""
-    return [
-        Serving.from_json(record)
-        for record in (await ledger.read(table(run, SERVING))).values()
-        if isinstance(record, dict) and record.get("channel") == channel
-    ]
 
 
 @dataclass(frozen=True)

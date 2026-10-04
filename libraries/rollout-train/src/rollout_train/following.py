@@ -35,7 +35,8 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.inference import Channel
-from rollout_train.inference.remote import ENGINES, MAX_LAG
+from rollout_train.inference.channel import MAX_LAG
+from rollout_train.inference.remote import ENGINES
 from rollout_train.presence import Presence, alive
 from rollout_train.serving import Serving, qualified, wanted
 from rollout_train.trainer import WEIGHTS

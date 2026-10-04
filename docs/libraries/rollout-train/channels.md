@@ -80,8 +80,8 @@ adapter by the checkpoint's id. Publishing what is being served changes
 nothing.
 
 - The adapters before stay loaded, so that a turn in progress (a thought, then its answer) finishes under the
-  weights it began with: `Channel.keep` in all with the one served (two by default; a follower sets it to its
-  run's `max_lag + 1`, `keeping(n)`). Older ones are dropped.
+  weights it began with: `Channel.keep` in all with the one served (`max_lag + 1`, two for the default `max_lag` of
+  one; a follower sets it to its run's, `keeping(n)`). Older ones are dropped.
 - Every sampled span records the version it was sampled at
   ([what a session exports](recorder.md#what-a-session-exports)).
 - `publish(…, full=True)` serves a full checkpoint ([full weights](checkpoints.md#full-weights-and-merges)): the
@@ -115,7 +115,8 @@ run's `serving` table, under its fence and before it publishes to engines of its
 | `max_lag` | how many checkpoints behind this a sample may be: 0 for an eval, which plays its checkpoint and no other |
 
 `wanted(ledger, run, channel)` is what a channel should serve now: its record of the greatest depth, as a channel
-never goes back. `record_serving(ledger, run, serving, fence)` appends one; one written before changes nothing.
+never goes back; `serving_of(ledger, run, channel)` is every record of it. `record_serving(ledger, run, serving,
+fence)` appends one; one written before changes nothing.
 
 A `Follower` (`rollout_train.following`) keeps runs' channels serving what each run says: every two seconds it
 reads `wanted` for each, and for a channel that serves something older reads the files from the blob store (hard

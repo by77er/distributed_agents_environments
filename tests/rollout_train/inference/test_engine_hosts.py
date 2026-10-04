@@ -20,13 +20,13 @@ from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.cluster import load
 from rollout_train.inference import Generation, NotLoaded, RemoteChannel
 from rollout_train.inference.hosts import HostPausable, HostServer, HostSpec, host_spec, started
-from rollout_train.inference.remote import ENGINES, Unreachable, serving_of
+from rollout_train.inference.remote import ENGINES, Unreachable
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.presence import FilePresence
 from rollout_train.record import scope
 from rollout_train.recorder import Renderer
 from rollout_train.run_settings import RunSettings
-from rollout_train.serving import Serving, record_serving
+from rollout_train.serving import Serving, record_serving, serving_of
 from rollout_train.stores import FILES
 from rollout_train.testing import PlainRenderer
 from tests.local_ray import LocalRay

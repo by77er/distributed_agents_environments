@@ -86,13 +86,20 @@ async def record_serving(ledger: Ledger, run: str, serving: Serving, fence: Fenc
     return await ledger.append(table(run, SERVING), key, serving.to_json(), fence)
 
 
+async def serving_of(ledger: Ledger, run: str, channel: str) -> list[Serving]:
+    """Every checkpoint a run has said its channel serves, once each, in the order they were written."""
+    return [
+        Serving.from_json(record)
+        for record in (await ledger.read(table(run, SERVING))).values()
+        if isinstance(record, dict) and record.get("channel") == channel
+    ]
+
+
 async def wanted(ledger: Ledger, run: str, channel: str) -> Serving | None:
     """What a run's channel should serve now: its record of the greatest depth (the newest among equals); None if the
     run has said nothing of it."""
     found: Serving | None = None
-    for record in (await ledger.read(table(run, SERVING))).values():
-        if isinstance(record, dict) and record.get("channel") == channel:
-            each = Serving.from_json(record)
-            if found is None or each.depth >= found.depth:
-                found = each
+    for each in await serving_of(ledger, run, channel):
+        if found is None or each.depth >= found.depth:
+            found = each
     return found
