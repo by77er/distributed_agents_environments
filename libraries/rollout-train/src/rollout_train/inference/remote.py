@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 from pydantic import JsonValue
 
+from rollout_train.http import error_of
 from rollout_train.inference.channel import Generation, Limits, Throughput, Unserved
 from rollout_train.ledger import Ledger
 from rollout_train.record import table
@@ -232,12 +233,12 @@ class RemoteEngine:
             response = await self._http.request(method, self.address + path, json=body, **options)
         except httpx.TransportError as error:
             raise Unreachable(f"{self.address}: {type(error).__name__}: {error}") from error
-        said = _answer(response) if answer or response.status_code >= 400 else {}
         if response.status_code == 404 and path == "/v1/completions":
-            raise NotLoaded(f"{self.address}: {_said(said) or 'no such model'}")
+            raise NotLoaded(f"{self.address}: {error_of(response).get('message') or 'no such model'}")
         if response.status_code >= 400:
-            raise RuntimeError(f"{self.address}: {response.status_code} {_said(said) or response.text[:300]}")
-        return said
+            said = error_of(response).get("message") or response.text[:300]
+            raise RuntimeError(f"{self.address}: {response.status_code} {said}")
+        return _answer(response) if answer else {}
 
 
 class NotLoaded(Unserved):
@@ -263,11 +264,6 @@ def _answer(response: httpx.Response) -> dict[str, Any]:
 def _object(value: Any) -> dict[str, Any]:
     """A JSON object, as one (nothing, for any other value)."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
-
-
-def _said(answer: Mapping[str, Any]) -> str:
-    error: Any = answer.get("error")
-    return str(_object(error).get("message") or error or "")
 
 
 class RemoteChannel:

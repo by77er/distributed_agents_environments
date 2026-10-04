@@ -33,6 +33,7 @@ from rollout.harness.runner import RecordedModel, RunBinding
 from rollout_train.gateway.keys import Grant, Keyring, granted
 from rollout_train.gateway.service import Gateway, Refused, contract_of, limits_of
 from rollout_train.gateway.turns import TurnStore
+from rollout_train.http import error_of
 from rollout_train.inference import Routes
 from rollout_train.inference.channel import Sampler
 from rollout_train.ledger import Fence
@@ -275,7 +276,7 @@ class GatewayEndpoint:
                 continue
             if response.status_code == 200:
                 return SampleResult.model_validate(response.json())
-            error = _error(response)
+            error = error_of(response)
             failure = f"{response.status_code} {error.get('type', '')}: {error.get('message', response.text)}"
             if error.get("type") == "ContextOverflow":
                 raise ContextOverflow(int(error["context_limit"]))
@@ -287,13 +288,3 @@ class GatewayEndpoint:
 def _name(channel: str) -> str:
     """A channel's name, where it is named within its run (`RUN/NAME`) or not."""
     return parts(channel)[1] if "/" in channel else channel
-
-
-def _error(response: httpx.Response) -> dict[str, Any]:
-    """What an error response of the gateway's says: its `type`, `message` and (for a context too long) its
-    `context_limit`."""
-    if not response.headers.get("content-type", "").startswith("application/json"):
-        return {}
-    said: Any = response.json()
-    error: Any = cast(dict[str, Any], said).get("error") if isinstance(said, dict) else None
-    return cast(dict[str, Any], error) if isinstance(error, dict) else {}

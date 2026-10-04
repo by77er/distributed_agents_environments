@@ -44,6 +44,54 @@ from rollout.harness.sandboxes import (
 )
 
 
+def _failed(error: Exception) -> Any:
+    """The answer to a call that raised: 500, with the error."""
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"error": f"{type(error).__name__}: {error}"}, status_code=500)
+
+
+class _Described:
+    """A client of a service at `url` that says once what it offers (`GET /LISTED`: the list under that key, and
+    whether it deduplicates), and answers 500 with the error of a call that raised."""
+
+    listed: str
+    """What it says it offers, and where (`specifications`, `operations`)."""
+    what: str
+    """The service, in words."""
+
+    def __init__(
+        self,
+        url: str,
+        client: httpx.AsyncClient | None,
+        offered: Sequence[ToolSpecification] | None,
+        deduplicating: bool,
+        timeout: float,
+    ) -> None:
+        self._url = url
+        self._http = client or httpx.AsyncClient(base_url=url, timeout=timeout)
+        self._described = (list(offered), deduplicating) if offered is not None else None
+
+    @property
+    def deduplicates(self) -> bool:
+        return self._describe()[1]
+
+    def _describe(self) -> tuple[list[ToolSpecification], bool]:
+        if self._described is None:  # (asked once, before any call: a plain request, as runs are being set up)
+            response = httpx.get(f"{self._url}/{self.listed}", timeout=30)
+            response.raise_for_status()
+            described = response.json()
+            offered = [ToolSpecification.model_validate(entry) for entry in described[self.listed]]
+            self._described = (offered, bool(described["deduplicates"]))
+        return self._described
+
+    def _checked(self, response: httpx.Response) -> Any:
+        if response.status_code == 500:
+            raise RuntimeError(response.json().get("error", f"the {self.what} failed"))
+        response.raise_for_status()
+        return response.json()
+
+
 def serve(tool_set: ToolSet) -> Any:
     """A Starlette application serving `tool_set` (needs the `monitor` extra's starlette)."""
     from starlette.applications import Starlette
@@ -65,15 +113,17 @@ def serve(tool_set: ToolSet) -> Any:
                 arguments_digest=body["arguments_digest"],
             )
         except Exception as error:
-            return JSONResponse({"error": f"{type(error).__name__}: {error}"}, status_code=500)
+            return _failed(error)
         return JSONResponse(result.model_dump(mode="json", exclude_none=True))
 
     return Starlette(routes=[Route("/specifications", specifications), Route("/call", call, methods=["POST"])])
 
 
-class RemoteToolSet:
+class RemoteToolSet(_Described):
     """A `DeduplicatingToolSet` served at `url`. It deduplicates if the tool set behind it does: the effect's id goes
     with every call."""
+
+    listed, what = "specifications", "tool set"
 
     def __init__(
         self,
@@ -86,25 +136,10 @@ class RemoteToolSet:
     ) -> None:
         """`specifications` and `deduplicating`: the tools and whether the tool set deduplicates, if the caller
         already knows (the tool set is asked otherwise)."""
-        self._url = url
-        self._http = client or httpx.AsyncClient(base_url=url, timeout=timeout)
-        self._described = (list(specifications), deduplicating) if specifications is not None else None
-
-    @property
-    def deduplicates(self) -> bool:
-        return self._describe()[1]
+        super().__init__(url, client, specifications, deduplicating, timeout)
 
     def specifications(self) -> Sequence[ToolSpecification]:
         return self._describe()[0]
-
-    def _describe(self) -> tuple[list[ToolSpecification], bool]:
-        if self._described is None:  # (asked once, before any call: a plain request, as runs are being set up)
-            response = httpx.get(f"{self._url}/specifications", timeout=30)
-            response.raise_for_status()
-            described = response.json()
-            tools = [ToolSpecification.model_validate(entry) for entry in described["specifications"]]
-            self._described = (tools, bool(described["deduplicates"]))
-        return self._described
 
     async def call(
         self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
@@ -115,11 +150,7 @@ class RemoteToolSet:
             "effect_id": effect_id,
             "arguments_digest": arguments_digest,
         }
-        response = await self._http.post("/call", json=body)
-        if response.status_code == 500:
-            raise RuntimeError(response.json().get("error", "the tool set failed"))
-        response.raise_for_status()
-        return ToolResult.model_validate(response.json())
+        return ToolResult.model_validate(self._checked(await self._http.post("/call", json=body)))
 
 
 @cache
@@ -134,9 +165,6 @@ def serve_pool(pool: Pool) -> Any:
     from starlette.requests import Request
     from starlette.responses import JSONResponse, Response
     from starlette.routing import Route
-
-    def failed(error: Exception) -> Response:
-        return JSONResponse({"error": f"{type(error).__name__}: {error}"}, status_code=500)
 
     async def operations(request: Request) -> Response:
         listed = [each.model_dump(mode="json", exclude_none=True) for each in pool.operations()]
@@ -156,14 +184,14 @@ def serve_pool(pool: Pool) -> Any:
         except SandboxLost as error:
             return JSONResponse({"error": str(error)}, status_code=410)
         except Exception as error:
-            return failed(error)
+            return _failed(error)
         return JSONResponse(lease.model_dump(mode="json"))
 
     async def release(request: Request) -> Response:
         try:
             await pool.release((await request.json())["key"])
         except Exception as error:
-            return failed(error)
+            return _failed(error)
         return JSONResponse({})
 
     async def call(request: Request) -> Response:
@@ -177,7 +205,7 @@ def serve_pool(pool: Pool) -> Any:
                 arguments_digest=body["arguments_digest"],
             )
         except Exception as error:
-            return failed(error)
+            return _failed(error)
         return JSONResponse(result.model_dump(mode="json", exclude_none=True))
 
     return Starlette(
@@ -191,8 +219,10 @@ def serve_pool(pool: Pool) -> Any:
     )
 
 
-class RemotePool:
+class RemotePool(_Described):
     """A `Pool` served at `url`."""
+
+    listed, what = "operations", "pool"
 
     def __init__(
         self,
@@ -205,25 +235,10 @@ class RemotePool:
     ) -> None:
         """`operations` and `deduplicating`: what can be done to its sandboxes and whether it deduplicates, if the
         caller already knows (the pool is asked otherwise)."""
-        self._url = url
-        self._http = client or httpx.AsyncClient(base_url=url, timeout=timeout)
-        self._described = (list(operations), deduplicating) if operations is not None else None
-
-    @property
-    def deduplicates(self) -> bool:
-        return self._describe()[1]
+        super().__init__(url, client, operations, deduplicating, timeout)
 
     def operations(self) -> Sequence[ToolSpecification]:
         return self._describe()[0]
-
-    def _describe(self) -> tuple[list[ToolSpecification], bool]:
-        if self._described is None:  # (asked once: a plain request, as runs are being set up)
-            response = httpx.get(f"{self._url}/operations", timeout=30)
-            response.raise_for_status()
-            described = response.json()
-            listed = [ToolSpecification.model_validate(entry) for entry in described["operations"]]
-            self._described = (listed, bool(described["deduplicates"]))
-        return self._described
 
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
         body = {"spec": spec.model_dump(mode="json"), "key": key, "environment": dict(environment or {})}
@@ -250,13 +265,6 @@ class RemotePool:
             "arguments_digest": arguments_digest,
         }
         return ToolResult.model_validate(self._checked(await self._http.post("/call", json=body)))
-
-    @staticmethod
-    def _checked(response: httpx.Response) -> Any:
-        if response.status_code == 500:
-            raise RuntimeError(response.json().get("error", "the pool failed"))
-        response.raise_for_status()
-        return response.json()
 
 
 @cache
