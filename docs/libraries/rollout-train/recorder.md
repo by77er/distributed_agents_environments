@@ -91,6 +91,10 @@ segments ([`Segment`](../../guide/reference.md#segment)), each the tokens of a c
 - **Spans** ([`Span`](../../guide/reference.md#span)) mark the tokens the policy sampled. Each carries the weights
   version that sampled it, so a segment that spans a weight update says so token by token.
 - **Logprobs** are those of the tokens inside the spans, in order: the behaviour logprobs.
+- **What it was sampled with** (`sampled_with`) is what every one of its turns was sampled with, of `token_exact`,
+  `sampled_logprobs` and `honours_sampling` (`TOKEN_LEVEL`). A segment without `token_exact` and `sampled_logprobs`
+  (`BEHAVIOUR`) has no importance weight: the [algorithm](training.md#the-algorithm-grpo) does not train on its group, and
+  a [dataset](datasets.md) of such turns is `supervised`.
 - **Forced tokens** (the close of an over-budget thought) lie between spans. They are context, and are not trained
   on.
 - Whether a conversation is one segment or many is decided by what its program sends and by the model family's

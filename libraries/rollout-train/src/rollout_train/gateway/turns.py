@@ -4,8 +4,8 @@ A turn is two things:
 
 - **a blob** holding all of it: who sampled it (the run, the episode and attempt, the program's run, the slot, the
   channel), the checkpoint that served it and its depth, the prompt's tokens, the completion's tokens, which of them
-  were sampled and which forced, the behaviour logprobs, the reply (the parsed message, how it finished, usage), the
-  links its harness declared to earlier requests, and timings;
+  were sampled and which forced, the behaviour logprobs, what it was sampled with (`sampled_with`), the reply (the
+  parsed message, how it finished, usage), the links its harness declared to earlier requests, and timings;
 - **a ledger record** naming the blob, appended under the turn's effect id to the table of the program's run
   (`runs/RUN/turns/RUN_ID`) and under the fence its key names. The first append wins: a turn sampled twice (a retry
   that reached another replica while the first was still sampling) is recorded once, and both are answered with the
@@ -45,7 +45,7 @@ from pydantic import JsonValue, TypeAdapter
 from rollout.contracts import BlobReference, SampleResult, SessionIdentity
 from rollout.harness.blobs import Blobs
 from rollout_train.ledger import Fence, Ledger
-from rollout_train.recorder.segments import Segment, segments_of
+from rollout_train.recorder.segments import TOKEN_LEVEL, Segment, segments_of
 
 TURNS = "turns"
 """A run's tables of turns: `runs/RUN/turns/RUN_ID`, one per program's run."""
@@ -113,6 +113,9 @@ class TurnRecord:
     links: tuple[Link, ...] = ()
     timings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """`started` (seconds since the epoch), `phases` (seconds each generation took) and `seconds` (the whole turn)."""
+    sampled_with: tuple[str, ...] = TOKEN_LEVEL
+    """What it was sampled with, of `TOKEN_LEVEL`: what its sampler could do (a turn recorded without saying was
+    sampled with all of them)."""
 
     @property
     def version(self) -> int:
@@ -240,6 +243,7 @@ class TurnStore:
                     attempt=int(header["attempt"]),
                     links=tuple(Link(str(link["type"]), str(link["source"])) for link in header["links"]),
                     timings=header["timings"],
+                    sampled_with=tuple(header.get("sampled_with", TOKEN_LEVEL)),
                 )
             )
         return turns
@@ -295,6 +299,7 @@ class TurnStore:
             "result": turn.result.model_dump(mode="json"),
             "links": [{"type": link.type, "source": link.source} for link in turn.links],
             "timings": dict(turn.timings),
+            "sampled_with": list(turn.sampled_with),
         }
         head = json.dumps(header, separators=(",", ":")).encode()
         body = [

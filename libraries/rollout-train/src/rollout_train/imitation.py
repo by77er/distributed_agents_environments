@@ -8,6 +8,11 @@ segment; `imitate` takes a supervised step on them (the trainer's likelihood obj
 makes. A dataset's examples (`rollout_train.datasets.examples`) are imitated the same way: the checkpoint the step makes
 then names the dataset, and its parents after the first are the checkpoints that sampled the examples it trained on.
 
+Examples whose turns were sampled with their exact tokens and behaviour logprobs are `importance` data; where some
+were not (a frontier API's turns), they are `supervised`: the trainer computes what it needs of their logprobs itself,
+and nothing is importance-corrected. Examples say which (`supervision_of`), and so does the checkpoint a step on them
+makes.
+
 A segment is cut by its tokens: the fewest tokens before its first sampled one whose text holds the guidance, and
 which encode back to themselves, are decoded, the guidance is taken out, and the rest is encoded again; what the
 policy sampled is kept token for token, and its spans move with it. A segment where no such stretch is found is left
@@ -44,6 +49,15 @@ RATES = {"full": 1e-6, "lora": 1e-4}
 """A supervised step's learning rate, by what its trainer makes: every weight, or an adapter."""
 IMITATION = "imitation"
 """The kind of a run's start that took a supervised step (`rollout imitate`), as its `starts` record says."""
+IMPORTANCE, SUPERVISED = "importance", "supervised"
+"""Examples whose every turn was sampled with its exact tokens and behaviour logprobs, and examples some of whose
+turns were not."""
+
+
+def supervision_of(segments: Sequence[Segment]) -> str:
+    """`importance` if every segment's turns were sampled with their exact tokens and behaviour logprobs, else
+    `supervised`."""
+    return SUPERVISED if any(segment.lacks for segment in segments) else IMPORTANCE
 
 
 def without(segment: Segment, texts: Sequence[str], renderer: Renderer) -> Segment | None:
@@ -116,6 +130,11 @@ class Examples:
     sampled_by: dict[str, str] = field(default_factory=dict[str, str])
     """The checkpoint that sampled each segment, by its source, where that is known (not the base model)."""
 
+    @property
+    def supervision(self) -> str:
+        """`importance` or `supervised` (`supervision_of` its segments)."""
+        return supervision_of([weighted.segment for weighted in self.segments])
+
 
 async def examples(
     ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str], solved_only: bool = True
@@ -167,7 +186,8 @@ async def imitate(
     that sampled the segments it trained on (`taught.sampled_by`), by depth; one trained from the base model has none.
     An adapter's step from full weights begins a new adapter over them (`trainer` was made over those weights). The
     step starts its optimizer afresh, unless `resume_optimizer`: then from the trainer state of the checkpoint it trains
-    from (moments a step of another objective left, say). Its metrics say which (`optimizer_resumed`)."""
+    from (moments a step of another objective left, say). Its metrics say which (`optimizer_resumed`), and its record
+    says whether the segments it trained on were `importance` or `supervised` data (`supervision_of`)."""
     chosen = list(taught.segments)
     if limit is not None and len(chosen) > limit:
         chosen = random.Random(seed).sample(chosen, limit)
@@ -211,4 +231,5 @@ async def imitate(
         batch=batch,
         metrics=metrics,
         dataset=taught.dataset,
+        supervision=supervision_of([weighted.segment for weighted in chosen]),
     )

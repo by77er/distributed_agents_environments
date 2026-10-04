@@ -16,7 +16,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
-- **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#refused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -3184,6 +3184,7 @@ class Checkpoint
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `dataset` | `str \| None` | `None` | The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its parents after the first are then the checkpoints that sampled the dataset's examples. |
+| `supervision` | `str \| None` | `None` | For a checkpoint a supervised step made: `importance` if every segment it trained on was sampled with its exact tokens and behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`). |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 | `released` | `float \| None` | `None` | When its files were deleted (`Checkpoints.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
 
@@ -3210,7 +3211,7 @@ Every checkpoint, in a ledger, and their files in a blob store.
   builds on, if it is an adapter over one; None for an adapter over a model. Raises `ValueError` if that
   checkpoint was released.
 - `async def head(self, run: str) -> Checkpoint | None` — The newest checkpoint a run made, if it made one.
-- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None, dataset: str | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
+- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None, dataset: str | None = None, supervision: str | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
   Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
   id); for a merge (full weights from an adapter), the `base` it names; else its first parent's base, or `base`
   for a checkpoint made from the base model. The append is what
@@ -3270,6 +3271,7 @@ A dataset's record (`DATASETS`): how its examples were chosen, what came of it, 
 | `counts` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; and of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens`. |
 | `left_out` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | Turns of its episodes that are no examples, by why. |
 | `checkpoints` | `list[str]` | `field(default_factory=list[str])` | The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none). |
+| `supervision` | `str` | `IMPORTANCE` | `importance` if every example's turns were sampled with their exact tokens and behaviour logprobs, else `supervised`. |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 | `by` | `str` | `''` | Who made it: `user@host`. |
 
@@ -3439,7 +3441,7 @@ class Grpo
 **Methods**
 
 - `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
-  its episode's advantage.
+  its episode's advantage; none, if one of them cannot be weighed (`unweighable`).
 
 ### `Ledger`
 
@@ -4148,6 +4150,16 @@ answered), or the server cannot be reached: the turn is sampled again, from what
 
 The model endpoint for trainable channels: token-exact recording.
 
+### `BEHAVIOUR`
+
+*constant* · `libraries/rollout-train/src/rollout_train/recorder/segments.py`
+
+```python
+BEHAVIOUR = ('token_exact', 'sampled_logprobs')
+```
+
+What a segment's turns must have been sampled with for it to be trained on with an importance weight.
+
 ### `ChatTemplateRenderer`
 
 *class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
@@ -4239,10 +4251,13 @@ A piece of a session's trajectory: tokens that only grew, as the policy saw and 
 | `spans` | `list[Span]` | required |  |
 | `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
 | `channel` | `str` | `''` | The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served. |
+| `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What every one of its turns was sampled with, of `TOKEN_LEVEL`. |
 
 **Methods**
 
 - `@property def sampled(self) -> int`
+- `@property def lacks(self) -> tuple[str, ...]` — What its turns were sampled without, of `BEHAVIOUR` (empty: it can be trained on with an importance
+  weight).
 
 ### `segments_of`
 
@@ -4289,6 +4304,18 @@ How a family delimits thinking. Its generation prompt may already open the block
 | `close` | `str` | required |  |
 | `prompt_opens` | `bool` | required | Whether the generation prompt ends inside an opened thinking block (the model only closes it). |
 | `forced_close` | `str` | required | Text appended to end thinking that ran out of budget (masked from training). |
+
+### `TOKEN_LEVEL`
+
+*constant* · `libraries/rollout-train/src/rollout_train/recorder/segments.py`
+
+```python
+TOKEN_LEVEL = ('token_exact', 'sampled_logprobs', 'honours_sampling')
+```
+
+What a turn can be sampled with: its tokens are the exact ones sampled, each sampled token's behaviour logprob is
+known, and temperature and top-p were applied (`rollout_train.providers.Capabilities`). vLLM and Tinker sample with
+all three, and a turn that does not say what it was sampled with was sampled by one of them.
 
 ### `ToolCallFormat`
 
@@ -4378,7 +4405,8 @@ What a replica serves: where it records, the keys it takes, and the channels it 
 process publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve
 elsewhere (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
 harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
-its endpoints).
+its endpoints). Each turn records what its sampler samples with: the sampler's `sampled_with` where it says, else
+`TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -4607,6 +4635,7 @@ One turn, as the gateway sampled and recorded it.
 | `attempt` | `int` | `0` |  |
 | `links` | `tuple[Link, ...]` | `()` |  |
 | `timings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | `started` (seconds since the epoch), `phases` (seconds each generation took) and `seconds` (the whole turn). |
+| `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What it was sampled with, of `TOKEN_LEVEL`: what its sampler could do (a turn recorded without saying was sampled with all of them). |
 
 **Methods**
 
@@ -5456,6 +5485,10 @@ What an inference provider's kind can do.
 | `loads` | `frozenset[str]` | required | The checkpoint formats it serves (`peft`, `full`, `tinker`); none: base models only. |
 | `bills` | `Literal['none', 'tokens', 'hours']` | `'none'` | What it costs by: nothing, tokens (per model and token class), or hours of pods. |
 | `unchecked` | `frozenset[str]` | `frozenset()` | Capabilities declared as the SDK says but not yet confirmed by a live test: nothing relies on them until then (Tinker's prompt and top-k logprobs). |
+
+**Methods**
+
+- `@property def sampled_with(self) -> tuple[str, ...]` — What its turns are sampled with, as a turn records it (`rollout_train.recorder.segments.TOKEN_LEVEL`).
 
 ### `INFERENCE_KINDS`
 

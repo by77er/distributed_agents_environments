@@ -81,6 +81,9 @@ class Checkpoint:
     dataset: str | None = None
     """The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its
     parents after the first are then the checkpoints that sampled the dataset's examples."""
+    supervision: str | None = None
+    """For a checkpoint a supervised step made: `importance` if every segment it trained on was sampled with its exact
+    tokens and behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`)."""
     made: float = 0.0
     """When, in seconds since the epoch."""
     released: float | None = None
@@ -177,6 +180,7 @@ class Checkpoints:
         batch: BlobReference | None = None,
         metrics: Mapping[str, float] | None = None,
         dataset: str | None = None,
+        supervision: str | None = None,
     ) -> Checkpoint:
         """Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
         Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
@@ -198,6 +202,7 @@ class Checkpoints:
             batch=batch,
             metrics=dict(metrics or {}),
             dataset=dataset,
+            supervision=supervision,
             made=round(time.time(), 1),
         )
         record: Any = _VERSION.dump_python(checkpoint, mode="json")

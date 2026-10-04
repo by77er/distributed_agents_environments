@@ -1129,6 +1129,12 @@ What later tracks take from them:
 - **19**: `deploy/clusters/example.toml` is the documented single-machine config; the profile-coverage test in
   `tests/rollout_train/test_run_settings.py` goes with `profile.py`.
 
+Commit 7 is in. `TurnRecord.sampled_with` and `Segment.sampled_with` hold names of `rollout_train.recorder.TOKEN_LEVEL`
+(`Capabilities.sampled_with` gives a provider's), and `Segment.lacks` says what of `BEHAVIOUR` a segment's turns lacked.
+It differs from §2 in two places: the group's result names the channel and what its turns lacked, not the provider,
+since a turn records no provider until 11 adds one; and the imitation step records `supervision` on the checkpoint it
+makes (`Checkpoint.supervision`) as well as in its start.
+
 ### What the acceptance run needs from each step
 
 **The run.** Trainer: Tinker LoRA on `Qwen/Qwen3.5-4B`. Inference: `local-vllm`, the same model unquantized on the

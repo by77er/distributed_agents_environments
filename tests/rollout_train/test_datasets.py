@@ -27,7 +27,7 @@ from rollout_train.datasets import (
 )
 from rollout_train.imitation import GUIDANCE, imitate, passes_for
 from rollout_train.record import GROUPS, STARTS, scope, table
-from rollout_train.recorder import Segment, Span
+from rollout_train.recorder import TOKEN_LEVEL, Segment, Span
 from rollout_train.registry import Taken, registry_of
 from rollout_train.rollouts import Episode, Outcome, Trajectory, stored
 from rollout_train.rollouts.scheduler import EPISODES
@@ -38,9 +38,10 @@ from tests.rollout_train.support import Counting
 WAY = "How to get there. Place the table."
 
 
-def segment(prompt: str, sampled: str, version: int) -> Segment:
+def segment(prompt: str, sampled: str, version: int, sampled_with: tuple[str, ...] = TOKEN_LEVEL) -> Segment:
     tokens = [ord(character) for character in prompt + sampled]
-    return Segment(tokens, [Span(len(prompt), len(tokens), version, f"r:{version}")], [-0.5] * len(sampled))
+    spans = [Span(len(prompt), len(tokens), version, f"r:{version}")]
+    return Segment(tokens, spans, [-0.5] * len(sampled), sampled_with=sampled_with)
 
 
 class Played:
@@ -137,6 +138,7 @@ async def test_a_dataset_is_a_record_and_a_manifest_that_read_back(tmp_path: Pat
     made = await make_dataset(played.ledger, "best-of-group", ["train"], into=played.blobs, at=played.at, by="me@here")
     assert await dataset_of(played.ledger, made.id) == made and await datasets_in(played.ledger) == [made]
     assert made.checkpoints == [first.id, second.id] and made.by == "me@here" and made.cut == ["way"]
+    assert made.supervision == "importance"  # (every turn was sampled with its exact tokens and logprobs)
     assert made.counts == {"episodes": 1, "groups": 1, "tasks": 1, "turns": 3, "sampled_tokens": 15,
                            "context_tokens": 3 * len("user: a\nassistant: apple"), "turns_seen": 3}  # fmt: skip
     lines = await manifest_of(made)
@@ -201,6 +203,7 @@ async def test_a_step_on_a_dataset_learns_from_the_checkpoints_that_sampled_it(t
     again = await imitate(checkpoints, trainer, taught, fence=fence, run="sft", start=None, base="qwen",
                           directory=tmp_path / "checkpoints")  # fmt: skip
     assert again.parents == (made_by.id, first, second)  # (the run goes on from what it made)
+    assert made_by.supervision == again.supervision == "importance"
     alone = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("fresh")), run="fresh",
                           start=None, base="qwen", directory=tmp_path / "checkpoints")  # fmt: skip
     assert alone.parents == () and alone.depth == 1 and alone.dataset == made.id  # (from the base model)
@@ -311,7 +314,7 @@ def test_the_commands_make_list_and_train_on_a_dataset(
         main()
     assert exited.value.code == 0
     out = capsys.readouterr().out
-    assert "3 segments of 1 episodes (0 left out)" in out and f"(from {second}, {first})" in out
+    assert "3 segments of 1 episodes (0 left out), importance" in out and f"(from {second}, {first})" in out
     (made_by,) = [each for each in asyncio.run(checkpoints.all()) if each.dataset is not None]
     assert made_by.parents == (second, first) and made_by.dataset == made.id
 
@@ -324,7 +327,7 @@ def test_the_commands_make_list_and_train_on_a_dataset(
 
     (start,) = asyncio.run(started()).values()
     assert isinstance(start, dict) and start["kind"] == "imitation" and start["dataset"] == made.id
-    assert start["from"] == second
+    assert start["from"] == second and start["supervision"] == "importance"
 
 
 @pytest.mark.parametrize("kind", ["files", "database"])
@@ -353,3 +356,19 @@ def test_a_small_dataset_takes_passes_enough_for_its_updates() -> None:
     assert passes_for(twelve, 512) == 8  # (a pass is one update: eight passes make eight)
     assert passes_for(twelve, 40) == 3  # (three updates a pass)
     assert passes_for(twelve * 100, 512) == 1  # (large enough: one pass)
+
+
+async def test_a_dataset_of_turns_sampled_without_behaviour_logprobs_is_supervised(tmp_path: Path) -> None:
+    played = Played(tmp_path)
+    replied = [segment("user: a\nassistant: ", "apple", 0), segment("user: b\nassistant: ", "pear", 0, sampled_with=())]
+    await played.group(1, "t1", {"solved": True, "segments": replied})
+    made = await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at)
+    assert made.supervision == "supervised" and await dataset_of(played.ledger, made.id) == made
+    taught = await examples(played.ledger, made, plain_renderer("plain"))
+    assert taught.supervision == "supervised"
+    checkpoints, trainer = Checkpoints(played.ledger, played.blobs), Counting()
+    made_by = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("sft")), run="sft",
+                            start=None, base="qwen", directory=tmp_path / "checkpoints")  # fmt: skip
+    assert (
+        made_by.supervision == "supervised" and (await checkpoints.checkpoint(made_by.id)).supervision == "supervised"
+    )

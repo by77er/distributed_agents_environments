@@ -113,6 +113,9 @@ Every turn is two things ([`TurnStore`](../../guide/reference.md#turnstore)):
   - the checkpoint that served it, and its depth;
   - the prompt's tokens, the completion's tokens, and which were sampled and which forced;
   - the behaviour logprobs;
+  - what it was sampled with (`sampled_with`): of `token_exact`, `sampled_logprobs` and `honours_sampling`, what its
+    sampler can do. Every engine and server a channel samples from today does all three, and a turn recorded before
+    turns said is read back as sampled with all three;
   - the reply: the parsed message, how it finished, usage;
   - the links its harness declared;
   - timings: when it started, how long each generation took, and the whole turn.

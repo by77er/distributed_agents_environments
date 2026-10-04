@@ -22,6 +22,9 @@ Its examples are chosen in two parts.
 
 The guidance an episode's prompts carried, of the kinds the dataset cuts, is cut from its examples when they are made,
 as `rollout_train.imitation.without` cuts it; a turn where the cut cannot be made exactly is left out then.
+
+A dataset records its `supervision`: `importance` where every example's turns were sampled with their exact tokens and
+behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`).
 """
 
 import asyncio
@@ -44,10 +47,11 @@ from rollout.contracts import BlobReference, RunEvent
 from rollout.harness.blobs import Blobs
 from rollout.names import named
 from rollout_train.checkpoints import SHORTEST, checkpoints_in, new_id
-from rollout_train.imitation import GUIDANCE, Examples, without
+from rollout_train.imitation import GUIDANCE, IMPORTANCE, SUPERVISED, Examples, without
 from rollout_train.ledger import Ledger
 from rollout_train.record import GROUPS, STARTS, newest_record, table
 from rollout_train.recorder.renderers import Renderer
+from rollout_train.recorder.segments import BEHAVIOUR, TOKEN_LEVEL
 from rollout_train.registry import Registry
 from rollout_train.rollouts.episodes import COMPRESSED, Episode, Record, events_of, loaded
 from rollout_train.rollouts.scheduler import EPISODES
@@ -75,6 +79,8 @@ class Turn:
     sampled: int
     depth: int | None
     """The depth of the checkpoint that sampled it (its spans' newest); None if it sampled nothing."""
+    sampled_with: tuple[str, ...] = TOKEN_LEVEL
+    """What its turns were sampled with (`Segment.sampled_with`)."""
 
 
 class TurnFilter(Protocol):
@@ -192,6 +198,9 @@ class Dataset:
     """Turns of its episodes that are no examples, by why."""
     checkpoints: list[str] = field(default_factory=list[str])
     """The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none)."""
+    supervision: str = IMPORTANCE
+    """`importance` if every example's turns were sampled with their exact tokens and behaviour logprobs, else
+    `supervised`."""
     made: float = 0.0
     """When, in seconds since the epoch."""
     by: str = ""
@@ -236,6 +245,7 @@ async def make_dataset(
     lines: list[dict[str, JsonValue]] = []
     left_out: Counter[str] = Counter()
     seen = 0
+    supervision = IMPORTANCE
     for candidate in chosen:
         store = opened(await where_blobs_are(ledger, candidate.run, candidate.record.trajectories))
         episode = await loaded(candidate.record, store)
@@ -259,6 +269,8 @@ async def make_dataset(
                 left_out[why] += 1
                 continue
             source = f"{candidate.run}/{candidate.group}/{candidate.number}/{turn.slot}/{turn.index}"
+            if any(each not in turn.sampled_with for each in BEHAVIOUR):
+                supervision = SUPERVISED
             lines.append({
                 **noted, "source": source, "task": candidate.task, "reward": episode.reward, "depth": turn.depth,
                 "checkpoint": served[candidate.run].get(turn.depth) if turn.depth is not None else None,
@@ -289,6 +301,7 @@ async def make_dataset(
         },
         left_out=dict(left_out.most_common()),
         checkpoints=sorted(depths, key=lambda each: (depths[each], each)),
+        supervision=supervision,
         made=round(time.time(), 1),
         by=by or f"{getpass.getuser()}@{socket.gethostname()}",
     )
@@ -308,6 +321,7 @@ def turns_of(episode: Episode) -> list[Turn]:
             len(segment.tokens),
             segment.sampled,
             max((span.version for span in segment.spans), default=None),
+            segment.sampled_with,
         )
         for slot, trajectory in episode.trajectories.items()
         for index, segment in enumerate(trajectory.segments)

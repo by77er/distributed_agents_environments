@@ -13,6 +13,7 @@ from rollout_train.providers import (
     is_local,
     settings_of,
 )
+from rollout_train.recorder import TOKEN_LEVEL
 
 TLS = Tls(ca="~/ca.pem", certificate="~/gateway.crt", key="~/gateway.key")
 
@@ -38,6 +39,8 @@ def test_the_capability_table() -> None:
     assert tinker.bills == "tokens" and tinker.unchecked == {"prompt_logprobs", "top_logprobs"}  # (checked live first)
     assert INFERENCE_KINDS["runpod-inference"].auths == ("mtls",)
     assert INFERENCE_KINDS["tinker"].auths == ("vendor",)
+    sampled_with = {kind: each.capabilities.sampled_with for kind, each in INFERENCE_KINDS.items()}
+    assert sampled_with.pop("api") == () and set(sampled_with.values()) == {TOKEN_LEVEL}  # (as a turn records it)
 
 
 def test_the_trainers_table() -> None:

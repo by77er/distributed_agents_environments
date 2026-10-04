@@ -12,6 +12,8 @@
 - **What is trained on**: every segment of the episodes whose advantage is not zero, up to what the trainer can
   afford in a step; beyond that, segments are taken at even steps through the group, so that each episode and
   slot keeps its share, spread over its whole game.
+- **What cannot be trained on**: a segment whose turns were sampled without their exact tokens or their behaviour
+  logprobs (`Segment.lacks`) has no importance weight. A group with one is not trained on, and its result says why.
 """
 
 import random
@@ -22,6 +24,7 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
+from rollout_train.recorder.segments import Segment
 from rollout_train.rollouts import Episode
 from rollout_train.trainer import Budget, Weighted
 
@@ -73,6 +76,24 @@ def fastest_of_the_saturated(group: Sequence[Episode]) -> list[float]:
     return [1.0 if took.get(index) == fastest else 0.0 for index in range(len(group))]
 
 
+_LACKING = {"token_exact": "their exact tokens", "sampled_logprobs": "behaviour logprobs"}
+
+
+def unweighable(segments: Sequence[Segment]) -> str | None:
+    """Why some of `segments` cannot be trained on with an importance weight, if they cannot: what their turns were
+    sampled without, by channel."""
+    lacking: dict[str, set[str]] = {}
+    for segment in segments:
+        lacking.setdefault(segment.channel, set()).update(segment.lacks)
+    said = [
+        f"turns of channel `{channel or 'unnamed'}` were sampled without "
+        + " or ".join(_LACKING[each] for each in _LACKING if each in missing)
+        for channel, missing in sorted(lacking.items())
+        if missing
+    ]
+    return "; ".join(said) or None
+
+
 def spread[Item](items: Sequence[Item], limit: int | None, rng: random.Random) -> list[Item]:
     """At most `limit` of the items, taken at even steps through them from a random start."""
     if limit is None or len(items) <= limit:
@@ -90,7 +111,7 @@ class Grpo:
 
     def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch:
         """The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
-        its episode's advantage."""
+        its episode's advantage; none, if one of them cannot be weighed (`unweighable`)."""
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
             return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
@@ -106,4 +127,6 @@ class Grpo:
             for slot, trajectory in episode.trajectories.items()
             for index, segment in enumerate(trajectory.segments)
         ]
+        if (why := unweighable([each.segment for each in weighted])) is not None:
+            return Batch(skipped=why, notes=notes)
         return Batch(spread(weighted, budget.segments, rng), notes=notes)

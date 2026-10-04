@@ -16,7 +16,8 @@ What is trained is a graph of checkpoints. Every checkpoint grows from a base mo
   learned from, such as a distillation's teachers, or the checkpoints that sampled a dataset it was trained on; none,
   the base model), the **base** model it adapts (`Qwen/Qwen3.5-9B`, its first parent's, or the one its line began
   from), and the **run** and **step** that made it. A checkpoint a supervised step on a [dataset](datasets.md) made
-  names the dataset (`dataset`).
+  names the dataset (`dataset`), and says whether its examples carried behaviour logprobs (`supervision`:
+  `importance` or `supervised`).
 - Its **kind** says what its weights are: `lora`, an adapter over its base; or `full`, every weight of a model
   ([full weights](#full-weights-and-merges)).
 - Its **depth** counts the steps from the base model along its first parents. It is the number stamped on the tokens

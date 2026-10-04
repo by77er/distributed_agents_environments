@@ -55,6 +55,7 @@ from rollout_train.ledger import Fenced
 from rollout_train.recorder.compat import SERVED_UNDER, chat, key, messages, refused, replied, requested, responses
 from rollout_train.recorder.compat.wire import Failure, Format, Prompt
 from rollout_train.recorder.sampling import sample_turn
+from rollout_train.recorder.segments import TOKEN_LEVEL
 from rollout_train.serving import BASE, parts
 
 LINKS = "x-rollout-links"
@@ -80,7 +81,8 @@ class Gateway:
     process publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve
     elsewhere (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
     harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
-    its endpoints)."""
+    its endpoints). Each turn records what its sampler samples with: the sampler's `sampled_with` where it says, else
+    `TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs)."""
 
     store: TurnStore
     keyring: Keyring
@@ -215,6 +217,7 @@ class Gateway:
                 "phases": [round(seconds, 4) for seconds in turn.phases],
                 "seconds": round(time.monotonic() - began, 4),
             },
+            sampled_with=tuple(getattr(sampler, "sampled_with", TOKEN_LEVEL)),
         )
 
     def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None:

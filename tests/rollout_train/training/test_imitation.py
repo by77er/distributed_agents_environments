@@ -68,6 +68,7 @@ async def test_the_solved_guided_episodes_are_examples_and_a_step_on_them_makes_
     )
     assert (checkpoint.run, checkpoint.parents, checkpoint.depth, checkpoint.base) == ("train", (), 1, "qwen")
     assert checkpoint.metrics["imitated_episodes"] == 1.0 and trainer.batches == [[example]]
+    assert taught.supervision == checkpoint.supervision == "importance"  # (sampled with exact tokens and logprobs)
     again = await imitate(
         checkpoints, trainer, taught, fence=run, run="train", start=None, directory=tmp_path / "checkpoints"
     )

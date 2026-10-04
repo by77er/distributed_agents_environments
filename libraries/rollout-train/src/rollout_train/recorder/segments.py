@@ -7,6 +7,10 @@ however many turns it has, and is trained in one pass. A turn whose context was 
 that drops earlier thinking, an observation replaced by a shorter form) begins a new segment. A turn that repeats an
 earlier prompt exactly (a client's retry) replaces it.
 
+A segment also says what its turns were sampled with (`sampled_with`: the capabilities every one of them had, of
+`TOKEN_LEVEL`). A segment is trained on with an importance weight only if its tokens are the exact ones sampled and
+their behaviour logprobs are known (`BEHAVIOUR`).
+
 `segments_of` applies the rule to turns in the order they were sampled. It is a pure function of the turns: the
 gateway's turn store reads a session's turns back and exports them with it.
 """
@@ -14,6 +18,13 @@ gateway's turn store reads a session's turns back and exports them with it.
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Protocol
+
+TOKEN_LEVEL = ("token_exact", "sampled_logprobs", "honours_sampling")
+"""What a turn can be sampled with: its tokens are the exact ones sampled, each sampled token's behaviour logprob is
+known, and temperature and top-p were applied (`rollout_train.providers.Capabilities`). vLLM and Tinker sample with
+all three, and a turn that does not say what it was sampled with was sampled by one of them."""
+BEHAVIOUR = ("token_exact", "sampled_logprobs")
+"""What a segment's turns must have been sampled with for it to be trained on with an importance weight."""
 
 
 @dataclass(frozen=True)
@@ -38,10 +49,18 @@ class Segment:
     """Behavior logprobs of the tokens inside the spans, in order."""
     channel: str = ""
     """The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served."""
+    sampled_with: tuple[str, ...] = TOKEN_LEVEL
+    """What every one of its turns was sampled with, of `TOKEN_LEVEL`."""
 
     @property
     def sampled(self) -> int:
         return sum(span.end - span.start for span in self.spans)
+
+    @property
+    def lacks(self) -> tuple[str, ...]:
+        """What its turns were sampled without, of `BEHAVIOUR` (empty: it can be trained on with an importance
+        weight)."""
+        return tuple(each for each in BEHAVIOUR if each not in self.sampled_with)
 
 
 class Turn(Protocol):
@@ -70,6 +89,11 @@ class Turn(Protocol):
 
     @property
     def channel(self) -> str: ...
+
+    @property
+    def sampled_with(self) -> Sequence[str]:
+        """What it was sampled with, of `TOKEN_LEVEL`."""
+        ...
 
 
 def segments_of(turns: Sequence[Turn], *, untrained: Collection[str] = ()) -> list[Segment]:
@@ -100,5 +124,7 @@ def segments_of(turns: Sequence[Turn], *, untrained: Collection[str] = ()) -> li
                 start = None
         logprobs = list(parent.logprobs) if parent else []
         logprobs += [value for value, sampled in zip(turn.logprobs, mask, strict=True) if sampled]
-        segments.append(Segment([*turn.prompt, *turn.completion], spans, logprobs, turn.channel))
+        held_with = parent.sampled_with if parent else TOKEN_LEVEL
+        sampled_with = tuple(each for each in held_with if each in turn.sampled_with)
+        segments.append(Segment([*turn.prompt, *turn.completion], spans, logprobs, turn.channel, sampled_with))
     return [segment for index, segment in enumerate(segments) if index not in dropped and segment.spans]

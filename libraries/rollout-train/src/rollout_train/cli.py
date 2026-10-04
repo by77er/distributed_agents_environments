@@ -496,7 +496,8 @@ async def _imitate(
         taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
     if not taught.segments:
         raise SystemExit("no solved episode of the run carried that guidance" if made is None else "no examples")
-    print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out)", flush=True)
+    print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out), "
+          f"{taught.supervision}", flush=True)  # fmt: skip
     head = await checkpoints.head(run.id) or (await checkpoints.checkpoint(start) if start else None)
     model = spec.model  # (an adapter from full weights is trained over them)
     under = await checkpoints.under(head) if head is not None else None
@@ -516,8 +517,9 @@ async def _imitate(
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: Any = {
         "kind": IMITATION, "from": head.id if head else None, "dataset": made.id if made else None,
-        "host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1), "directory": str(where),
-        "profile": str(profiled), "blobs": location(described.blobs, described.directory / BLOBS),
+        "supervision": taught.supervision, "host": socket.gethostname(), "process": PROCESS,
+        "started": round(time.time(), 1), "directory": str(where), "profile": str(profiled),
+        "blobs": location(described.blobs, described.directory / BLOBS),
     }  # fmt: skip
     await ledger.append(table(run.id, STARTS), str(fence.number), started, fence)
     try:

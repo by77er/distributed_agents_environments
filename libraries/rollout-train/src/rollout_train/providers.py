@@ -38,6 +38,7 @@ from urllib.parse import urlsplit
 from pydantic import JsonValue
 
 from rollout_train.inference.remote import Connection
+from rollout_train.recorder.segments import TOKEN_LEVEL
 
 __all__ = [
     "AUTHS",
@@ -202,6 +203,11 @@ class Capabilities:
     unchecked: frozenset[str] = frozenset()
     """Capabilities declared as the SDK says but not yet confirmed by a live test: nothing relies on them until then
     (Tinker's prompt and top-k logprobs)."""
+
+    @property
+    def sampled_with(self) -> tuple[str, ...]:
+        """What its turns are sampled with, as a turn records it (`rollout_train.recorder.segments.TOKEN_LEVEL`)."""
+        return tuple(each for each in TOKEN_LEVEL if getattr(self, each))
 
 
 @dataclass(frozen=True)

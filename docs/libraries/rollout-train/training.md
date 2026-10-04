@@ -128,6 +128,7 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
 |---|---|
 | Advantages | An episode's score minus its group's mean, with no division by the group's spread (Dr. GRPO). Every token the policy sampled in the episode gets it; with several model slots, every slot's, so a team is rewarded together. |
 | Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (DAPO). So is a group with fewer than two episodes fit to train on. |
+| Behaviour logprobs | A group with a segment to train on whose turns were sampled without their exact tokens or behaviour logprobs is skipped, and `skipped` says which channel's turns lacked what. |
 | The fastest of the saturated | Episodes that reached everything their task has to give earned the same; the one that took the least scores a point more, and episodes that tie for fastest all do. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. An episode that does not say its duration is not compared. `tie_break` turns this off. |
 | What is trained on | Every segment of the episodes whose advantage is not zero, up to what the trainer can afford in a step (`Budget.segments`). Beyond that, segments are taken at even steps through the group, so that each episode and slot keeps its share, spread over its whole game. |
 
@@ -335,7 +336,8 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   step of a trainer whose objective is likelihood ([LoRA trainer](../../implementations/rollout-lora.md), or the
   trainer of every weight) from the newest checkpoint the run made (else from `start`), and appends the checkpoint it
   makes as the run's (with no step). Its parents are the checkpoint it trained from, then the checkpoints that sampled
-  its examples, where those are known.
+  its examples, where those are known. The checkpoint says whether its examples were `importance` data (every turn
+  sampled with its exact tokens and behaviour logprobs) or `supervised` (`supervision`).
 
 ```bash
 rollout imitate PROFILE [--directory RUN] [--without KIND ...] [--limit N] [--seed N]   # with the run stopped
@@ -344,7 +346,8 @@ rollout imitate PROFILE … --resume-optimizer          # go on from the parent'
 rollout imitate PROFILE … --learning-rate R --warmup N --passes N   # the step's schedule
 ```
 
-It takes the run's fence, so the run must be stopped, and writes a start of `kind: imitation`. It reads the episodes
+It takes the run's fence, so the run must be stopped, and writes a start of `kind: imitation` that says its
+examples' `supervision`. It reads the episodes
 of the run in the directory for guidance of the kinds given (`way` by default), or, with `--dataset`, a
 [dataset's](datasets.md) examples; steps the profile's trainer with `objective = "likelihood"`; and adds
 `imitated_episodes`, `imitated_segments` and `optimizer_resumed` to the checkpoint's metrics. The step starts from

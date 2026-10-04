@@ -38,6 +38,7 @@ rollout imitate profile.toml --dataset diamonds-worked --start curriculum-9 --na
 | `counts` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens` |
 | `left_out` | the turns of its episodes that are no examples, by why (`action failed`: 2,969) |
 | `checkpoints` | the checkpoints that sampled its examples, by id, by depth |
+| `supervision` | `importance` where every example's turns were sampled with their exact tokens and behaviour logprobs; `supervised` where some were not (the trainer computes what it needs of their logprobs, and nothing is importance-corrected). A step on its examples records the same on the checkpoint it makes, and in its start |
 | `manifest`, `blobs` | the manifest's blob, and the store it is in, as any process opens it ([`rollout_train.stores`](rollouts.md#what-runners-write)) |
 | `made`, `by` | when, and who (`user@host`) |
 

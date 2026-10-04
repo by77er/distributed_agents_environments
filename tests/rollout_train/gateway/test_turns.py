@@ -2,6 +2,8 @@
 are the segments of the turns as they were sampled, whatever the session did."""
 
 import asyncio
+import json
+import lzma
 import math
 import random
 from array import array
@@ -12,9 +14,9 @@ from pydantic import JsonValue
 
 from rollout.contracts import FinishReason, Message, SampleResult, Usage
 from rollout_train.gateway import Link, TurnRecord, TurnStore, turns_table, unaccepted
-from rollout_train.gateway.turns import TURN, _Unpacked  # pyright: ignore[reportPrivateUsage]
+from rollout_train.gateway.turns import COMPRESSION, TURN, _Unpacked  # pyright: ignore[reportPrivateUsage]
 from rollout_train.ledger import Fenced
-from rollout_train.recorder.segments import segments_of
+from rollout_train.recorder.segments import TOKEN_LEVEL, segments_of
 from tests.rollout_train.gateway.support import stores
 
 
@@ -27,6 +29,7 @@ def turn(
     depth: int = 0,
     links: tuple[Link, ...] = (),
     slot: str = "policy",
+    sampled_with: tuple[str, ...] = TOKEN_LEVEL,
 ) -> TurnRecord:
     logprobs = [-(token % 5 + 1) / 4 if sampled else math.nan for token, sampled in zip(completion, mask, strict=True)]
     result = SampleResult(
@@ -36,7 +39,7 @@ def turn(
     )
     return TurnRecord(
         effect_id, "train", "r_1", slot, "policy", f"c{depth}", depth, array("i", prompt), completion, mask, logprobs,
-        result, episode="1/1", attempt=1, links=links,
+        result, episode="1/1", attempt=1, links=links, sampled_with=sampled_with,
     )  # fmt: skip
 
 
@@ -155,3 +158,44 @@ def test_a_compaction_attempt_is_trained_on_only_if_its_harness_went_on_from_it(
     assert [len(segment.spans) for segment in every] == [2, 2, 1]  # (t2 and t3 each continue t1)
     assert [[span.effect_id for span in segment.spans] for segment in accepted] == [["t1", "t2"], ["t1"], ["t4"]]
     assert accepted[1].tokens == every[1].tokens  # (what t3 sampled is kept as context)
+
+
+async def test_a_turn_says_what_it_was_sampled_with_and_a_segment_what_all_its_turns_were(tmp_path: Path) -> None:
+    ledger, blobs = stores(tmp_path)
+    store = TurnStore(ledger, blobs)
+    fence = await ledger.take("runs/train/episodes/1/1")
+    exact = turn("a", [1, 2, 3], [4], [True])
+    text = turn("b", [1, 2, 3, 4, 5], [6], [True], sampled_with=())  # (continues a, sampled by what returns text)
+    alone = turn("c", [7, 8], [9], [True], sampled_with=("token_exact",))
+    for each in (exact, text, alone):
+        await store.record(each, fence)
+    back = await store.turns("train", "r_1")
+    assert [each.sampled_with for each in back] == [TOKEN_LEVEL, (), ("token_exact",)]
+    segments = (await store.sessions("train", "r_1"))["policy"]
+    assert [(each.sampled_with, each.lacks) for each in segments] == [
+        ((), ("token_exact", "sampled_logprobs")),  # (what one of its turns lacked, the segment lacks)
+        (("token_exact",), ("sampled_logprobs",)),
+    ]
+    assert segments_of([exact])[0].lacks == ()
+
+
+async def test_a_turn_recorded_without_saying_what_it_was_sampled_with_was_sampled_token_by_token(
+    tmp_path: Path,
+) -> None:
+    ledger, blobs = stores(tmp_path)
+    store = TurnStore(ledger, blobs)
+    fence = await ledger.take("runs/train/episodes/1/1")
+    recorded = store._packed(turn("a", [1, 2], [3], [True]), [])  # pyright: ignore[reportPrivateUsage]
+    body = lzma.decompress(recorded, format=lzma.FORMAT_RAW, filters=COMPRESSION)
+    size = int.from_bytes(body[:4], "little")
+    header = json.loads(body[4 : 4 + size])
+    del header["sampled_with"]  # (as turns were recorded before they said)
+    head = json.dumps(header).encode()
+    unsaid = len(head).to_bytes(4, "little") + head + body[4 + size :]
+    packed = lzma.compress(unsaid, format=lzma.FORMAT_RAW, filters=COMPRESSION)
+    reference = await blobs.put(packed, TURN)
+    await ledger.append(
+        turns_table("train", "r_1"), "a", {"blob": reference.model_dump(mode="json"), "slot": "policy"}, fence
+    )
+    (back,) = await store.turns("train", "r_1")
+    assert back.sampled_with == TOKEN_LEVEL
