@@ -1,32 +1,18 @@
 // A new training run, asked for from the page: a launcher alive on a training machine offers its profiles (each with
-// the settings a launch may change), and starts the run asked for on one of them.
+// the settings a launch may change), and starts the run asked for on one of them, with the evals it makes of its
+// checkpoints.
 
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
+import { useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
 import type { Launcher, OfferedProfile } from "../api/types";
 import { Card, Empty, Head, SectionTitle } from "../components/ui";
 import { Ago } from "../layout/runs";
 import { nameOf } from "../lib/model";
+import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, shown, typed } from "../lib/settings";
 
-/** A setting's value as typed: a number, a boolean, JSON (a list, a table, a quoted string), or else the text. */
-export function typed(text: string): unknown {
-  const trimmed = text.trim();
-  if (trimmed === "") return "";
-  if (trimmed === "true" || trimmed === "false") return trimmed === "true";
-  if (/^-?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(trimmed)) return Number(trimmed);
-  if (/^[[{"]/.test(trimmed)) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return text;
-    }
-  }
-  return text;
-}
-
-const shown = (value: unknown): string =>
-  value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
+export { typed };
+const EVALS = [EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES];
 
 /** What weights are, in a word or two: full, or a LoRA adapter. */
 const weightsText = (kind: string): string => (kind === "full" ? "full weights" : kind === "lora" ? "LoRA" : kind);
@@ -63,6 +49,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const launch = useLaunch();
   const known = useKnown();
   const { data: system } = useSystem();
+  const { data: evals } = useEvals();
   const offered = useMemo(() => {
     const byName = new Map<string, { profile: OfferedProfile; launchers: Launcher[] }>();
     for (const launcher of launchers) {
@@ -87,7 +74,12 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [rows, setRows] = useState<Row[]>([]);
   const defaults = chosen?.profile.settings ?? {};
-  const settingKeys = Object.keys(defaults).filter(key => key !== "trainer.start" && key !== "trainer.bookmark").sort();
+  const [suite, setSuite] = useState<string | null>(null);  // (none chosen: the profile's)
+  const [every, setEvery] = useState<string | null>(null);
+  const [episodes, setEpisodes] = useState<string | null>(null);
+  const evalsAsked = evalsSettings(suite ?? shown(defaults[EVALS_SUITE]), every ?? (shown(defaults[EVALS_EVERY]) || "1"),
+    episodes ?? (shown(defaults[EVALS_EPISODES]) || "1"));
+  const settingKeys = Object.keys(defaults).filter(key => key !== "trainer.start" && key !== "trainer.bookmark" && !EVALS.includes(key)).sort();
   const room = chosen ? chosen.launchers.some(each => (each.playing ?? 0) < (each.at_once ?? 1)) : false;
   const checkpoints = [...(system?.checkpoints ?? [])].sort((a, b) => b.made - a.made);
   const bookmarks = Object.keys(system?.bookmarks ?? {}).sort();
@@ -105,6 +97,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
       if (shown(value) !== shown(defaults[key])) settings[key] = value;
     }
     for (const row of rows) if (row.key.trim()) settings[row.key.trim()] = typed(row.value);
+    for (const [key, value] of Object.entries(evalsAsked.settings)) if (shown(value) !== shown(defaults[key])) settings[key] = value;
     return settings;
   };
 
@@ -135,7 +128,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
               <select value={chosen?.profile.profile ?? ""} onChange={event => {
                 const next = offered.find(each => each.profile.profile === event.target.value)?.profile;
                 const from = start && system?.bookmarks[start] ? system.bookmarks[start] : start;
-                setProfileName(event.target.value); setEdits({});
+                setProfileName(event.target.value); setEdits({}); setSuite(null); setEvery(null); setEpisodes(null);
                 if (from && !startable(from, next)) setStart("");
               }}>
                 {offered.map(each => <option key={each.profile.profile} value={each.profile.profile}>{each.profile.profile} · {each.profile.model}{each.profile.weights ? ` · ${weightsText(each.profile.weights)}` : ""}</option>)}
@@ -204,6 +197,27 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             })}
             {settingKeys.length ? null : <p className="muted small">This profile offers no settings.</p>}
           </div>
+          <SectionTitle title="Evals" />
+          <div className="field-row evals-fields">
+            <label className="field">
+              <span>Suite</span>
+              <select value={suite ?? shown(defaults[EVALS_SUITE])} onChange={event => setSuite(event.target.value)}>
+                {shown(defaults[EVALS_SUITE]) ? null : <option value="">none</option>}
+                {(evals?.suites ?? []).map(each => <option key={each.suite} value={each.suite}>{each.suite} · {each.starts.length} starts</option>)}
+                {shown(defaults[EVALS_SUITE]) && !evals?.suites.some(each => each.suite === defaults[EVALS_SUITE]) ? <option value={shown(defaults[EVALS_SUITE])}>{shown(defaults[EVALS_SUITE])}</option> : null}
+              </select>
+            </label>
+            <label className="field">
+              <span>Every N steps</span>
+              <input type="number" min={1} value={every ?? (shown(defaults[EVALS_EVERY]) || "1")} onChange={event => setEvery(event.target.value)} disabled={!(suite ?? shown(defaults[EVALS_SUITE]))} />
+              {evalsAsked.errors[EVALS_EVERY] ? <small className="error-text">{evalsAsked.errors[EVALS_EVERY]}</small> : null}
+            </label>
+            <label className="field">
+              <span>Episodes per start</span>
+              <input type="number" min={1} value={episodes ?? (shown(defaults[EVALS_EPISODES]) || "1")} onChange={event => setEpisodes(event.target.value)} disabled={!(suite ?? shown(defaults[EVALS_SUITE]))} />
+              {evalsAsked.errors[EVALS_EPISODES] ? <small className="error-text">{evalsAsked.errors[EVALS_EPISODES]}</small> : null}
+            </label>
+          </div>
           <SectionTitle title="More trainer settings" />
           <div className="settings-grid">
             {rows.map((row, index) => (
@@ -218,7 +232,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
         </Card>
       </div>
       <div className="launch-submit">
-        <button type="submit" disabled={launch.isPending || !name.trim() || !environment}>{launch.isPending ? "asking…" : "Launch the run"}</button>
+        <button type="submit" disabled={launch.isPending || !name.trim() || !environment || Object.keys(evalsAsked.errors).length > 0}>{launch.isPending ? "asking…" : "Launch the run"}</button>
         <Link to="/runs" className="linkish">cancel</Link>
         {launch.isError ? <span className="error-text">{launch.error.message}</span> : null}
         {!launch.isError ? <span className="small faint">launchers alive: {launchers.map(each => <span key={each.launcher}>{each.launcher} (beat <Ago at={each.at} /> ago, {each.playing ?? 0} of {each.at_once ?? 1} playing) </span>)}</span> : null}

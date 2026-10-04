@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, Entry, Episode, Evals, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Statistics, System } from "./types";
+import type { Bookmark, CheckpointEvals, Entry, Episode, Evals, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -27,6 +27,9 @@ export const topics = {
     key: ["checkpoints", sample],
     path: `api/checkpoints${sample ? "?sample=1" : ""}`,
   }),
+  checkpointEvals: (id: string): Topic => ({ topic: `checkpoint-evals/${id}`, key: ["checkpoint-evals", id], path: `api/checkpoints/${encodeURIComponent(id)}/evals` }),
+  path: (id: string): Topic => ({ topic: `path/${id}`, key: ["path", id], path: `api/checkpoints/${encodeURIComponent(id)}/path` }),
+  settings: (run: string): Topic => ({ topic: `settings/${run}`, key: ["settings", run], path: `api/runs/${encodeURIComponent(run)}/settings` }),
   group: (run: string, number: number): Topic => ({
     topic: `group/${run}/${number}`,
     key: ["group", run, number],
@@ -103,8 +106,8 @@ export const useMachines = () =>
 export const useLaunches = () =>
   useQuery({ queryKey: topics.launches().key, queryFn: ({ signal }) => readJson<Launches>(topics.launches().path, signal) });
 
-export const useEvals = () =>
-  useQuery({ queryKey: topics.evals().key, queryFn: ({ signal }) => readJson<Evals>(topics.evals().path, signal) });
+export const useEvals = (enabled = true) =>
+  useQuery({ queryKey: topics.evals().key, enabled, queryFn: ({ signal }) => readJson<Evals>(topics.evals().path, signal) });
 
 /** Ask for a run or an eval: a launcher alive that offers its profile starts it. */
 export function useLaunch() {
@@ -133,6 +136,27 @@ export const useStatistics = () =>
       return figures;
     },
   });
+
+/** Every eval a checkpoint had. */
+export const useCheckpointEvals = (id: string | null | undefined) =>
+  useQuery({ queryKey: topics.checkpointEvals(id ?? "").key, enabled: Boolean(id), queryFn: ({ signal }) => readJson<CheckpointEvals>(topics.checkpointEvals(id!).path, signal) });
+
+/** A checkpoint's line from the base model, with each point's scores. */
+export const usePath = (id: string | null | undefined) =>
+  useQuery({ queryKey: topics.path(id ?? "").key, enabled: Boolean(id), queryFn: ({ signal }) => readJson<Path>(topics.path(id!).path, signal) });
+
+/** A training run's settings, and what is wanted of them. */
+export const useRunSettings = (run: string) =>
+  useQuery({ queryKey: topics.settings(run).key, queryFn: ({ signal }) => readJson<RunSettings>(topics.settings(run).path, signal) });
+
+/** Want some of a run's changeable settings from its next step on. */
+export function useWantSettings(run: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (settings: Record<string, unknown>) => asked<{ desired: unknown }>(topics.settings(run).path, "POST", { settings }),
+    onSuccess: () => client.invalidateQueries({ queryKey: topics.settings(run).key }),
+  });
+}
 
 export const useLineage = (sample: boolean) =>
   useQuery({ queryKey: topics.checkpoints(sample).key, queryFn: ({ signal }) => readJson<Lineage>(topics.checkpoints(sample).path, signal) });

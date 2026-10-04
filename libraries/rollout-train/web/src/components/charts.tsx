@@ -173,7 +173,11 @@ interface LineChartProps {
   y?: { zero?: boolean; min?: number; max?: number };
   stepped?: boolean;
   rules?: { value: number; label: string }[];
+  /** Places along x to mark with a rule across the chart and a word at its top. */
+  marks?: { x: number; label: string }[];
   label: string;
+  /** The span of x drawn at least (beside the points' own). */
+  domain?: [number, number];
   format?: (value: number) => string;
   xFormat?: (value: number) => string;
   yTick?: (value: number) => string;
@@ -182,14 +186,16 @@ interface LineChartProps {
 }
 
 /** A line for each series over x (a group's place, a step, or a time with `time`), on one y scale. `stepped` holds each
- * value until the next (a count); `rules` are reference lines. */
-export const LineChart = memo(function LineChart({ series, width, height = 210, time = false, y = {}, stepped = false, rules = [], label, format = figure, xFormat = figure, yTick, dots, gap = Infinity }: LineChartProps) {
-  const left = 50, right = 14, top = 12, bottom = 26;
+ * value until the next (a count); `rules` are reference lines, `marks` places along x. */
+export const LineChart = memo(function LineChart({ series, width, height = 210, time = false, y = {}, stepped = false, rules = [], marks = [], domain, label, format = figure, xFormat = figure, yTick, dots, gap = Infinity }: LineChartProps) {
+  const left = 50, right = 14, top = marks.length ? 34 : 12, bottom = 26;
+  const rows: number[] = [];  // (the row each mark's word is on)
   const [hover, setHover] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const shown = series.map(each => ({ ...each, points: each.points.filter(point => Number.isFinite(point[1])) })).filter(each => each.points.length);
   const points = shown.flatMap(each => [...each.points, ...(each.scatter ?? [])]).filter(point => Number.isFinite(point[1]));
-  let x0 = Math.min(...points.map(point => point[0])), x1 = Math.max(...points.map(point => point[0]), ...shown.map(each => each.until ?? -Infinity));
+  let x0 = Math.min(...points.map(point => point[0]), ...marks.map(mark => mark.x), ...(domain ? [domain[0]] : []));
+  let x1 = Math.max(...points.map(point => point[0]), ...shown.map(each => each.until ?? -Infinity), ...marks.map(mark => mark.x), ...(domain ? [domain[1]] : []));
   if (!(x1 > x0)) { x0 -= time ? 1800 : 1; x1 += time ? 1800 : 1; }
   const ys = scale([...points.map(point => point[1]), ...rules.map(rule => rule.value)], y);
   const X = (value: number) => left + ((value - x0) / (x1 - x0)) * (width - left - right);
@@ -231,6 +237,18 @@ export const LineChart = memo(function LineChart({ series, width, height = 210, 
         </g>
       ))}
       <line x1={left} x2={width - right} y1={height - bottom + 0.5} y2={height - bottom + 0.5} className="s-axis" />
+      {marks.map((mark, place) => {
+        // (a word too close to the one before goes on the row under it)
+        const near = place > 0 && X(mark.x) - X(marks[place - 1].x) < 130, row = near && rows[place - 1] === 0 ? 1 : 0;
+        rows[place] = row;
+        const at = 10 + row * 12, end = X(mark.x) > width - right - 130;
+        return (
+          <g key={`m${mark.x}`} className="mark-x">
+            <line x1={X(mark.x)} x2={X(mark.x)} y1={at + 3} y2={height - bottom} className="s-rule" />
+            <text x={X(mark.x) + (end ? -4 : 4)} y={at} textAnchor={end ? "end" : "start"}>{mark.label}</text>
+          </g>
+        );
+      })}
       {rules.map(rule => (
         <g key={rule.label}>
           <line x1={left} x2={width - right} y1={Y(rule.value)} y2={Y(rule.value)} className="s-rule" />

@@ -156,6 +156,14 @@ export function knownOf(checkpoints: Checkpoint[] | undefined, runs: Record<stri
   return found;
 }
 
+/** A checkpoint's line: its first parents back to the one trained from the base model, oldest first, ending at it (a
+ * parent this ledger lacks ends it there). */
+export function lineOf(checkpoint: Checkpoint, find: (id: string | null | undefined) => Checkpoint | undefined): Checkpoint[] {
+  const line: Checkpoint[] = [];
+  for (let each: Checkpoint | undefined = checkpoint; each && !line.includes(each); each = find(each.parents[0])) line.unshift(each);
+  return line;
+}
+
 /** The checkpoints a run made, oldest first. */
 export const madeBy = (checkpoints: Checkpoint[], run: string): Checkpoint[] =>
   checkpoints.filter(checkpoint => checkpoint.run === run).sort((a, b) => a.depth - b.depth || a.made - b.made);

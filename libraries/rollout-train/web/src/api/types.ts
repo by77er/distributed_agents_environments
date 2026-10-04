@@ -140,7 +140,10 @@ export interface Run {
   written: number | null;
   played?: Played;
   /** What it is: a training run (`run`), or an eval playing a suite (`eval`). */
-  kind?: "run" | "eval";
+  kind?: "run" | "eval" | string;
+  /** For an eval a training run's schedule asked for: that run, and the step whose checkpoint it plays. */
+  by?: string | null;
+  by_step?: number | null;
 }
 
 /** A checkpoint: where it came from, what made it, and what is kept of it. */
@@ -574,4 +577,78 @@ export interface Lineage {
   workers: Worker[];
   routing: { waiting: Record<string, number>; history: [number, number][] };
   evaluations: Suite[];
+}
+
+/** An eval a checkpoint had: the suite, the eval's run, who asked for it (by hand, or a training run's schedule at a
+ * step), how far it got and its score. */
+export interface CheckpointEval {
+  suite: string;
+  run: string;
+  name: string;
+  kind: string;
+  checkpoint: string | null;
+  model: string | null;
+  asked_by: "by hand" | "schedule";
+  by: string | null;
+  by_name: string | null;
+  step: number | null;
+  /** Episodes of each start. */
+  episodes: number;
+  played: number;
+  expected: number;
+  /** Episodes solved; none where none of them said whether it solved its start. */
+  solved: number | null;
+  /** The share solved of those that said. */
+  share: number | null;
+  reward: number | null;
+  started: number | null;
+  at: number | null;
+  done: boolean;
+}
+
+export interface CheckpointEvals {
+  checkpoint: string;
+  evals: CheckpointEval[];
+}
+
+/** A point's score at a suite, over every eval of it there. */
+export interface PathScore {
+  reward: number | null;
+  /** The share solved; none where its episodes do not say. */
+  solved: number | null;
+  played: number;
+  evals: string[];
+}
+
+/** A point on a checkpoint's line: the base model (depth 0, no id), then each checkpoint along first parents. */
+export interface PathPoint {
+  id: string | null;
+  short: string;
+  depth: number;
+  model: string | null;
+  run: string | null;
+  name: string | null;
+  step: number | null;
+  kind: "model" | "lora" | "full" | string;
+  bookmarks: string[];
+  scores: Record<string, PathScore>;
+}
+
+export interface Path {
+  checkpoint: string;
+  points: PathPoint[];
+  suites: { suite: string; environment: string | null }[];
+}
+
+/** A training run's settings, by dotted key: fixed ones, changeable ones as it started, those its newest step used,
+ * what is wanted of them, and each step that used other settings than the one before. */
+export interface RunSettings {
+  run: string;
+  kind: string;
+  fixed: Record<string, unknown>;
+  changeable: Record<string, unknown>;
+  now: Record<string, unknown>;
+  desired: Record<string, unknown>;
+  changed: number | null;
+  changes: { step: number; changed: Record<string, unknown> }[];
 }

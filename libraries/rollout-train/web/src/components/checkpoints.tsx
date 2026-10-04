@@ -25,10 +25,20 @@ export function CheckpointTag({ id, base, bare = false, link = true }: { id: str
   return (
     <span className="checkpoint-tag">
       {link && inside ? <Link to={checkpointPlace(id)} title={known.title(id)}>{body}</Link> : <span title={known.title(id)}>{body}</span>}
-      {known.checkpoint(id)?.kind === "full" ? <span className="chip" title="all of a model's weights">full</span> : null}
+      <WeightsChip id={id} />
       <Marks names={known.bookmarks(id)} />
     </span>
   );
+}
+
+/** What a checkpoint's weights are, where they are not an adapter over a model: `full` weights, or an adapter `over full`
+ * weights (a checkpoint of its own). */
+export function WeightsChip({ id }: { id: string | null | undefined }) {
+  const known = useKnown();
+  const checkpoint = known.checkpoint(id);
+  if (checkpoint?.kind === "full") return <span className="chip" title="all of a model's weights">full</span>;
+  const under = known.checkpoint(checkpoint?.base);
+  return under ? <span className="chip" title={`a LoRA adapter over ${known.base(checkpoint?.base)}`}>over full</span> : null;
 }
 
 /** What a checkpoint's weights build on: a checkpoint this ledger has (as a tag), else the model's name (its last part,

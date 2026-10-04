@@ -3,11 +3,14 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint, Evals, PlainMessage, SampleLine } from "./api/types";
+import type { Run, System, Checkpoint, Evals, Path, PathPoint, PlainMessage, SampleLine } from "./api/types";
 import { scale, sparkPoints } from "./components/charts";
+import { columnsOf, type Subject } from "./components/evals";
 import { slotHue } from "./lib/format";
-import { episodeClass, knownOf, reported } from "./lib/model";
+import { episodeClass, knownOf, lineOf, reported } from "./lib/model";
 import { placeOf } from "./lib/places";
+import { pathChart } from "./lib/scores";
+import { evalsSettings, settingOf, wantedOf } from "./lib/settings";
 import { mapRows, resultOf, samplesOf, seenOf } from "./pages/Episode";
 import { Runs } from "./pages/Runs";
 import { Suite } from "./pages/Suite";
@@ -39,6 +42,7 @@ describe("places", () => {
     expect(placeOf("/runs/new")).toEqual({ page: "runs", kind: "launch" });
     expect(placeOf("/evals")).toEqual({ page: "evals", kind: "evals" });
     expect(placeOf("/evals/words-v1")).toEqual({ page: "evals", kind: "suite", suite: "words-v1" });
+    expect(placeOf("/eval/run_1")).toEqual({ page: "evals", kind: "eval", run: "run_1" });
     expect(placeOf("")).toEqual({ page: "runs", kind: "runs" });
   });
 });
@@ -247,5 +251,88 @@ describe("a new run's settings", () => {
     expect(typed("true")).toBe(true);
     expect(typed("[1, 2]")).toEqual([1, 2]);
     expect(typed("rollout_lora:LoraTrainer")).toBe("rollout_lora:LoraTrainer");
+  });
+});
+
+describe("a checkpoint's line", () => {
+  it("is its first parents back to the one trained from the base model, oldest first", () => {
+    const first = checkpoint("kpqxlmnoprstuvwx", "kpqx", "run_1", 1);
+    const merged = { ...checkpoint("lmnopqrstuvwxyzk", "lmno", null, null, [first.id]), kind: "full" };
+    const stacked = { ...checkpoint("mnopqrstuvwxyzkl", "mnop", "run_2", 1, [merged.id, "zzzzzzzzzzzzzzzz"]), base: merged.id };
+    const byId = new Map([first, merged, stacked].map(each => [each.id, each]));
+    expect(lineOf(stacked, id => (id ? byId.get(id) : undefined)).map(each => each.short)).toEqual(["kpqx", "lmno", "mnop"]);
+    expect(lineOf(first, () => undefined)).toEqual([first]);
+  });
+
+  const point = (depth: number, extra: Partial<PathPoint>): PathPoint => ({
+    id: `c${depth}`, short: `c${depth}`, depth, model: null, run: "run_1", name: "lora run", step: depth, kind: "lora", bookmarks: [], scores: {}, ...extra,
+  });
+  const score = (solved: number | null, reward: number) => ({ solved, reward, played: 4, evals: ["e"] });
+
+  it("draws each suite's score by depth from the base model, marking where it enters a run or changes its weights", () => {
+    const path: Path = {
+      checkpoint: "c4",
+      suites: [{ suite: "words", environment: "games:words" }, { suite: "maths", environment: "games:maths" }],
+      points: [
+        point(0, { id: null, short: "base", model: "tiny", run: null, name: null, step: null, kind: "model", scores: { words: score(0.25, 0.3), maths: score(null, -1) } }),
+        point(1, { scores: { words: score(0.5, 0.5) } }),
+        point(2, { id: "c2", run: null, name: null, kind: "full", bookmarks: ["merged"], scores: { maths: score(null, 2) } }),
+        point(3, { run: "run_2", name: "stacked", scores: { words: score(0.75, 0.8) } }),
+        point(4, { run: "run_2", name: "stacked" }),
+      ],
+    };
+    const chart = pathChart(path, place => `color-${place}`);
+    expect(chart.series.map(each => [each.suite, each.measure, each.color, each.points])).toEqual([
+      ["words", "solved", "color-0", [[0, 0.25], [1, 0.5], [3, 0.75]]],
+      ["maths", "reward", "color-1", [[0, -1], [2, 2]]],
+    ]);
+    expect(chart.solved).toBe(false);
+    expect([...chart.labels.entries()]).toEqual([[0, "base"], [1, "c1"], [2, "merged"], [3, "c3"], [4, "c4"]]);
+    expect(chart.marks).toEqual([{ x: 1, label: "lora run" }, { x: 2, label: "outside a run · full" }, { x: 3, label: "stacked · LoRA" }]);
+    expect(pathChart({ ...path, suites: [{ suite: "words", environment: null }] }).solved).toBe(true);
+    expect(pathChart({ checkpoint: "c", points: [], suites: [] }).series).toEqual([]);
+  });
+});
+
+describe("a suite's columns", () => {
+  it("stand by run, the base model first, then by depth", () => {
+    const at = (id: string, short: string, run: string | null, depth: number, made: number): Checkpoint => ({ ...checkpoint(id, short, run, depth), depth, made });
+    const checkpoints = [at("kkkkkkkkkkkkkkkk", "kkkk", "late", 1, 5), at("llllllllllllllll", "llll", "early", 2, 2),
+      at("mmmmmmmmmmmmmmmm", "mmmm", "early", 1, 1), at("nnnnnnnnnnnnnnnn", "nnnn", null, 3, 3)];
+    const known = knownOf(checkpoints, { early: "early run" });
+    const subject = (name: string, checkpoint: string | null): Subject => ({
+      subject: name, kind: checkpoint ? "checkpoint" : "model", checkpoint: checkpoint ?? undefined, model: "tiny", played: 1, solved: 1, results: {},
+    });
+    const subjects = [subject("e1", "kkkkkkkkkkkkkkkk"), subject("e2", "llllllllllllllll"), subject("e3", null), subject("e4", "nnnnnnnnnnnnnnnn"),
+      subject("e5", "mmmmmmmmmmmmmmmm")];
+    expect(columnsOf(subjects, known).map(column => [column.label, column.subjects.map(each => each.subject)])).toEqual([
+      ["base model", ["e3"]], ["early run", ["e5", "e2"]], ["late", ["e1"]], ["outside a run", ["e4"]],
+    ]);
+  });
+});
+
+describe("a run's settings, as typed", () => {
+  it("are whole numbers of 1 at least where they must be, a suite or none, else as typed", () => {
+    expect(settingOf("evals.every", "2")).toEqual({ value: 2 });
+    expect(settingOf("evals.every", "0")).toEqual({ error: "a whole number, 1 at least" });
+    expect(settingOf("groups_per_step", "1.5")).toEqual({ error: "a whole number, 1 at least" });
+    expect(settingOf("groups_per_step", "")).toEqual({ error: "a whole number, 1 at least" });
+    expect(settingOf("evals.suite", "  ")).toEqual({ value: null });
+    expect(settingOf("trainer.learning_rate", "3e-5")).toEqual({ value: 3e-5 });
+    expect(settingOf("trainer.truncate", "")).toEqual({ value: null });
+  });
+
+  it("ask only for what differs from what the run uses, and say why a field cannot be", () => {
+    const current = { groups_per_step: 4, "evals.suite": null, "evals.every": 1, "trainer.learning_rate": 5e-5 };
+    expect(wantedOf({ groups_per_step: "4", "evals.suite": "words", "evals.every": "x", "trainer.learning_rate": "0.00003" }, current)).toEqual({
+      settings: { "evals.suite": "words", "trainer.learning_rate": 3e-5 }, errors: { "evals.every": "a whole number, 1 at least" },
+    });
+    expect(wantedOf({ "evals.suite": "" }, current)).toEqual({ settings: {}, errors: {} });
+  });
+
+  it("make a new run's evals: none without a suite", () => {
+    expect(evalsSettings("", "2", "3")).toEqual({ settings: {}, errors: {} });
+    expect(evalsSettings("words", "2", "3")).toEqual({ settings: { "evals.suite": "words", "evals.every": 2, "evals.episodes": 3 }, errors: {} });
+    expect(evalsSettings("words", "0", "3").errors).toEqual({ "evals.every": "a whole number, 1 at least" });
   });
 });

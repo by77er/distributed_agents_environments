@@ -10,7 +10,7 @@ import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
-import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
+import { episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { RunDot, running, useRunColor } from "./runs";
 
@@ -48,8 +48,7 @@ function RunsTree({ place, system }: { place: Place; system: System }) {
   const { data: episode } = useEpisodeLabels(episodeId);
   const showing = place.kind === "episode" ? episode : undefined;
   const others = (feeds ?? []).filter(run => !run.labels.run).length;
-  // (an eval's run is under the evals, unless it is the one shown)
-  const runs = system.runs.filter(run => run.kind !== "eval" || ("run" in place && place.run === run.run) || showing?.run === run.run);
+  const runs = system.runs.filter(run => run.kind !== "eval");  // (an eval's run is under the evals)
   return (
     <>
       {runs.map(run => (
@@ -216,12 +215,12 @@ function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   );
 }
 
-/** The suites, each with how many subjects played it; then the evals playing now. */
+/** The suites, each with how many subjects played it; then the evals playing now, and the eval shown. */
 function EvalsTree({ place }: { place: Place }) {
   const { data: evals } = useEvals();
   const known = useKnown();
   if (!evals) return null;
-  const playing = evals.evals.filter(each => !each.done);
+  const playing = evals.evals.filter(each => !each.done || (place.kind === "eval" && place.run === each.run));
   return (
     <>
       {evals.suites.length ? <div className="label">Suites</div> : null}
@@ -232,10 +231,10 @@ function EvalsTree({ place }: { place: Place }) {
         </Node>
       ))}
       {evals.suites.length ? null : <div className="empty">No suite yet.</div>}
-      {playing.length ? <div className="label">Playing</div> : null}
+      {playing.length ? <div className="label">Evals</div> : null}
       {playing.map(each => (
-        <Node key={each.run} to={runPlace(each.run)}>
-          <span className="dot alive" />
+        <Node key={each.run} to={evalPlace(each.run)} current={place.kind === "eval" && place.run === each.run}>
+          <span className={`dot${each.done ? "" : " alive"}`} />
           <span className="name" title={`${each.suite} with ${known.short(each.checkpoint)}`}>{each.name}</span>
           <span className="tag">{each.played}/{each.expected}</span>
         </Node>

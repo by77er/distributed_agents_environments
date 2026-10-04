@@ -1,0 +1,58 @@
+// Evals from a checkpoint's point of view: every eval it had, and each suite's score along its line from the base model.
+
+import { Link } from "react-router-dom";
+import { useCheckpointEvals, useKnown, usePath } from "../api/queries";
+import { Ago } from "../layout/runs";
+import { clock, figure, percent } from "../lib/format";
+import { evalPlace, runPlace, suitePlace } from "../lib/places";
+import { pathChart } from "../lib/scores";
+import { LineChart, Sized } from "./charts";
+import { Card, Legend, Table } from "./ui";
+
+/** Each suite's score at every checkpoint on a checkpoint's line, from the base model; nothing where none was evaluated. */
+export function PathCard({ checkpoint }: { checkpoint: string }) {
+  const { data: path } = usePath(checkpoint);
+  if (!path?.points.length) return null;
+  const chart = pathChart(path);
+  if (!chart.series.length) return null;
+  const deepest = Math.max(...path.points.map(point => point.depth));
+  return (
+    <Card title="Scores along its line">
+      <Sized>{width => (
+        <LineChart series={chart.series} width={width} height={240} y={{ zero: false }} marks={chart.marks} domain={[0, deepest]} dots
+          label="each suite's score at each checkpoint on the line" xFormat={depth => chart.labels.get(depth) ?? String(depth)}
+          format={chart.solved ? percent : figure} yTick={chart.solved ? percent : undefined} />
+      )}</Sized>
+      <Legend items={chart.series.map(each => ({ name: `${each.suite}${chart.solved ? "" : each.measure === "solved" ? " (solved)" : " (mean reward)"}`, color: each.color }))} />
+    </Card>
+  );
+}
+
+/** Every eval a checkpoint had, by hand or by its run's schedule, newest first: one opens the eval. */
+export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
+  const { data } = useCheckpointEvals(checkpoint);
+  const known = useKnown();
+  const evals = data?.evals ?? [];
+  return (
+    <Card title="Evals">
+      {evals.length ? (
+        <Table
+          heads={[["suite"], ["solved", "n"], ["mean reward", "n"], ["episodes", "n"], ["asked by"], ["started"], ["eval"]]}
+          keys={evals.map(each => each.run)}
+          rows={evals.map(each => [
+            <Link to={suitePlace(each.suite)} className="linkish" onClick={event => event.stopPropagation()}>{each.suite}</Link>,
+            each.share == null ? "–" : <span title={`${each.solved} of ${each.played}`}>{percent(each.share)}</span>,
+            figure(each.reward),
+            <span title={`${each.episodes} of each start`}>{each.played === each.expected ? each.played : `${each.played} of ${each.expected}`}</span>,
+            each.asked_by === "schedule" && each.by ? (
+              <Link to={runPlace(each.by)} className="linkish" onClick={event => event.stopPropagation()}>{known.run(each.by)}{each.step != null ? ` · S${each.step}` : ""}</Link>
+            ) : "by hand",
+            each.started ? <span title={clock(each.started)}><Ago at={each.started} /> ago</span> : "–",
+            <b title={`id: ${each.run}`}>{each.name}</b>,
+          ])}
+          to={evals.map(each => evalPlace(each.run))}
+        />
+      ) : <p className="muted">None yet.</p>}
+    </Card>
+  );
+}

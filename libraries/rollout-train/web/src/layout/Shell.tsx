@@ -4,15 +4,25 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { type Topic, topics, useEpisode, useKnown, useSystem } from "../api/queries";
+import { type Topic, topics, useEpisode, useEvals, useKnown, useSystem } from "../api/queries";
+import type { System } from "../api/types";
 import { useConnection, useStream } from "../api/stream";
-import { nameOf, stepOf } from "../lib/model";
-import { episodePlace, groupPlace, PAGES, type Place, runPlace, stepPlace, usePlace } from "../lib/places";
+import { madeBy, nameOf, stepOf } from "../lib/model";
+import { episodePlace, groupPlace, PAGES, type Place, runPlace, stepPlace, suitePlace, usePlace } from "../lib/places";
 import { Tree } from "./Tree";
 
 /** The topics the place shown needs the monitor to say it changed. */
-function watched(place: Place): Topic[] {
+function watched(place: Place, system: System | undefined): Topic[] {
   const found = [topics.system(), topics.feeds()];
+  if (place.kind === "run") {
+    const newest = system ? madeBy(system.checkpoints, place.run).at(-1) : undefined;
+    found.push(topics.settings(place.run), ...(newest ? [topics.path(newest.id)] : []));
+  }
+  if (place.kind === "checkpoint") {
+    const id = system?.checkpoints.find(each => each.id === place.id || each.id.startsWith(place.id))?.id ?? place.id;
+    found.push(topics.checkpointEvals(id), topics.path(id), topics.launches());
+  }
+  if (place.kind === "launch") found.push(topics.evals());
   if (place.kind === "group") found.push(topics.group(place.run, place.number));
   if (place.kind === "episode") found.push(topics.episode(place.id));
   if (place.kind === "statistics") found.push(topics.statistics(), topics.machines());
@@ -28,8 +38,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
-  useStream(watched(place));
   const { data: system } = useSystem();
+  useStream(watched(place, system));
   // A new place opens at its top (or at the section it names); what is read again keeps where one is.
   useEffect(() => {
     setOpen(false);
@@ -86,6 +96,7 @@ function Live() {
 function Crumbs({ place }: { place: Place }) {
   const { data: system } = useSystem();
   const { data: episode } = useEpisode(place.kind === "episode" ? place.id : "", place.kind === "episode");
+  const { data: evals } = useEvals(place.kind === "eval");
   const known = useKnown();
   const [, pageName, pageTo] = PAGES.find(([page]) => page === place.page)!;
   const crumbs: [string, string][] = [[pageName, pageTo]];
@@ -114,6 +125,11 @@ function Crumbs({ place }: { place: Place }) {
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
   else if (place.kind === "checkpoints" && place.sample) crumbs.push(["Sample fixture", ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
+  else if (place.kind === "eval") {
+    const played = evals?.evals.find(each => each.run === place.run);
+    if (played) crumbs.push([`Suite ${played.suite}`, suitePlace(played.suite)]);
+    crumbs.push([`Eval ${played?.name ?? runName(place.run)}`, ""]);
+  }
   return (
     <div className="crumbs">
       {crumbs.map(([name, to], index) => (

@@ -2,11 +2,11 @@
 // how each did at each start of the suite.
 
 import { Link } from "react-router-dom";
-import { useSystem } from "../api/queries";
+import { useKnown, useSystem } from "../api/queries";
 import type { Suite } from "../api/types";
 import { figure, percent } from "../lib/format";
 import type { Known } from "../lib/model";
-import { runPlace } from "../lib/places";
+import { evalPlace, runPlace } from "../lib/places";
 import { CheckpointTag } from "./checkpoints";
 import { solvedClass } from "./ui";
 
@@ -50,29 +50,78 @@ export function Played({ subject, start }: { subject: Subject; start: SuiteStart
   );
 }
 
-/** Every subject of a suite, start by start: what each solved, and in all. A subject opens the eval that played it. */
+/** A suite's subjects in columns, grouped: the base model first, then each run's checkpoints (and those made outside a
+ * run), runs in the order their checkpoints grew, and within a run by depth. */
+export interface Column {
+  key: string;
+  /** The run, or `base` for the base model, or `outside` for checkpoints made outside a run. */
+  label: string;
+  run: string | null;
+  subjects: Subject[];
+}
+
+export function columnsOf(subjects: Subject[], known: Known): Column[] {
+  const groups = new Map<string, Column>();
+  const at = (subject: Subject) => known.checkpoint(subject.checkpoint);
+  for (const subject of subjects) {
+    const checkpoint = at(subject);
+    const key = subject.kind === "model" ? "base" : checkpoint?.run ? `run:${checkpoint.run}` : "outside";
+    const label = key === "base" ? "base model" : checkpoint?.run ? known.run(checkpoint.run) : "outside a run";
+    const group = groups.get(key) ?? { key, label, run: checkpoint?.run ?? null, subjects: [] };
+    group.subjects.push(subject);
+    groups.set(key, group);
+  }
+  const depth = (subject: Subject) => at(subject)?.depth ?? 0, made = (subject: Subject) => at(subject)?.made ?? 0;
+  const order = (a: Subject, b: Subject) => depth(a) - depth(b) || made(a) - made(b) || a.subject.localeCompare(b.subject);
+  for (const group of groups.values()) group.subjects.sort(order);
+  const first = (group: Column) => group.subjects[0];
+  return [...groups.values()].sort((a, b) => (a.key === "base" ? -1 : b.key === "base" ? 1 : order(first(a), first(b))));
+}
+
+/** A column's heading: the checkpoint (its short id, what its weights are, its bookmarks) and its step, or the base
+ * model's name; under it, how many episodes of each start (opening the eval). */
+function SubjectHead({ subject, runs }: { subject: Subject; runs: Set<string> }) {
+  const known = useKnown();
+  const checkpoint = known.checkpoint(subject.checkpoint);
+  const each = `${subject.episodes ?? 1} per start`;
+  const scheduled = subject.asked_by && subject.asked_by !== "by hand" ? " · scheduled" : "";  // (asked for by a run)
+  return (
+    <th className="subject">
+      <div>{subject.kind === "model" ? <span className="nowrap" title={subject.model ?? ""}>{subject.model?.split("/").at(-1) ?? "base model"}</span> : <CheckpointTag id={subject.checkpoint} bare />}</div>
+      <small>
+        {checkpoint?.step != null ? `S${checkpoint.step} · ` : ""}
+        {runs.has(subject.subject) ? <Link to={evalPlace(subject.subject)} className="linkish">{each}</Link> : each}{scheduled}
+      </small>
+    </th>
+  );
+}
+
+/** Every subject of a suite, start by start: what each solved, and in all. Columns stand by run, then depth; a column
+ * opens the eval that played it. */
 export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subject[] }) {
   const { data: system } = useSystem();
+  const known = useKnown();
   const runs = new Set((system?.runs ?? []).map(run => run.run)), said = anySolved(subjects);
+  const columns = columnsOf(subjects, known), ordered = columns.flatMap(column => column.subjects);
   return (
     <>
       <div className="table">
         <table className="evals">
           <thead>
-            <tr>
-              <th>start</th>
-              {subjects.map(subject => (
-                <th key={subject.subject} className="subject">
-                  <div><SubjectName subject={subject} /></div>
-                  <small>{runs.has(subject.subject) ? <Link to={runPlace(subject.subject)} className="linkish">{subject.episodes ?? 1} a start</Link> : `${subject.episodes ?? 1} a start`}</small>
+            <tr className="groups">
+              <th rowSpan={2}>start</th>
+              {columns.map(column => (
+                <th key={column.key} colSpan={column.subjects.length} className="group">
+                  {column.run && runs.has(column.run) ? <Link to={runPlace(column.run)} className="linkish">{column.label}</Link> : column.label}
                 </th>
               ))}
             </tr>
+            <tr>{ordered.map(subject => <SubjectHead key={subject.subject} subject={subject} runs={runs} />)}</tr>
           </thead>
           <tbody>
             <tr className="total">
               <td>{said ? "solved" : "mean reward"}</td>
-              {subjects.map(subject => {
+              {ordered.map(subject => {
                 const expected = suite.starts.length * (subject.episodes ?? 1);
                 return (
                   <td key={subject.subject} className="n" title={`mean reward ${figure(subject.reward)}`}>
@@ -86,7 +135,7 @@ export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subje
             {suite.starts.map(start => (
               <tr key={start.start}>
                 <td className="key" title={start.title ?? ""}>{startName(start)}</td>
-                {subjects.map(subject => <td key={subject.subject} className="cell-result"><Played subject={subject} start={start} /></td>)}
+                {ordered.map(subject => <td key={subject.subject} className="cell-result"><Played subject={subject} start={start} /></td>)}
               </tr>
             ))}
           </tbody>

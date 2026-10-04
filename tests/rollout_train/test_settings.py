@@ -33,7 +33,7 @@ from rollout_train.settings import (
 )
 from rollout_train.trainer import Changeable, Files, Step, Weighted
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.test_evals import CATALOG, a_schedule
+from tests.rollout_train.test_evals import ENVIRONMENT, a_schedule
 from tests.rollout_train.test_profile import write
 from tests.rollout_train.training.test_loop import Counting, answering, here, made_by
 
@@ -134,7 +134,7 @@ async def test_a_running_loop_takes_the_changeable_settings_wanted_from_the_next
 ) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
     desired = desired_settings_of(ledger)
     assert desired is not None
     read: list[int] = []

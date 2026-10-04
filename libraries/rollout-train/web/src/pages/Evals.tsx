@@ -10,7 +10,7 @@ import { LaunchList } from "../components/launches";
 import { Card, Empty, Head, Mark, Spec, Specs, Table, Tile } from "../components/ui";
 import { Ago } from "../layout/runs";
 import { clock, figure } from "../lib/format";
-import { runPlace, suitePlace } from "../lib/places";
+import { evalPlace, suitePlace } from "../lib/places";
 
 /** How to make a suite, for a ledger with none (or to make another). */
 export function MakeSuite({ ledger }: { ledger: string }) {
@@ -55,7 +55,7 @@ export function Evals() {
               each.started ? <><Ago at={each.started} /> ago</> : "–",
               <Mark state={each.done ? "ended" : "running"}>{each.done ? "done" : "playing"}</Mark>,
             ])}
-            to={evals.evals.map(each => runPlace(each.run))}
+            to={evals.evals.map(each => evalPlace(each.run))}
           />
         ) : <p className="muted">None yet.</p>}
       </Card>
@@ -70,7 +70,7 @@ function SuiteTile({ suite }: { suite: EvalSuite }) {
   return (
     <Tile to={suitePlace(suite.suite)} className="rail accent">
       <header><b>{suite.suite}</b><span className="what">{suite.environment ?? ""}</span></header>
-      <div className="cells">
+      <div className="cells three">
         <div className="cell"><span>starts</span><b>{suite.starts.length}</b><small>{new Set(suite.starts.map(start => start.task)).size} rows</small></div>
         <div className="cell"><span>played by</span><b>{suite.subjects.length}</b><small>subjects</small></div>
         <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : ""}</small></div>

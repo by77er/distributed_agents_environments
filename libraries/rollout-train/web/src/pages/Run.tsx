@@ -1,5 +1,6 @@
 // A training run: where it started from and where it is now, how its groups went, what is in flight, every group's
-// rewards, its steps and the tasks it played.
+// rewards, its steps, the tasks it played, each suite's score along its line, and its settings. An eval's run has a
+// page of its own (`EvalRun`).
 
 import { memo } from "react";
 import { Link } from "react-router-dom";
@@ -12,13 +13,17 @@ import { byNumber, figure, mean, shareOf, span } from "../lib/format";
 import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, reported, stateKind } from "../lib/model";
 import { groupPlace, stepPlace } from "../lib/places";
 import { BaseName, CheckpointTag } from "../components/checkpoints";
+import { PathCard } from "../components/scores";
+import { RunSettingsSection } from "../components/settings";
 import { Ago, Elsewhere, running, Wrote } from "../layout/runs";
+import { EvalRun } from "./EvalRun";
 
 export function Run({ name }: { name: string }) {
   const { data: system } = useSystem();
   if (!system) return <Empty>Reading the run…</Empty>;
   const run = system.runs.find(each => each.run === name);
   if (!run) return <Empty>There is no run {name}.</Empty>;
+  if (run.kind === "eval") return <EvalRun run={run.run} />;
   const made = madeBy(system.checkpoints, run.run);  // (the checkpoints it made, oldest first)
   return (
     <>
@@ -43,6 +48,8 @@ export function Run({ name }: { name: string }) {
         <StepsCard run={run} />
         <TasksCard run={run} />
       </div>
+      {made.length ? <PathCard checkpoint={made.at(-1)!.id} /> : null}
+      <RunSettingsSection run={run.run} />
     </>
   );
 }

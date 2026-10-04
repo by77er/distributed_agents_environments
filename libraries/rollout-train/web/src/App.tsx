@@ -11,6 +11,7 @@ import { Statistics } from "./pages/Statistics";
 import { Checkpoint } from "./pages/Checkpoint";
 import { Checkpoints } from "./pages/Checkpoints";
 import { Evals } from "./pages/Evals";
+import { EvalRun } from "./pages/EvalRun";
 import { Suite } from "./pages/Suite";
 
 function View() {
@@ -27,6 +28,7 @@ function View() {
     case "checkpoint": return <Checkpoint id={place.id} />;
     case "evals": return <Evals />;
     case "suite": return <Suite name={place.suite} />;
+    case "eval": return <EvalRun run={place.run} />;
     case "statistics": return <Statistics />;
     default: return <Runs />;
   }

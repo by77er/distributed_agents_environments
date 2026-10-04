@@ -1,16 +1,22 @@
 // A checkpoint: where it came from (its parents, its base model, the run and step that made it), the bookmarks that name
-// it (made, moved and taken away here), its line back to the base model, what grew from it, and the suites it played.
+// it (made, moved and taken away here), its line back to the base model with each suite's score along it, what grew
+// from it, every eval it had, and the form that asks for another.
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useBookmark, useEvals, useKnown, useSystem, useUnbookmark } from "../api/queries";
-import type { Checkpoint as CheckpointData } from "../api/types";
+import { useBookmark, useEvals, useKnown, useLaunches, useSystem, useUnbookmark } from "../api/queries";
+import type { Checkpoint as CheckpointData, System } from "../api/types";
 import { BarChart, Sized } from "../components/charts";
 import { BaseName, Marks } from "../components/checkpoints";
+import { LaunchList } from "../components/launches";
+import { PlayForm } from "../components/play";
+import { CheckpointEvalsCard, PathCard } from "../components/scores";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
 import { bytes, clock, figure, span } from "../lib/format";
-import { evalsPlace, runPlace, stepPlace, checkpointPlace, suitePlace } from "../lib/places";
-import { shareOf, shareText } from "../components/evals";
+import { lineOf } from "../lib/model";
+import { runPlace, stepPlace, checkpointPlace } from "../lib/places";
+import { MakeSuite } from "./Evals";
+import { NoLauncher } from "./NewRun";
 
 export function Checkpoint({ id }: { id: string }) {
   const { data: system } = useSystem();
@@ -20,8 +26,7 @@ export function Checkpoint({ id }: { id: string }) {
   const checkpoint = system.checkpoints.find(each => each.id === id) ?? system.checkpoints.find(each => each.id.startsWith(id));
   if (!checkpoint) return <Empty>There is no checkpoint {id}.</Empty>;
   const children = system.checkpoints.filter(each => each.parents.includes(checkpoint.id));
-  const line: CheckpointData[] = [];  // (its first parents, back to the base model)
-  for (let each: CheckpointData | undefined = checkpoint; each; each = known.checkpoint(each.parents[0])) line.unshift(each);
+  const line = lineOf(checkpoint, known.checkpoint);
   const serving = system.channels.filter(channel => channel.adapter === checkpoint.id);
   const size = (checkpoint.weights?.bytes ?? 0) + (checkpoint.state?.bytes ?? 0);
   const placeOf = (each: CheckpointData) => (each.run && each.step != null && system.runs.some(run => run.run === each.run) ? stepPlace(each.run, each.step) : checkpointPlace(each.id));
@@ -34,7 +39,7 @@ export function Checkpoint({ id }: { id: string }) {
       <Head title={<span className="mono" title={checkpoint.id}>{checkpoint.short}</span>}>
         <Specs>
           <Spec label="id">{checkpoint.id}</Spec>
-          <Spec label="weights">{checkpoint.kind === "full" ? "full" : "LoRA adapter"}</Spec>
+          <Spec label="weights">{checkpoint.kind === "full" ? "full" : known.checkpoint(checkpoint.base) ? "LoRA adapter over full weights" : "LoRA adapter"}</Spec>
           <Spec label={known.checkpoint(checkpoint.base) ? "over" : "base model"}>{checkpoint.base ? <BaseName base={checkpoint.base} /> : "–"}</Spec>
           {checkpoint.run ? <Spec label="made by"><Link to={runPlace(checkpoint.run)} title={`id: ${checkpoint.run}`}>{known.run(checkpoint.run)}</Link></Spec> : <Spec label="made by">outside a run</Spec>}
           {checkpoint.run && checkpoint.step != null ? <Spec label="step" kind="violet"><Link to={stepPlace(checkpoint.run, checkpoint.step)}>S{checkpoint.step}</Link></Spec> : null}
@@ -69,30 +74,28 @@ export function Checkpoint({ id }: { id: string }) {
           />
         ) : <p className="muted">None.</p>}
       </Card>
-      <Played id={checkpoint.id} />
+      <PathCard checkpoint={checkpoint.id} />
+      <CheckpointEvalsCard checkpoint={checkpoint.id} />
+      <PlayIt checkpoint={checkpoint} system={system} />
     </>
   );
 }
 
-/** Every suite a checkpoint played, and how it did at each: one opens the suite, beside every other subject's. */
-function Played({ id }: { id: string }) {
+/** Ask a launcher to play a suite with the checkpoint, and the evals of it asked for so. */
+function PlayIt({ checkpoint, system }: { checkpoint: CheckpointData; system: System }) {
   const { data: evals } = useEvals();
-  const played = (evals?.suites ?? []).flatMap(suite =>
-    suite.subjects.filter(subject => subject.checkpoint === id).map(subject => ({ suite, subject })));
+  const { data: launched } = useLaunches();
+  if (!evals || !launched) return null;
+  const ours = (start: string | null | undefined) =>
+    Boolean(start) && (start === checkpoint.id || system.bookmarks[start!] === checkpoint.id || checkpoint.id.startsWith(start!));
+  const launches = launched.launches.filter(each => each.asked.kind === "eval" && ours(each.asked.start));
   return (
-    <Card title="Evals" note={<Link to={evalsPlace} className="linkish">play one with it</Link>}>
-      {played.length ? (
-        <Table
-          heads={[["suite"], ["starts", "n"], ["played", "n"], ["solved", "n"], ["mean reward", "n"]]}
-          keys={played.map(({ subject }) => subject.subject)}
-          rows={played.map(({ suite, subject }) => [
-            <b>{suite.suite}</b>, String(suite.starts.length), `${subject.played} of ${suite.starts.length * (subject.episodes ?? 1)}`,
-            shareText(shareOf(subject)), figure(subject.reward),
-          ])}
-          to={played.map(({ suite }) => suitePlace(suite.suite))}
-        />
-      ) : <p className="muted">None yet.</p>}
-    </Card>
+    <>
+      {!evals.suites.length ? <MakeSuite ledger={system.ledger_at} />
+        : launched.launchers.length ? <PlayForm subject={checkpoint.id} suites={evals.suites} launchers={launched.launchers} system={system} title="Run an eval" />
+          : <NoLauncher ledger={system.ledger_at} />}
+      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
+    </>
   );
 }
 

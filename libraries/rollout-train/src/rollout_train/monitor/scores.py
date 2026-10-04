@@ -47,7 +47,7 @@ def path_of(
 ) -> dict[str, Any]:
     """A checkpoint's line, from the base model to it along first parents (`points`, by depth: the base model at 0),
     each point with what it is (its run, step, weights and bookmarks) and its score at each suite (`scores`, pooled
-    over every eval of it there); and the suites any point was evaluated on, with their catalogs."""
+    over every eval of it there); and the suites any point was evaluated on, with their environments."""
     said = names or {}
     called: Mapping[str, str] = said.get("runs", {})
     marks: dict[str, list[str]] = {}
@@ -94,7 +94,7 @@ def path_of(
     return {
         "checkpoint": checkpoint,
         "points": points if line else [],
-        "suites": [{"suite": suite, "catalog": _about(tables, suite).get("catalog")} for suite in suites],
+        "suites": [{"suite": suite, "environment": _environment(tables, suite)} for suite in suites],
     }
 
 
@@ -176,5 +176,7 @@ def _pooled(evals: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return pooled
 
 
-def _about(tables: Mapping[str, Mapping[str, JsonValue]], suite: str) -> dict[str, Any]:
-    return cast(dict[str, Any], tables.get(f"{EVALUATIONS}{suite}/suite", {}).get("suite") or {})
+def _environment(tables: Mapping[str, Mapping[str, JsonValue]], suite: str) -> str | None:
+    """A suite's environment, as `module:name` (a suite made as a catalog's says it so)."""
+    about = cast(dict[str, Any], tables.get(f"{EVALUATIONS}{suite}/suite", {}).get("suite") or {})
+    return about.get("environment") or about.get("catalog")

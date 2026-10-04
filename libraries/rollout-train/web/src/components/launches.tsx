@@ -6,7 +6,8 @@ import { Link } from "react-router-dom";
 import { useStop } from "../api/queries";
 import type { Launch, System } from "../api/types";
 import { Ago } from "../layout/runs";
-import { runPlace, suitePlace } from "../lib/places";
+import { span } from "../lib/format";
+import { evalPlace, runPlace, suitePlace } from "../lib/places";
 import { Mark, SectionTitle, Tile } from "./ui";
 import { CheckpointTag } from "./checkpoints";
 
@@ -44,10 +45,10 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
   return (
     <Tile className={`rail ${rail[launch.state] ?? ""}`}>
       <header>
-        <b>{run ? <Link to={runPlace(run.run)} className="linkish">{asked.name}</Link> : asked.name}</b>
-        <span className="what">{asked.profile} · {asked.environment}</span>
+        <b>{run ? <Link to={run.kind === "eval" ? evalPlace(run.run) : runPlace(run.run)} className="linkish">{asked.name}</Link> : asked.name}</b>
         <Mark state={launch.state} />
       </header>
+      <div className="facts wraps"><span>{asked.profile}</span><span className="mono small">{asked.environment}</span></div>
       {asked.kind === "eval" ? (
         <div className="facts">
           <span>plays <Link to={suitePlace(asked.suite ?? "")} className="linkish">{asked.suite}</Link> with <CheckpointTag id={asked.start ?? null} /></span>
@@ -69,7 +70,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
         <span>asked <Ago at={launch.at} /> ago</span>
         {launch.launcher ? <span>by <b>{launch.launcher}</b></span> : <span className="t-warm">no launcher has claimed it</span>}
         {launch.pid ? <span className="mono">pid {launch.pid}</span> : null}
-        {launch.state !== "asked" ? <span>{launch.state} <Ago at={launch.updated} /> ago</span> : null}
+        {GOING.has(launch.state) ? null : <span>took {span(Math.max(0, launch.updated - launch.at))}</span>}
       </div>
       {launch.directory ? <div className="mono small faint launch-directory" title={launch.directory}>{launch.directory}</div> : null}
       {launch.detail ? (
@@ -78,7 +79,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
             <summary>why it failed</summary>
             <pre>{launch.detail}</pre>
           </details>
-        ) : <div className="small muted">{launch.detail}</div>
+        ) : launch.detail !== launch.state ? <div className="small muted">{launch.detail}</div> : null
       ) : null}
       {GOING.has(launch.state) && launch.state !== "stopping" ? (
         <div className="launch-actions">

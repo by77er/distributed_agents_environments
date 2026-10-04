@@ -29,7 +29,7 @@ from tests.rollout_train.rollouts.games import words
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
 
-CATALOG = "tests.rollout_train.rollouts.games:words"
+ENVIRONMENT = "tests.rollout_train.rollouts.games:words"
 
 
 async def a_checkpoint(
@@ -82,7 +82,7 @@ async def a_line(tmp_path: Path) -> tuple[FileLedger, dict[str, Checkpoint]]:
     model, of each checkpoint by hand, and of the first step's by its run's schedule."""
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1])
+    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
     first = await a_checkpoint(checkpoints, tmp_path, "lora-run", 1, [])
     second = await a_checkpoint(checkpoints, tmp_path, "lora-run", 2, [first.id])
     merged = await a_checkpoint(checkpoints, tmp_path, None, None, [second.id], kind="full")
@@ -135,14 +135,14 @@ async def test_a_checkpoints_line_runs_from_the_base_model_through_merges_with_e
     scores = [point["scores"].get("words-v1") for point in points]
     assert [score["solved"] if score else None for score in scores] == [0.0, 0.5, 0.75, None, 1.0]
     assert scores[2]["played"] == 4 and sorted(scores[2]["evals"]) == ["eval-second", "eval-second-again"]  # (pooled)
-    assert path["suites"] == [{"suite": "words-v1", "catalog": CATALOG}]
+    assert path["suites"] == [{"suite": "words-v1", "environment": ENVIRONMENT}]
     alone = path_of({}, {made["first"].id: made["first"]}, made["first"].id)
     assert alone["points"][0]["short"] == "base" and alone["suites"] == []
 
 
 async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes"], seeds=[1])
+    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
     fence = await ledger.take(scope("train"))
     changeable: dict[str, JsonValue] = {"groups_per_step": 4, "evals.suite": None, "evals.every": 1,
                                         "evals.episodes": 1, "trainer.learning_rate": 5e-5}  # fmt: skip
