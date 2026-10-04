@@ -94,13 +94,19 @@ def new_id() -> str:
 
 
 def short(ids: Iterable[str]) -> dict[str, str]:
-    """Each id by the shortest start of it (at least `SHORTEST` characters) that no other id begins with."""
+    """Each id by the shortest start of it (at least `SHORTEST` characters) that no other id begins with. An id of
+    the form `NAME@N` (a version recorded before versions had ids of their own) is shown as `@N`, unless another id
+    would be shown so too: then whole."""
     every = sorted(set(ids))
     shown: dict[str, str] = {}
     for index, each in enumerate(every):
         neighbours = every[max(0, index - 1) : index] + every[index + 1 : index + 2]
         shared = max((_common(each, other) for other in neighbours), default=0)
         shown[each] = each[: max(SHORTEST, shared + 1)]
+    numbered = {each: f"@{each.rpartition('@')[2]}" for each in every if each.rpartition("@")[2].isdigit()}
+    taken = [*numbered.values(), *(shown[each] for each in every if each not in numbered)]
+    for each, label in numbered.items():
+        shown[each] = label if taken.count(label) == 1 else each
     return shown
 
 

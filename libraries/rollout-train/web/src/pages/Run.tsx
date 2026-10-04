@@ -80,8 +80,8 @@ const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made:
   const none = run.done.filter(line => line.solved.length && !line.solved.some(Boolean)).length;
   return (
     <Kpis>
-      <Kpi label="Started from" value={from ? known.short(from) : "base"} note={from ? known.origin(from) : made[0]?.base ?? "the base model"} />
-      <Kpi label="Now" value={newest ? newest.short : "–"} note={newest ? `depth ${newest.depth} · ${made.filter(each => each.weights).length} of ${made.length} versions kept` : "no step committed"} />
+      <Kpi label="Started from" value={from ? known.short(from) : "base"} note={from ? known.origin(from) : made[0]?.base?.split("/").at(-1) ?? "the base model"} />
+      <Kpi label="Now" value={newest ? newest.short : "–"} note={newest ? `depth ${newest.depth} · ${made.filter(each => each.weights).length} of ${made.length} kept` : "no step committed"} />
       <Kpi label="Steps" value={`${run.steps.length}`} note={`${committed} committed · ${run.next.length} waiting`} />
       <Kpi label="Groups done" value={`${run.done.length}`} note={`${trained} trained on, of ${run.decided} decided`} />
       <Kpi label="Groups solved" value={`${all} · ${run.done.length - all - none} · ${none}`} note="all · some · none solved" />

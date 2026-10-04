@@ -80,10 +80,8 @@ async def test_a_version_is_shown_by_the_shortest_start_of_its_id_that_no_other_
         "kkkkmnnn": "kkkkmn",
         "zzzzzzzz": "zzzz",
     }
-    assert short(["curriculum-9@1", "curriculum-9@12"]) == {
-        "curriculum-9@1": "curriculum-9@1",
-        "curriculum-9@12": "curriculum-9@12",
-    }
+    assert short(["curriculum-9@1", "curriculum-9@12"]) == {"curriculum-9@1": "@1", "curriculum-9@12": "@12"}
+    assert short(["a@1", "b@1", "c@2"]) == {"a@1": "a@1", "b@1": "b@1", "c@2": "@2"}  # (two @1s: each whole)
     assert short([]) == {}
     single = tmp_path / "weights.bin"
     single.write_text("w")
