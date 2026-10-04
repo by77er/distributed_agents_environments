@@ -1,5 +1,5 @@
-"""A verifiers environment is a catalog: its tasks are a row's starts, and an episode is one verifiers episode whose
-harness reaches the model through the recorder, which records what it samples."""
+"""A verifiers environment is one of ours: its tasks are a row's starts and its eval data, and an episode is one
+verifiers episode whose harness reaches the model through the recorder, which records what it samples."""
 
 import asyncio
 import importlib
@@ -15,7 +15,9 @@ import pytest
 pytest.importorskip("verifiers")
 import uvicorn
 
+from rollout.environment import Description
 from rollout.harness import ProgramReference, RecordedModel, instantiate
+from rollout_train.check import checked
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.compat import create_app
 from rollout_train.testing import plain_channel
@@ -72,20 +74,29 @@ def environment() -> VerifiersEnvironment:
     return VerifiersEnvironment("rollout-verifiers-echo", train={"split": "train"}, eval={"split": "test"})
 
 
-def test_the_tasks_of_a_split_are_the_starts_of_its_row_and_the_eval_data_is_another_catalog() -> None:
-    train = environment()
-    (row,) = train.rows()
+def test_the_training_tasks_are_the_starts_of_its_row_and_the_eval_tasks_its_eval_data() -> None:
+    echo = environment()
+    (row,) = echo.rows()
     assert (row.key, row.title) == ("train", "rollout-verifiers-echo (split train): 2 tasks")
-    starts: list[Any] = [train.start(row, random.Random(seed)) for seed in range(8)]
+    starts: list[Any] = [echo.start(row, random.Random(seed)) for seed in range(8)]
     assert {start["task"]["answer"] for start in starts} == {"apple", "river"}
-    assert starts[3] == train.start(row, random.Random(3))  # a seed draws the same task every time
+    assert starts[3] == echo.start(row, random.Random(3))  # a seed draws the same task every time
     assert starts[0]["environment"]["taskset"] == {"id": "rollout-verifiers-echo", "split": "train"}
 
-    test = train.evaluation()
-    (row,) = test.rows()
-    drawn: Any = test.start(row, random.Random(0))
-    assert row.key == "eval" and drawn["task"]["answer"] == "candle"
-    program = instantiate(ProgramReference(program=train.program.program, parameters=starts[0]))
+    ((name, held),) = echo.evals().items()  # the eval split's tasks, in order, on a row training never plays
+    (start,) = held
+    assert (name, start.task, start.title, start.seed) == ("rollout-verifiers-echo-test", "eval", "task 0", 0)
+    parameters: Any = start.parameters
+    assert parameters["task"]["answer"] == "candle" and parameters["environment"]["taskset"]["split"] == "test"
+    assert VerifiersEnvironment("rollout-verifiers-echo", train={"split": "train"}).evals() == {}
+
+    assert echo.description == Description(rewards=(0.0, 1.0), solved=True, duration="turns")
+    assert echo.version.startswith("rollout_verifiers_echo, verifiers 0.3.2")
+    assert echo.version != VerifiersEnvironment("rollout-verifiers-echo", train={"split": "test"}).version
+    findings = checked(echo)
+    assert all(finding.passed for finding in findings), [str(finding) for finding in findings]
+
+    program = instantiate(ProgramReference(program=echo.program.program, parameters=starts[0]))
     assert isinstance(program, VerifiersProgram) and program.task["answer"] == starts[0]["task"]["answer"]
 
 

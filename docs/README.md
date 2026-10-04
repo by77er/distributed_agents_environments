@@ -50,7 +50,7 @@ Each implements one interface a library defines.
 | [Qwen renderers](implementations/rollout-qwen.md) | The token formats of Qwen3.5 and Qwen3 |
 | [Gemma renderers](implementations/rollout-gemma.md) | The token format of Gemma 4 |
 | [Computers](implementations/rollout-computers.md) | Environment backends and the tools that act on them |
-| [verifiers environments](implementations/rollout-verifiers.md) | Prime Intellect's verifiers environments as catalogs, their harnesses reaching the recorder |
+| [verifiers environments](implementations/rollout-verifiers.md) | Prime Intellect's verifiers environments as environments here, their harnesses reaching the recorder |
 | [Models](guide/models.md), [Content](guide/content.md#media-and-blobs) | `rollout-openai` and `rollout-s3` are described in the guide |
 
 ## Products and environments
@@ -81,7 +81,7 @@ Each implements one interface a library defines.
 | `implementations/rollout-computers` | `rollout_computers` | Computers for tasks, and the tools that act on them | `EnvironmentService` |
 | `implementations/rollout-openai` | `rollout_openai` | The OpenAI Responses API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
-| `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the recorder | `Catalog` |
+| `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the recorder | `Environment` |
 | `products/project-assistant` | `project_assistant` | A conversational agent about one repository | |
 | `products/agent-sessions` | `agent_sessions` (and `agent_sessions.coordination`) | Agents with their own computers, and their coordination | |
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |

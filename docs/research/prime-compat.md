@@ -12,7 +12,7 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 
 ## The answer in brief
 
-- **A verifiers v1 environment runs here as a catalog**, with no change to the loop, the scheduler, evals or the
+- **A verifiers v1 environment runs here as an environment**, with no change to the loop, the scheduler, evals or the
   trainer. Its harness reaches the model through verifiers' own interception server, which relays each request in
   the harness's own API to the episode's model address. The recorder renders and samples every request, so the
   tokens and logprobs are recorded by this system and are exact. The adapter, `rollout-verifiers`, is a uv project of
@@ -22,9 +22,10 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
   `Idempotency-Key` in each. This is also the front door for testing black-box harnesses against each other.
 - **The spike:** `primeintellect/gsm8k` 0.1.4 from the Environments Hub, Qwen/Qwen3-0.6B on vLLM. The base model
   solved 36 of 100 starts of a frozen suite through `rollout eval`; verifiers' own `vf-eval`, against the recorder,
-  scored 0.39 on the same tasks, with the same outcome on 83 of 100. A LoRA run took 3 steps. The recorded logprobs
-  differ from the trainer's, recomputed on the same tokens, by 0.0167 per token on average (median 0.0007), as vLLM
-  and the trainer always do here: the tokens are the ones sampled.
+  scored 0.39 on the same tasks, with the same outcome on 83 of 100 (both measured before the recorder closed
+  Qwen3's thinking at its budget, so partly limited by finishing within 768 tokens). A LoRA run took 3 steps. The
+  recorded logprobs differ from the trainer's, recomputed on the same tokens, by 0.0167 per token on average (median
+  0.0007), as vLLM and the trainer always do here: the tokens are the ones sampled.
 - **What does not carry over:** an episode is all or nothing (ours can resume mid-episode); every agent of a
   multi-agent verifiers environment would share the one model address; tasksets have no order, so our curriculum
   has nothing to unlock; splits are whatever each taskset's config calls them.
@@ -39,7 +40,7 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 | verifiers v1 | Here | How well |
 |---|---|---|
 | A taskset's tasks (`TaskData`: prompt, answer, files) | A row's starts: the task's data is the start's parameters | Cleanly. A suite freezes each task's data in the ledger |
-| `TasksetConfig` (split, dataset, size) | `train` and `eval` settings: two catalogs | Cleanly, but each taskset names its own settings |
+| `TasksetConfig` (split, dataset, size) | `train` and `eval` settings: the training row and the eval data | Cleanly, but each taskset names its own settings |
 | `@vf.reward` methods over a `Trace` | The episode's reward (their weighted sum) and `result` | Cleanly. `solved` is ours: a threshold on the reward |
 | `@vf.metric` | The episode's `result` | Cleanly |
 | A harness (`null`, `bash`, Codex, Claude Code) | A harness inside the environment, given a model address | Cleanly: verifiers runs it |
@@ -63,11 +64,14 @@ workspace) and the Hub's `gsm8k` 0.1.4 wheel. From that directory:
 ```bash
 uv sync --group spike
 export PYTHONPATH=examples
-uv run --group spike rollout suite make e2e-prime-gsm8k-test --catalog prime_gsm8k:test --seeds 1,2,...,100 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
-uv run --group spike rollout eval examples/prime_gsm8k.toml e2e-prime-gsm8k-test --directory ~/.cache/rollout/runs/e2e-prime-eval-base --name e2e-prime-eval-base
-uv run --group spike rollout train examples/prime_gsm8k.toml prime_gsm8k:train --groups 8 --groups-per-step 2 --directory ~/.cache/rollout/runs/e2e-prime-lora --name e2e-prime-lora
-uv run --group spike rollout eval examples/prime_gsm8k.toml e2e-prime-gsm8k-test --checkpoint e2e-prime-lora:3 --directory ~/.cache/rollout/runs/e2e-prime-eval-lora --name e2e-prime-eval-lora
+uv run --group spike rollout eval examples/prime_gsm8k.toml gsm8k-test-100 --environment prime_gsm8k:environment --directory ~/.cache/rollout/runs/e2e-prime-eval-base --name e2e-prime-eval-base
+uv run --group spike rollout train examples/prime_gsm8k.toml prime_gsm8k:environment --groups 8 --groups-per-step 2 --directory ~/.cache/rollout/runs/e2e-prime-lora --name e2e-prime-lora
+uv run --group spike rollout eval examples/prime_gsm8k.toml gsm8k-test-100 --checkpoint e2e-prime-lora:3 --directory ~/.cache/rollout/runs/e2e-prime-eval-lora --name e2e-prime-eval-lora
 ```
+
+The environment's eval data is the test split's first 100 tasks (`gsm8k-test-100`), frozen as a suite the first time
+an eval plays it. The spike's own suite, `e2e-prime-gsm8k-test`, was drawn by hand: 100 starts of the test split with
+seeds 1 to 100 (93 distinct tasks), made before environments had eval data of their own; it stays in the ledger.
 
 verifiers' own eval ran as `vf-eval primeintellect/gsm8k --env.taskset.split test --env.agent.harness.id null
 --env.agent.runtime.type subprocess --client.base-url URL --client.api-key-var VARIABLE --select.include.idx …
@@ -82,11 +86,12 @@ which runs a `math-verify` script inside the rollout's runtime. It was played by
 loop, run as a uv script) in the `subprocess` runtime.
 
 **The channel.** Qwen/Qwen3-0.6B, renderer `qwen3`, `thinking_tokens = 512`, `answer_tokens = 256`, turns of at
-most 2,048 tokens, a LoRA adapter of rank 16. Qwen3 opens its own thinking: the `qwen3` renderer's
-`ThinkingFormat` has `prompt_opens=False`, so the recorder samples in one phase and cannot close thinking by force,
-and the two budgets act as one cap of 768 sampled tokens. 71 of the base model's 100 eval episodes and 26 of the 32
-training episodes ran into it, mostly while still thinking. Those score 0, so the solve rate here measures finishing
-within 768 tokens as much as arithmetic. A real run would raise the cap.
+most 2,048 tokens, a LoRA adapter of rank 16. Qwen3 opens its own thinking (the `qwen3` renderer's `ThinkingFormat`
+has `prompt_opens=False`). The recorder now samples such thinking in two phases: room to open the block, a forced
+close at the budget if the model is still thinking, then the answer. The spike ran before that, when the recorder
+sampled Qwen3 in one phase and the two budgets acted as one cap of 768 sampled tokens: 71 of the base model's 100
+eval episodes and 26 of the 32 training episodes ran into it, mostly while still thinking, and scored 0. The solve
+rates below were measured then, and are limited partly by finishing within that cap.
 
 | Run (ledger name) | What | Result |
 |---|---|---|
@@ -162,7 +167,7 @@ harnesses (`SUPPORTS_RESUME` is about user turns over ACP, *unverified* for resu
 
 ### Curricula
 
-Our curriculum unlocks rows in the catalog's order, easiest first, and weights each by how often its groups'
+Our curriculum unlocks rows in the environment's order, easiest first, and weights each by how often its groups'
 rewards differed. A taskset is an unordered dataset with no difficulty. Making each task a row would unlock the
 first three tasks and train on them until solved. So a split is one row and its tasks are its starts, drawn at
 random: the curriculum has one row and nothing to unlock. *Proposed:* a flat curriculum over task rows (no
@@ -230,10 +235,10 @@ Either way the model calls still go harness → interception server → the reco
 
 ## Exporting our environments as verifiers packages
 
-*Proposed*, not built. A single-agent catalog could be published as a v1 package:
+*Proposed*, not built. A single-agent environment of ours could be published as a v1 package:
 
-1. **A taskset** whose `load()` yields one `TaskData` per start (the catalog's rows, each with seeds), the start's
-   parameters as a field. `INFINITE` with a generator for catalogs that draw starts forever.
+1. **A taskset** whose `load()` yields one `TaskData` per start (the environment's rows, each with seeds, and its eval data), the start's
+   parameters as a field. `INFINITE` with a generator for environments that draw starts forever.
 2. **A harness** whose `launch(ctx, trace, runtime, endpoint, secret, …)` runs our program in the runtime: a runner
    process (`rollout.local`) with the program's slot bound to a direct model at `endpoint` with key `secret`. The
    interception server accepts Responses, so `rollout_openai.ResponsesEndpoint(ApiKey(secret, base_url=endpoint))`
