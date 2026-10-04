@@ -27,6 +27,7 @@ import secrets
 from array import array
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from rollout.contracts import (
     CapabilityContract,
@@ -39,8 +40,10 @@ from rollout.contracts import (
     SessionIdentity,
     Usage,
 )
-from rollout.harness.runner import RecordedModel, SamplingParameters
+from rollout.harness.runner import RecordedModel, RunBinding, SamplingParameters
 from rollout_train.inference import Channel
+from rollout_train.inference.channel import Sampler, Unserved
+from rollout_train.serving import parts, qualified
 
 SERVED_UNDER = "/v1"
 """The path `rollout_train.recorder.compat` serves a recorder under: a recorder's `base_url` ends with it."""
@@ -86,20 +89,71 @@ class _Turn:
     channel: str
 
 
+class Routes(Protocol):
+    """Channels whose replicas serve elsewhere, each run's routed apart (`rollout_train.inference.remote.Routes`)."""
+
+    def routed(self, channel: str) -> bool:
+        """Whether channels of this name are routed."""
+        ...
+
+    def channel(self, run: str, channel: str) -> Sampler:
+        """A run's channel, routed to the replicas that serve it."""
+        ...
+
+    async def reaches(self, run: str, channel: str) -> bool:
+        """Whether a replica serves a run's channel, close enough to what the run says it should, to take a session."""
+        ...
+
+
+ATTEMPTS = 3
+"""Times a turn is sampled before it fails, when the weights it began with stop being served (`Unserved`)."""
+
+
 @dataclass
 class Recorder:
     channels: Mapping[str, Channel]
+    """The channels whose engines this process publishes to, by name."""
     base_url: str | None = None
     """Where `rollout_train.recorder.compat` serves this recorder, as harnesses reach it (None: it is not served)."""
+    routes: Routes | None = None
+    """The channels whose replicas serve elsewhere: a binding names one within its run (`RUN/NAME`, `for_run`)."""
     _turns: dict[str, list[_Turn]] = field(default_factory=dict[str, list[_Turn]])
     _by_effect: dict[str, SampleResult] = field(default_factory=dict[str, SampleResult])
     _keys: dict[str, tuple[str, ModelEndpoint]] = field(default_factory=dict[str, tuple[str, ModelEndpoint]])
 
     def endpoint(self, binding: RecordedModel) -> "RecordedEndpoint":
-        channel = self.channels.get(binding.channel)
+        channel: Sampler | None = self.channels.get(binding.channel)
+        if channel is None and self.routes is not None and "/" in binding.channel:
+            run, name = parts(binding.channel)
+            channel = self.channels.get(name) or (self.routes.channel(run, name) if self.routes.routed(name) else None)
         if channel is None:
             raise ValueError(f"no recorded channel {binding.channel!r}")
         return RecordedEndpoint(self, channel, binding.sampling)
+
+    def for_run(self, run: str, binding: RunBinding) -> RunBinding:
+        """A run's binding, with each recorded model on a routed channel named within the run (`RUN/NAME`), so that
+        its samples go to the replicas serving that run's channel; the same binding if it names none."""
+        models = dict(binding.models)
+        for slot, model in binding.models.items():
+            recorded = model.recorded
+            if recorded is not None and self._routed(recorded.channel):
+                named = recorded.model_copy(update={"channel": qualified(run, recorded.channel)})
+                models[slot] = model.model_copy(update={"recorded": named})
+        return binding if models == dict(binding.models) else binding.model_copy(update={"models": models})
+
+    async def reaches(self, run: str, binding: RunBinding) -> bool:
+        """Whether every recorded model of a run's binding can be sampled here: from a channel whose engines this
+        process publishes to, or from a routed channel a replica of which serves the run."""
+        for model in binding.models.values():
+            recorded = model.recorded
+            if recorded is None or recorded.channel in self.channels:
+                continue
+            if not self._routed(recorded.channel) or not await self.routes.reaches(run, recorded.channel):  # type: ignore[union-attr]
+                return False
+        return True
+
+    def _routed(self, channel: str) -> bool:
+        return channel not in self.channels and self.routes is not None and self.routes.routed(channel)
 
     def export(self, session_id: str) -> list[Segment]:
         """The session's segments, oldest first (see the module's description)."""
@@ -161,7 +215,7 @@ class Recorder:
 class RecordedEndpoint:
     """Implements `ModelEndpoint` for one channel."""
 
-    def __init__(self, recorder: Recorder, channel: Channel, sampling: SamplingParameters) -> None:
+    def __init__(self, recorder: Recorder, channel: Sampler, sampling: SamplingParameters) -> None:
         self._recorder = recorder
         self._channel = channel
         self._sampling = sampling
@@ -188,8 +242,21 @@ class RecordedEndpoint:
         recorded = self._recorder._by_effect.get(request.effect_id)  # pyright: ignore[reportPrivateUsage]
         if recorded is not None:  # a retried effect: the recorded result, not a second sample
             return recorded
-        channel, renderer, limits = self._channel, self._channel.renderer, self._channel.limits
+        channel, renderer = self._channel, self._channel.renderer
         prompt = renderer.render(request.context.append, request.tools)
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                return await self._sampled(request, prompt)
+            except Unserved:  # (the weights the turn began with are gone, or so is its replica: from the start again)
+                if attempt == ATTEMPTS:
+                    raise
+        raise AssertionError(channel.name)  # (unreachable: the last attempt returns or raises)
+
+    async def _sampled(self, request: SampleRequest, prompt: list[int]) -> SampleResult:
+        """One turn sampled and recorded, from the weights its session samples from when it begins."""
+        channel, renderer = self._channel, self._channel.renderer
+        adapter, version = await channel.weights(request.session_id)  # (where it is routed, the replica is chosen)
+        limits = channel.limits
         thinking = renderer.thinking
         budget, answer = limits.thinking, limits.answer
         if request.max_output_tokens is not None:  # the request's own cap: the answer first, thinking with the rest
@@ -204,7 +271,6 @@ class RecordedEndpoint:
         completion: list[int] = []
         mask: list[bool] = []
         logprobs: list[float] = []
-        adapter, version = channel.adapter, channel.version
 
         def force() -> None:
             """Close the thinking, unsampled: never trained on."""
@@ -223,6 +289,7 @@ class RecordedEndpoint:
                 stop_token_ids=stop,
                 adapter=adapter,
                 session=request.session_id,
+                version=version,
             )
             completion.extend(generation.tokens)
             mask.extend([True] * len(generation.tokens))

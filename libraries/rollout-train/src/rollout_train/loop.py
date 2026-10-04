@@ -28,6 +28,10 @@ taken twice.
 Taking the run's fence when it starts shuts out a loop it replaced: that one's next write is refused. The checkpoints it
 makes are appended under that fence.
 
+**What its channel serves is written down** (`rollout_train.serving`): each time it serves a checkpoint, it appends that
+the channel serves it from now on (the base model until the first), and then publishes it to the engines in its own
+process, if it has any. Engines on other machines follow the record (`rollout_train.following`).
+
 **It can evaluate its checkpoints as it makes them** (`evals`, a `rollout_train.evals.Schedule`). After a step whose
 checkpoint the schedule names is served, the suite is asked for as an eval of that checkpoint, a run of its own, and
 the next step waits until every start has been played: all that time the channel serves that checkpoint, while
@@ -75,8 +79,10 @@ from rollout_train.record import (
     scope,
     table,
 )
+from rollout_train.resharding import RESHARDED
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
+from rollout_train.serving import Serving, qualified, record_serving
 from rollout_train.settings import EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, GROUPS_PER_STEP, TRAINER, applied
 from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, StepFailed, Trainer, Weighted
 
@@ -201,8 +207,17 @@ async def train(
         nonlocal served
         if served is not None and checkpoint.depth <= served.depth:
             return  # (the channel does not go back)
+        if checkpoint.weights is None:
+            raise ValueError(f"{checkpoint.id} was released: its weights are gone")
+        manifest = await reshard(checkpoint, fence) if reshard is not None else checkpoint.weights
+        layout: Any = (await ledger.read(RESHARDED)).get(checkpoint.id) if reshard is not None else None
+        wanted = Serving(
+            channel, checkpoint.id, checkpoint.depth, checkpoint.kind, manifest, layout and layout.get("layout"),
+            await _over(checkpoints, checkpoint), base, trainer.budget.segment_tokens,
+        )  # fmt: skip
+        await record_serving(ledger, run, wanted, fence)  # (whatever serves the channel elsewhere follows it)
         if reshard is not None:
-            loaded = await checkpoints.files(await reshard(checkpoint, fence), directory / checkpoint.id / "resharded")
+            loaded = await checkpoints.files(manifest, directory / checkpoint.id / "resharded")
         else:
             loaded = (await files(checkpoint)).weights
         served_as = await publish(channel, checkpoint.id, str(loaded), checkpoint.depth, full=checkpoint.kind == "full")
@@ -255,7 +270,7 @@ async def train(
             schedule.environment, checkpoints, run=eval_run, suite=schedule.suite, subject=checkpoint.id, base=base,
             channel=channel, directory=directory, publish=None, episodes=schedule.episodes, binding=schedule.binding,
             started={"from": None, "by": run, "step": step},  # (whether its files are kept is the run's retention's)
-            asked_by="by its run's schedule", hooks=hooks,
+            asked_by="by its run's schedule", hooks=hooks, served_by=qualified(run, channel),
         )  # fmt: skip
         summary: dict[str, JsonValue] = {"played": said["played"], "solved": said["solved"], "reward": said["reward"]}
         record: dict[str, JsonValue] = {"suite": schedule.suite.name, "checkpoint": checkpoint.id, "run": eval_run}
@@ -291,6 +306,8 @@ async def train(
     if (now := await current()) is not None:
         await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
         await evaluated_with(now)  # (and one that died while evaluating it finishes the eval)
+    else:  # (the base model, until the first checkpoint)
+        await record_serving(ledger, run, Serving(channel, model=base, sequence=trainer.budget.segment_tokens), fence)
 
     outstanding: dict[asyncio.Task[list[Episode]], int] = {}
     """Groups being played, by the task that waits for their episodes."""
@@ -477,6 +494,17 @@ async def train(
             task.cancel()
         if stepping is not None:
             await asyncio.gather(stepping, return_exceptions=True)
+
+
+async def _over(checkpoints: Checkpoints, checkpoint: Checkpoint) -> str | None:
+    """The full checkpoint an adapter is served over, by id, if it is over one (not over a model)."""
+    if checkpoint.kind == "full":
+        return None
+    try:
+        under = await checkpoints.under(checkpoint)
+    except ValueError:  # (released: whatever serves the adapter holds its weights already, or cannot)
+        return checkpoint.base
+    return under.id if under is not None else None
 
 
 async def _made(checkpoints: Checkpoints, step: dict[str, JsonValue]) -> bool:

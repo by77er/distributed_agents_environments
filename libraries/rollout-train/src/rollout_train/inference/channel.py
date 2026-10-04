@@ -11,6 +11,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from pydantic import JsonValue
+
 if TYPE_CHECKING:
     from rollout_train.recorder.renderers import Renderer
 
@@ -65,6 +67,12 @@ class Engine(Protocol):
     def close(self) -> None: ...
 
 
+class Unserved(Exception):
+    """The weights a request names are not served at the version its tokens would be stamped with (they were dropped,
+    or replaced while a turn was in progress), or its replica cannot be reached: the turn is sampled again, from the
+    weights served then."""
+
+
 @dataclass(frozen=True)
 class Limits:
     """What a turn may take, in tokens: the deployment's hardware decides, and code above it receives the outcome
@@ -77,6 +85,43 @@ class Limits:
     sequence: int | None = None
     """The longest turn (prompt and completion): the smaller of what the engines accept and what the trainer can
     train on. A long prompt leaves less room to think, so that every turn can be trained on."""
+
+
+class Sampler(Protocol):
+    """What the recorder samples from: a `Channel`, whose engines this process publishes to, or a channel routed to
+    replicas that serve elsewhere (`rollout_train.inference.remote.RemoteChannel`)."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def renderer(self) -> "Renderer": ...
+
+    @property
+    def limits(self) -> Limits: ...
+
+    @property
+    def context_limit(self) -> int: ...
+
+    async def weights(self, session: str) -> tuple[str | None, int]:
+        """The adapter a session's next turn samples from (None: the weights its replica holds), and the version its
+        tokens are stamped with."""
+        ...
+
+    async def generate(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        adapter: str | None,
+        session: str = "",
+        version: int | None = None,
+    ) -> Generation:
+        """Sample on the session's replica; `Unserved` if it does not serve `adapter` at `version` (or is gone)."""
+        ...
 
 
 @dataclass
@@ -92,19 +137,22 @@ class Channel:
     """What is served, by name: the adapter, or the full checkpoint the engines hold (None: the model's own)."""
     version: int = 0
     """How many times weights have been published; recorded with every sampled token."""
-    _loaded: list[str] = field(default_factory=list[str])
+    held: str | None = None
+    """The full checkpoint the engines hold, by name (None: the model's own)."""
+    held_version: int = 0
+    """The version the weights the engines hold are served as: a request that names no adapter is stamped with it."""
+    _loaded: dict[str, int] = field(default_factory=dict[str, int])
+    """The adapters loaded, oldest first, with the version each is served as."""
     _open: asyncio.Event = field(default_factory=asyncio.Event)
     _idle: asyncio.Event = field(default_factory=asyncio.Event)
     _in_flight: int = 0
-    _busy_since: float = 0.0
-    _counts: dict[str, float] = field(default_factory=dict[str, float])
+    _throughput: "Throughput" = field(default_factory=lambda: Throughput())
 
     def __post_init__(self) -> None:
         if not self.engines:
             raise ValueError(f"channel {self.name!r} has no engine")
         self._open.set()
         self._idle.set()
-        self._counts = dict.fromkeys(("requests", "prompt_tokens", "generated_tokens", "request_s", "busy_s"), 0.0)
 
     @property
     def context_limit(self) -> int:
@@ -122,15 +170,22 @@ class Channel:
         stop_token_ids: Sequence[int],
         adapter: str | None,
         session: str = "",
+        version: int | None = None,
+        replica: int | None = None,
     ) -> Generation:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
-        beginnings are cached."""
+        beginnings are cached. `version` is the version the caller stamps the tokens with. A request addressed to one
+        engine from elsewhere names it (`replica`, by its place among them; `rollout_train.inference.remote`), and is
+        refused with `Unserved` if the weights `adapter` names are not served at `version` there: what that caller
+        knows of the engine may be out of date, while this process's own callers read what it publishes."""
         while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
             await self._open.wait()
-        engine = self.engines[zlib.crc32(session.encode()) % len(self.engines)]
+        if replica is not None and version is not None and self.version_of(adapter) != version:
+            raise Unserved(f"{self.name} does not serve {adapter or 'the weights it holds'} at version {version}")
+        engine = self.engines[zlib.crc32(session.encode()) % len(self.engines) if replica is None else replica]
         started = time.monotonic()
         if self._in_flight == 0:
-            self._busy_since = started
+            self._throughput.busy(started)
         self._in_flight += 1
         self._idle.clear()
         try:
@@ -143,16 +198,36 @@ class Channel:
                 adapter=adapter,
             )
         finally:
-            finished = time.monotonic()
             self._in_flight -= 1
-            self._counts["request_s"] += finished - started
+            self._throughput.ended(started, idle=self._in_flight == 0)
             if self._in_flight == 0:
-                self._counts["busy_s"] += finished - self._busy_since
                 self._idle.set()
-        self._counts["requests"] += 1
-        self._counts["prompt_tokens"] += len(prompt)
-        self._counts["generated_tokens"] += len(generation.tokens)
+        self._throughput.counted(len(prompt), len(generation.tokens))
         return generation
+
+    async def weights(self, session: str) -> tuple[str | None, int]:
+        """The adapter a session's next turn samples from (None: the weights the engines hold), and the version its
+        tokens are stamped with: the same for every session, as this process publishes to every engine at once."""
+        return self.adapter, self.version
+
+    def version_of(self, adapter: str | None) -> int | None:
+        """The version an adapter loaded on the engines is served as (None: the weights they hold); None if it is not
+        loaded."""
+        return self.held_version if adapter is None else self._loaded.get(adapter)
+
+    def state(self) -> dict[str, JsonValue]:
+        """What the engines serve, as a replica tells whoever routes to it: the adapter sampling now, what is served
+        and its version, the full checkpoint held and its version, each adapter loaded with its version, and the
+        longest sequence they accept."""
+        return {
+            "adapter": self.adapter,
+            "serving": self.serving,
+            "version": self.version,
+            "held": self.held,
+            "held_version": self.held_version,
+            "loaded": dict[str, JsonValue](self._loaded),
+            "max_model_len": min(engine.max_model_len for engine in self.engines),
+        }
 
     async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
         """Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
@@ -163,10 +238,12 @@ class Channel:
         adapters trained on the weights before go with them. Publishing what is being served changes nothing."""
         if adapter == self.serving:
             return self.version
+        served_as = self.version + 1 if version is None else version
         if full:
             await self.pause()  # (no turn may be half sampled when the weights under it change)
             try:
                 await asyncio.gather(*(engine.load_weights(path) for engine in self.engines))
+                self.held, self.held_version = adapter, served_as
             finally:
                 self.resume()
             for dropped in self._loaded:
@@ -176,11 +253,12 @@ class Channel:
         else:
             await asyncio.gather(*(engine.load_adapter(adapter, path) for engine in self.engines))
             self.adapter = adapter
-            self._loaded.append(adapter)
+            self._loaded[adapter] = served_as
             while len(self._loaded) > 2:
-                dropped = self._loaded.pop(0)
+                dropped = next(iter(self._loaded))
+                del self._loaded[dropped]
                 await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
-        self.serving, self.version = adapter, self.version + 1 if version is None else version
+        self.serving, self.version = adapter, served_as
         return self.version
 
     async def pause(self) -> None:
@@ -200,23 +278,53 @@ class Channel:
     def take(self) -> dict[str, float]:
         """What passed through since the last call: requests, tokens in and out, and throughput.
         `tokens_per_second` is everything generated over the time the channel was generating."""
-        if self._in_flight:  # a stretch still going counts up to now
-            now = time.monotonic()
-            self._counts["busy_s"] += now - self._busy_since
-            self._busy_since = now
-        counts, busy, each = self._counts, self._counts["busy_s"], self._counts["request_s"]
-        taken = {
-            "requests": counts["requests"],
-            "prompt_tokens": counts["prompt_tokens"],
-            "generated_tokens": counts["generated_tokens"],
-            "busy_seconds": round(busy, 1),
-            "tokens_per_second": round(counts["generated_tokens"] / busy, 1) if busy else 0.0,
-            "tokens_per_second_per_stream": round(counts["generated_tokens"] / each, 1) if each else 0.0,
-            "mean_concurrency": round(each / busy, 1) if busy else 0.0,
-        }
-        self._counts = dict.fromkeys(counts, 0.0)
-        return taken
+        return self._throughput.take(busy=self._in_flight > 0)
 
     def close(self) -> None:
         for engine in self.engines:
             engine.close()
+
+
+class Throughput:
+    """What passed through a channel until it is taken: requests, tokens in and out, the time requests took, and the
+    time the channel was generating (while any request was in flight)."""
+
+    def __init__(self) -> None:
+        self._counts = dict.fromkeys(("requests", "prompt_tokens", "generated_tokens", "request_s", "busy_s"), 0.0)
+        self._busy_since = 0.0
+
+    def busy(self, since: float) -> None:
+        """A request began while none was in flight."""
+        self._busy_since = since
+
+    def ended(self, started: float, *, idle: bool) -> None:
+        """A request begun at `started` ended; `idle`: none is in flight now."""
+        finished = time.monotonic()
+        self._counts["request_s"] += finished - started
+        if idle:
+            self._counts["busy_s"] += finished - self._busy_since
+
+    def counted(self, prompt: int, generated: int) -> None:
+        """A request with `prompt` tokens in generated `generated` tokens."""
+        self._counts["requests"] += 1
+        self._counts["prompt_tokens"] += prompt
+        self._counts["generated_tokens"] += generated
+
+    def take(self, *, busy: bool) -> dict[str, float]:
+        """What passed through since the last call; `busy`: a request is in flight, and its stretch counts up to now."""
+        if busy:
+            now = time.monotonic()
+            self._counts["busy_s"] += now - self._busy_since
+            self._busy_since = now
+        counts, spent, each = self._counts, self._counts["busy_s"], self._counts["request_s"]
+        taken = {
+            "requests": counts["requests"],
+            "prompt_tokens": counts["prompt_tokens"],
+            "generated_tokens": counts["generated_tokens"],
+            "busy_seconds": round(spent, 1),
+            "tokens_per_second": round(counts["generated_tokens"] / spent, 1) if spent else 0.0,
+            "tokens_per_second_per_stream": round(counts["generated_tokens"] / each, 1) if each else 0.0,
+            "mean_concurrency": round(each / spent, 1) if spent else 0.0,
+        }
+        self._counts = dict.fromkeys(counts, 0.0)
+        return taken

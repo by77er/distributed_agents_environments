@@ -4,9 +4,24 @@
   renderer, the adapter in use and the version it is served as (its checkpoint's depth). Requests go through it; new
   weights are published to it.
 - `Engine`: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` runs vLLM in this process's care;
-  an engine on another machine is another implementation of the same protocol.
+  `RemoteEngine` is a replica served on another machine (`remote`).
+- `remote`: a process's engines served over HTTP (`serve_engines`), and `RemoteChannel`, one run's channel routed to
+  the replicas that serve it elsewhere, as a runner samples it.
 """
 
-from rollout_train.inference.channel import Channel, Engine, Generation, Limits
+from rollout_train.inference.channel import Channel, Engine, Generation, Limits, Sampler, Unserved
+from rollout_train.inference.remote import RemoteChannel, RemoteEngine, Route, Routes, serve_engines
 
-__all__ = ["Channel", "Engine", "Generation", "Limits"]
+__all__ = [
+    "Channel",
+    "Engine",
+    "Generation",
+    "Limits",
+    "RemoteChannel",
+    "RemoteEngine",
+    "Route",
+    "Routes",
+    "Sampler",
+    "Unserved",
+    "serve_engines",
+]

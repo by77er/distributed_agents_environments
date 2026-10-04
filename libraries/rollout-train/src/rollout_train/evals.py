@@ -52,6 +52,7 @@ from rollout_train.record import (
 from rollout_train.registry import valid
 from rollout_train.rollouts.episodes import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
+from rollout_train.serving import Serving, record_serving
 from rollout_train.trainer import WEIGHTS
 
 EVALUATIONS = "evaluations/"
@@ -194,13 +195,17 @@ async def evaluate(
     asked_by: str = "by hand",
     reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None,
     hooks: Sequence[Hooks] = (),
+    served_by: str | None = None,
 ) -> dict[str, Any]:
     """Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
     `episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`, and each
     start's `results`, a `Result` each). `publish` serves a checkpoint on the channel (a full one in place of the
     engines' weights; for an adapter over a full checkpoint, the engines must already hold that checkpoint's weights, as
     `rollout eval` sees to); None: the channel serves `subject` already (a training run's newest checkpoint). `reshard`
-    gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine."""
+    gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine.
+    What the eval's channel serves is written down (`rollout_train.serving`), so that runners anywhere play it on
+    replicas that serve `subject` and no other checkpoint; `served_by` names the channel whose replicas serve it
+    (`RUN/NAME`: the training run's, for an eval its schedule asks for), where it is not the eval's own."""
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
     fence = await ledger.take(scope(run))
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
@@ -225,11 +230,19 @@ async def evaluate(
         for hook in hooks:
             hook.on_note(event)
 
-    if subject is not None and publish is not None:
+    if subject is None:  # (the model the channel's engines are started with)
+        await record_serving(ledger, run, Serving(channel, model=base, served_by=served_by, max_lag=0), fence)
+    elif publish is None:  # (the channel serves it already)
+        known = await checkpoints.checkpoint(subject)
+        said = Serving(channel, known.id, known.depth, known.kind, model=base, served_by=served_by, max_lag=0)
+        await record_serving(ledger, run, said, fence)
+    else:
         served = await checkpoints.checkpoint(subject)
         if served.weights is None:
             raise ValueError(f"{subject} was released: its weights were deleted, so it cannot be played")
         manifest = await reshard(served, fence) if reshard is not None else served.weights
+        said = Serving(channel, served.id, served.depth, served.kind, manifest, model=base, max_lag=0)
+        await record_serving(ledger, run, said, fence)
         files = await checkpoints.files(manifest, directory / served.id / ("resharded" if reshard else WEIGHTS))
         version = await publish(channel, served.id, str(files), served.depth, full=served.kind == "full")
         note("published", {"channel": channel, "adapter": served.id, "version": version})
