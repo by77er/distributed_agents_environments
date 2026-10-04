@@ -129,8 +129,8 @@ class TinkerTrainer:
         """The training client a step starts from, and whether its optimizer starts afresh."""
         if parent is None:
             client = await self._service.create_lora_training_client_async(
-                base_model=self.model, rank=self.settings.rank, seed=seed, train_unembed=self.settings.train_unembed
-            )
+                base_model=self.model, rank=self.settings.rank, seed=seed, train_unembed=False
+            )  # (an adapter of attention and MLP layers: what engines here and the merge take most simply)
             return client, True
         state = pointer(parent.state, "state") if parent.state is not None else None
         if state is not None:  # its optimizer too
@@ -194,21 +194,18 @@ class TinkerTrainer:
             billed += sum(len(part.weighted.segment.tokens) - 1 for part in parts) * (
                 2 if objective.kind == "policy_gradient" and objective.ratio == "segment" else 1
             )
-            checks = objective.reads_old and settings.max_kl is not None and update > 0
-            if checks and settings.strict_kl:  # the distance before the update is sent
+            if objective.reads_old and settings.max_kl is not None and update > 0:  # the distance, before the update
                 out = await pending
                 sums, distance = self._measured(parts, out)
-                if distance > float(settings.max_kl or 0.0):
+                if distance > settings.max_kl:
                     stopped = True
                     break
                 stepped = await (await client.optim_step_async(self._adam(rate)))
-            else:
+            else:  # the update sent at once, beside the forward-backward
                 optimizing = await client.optim_step_async(self._adam(rate))
                 out = await pending
                 stepped = await optimizing
                 sums, distance = self._measured(parts, out)
-                if checks and distance > float(settings.max_kl or 0.0):
-                    stopped = True  # (one minibatch late: its update is made)
             moved.append(distance)
             for key, value in sums.items():
                 totals[key] += value
@@ -225,8 +222,6 @@ class TinkerTrainer:
                     **{f"optimizer_{key}": float(value) for key, value in (stepped.metrics or {}).items()},
                 }
             )
-            if stopped:
-                break
 
         tokens = max(totals["tokens"], 1.0)
         starts = [part for part in segments.values() if part.old is not None]
@@ -340,14 +335,14 @@ class TinkerTrainer:
         return datum(part.weighted.segment.tokens, part.rows, values)
 
     def _adam(self, rate: float) -> AdamParams:
-        settings = self.settings
+        """Adam as torch's AdamW is in the LoRA step (Tinker's own defaults are 0.95 and 1e-12)."""
         return AdamParams(
             learning_rate=rate,
-            beta1=settings.beta1,
-            beta2=settings.beta2,
-            eps=settings.eps,
+            beta1=0.9,
+            beta2=0.999,
+            eps=1e-8,
             weight_decay=0.0,
-            grad_clip_norm=settings.max_gradient_norm,
+            grad_clip_norm=self.settings.max_gradient_norm,
         )
 
     def _write(self, into: Path, sampler: str, state: str, lines: list[dict[str, float]]) -> None:

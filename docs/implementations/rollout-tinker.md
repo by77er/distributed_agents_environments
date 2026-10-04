@@ -116,17 +116,14 @@ mean the same, so a profile switches trainers by changing `kind`.
 | `clip_low`, `clip_high`, `segment_clip_low`, `segment_clip_high`, `truncate`, `ratio`, `objective` | As `LoraSettings` |
 | `tokens_per_step` | Sampled tokens per optimizer step (65,536). A step that is one optimizer step needs no pass for where it starts (below) |
 | `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`, `segment_tokens`, `segments_per_step` | As `LoraSettings` |
-| `strict_kl` | Read each minibatch's distance before its update is sent (true): two of Tinker's clock cycles a minibatch. False sends both at once, and a stop at `max_kl` comes one minibatch late |
-| `beta1`, `beta2`, `eps` | Adam's, as torch's AdamW has them (0.9, 0.999, 1e-8; Tinker's own defaults are 0.95 and 1e-12) |
-| `train_unembed` | Also adapt the output layer (false) |
 | `project` | A Tinker project's id |
 
-`service` (trainer and engine) is what calls Tinker: by default a session the SDK opens; `module:name` of what makes
-another, as the tests name `rollout_tinker.testing:fake_service`.
+Adam's numbers are torch's AdamW's, as in the LoRA step (0.9, 0.999, 1e-8; Tinker's own defaults are 0.95 and 1e-12),
+and the adapter leaves the output layer out. `service` (trainer and engine) is what calls Tinker: by default a session
+the SDK opens; `module:name` of what makes another, as the tests name `rollout_tinker.testing:fake_service`.
 
-The trainer takes some settings between steps, as the LoRA trainer does (`Changeable`): `learning_rate`, the clips,
-`truncate`, `tokens_per_step`, `max_kl`, `strict_kl` and `max_gradient_norm`. The next step reads them, on the same
-client.
+The trainer takes the LoRA trainer's settings between steps (`Changeable`): `learning_rate`, the clips, `truncate`,
+`tokens_per_step`, `max_kl` and `max_gradient_norm`. The next step reads them, on the same client.
 
 ## A step
 
@@ -161,7 +158,8 @@ policy before that update), so the metrics are the LoRA step's.
 - A parent not trained on Tinker: the step fails. No call takes an adapter trained elsewhere into a Tinker run.
 
 **The stop at `max_kl`.** A minibatch that finds the policy further than `max_kl` from where the step began stops the
-pass. Its gradient was accumulated where no call clears it, so that client is not used again: the next step resumes
+pass. Each minibatch after the first reads that distance before its update is sent, which takes two of Tinker's clock
+cycles; the first, and every minibatch when nothing is checked, sends its update beside its forward-backward. Its gradient was accumulated where no call clears it, so that client is not used again: the next step resumes
 the saved state.
 
 **Failures.** Any error of the step (Tinker's, or a batch it refuses) raises `StepFailed` with the error's type and

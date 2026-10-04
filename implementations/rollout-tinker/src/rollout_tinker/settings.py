@@ -14,11 +14,10 @@ CHANGEABLE = (
     "truncate",
     "tokens_per_step",
     "max_kl",
-    "strict_kl",
     "max_gradient_norm",
 )
-"""The settings the trainer takes between steps (`LoraSettings`' own, and `strict_kl`): each step reads them afresh,
-and none changes what its weights are or what a step can hold."""
+"""The settings the trainer takes between steps (`LoraSettings`' own): each step reads them afresh, and none changes
+what its weights are or what a step can hold."""
 
 
 @dataclass(frozen=True)
@@ -43,9 +42,6 @@ class TinkerSettings:
     max_kl: float | None = 0.02
     """Stop the pass when a minibatch finds the policy this far from where the step began (nats per token, on the
     sampled tokens)."""
-    strict_kl: bool = True
-    """Read each minibatch's distance before its update is sent (two clock cycles a minibatch); else send both at
-    once, and a stop comes one minibatch late."""
     max_gradient_norm: float = 1.0
     segment_tokens: int | None = None
     """The longest segment a step trains on (None: any up to the model's context). Longer ones are left out and
@@ -60,13 +56,6 @@ class TinkerSettings:
     """`policy_gradient` or `likelihood`, as `LoraSettings` says."""
     ratio: str = "token"
     """`token` (PPO) or `segment` (GSPO), as `LoraSettings` says."""
-    beta1: float = 0.9
-    beta2: float = 0.999
-    eps: float = 1e-8
-    """Adam's, as torch's AdamW has them (Tinker's own defaults are 0.95 and 1e-12)."""
-    train_unembed: bool = False
-    """Also adapt the output layer. Off: an adapter of attention and MLP layers is what local engines and the merge
-    take most simply."""
     project: str | None = None
     """A Tinker project's id (not a secret); else `TINKER_PROJECT_ID`, if set."""
 
