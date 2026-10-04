@@ -32,7 +32,7 @@ PUBLIC_MODULES = [
     ("rollout_train", "The training loop, the group algorithm, evals, and what they ask of a trainer."),
     ("rollout_train.inference", "Channels: trainable models being served, and what they ask of an engine."),
     ("rollout_train.inference.hosts", "Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint."),
-    ("rollout_train.recorder", "The model endpoint for trainable channels: token-exact recording."),
+    ("rollout_train.recorder", "What recording a trainable channel takes: renderers, the thinking budget, segments."),
     ("rollout_train.gateway", "The stateless gateway: samples channels for harnesses and records every turn."),
     ("rollout_train.profile", "A deployment, described and opened."),
     ("rollout_train.monitor", "A live web page over every run of a ledger."),
