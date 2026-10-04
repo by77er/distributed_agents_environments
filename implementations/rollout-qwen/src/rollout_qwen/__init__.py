@@ -16,6 +16,9 @@ from rollout_train.recorder.renderers import (
 
 __all__ = ["qwen3", "qwen35", "tokenizer_of"]
 
+END_OF_TEXT = "<|endoftext|>"
+"""A token the models end on besides `<|im_end|>`: engines stop there whatever the stop tokens."""
+
 
 def tokenizer_of(model: str) -> Tokenizer:
     """The tokenizer of a checkpoint, by its name or path."""
@@ -25,22 +28,26 @@ def tokenizer_of(model: str) -> Tokenizer:
 
 
 def qwen35(model: str | Tokenizer) -> Renderer:
-    """Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer."""
+    """Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer.
+    A turn ends with `<|im_end|>`, or with the end of text, where the model stops too."""
     return ChatTemplateRenderer(
         "qwen3.5",
         tokenizer_of(model) if isinstance(model, str) else model,
         XmlFunctionCalls(),
         ThinkingFormat(open="<think>", close="</think>", prompt_opens=True, forced_close="\n</think>\n\n"),
         end="<|im_end|>",
+        stops=(END_OF_TEXT,),
     )
 
 
 def qwen3(model: str | Tokenizer) -> Renderer:
-    """Qwen3: JSON tool calls, and thinking the model opens. `model` is a checkpoint's name, or its tokenizer."""
+    """Qwen3: JSON tool calls, and thinking the model opens. `model` is a checkpoint's name, or its tokenizer.
+    A turn ends with `<|im_end|>`, or with the end of text, where the model stops too."""
     return ChatTemplateRenderer(
         "qwen3",
         tokenizer_of(model) if isinstance(model, str) else model,
         JsonToolCalls(),
         ThinkingFormat(open="<think>", close="</think>", prompt_opens=False, forced_close="\n</think>\n\n"),
         end="<|im_end|>",
+        stops=(END_OF_TEXT,),
     )

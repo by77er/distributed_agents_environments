@@ -197,7 +197,8 @@ class ChatTemplateRenderer:
             reasoning = reasoning.replace(self.thinking.open, "").replace(self.thinking.close, "").strip()
             if reasoning:
                 blocks.append(Reasoning(scope=ReasoningScope.PORTABLE, text=reasoning))
-        elif self.thinking is not None and self.thinking.prompt_opens:  # thinking never closed: all of it is thought
+        elif self.thinking is not None and (self.thinking.prompt_opens or text.lstrip().startswith(self.thinking.open)):
+            # Thinking opened (by the prompt, or by the model) and never closed: all of it is thought.
             reasoning = text.replace(self.thinking.open, "").strip()
             return Message(
                 role=Role.ASSISTANT,
