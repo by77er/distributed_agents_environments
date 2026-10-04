@@ -2466,12 +2466,14 @@ name = "minecraft-team"
 version = "0.0.0"
 source = { editable = "environments/minecraft" }
 dependencies = [
+    { name = "httpx" },
     { name = "pyyaml" },
     { name = "rollout" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "rollout", editable = "libraries/rollout" },
 ]

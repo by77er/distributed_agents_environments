@@ -5,6 +5,7 @@ description = "One to four agents in a Minecraft world, as a team: an environmen
 requires-python = ">=3.13"
 dependencies = [
     "rollout",
+    "httpx>=0.28",
     "pyyaml>=6",
 ]
 
