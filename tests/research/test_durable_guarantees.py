@@ -66,12 +66,6 @@ def durable(directory: Path, pool: SandboxPool) -> DurableRunner:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="since 42e324d a terminal event recorded while any event is stored takes MAX(seq) + 1: a run replayed "
-    "after its terminal event was stored and before DBOS recorded its end (its runner closed or died while it "
-    "released its sandboxes) appends a second terminal event",
-)
 async def test_a_run_replayed_after_it_ended_has_one_terminal_event(tmp_path: Path) -> None:
     pool = SlowToRelease(FakeSandboxes())
     runner = durable(tmp_path / "state", pool)

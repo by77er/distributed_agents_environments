@@ -336,6 +336,7 @@ class DurableRunner(MessageRouter):
             on_event=self._recorded,
             mark_attempt=self.store.mark_attempt,
             last_seq=lambda: self.store.last_seq(run_id),
+            terminal_seq=lambda: self.store.terminal_seq(run_id),
         )
         context.record_event(
             RunEventType.RUN_CREATED,

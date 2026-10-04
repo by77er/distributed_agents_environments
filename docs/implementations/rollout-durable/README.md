@@ -85,8 +85,11 @@ A run acquires its [sandboxes](../../libraries/rollout/sandboxes.md#the-runner) 
 program, under the lease it was started with: recovered or woken, it gets the same sandboxes back while their leases
 hold. It releases them when its program ends, and not when it is unloaded. A replay that takes another way than the
 first execution (a sandbox refused on resuming, say) records its terminal event after every event stored, so the
-run's stream still ends. The runner says `resumes = True`: an episode runner over it leaves its runs to be resumed
-when it closes, and adopts them when it starts again.
+run's stream still ends. A run has one terminal event and one end: a replay of a run whose terminal event is stored
+already (recovered after it ended and before DBOS recorded its end, say) records its own at that event's `seq`, where
+it is not stored again, and the store writes how a run ended (`finish_run`) only while it is still running. The
+runner says `resumes = True`: an episode runner over it leaves its runs to be resumed when it closes, and adopts them
+when it starts again.
 
 ## Messages
 

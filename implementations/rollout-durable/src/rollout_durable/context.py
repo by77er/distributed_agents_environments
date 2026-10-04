@@ -75,10 +75,12 @@ class DurableRunContext(LocalRunContext):
         on_event: Callable[[RunEvent], None] | None = None,
         mark_attempt: Callable[[str], bool] = lambda effect_id: True,
         last_seq: Callable[[], int | None] = lambda: None,
+        terminal_seq: Callable[[], int | None] = lambda: None,
     ) -> None:
         self._clock = started_at
         self._mark_attempt = mark_attempt
         self._last_seq = last_seq
+        self._terminal_seq = terminal_seq
         super().__init__(
             run_id,
             endpoints,
@@ -96,9 +98,13 @@ class DurableRunContext(LocalRunContext):
 
     def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent:
         """Events are stored by `seq`, and a replay's are the ones stored. A replay that took another way (a sandbox
-        refused, say) would give its terminal event a `seq` already taken; it comes after every stored event."""
-        if event_type in TERMINAL_EVENT_TYPES and (stored := self._last_seq()) is not None:
-            self._next_seq = max(self._next_seq, stored + 1)
+        refused, say) would give its terminal event a `seq` already taken; it comes after every stored event, unless
+        a terminal event is stored already: then it takes that one's `seq`, and is not stored."""
+        if event_type in TERMINAL_EVENT_TYPES:
+            if (ended := self._terminal_seq()) is not None:
+                self._next_seq = ended
+            elif (stored := self._last_seq()) is not None:
+                self._next_seq = max(self._next_seq, stored + 1)
         return super().record_event(event_type, payload)
 
     def now(self) -> datetime:

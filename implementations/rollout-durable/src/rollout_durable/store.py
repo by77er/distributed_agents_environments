@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 from sqlalchemy.schema import CreateColumn
 
-from rollout.contracts import RunEvent
+from rollout.contracts import TERMINAL_EVENT_TYPES, RunEvent
 from rollout_durable.database import Connection, Database, sql
 
 RUNNING = "running"
@@ -139,13 +139,17 @@ class RunStore:
         self.database.write(create, exclusive=f"conversation positions:{conversation}")
 
     def finish_run(self, run_id: str, status: str, outcome: JsonValue) -> None:
+        """Say how a run ended, if it is still running: a replay of a run that ended (recovered after its terminal
+        event was stored, say) does not say it again."""
+
         def finish(db: Connection) -> None:
-            sql(
+            finished = sql(
                 db,
-                "UPDATE runs SET status = :status, outcome = :outcome WHERE run_id = :run_id",
-                {"status": status, "outcome": json.dumps(outcome), "run_id": run_id},
+                "UPDATE runs SET status = :status, outcome = :outcome WHERE run_id = :run_id AND status = :running",
+                {"status": status, "outcome": json.dumps(outcome), "run_id": run_id, "running": RUNNING},
             )
-            sql(db, "UPDATE conversations SET live_run_id = NULL WHERE live_run_id = :run_id", {"run_id": run_id})
+            if finished.rowcount:
+                sql(db, "UPDATE conversations SET live_run_id = NULL WHERE live_run_id = :run_id", {"run_id": run_id})
 
         self.database.write(finish)
         self._notify(run_id)
@@ -336,6 +340,22 @@ class RunStore:
             lambda db: sql(db, "SELECT MAX(seq) FROM events WHERE run_id = :run_id", {"run_id": run_id}).scalar()
         )
         return int(found) if found is not None else None
+
+    def terminal_seq(self, run_id: str) -> int | None:
+        """The `seq` of a run's stored terminal event; None when it has none."""
+        like = " OR ".join(f"event LIKE :type_{index}" for index, _ in enumerate(TERMINAL_EVENT_TYPES))
+        types = {f"type_{index}": f'%"{kind.value}"%' for index, kind in enumerate(TERMINAL_EVENT_TYPES)}
+        rows = self.database.read(
+            lambda db: list(
+                sql(
+                    db,
+                    f"SELECT event FROM events WHERE run_id = :run_id AND ({like}) ORDER BY seq",
+                    {"run_id": run_id, **types},
+                ).scalars()
+            )
+        )
+        events = (RunEvent.model_validate_json(row) for row in rows)
+        return next((event.seq for event in events if event.type in TERMINAL_EVENT_TYPES), None)
 
     def events(self, run_id: str, from_seq: int = 0) -> list[RunEvent]:
         rows = self.database.read(
