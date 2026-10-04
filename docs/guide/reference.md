@@ -4416,7 +4416,7 @@ class VllmEngine
 
 **Methods**
 
-- `def __init__(self, model: str, *, gpu_memory_utilization: float = 0.72, max_model_len: int = 8192, max_num_seqs: int = 32, max_num_batched_tokens: int = 4096, max_lora_rank: int = 32, max_loras: int = 2, language_model_only: bool = True, speculative: Mapping[str, Any] | None = None, seed: int = 0) -> None`
+- `def __init__(self, model: str, *, gpu_memory_utilization: float = 0.72, max_model_len: int = 8192, max_num_seqs: int = 32, max_num_batched_tokens: int = 4096, max_lora_rank: int = 32, max_loras: int = 2, language_model_only: bool = True, speculative: Mapping[str, Any] | None = None, quantization: str | None = None, seed: int = 0) -> None`
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
 - `async def load_adapter(self, name: str, path: str) -> None` — Register a LoRA adapter (a PEFT directory) under `name`; samples name it to use it.
 - `async def remove_adapter(self, name: str) -> None`

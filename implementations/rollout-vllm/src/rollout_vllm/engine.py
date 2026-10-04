@@ -30,6 +30,7 @@ class VllmEngine:
         max_loras: int = 2,
         language_model_only: bool = True,
         speculative: Mapping[str, Any] | None = None,
+        quantization: str | None = None,
         seed: int = 0,
     ) -> None:
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
@@ -50,6 +51,7 @@ class VllmEngine:
             language_model_only=language_model_only,
             logprobs_mode="processed_logprobs",  # the distribution actually sampled from (after temperature)
             speculative_config=dict(speculative) if speculative else None,
+            quantization=quantization,  # (`fp8`: a bfloat16 checkpoint's weights quantized as they load)
             seed=seed,
         )
         self.model = model
