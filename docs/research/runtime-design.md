@@ -1322,3 +1322,11 @@ The user settled the design's open questions on 2026-10-04:
   provider; raising `max_lag` on a running run is checked the same way, and lowering it frees slots once the follower
   has unloaded the adapters. Slots decide whether a run is served at all; the gateway's weighted fair shares decide
   how much throughput each bound run gets.
+- **Every role reaches the ledger through the ledger API.** In a cluster, the launcher, monitor, gateway, run jobs,
+  runners, followers and sandbox pools all use `HttpLedger(url, token)` against the ledger service, which alone holds
+  the database's credentials and connections; on one machine and in tests the same interfaces are a database ledger
+  in the process. Each role's token is scoped to what it does (a follower reads serving records and writes its beats;
+  a runner claims and records episodes of the runs it is given; the monitor asks launches and changes settings; the
+  launcher claims launches). The service keeps what docs/research/ledger-guarantees.md §10 lists: request ids for
+  retries, the fence checked when an append is applied, `Fenced` as its own error, deciding reads from the primary,
+  and change streams by commit position.
