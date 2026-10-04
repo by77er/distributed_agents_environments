@@ -20,7 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["rollout-vllm", "rollout-lora", "rollout-qwen"]
 gemma = ["rollout-gemma"]
-tinker = ["rollout-tinker"]  # a trainer and an engine at Thinking Machines
+tinker = ["rollout-tinker", "rollout-qwen"]  # a trainer and an engine at Thinking Machines
 
 [tool.uv.workspace]
 members = ["libraries/*", "implementations/*", "environments/minecraft", "environments/gridworld"]

@@ -5025,6 +5025,7 @@ gpu = [
     { name = "rollout-vllm" },
 ]
 tinker = [
+    { name = "rollout-qwen" },
     { name = "rollout-tinker" },
 ]
 
@@ -5056,6 +5057,7 @@ requires-dist = [
     { name = "rollout-lora", marker = "extra == 'gpu'", editable = "implementations/rollout-lora" },
     { name = "rollout-openai", editable = "implementations/rollout-openai" },
     { name = "rollout-qwen", marker = "extra == 'gpu'", editable = "implementations/rollout-qwen" },
+    { name = "rollout-qwen", marker = "extra == 'tinker'", editable = "implementations/rollout-qwen" },
     { name = "rollout-runpod", editable = "implementations/rollout-runpod" },
     { name = "rollout-s3", editable = "implementations/rollout-s3" },
     { name = "rollout-tinker", marker = "extra == 'tinker'", editable = "implementations/rollout-tinker" },
