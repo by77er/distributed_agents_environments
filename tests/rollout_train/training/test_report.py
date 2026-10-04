@@ -86,7 +86,7 @@ async def test_a_report_writes_the_summary_and_the_chart_into_the_runs_directory
     directory, lines, _, _, versions = await run(tmp_path)
     image = chart(lines, ROWS, list(versions.values()))
     assert image.startswith(b"\x89PNG") and len(image) > 10_000
-    await report(directory, ROWS, None)
+    await report(directory, ROWS, None, run="train")
     assert (directory / "progress.png").read_bytes().startswith(b"\x89PNG")
     written = (directory / "progress.md").read_text()
     assert "`r3` row 3 — 1 groups, solved 75%" in written and "(serving run-1@1)" in written  # (from the ledger)

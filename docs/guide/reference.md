@@ -3220,7 +3220,7 @@ class Profile
 | `serve` | `str \| None` | `None` | `host:port` to serve the rollout jobs and the model endpoint for harnesses on. |
 | `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
 | `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
-| `ledger` | `Path \| None` | `None` | Where the run's tables and the policies' versions are kept, in files (by default `directory/ledger`). Runs that share it see each other's policies. |
+| `ledger` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a ledger see each other's policies. |
 | `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
 | `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
 | `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |

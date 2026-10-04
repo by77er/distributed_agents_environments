@@ -4,6 +4,10 @@ directory = "~/.cache/rollout/runs/team"
 feed_runs = 80
 episodes_at_once = 6             # each a Paper server of its own, and up to four agents' requests
 
+[ledger]                         # one database for every run on this machine; `rollout ledger copy` moves it to Postgres
+kind = "rollout_train.database:DatabaseLedger"
+url = "sqlite:///~/.cache/rollout/ledger.db"
+
 [channels.policy]
 model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
 renderer = "rollout_qwen:qwen35"

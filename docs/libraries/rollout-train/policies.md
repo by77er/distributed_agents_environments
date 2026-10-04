@@ -60,7 +60,28 @@ starting again reads it back.
 | Keys | A record is appended under a key, and a table has each key once. Appending under a key that is there changes nothing and says so. An action that is written down before it is taken can be taken again after a crash without being done twice. |
 | Fences | Whoever means to write takes the fence of a scope: a number higher than any taken before. An append that carries an older fence is refused (`Fenced`). |
 
-`FileLedger` keeps each table as a file of JSON lines in a directory, which processes on one machine may share.
+Two ledgers are provided:
+
+| Ledger | Keeps | Shared by |
+|---|---|---|
+| `FileLedger(directory)` | each table as a file of JSON lines | the processes of one machine |
+| `DatabaseLedger(url)` (`rollout_train.database`, with the `durable` extra) | every table in two SQL tables, `ledger_records` and `ledger_fences` (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
+
+A profile says which (`ledger`), and an open profile writes where it is into the run's directory (`ledger.json`), so
+that the monitor, the report and imitation open the same one from the directory alone (`of_run`). A run is named
+after its directory, so the runs sharing a ledger keep apart.
+
+Moving a ledger to Postgres (or from files to SQLite) is a copy and a changed URL, with nothing writing to it:
+
+```bash
+rollout ledger copy ~/.cache/rollout/runs/curriculum-9 postgresql://trainer@db-1/rollout --point
+```
+
+then the profile's `[ledger]` names the same `url`. `copy` (`rollout_train.database.copy`) takes any ledger, a run's
+directory, files or a database, into a database that has none of its tables yet: every record under its key, in the
+order it was appended, and every fence, so a writer from before the move is still shut out. `--point` makes the run's
+directory name the copy at once (an open profile writes the same when it starts).
+
 A ledger also lists its tables and its scopes' fences: `runs_in` and `policies_in` read from the tables' names
 which runs and which policies it has, and the [monitor](monitor.md) shows them.
 The training loop's tables are described under [dying and starting again](training.md#dying-and-starting-again); a

@@ -11,16 +11,18 @@ things make that safe.
   that carries an older fence is refused (`Fenced`), so a process that was replaced, and does not know it yet,
   cannot write over its replacement.
 
-`FileLedger` keeps tables as files of JSON lines.
+`FileLedger` keeps tables as files of JSON lines; `rollout_train.database.DatabaseLedger` keeps them in SQL tables that
+every run and machine using the database shares. A run's directory says where its ledger is (`LOCATION`), so that
+whatever reads the run (the monitor, the report) finds it.
 """
 
 import contextlib
 import fcntl
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import JsonValue
 
@@ -141,3 +143,31 @@ class FileLedger:
 
 FENCES = "fences.json"
 """In a `FileLedger`'s directory: the newest fence of every scope."""
+
+
+LOCATION = "ledger.json"
+"""In a run's directory: where its ledger is, as `opened` reads it."""
+
+
+def opened(location: Mapping[str, Any]) -> Ledger:
+    """The ledger a location names: `{"directory": …}`, files there; or `{"kind": "module:name", …}`, what that makes
+    when called with the other entries (`{"kind": "rollout_train.database:DatabaseLedger", "url": …}`)."""
+    if "kind" in location:
+        from rollout.names import named
+
+        entries = dict(location)
+        return named(str(entries.pop("kind")))(**entries)
+    return FileLedger(Path(str(location["directory"])).expanduser())
+
+
+def of_run(directory: Path) -> Ledger:
+    """The ledger of the run in `directory`: where its `LOCATION` file says, or files under `directory/ledger`."""
+    path = directory / LOCATION
+    if path.exists():
+        return opened(json.loads(path.read_text()))
+    return FileLedger(directory / "ledger")
+
+
+def present(ledger: Ledger) -> bool:
+    """Whether a ledger has anything to read: a reader makes no ledger directory where there is none."""
+    return not isinstance(ledger, FileLedger) or ledger.directory.exists()

@@ -24,8 +24,8 @@ from pydantic import JsonValue
 
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.layout import BLOBS, JOBS, LEDGER, PROCESSES
-from rollout_train.ledger import FileLedger
+from rollout_train.layout import BLOBS, JOBS, PROCESSES
+from rollout_train.ledger import FileLedger, of_run, present
 from rollout_train.monitor.feed import Appended, FeedReader, plain
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
@@ -63,7 +63,7 @@ class System:
         self.directory = directory
         self.feed = feed
         self.machine = Machine(directory)
-        self._ledger = FileLedger(directory / LEDGER)
+        self._ledger = of_run(directory)
         self._jobs: dict[str, _JobLog] = {}
         self._reading = threading.Lock()
         """Held while the jobs' logs are read: requests are answered in threads, and two must not read at once."""
@@ -79,7 +79,7 @@ class System:
         runs: list[str] = []
         policies: list[dict[str, Any]] = []
         versions: list[Version] = []
-        if await asyncio.to_thread(self._ledger.directory.exists):  # (a reader makes no ledger where none is)
+        if await asyncio.to_thread(present, self._ledger):
             fences = await self._ledger.fences()
             tables = {name: await self._ledger.read(name) for name in await self._ledger.tables()}
             runs = await runs_in(self._ledger)
@@ -92,7 +92,7 @@ class System:
     async def group(self, run: str, number: int) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
         its step and the version it made, and its outcome."""
-        if not await asyncio.to_thread(self._ledger.directory.exists):
+        if not await asyncio.to_thread(present, self._ledger):
             return None
         tables = {name: await self._ledger.read(table(run, name)) for name in RUN_TABLES}
         record: Any = tables[GROUPS].get(str(number))
@@ -220,7 +220,8 @@ class System:
 
     def _written(self, in_feed: list[dict[str, Any]]) -> float | None:
         """When the run last wrote anything this reads."""
-        times = [path.stat().st_mtime for path in self._ledger.directory.rglob("*.jsonl")]
+        files = self._ledger.directory.rglob("*.jsonl") if isinstance(self._ledger, FileLedger) else ()
+        times = [path.stat().st_mtime for path in files]  # (a ledger in a database: its jobs and feed say when)
         times += [job.written for job in self._jobs.values()]
         times += [run["updated"] for run in in_feed]
         return round(max(times), 1) if times else None

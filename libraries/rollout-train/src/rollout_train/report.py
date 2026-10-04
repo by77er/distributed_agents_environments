@@ -17,8 +17,7 @@ import httpx
 
 from rollout.catalog import Row
 from rollout_train.curriculum import Curriculum
-from rollout_train.layout import LEDGER
-from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.ledger import Ledger, of_run
 from rollout_train.policies import Version, policies_in, versions_in
 from rollout_train.record import Result, Trained, results, trained
 
@@ -207,14 +206,16 @@ async def report(
     webhook: str | None,
     *,
     ledger: Ledger | None = None,
-    run: str = "train",
+    run: str | None = None,
     watch: bool = False,
     interval: float = 30.0,
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
     `watch`, again after every new group, until interrupted. The run's results, steps and versions are read from
-    `ledger` (by default the one in files under the run's directory)."""
-    ledger = ledger or FileLedger(directory / LEDGER)
+    `ledger` (by default the run's own, wherever its directory says it is); the run is `run`, by default named
+    after its directory."""
+    ledger = ledger or of_run(directory)
+    run = run or directory.name
     reported: tuple[int, int] = (-1, -1)
     while True:
         lines = await results(ledger, run)

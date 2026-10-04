@@ -10,6 +10,7 @@ passed to it: this module knows no engine and no trainer. docs/guide/deploying.m
 
 import asyncio
 import contextlib
+import json
 import math
 import time
 import tomllib
@@ -23,9 +24,10 @@ from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
-from rollout_train import Colocated, FileLedger, Ledger, Policies, Trainer
+from rollout_train import Colocated, Ledger, Policies, Trainer
 from rollout_train.inference import Channel, Engine, Limits
 from rollout_train.layout import BLOBS, FEED, JOBS, LEDGER, PROCESSES
+from rollout_train.ledger import LOCATION, opened
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.rollouts import RolloutJobs
@@ -96,9 +98,11 @@ class Profile:
     """The URL others reach `serve` at (by default `http://` and `serve`)."""
     tools: Mapping[str, str] = field(default_factory=dict[str, str])
     """Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`."""
-    ledger: Path | None = None
-    """Where the run's tables and the policies' versions are kept, in files (by default `directory/ledger`).
-    Runs that share it see each other's policies."""
+    ledger: Mapping[str, Any] = field(default_factory=dict[str, Any])
+    """Where the run's tables and the policies' versions are kept (`rollout_train.ledger.opened`): `{"directory": …}`,
+    in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database
+    (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share
+    a ledger see each other's policies."""
     blobs: Mapping[str, Any] = field(default_factory=dict[str, Any])
     """Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called
     with the other entries. Without one, files under `directory/blobs`."""
@@ -130,8 +134,8 @@ class Profile:
         known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs", "episodes_at_once")
         top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
-        if "ledger" in top:
-            top["ledger"] = Path(top["ledger"]).expanduser()
+        if isinstance(top.get("ledger"), str):  # (`ledger = "path"`: a directory of files)
+            top["ledger"] = {"directory": str(Path(top["ledger"]).expanduser())}
         return cls(
             **top,
             **memory,
@@ -170,7 +174,9 @@ class Platform:
 
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
-        self.ledger: Ledger = FileLedger(profile.ledger or profile.directory / LEDGER)
+        self.location: dict[str, Any] = dict(profile.ledger) or {"directory": str(profile.directory / LEDGER)}
+        """Where the ledger is; written into the run's directory, for whatever reads the run."""
+        self.ledger: Ledger = opened(self.location)
         self.policies: Policies
         """The policies' versions, in the ledger and the blob store."""
         self.policy = (profile.trainer.policy if profile.trainer else None) or profile.directory.name
@@ -192,6 +198,7 @@ class Platform:
         self = cls(profile)
         directory = profile.directory
         directory.mkdir(parents=True, exist_ok=True)
+        (directory / LOCATION).write_text(json.dumps(self.location))
         record = directory / PROCESSES
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
