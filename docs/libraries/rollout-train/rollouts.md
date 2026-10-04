@@ -60,12 +60,17 @@ open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
   seconds.
 - **Oldest group first.** Open episodes are claimed in the order their groups were decided, across every run it
   serves.
-- **What it serves.** A run whose plan's recorded models are all on channels its recorder serves, and whose local
-  imports are all among `imports` (the tool sets it has). With `runs`, those runs only.
+- **What it serves.** A run whose plan's recorded models are all on channels its recorder serves, whose local
+  imports are all among `imports` (the tool sets it has), and whose local pools are all among `pools` (the sandbox
+  pools it has). With `runs`, those runs only.
+- **Room in the pools.** An episode whose program declares sandboxes is claimed only while their pools have room
+  for them: each pool's `capacity()` is asked once a look, and what the runner claims is counted against it as it
+  goes ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)).
 - **`guard`** is called before claiming, and raises to wait: a machine short of memory claims nothing until it has
   room.
 - **An episode is played** as the run's program with the group's `parameters` as its row, labelled `run`, `group`
-  and `episode`. When it ends, the runner takes the run's segments from the recorder (which then forgets the run),
+  and `episode`, with the claim's key (`RUN/GROUP/EPISODE/ATTEMPT`) as the run's lease: its sandboxes are leased
+  under it, and their leases end with the claim. When it ends, the runner takes the run's segments from the recorder (which then forgets the run),
   assembles the [episode](episodes.md), stores it and appends its record.
 - **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
   `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
@@ -79,8 +84,9 @@ episodes of a group have records and returns them, trajectories and all.
 
 With `presence` (a `Presence`, `rollout_train.presence`), a runner beats when it
 starts, before it claims anything, and every `beating` seconds (15) after; `beat()` beats at once besides (an open
-profile's runner does when a channel serves a new checkpoint). A beat holds what `about()` says of its
-machine (called in a thread: it may measure), with its `places` and how many episodes it is `playing`. Each runner's newest beat
+profile's runner does when a channel serves a new checkpoint). A beat holds what `about()` says of its machine (called
+in a thread: it may measure), with its `places`, how many episodes it is `playing`, and, when it has pools, how full
+each is (`pools`: `size`, `leased`, `free`). Each runner's newest beat
 is kept with the measurements of its recent ones (240: an hour), so its machine can be shown from anywhere.
 
 Beats are kept beside the ledger, as ordinary state changed in place, not appended: `presence.json` beside a ledger

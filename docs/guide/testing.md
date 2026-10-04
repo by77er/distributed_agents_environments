@@ -33,9 +33,10 @@ loudly. Pass `contract=CapabilityContract(...)` to test behavior near limits.
 | `events_of(run, RunEventType.X)` | the run's events of one type |
 | `payload(event)` | an event's payload as a JSON object |
 
-`local_run` gives the run no imported tools, environments or blob store. A task that uses them is tested through a
-`LocalRunner` built with `tool_sets=`, `environments=` or `blobs=` and a scripted endpoint as its provider, as in
-[tools](tools.md#imported-tools).
+`local_run` gives the run no imported tools, sandboxes, environments or blob store. A task that uses them is tested
+through a `LocalRunner` built with `tool_sets=`, `pools=`, `environments=` or `blobs=` and a scripted endpoint as its
+provider, as in [tools](tools.md#imported-tools). `FakeSandboxes` is a sandbox provider whose sandboxes are records
+that honour their specs: `pools={"fake": SandboxPool(FakeSandboxes())}` ([sandboxes](../libraries/rollout/sandboxes.md)).
 
 ### Counting calls across processes
 

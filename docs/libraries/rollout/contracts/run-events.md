@@ -27,6 +27,7 @@ and tests read these events, never a runner's internals.
 |---|---|---|
 | `run.created` | a runner starts the run. It is the run's first event. | `specification`, `conversation` (or `null`), `labels` |
 | `tools.resolved` | the run starts with tools. It follows `run.created`. | `specifications`: the program's `@tool` methods, then the imported tools |
+| `sandboxes.acquired` | the runner has acquired the sandboxes the program declares, before the program starts | `sandboxes`: each one's `Lease` by its name ([sandboxes](../sandboxes.md)) |
 | `run.suspended` | the loop starts to wait for a message and none of the wanted kind is held | `waiting_for`: `kind`, and `timeout` in seconds or `null` |
 | `run.cancel_requested` | a cancellation reaches the run | `reason`, `by` |
 | `run.completed` | the program returned | `outcome` |

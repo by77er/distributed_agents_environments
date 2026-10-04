@@ -13,6 +13,9 @@ address = run.model.address()          # ModelAddress(base_url, api_key, model)
 # an Anthropic client:  ANTHROPIC_BASE_URL=address.base_url.removesuffix("/v1")  ANTHROPIC_API_KEY=address.api_key
 ```
 
+A harness inside a sandbox is handed its address without any of that: a sandbox's spec names the slots it samples,
+and the runner puts each one's address in the sandbox's environment ([sandboxes](../rollout/sandboxes.md#harnesses-inside-a-sandbox)).
+
 What the harness samples there is recorded for the run's slot like any other sample, reaches the runner's hooks, and
 ends up in the episode's trajectory. Whichever API it speaks, each request is rendered with the channel's renderer
 and sampled by the channel, so the recorded tokens and logprobs are exactly what the policy sampled.

@@ -7,7 +7,7 @@
 | **Agent** | The policy side of the loop: selects what the model sees and produces one reply per turn. See [agents](../guide/agents.md). |
 | **Harness** | The loop that drives a task with an agent. See [harness](../libraries/rollout/README.md). |
 | **Run** | One execution of a program under a `RunBinding`, identified by `run_id`: one episode. A training run is the other sense of the word ([below](#training-terms)). |
-| **RunSpecification / RunBinding** | What to run (a program reference and parameters) / how it is served here (model endpoints, imported tool sets, delivery policy). |
+| **RunSpecification / RunBinding** | What to run (a program reference and parameters) / how it is served here (model endpoints, imported tool sets, sandbox pools, delivery policy). |
 | **Deployment** | A named, addressable `RunSpecification`. |
 | **Runner** | Executes runs: `LocalRunner` in process, or `DurableRunner`, whose runs survive it ([durable runner](../implementations/rollout-durable/README.md)). |
 | **Observation** | The task's response to a model turn: messages shown to the model next, an optional reward, an optional ending, logged info. |
@@ -21,9 +21,12 @@
 | **Replay** | Running a program again while its recorded effects return their results; how a durable runner resumes. |
 | **Tool** | A `ToolSpecification` (what the model sees) and its implementation: a `@tool` method, or an imported tool. |
 | **Tool set / ToolBinding** | Tools a program imports by name / where a run finds them: in the runner's process or at a URL. |
+| **Sandbox** | Something a program runs against for one run, outside its own code (a Minecraft world, a container, an environment's worker): declared by the program (`SandboxSpec`), acquired by the runner before the program starts and released when it ends, reached as `run.sandbox(name)`. See [sandboxes](../libraries/rollout/sandboxes.md). |
+| **Pool / provider / PoolBinding** | Hands out sandboxes of one kind under leases, saying how many it has room for / makes, deletes and operates them / which pool serves a kind for a run: in the runner's process or at a URL. |
+| **Lease** | A sandbox held under a key (the run's lease and the sandbox's name): the same key gets the same sandbox. An episode's are held under its claim, and end with it. |
 | **Canonical content** | Model-agnostic messages and content blocks; the only content form that code, run events and tool sets use. |
 | **Model endpoint** | Anything that implements the [model endpoint contract](../libraries/rollout/contracts/model-endpoint.md): the recorder or an adapter. |
-| **Profile** | A deployment, described: channels and engines, the trainer, the runner, where tool sets live. See [deploying](../guide/deploying.md). |
+| **Profile** | A deployment, described: channels and engines, the trainer, the runner, where tool sets and sandbox pools live. See [deploying](../guide/deploying.md). |
 | **Library / implementation / product / environment** | The four kinds of package in the repository: what code is written against; one implementation of an interface a library defines; an application; something to train on. See [overview](overview.md#layers). |
 | **Environment** | What a run trains on and an eval measures (`rollout.environment.Environment`, [below](#training-terms)); the packages under `environments/` are environments in that sense. Also, a computer a task creates through `run.environments` ([computers](../implementations/rollout-computers.md)). |
 | **Harness inside an environment** | A program's own agent, given an address for a model slot that speaks OpenAI's and Anthropic's APIs: recorded like any other sample. |
@@ -51,8 +54,8 @@ of segments.
 | **Behavior logprob** | The log-probability of a sampled token under the distribution it was sampled from. |
 | **Plan** | How a training run's episodes are played: its program and its binding, in the run's `plans` table. |
 | **Episode runner** | Claims the episodes runs ask for in the ledger, plays them on a runner and records them, at most as many at once as it has places. Several, on one machine or many, share the work. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
-| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under and beats. |
-| **Heartbeat** | What a runner or a launcher writes every 15 seconds beside the ledger: its host, its machine's measurements, its engines and channels, or what it offers. One silent for 90 seconds is taken to be gone. See [heartbeats](../libraries/rollout-train/rollouts.md#heartbeats). |
+| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under and beats. The episode's sandboxes are leased under it, and their leases end with it. |
+| **Heartbeat** | What a runner, a launcher or a pool served on its own writes every 15 seconds beside the ledger: its host, its machine's measurements, its engines and channels, how full its pools are, or what it offers. One silent for 90 seconds is taken to be gone. See [heartbeats](../libraries/rollout-train/rollouts.md#heartbeats). |
 | **Launch / launcher** | A training run or an eval asked for (its profile, environment, name, checkpoint and settings; an eval's suite and episodes a start) / the process on a training machine that claims launches for the profiles it offers and starts `rollout train` or `rollout eval` for them, as a process of its own or as a Ray job. See [launchers](../guide/deploying.md#launchers). |
 | **Suite / eval** | A named, frozen list of starts of an environment's rows: its eval data of that name, or made by hand (each row's start drawn with each of its seeds) / one suite played by one checkpoint or the base model, training nothing: a run of its own whose start says `kind: eval`, recording each episode's outcome under `evaluations/SUITE/EVAL/results`. See [evals](../libraries/rollout-train/evals.md). |
 | **Dataset** | Examples to imitate, chosen from runs' episodes by an episode rule and turn filters, made once: a record in the ledger's `datasets` table and a manifest blob of one line per example, and a name if it is given one. A supervised step on one makes a checkpoint whose parents after the first sampled its examples. See [datasets](../libraries/rollout-train/datasets.md). |

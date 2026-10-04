@@ -11,6 +11,7 @@ class MyTask(Task):
     # Declarations: class attributes
     models = {"policy": ModelSlot()}      # model slots; the agent acts through "policy"
     imports = ["notes"]                    # imported tool sets, bound per run (tools.md)
+    sandboxes = {"box": SandboxSpec(kind="code")}   # sandboxes acquired for the run (sandboxes.md)
     max_turns = 10                         # truncate after this many replies (None: no limit)
     context_hints = ContextHints()         # advice to the agent about how much history to show
 
@@ -199,6 +200,7 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | `history` | the episode, read-only: `turns`, and `messages(hints)` ([agents](agents.md#what-the-model-sees)) |
 | `models`, `model` | the declared model slots by name; `model` is `models["policy"]` ([agents](agents.md#the-model-interface)) |
 | `tools` | the imported tools: `specifications()`, `await call(name, arguments)`, `name in run.tools` ([tools](tools.md#imported-tools)) |
+| `sandbox(name)` | a sandbox the task or program declared, acquired for the run: its addresses, its environment, and its operations, each an effect ([sandboxes](../libraries/rollout/sandboxes.md)) |
 | `environments` | creates computers the run owns; `None` when the runner has no environment backend ([environments](../implementations/rollout-computers.md)) |
 | `blobs` | stores bytes for `Media` blocks; `None` when the runner has no blob store ([content](content.md#media-and-blobs)) |
 | `context_hints` | the task's `context_hints`, for the agent |

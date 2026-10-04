@@ -546,8 +546,8 @@ segment_tokens = 16000
 segments_per_step = 384
 tokens_per_step = 65536
 
-[tools]
-minecraft = "minecraft_team.worlds:tools"
+[pools.minecraft]
+kind = "minecraft_team.worlds:worlds"
 
 [memory]
 runs_gib = 6

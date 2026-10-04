@@ -30,6 +30,8 @@ from rollout_train.presence import Presence
 from rollout_train.record import runs_in, table
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, holds
 
+__all__ = ["FileLeases", "ended", "keep", "leases_of", "sweep"]
+
 logger = logging.getLogger(__name__)
 
 POOL = "pool"

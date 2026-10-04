@@ -7,8 +7,8 @@ runs from picking up diamonds lying in a lit room to beating the game: one 4-bit
 them all, and every agent is rewarded equally with the team's score.
 
 The environment is the package `minecraft-team` (import `minecraft_team`), which depends on `rollout` alone. It is
-its tasks as the rows of an [environment](../guide/perspectives.md#building-an-environment), a program that plays one episode, and a tool
-set that owns the servers. It knows nothing of the model, the trainer or where anything runs: the
+its tasks as the rows of an [environment](../guide/perspectives.md#building-an-environment), a program that plays one episode, and a
+[sandbox](../libraries/rollout/sandboxes.md) provider that makes its worlds. It knows nothing of the model, the trainer or where anything runs: the
 [profile](../guide/deploying.md) says that, and the [training loop](../libraries/rollout-train/training.md) is the
 library's.
 
@@ -46,8 +46,8 @@ Paths are under `environments/minecraft/`.
 | Limits | `limits.json`, `minecraft_team/limits.py`, `harness/lib/limits.js` | The numbers an action keeps and agents are told: reach, the longest `move`, how long walking may dig at a block, what it bridges with, how long `wait` waits, smelting time and fuels, the window's length, a chat message's length. Python and Node read the one file |
 | Prompts | `minecraft_team/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
 | Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
-| Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md) |
-| Worlds | `minecraft_team/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_team.worlds:tools`), or on a machine of its own (`rollout tools minecraft_team.worlds:tools`, and its URL in the profile) |
+| Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md). It declares its world, a sandbox named `world` |
+| Worlds | `minecraft_team/worlds.py` | Temporary worlds as sandboxes of the kind `minecraft` ([below](#the-worlds)): actions, observations and ground-truth scores. In a pool in the process that runs episodes (`[pools.minecraft]` naming `minecraft_team.worlds:worlds`), or on a machine of its own (`rollout pool minecraft_team.worlds:worlds`, and its URL in the profile) |
 | Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given; its eval data, one start of every task (`teams-every-task`), which training never draws; what its results say (rewards from 0 up, `solved`, `saturated`, `duration` in minutes of game time) |
 | Profile | `profiles/one-gpu.toml` | One machine with one 16 GB GPU |
 | Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
@@ -56,7 +56,7 @@ Paths are under `environments/minecraft/`.
 ### One statement, two places
 
 Several things are written on two sides: the actions and their limits (the prompts, and the Node harness), the control
-API (the Python client, and the Java plugin), the tool set's operations, the game's version, the guidance and the
+API (the Python client, and the Java plugin), the worlds' operations, the game's version, the guidance and the
 tasks it is written for. `tests/test_agreement.py` reads both sides and fails when they differ, without starting a
 server:
 
@@ -65,7 +65,7 @@ server:
   what it smelts at (furnace);
 - the prompts state the limits in the words agents read;
 - the client asks for every route the plugin serves and for no other;
-- the tool set specifies the operations it performs;
+- the worlds specify the operations they perform;
 - the plugin is built for the version the servers run;
 - the server tracks and sends large things as far off as the harness shows them;
 - every guided task but the progress ones says its way, and the way names only actions the agents have;
@@ -73,18 +73,27 @@ server:
   to four players, at least two where the kit is dealt in parts;
 - every unguided row counts for its guided twin.
 
-### The tool set
+### The worlds
 
-| Operation | After a crash | Does |
-|---|---|---|
-| `begin` | `SIDE_EFFECTING` | Starts a server from the seed's template, connects the bots, builds the task, waits until every bot holds the chunks around it |
-| `observe` | `PURE` | What an agent perceives. Observing uses nothing up: asked again before the game next runs, the harness answers the same |
-| `act` | `SIDE_EFFECTING` | Starts an agent's action |
-| `window` | `SIDE_EFFECTING` | Runs game time while actions happen, then freezes; says whether anything is left to earn |
-| `score` | `PURE` | The reward, and the ground truth it is scored from |
-| `end` | `IDEMPOTENT` | Stops the episode's server |
+An episode declares its world as a sandbox, `world(task, world_seed, layout_seed, names)`: of the kind `minecraft`,
+with the task, the seeds and the team's names as its parameters. The runner acquires it from the pool the binding
+names for `minecraft` before the episode begins, and releases it when the episode ends, however it ends.
+`MinecraftWorlds` is the provider: for each lease it starts a server from the seed's template, connects the bots,
+builds the task and waits until every bot holds the chunks around it; the lease's addresses are where a player joins
+the world to watch it (`game`) and the plugin's control API (`control`). It holds at most `size` worlds at once (6),
+each a Paper server of its own (1 to 2 GB of memory), and an episode runner claims an episode only while one more
+fits. `worlds(directory, size=6)` makes it for a profile, keeping the bots' logs under `directory/logs`.
 
-The tool set does not deduplicate by effect identity; what each class means under a durable runner is in
+Every agent's operations reach the episode's world through `run.sandbox("world")`, each a recorded effect:
+
+| Operation | Takes | After a crash | Does |
+|---|---|---|---|
+| `observe` | `agent` | `PURE` | What an agent perceives. Observing uses nothing up: asked again before the game next runs, the harness answers the same |
+| `act` | `agent`, `action` | `SIDE_EFFECTING` | Starts an agent's action |
+| `window` | | `SIDE_EFFECTING` | Runs game time while actions happen, then freezes; says whether anything is left to earn |
+| `score` | | `PURE` | The reward, and the ground truth it is scored from |
+
+The worlds do not deduplicate by effect identity; what each class means under a durable runner is in
 [tools](../guide/tools.md#after-a-crash).
 
 ## No cheating by construction

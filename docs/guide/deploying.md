@@ -1,9 +1,9 @@
 # Deploying
 
 A deployment is described once, in a profile: the channels and the engines behind them, the trainer, the runner, and
-where each environment's tool set lives. Whoever trains gets a trainer, the checkpoints and a way to publish checkpoints
-from it, while a runner it opens plays the episodes the run asks for, and never learns what stands behind them; an
-environment is named in it only by its tool set. This page is the one place the profile file is
+where each environment's tool sets and sandbox pools live. Whoever trains gets a trainer, the checkpoints and a way to
+publish checkpoints from it, while a runner it opens plays the episodes the run asks for, and never learns what stands
+behind them; an environment is named in it only by its tool sets and pools. This page is the one place the profile file is
 described. The code is `rollout_train.profile`, and the command is `rollout` (`rollout_train.cli`).
 
 ```toml
@@ -33,8 +33,9 @@ learning_rate = 5e-5
 segment_tokens = 8000                        # the longest turn it can train on: its channel takes it as its limit
 segments_per_step = 384
 
-[tools]
-minecraft = "minecraft_team.worlds:tools"    # made in this process by `tools(directory)`; or "http://worlds:8700"
+[pools.minecraft]                             # the worlds, made in this process by `worlds(directory, size=6)`
+kind = "minecraft_team.worlds:worlds"         # or, for a pool on a machine of its own: minecraft = "http://worlds:8710"
+size = 6
 
 [memory]
 runs_gib = 6                                  # must be available to admit runs
@@ -54,7 +55,8 @@ uv run rollout imitate profile.toml --directory RUN                  # a supervi
 uv run rollout checkpoints --ledger RUN                                 # every checkpoint: where it came from, its bookmarks
 uv run rollout bookmark diamonds first:20 --ledger RUN               # name the checkpoint run "first" made at step 20
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
-uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
+uv run rollout pool minecraft_team.worlds:worlds --directory DATA --ledger URL --port 8710   # worlds on a machine of their own
+uv run rollout tools FACTORY --directory DATA --port 8700            # a tool set on a machine of its own
 uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
 uv run rollout env check ENVIRONMENT --profile profile.toml --groups 4   # does it hold together; do its groups teach
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # a frozen list of starts
@@ -88,13 +90,14 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `ray` | A Ray cluster the run connects to (`ray = "auto"`: the one this machine is part of, or `ray://host:port`): its reshards then run as Ray tasks on that cluster ([Ray](#ray)). Without it, they run in the run's process | Add nodes to the cluster |
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
-| `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
-| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, the launches, and what is wanted of each run's settings | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
+| `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the tool set should live |
+| `pools` | Each sandbox pool, by the kind of sandbox it serves ([sandboxes](../libraries/rollout/sandboxes.md)): `module:name` of the provider that makes them in this process, or a table whose `kind` is that and whose other keys are its settings (`size`: how many at once), or a URL. A pool in this process is named `KIND@HOST/DIRECTORY`, keeps its leases beside the ledger and has a keeper that ends them with their claims | Run `rollout pool` where the sandboxes should live, and give its URL |
+| `ledger` | Where the run's tables and the checkpoints are kept ([the ledger](../libraries/rollout-train/checkpoints.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, the launches, what is wanted of each run's settings, and the sandboxes' leases | Runs that share a ledger and a blob store share one graph of checkpoints, and can start from each other's |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
 | `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
 | `evals` | A suite the run plays with the checkpoint of every `every`th step (1 unless it says otherwise), `episodes` episodes of each start (1), between that step and the next, on the trained channel ([evals during training](../libraries/rollout-train/evals.md#evals-during-training)). Each is an eval of its own, a run named `NAME-eval-STEP`. Without it, the run evaluates nothing. A running run's evals can be changed ([what can change while a run goes](#what-can-change-while-a-run-goes)) | Ask for evals as launches instead, so that they run on engines of their own |
-| `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
+| `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines can take. An episode is claimed only while its sandboxes' pools have room for it too | Raise it with the engines' `max_num_seqs`, and the pools' sizes with the memory for their sandboxes |
 
 ## What can change while a run goes
 
@@ -110,7 +113,7 @@ where a run starts; a run started again starts from them and takes what is wante
 
 ## What a profile names
 
-Engines, renderers, trainers and tool sets are implementations, named as `module:name`. `rollout_train.profile`
+Engines, renderers, trainers, tool sets and sandbox providers are implementations, named as `module:name`. `rollout_train.profile`
 imports none of them: it calls what the name resolves to, and passes it what the profile says of it. Their defaults
 are their own.
 
@@ -119,7 +122,8 @@ are their own.
 | `engine` of a channel | The channel's `model`, and one entry of `engines` as keyword arguments. Once per entry | `rollout_vllm:VllmEngine` ([vLLM engine](../implementations/rollout-vllm.md)) |
 | `renderer` of a channel | The channel's `model` | `rollout_qwen:qwen35`, `rollout_qwen:qwen3` ([Qwen renderers](../implementations/rollout-qwen.md)), `rollout_gemma:gemma4` ([Gemma renderers](../implementations/rollout-gemma.md)) |
 | `kind` of the trainer | The trained channel's `model`, and every other key of `[trainer]` except `channel`, `start`, `bookmark` and `colocated` as keyword arguments | `rollout_lora:LoraTrainer` ([LoRA trainer](../implementations/rollout-lora.md)) |
-| An entry of `tools` | The run's directory | An environment's own, such as `minecraft_team.worlds:tools` ([Minecraft team](../products/minecraft-team.md)) |
+| An entry of `tools` | The run's directory | An environment's own |
+| An entry of `pools` | The run's directory, and the entry's other keys as keyword arguments | `minecraft_team.worlds:worlds` ([Minecraft team](../products/minecraft-team.md#the-worlds)) |
 
 `rollout_train.testing` has a scripted engine and a readable renderer for profiles that need no GPU
 (`rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer`). The GPU packages are installed
@@ -131,7 +135,7 @@ In code, a profile opens into a platform:
 
 ```py
 async with Profile.load(Path("profile.toml")).open() as platform:
-    binding = binding_for(environment, "policy", platform.tool_bindings)
+    binding = binding_for(environment, "policy", platform.tool_bindings, platform.pool_bindings)
     await train(
         environment, platform.trainer, platform.checkpoints, start=platform.origin, channel="policy",
         base=platform.profile.channels["policy"].model,
@@ -144,7 +148,7 @@ async with Profile.load(Path("profile.toml")).open() as platform:
 Opening starts, in order: the run (registered the first time: `run.json`) and the checkpoint it starts from; with
 `ray`, the connection to the Ray cluster; the engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
 the trained one with the trainer's longest segment as its longest turn; the recorder; the monitor's feed in
-`directory/feed`; the tool sets; the blob store and the checkpoints; the runner, and the
+`directory/feed`; the tool sets; the pools, each with its keeper; the blob store and the checkpoints; the runner, and the
 [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
 listens there.
 `open(training=False)` (what `rollout eval` opens) makes no trainer; the trained channel's engines still load what its
@@ -164,16 +168,18 @@ that a monitor on another machine asks it for the run's episodes ([monitor](../l
 
 Opening a profile starts an [episode runner](../libraries/rollout-train/rollouts.md#a-runner) named
 `HOST/DIRECTORY` (this machine's name and the run directory's), with `episodes_at_once` places and the profile's tool
-sets. It plays the episodes of the run in its directory, claiming them in the ledger and recording them
-there, with their trajectories and events in the blob store. Started again, it takes its fence anew, and what it had
-claimed is open to be played again.
+sets and pools. It plays the episodes of the run in its directory, claiming them in the ledger and recording them
+there, with their trajectories and events in the blob store; it claims an episode only while the pools of its
+sandboxes have room for them, and leases them under the claim. Started again, it takes its fence anew, and what it
+had claimed is open to be played again; the sandboxes leased under those claims are deleted by their pools.
 
 Runners on other machines share a run's work through the ledger and the blob store alone: a database ledger they
-all reach (`postgresql://…`) and a blob store they all reach (an object store), with the channels and tool sets the
-run's plan names. The run does not know where its episodes were played.
+all reach (`postgresql://…`) and a blob store they all reach (an object store), with the channels, tool sets and pools
+the run's plan names. The run does not know where its episodes were played.
 
 Each runner beats every 15 seconds ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats)): its host, its
-machine's memory, GPUs and disk, its engines' processes, and what each channel serves and how fast. A runner that
+machine's memory, GPUs and disk, its engines' processes, what each channel serves and how fast, and how full its pools
+are. A runner that
 stops beating for 90 seconds is taken to be gone, and what it had claimed is played by others. `rollout train` also
 writes into the run's start where its blob store is (its kind and settings; a store's credentials come from its
 environment and are never written), so a monitor anywhere reads the run's finished episodes back, and shows its

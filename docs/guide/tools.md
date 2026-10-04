@@ -228,6 +228,11 @@ asyncio.run(imported())
 If a tool set raises, the effect is recorded as failed and the model receives an error result, so every tool call
 still gets an answer.
 
+A tool set is shared by the runs it serves. What a run needs for itself alone, made when it starts and deleted when
+it ends (a Minecraft world, a container), is a [sandbox](../libraries/rollout/sandboxes.md): the program declares it,
+the runner acquires it before the program starts and releases it after, and the program reaches it as
+`run.sandbox(name)`, whose operations are recorded effects like imported tools, with no id to pass.
+
 ### After a crash
 
 Under the durable runner, a call that a crash interrupted is made again, with the same `effect_id`, when the tool's

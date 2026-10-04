@@ -16,6 +16,7 @@ named here are in the [API reference](../../guide/reference.md#rolloutharness).
 | [guide: agents](../../guide/agents.md) | `Agent`, `History`, `ContextHints`, `Model` |
 | [guide: conversations](../../guide/conversations.md) | `Envelope`, `Address`, priorities, delivery modes |
 | [guide: runs and events](../../guide/runs-and-events.md) | effects, identifiers, run events |
+| [sandboxes.md](sandboxes.md) | `SandboxSpec`, `Sandbox`, pools and providers: what a program runs against, leased for the run |
 | [hooks.md](hooks.md) | `RunHooks`: watching every event and model sample of a runner |
 | [memory.md](memory.md) | `Memory` and `CompactingAgent`: a context that fits any model |
 | [determinism.md](determinism.md) | rules for code that runs under the durable runner |
@@ -55,6 +56,7 @@ a program what it needs before it starts the run:
 | `model_slots()` | one slot, `policy` | the task's `models` |
 | `context_hints()` | `ContextHints()` | the task's `context_hints` |
 | `imports()` | none | the task's `imports` |
+| `sandboxes()` | none | the task's `sandboxes` ([sandboxes](sandboxes.md)) |
 | `tool_specifications()` | none | the specifications of the task's `@tool` methods |
 | `await main(run)` | raises `NotImplementedError` | `await rollout(task, agent, run)` |
 
@@ -68,21 +70,22 @@ A run names its program with a [`ProgramReference`](../../guide/reference.md#pro
 | `resolve(name)` | get the class a name refers to: registered, or imported |
 | `instantiate(reference)` | create the program. A task, an agent or a program is constructed with its parameters, or with no arguments when they are `None`. |
 | `with_row(reference, row)` | get the same program for another row of parameters. For the loop, the row replaces the task's parameters. |
-| `bind(reference, channel)` | get a `RunBinding` that serves every model slot from one recorded channel, and each import from the tool set registered under the import's name unless `tools` says otherwise |
+| `bind(reference, channel)` | get a `RunBinding` that serves every model slot from one recorded channel, each import from the tool set registered under the import's name unless `tools` says otherwise, and each kind of sandbox from the pool registered under the kind's name unless `pools` says otherwise |
 
 ## Run specifications
 
 A [`RunSpecification`](../../guide/reference.md#runspecification) is a program and a binding. The binding decides
-what task and agent code must not: which model serves a slot, how it samples, where a tool set lives.
+what task and agent code must not: which model serves a slot, how it samples, where a tool set or a pool lives.
 
 | Type | Says |
 |---|---|
-| [`RunBinding`](../../guide/reference.md#runbinding) | how each model slot and each import is served, and how priorities map to delivery modes ([conversations](../../guide/conversations.md#priority-and-delivery-mode)) |
+| [`RunBinding`](../../guide/reference.md#runbinding) | how each model slot and each import is served, which pool serves each kind of sandbox, and how priorities map to delivery modes ([conversations](../../guide/conversations.md#priority-and-delivery-mode)) |
 | [`ModelBinding`](../../guide/reference.md#modelbinding) | exactly one of `direct` and `recorded` |
 | [`DirectModel`](../../guide/reference.md#directmodel) | a provider's API. `provider` is the key of an endpoint factory registered with the runner. Nothing is recorded. |
 | [`RecordedModel`](../../guide/reference.md#recordedmodel) | a channel served through the [recorder](../rollout-train/recorder.md) |
 | [`SamplingParameters`](../../guide/reference.md#samplingparameters) | how a bound model samples. It belongs to bindings; task and agent code cannot set it. |
 | [`ToolBinding`](../../guide/reference.md#toolbinding) | exactly one of `local` (a tool set registered with the runner) and `url` (a tool set served over HTTP, [tools](../../guide/tools.md#serving-a-tool-set-over-http)) |
+| [`PoolBinding`](../../guide/reference.md#poolbinding) | exactly one of `local` (a pool registered with the runner) and `url` (a pool served over HTTP, [sandboxes](sandboxes.md#over-http)) |
 | [`Deployment`](../../guide/reference.md#deployment) | a name, `{namespace}/{name}`, and the specification that a conversation addressed to it runs |
 
 ## Runner
@@ -96,14 +99,16 @@ Code written against them holds either implementation:
 | `DurableRunner(directory, ...)` | `rollout_durable` | Runs each program inside a DBOS workflow in the runner's process. Effects are recorded steps, so a run resumes after a crash ([durability](../../implementations/rollout-durable/README.md)). |
 
 Both take `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
-bindings, by name), `environments` (an `EnvironmentService`), `blobs`, `recorder` (serves recorded bindings) and
-`hooks`.
+bindings, by name), `pools` (for local pool bindings, by name), `environments` (an `EnvironmentService`), `blobs`,
+`recorder` (serves recorded bindings) and `hooks`.
 
 What the protocols guarantee:
 
 - `launch` is called once, before anything else that starts or reaches a run. `close` releases what the runner
   holds, and the runner cannot be used afterwards.
-- `start` begins a run and returns its handle. The run's `labels` are recorded in its `run.created` event.
+- `start` begins a run and returns its handle. The run's `labels` are recorded in its `run.created` event. Its
+  sandboxes are acquired under its `lease` (by default its `run_id`) before the program starts
+  ([sandboxes](sandboxes.md#the-runner)).
 - `deploy` registers or replaces a deployment. A conversation's next run uses the current one.
 - `run(run_id)` returns a run's handle, and raises `KeyError` for a run the runner does not know.
   `conversation_of` gives the conversation a run serves; `conversation_runs` gives a conversation's runs, oldest
@@ -113,7 +118,7 @@ What the protocols guarantee:
 - `cancel` records `run.cancel_requested`, lets `teardown` run, and returns once the run has ended. The
   `LocalRunner` cancels the run's task at once; the `DurableRunner` stops the run at its next effect, wait or turn
   boundary.
-- When a run ends, its runner destroys the environments the run still owns.
+- When a run ends, its runner destroys the environments the run still owns and releases its sandboxes.
 
 A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
 

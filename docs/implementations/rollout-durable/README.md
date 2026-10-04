@@ -78,8 +78,12 @@ DBOS records a step's result after the step ran, so a step in flight at a crash 
 deduplicate by `effect_id` absorb the repeat, and a model call in flight is sampled again. Effects that cannot be
 deduplicated are **guarded**: the step first inserts its `effect_id` into `attempts`. If the marker is already there,
 an earlier attempt was interrupted, and the step raises `OutcomeUnknown` instead of performing the effect; the effect
-completes with status `outcome_unknown`. Guarded effects are `Environment.execute` and calls to imported tools that
-are side-effecting and do not deduplicate ([tools](../../guide/tools.md#after-a-crash)).
+completes with status `outcome_unknown`. Guarded effects are `Environment.execute`, and calls to imported tools and
+operations on sandboxes that are side-effecting and do not deduplicate ([tools](../../guide/tools.md#after-a-crash)).
+
+A run acquires its [sandboxes](../../libraries/rollout/sandboxes.md#the-runner) each time it is executed, before its
+program, under the lease it was started with: recovered or woken, it gets the same sandboxes back while their leases
+hold. It releases them when its program ends, and not when it is unloaded.
 
 ## Messages
 
