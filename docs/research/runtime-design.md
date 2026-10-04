@@ -1239,6 +1239,8 @@ The user settled the design's open questions on 2026-10-04:
   resource, whose Ray cluster holds the run's trainer, runners and environment worker and goes when the job ends.
   Within that cluster Ray restarts actors whose pod died; when the driver or the head is lost, the RayJob's
   `backoffLimit` starts the job again on a new Ray cluster (the old one's state went with its head), which resumes
-  the run from the ledger and blob store under a new fence. Shared inference pools stay outside run clusters as
-  long-lived workloads, so a retry does not reload models. On a one-GPU node the run's trainer pod and a pool's
+  the run from the ledger and blob store under a new fence. A shared inference pool is a long-lived Ray cluster of
+  its own (a RayCluster custom resource) whose engine hosts serve every run bound to it, its GPU workers added and
+  removed by the autoscaler; the gateway reaches its engines over HTTP and its followers read runs' serving records,
+  so a run's retry does not reload models. On a one-GPU node the run's trainer pod and a pool's
   engine pod share the card by time-slicing into two, with the engine's memory share capped to leave the trainer room.
