@@ -7,7 +7,6 @@ from pathlib import Path
 from pydantic import JsonValue
 
 from rollout_train.gateway.service import Gateway
-from rollout_train.inference.remote import Routes
 from rollout_train.machine import measured
 
 GATEWAY = "gateway"
@@ -27,7 +26,7 @@ def about(gateway: Gateway, listen: str, directory: Path | None = None) -> dict[
         {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
         for name, channel in gateway.channels.items()
     ]
-    routed = gateway.routes.channels() if isinstance(gateway.routes, Routes) else {}
+    routed = gateway.routes.channels() if gateway.routes is not None else {}
     for name, channel in routed.items():
         servers: list[JsonValue] = list(channel.servers())
         channels.append({"channel": name, **channel.take(), "servers": servers})

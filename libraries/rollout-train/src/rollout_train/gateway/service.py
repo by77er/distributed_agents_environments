@@ -107,7 +107,8 @@ class Gateway:
     def sampler_of(self, run: str, channel: str) -> Sampler:
         """What a run's channel samples from: the channel of this process it names, else the run's routed channel of
         that name. A channel named within its run (`RUN/NAME`) is that run's."""
-        run, name = parts(channel) if "/" in channel else (run, channel)
+        named, name = parts(channel)
+        run = named or run
         if name in self.channels:
             return self.channels[name]
         if self.routes is not None and self.routes.routed(name):
@@ -117,7 +118,7 @@ class Gateway:
     async def reaches(self, run: str, channel: str) -> bool:
         """Whether a run's channel can be sampled now: one of this process, or a routed one whose servers have a
         checkpoint close enough to what the run says it should serve."""
-        name = parts(channel)[1] if "/" in channel else channel
+        _, name = parts(channel)
         if name in self.channels:
             return True
         return self.routes is not None and self.routes.routed(name) and await self.routes.reaches(run, name)
@@ -125,7 +126,7 @@ class Gateway:
     @property
     def names(self) -> list[str]:
         """The channels it samples, by name."""
-        routed: Mapping[str, object] = getattr(self.routes, "routes", {})
+        routed: Mapping[str, object] = self.routes.routes if self.routes is not None else {}
         return [*self.channels, *(name for name in routed if name not in self.channels)]
 
     def describe(self, grant: Grant) -> CapabilityContract:

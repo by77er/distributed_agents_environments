@@ -72,7 +72,10 @@ def qualified(run: str, channel: str) -> str:
 
 
 def parts(name: str) -> tuple[str, str]:
-    """The run and the channel a qualified name says (`qualified`)."""
+    """The run and the channel a channel's name says: a qualified name's (`qualified`), or for a name without a run,
+    no run (`""`) and the name."""
+    if "/" not in name:
+        return "", name
     run, _, channel = name.rpartition("/")
     if not run or not channel:
         raise ValueError(f"{name!r} names no run's channel (RUN/NAME)")

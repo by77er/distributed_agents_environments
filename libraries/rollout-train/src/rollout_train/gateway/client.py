@@ -148,7 +148,7 @@ class GatewayEndpoints:
         self._attempts.pop(run_id, None)
 
     def endpoint(self, binding: RecordedModel) -> "GatewayEndpoint":
-        if _name(binding.channel) not in self.channels:
+        if parts(binding.channel)[1] not in self.channels:
             raise ValueError(f"no recorded channel {binding.channel!r}")
         return GatewayEndpoint(self, binding)
 
@@ -183,12 +183,12 @@ class GatewayEndpoints:
         """What a binding's channel guarantees a session, with the thinking and answer room the binding gives in place
         of the channel's: a routed channel, as its run's servers say (the run is admitted)."""
         channel, said = binding.channel, binding.sampling
-        name = _name(channel)
+        run, name = parts(channel)
         sampler: Sampler | None = None
         if self.gateway is not None and name in self.gateway.channels:
             sampler = self.gateway.channels[name]
         elif self.routes is not None and self.routes.routed(name):
-            run = parts(channel)[0] if "/" in channel else self.attempt(SessionIdentity.parse(session_id).owner).run
+            run = run or self.attempt(SessionIdentity.parse(session_id).owner).run
             sampler = self.routes.channel(run, name)
         if sampler is not None:
             return contract_of(sampler, limits_of(sampler.limits, said.thinking_tokens, said.answer_tokens))
@@ -211,7 +211,7 @@ class GatewayEndpoints:
                 if not await self.gateway.reaches(run, recorded.channel):
                     return False
                 continue
-            name = _name(recorded.channel)
+            _, name = parts(recorded.channel)
             if self.routes is not None and self.routes.routed(name):
                 if not await self.routes.reaches(run, name):
                     return False
@@ -283,8 +283,3 @@ class GatewayEndpoint:
             if response.status_code < 500:
                 raise ModelEndpointError(f"the gateway refused the sample: {failure}")
         raise ModelEndpointError(f"the gateway did not answer after {endpoints.retries + 1} tries: {failure}")
-
-
-def _name(channel: str) -> str:
-    """A channel's name, where it is named within its run (`RUN/NAME`) or not."""
-    return parts(channel)[1] if "/" in channel else channel
