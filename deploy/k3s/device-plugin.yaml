@@ -1,0 +1,4 @@
+# Values for NVIDIA's device plugin chart (nvdp/nvidia-device-plugin) on the WSL2 K3s node.
+# The node advertises its one card as one `nvidia.com/gpu`, for one Ray worker pod; Ray shares it among its actors
+# with fractional `num_gpus`. Processes outside the cluster keep using the card.
+runtimeClassName: nvidia
