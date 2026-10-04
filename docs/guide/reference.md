@@ -12,7 +12,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#events_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Step`](#step), [`StepFailed`](#stepfailed), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Start`](#start), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -2536,6 +2536,19 @@ class Curriculum
   longer untried, and it taught nothing.
 - `def record(self, row: Row) -> Record`
 
+### `evaluate`
+
+*function* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+async def evaluate(catalog: Catalog, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
+```
+
+Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
+`episodes` episodes of each start, as the run `run`; returns how it went (`played`, `solved`, `reward`). `publish`
+serves a checkpoint on the channel, `reshard` gives its files in the engines' layout (`rollout_train.resharding`);
+`directory` holds its files on this machine.
+
 ### `Fence`
 
 *class* · `libraries/rollout-train/src/rollout_train/ledger.py`
@@ -2641,6 +2654,17 @@ class Ledger(Protocol)
 - `async def tables(self) -> list[str]` — The tables that have records, by name.
 - `async def fences(self) -> dict[str, int]` — The newest fence of every scope that has been taken.
 
+### `make_suite`
+
+*function* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+async def make_suite(ledger: Ledger, name: str, catalog_name: str, catalog: Catalog, *, rows: Sequence[str] | None, seeds: Sequence[int]) -> Suite
+```
+
+Make a suite of `catalog`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
+`ValueError` for a name that is no name or is taken (a suite is never changed), or a row the catalog lacks.
+
 ### `Manifest`
 
 *class* · `libraries/rollout-train/src/rollout_train/checkpoints.py`
@@ -2718,6 +2742,23 @@ age.
 
 - `def kept(self, depths: list[int]) -> set[int]`
 
+### `Start`
+
+*class* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+class Start
+```
+
+One start of a suite: a row's start, drawn with a seed of its own.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `task` | `str` | required | The row's key. |
+| `title` | `str` | required |  |
+| `seed` | `int` | required |  |
+| `parameters` | `JsonValue` | required | What every episode of it is given: the row's start, drawn with `seed`. |
+
 ### `Step`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -2739,6 +2780,35 @@ class StepFailed(Exception)
 ```
 
 A step did not produce weights: the policy is as it was, and a later step may succeed.
+
+### `Suite`
+
+*class* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+class Suite
+```
+
+A named list of starts of a catalog's rows, frozen: what every subject plays, start for start.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `catalog` | `str` | required | The catalog, as `module:name`. |
+| `starts` | `list[Start]` | required | Its starts, in order: each row it names, once with each seed. |
+| `made` | `float` | `0.0` |  |
+| `rows` | `list[str] \| None` | `None` | The rows it names, by key. |
+| `seeds` | `list[int] \| None` | `None` |  |
+
+### `suite_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+async def suite_of(ledger: Ledger, name: str) -> Suite | None
+```
+
+A suite, if there is one by that name.
 
 ### `train`
 
@@ -3319,11 +3389,14 @@ class System
 - `async def launches(self) -> dict[str, Any]` — The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
   settings a launch may change, its catalogs, and whether it has room). A launch whose launcher stopped beating
   while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
-- `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile and its
-  catalog starts it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the
-  profile does not have), `KeyError` for what no launcher offers or a checkpoint no reference says.
+- `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
+  and its catalog starts it. An eval names a suite (whose catalog it plays) and the checkpoint that plays it.
+  Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
+  `KeyError` for what no launcher offers or a checkpoint no reference says.
 - `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
   group boundary. Raises `KeyError` when there is no such launch going.
+- `async def evals(self) -> dict[str, Any]` — Every suite (its catalog and starts, and each subject that played it, with how it did at each start) and
+  every eval (its suite, its checkpoint, how far it has got), newest first (`rollout_train.evals`).
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
   beside the ledger.

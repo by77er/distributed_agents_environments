@@ -20,7 +20,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the catalog |
-| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the graph of checkpoints, the ledger and the registry; resharding; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
+| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the graph of checkpoints, the ledger and the registry; resharding; evaluation suites and evals; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
 | Environments | `minecraft-team` | An environment to train on |

@@ -3,10 +3,11 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint } from "./api/types";
+import type { Run, System, Checkpoint, Evals } from "./api/types";
 import { knownOf } from "./lib/model";
 import { placeOf } from "./lib/places";
 import { Runs } from "./pages/Runs";
+import { Suite } from "./pages/Suite";
 
 const run = (name: string, done: number): Run => ({
   run: name, name, fence: 1, wrote: 10, decided: done, open: [], next: [], channels: [], state: "ended", host: "here",
@@ -33,6 +34,8 @@ describe("places", () => {
     expect(placeOf("/checkpoint/kpqx")).toEqual({ page: "checkpoints", kind: "checkpoint", id: "kpqx" });
     expect(placeOf("/system")).toEqual({ page: "statistics", kind: "statistics", section: "machines" });
     expect(placeOf("/runs/new")).toEqual({ page: "runs", kind: "launch" });
+    expect(placeOf("/evals")).toEqual({ page: "evals", kind: "evals" });
+    expect(placeOf("/evals/words-v1")).toEqual({ page: "evals", kind: "suite", suite: "words-v1" });
     expect(placeOf("")).toEqual({ page: "runs", kind: "runs" });
   });
 });
@@ -81,6 +84,58 @@ describe("a page read again", () => {
     await waitFor(() => expect(screen.getByText("beta").closest("a")!.textContent).toContain("of 3 decided"));
     expect(screen.getByText("alpha").closest("a")).toBe(alpha);
     expect(alpha.innerHTML).toBe(alphaText);
+  });
+
+  it("leaves the evals' runs to the evals page", () => {
+    const client = newQueryClient();
+    client.setQueryData(topics.system().key, system([run("alpha", 3), { ...run("words on kpqx", 2), kind: "eval" }]));
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><Runs /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.queryByText("words on kpqx")).toBeNull();
+  });
+});
+
+describe("a suite", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows every subject start by start, and compares two", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
+    const client = newQueryClient();
+    const checkpoints = [checkpoint("kpqxlmnoprstuvwx", "kpqx", "run_1", 3)];
+    client.setQueryData(topics.system().key, { ...system([run("run_1", 1)]), checkpoints });
+    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    const starts = [{ start: "1", task: "say-yes", seed: 1, title: "yes" }, { start: "2", task: "say-no", seed: 1, title: "no" }];
+    const evals: Evals = {
+      suites: [{
+        suite: "words-v1", catalog: "games:words", made: 1, sample: false, starts,
+        subjects: [
+          { subject: "eval_a", kind: "checkpoint", checkpoint: "kpqxlmnoprstuvwx", model: "tiny", episodes: 1, played: 2, solved: 2, reward: 1,
+            results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: true, reward: 1 }] } },
+          { subject: "eval_b", kind: "model", model: "org/tiny", episodes: 1, played: 2, solved: 1, reward: 0.5,
+            results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: false, reward: 0 }] } },
+        ],
+      }],
+      evals: [],
+    };
+    client.setQueryData(topics.evals().key, evals);
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><Suite name="words-v1" /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("words-v1");
+    expect(screen.getAllByText("say-yes · 1").length).toBe(1);  // (in the matrix; the starts compared differ only at say-no)
+    expect(screen.getAllByText("say-no · 1").length).toBe(2);
+    expect(screen.getByText(/At the 2 starts both played/).textContent).toMatch(/solved more at 1,\s*less at 0, and as much at 1/);
+    expect(screen.getByText("+100%")).toBeTruthy();
+    expect(screen.getByText("No launcher is alive")).toBeTruthy();
   });
 });
 

@@ -41,7 +41,7 @@ export function NewRun() {
   );
 }
 
-function NoLauncher({ ledger }: { ledger: string }) {
+export function NoLauncher({ ledger }: { ledger: string }) {
   const command = `rollout launcher --ledger ${ledger.includes("://") ? ledger : `${ledger}`} --profiles DIR --catalog module:name --runs DIR`;
   return (
     <Card title="No launcher is alive" note="a launcher beats every 15 s; one that has not for 90 s is taken to be gone">

@@ -20,6 +20,8 @@ function watched(place: Place): Topic[] {
   if (place.kind === "statistics") found.push(topics.statistics(), topics.machines());
   if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches());
   if (place.kind === "checkpoints") found.push(topics.checkpoints(place.sample));
+  if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());
+  if (place.page === "evals") found.push(topics.launches());
   return found;
 }
 
@@ -49,7 +51,8 @@ export function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="pages" aria-label="pages">
           {PAGES.map(([page, name, to]) => {
-            const count = page === "runs" ? system?.runs.length : page === "checkpoints" ? system?.checkpoints.length : null;
+            const count = page === "runs" ? system?.runs.filter(run => run.kind !== "eval").length : page === "checkpoints" ? system?.checkpoints.length
+              : page === "evals" ? system?.runs.filter(run => run.kind === "eval").length : null;
             return (
               <Link key={page} to={to} className={place.page === page ? "current" : undefined} aria-current={place.page === page ? "page" : undefined}>
                 {name}{count != null ? <span className="count">{count}</span> : null}
@@ -121,6 +124,7 @@ function Crumbs({ place }: { place: Place }) {
   else if (place.kind === "launch") crumbs.push(["New run", ""]);
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
   else if (place.kind === "checkpoints" && place.sample) crumbs.push(["Sample fixture", ""]);
+  else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
   return (
     <div className="crumbs">
       {crumbs.map(([name, to], index) => (

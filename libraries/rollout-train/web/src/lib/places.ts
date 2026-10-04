@@ -1,9 +1,9 @@
 // Places: every view has an address after the page's `#`, so it can be linked to and comes back on reload. Each is
-// on one of the three pages: the runs, the checkpoints, the statistics.
+// on one of the four pages: the runs, the checkpoints, the evals, the statistics.
 
 import { useLocation } from "react-router-dom";
 
-export type Page = "runs" | "checkpoints" | "statistics";
+export type Page = "runs" | "checkpoints" | "evals" | "statistics";
 
 export type Place =
   | { page: "runs"; kind: "runs" }
@@ -15,6 +15,8 @@ export type Place =
   | { page: "runs"; kind: "launch" }
   | { page: "checkpoints"; kind: "checkpoints"; sample: boolean }
   | { page: "checkpoints"; kind: "checkpoint"; id: string }
+  | { page: "evals"; kind: "evals" }
+  | { page: "evals"; kind: "suite"; suite: string }
   | { page: "statistics"; kind: "statistics"; section: string | null };
 
 export const runPlace = (run: string) => `/run/${encodeURIComponent(run)}`;
@@ -25,11 +27,14 @@ export const episodePlace = (id: string, slot?: string | null) =>
 export const launchPlace = "/runs/new";
 export const checkpointPlace = (id: string) => `/checkpoint/${encodeURIComponent(id)}`;
 export const checkpointsPlace = (sample: boolean) => `/checkpoints${sample ? "/sample" : ""}`;
+export const evalsPlace = "/evals";
+export const suitePlace = (suite: string) => `/evals/${encodeURIComponent(suite)}`;
 export const statisticsPlace = (section?: string | null) => `/statistics${section ? `/${section}` : ""}`;
 
 export const PAGES: [Page, string, string][] = [
   ["runs", "Runs", "/runs"],
   ["checkpoints", "Checkpoints", "/checkpoints"],
+  ["evals", "Evals", "/evals"],
   ["statistics", "Statistics", "/statistics"],
 ];
 
@@ -44,6 +49,7 @@ export function placeOf(pathname: string): Place {
   // (`versions` and `version` are what these pages were called: links to them still open them)
   if (parts[0] === "checkpoints" || parts[0] === "versions") return { page: "checkpoints", kind: "checkpoints", sample: parts[1] === "sample" };
   if ((parts[0] === "checkpoint" || parts[0] === "version") && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
+  if (parts[0] === "evals") return parts[1] ? { page: "evals", kind: "suite", suite: parts[1] } : { page: "evals", kind: "evals" };
   if (parts[0] === "statistics") return { page: "statistics", kind: "statistics", section: parts[1] || null };
   if (parts[0] === "system") return { page: "statistics", kind: "statistics", section: "machines" };  // (the machines are a section of the statistics)
   return { page: "runs", kind: "runs" };

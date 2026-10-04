@@ -10,6 +10,8 @@ import { Outside, Runs } from "./pages/Runs";
 import { Statistics } from "./pages/Statistics";
 import { Checkpoint } from "./pages/Checkpoint";
 import { Checkpoints } from "./pages/Checkpoints";
+import { Evals } from "./pages/Evals";
+import { Suite } from "./pages/Suite";
 
 function View() {
   const place = usePlace();
@@ -23,6 +25,8 @@ function View() {
     case "launch": return <NewRun />;
     case "checkpoints": return <Checkpoints sample={place.sample} />;
     case "checkpoint": return <Checkpoint id={place.id} />;
+    case "evals": return <Evals />;
+    case "suite": return <Suite name={place.suite} />;
     case "statistics": return <Statistics />;
     default: return <Runs />;
   }

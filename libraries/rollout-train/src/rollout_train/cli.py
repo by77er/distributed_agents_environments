@@ -88,6 +88,69 @@ async def _train(
         )  # fmt: skip
 
 
+async def _evaluate(
+    profile: Path,
+    suite_name: str,
+    reference: str | None,
+    episodes: int,
+    directory: Path | None,
+    monitor: str | None = None,
+    name: str | None = None,
+    settings: dict[str, Any] | None = None,
+) -> None:
+    import dataclasses
+
+    from rollout.catalog import binding_for
+    from rollout_train.evals import evaluate, suite_of
+    from rollout_train.profile import Profile
+    from rollout_train.registry import resolved
+
+    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
+    if described.trainer is not None:  # (so the engines hold what the checkpoint is served over: full weights, say)
+        trainer = dataclasses.replace(described.trainer, start=reference, bookmark=None)
+        described = dataclasses.replace(described, trainer=trainer)
+    channel = described.trainer.channel if described.trainer else next(iter(described.channels))
+    where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
+    started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
+    async with described.open() as platform:
+        suite = await suite_of(platform.ledger, suite_name)
+        if suite is None:
+            raise SystemExit(f"there is no suite {suite_name!r}: make one with `rollout suite make`")
+        try:
+            subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
+        except KeyError as error:
+            raise SystemExit(error.args[0]) from None
+        rows = named(suite.catalog)
+        started["blobs"] = platform.blobs_at
+        said = await evaluate(
+            rows, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
+            base=described.channels[channel].model, channel=channel, directory=described.directory / "checkpoints",
+            publish=platform.publish, episodes=episodes, binding=binding_for(rows, channel, platform.tool_bindings),
+            started=started, reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
+        )  # fmt: skip
+    print(f"{suite_name}: solved {said['solved']} of {said['played']} episodes (mean reward {said['reward']})")
+
+
+async def _suite(command: str, where: str, name: str | None, catalog: str | None, rows: str | None, seeds: str) -> None:
+    from rollout_train.evals import make_suite, suite_of, suites_in
+
+    ledger = _ledger_at(where)
+    if command == "make":
+        assert name is not None and catalog is not None
+        keys = [each.strip() for each in rows.split(",") if each.strip()] if rows else None
+        try:
+            numbers = [int(each) for each in seeds.split(",") if each.strip()]
+            made = await make_suite(ledger, name, catalog, named(catalog), rows=keys, seeds=numbers)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+        print(f"the suite {made.name}: {len(made.starts)} starts of {catalog}")
+        return
+    for each in await suites_in(ledger):
+        found = await suite_of(ledger, each)
+        assert found is not None
+        print(f"{each:<24} {len(found.starts):>4} starts  {found.catalog}")
+
+
 async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
     from rollout.harness.blobs import FileBlobStore
     from rollout_train.checkpoints import Checkpoints
@@ -355,6 +418,29 @@ def main() -> None:
     merging.add_argument("--merger", default="rollout_lora.merge:merge", help="what folds the adapter in (module:name)")
     merging.add_argument("--bookmark", help="a bookmark to name the merged checkpoint")
     merging.add_argument("--ledger", default=".", help=where)
+    evaluating = commands.add_parser(
+        "eval", help="play a suite with a checkpoint (or the base model), training nothing"
+    )
+    evaluating.add_argument("profile", type=Path)
+    evaluating.add_argument("suite")
+    evaluating.add_argument(
+        "--checkpoint", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id (none: the base model)"
+    )
+    evaluating.add_argument("--episodes", type=int, default=1, help="episodes of each start (1)")
+    evaluating.add_argument("--directory", type=Path, help="the eval's directory (instead of the profile's)")
+    evaluating.add_argument("--name", help="what the eval is called (by default its directory's name)")
+    evaluating.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
+    evaluating.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
+    suites = commands.add_parser("suite", help="make or list evaluation suites")
+    suite_commands = suites.add_subparsers(dest="suite_command", required=True)
+    making = suite_commands.add_parser("make", help="make a suite: a start of each row for each seed, frozen")
+    making.add_argument("name")
+    making.add_argument("--catalog", required=True, help="module:name")
+    making.add_argument("--rows", help="row keys, comma-separated (by default every row)")
+    making.add_argument("--seeds", required=True, help="seeds, comma-separated: each row is started once with each")
+    making.add_argument("--ledger", default=".", help=where)
+    suite_listing = suite_commands.add_parser("list", help="every suite")
+    suite_listing.add_argument("--ledger", default=".", help=where)
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
@@ -380,6 +466,19 @@ def main() -> None:
         asyncio.run(
             _merge(arguments.checkpoint, arguments.ledger, arguments.base, arguments.merger, arguments.bookmark)
         )
+        return
+    if arguments.command == "eval":
+        work = _evaluate(
+            arguments.profile, arguments.suite, arguments.checkpoint, arguments.episodes, arguments.directory,
+            arguments.monitor, arguments.name, dict(_setting(each) for each in arguments.set),
+        )  # fmt: skip
+        sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command == "suite":
+        made = arguments.suite_command == "make"
+        asyncio.run(_suite(
+            arguments.suite_command, arguments.ledger, arguments.name if made else None,
+            arguments.catalog if made else None, arguments.rows if made else None, arguments.seeds if made else "",
+        ))  # fmt: skip
         return
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))

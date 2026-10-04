@@ -1,11 +1,12 @@
-// The runs asked for from the page, and how each goes: asked, claimed by a launcher, running, and how it finished.
+// The runs and evals asked for from the page, and how each goes: asked, claimed by a launcher, running, and how it
+// finished.
 
 import { memo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStop } from "../api/queries";
 import type { Launch, System } from "../api/types";
 import { Ago } from "../layout/runs";
-import { runPlace } from "../lib/places";
+import { runPlace, suitePlace } from "../lib/places";
 import { Mark, SectionTitle, Tile } from "./ui";
 import { CheckpointTag } from "./checkpoints";
 
@@ -47,11 +48,18 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
         <span className="what">{asked.profile} · {asked.catalog}</span>
         <Mark state={launch.state} />
       </header>
-      <div className="facts">
-        <span>from <CheckpointTag id={asked.start ?? null} /></span>
-        {asked.bookmark ? <span>carries <span className="chip bookmark">{asked.bookmark}</span></span> : null}
-        <span>{asked.groups ?? 100} groups · {asked.groups_per_step ?? 4} a step · seed {asked.seed ?? 0}</span>
-      </div>
+      {asked.kind === "eval" ? (
+        <div className="facts">
+          <span>plays <Link to={suitePlace(asked.suite ?? "")} className="linkish">{asked.suite}</Link> with <CheckpointTag id={asked.start ?? null} /></span>
+          <span>{asked.episodes ?? 1} episode{(asked.episodes ?? 1) === 1 ? "" : "s"} a start</span>
+        </div>
+      ) : (
+        <div className="facts">
+          <span>from <CheckpointTag id={asked.start ?? null} /></span>
+          {asked.bookmark ? <span>carries <span className="chip bookmark">{asked.bookmark}</span></span> : null}
+          <span>{asked.groups ?? 100} groups · {asked.groups_per_step ?? 4} a step · seed {asked.seed ?? 0}</span>
+        </div>
+      )}
       {changed.length ? (
         <div className="facts settings-changed">
           {changed.map(([key, value]) => <span key={key} className="mono small"><b>{key}</b> = {JSON.stringify(value)}</span>)}

@@ -1,15 +1,16 @@
 // A checkpoint: where it came from (its parents, its base model, the run and step that made it), the bookmarks that name
-// it (made, moved and taken away here), its line back to the base model, and what grew from it.
+// it (made, moved and taken away here), its line back to the base model, what grew from it, and the suites it played.
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useBookmark, useKnown, useSystem, useUnbookmark } from "../api/queries";
+import { useBookmark, useEvals, useKnown, useSystem, useUnbookmark } from "../api/queries";
 import type { Checkpoint as CheckpointData } from "../api/types";
 import { BarChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
 import { bytes, clock, figure, span } from "../lib/format";
-import { runPlace, stepPlace, checkpointPlace } from "../lib/places";
+import { evalsPlace, runPlace, stepPlace, checkpointPlace, suitePlace } from "../lib/places";
+import { shareText } from "../components/evals";
 
 export function Checkpoint({ id }: { id: string }) {
   const { data: system } = useSystem();
@@ -68,7 +69,30 @@ export function Checkpoint({ id }: { id: string }) {
           />
         ) : <p className="muted">It was trained from the base model, and nothing has grown from it yet.</p>}
       </Card>
+      <Played id={checkpoint.id} />
     </>
+  );
+}
+
+/** Every suite a checkpoint played, and how it did at each: one opens the suite, beside every other subject's. */
+function Played({ id }: { id: string }) {
+  const { data: evals } = useEvals();
+  const played = (evals?.suites ?? []).flatMap(suite =>
+    suite.subjects.filter(subject => subject.checkpoint === id).map(subject => ({ suite, subject })));
+  return (
+    <Card title="Evals" note={<>the suites it played; <Link to={evalsPlace} className="linkish">play one with it</Link></>}>
+      {played.length ? (
+        <Table
+          heads={[["suite"], ["starts", "n"], ["played", "n"], ["solved", "n"], ["mean reward", "n"]]}
+          keys={played.map(({ subject }) => subject.subject)}
+          rows={played.map(({ suite, subject }) => [
+            <b>{suite.suite}</b>, String(suite.starts.length), `${subject.played} of ${suite.starts.length * (subject.episodes ?? 1)}`,
+            shareText(subject.played ? subject.solved / subject.played : null), figure(subject.reward),
+          ])}
+          to={played.map(({ suite }) => suitePlace(suite.suite))}
+        />
+      ) : <p className="muted">It has played no suite yet.</p>}
+    </Card>
   );
 }
 

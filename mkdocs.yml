@@ -81,6 +81,7 @@ nav:
           - "Checkpoints and the ledger": libraries/rollout-train/checkpoints.md
           - "Episodes": libraries/rollout-train/episodes.md
           - "Training": libraries/rollout-train/training.md
+          - "Evals": libraries/rollout-train/evals.md
           - "Channels": libraries/rollout-train/channels.md
           - "Recorder": libraries/rollout-train/recorder.md
           - "The recorder over HTTP": libraries/rollout-train/harness-endpoint.md

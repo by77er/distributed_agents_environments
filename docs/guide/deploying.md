@@ -51,6 +51,8 @@ uv run rollout bookmark diamonds first:20 --ledger RUN               # name the 
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 uv run rollout train profile.toml CATALOG --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
+uv run rollout suite make words-v1 --catalog CATALOG --seeds 1,2,3 --ledger RUN       # a frozen list of starts
+uv run rollout eval profile.toml words-v1 --checkpoint diamonds --episodes 4         # play it with a checkpoint
 uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS   # start runs asked for here
 uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS \
     --ray http://127.0.0.1:8265 --as-job                             # the same, as a Ray job; each run a Ray job too
@@ -60,7 +62,8 @@ uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --run
 profile or the command is told by name. `train --name NAME` names a new run (by default after its directory);
 `rename` names a run again, by its name or its id; `bookmark` names a checkpoint by any reference, and `checkpoints` lists
 them all ([checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
-of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)); `report` and
+of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)). `suite` makes and
+lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](../libraries/rollout-train/evals.md)); `report` and
 `imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
 [imitation](../libraries/rollout-train/training.md#imitation).
 
@@ -153,8 +156,8 @@ machines and engines from the beats: from the run's machine it reads only the ep
 
 ## Launchers
 
-A launcher starts the training runs asked for (from the monitor's page, say) on a machine that can run them. Run one
-per training machine:
+A launcher starts the training runs and evals asked for (from the monitor's page, say) on a machine that can run
+them. Run one per training machine:
 
 ```bash
 uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
@@ -186,7 +189,15 @@ python -m rollout_train.cli train PROFILE CATALOG --directory RUNS/NAME-ID --nam
     --groups-per-step K --seed S --set KEY=VALUE ...
 ```
 
-with its output in the run's `train.log`. It notes how the launch goes: `claimed`, `running` (with the process),
+with its output in the run's `train.log`. A launch of kind `eval` names a suite, the checkpoint that plays it
+(`start`) and its episodes a start, and is started as
+
+```bash
+python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name NAME --episodes N \
+    --checkpoint REF --set KEY=VALUE ...
+```
+
+([evals](../libraries/rollout-train/evals.md#asked-for-from-the-page)). It notes how the launch goes: `claimed`, `running` (with the process),
 then `ended`, or `failed` with the end of the output. A launch asked to stop before it is claimed is `stopped` at
 once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). Launches are ordinary
 state beside the ledger: `launches.json` beside a ledger of files, the `launches` table in a database ledger's
@@ -199,7 +210,7 @@ going as `lost`.
 
 A launcher with `--ray` submits each run as a Ray job in place of starting a process: Ray places it on a node with
 `--gpus` accelerators and one CPU free, queues it until there is one, and supervises it. The job's command is the
-same `rollout train` command, run from the launcher's working directory, so every node needs the same checkout, the
+same `rollout train` (or `rollout eval`) command, run from the launcher's working directory, so every node needs the same checkout, the
 same environment and the same run directories. The launcher follows the job until it ends and writes its output to
 the run's `train.log`; the launch notes the job (`job`) in place of a process. Stop stops the job. `--as-job` submits
 the launcher itself as a long-lived Ray job and returns; it refuses when a launcher already runs as a Ray job on this

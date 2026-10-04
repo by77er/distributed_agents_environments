@@ -6,6 +6,7 @@ A topic is a thing the page shows, by name:
 - `system`: where every run stands (`System.snapshot`);
 - `machines`: every runner's machine, as its heartbeats say (`System.machines`);
 - `launches`: the runs asked for, and the launchers alive with what each offers (`System.launches`);
+- `evals`: the suites and the evals that played them (`System.evals`);
 - `feeds`: every episode in the runs' feeds, summarised (`System.feeds`);
 - `statistics`: every run in figures (`System.statistics`, without the machines);
 - `checkpoints`, `checkpoints/sample`: the checkpoints as a graph, without or with the sample fixture
@@ -105,6 +106,8 @@ class Hub:
             return await system.machines()
         if topic == "launches":
             return await system.launches()
+        if topic == "evals":
+            return await system.evals()
         if topic == "feeds":
             return await asyncio.to_thread(system.feeds)
         if topic == "statistics":

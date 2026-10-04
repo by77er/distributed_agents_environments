@@ -48,8 +48,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
     - `/api/system`: where every run stands (`System.snapshot`);
     - `/api/machines`: every runner's machine as its heartbeats say, now and over its recent beats;
-    - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run (`System.launch`),
-      `POST /api/launches/{id}/stop` stops one;
+    - `/api/evals`: the suites and the evals that played them (`System.evals`);
+    - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run or an eval
+      (`System.launch`), `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
@@ -184,6 +185,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
         return await written(change)
 
+    async def evals(request: Request) -> Response:
+        return answered(request, await hub.read("evals"))
+
     async def launches(request: Request) -> Response:
         if request.method == "GET":
             return answered(request, await hub.read("launches"))
@@ -230,6 +234,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/system", state),
         Route("/api/machines", machines),
         Route("/api/launches", launches, methods=["GET", "POST"]),
+        Route("/api/evals", evals),
         Route("/api/launches/{id}/stop", stop, methods=["POST"]),
         Route("/api/groups/{run}/{number:int}", group),
         Route("/api/episodes/{run_id}", episode),

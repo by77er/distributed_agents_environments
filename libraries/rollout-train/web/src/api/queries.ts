@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, Entry, Episode, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Statistics, System } from "./types";
+import type { Bookmark, Entry, Episode, Evals, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Statistics, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -21,6 +21,7 @@ export const topics = {
   machines: (): Topic => ({ topic: "machines", key: ["machines"], path: "api/machines" }),
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
+  evals: (): Topic => ({ topic: "evals", key: ["evals"], path: "api/evals" }),
   checkpoints: (sample: boolean): Topic => ({
     topic: sample ? "checkpoints/sample" : "checkpoints",
     key: ["checkpoints", sample],
@@ -102,7 +103,10 @@ export const useMachines = () =>
 export const useLaunches = () =>
   useQuery({ queryKey: topics.launches().key, queryFn: ({ signal }) => readJson<Launches>(topics.launches().path, signal) });
 
-/** Ask for a run: a launcher alive that offers its profile starts it. */
+export const useEvals = () =>
+  useQuery({ queryKey: topics.evals().key, queryFn: ({ signal }) => readJson<Evals>(topics.evals().path, signal) });
+
+/** Ask for a run or an eval: a launcher alive that offers its profile starts it. */
 export function useLaunch() {
   const client = useQueryClient();
   return useMutation({

@@ -28,12 +28,14 @@ from pydantic import JsonValue
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Manifest, checkpoints_in, short
+from rollout_train.evals import EVAL, subject_table, suite_of, suite_table
 from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import ASKED, OPEN, STOPPED, STOPPING, Asked, Launch, launches_of
+from rollout_train.launches import RUN as TRAINING
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
-from rollout_train.monitor.lineage import lineage
+from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
 from rollout_train.monitor.statistics import newest, statistics
 from rollout_train.presence import Beat, alive, presence_of
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, runs_in, table
@@ -209,16 +211,27 @@ class System:
         return {"launches": shown, "launchers": launchers}
 
     async def launch(self, body: Mapping[str, Any]) -> Launch:
-        """Ask for a run (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile and its
-        catalog starts it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the
-        profile does not have), `KeyError` for what no launcher offers or a checkpoint no reference says."""
+        """Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
+        and its catalog starts it. An eval names a suite (whose catalog it plays) and the checkpoint that plays it.
+        Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
+        `KeyError` for what no launcher offers or a checkpoint no reference says."""
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
+        given = dict(body)
+        if given.get("kind") == EVAL:  # (an eval plays its suite's catalog)
+            found = await suite_of(self._ledger, str(given.get("suite") or ""))
+            if found is None:
+                raise KeyError(f"there is no suite {given.get('suite')!r}")
+            given["catalog"] = found.catalog
         try:
-            asked = Asked(**{key: value for key, value in body.items() if key in Asked.__dataclass_fields__})
+            asked = Asked(**{key: value for key, value in given.items() if key in Asked.__dataclass_fields__})
         except TypeError as error:
             raise Taken(f"a launch says its profile, its catalog and its name ({error})") from None
+        if asked.kind not in (TRAINING, EVAL):
+            raise Taken(f"a launch is a {TRAINING} or an {EVAL}, not {asked.kind!r}")
+        if asked.kind == EVAL and asked.episodes < 1:
+            raise Taken("an eval plays one episode of each start at least")
         offered = [each for each in (await self.launches())["launchers"] if each.get("playing", 0) is not None]
         profiles = [
             profile for each in offered for profile in each.get("profiles", []) if profile["profile"] == asked.profile
@@ -252,6 +265,40 @@ class System:
         if registry is None:
             raise KeyError("this ledger has no registry")
         return registry
+
+    async def evals(self) -> dict[str, Any]:
+        """Every suite (its catalog and starts, and each subject that played it, with how it did at each start) and
+        every eval (its suite, its checkpoint, how far it has got), newest first (`rollout_train.evals`)."""
+        tables = await self._tables()
+        called = await names(registry_of(self._ledger))
+        suites = _Reading(tables, set(), [], called, time.time()).evaluations()
+        for each in suites:
+            about: Any = tables.get(suite_table(each["suite"], "suite"), {}).get("suite") or {}
+            each |= {"catalog": about.get("catalog"), "made": about.get("made")}
+        evals: list[dict[str, Any]] = []
+        for run in named_runs(tables):
+            starts: Any = tables.get(table(run, STARTS), {})
+            latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
+            if latest.get("kind") != EVAL:
+                continue
+            groups: Any = tables.get(table(run, GROUPS), {})
+            results: Any = tables.get(subject_table(str(latest.get("suite")), run, "results"), {})
+            expected = sum(int(group.get("episodes") or 0) for group in groups.values())
+            evals.append(
+                {
+                    "run": run,
+                    "name": called["runs"].get(run, run),
+                    "suite": latest.get("suite"),
+                    "checkpoint": latest.get("checkpoint"),
+                    "started": latest.get("started"),
+                    "played": len(results),
+                    "expected": expected,
+                    "solved": sum(bool(result.get("solved")) for result in results.values()),
+                    "done": bool(groups) and len(results) >= expected,
+                }
+            )
+        evals.sort(key=lambda each: -(each["started"] or 0.0))
+        return {"suites": suites, "evals": evals}
 
     async def lineage(self, sample: bool = False) -> dict[str, Any]:
         """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
@@ -443,7 +490,11 @@ class System:
             played[run] = _Played(run, own, fences, self._records)
             listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
             seen = self._read(run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run))
-            runs.append(listed | seen | {"played": played[run].counts(), "name": called["runs"].get(run, run)})
+            begun: Any = starts[max(starts, key=int)] if starts else {}
+            kind = str(begun.get("kind") or "run")
+            runs.append(
+                listed | seen | {"played": played[run].counts(), "name": called["runs"].get(run, run), "kind": kind}
+            )
         rank = {RUNNING: 0, IDLE: 1, GONE: 2}
         runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
         return {

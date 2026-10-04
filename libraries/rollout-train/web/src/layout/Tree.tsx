@@ -1,15 +1,16 @@
 // The hierarchy, on the left, for the page shown: the runs (each run, its steps, their groups, their episodes and
-// the episodes' rollouts), the checkpoints, or the statistics' sections and the runs drawn. What is folded is remembered
+// the episodes' rollouts), the checkpoints, the suites and the evals playing, or the statistics' sections and the runs
+// drawn. What is folded is remembered
 // in this browser.
 
 import { memo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useEpisode, useFeeds, useKnown, useSystem } from "../api/queries";
+import { useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
 import { byNumber, figure } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range } from "../lib/model";
-import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace } from "../lib/places";
+import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { RunDot, running, useRunColor } from "./runs";
 
@@ -34,7 +35,8 @@ export function Tree({ place }: { place: Place }) {
   if (!system) return null;
   return (
     <nav className="tree" aria-label="hierarchy">
-      {place.page === "checkpoints" ? <CheckpointsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} /> : <RunsTree place={place} system={system} />}
+      {place.page === "checkpoints" ? <CheckpointsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} />
+        : place.page === "evals" ? <EvalsTree place={place} /> : <RunsTree place={place} system={system} />}
     </nav>
   );
 }
@@ -46,10 +48,12 @@ function RunsTree({ place, system }: { place: Place; system: System }) {
   const { data: episode } = useEpisodeLabels(episodeId);
   const showing = place.kind === "episode" ? episode : undefined;
   const others = (feeds ?? []).filter(run => !run.labels.run).length;
+  // (an eval's run is under the evals, unless it is the one shown)
+  const runs = system.runs.filter(run => run.kind !== "eval" || ("run" in place && place.run === run.run) || showing?.run === run.run);
   return (
     <>
-      {system.runs.map(run => (
-        <RunBranch key={run.run} run={run} only={system.runs.length === 1} place={place} folds={folds} fold={fold} showing={showing} host={system.host} />
+      {runs.map(run => (
+        <RunBranch key={run.run} run={run} only={runs.length === 1} place={place} folds={folds} fold={fold} showing={showing} host={system.host} />
       ))}
       <div className="label">Outside a run</div>
       <Node to="/episodes" current={place.kind === "outside"}>
@@ -208,6 +212,34 @@ function CheckpointsTree({ place, system }: { place: Place; system: System }) {
         <span className="name">Sample fixture</span>
         <SampleChip />
       </Node>
+    </>
+  );
+}
+
+/** The suites, each with how many subjects played it; then the evals playing now. */
+function EvalsTree({ place }: { place: Place }) {
+  const { data: evals } = useEvals();
+  const known = useKnown();
+  if (!evals) return null;
+  const playing = evals.evals.filter(each => !each.done);
+  return (
+    <>
+      {evals.suites.length ? <div className="label">Suites</div> : null}
+      {evals.suites.map(suite => (
+        <Node key={suite.suite} to={suitePlace(suite.suite)} current={place.kind === "suite" && place.suite === suite.suite}>
+          <span className="name">{suite.suite}</span>
+          <span className="tag">{suite.subjects.length} played</span>
+        </Node>
+      ))}
+      {evals.suites.length ? null : <div className="empty">No suite yet.</div>}
+      {playing.length ? <div className="label">Playing</div> : null}
+      {playing.map(each => (
+        <Node key={each.run} to={runPlace(each.run)}>
+          <span className="dot alive" />
+          <span className="name" title={`${each.suite} with ${known.short(each.checkpoint)}`}>{each.name}</span>
+          <span className="tag">{each.played}/{each.expected}</span>
+        </Node>
+      ))}
     </>
   );
 }

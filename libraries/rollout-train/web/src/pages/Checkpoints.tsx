@@ -12,7 +12,7 @@ import { QueueChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
 import { Card, Empty, Head, Kpi, Kpis, Mark, SampleChip, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
 import { clock, figure, mean, span } from "../lib/format";
-import { runPlace, checkpointPlace, checkpointsPlace } from "../lib/places";
+import { runPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { useFolds } from "../lib/stored";
 
 const LANE = 78, COLUMN = 62, PAD = 34;
@@ -395,7 +395,7 @@ function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order:
   });
   return (
     <section className="card">
-      <header><h2>Evaluation · {suite.suite}</h2><span>{suite.starts.length} fixed starts (row and seed), played by {subjects.length} subjects{suite.sample ? <> <SampleChip /></> : null}</span></header>
+      <header><h2>Evaluation · {suite.sample ? suite.suite : <Link to={suitePlace(suite.suite)}>{suite.suite}</Link>}</h2><span>{suite.starts.length} fixed starts (row and seed), played by {subjects.length} subjects{suite.sample ? <> <SampleChip /></> : null}</span></header>
       <div className="body">
         <div className="table">
           <table className="evals">

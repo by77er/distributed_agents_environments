@@ -82,7 +82,8 @@ them ([rollouts](rollouts.md)), and the checkpoints. Each run keeps the rest in 
 | the ledger | each run's `starts`, `groups`, `results`, `steps` and `failures`; its `episodes`, `claims` and `interrupted`; the `checkpoints`; the fences ([checkpoints](checkpoints.md)) | every run, its steps, groups and their stages, the episodes that ended and what each reported, which runner plays what, outcomes, checkpoints, the statistics |
 | the registry | each run's id and name, and the bookmarks ([the registry](checkpoints.md#the-registry)) | what each run is called, and the bookmarks that name each checkpoint |
 | the heartbeats | each runner's and launcher's newest beat, with its recent beats' measurements (`rollout_train.presence`) | the machines (memory, accelerators, disk, the engines' processes), each channel's checkpoint and throughput, whether a run is running, which launchers are alive and what they offer |
-| the launches | the runs asked for and how each goes (`rollout_train.launches`) | the launches on Runs, and the New run form |
+| the launches | the runs and evals asked for and how each goes (`rollout_train.launches`) | the launches on Runs and Evals, the New run form, and a suite's Run this suite form |
+| `evaluations/` | each suite's starts, and each eval's subject and results ([evals](evals.md)) | the Evals page, a suite's page, and the suites a checkpoint played |
 | a run's `feed` | what is happening now, written by `RunFeed` | episodes still running, their rollouts turn by turn |
 | the run's blob store | each ended episode's events, where the run's newest start says its blobs are (`blobs`: files, or S3) | the rollouts of episodes no longer in the feed |
 
@@ -113,7 +114,8 @@ newest first, each with the groups that went into it (a square for each episode)
 A step's groups need not be consecutive. A group that gave nothing to train on is listed with the step decided after
 it, marked skipped. Runs, steps, groups and episodes fold open and closed: an open step lists its groups, an open
 group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph (with or without the sample
-fixture), the checkpoints bookmarks name, and each run's newest. On **Statistics**, its sections, and the runs drawn: a click leaves a run out or takes it
+fixture), the checkpoints bookmarks name, and each run's newest. On **Evals**, the suites, then the evals playing
+now. An eval's run is on Evals, not among the runs (its page opens from there). On **Statistics**, its sections, and the runs drawn: a click leaves a run out or takes it
 back. What is folded and what is left out are remembered in the browser. The address (after `#`) names what is shown,
 so a reload stays there.
 
@@ -125,9 +127,11 @@ so a reload stays there.
 | Runs | Step | `#/run/RUN/step/N` | the checkpoint the step made and its parent, the groups that went into it (and those decided before it that gave nothing to train on), and the update's statistics |
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
 | Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below |
-| Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no training run asked for: evaluations, tests, programs run by hand |
+| Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
 | Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations; evaluation suites, a column per checkpoint or model ([the checkpoints view](#the-checkpoints-view)) |
-| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, base model, run and step), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, and what grew from it |
+| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, base model, run and step), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, and the suites it played (each opening the suite) |
+| Evals | Every suite and eval | `#/evals` | the evals asked for from the page; each suite (its catalog, starts, subjects, and the subject that did best); every eval, newest first (its suite, who played, episodes played of those asked for, the share solved, whether it is done), each opening its run |
+| Evals | Suite | `#/evals/SUITE` | its catalog, rows and seeds; the subject that did best; a **Run this suite** form ([evals](evals.md#asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals; two subjects compared at the starts both played |
 | Statistics | Across every run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color |
 
 Renaming on a run's page asks the monitor (`POST /api/rename`, `{"id", "name"}`), which renames it in the registry
@@ -181,7 +185,7 @@ summed as the trainer sums it ([rewards](episodes.md#rewards)).
 
 `System(directory)` reads a run's directory and its ledger, and `System(ledger=…)` a ledger alone: `snapshot()`
 (where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds),
-`lineage(sample)` (the checkpoints view), `statistics()` (with each run's name), `machines()` (the heartbeats),
+`lineage(sample)` (the checkpoints view), `evals()` (every suite and eval), `statistics()` (with each run's name), `machines()` (the heartbeats),
 `launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, checkpoint)` and `unbookmark(name)`. `create_app(where)` serves them,
 the stream and the page; its routes are listed in `rollout_train.monitor.app`.
 
@@ -221,8 +225,8 @@ A checkpoint that something here starts from and that this ledger does not have 
 `rollout_train.monitor.lineage` reads it from the ledger's tables and the runners' heartbeats, at `/api/checkpoints`. What
 a ledger has today is read as it is: the checkpoints, the runs' steps, bookmarks. A run's steps stand for its trainer's
 queue (a run takes one step at a time), and the channels its runners' beats name for what its engines serve. The tables
-for distillation, trainers, inference workers and evaluations are proposed in
-[the checkpoint graph](../../research/policy-dag.md), and nothing writes them yet. `#/checkpoints/sample` (`?sample=1`)
+for distillation, trainers and inference workers are proposed in [the checkpoint graph](../../research/policy-dag.md),
+and nothing writes them yet; evaluations are written by [evals](evals.md), and a suite's name opens its page. `#/checkpoints/sample` (`?sample=1`)
 shows the view with a fixture of them (`rollout_train/monitor/sample-lineage.json`) beside the ledger, everything from
 it marked sample.
 

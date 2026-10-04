@@ -134,6 +134,8 @@ export interface Run {
   starts: number;
   written: number | null;
   played?: Played;
+  /** What it is: a training run (`run`), or an eval playing a suite (`eval`). */
+  kind?: "run" | "eval";
 }
 
 /** A checkpoint: where it came from, what made it, and what is kept of it. */
@@ -267,6 +269,11 @@ export interface LaunchAsked {
   groups_per_step?: number;
   seed?: number;
   settings?: Record<string, unknown>;
+  /** A training run (`run`, the default) or an eval (`eval`): one suite played by `start` (none: the base model). */
+  kind?: "run" | "eval";
+  suite?: string | null;
+  /** An eval's episodes of each start. */
+  episodes?: number;
 }
 
 export type LaunchState = "asked" | "claimed" | "running" | "stopping" | "ended" | "failed" | "stopped";
@@ -496,11 +503,37 @@ export interface Suite {
     checkpoint?: string;
     model?: string;
     asked_by?: string;
+    episodes?: number;
     played: number;
     solved: number;
-    results: Record<string, { solved: boolean; reward: number }[]>;
+    reward?: number | null;
+    results: Record<string, { solved: boolean; reward: number; run_id?: string }[]>;
   }[];
   sample: boolean;
+}
+
+/** A suite as the Evals page has it: a suite, with the catalog it was drawn from and when it was made. */
+export interface EvalSuite extends Suite {
+  catalog: string | null;
+  made: number | null;
+}
+
+/** An eval: its run, the suite it plays, the checkpoint that plays it (none: the base model), and how far it got. */
+export interface EvalRun {
+  run: string;
+  name: string;
+  suite: string;
+  checkpoint: string | null;
+  started: number | null;
+  played: number;
+  expected: number;
+  solved: number;
+  done: boolean;
+}
+
+export interface Evals {
+  suites: EvalSuite[];
+  evals: EvalRun[];
 }
 
 /** What came from what: `base` (from `base:MODEL` to a line's first checkpoint), `trained` (from a checkpoint to one trained

@@ -11,12 +11,15 @@
 - `Trainer`, `Weighted`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a trainer is. `Colocated`:
   the wrapper for one that shares its accelerator with the engines.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
+- `evaluate`, `make_suite`, `suite_of`, `Suite`, `Start` (`evals`): a frozen suite of starts, and an eval that plays
+  it with one checkpoint, training nothing.
 """
 
 from rollout_train.algorithm import Algorithm, Batch, Grpo, group_advantages
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention
 from rollout_train.colocated import Colocated
 from rollout_train.curriculum import Curriculum
+from rollout_train.evals import Start, Suite, evaluate, make_suite, suite_of
 from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
 from rollout_train.record import Result, Trained, results, trained
@@ -39,13 +42,18 @@ __all__ = [
     "Manifest",
     "Result",
     "Retention",
+    "Start",
     "Step",
     "StepFailed",
+    "Suite",
     "Trained",
     "Trainer",
     "Weighted",
+    "evaluate",
     "group_advantages",
+    "make_suite",
     "results",
+    "suite_of",
     "train",
     "trained",
 ]

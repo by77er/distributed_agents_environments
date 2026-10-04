@@ -19,7 +19,9 @@ export function Runs() {
   const { data: launched } = useLaunches();
   if (!system) return <Empty>Reading the runs…</Empty>;
   const others = (feeds ?? []).filter(run => !run.labels.run);
-  const states = (["running", "idle", "ended"] as const).map(name => [name, system.runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
+  const runs = system.runs.filter(run => run.kind !== "eval");  // (evals are on their own page)
+  const launches = (launched?.launches ?? []).filter(each => each.asked.kind !== "eval");
+  const states = (["running", "idle", "ended"] as const).map(name => [name, runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
   return (
     <>
       <Head title={<span className="head-with-action">Runs<Link to={launchPlace} className="action">New run</Link></span>} sub="The runs in the ledger, running ones first. A run opens its steps, groups, episodes and rollouts.">
@@ -29,11 +31,11 @@ export function Runs() {
           <Spec label="this host">{system.host}</Spec>
         </Specs>
       </Head>
-      {launched?.launches?.length ? <LaunchList launches={launched.launches} system={system} /> : null}
-      {system.runs.length ? <div className="tiles wide-tiles">{system.runs.map(run => <RunTile key={run.run} run={run} host={system.host} />)}</div> : <Empty>The ledger has no run yet.</Empty>}
+      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
+      {runs.length ? <div className="tiles wide-tiles">{runs.map(run => <RunTile key={run.run} run={run} host={system.host} />)}</div> : <Empty>The ledger has no run yet.</Empty>}
       {others.length ? (
         <Card title="Episodes outside a run" note={`${others.length} in the feeds`}>
-          <p className="muted small" style={{ margin: 0 }}><Link to="/episodes" className="linkish">Evaluations, tests and programs run by hand</Link> that no training run asked for.</p>
+          <p className="muted small" style={{ margin: 0 }}><Link to="/episodes" className="linkish">Tests and programs run by hand</Link> that no training run asked for.</p>
         </Card>
       ) : null}
     </>

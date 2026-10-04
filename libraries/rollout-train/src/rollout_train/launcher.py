@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rollout_train.launches import ASKED, CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Launch, Launches
+from rollout_train.launches import ASKED, CLAIMED, ENDED, EVAL, FAILED, RUNNING, STOPPED, STOPPING, Launch, Launches
 from rollout_train.machine import alive, measured
 from rollout_train.presence import Presence
 from rollout_train.ray_cluster import prepare
@@ -129,15 +129,25 @@ class Launcher:
         profile = next(each for each in self._offered if each["profile"] == asked.profile)
         directory = self.runs / f"{slug(asked.name)}-{launch.id[-6:].lower()}"
         settings: dict[str, Any] = dict(asked.settings)
-        settings |= {"trainer.start": asked.start} if asked.start else {}
-        settings |= {"trainer.bookmark": asked.bookmark} if asked.bookmark else {}
-        command = [
-            sys.executable, "-m", "rollout_train.cli", "train", profile["path"], asked.catalog,
-            "--directory", str(directory), "--name", asked.name, "--groups", str(asked.groups),
-            "--groups-per-step", str(asked.groups_per_step), "--seed", str(asked.seed),
-            *(argument for key, value in settings.items() if value is not None
-              for argument in ("--set", f"{key}={json.dumps(value)}")),
+        if asked.kind != EVAL:  # (an eval's checkpoint is what plays, not where training starts)
+            settings |= {"trainer.start": asked.start} if asked.start else {}
+            settings |= {"trainer.bookmark": asked.bookmark} if asked.bookmark else {}
+        changed = [
+            argument for key, value in settings.items() if value is not None
+            for argument in ("--set", f"{key}={json.dumps(value)}")
         ]  # fmt: skip
+        if asked.kind == EVAL:
+            command = [
+                sys.executable, "-m", "rollout_train.cli", "eval", profile["path"], str(asked.suite),
+                "--directory", str(directory), "--name", asked.name, "--episodes", str(asked.episodes),
+                *(["--checkpoint", asked.start] if asked.start else []), *changed,
+            ]  # fmt: skip
+        else:
+            command = [
+                sys.executable, "-m", "rollout_train.cli", "train", profile["path"], asked.catalog,
+                "--directory", str(directory), "--name", asked.name, "--groups", str(asked.groups),
+                "--groups-per-step", str(asked.groups_per_step), "--seed", str(asked.seed), *changed,
+            ]  # fmt: skip
         if self.ray is not None:
             await self._submit(launch, command, directory)
             return
@@ -189,7 +199,7 @@ class Launcher:
                 submission_id=f"run-{launch.id}",
                 entrypoint_num_gpus=self.gpus,
                 entrypoint_num_cpus=1,
-                metadata={"kind": "run", "launch": launch.id, "name": launch.asked.name},
+                metadata={"kind": launch.asked.kind, "launch": launch.id, "name": launch.asked.name},
             )
         except Exception as error:  # a run Ray refuses is a failed launch
             detail = f"{type(error).__name__}: {error}"
