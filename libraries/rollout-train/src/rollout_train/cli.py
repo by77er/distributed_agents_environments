@@ -84,6 +84,7 @@ async def _train(
             directory=described.directory / "versions", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
             run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
+            reshard=platform.reshard if platform.layout else None,
         )  # fmt: skip
 
 
@@ -178,7 +179,9 @@ def _registry_at(where: str) -> "tuple[Ledger, Registry]":
     return ledger, registry
 
 
-async def _launcher(where: str, profiles: Path, catalogs: list[str], runs: Path, at_once: int) -> None:
+async def _launcher(
+    where: str, profiles: Path, catalogs: list[str], runs: Path, at_once: int, ray: str | None, gpus: float
+) -> None:
     from rollout_train.launcher import Launcher, name_of
     from rollout_train.launches import launches_of
     from rollout_train.presence import presence_of
@@ -188,7 +191,26 @@ async def _launcher(where: str, profiles: Path, catalogs: list[str], runs: Path,
     if launches is None or presence is None:
         raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
     profiles, runs = await asyncio.to_thread(profiles.expanduser), await asyncio.to_thread(runs.expanduser)
-    await Launcher(name_of(), launches, presence, profiles, catalogs, runs, at_once=at_once).serve()
+    found = Launcher(name_of(), launches, presence, profiles, catalogs, runs, at_once=at_once, ray=ray, gpus=gpus)
+    await found.serve()
+
+
+def _as_job(ray: str, given: list[str]) -> None:
+    """Submit this launcher (the command as given, without `--as-job`) as a Ray job, unless one already runs here."""
+    import shlex
+    import socket
+
+    from ray.job_submission import JobSubmissionClient
+
+    client, host = JobSubmissionClient(ray), socket.gethostname()
+    for job in client.list_jobs():
+        said: Any = job.metadata or {}
+        if said.get("kind") == "launcher" and said.get("host") == host and not job.status.is_terminal():
+            raise SystemExit(f"a launcher already runs here as Ray job {job.submission_id}: `ray job stop` it first")
+    command = [sys.executable, "-m", "rollout_train.cli", *(each for each in given if each != "--as-job")]
+    entrypoint = f"cd {shlex.quote(os.getcwd())} && exec {shlex.join(command)}"
+    job = client.submit_job(entrypoint=entrypoint, metadata={"kind": "launcher", "host": host}, entrypoint_num_cpus=0)
+    print(f"the launcher runs as Ray job {job}: `ray job logs {job} --follow` shows its output")
 
 
 async def _rename(who: str, name: str, where: str) -> None:
@@ -292,6 +314,9 @@ def main() -> None:
     launching.add_argument("--catalog", action="append", default=[], help="a catalog it offers (repeatable)")
     launching.add_argument("--runs", type=Path, required=True, help="where it makes each run's directory")
     launching.add_argument("--at-once", type=int, default=1, help="runs it plays at once (1: one GPU)")
+    launching.add_argument("--ray", help="a Ray cluster's job server (http://127.0.0.1:8265): each run is a Ray job")
+    launching.add_argument("--gpus", type=float, default=1.0, help="accelerators each run's Ray job asks for (1)")
+    launching.add_argument("--as-job", action="store_true", help="submit the launcher itself as a Ray job (with --ray)")
     listing = commands.add_parser("versions", help="every version, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
@@ -322,7 +347,15 @@ def main() -> None:
         asyncio.run(_bookmark(arguments.name, arguments.version, arguments.delete, arguments.ledger))
         return
     if arguments.command == "launcher":
-        work = _launcher(arguments.ledger, arguments.profiles, arguments.catalog, arguments.runs, arguments.at_once)
+        if arguments.as_job:
+            if not arguments.ray:
+                parser.error("launcher --as-job: say the Ray cluster with --ray")
+            _as_job(arguments.ray, sys.argv[1:])
+            return
+        work = _launcher(
+            arguments.ledger, arguments.profiles, arguments.catalog, arguments.runs, arguments.at_once,
+            arguments.ray, arguments.gpus,
+        )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "versions":
         asyncio.run(_versions(arguments.ledger))

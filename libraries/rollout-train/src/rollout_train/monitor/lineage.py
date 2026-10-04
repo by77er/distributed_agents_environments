@@ -7,14 +7,15 @@ says which. A run that starts from another run's version forks there. Beside the
 the steps, the inference workers and what each serves, and evaluations.
 
 What a ledger has today is read as it is: the versions, the runs' steps (which stand for their trainer's queue: a run
-takes one step at a time), bookmarks, and the `published` notes in the feed (which stand for what the run's engines
-serve). The other tables read here are proposed in docs/research/policy-dag.md, and nothing appends them yet:
+takes one step at a time), bookmarks, each version's reshard (`versions/resharding`, `versions/resharded`, which
+`rollout_train.resharding` writes), and the `published` notes read from the runners' heartbeats (which stand for what
+the run's engines serve). The other tables read here are proposed in docs/research/policy-dag.md, and nothing appends
+them yet:
 
 - `runs/RUN/plan`, `runs/RUN/published`: what a run was set up to do (a distillation's teachers, whose samples it
   trains on, its objective), and the version a request for the run's latest goes to, from when;
 - `trainers/NAME/registered`, `trainers/NAME/queue`, `trainers/NAME/taken`: a trainer, the steps queued for it, and
   when it began each;
-- `versions/resharding`, `versions/resharded`: a full-weight version's files rewritten as the engines load them;
 - `workers/NAME/registered`, `workers/NAME/loaded`, `workers/NAME/unloaded`: an inference worker (what it holds, its
   adapter slots), and each version it loaded and unloaded;
 - `evaluations/SUITE/starts`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`: a fixed suite
@@ -278,8 +279,9 @@ class _Reading:
                 if span["until"] is None
             }
             full = (self.record(f"{_RUNS}{version.run}/plan", "plan").get("weights") or "lora") == "full"
+            noted = version.id in self.read("versions/resharding") or version.id in self.read("versions/resharded")
             life: dict[str, Any] = {
-                "reshard": full,
+                "reshard": full or noted,
                 "resharding": self.record("versions/resharding", version.id).get("at"),
                 "resharded": self.record("versions/resharded", version.id).get("at"),
                 "latest_of": latest.get(version.id),

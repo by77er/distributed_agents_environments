@@ -27,7 +27,7 @@ from rollout.harness.imports import ToolBinding, ToolSet
 from rollout.harness.runner import Runner
 from rollout.names import named
 from rollout.processes import end_orphans, note_processes
-from rollout_train import Colocated, Ledger, Trainer, Version, Versions
+from rollout_train import Colocated, Fence, Ledger, Manifest, Trainer, Version, Versions
 from rollout_train.inference import Channel, Engine, Limits
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION
@@ -37,6 +37,7 @@ from rollout_train.presence import presence_of
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
+from rollout_train.resharding import connect, disconnect, on_ray, reshard
 from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.stores import location, opened
 
@@ -56,6 +57,9 @@ class ChannelSpec:
     thinking_tokens: int | None = None
     """Tokens of thinking per turn, and of answer after it, where the channel should not use `Limits`' own."""
     answer_tokens: int | None = None
+    reshard: str | None = None
+    """`module:name` of the layout the engines load a version's files in (`rollout_train.resharding`); none: the
+    trainer's files as they are, with no reshard."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +132,8 @@ class Profile:
     feed_runs: int | None = None
     """Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are
     deleted)."""
+    ray: str | None = None
+    """The Ray cluster to connect to (`auto`, or `ray://host:port`): reshards then run as Ray tasks on it."""
     name: str | None = None
     """What a run first started in `directory` is called (by default the directory's name). It is named again with
     `rollout rename`; its id, in the directory's `run.json`, never changes."""
@@ -146,14 +152,14 @@ class Profile:
             place[key] = value
         channels: dict[str, ChannelSpec] = {}
         for name, channel in _table(described, "channels").items():
-            known = ("model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens")
+            known = ("model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens", "reshard")
             given = _only(dict(channel), f"channels.{name}", *known)
             engines = tuple(given.pop("engines", [{}]))
             channels[name] = ChannelSpec(**given, engines=engines)
         trainer = _table(described, "trainer")
         memory = _only(_table(described, "memory"), "memory", "runs_gib", "training_gib")
         blobs = _table(described, "blobs")
-        known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs", "episodes_at_once")
+        known = ("directory", "ledger", "runner", "serve", "address", "tools", "feed_runs", "episodes_at_once", "ray")
         top = _only(described, "the profile", *known)
         top["directory"] = directory or Path(top["directory"]).expanduser()
         if isinstance(top.get("ledger"), str):  # (`ledger = "path"`: a directory of files)
@@ -232,6 +238,9 @@ class Platform:
         directory = profile.directory
         directory.mkdir(parents=True, exist_ok=True)
         (directory / LOCATION).write_text(json.dumps(self.location))
+        if profile.ray:  # (reshards run as Ray tasks on that cluster)
+            await asyncio.to_thread(connect, profile.ray)
+            stack.callback(disconnect)
         self.run = await run_of(directory, self.ledger, self.registry, profile.name)
         if profile.trainer is not None and profile.trainer.start is not None:
             self.origin = await resolved(self.ledger, self.registry, profile.trainer.start)
@@ -314,6 +323,20 @@ class Platform:
         if profile.serve:
             _background(stack, self._serve(profile.serve))
         return self
+
+    @property
+    def layout(self) -> str | None:
+        """The layout the trained channel's engines load versions in, if they are resharded."""
+        trainer = self.profile.trainer
+        return self.profile.channels[trainer.channel].reshard if trainer is not None else None
+
+    async def reshard(self, version: Version, fence: Fence) -> Manifest:
+        """A version's files in the trained channel's layout: resharded as a Ray task when the profile names a Ray
+        cluster, else here."""
+        assert self.layout is not None
+        if self.profile.ray:
+            return await on_ray(self.location, self.blobs_at, fence, version.id, self.layout)
+        return await reshard(self.versions, fence, version.id, self.layout, self.profile.directory / "resharding")
 
     async def bookmarked(self) -> set[str]:
         """The versions bookmarks name (which keep their files)."""

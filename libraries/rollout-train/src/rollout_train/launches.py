@@ -70,6 +70,9 @@ class Launch:
     directory: str | None = None
     """The run's directory, once a launcher has chosen it."""
     pid: int | None = None
+    """The process playing it, when its launcher started it itself."""
+    job: str | None = None
+    """The Ray job playing it, when its launcher submitted it to Ray."""
     detail: str | None = None
     """Why it failed, or how it ended."""
     updated: float = 0.0

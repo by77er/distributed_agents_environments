@@ -48,7 +48,6 @@ function RunsTree({ place, system }: { place: Place; system: System }) {
   const others = (feeds ?? []).filter(run => !run.labels.run).length;
   return (
     <>
-      <Link to="/runs" className={`label${place.kind === "runs" ? " here" : ""}`}>Runs · {system.runs.length}</Link>
       {system.runs.map(run => (
         <RunBranch key={run.run} run={run} only={system.runs.length === 1} place={place} folds={folds} fold={fold} showing={showing} host={system.host} />
       ))}

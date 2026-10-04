@@ -45,11 +45,12 @@ from rollout.contracts import BlobReference
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.curriculum import Curriculum
+from rollout_train.ledger import Fence
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, scope, table
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
 from rollout_train.trainer import STATE, WEIGHTS, Checkpoint, StepFailed, Trainer, Weighted
-from rollout_train.versions import Retention, Version, Versions, new_id
+from rollout_train.versions import Manifest, Retention, Version, Versions, new_id
 
 
 class Publisher(Protocol):
@@ -85,6 +86,7 @@ async def train(
     hooks: Sequence[Hooks] = (),
     kept: Callable[[], Awaitable[Collection[str]]] | None = None,
     made: Callable[[Version], Awaitable[object]] | None = None,
+    reshard: Callable[[Version, Fence], Awaitable[Manifest]] | None = None,
 ) -> None:
     """Train from `start` (a version's id; else the base model, named `base`) on `catalog` until `groups` more groups
     have been played (those a stopped loop left unplayed among them) and every group played has been trained on, serving
@@ -102,7 +104,8 @@ async def train(
     keep theirs. `started` is what the run's `starts` record says beside what the loop knows (where it starts from,
     this host, the time): where the run's directory is, where the monitor on its machine serves (`address`), and what
     profile started it, say. `hooks` are told of each result and step; `made` is called with each version made, once
-    it is served (to move a bookmark, say)."""
+    it is served (to move a bookmark, say). `reshard` gives the files the engines load for a version (in their
+    layout: `rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
     ledger, blobs = versions.ledger, versions.blobs
@@ -141,7 +144,11 @@ async def train(
         nonlocal served
         if served is not None and version.depth <= served.depth:
             return  # (the channel does not go back)
-        served_as = await publish(channel, version.id, str((await files(version)).weights), version.depth)
+        if reshard is not None:
+            loaded = await versions.files(await reshard(version, fence), directory / version.id / "resharded")
+        else:
+            loaded = (await files(version)).weights
+        served_as = await publish(channel, version.id, str(loaded), version.depth)
         note("published", {"channel": channel, "adapter": version.id, "version": served_as})
         served = version
         keep = {version.id, version.parent}
