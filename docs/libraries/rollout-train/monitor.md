@@ -25,10 +25,12 @@ rollout monitor sqlite:///~/.cache/rollout/ledger.db  # a database's runs (or po
 `WHERE` is a run's directory (its ledger, as `ledger.json` there says, or files under `ledger`), a ledger's
 directory of files, or a database's URL. The monitor reads, and writes four things: names in the registry
 ([the registry](checkpoints.md#the-registry)) (a run's, when it is renamed on its page, and bookmarks, made, moved and
-deleted on a checkpoint's page), launches: runs and evals asked for from the page ([launching a run](#launching-a-run)),
-and asked to stop or to resume a run, and what is wanted of a run's settings ([a run's settings](#a-runs-settings)),
-whether it is paused among them ([pausing, resuming and stopping](#pausing-resuming-and-stopping)). The runs' processes write the rest, and need not be running: the page shows a stopped run as it
-was left.
+deleted on a checkpoint's page); suites and their versions, made and edited on the Evals page
+([evals](evals.md#made-edited-and-asked-for-from-the-page)); launches: runs and evals asked for from the page
+([launching a run](#launching-a-run)), and asked to stop or to resume a run; and what is wanted of a run's settings
+([a run's settings](#a-runs-settings)), whether it is paused among them
+([pausing, resuming and stopping](#pausing-resuming-and-stopping)). The runs' processes write the rest, and need not be
+running: the page shows a stopped run as it was left.
 
 A run is shown by its name; its id (what everything kept of it is under) is on its page and under the pointer. A
 checkpoint is shown by where it came from (the run that made it and its step: `diamonds · S3`) and the shortest start of
@@ -42,18 +44,17 @@ package (`rollout_train/monitor/static`), and the monitor serves it as files: `r
 page draws each view from what it has read, and reads again only what the monitor says changed.
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
-  `feeds`, `machines`, `launches`, `statistics`, `checkpoints`, `environments`,
-  `environment/MODULE:NAME`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
-  `group/RUN/N`, `episode/RUN_ID`. The
-  monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives each reading a **checkpoint**, a hash
-  of what it says (leaving out when it was read). Each beat it reads the ledger once for every topic watched
-  (`System.one_reading`; a database ledger in one query, `read_all`).
-- **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the checkpoint of each topic asked for at
-  once, then a `checkpoint` event each time one changes. The page watches the topics of the place shown (always
+  `feeds`, `machines`, `launches`, `statistics`, `checkpoints`, `checkpoint-evals/ID`, `path/ID`, `environments`,
+  `environment/MODULE:NAME`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`, `settings/RUN`,
+  `group/RUN/N`, `episode/RUN_ID`. The monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives
+  each reading a **version**, a hash of what it says (leaving out when it was read). Each beat it reads the ledger once
+  for every topic watched (`System.one_reading`; a database ledger in one query, `read_all`).
+- **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the version of each topic asked for at
+  once, then a `version` event each time one changes. The page watches the topics of the place shown (always
   `system` and `feeds`; the launches on Runs and New run; a group, an episode, the statistics, the machines, the
   environments and an environment, or the graph, as they are shown), and opens a new stream
   when it moves elsewhere. While nobody watches, the monitor reads nothing.
-- **ETags.** Each JSON answer carries its topic's checkpoint as its ETag. The page sends the checkpoint it has
+- **ETags.** Each JSON answer carries its topic's version as its ETag. The page sends the version it has
   (`If-None-Match`), and the monitor answers 304, with nothing, when it is the same. An episode's lines are asked for
   after those the page has (`?after=N`).
 - **Drawing only what changed.** An answer that changed in part keeps the parts that did not as they were (TanStack
@@ -133,8 +134,8 @@ folding open to the groups toward its next step (in flight, or recorded and wait
 newest first, each with the groups that went into it (a square for each episode); then the episodes outside a run.
 A step's groups need not be consecutive. A group that gave nothing to train on is listed with the step decided after
 it, marked skipped. Runs, steps, groups and episodes fold open and closed: an open step lists its groups, an open
-group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph (with or without the sample
-fixture), the checkpoints bookmarks name, and each run's newest. On **Evals**, the suites, each folding open to the
+group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph, the checkpoints bookmarks
+name, and each run's newest. On **Evals**, the suites, each folding open to the
 evals that played it (each marked with the version it played, where a suite's evals played more than one), and the
 eval shown; then the checkpoints (and base models) that have had an eval, the one evaluated last first, each opening
 its history and folding open to its evals. An eval's run is on Evals, not among the runs, nor in the statistics: its
@@ -265,7 +266,7 @@ refused (409) and the page says why. The run takes them when it next decides a s
 again). **Fixed** lists the rest as they are: the model, what the trainer is and makes, the adapter's rank, the
 channels and their engines (each channel's `thinking_tokens` and `answer_tokens`, "none" for no budget), how many
 episodes it plays at once, the groups and seed it was started with; a value that is unset reads "none". A run whose
-start records no settings (one started before runs recorded them) shows none.
+start records no settings shows none.
 
 ## Pausing, resuming and stopping
 
@@ -285,7 +286,7 @@ and its dot in the sidebar are drawn in violet. Every page open on the monitor h
 ## Launching a run
 
 A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --environment module:name --runs DIR
-[--at-once N]`, `rollout_train.launcher`) beats every 15 seconds, saying what it offers: each profile under
+[--at-once N] [--ray URL]`, `rollout_train.launcher`, [launchers](../../guide/deploying.md#launchers)) beats every 15 seconds, saying what it offers: each profile under
 `--profiles` that names a trainer, with what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
 says, as `rollout_lora`'s do) and the settings a launch may change and their values in the profile (the trainer's
 settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
@@ -317,10 +318,12 @@ starts one.
 A launcher claims only a launch whose every environment it offers (one that names no environments offers any). It
 makes the run's directory under `--runs` (`NAME-ID`), and starts `rollout train` there with
 `--name` and each setting as `--set KEY=VALUE` (no evals as `--set evals.suite=""`, so that the profile's `[evals]` is
-not used); its output goes to `train.log` in that directory. The launch's state
+not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job. The launch's state
 follows: `asked`, `claimed`, `running` (with the process), and `ended`, `failed` (with the end of its output) or
 `stopped`. **Stop** (`POST /api/launches/ID/stop`) cancels a launch not yet claimed at once; a running one is sent an
 interrupt, and the run stops as on Ctrl-C, at a group boundary. Once the run writes its start, its tile links to it.
+
+## Statistics
 
 The statistics, read from the ledger (`rollout_train.monitor.statistics`) and, for the engines, from each run's
 runners' heartbeats; every chart is drawn to scale and says each series' value under the pointer:
@@ -344,9 +347,9 @@ writes as true or false for each episode), for each episode of a group none of w
 and counts likewise. Where nothing says, the page shows no solve figures (no share solved, no solve rate, no solved and
 not-solved colors) and the mean reward in their place.
 
-### The machines
+## The machines
 
-The Machines page (`#/machines`; `#/system` opens it too) shows every process that beats beside the ledger
+The Machines page (`#/machines`) shows every process that beats beside the ledger
 ([heartbeats](rollouts.md#heartbeats)) by what its beat says it is, beside what the ledger says of it
 (`rollout_train.monitor.machines`). A process is alive while its newest beat is younger than 90 seconds by the clock of
 the store that keeps the beats; when it last beat is shown by the monitor's clock. The page has a section for each
@@ -373,7 +376,7 @@ launcher its `profiles`, `environments`, `at_once`, `playing` and `launches`; a 
 `channels`. Each host has `alive`, `at`, its newest measurements (`machine`), their `history`, and its `roles`
 (`{"kind", "name", "alive"}`).
 
-### An episode's rollouts
+## An episode's rollouts
 
 Each agent's rollout is its samples in order, its slots in their numbers' order (`agent-2` before `agent-10`), each in
 a color its whole name gives it. An agent offered tools on its turns that samples with none offered (summarising its
@@ -392,12 +395,17 @@ Where neither the feed nor the kept events hold a sample of an episode (a harnes
 recorded and the runner's hooks never saw), its rollouts are the replies of the turns the gateway recorded, read from
 the ledger, live and once it ended.
 
+## Reading it from Python
+
 `System(directory)` reads a run's directory and its ledger, and `System(ledger=…)` a ledger alone: `snapshot()`
-(where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds),
-`lineage(sample)` (the checkpoints view), `evals()` (every suite, its versions, and every eval), `statistics()` (with each run's name), `machines()` (every machine that beats and the roles on it),
-`launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, checkpoint)`, `unbookmark(name)`,
-`environments()` (every environment the system knows), `environment(name)` (an environment's page: [environments](#environments)) and `save_suite(name, body)`. `create_app(where)` serves them,
-the stream and the page; its routes are listed in `rollout_train.monitor.app`.
+(where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds), `lineage()`
+(the checkpoints view), `evals()` (every suite, its versions, and every eval), `checkpoint_evals(id)`, `path(id)`,
+`eval_subjects()`, `history(kind, reference)`, `statistics()` (with each run's name), `machines()` (every machine that
+beats and the roles on it), `environments()` (every environment the system knows), `environment(name)` (an
+environment's page: [environments](#environments)), `settings(run)` and `want(run, settings)`, `pause(run)`,
+`resume(run)`, `launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, checkpoint)`,
+`unbookmark(name)` and `save_suite(name, body)`. `create_app(where)` serves them, the stream and the page; its routes
+are listed in `rollout_train.monitor.app`.
 
 A group's stage is read from the records alone, so it is what a [loop](training.md) that started now would find:
 

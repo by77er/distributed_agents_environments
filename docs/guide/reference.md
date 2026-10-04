@@ -5057,8 +5057,6 @@ several threads at once.
 - `def __init__(self, directory: Path) -> None`
 - `def refresh(self) -> None`
 - `def runs(self) -> list[dict[str, Any]]` — Every run in the feed, newest first: its labels, state, rewards and how much it has done.
-- `def notes(self, after: int = 0) -> list[dict[str, Any]]` — The notes from index `after` on: episodes as runners start and end them, published weights, the loop's
-  results and steps, the engines' throughput.
 - `def lines(self, run_id: str, after: int = 0) -> list[dict[str, Any]]` — A run's lines from index `after` on.
 
 ### `plain`
@@ -5167,8 +5165,8 @@ class System
   (`rollout_train.monitor.scores.history_of`); None where there is no such subject.
 - `async def evals(self) -> dict[str, Any]` — Every suite (the version its name points to, with its environment and starts; every version; and each
   subject that played it, with the version it played and how it did at each start) and every eval (its suite, the
-  version it played, its checkpoint, how far it has got), newest first (`rollout_train.evals`).
-- `async def lineage(self) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
+  version it played, its checkpoint, how far it has got), newest first (`rollout_train.monitor.scores`).
+- `async def lineage(self) -> dict[str, Any]` — The checkpoints as a graph, with what trains and serves them (`rollout_train.monitor.lineage`).
 - `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
   throughput from its runners' heartbeats, and what the runs are called.
 - `async def machines(self) -> dict[str, Any]` — Every machine that beats and the roles on it, as the heartbeats and the ledger say
