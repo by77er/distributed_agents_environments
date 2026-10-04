@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Stops the platform's services on the host (deploy/k3s/cutover.md, step 1): the launchers, the gateway, the monitors,
 # and the host's Ray head with its workers. Tests' own Ray sessions (under ~/.cache/rollout/ray-tests) and the
-# cluster's containers are left running. Each is asked to stop (SIGINT), given 30 seconds, then terminated (SIGTERM).
+# cluster's containers are left running. Each is asked to stop (SIGINT), given 30 seconds, then terminated (SIGTERM),
+# and killed (SIGKILL) if it is still there 10 seconds later (Ray's control server can hang in its own shutdown).
 set -uo pipefail
 
 SERVICES='^\S*(python3?|uv run) \S*(rollout|rollout_train\.cli|-m rollout_train\.cli) (launcher|gateway|monitor) '
@@ -24,11 +25,12 @@ for _ in $(seq 30); do
   [[ -z $pids ]] && break
   sleep 1
 done
-if [[ -n $pids ]]; then
-  kill -TERM $pids 2>/dev/null
-  sleep 5
+for signal in TERM KILL; do
+  [[ -z $pids ]] && break
+  kill -$signal $pids 2>/dev/null
+  sleep 10
   pids=$(host | sort -u)
-fi
+done
 if [[ -n $pids ]]; then
   echo "still running:"; ps -o pid=,args= -p ${pids//$'\n'/,} | cut -c1-160; exit 1
 fi
