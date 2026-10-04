@@ -107,6 +107,7 @@ Proposals and designs (what could be built, and the records it would need), and 
 | [Thinking Machines' API](research/thinking-machines.md) | Training and sampling through Tinker as a trainer and an engine of their own |
 | [Prime Intellect's verifiers](research/prime-compat.md) | verifiers environments run here: what maps, a spike on a Hub environment, how stable the API is, and exporting ours |
 | [Runtime design](research/runtime-design.md) | One cluster config, run settings and presets, providers and the bridges between their formats, every role on Ray, one gateway: the design being carried out, and the order of its commits |
+| [Objectives design](research/objectives-design.md) | Objectives as a family and orthogonal components, the literature's losses as presets, distillation from a teacher's logprobs, and LLM judges: proposed |
 | [Ledger guarantees](research/ledger-guarantees.md) | What the ledger promises its writers and readers (fences, claims, retries), each guarantee with the test that holds it |
 | [SFT datasets](research/sft-datasets.md) | Datasets made by rejection sampling from a run's episodes: the rules measured on one ledger, and the one recommended |
 | [Cleanup inventory](research/cleanup-inventory.md) | What to remove and what to factor out, ranked, and the order of the removal commits |

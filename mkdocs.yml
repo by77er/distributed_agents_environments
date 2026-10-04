@@ -118,4 +118,5 @@ nav:
       - "Ledger guarantees": research/ledger-guarantees.md
       - "Cleanup inventory": research/cleanup-inventory.md
       - "Runtime design": research/runtime-design.md
+      - "Objectives design": research/objectives-design.md
       - "RunPod pods as providers": research/runpod-providers.md
