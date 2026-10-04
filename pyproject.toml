@@ -14,6 +14,7 @@ dependencies = [
     "rollout-computers",
     "rollout-openai",
     "rollout-s3",
+    "rollout-runpod",
     "project-assistant",
     "agent-sessions",
     "minecraft-team",
@@ -40,6 +41,7 @@ rollout-gemma = { workspace = true }
 rollout-computers = { workspace = true }
 rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
+rollout-runpod = { workspace = true }
 project-assistant = { workspace = true }
 agent-sessions = { workspace = true }
 minecraft-team = { workspace = true }
@@ -56,6 +58,8 @@ dev = [
     "boto3-stubs[s3]>=1.40",
     "openai>=3.19",  # the official clients, for the recorder's HTTP endpoint
     "anthropic>=1.8",
+    "cryptography>=46",  # test certificate authorities, for mutual TLS with pods
+    "pyyaml>=6",  # reading the pods' proxy configuration in tests
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -88,6 +92,7 @@ extraPaths = [
     "implementations/rollout-computers/src",
     "implementations/rollout-openai/src",
     "implementations/rollout-s3/src",
+    "implementations/rollout-runpod/src",
     "implementations/rollout-verifiers/src",
     "products/project-assistant/src",
     "products/agent-sessions/src",

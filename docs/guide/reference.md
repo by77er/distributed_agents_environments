@@ -20,6 +20,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#refused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
+- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -30,6 +31,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_computers.tools`](#rollout_computerstools)** — Tools for agents that work on a computer: shell, files, edits and images. [`apply_edits`](#apply_edits), [`ComputerTools`](#computertools), [`page_text`](#page_text), [`prepare_image`](#prepare_image), [`Replacement`](#replacement)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 - **[`rollout_s3`](#rollout_s3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
+- **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#pod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
 
 ## `rollout.harness`
 
@@ -3906,6 +3908,7 @@ How servers are reached: a bearer token read from an environment variable (`toke
 | `ca` | `str \| None` | `None` |  |
 | `certificate` | `str \| None` | `None` |  |
 | `key` | `str \| None` | `None` |  |
+| `identity` | `str \| None` | `None` | The URI SAN the server's certificate must carry (`spiffe://rollout/pod/NAME`), checked in the TLS handshake in place of the host name: a server whose certificate names another identity, or none, is refused before anything is sent to it. None: the host name is checked, as TLS does. |
 
 **Methods**
 
@@ -4958,6 +4961,117 @@ class System
   per model slot) are drawn; what it reported when it ended; and where it sits: its run, its group and its
   labels. An episode of a run on another machine is asked of the monitor there.
 
+## `rollout_train.pods`
+
+GPU pods elsewhere: their identities, the training service's client.
+
+### `GATEWAY_IDENTITY`
+
+*constant* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
+
+```python
+GATEWAY_IDENTITY = f'spiffe://{TRUST_DOMAIN}/gateway'
+```
+
+The identity of the gateway's client certificate: the only client a pod takes requests from.
+
+### `live`
+
+*function* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
+
+```python
+def live(beats: Iterable[Beat], role: str | None = None) -> list[PodAddress]
+```
+
+The pods whose newest beat is fresh, says an address, and names the identity named for the pod (of `role`, if
+given), by name. A beat that says another identity than its pod's name is left out: nothing reaches it.
+
+### `pod_identity`
+
+*function* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
+
+```python
+def pod_identity(name: str) -> str
+```
+
+The identity a pod's certificate carries: `spiffe://rollout/pod/NAME`. A name is lowercase letters, digits and
+hyphens, at most 63 characters, as a DNS label is.
+
+### `PodAddress`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
+
+```python
+class PodAddress
+```
+
+A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, the address it
+is reached at (`https://IP:PORT`), its role (`inference` or `trainer`), whether it is ready, and its certificate's
+serial (for the launcher, which has the certificate of a pod it no longer counts as its own revoked).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `identity` | `str` | required |  |
+| `address` | `str` | required |  |
+| `role` | `str` | required |  |
+| `ready` | `bool` | required |  |
+| `serial` | `str \| None` | `None` |  |
+
+### `RemoteTrainer`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/trainer.py`
+
+```python
+class RemoteTrainer
+```
+
+Takes steps on the training service at `address`, its files through `checkpoints`' blob store. `weights` and
+`budget` are what the pod's trainer makes and can take (as the cluster says of it; `describe` asks the pod);
+`changeable` the settings it takes between steps, with their values now. The pod is reached as `connection` says
+(a client certificate, the CA, and the identity the pod's certificate must carry). It is asked after a step every
+`every` seconds; a step fails as `TrainerUnreachable` after `patience` seconds without an answer.
+
+**Methods**
+
+- `def __init__(self, address: str, checkpoints: Checkpoints, *, weights: str = 'lora', budget: Budget | None = None, changeable: Mapping[str, JsonValue] | None = None, connection: Connection | None = None, client: httpx.AsyncClient | None = None, every: float = 2.0, patience: float = 300.0) -> None`
+- `@property def changeable(self) -> Mapping[str, JsonValue]`
+- `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `async def describe(self) -> dict[str, Any]` — What the pod says its trainer is: its kind, model, `weights`, `budget`, and the settings it takes between
+  steps.
+- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def aclose(self) -> None` — Close the client it made (one it was given is its giver's).
+
+### `TrainerBusy`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/trainer.py`
+
+```python
+class TrainerBusy(TrainerRefused)
+```
+
+The training pod is taking another step, which it was asked for by someone else.
+
+### `TrainerRefused`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/trainer.py`
+
+```python
+class TrainerRefused(StepFailed)
+```
+
+The training pod (or the proxy in front of it) refused the request.
+
+### `TrainerUnreachable`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/trainer.py`
+
+```python
+class TrainerUnreachable(StepFailed)
+```
+
+The training pod did not answer for as long as a step waits for it.
+
 ## `rollout_train.testing`
 
 Test doubles: a scripted engine and a readable token format.
@@ -5704,3 +5818,131 @@ Implements `Blobs` in an S3 bucket.
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
 - `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None`
+
+## `rollout_runpod`
+
+GPU pods on RunPod, and certificates for them from step-ca.
+
+### `fingerprint`
+
+*function* · `implementations/rollout-runpod/src/rollout_runpod/certificates.py`
+
+```python
+def fingerprint(root: bytes) -> str
+```
+
+The SHA-256 fingerprint of a certificate (PEM), in lowercase hexadecimal: what step-ca's clients trust a root
+by.
+
+### `Pod`
+
+*class* · `implementations/rollout-runpod/src/rollout_runpod/api.py`
+
+```python
+class Pod
+```
+
+A pod, as RunPod says it is.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `str` | required |  |
+| `name` | `str` | required |  |
+| `status` | `str` | required | RunPod's `desiredStatus`: `RUNNING`, `EXITED` (stopped) or `TERMINATED`. |
+| `image` | `str` | `''` |  |
+| `public_ip` | `str \| None` | `None` |  |
+| `ports` | `Mapping[int, int]` | `field(default_factory=dict[int, int])` | Each exposed port of the pod, and the public port it is reached at. |
+| `cost_per_hour` | `float \| None` | `None` |  |
+
+**Methods**
+
+- `def address(self, port: int = 8443) -> str | None` — Where `port` is reached from outside, `https://IP:PORT`; None until RunPod has said.
+- `@classmethod def of(cls, said: Mapping[str, Any]) -> 'Pod'`
+
+### `PodSpec`
+
+*class* · `implementations/rollout-runpod/src/rollout_runpod/api.py`
+
+```python
+class PodSpec
+```
+
+A pod, as it is asked for.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | The pod's name: the launcher's, which its certificate's identity is made from (`spiffe://rollout/pod/NAME`). |
+| `image` | `str` | required |  |
+| `gpu_types` | `Sequence[str]` | required | RunPod's GPU type ids, in order of preference (`NVIDIA GeForce RTX 4090`, `NVIDIA H100 80GB HBM3`). |
+| `gpu_count` | `int` | `1` |  |
+| `env` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` |  |
+| `secrets` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Variables whose values are secrets kept in RunPod's console, by the secret's name. |
+| `sensitive` | `Mapping[str, str]` | `field(default_factory=dict[str, str], repr=False)` | Variables whose values are sent and never logged. |
+| `ports` | `Sequence[str]` | `('8443/tcp',)` | `PORT/tcp` (a public port mapped to it; RunPod's HTTPS proxy would end TLS, so none is `/http`). |
+| `volume_gb` | `int` | `50` |  |
+| `volume_mount` | `str` | `'/workspace'` |  |
+| `container_disk_gb` | `int` | `50` |  |
+| `cloud` | `str` | `'SECURE'` | `SECURE` or `COMMUNITY`. |
+| `data_centers` | `Sequence[str]` | `()` |  |
+| `interruptible` | `bool` | `False` |  |
+
+**Methods**
+
+- `def body(self) -> dict[str, Any]` — The pod as RunPod's API takes it.
+
+### `RunPod`
+
+*class* · `implementations/rollout-runpod/src/rollout_runpod/api.py`
+
+```python
+class RunPod
+```
+
+RunPod's pods API at `url`, with the key in the environment variable `key_env`.
+
+**Methods**
+
+- `def __init__(self, *, key_env: str = KEY, url: str = API, client: httpx.AsyncClient | None = None) -> None`
+- `async def create(self, spec: PodSpec) -> Pod` — Ask for a pod; it starts as soon as RunPod has a machine for it.
+- `async def pods(self, *, name: str | None = None) -> list[Pod]` — Every pod of the account (those named `name`, if given).
+- `async def pod(self, id: str) -> Pod`
+- `async def start(self, id: str) -> None` — Start a stopped pod (its volume as it was left; its container disk afresh).
+- `async def stop(self, id: str) -> None` — Stop a pod: its GPU is released and no longer billed; its volume is kept (and billed) until it is deleted.
+- `async def terminate(self, id: str) -> None` — Delete a pod and its volume.
+- `async def aclose(self) -> None`
+
+### `RunPodError`
+
+*class* · `implementations/rollout-runpod/src/rollout_runpod/api.py`
+
+```python
+class RunPodError(Exception)
+```
+
+RunPod refused a request, or could not be reached. Says the request, the status and RunPod's message: never
+the key.
+
+**Methods**
+
+- `def __init__(self, message: str, status: int | None = None) -> None`
+
+### `StepCa`
+
+*class* · `implementations/rollout-runpod/src/rollout_runpod/certificates.py`
+
+```python
+class StepCa
+```
+
+step-ca at `url`, whose root certificate is `root` (PEM), with the JWK provisioner `provisioner` whose private
+key is `key` (a JWK, EC P-256).
+
+**Methods**
+
+- `def __init__(self, url: str, *, provisioner: str, key: Mapping[str, Any], root: bytes, client: httpx.AsyncClient | None = None) -> None`
+- `@classmethod def from_files(cls, url: str, *, provisioner: str, key: Path, root: Path) -> 'StepCa'` — With the provisioner's key and the root certificate read from files.
+- `def token(self, subject: str, sans: Sequence[str] | None = None, *, audience: str = 'sign', lifetime: float = TOKEN_LIFETIME, now: float | None = None) -> str` — A one-time token for a certificate of `subject` (with `sans`, by default the subject alone), good for
+  `lifetime` seconds; with `audience = "revoke"`, for revoking the certificate whose serial `subject` is.
+- `def pod_token(self, identity: str, *, lifetime: float = TOKEN_LIFETIME) -> str` — The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN.
+- `async def revoke(self, serial: str, *, reason: str = '') -> None` — Revoke the certificate whose serial is `serial` (decimal), so that it is not renewed (passive revocation).
+- `async def aclose(self) -> None`

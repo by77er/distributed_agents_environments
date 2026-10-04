@@ -1,0 +1,16 @@
+[project]
+name = "rollout-runpod"
+version = "0.0.0"
+description = "GPU pods on RunPod for inference and training: the pods API, and certificates for pods from step-ca"
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28",
+    "cryptography>=46",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rollout_runpod"]

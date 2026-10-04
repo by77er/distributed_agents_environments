@@ -35,6 +35,7 @@ PUBLIC_MODULES = [
     ("rollout_train.gateway", "The stateless gateway: samples channels for harnesses and records every turn."),
     ("rollout_train.profile", "A deployment, described and opened."),
     ("rollout_train.monitor", "A live web page over every run of a ledger."),
+    ("rollout_train.pods", "GPU pods elsewhere: their identities, the training service's client."),
     ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),
     # implementations
     ("rollout_durable", "A runner whose runs survive their process, on DBOS."),
@@ -46,6 +47,7 @@ PUBLIC_MODULES = [
     ("rollout_computers.tools", "Tools for agents that work on a computer: shell, files, edits and images."),
     ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
     ("rollout_s3", "Blobs in S3 or any S3-compatible object store."),
+    ("rollout_runpod", "GPU pods on RunPod, and certificates for them from step-ca."),
 ]
 
 

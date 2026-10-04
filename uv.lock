@@ -21,6 +21,7 @@ members = [
     "rollout-lora",
     "rollout-openai",
     "rollout-qwen",
+    "rollout-runpod",
     "rollout-s3",
     "rollout-train",
     "rollout-vllm",
@@ -4913,6 +4914,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "rollout-runpod"
+version = "0.0.0"
+source = { editable = "implementations/rollout-runpod" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=46" },
+    { name = "httpx", specifier = ">=0.28" },
+]
+
+[[package]]
 name = "rollout-s3"
 version = "0.0.0"
 source = { editable = "implementations/rollout-s3" }
@@ -4993,6 +5009,7 @@ dependencies = [
     { name = "rollout-computers" },
     { name = "rollout-durable" },
     { name = "rollout-openai" },
+    { name = "rollout-runpod" },
     { name = "rollout-s3" },
     { name = "rollout-train", extra = ["http", "report"] },
 ]
@@ -5014,12 +5031,14 @@ ray = [
 dev = [
     { name = "anthropic" },
     { name = "boto3-stubs", extra = ["s3"] },
+    { name = "cryptography" },
     { name = "moto", extra = ["server"] },
     { name = "openai" },
     { name = "pgembed" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 docs = [
@@ -5040,6 +5059,7 @@ requires-dist = [
     { name = "rollout-lora", marker = "extra == 'gpu'", editable = "implementations/rollout-lora" },
     { name = "rollout-openai", editable = "implementations/rollout-openai" },
     { name = "rollout-qwen", marker = "extra == 'gpu'", editable = "implementations/rollout-qwen" },
+    { name = "rollout-runpod", editable = "implementations/rollout-runpod" },
     { name = "rollout-s3", editable = "implementations/rollout-s3" },
     { name = "rollout-train", extras = ["http", "report"], editable = "libraries/rollout-train" },
     { name = "rollout-train", extras = ["ray"], marker = "extra == 'ray'", editable = "libraries/rollout-train" },
@@ -5051,12 +5071,14 @@ provides-extras = ["gpu", "gemma", "ray"]
 dev = [
     { name = "anthropic", specifier = ">=1.8" },
     { name = "boto3-stubs", extras = ["s3"], specifier = ">=1.40" },
+    { name = "cryptography", specifier = ">=46" },
     { name = "moto", extras = ["server"], specifier = ">=5.1" },
     { name = "openai", specifier = ">=3.19" },
     { name = "pgembed", specifier = ">=0.2" },
     { name = "pyright", specifier = ">=1.1.407" },
     { name = "pytest", specifier = ">=8.4" },
     { name = "pytest-asyncio", specifier = ">=1.2" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.14" },
 ]
 docs = [

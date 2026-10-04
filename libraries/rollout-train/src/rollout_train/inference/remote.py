@@ -16,7 +16,9 @@ business, or, with a list of servers and no router, worked out from the session'
 
 What a request carries is all a server needs: the checkpoint, the prompt's tokens, the session (`session_id`, which a
 router may keep to one server) and a name of its own (`request_id`). A bearer token (read from the environment or a
-file, never written down) and TLS with a CA bundle and a client certificate are the deployment's (`Connection`).
+file, never written down) and TLS with a CA bundle and a client certificate are the deployment's (`Connection`). A
+server reached by its address alone (a pod's public IP) is known by the identity its certificate carries, a URI SAN such
+as `spiffe://rollout/pod/NAME`, checked in the handshake in place of the host name (`Connection.identity`).
 """
 
 import asyncio
@@ -70,6 +72,10 @@ class Connection:
     ca: str | None = None
     certificate: str | None = None
     key: str | None = None
+    identity: str | None = None
+    """The URI SAN the server's certificate must carry (`spiffe://rollout/pod/NAME`), checked in the TLS handshake in
+    place of the host name: a server whose certificate names another identity, or none, is refused before anything is
+    sent to it. None: the host name is checked, as TLS does."""
 
     def token(self) -> str | None:
         if self.token_env is not None:
@@ -83,12 +89,37 @@ class Connection:
         token = self.token()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         verify: ssl.SSLContext | bool = True
-        if self.ca is not None or self.certificate is not None:
+        if self.ca is not None or self.certificate is not None or self.identity is not None:
             verify = ssl.create_default_context(cafile=str(Path(self.ca).expanduser()) if self.ca else None)
             if self.certificate is not None:
                 key = str(Path(self.key).expanduser()) if self.key else None
                 verify.load_cert_chain(str(Path(self.certificate).expanduser()), key)
+            if self.identity is not None:
+                verify = requiring(verify, self.identity)
         return httpx.AsyncClient(timeout=timeout, headers=headers, verify=verify)
+
+
+def requiring(context: ssl.SSLContext, identity: str) -> ssl.SSLContext:
+    """`context`, refusing in the handshake a peer whose certificate does not carry `identity` as a URI SAN: the
+    server, for a client's context (its host name is then not checked: the identity stands in for it); the client, for
+    a server's context that asks for a client certificate (`ssl.CERT_REQUIRED`)."""
+    if context.verify_mode != ssl.CERT_REQUIRED:
+        raise ValueError("an identity is checked only on a certificate that is verified (ssl.CERT_REQUIRED)")
+    context.check_hostname = False
+
+    class Identified(ssl.SSLObject):
+        def do_handshake(self) -> None:
+            super().do_handshake()
+            peer = self.getpeercert()
+            names: Any = peer.get("subjectAltName", ()) if peer else ()
+            carried = [str(value) for kind, value in names if kind == "URI"]
+            if identity not in carried:
+                raise ssl.SSLCertVerificationError(
+                    f"the peer's certificate is not {identity} (it names {', '.join(carried) or 'no URI'})"
+                )
+
+    context.sslobject_class = Identified
+    return context
 
 
 class RemoteEngine:
