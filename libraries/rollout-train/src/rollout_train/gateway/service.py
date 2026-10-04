@@ -16,7 +16,8 @@ session: any replica answers any request, and a replica can die at any moment.
     POST {base}/v1/chat/completions      OpenAI's Chat Completions
     POST {base}/v1/responses             OpenAI's Responses
     POST {base}/v1/messages              Anthropic's Messages
-    POST {base}/v1/samples               a `SampleRequest`, answered with a `SampleResult` (for programs in a runner)
+    POST {base}/v1/messages/count_tokens a Messages request's prompt, counted with the channel's renderer
+    POST {base}/v1/samples              a `SampleRequest`, answered with a `SampleResult` (for programs in a runner)
     GET  {base}/v1/models                the channels, as models
     GET  {base}/healthz                  alive
     GET  {base}/readyz                   ready: the ledger and the blob store answer
@@ -52,7 +53,7 @@ from rollout_train.inference.channel import Sampler, Unserved
 from rollout_train.inference.remote import NoReplica
 from rollout_train.ledger import Fenced
 from rollout_train.recorder.compat import SERVED_UNDER, chat, key, messages, refused, replied, requested, responses
-from rollout_train.recorder.compat.wire import Failure, Format
+from rollout_train.recorder.compat.wire import Failure, Format, Prompt
 from rollout_train.recorder.sampling import sample_turn
 from rollout_train.serving import BASE, parts
 
@@ -227,6 +228,11 @@ class Gateway:
             except Exception:
                 logger.exception("a hook failed on a sample of %s in run %s", grant.slot, grant.run_id)
 
+    async def count(self, grant: Grant, prompt: Prompt) -> int:
+        """How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold."""
+        renderer = self.sampler(grant).renderer
+        return len(await asyncio.to_thread(renderer.render, prompt.messages, prompt.tools))
+
     async def ready(self) -> dict[str, str]:
         """What is not ready, by part (empty: ready): the ledger and the blob store must answer."""
         problems: dict[str, str] = {}
@@ -276,6 +282,21 @@ def create_app(gateway: Gateway) -> Starlette:
 
         return answer
 
+    async def count_tokens(request: Request) -> Response:
+        try:
+            grant = gateway.granted(key(request))
+            try:
+                body = await request.json()
+                if not isinstance(body, dict):
+                    raise TypeError("the body is not a JSON object")
+                prompt = messages.prompt(cast(dict[str, Any], body))
+            except (KeyError, TypeError, ValueError) as error:
+                raise Refused(Failure.REQUEST, f"the request could not be read: {error}") from None
+            counted = await gateway.count(grant, prompt)
+        except Refused as error:
+            return messages.FORMAT.error(error.failure, str(error))
+        return JSONResponse({"input_tokens": counted})
+
     async def samples(request: Request) -> Response:
         try:
             grant = gateway.granted(key(request))
@@ -306,6 +327,7 @@ def create_app(gateway: Gateway) -> Starlette:
             Route(f"{SERVED_UNDER}/chat/completions", answering(chat.FORMAT), methods=["POST"]),
             Route(f"{SERVED_UNDER}/responses", answering(responses.FORMAT), methods=["POST"]),
             Route(f"{SERVED_UNDER}/messages", answering(messages.FORMAT), methods=["POST"]),
+            Route(f"{SERVED_UNDER}/messages/count_tokens", count_tokens, methods=["POST"]),
             Route(f"{SERVED_UNDER}/samples", samples, methods=["POST"]),
         ]
     )

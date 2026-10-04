@@ -1,15 +1,19 @@
 """Anthropic's Messages: `POST {base_url}/messages`.
 
-The key comes as `x-api-key` (or as a bearer token). `system` is a system message; a user message's `tool_result`
-blocks are tool messages, read before its text. `thinking` blocks are reasoning, and a reply carries its reasoning as
-a `thinking` block whose signature is a digest of its text. `max_tokens` caps the output; `thinking.budget_tokens` is
-ignored, like every sampling parameter. Server tools (those with a `type` other than `custom`) are not offered to the
-model. A context too long for the model is refused with "prompt is too long", which Claude Code compacts on.
+The key comes as `x-api-key` (or as a bearer token). `system`, and a message of role `system` anywhere in `messages`,
+are system messages, but for the block Claude Code adds for Anthropic's billing (`BILLING`); a user message's
+`tool_result` blocks are tool messages, read before its text. `thinking` blocks are reasoning, whatever their
+signature (never checked, never rendered), and `redacted_thinking` blocks are not read; a reply carries its reasoning
+as a `thinking` block whose signature is a digest of its text. `max_tokens` caps the output (a token count's request
+has none: `prompt`); `thinking` is ignored, like every sampling parameter and caching hint. Server tools (those with
+a `type` other than `custom`) are not offered to the model. A context too long for the model is refused with "prompt
+is too long", which Claude Code compacts on.
 """
 
 import hashlib
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 from starlette.responses import JSONResponse, Response
@@ -30,11 +34,22 @@ from rollout.contracts import (
 from rollout_train.recorder.compat.wire import Failure, Format, Prompt, event, identifier, reasoning_of, text_of
 
 STOP = {FinishReason.TOOL_USE: "tool_use", FinishReason.LENGTH: "max_tokens", FinishReason.STOP: "end_turn"}
+BILLING = "x-anthropic-billing-header:"
+"""What the system block Claude Code adds for Anthropic's billing begins with: it is not part of the prompt."""
 
 
 def read(body: dict[str, Any]) -> Prompt:
+    """A Messages request: its prompt, capped by its `max_tokens` (which Anthropic's API requires)."""
+    return replace(prompt(body), max_output_tokens=int(body["max_tokens"]))
+
+
+def prompt(body: dict[str, Any]) -> Prompt:
+    """A request's conversation and tools, without a cap on the output: what a token count reads."""
     messages: list[Message] = []
-    if system := text_of(body.get("system")):
+    given: str | list[dict[str, Any]] | None = body.get("system")
+    if isinstance(given, list):
+        given = [block for block in given if not str(block.get("text", "")).startswith(BILLING)]
+    if system := text_of(given):
         messages.append(Message.system(system))
     entries: list[dict[str, Any]] = body["messages"]
     for entry in entries:
@@ -43,8 +58,12 @@ def read(body: dict[str, Any]) -> Prompt:
         if entry["role"] == "assistant":
             messages.append(Message(role=Role.ASSISTANT, content=[known for block in blocks if (known := said(block))]))
             continue
+        if entry["role"] == "system":
+            if text := text_of([block for block in blocks if block.get("type") == "text"]):
+                messages.append(Message.system(text))
+            continue
         if entry["role"] != "user":
-            raise ValueError(f"a message's role is user or assistant, not {entry['role']!r}")
+            raise ValueError(f"a message's role is user, assistant or system, not {entry['role']!r}")
         for block in blocks:
             if block.get("type") == "tool_result":
                 result = ToolResult(
@@ -58,7 +77,7 @@ def read(body: dict[str, Any]) -> Prompt:
     return Prompt(
         messages=messages,
         tools=[specification(entry) for entry in offered if entry.get("type", "custom") == "custom"],
-        max_output_tokens=int(body["max_tokens"]),
+        max_output_tokens=None,
     )
 
 
