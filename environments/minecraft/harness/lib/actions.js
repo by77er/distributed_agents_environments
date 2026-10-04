@@ -99,8 +99,14 @@ const ACTIONS = {
     const asked = Math.max(1, Math.ceil(Math.max(1, int(count ?? 1, 'count')) / recipe.result.count))
     const afford = Math.min(...ingredients(bot, recipe).map(([name, amount]) => Math.floor(countOf(bot, name) / amount)))
     const before = countOf(bot, wanted.name)
-    await bot.craft(recipe, Math.max(1, Math.min(asked, afford)), table ?? undefined)
-    const made = countOf(bot, wanted.name) - before
+    let made = 0
+    for (let attempt = 0; attempt < CRAFT_ATTEMPTS && made === 0; attempt++) {
+      if (context.signal.aborted) throw new Interrupted()
+      if (attempt > 0) await synced(bot, bot.inventory) // (a craft that gave nothing may leave the bot's inventory wrong)
+      await bot.craft(recipe, Math.max(1, Math.min(asked, afford)), table ?? undefined)
+      made = await arrived(bot, wanted.name, before, context.signal)
+    }
+    if (made === 0) throw new ActionError(`crafting ${wanted.name} gave nothing back ${CRAFT_ATTEMPTS} times; your ingredients are still yours, try again`)
     return asked > afford ? { crafted: wanted.name, made, note: 'that is all your ingredients make' } : { crafted: wanted.name, made }
   },
 
@@ -340,10 +346,11 @@ const ACTIONS = {
   },
 
   async chat (bot, { message }, context) {
-    const text = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, LIMITS.chat_characters)
+    const whole = String(message ?? '').replace(/\s+/g, ' ').trim()
+    const text = whole.slice(0, LIMITS.chat_characters)
     if (!text) throw new ActionError('say something')
     bot.chat(text)
-    return { said: text }
+    return whole.length > text.length ? { said: text, cut_off: `the last ${whole.length - text.length} characters` } : { said: text }
   },
 
   // Nothing at all, at once: what an agent that called no tool does that turn. It does not keep the world's window
@@ -667,7 +674,24 @@ function direction_ (name) {
   return vector
 }
 
+// Crafting returns before the inventory it changes reaches the bot, and at a crafting table it sometimes gives nothing
+// at all: what was made is read once it has arrived, or after `CRAFT_SECONDS`, and an empty craft is tried again.
+const CRAFT_ATTEMPTS = 3
+const CRAFT_SECONDS = 2
+
+// A window as the server has it: the bot asks for it again, or goes on after a second.
+async function synced (bot, window) {
+  if (bot._syncWindow) await Promise.race([bot._syncWindow(window), sleep(1000)])
+}
+
+async function arrived (bot, name, before, signal) {
+  const until = Date.now() + CRAFT_SECONDS * 1000
+  while (countOf(bot, name) <= before && Date.now() < until && !signal.aborted) await sleep(50)
+  return Math.max(0, countOf(bot, name) - before)
+}
+
 function itemNamed (bot, name) {
+  name = String(name ?? '').replace(/^minecraft:/, '') // (the name as the game's commands spell it)
   const item = bot.registry.itemsByName[name]
   if (!item) throw new ActionError(`there is no item called ${name}`)
   return item

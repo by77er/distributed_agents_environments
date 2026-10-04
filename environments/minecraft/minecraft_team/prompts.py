@@ -379,7 +379,7 @@ ACTIONS = [
     ),
     _action(
         "chat",
-        "Say something to your teammates.",
+        f"Say something to your teammates, in at most {LIMITS.chat_characters} characters (the rest is cut off).",
         {"message": STRING},
         ["message"],
     ),

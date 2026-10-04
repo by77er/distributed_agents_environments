@@ -17,6 +17,7 @@ import pytest
 from minecraft_team import worlds
 from minecraft_team.control import Control
 from minecraft_team.harness import Harness
+from minecraft_team.limits import LIMITS
 from minecraft_team.paper import Installation, PaperServer
 from minecraft_team.prompts import describe
 from minecraft_team.tasks import (
@@ -382,6 +383,37 @@ async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(wor
     assert solved(chosen, state)
     crafted = [event["item"] for event in await world.control.events() if event["kind"] == "crafted"]
     assert crafted == [f"{kind}_planks", "crafting_table"]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_what_is_made_at_a_crafting_table_is_what_is_reported_and_a_long_message_is_cut_aloud(
+    world: World,
+) -> None:
+    x, z = 60, 60
+    y = await world.control.surface(x, z) + 1
+    await world.control.carve(x - 3, y, z - 3, width=7, height=3, depth=7, light=True)
+    kit = [{"item": "oak_planks", "count": 18}, {"item": "stick", "count": 12}]
+    await world.control.episode({
+        "team": ["ada"], "spawn": {"world": "world", "x": x, "y": y, "z": z},
+        "placements": [{"name": "ada", "world": "world", "x": x + 0.5, "y": y, "z": z + 0.5, "kit": kit}],
+        "gamemode": "survival", "difficulty": "peaceful", "time": 1000,
+        "gamerules": {"do_daylight_cycle": False, "do_weather_cycle": False, "keep_inventory": True},
+    })  # fmt: skip
+    await world.control.set_block(x + 1, y, z, "crafting_table")
+    await settle(world)
+    reported = 0
+    for _ in range(5):  # (a craft at a table could give nothing back and be reported done anyway)
+        before = (await world.harness.observe("ada"))["self"]["inventory"].get("wooden_pickaxe", 0)
+        crafted = await do(world, {"name": "craft", "item": "minecraft:wooden_pickaxe"})
+        after = (await world.harness.observe("ada"))["self"]["inventory"].get("wooden_pickaxe", 0)
+        if crafted["ok"]:
+            assert crafted["made"] == after - before == 1, crafted
+            reported += 1
+        else:  # said so, and nothing was taken
+            assert "gave nothing back" in crafted["error"] and after == before, crafted
+    assert reported >= 1 and (await world.harness.observe("ada"))["self"]["inventory"].get("wooden_pickaxe") == reported
+    said = await do(world, {"name": "chat", "message": "x" * (LIMITS.chat_characters + 7)})
+    assert said["ok"] and len(said["said"]) == LIMITS.chat_characters and said["cut_off"] == "the last 7 characters"
 
 
 @pytest.mark.asyncio(loop_scope="module")
