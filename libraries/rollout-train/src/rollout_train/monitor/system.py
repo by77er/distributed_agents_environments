@@ -594,15 +594,15 @@ class System:
     async def eval_subjects(self) -> dict[str, Any]:
         """Every subject that has had an eval, the one evaluated last first
         (`rollout_train.monitor.scores.subjects_in`)."""
-        tables, called = await self._tables(), await names(registry_of(self._ledger))
-        made = {each.id: each for each in await checkpoints_in(self._ledger)}
+        tables, called = await self._tables(), await self._names()
+        made = {each.id: each for each in await self._checkpoints()}
         return {"subjects": await asyncio.to_thread(subjects_in, tables, made, called)}
 
     async def history(self, kind: str, reference: str) -> dict[str, Any] | None:
         """A subject's history: every eval a checkpoint (by its id or the start of it) or a base model (by name) has had
         (`rollout_train.monitor.scores.history_of`); None where there is no such subject."""
-        tables, called = await self._tables(), await names(registry_of(self._ledger))
-        made = {each.id: each for each in await checkpoints_in(self._ledger)}
+        tables, called = await self._tables(), await self._names()
+        made = {each.id: each for each in await self._checkpoints()}
         found = (await self._checkpoint(reference) or reference) if kind == CHECKPOINT else reference
         return await asyncio.to_thread(history_of, tables, made, kind, found, called)
 

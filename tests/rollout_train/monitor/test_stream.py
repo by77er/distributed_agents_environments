@@ -85,7 +85,7 @@ async def test_the_ledger_is_read_once_within_a_reading_whatever_topics_read_it(
 
     ledger.read_all = counted  # type: ignore[method-assign]
     async with system.one_reading():
-        await asyncio.gather(system.snapshot(), system.evals(), system.lineage(), system.statistics())
+        await asyncio.gather(system.snapshot(), system.evals(), system.eval_subjects(), system.lineage())
         assert reads == 1
         system.read_afresh()  # (the monitor changed something itself: what it shows is read again)
         await system.snapshot()
