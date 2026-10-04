@@ -22,6 +22,8 @@ export const topics = {
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
   evals: (): Topic => ({ topic: "evals", key: ["evals"], path: "api/evals" }),
+  environments: (): Topic => ({ topic: "environments", key: ["environments"], path: "api/environments" }),
+  environment: (name: string): Topic => ({ topic: `environment/${name}`, key: ["environment", name], path: `api/environments/${encodeURIComponent(name)}` }),
   checkpoints: (sample: boolean): Topic => ({
     topic: sample ? "checkpoints/sample" : "checkpoints",
     key: ["checkpoints", sample],
@@ -109,24 +111,33 @@ export const useLaunches = () =>
 export const useEvals = (enabled = true) =>
   useQuery({ queryKey: topics.evals().key, enabled, queryFn: ({ signal }) => readJson<Evals>(topics.evals().path, signal) });
 
-/** What the suites' forms need of an environment (none where it does not load on the monitor's machine). */
+/** What the suites' forms and the new run's form need of an environment: its version, rows and eval data (an error where
+ * it does not load on the monitor's machine). */
 export const useEnvironment = (name: string) =>
   useQuery({
-    queryKey: ["environment", name],
+    queryKey: ["environment-loaded", name],
     enabled: Boolean(name),
     staleTime: Infinity,
     refetchInterval: false,
     retry: false,
-    queryFn: ({ signal }) => readJson<EnvironmentInfo>(`api/environments/${encodeURIComponent(name)}`, signal),
+    queryFn: async ({ signal }) => {
+      const found = await readJson<EnvironmentInfo>(topics.environment(name).path, signal);
+      if (!found.loads) throw new Error(found.error ?? `${name} does not load here`);
+      return found;
+    },
   });
 
-/** Every environment the system knows of, for the pickers: offered by a launcher alive, started on, or played by a
- * suite (read again now and then: launchers come and go). */
+/** An environment's page: what it says of itself and what was done with it. */
+export const useEnvironmentPage = (name: string) =>
+  useQuery({ queryKey: topics.environment(name).key, queryFn: ({ signal }) => readJson<EnvironmentInfo>(topics.environment(name).path, signal) });
+
+/** Every environment the system knows of: offered by a launcher alive, started on, or played by a suite (read again now
+ * and then besides, for the pickers on pages that do not watch it: launchers come and go). */
 export const useEnvironments = () =>
   useQuery({
-    queryKey: ["environments"],
+    queryKey: topics.environments().key,
     refetchInterval: 15_000,
-    queryFn: async ({ signal }) => (await readJson<{ environments: KnownEnvironment[] }>("api/environments", signal)).environments,
+    queryFn: async ({ signal }) => (await readJson<{ environments: KnownEnvironment[] }>(topics.environments().path, signal)).environments,
   });
 
 /** Make a suite, or its next version (which its name then points to). */

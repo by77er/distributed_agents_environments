@@ -836,14 +836,113 @@ export interface KnownEnvironment {
   versions: string[];
   /** Whether a launcher alive offers it. */
   offered: boolean;
+  /** Its training runs (by id), and the suites with a version that plays it. */
+  runs?: string[];
+  suites?: string[];
+  /** When a run (a training run, an eval or a check) last started on it. */
+  used?: number | null;
 }
 
-/** What the suites' forms need of an environment: its version, its rows, and its eval data (how many starts each). */
+/** What its results say of an episode: the range its reward falls in, whether it says solved and saturated, and what
+ * its duration counts. */
+export interface Description {
+  rewards: [number | null, number | null];
+  solved: boolean;
+  saturated: boolean;
+  duration: string | null;
+  observations: string | null;
+}
+
+/** One of an environment's rows, with what the training runs on it played of it. */
+export interface EnvironmentRow {
+  key: string;
+  title: string;
+  /** False for a row only its eval data has: training never plays it. */
+  trains: boolean;
+  groups: number;
+  /** Episodes played, failed ones too. */
+  played: number;
+  /** Of `said` (the episodes fit to train on in runs whose results say), how many solved; none where no run says. */
+  solved: number | null;
+  said: number;
+  reward: number | null;
+  /** Its starts in the eval data. */
+  held: number;
+}
+
+/** A training run on an environment, and what it played. */
+export interface EnvironmentRun {
+  run: string;
+  name: string;
+  version: string | null;
+  started: number | null;
+  groups: number;
+  played: number;
+  solved: number | null;
+  said: number;
+}
+
+/** An eval of a version of a suite that plays an environment, and its score at that environment's entry. */
+export interface EnvironmentScore {
+  run: string;
+  name: string;
+  suite: string;
+  version: string;
+  kind: "checkpoint" | "model" | string;
+  checkpoint: string | null;
+  model: string | null;
+  started: number | null;
+  done: boolean;
+  played: number;
+  solved: number | null;
+  said: number;
+  share: number | null;
+  reward: number | null;
+}
+
+/** A group a check played: its row, its rewards, and whether every episode scored the same (`flagged`). */
+export interface CheckGroup {
+  group: number;
+  task: string;
+  episodes: number | null;
+  /** None: not played to its end yet. */
+  rewards: number[] | null;
+  solved: boolean[] | null;
+  failed: number;
+  failures: string[];
+  flagged: boolean;
+  skipped: string | null;
+}
+
+/** An environment: what it says of itself where it loads on the monitor's machine, and what was done with it. */
 export interface EnvironmentInfo {
   environment: string;
-  version: string;
-  rows: { key: string; title: string }[];
+  name: string;
+  offered: boolean;
+  loads: boolean;
+  /** Why it does not load, where it does not. */
+  error: string | null;
+  /** As it loads; none where it does not. */
+  version: string | null;
+  /** Seen in runs' starts and suites' entries. */
+  versions: string[];
+  description: Description | null;
+  curriculum: { name: string; own: boolean; start: number | null; reach: number | null } | null;
+  rows: EnvironmentRow[];
+  /** Each list of eval data, and how many starts it has. */
   evals: Record<string, number>;
+  runs: EnvironmentRun[];
+  suites: { suite: string; version: string; current: boolean; versions: { id: string; number: number; starts: number; made: number }[] }[];
+  scores: EnvironmentScore[];
+  check: {
+    run: string;
+    name: string;
+    started: number | null;
+    version: string | null;
+    profile: string | null;
+    ended: { how: string; at: number; detail?: string | null } | null;
+    groups: CheckGroup[];
+  } | null;
 }
 
 /** A training run's settings, by dotted key: fixed ones, changeable ones as it started, those its newest step used,

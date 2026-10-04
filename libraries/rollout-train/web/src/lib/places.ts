@@ -1,9 +1,9 @@
 // Places: every view has an address after the page's `#`, so it can be linked to and comes back on reload. Each is
-// on one of the pages: the runs, the checkpoints, the evals, the statistics, the machines.
+// on one of the pages: the runs, the checkpoints, the evals, the environments, the statistics, the machines.
 
 import { useLocation } from "react-router-dom";
 
-export type Page = "runs" | "checkpoints" | "evals" | "statistics" | "machines";
+export type Page = "runs" | "checkpoints" | "evals" | "environments" | "statistics" | "machines";
 
 export type Place =
   | { page: "runs"; kind: "runs" }
@@ -18,6 +18,8 @@ export type Place =
   | { page: "evals"; kind: "evals" }
   | { page: "evals"; kind: "suite"; suite: string }
   | { page: "evals"; kind: "eval"; run: string }
+  | { page: "environments"; kind: "environments" }
+  | { page: "environments"; kind: "environment"; environment: string }
   | { page: "statistics"; kind: "statistics"; section: string | null }
   | { page: "machines"; kind: "machines" }
   | { page: "machines"; kind: "host"; host: string; role: string | null };
@@ -28,11 +30,15 @@ export const stepPlace = (run: string, number: number) => `${runPlace(run)}/step
 export const episodePlace = (id: string, slot?: string | null) =>
   `/episode/${encodeURIComponent(id)}${slot ? `/${encodeURIComponent(slot)}` : ""}`;
 export const launchPlace = "/runs/new";
+/** The new run's form, with an environment chosen. */
+export const launchOn = (environment: string) => `${launchPlace}?environment=${encodeURIComponent(environment)}`;
 export const checkpointPlace = (id: string) => `/checkpoint/${encodeURIComponent(id)}`;
 export const checkpointsPlace = (sample: boolean) => `/checkpoints${sample ? "/sample" : ""}`;
 export const evalsPlace = "/evals";
 export const suitePlace = (suite: string) => `/evals/${encodeURIComponent(suite)}`;
 export const evalPlace = (run: string) => `/eval/${encodeURIComponent(run)}`;
+export const environmentsPlace = "/environments";
+export const environmentPlace = (environment: string) => `/environment/${encodeURIComponent(environment)}`;
 export const statisticsPlace = (section?: string | null) => `/statistics${section ? `/${section}` : ""}`;
 export const machinesPlace = "/machines";
 export const hostPlace = (host: string, role?: string | null) =>
@@ -42,6 +48,7 @@ export const PAGES: [Page, string, string][] = [
   ["runs", "Runs", "/runs"],
   ["checkpoints", "Checkpoints", "/checkpoints"],
   ["evals", "Evals", "/evals"],
+  ["environments", "Environments", "/environments"],
   ["statistics", "Statistics", "/statistics"],
   ["machines", "Machines", "/machines"],
 ];
@@ -59,6 +66,8 @@ export function placeOf(pathname: string): Place {
   if ((parts[0] === "checkpoint" || parts[0] === "version") && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
   if (parts[0] === "eval" && parts[1]) return { page: "evals", kind: "eval", run: parts[1] };
   if (parts[0] === "evals") return parts[1] ? { page: "evals", kind: "suite", suite: parts[1] } : { page: "evals", kind: "evals" };
+  if (parts[0] === "environment" && parts[1]) return { page: "environments", kind: "environment", environment: parts[1] };
+  if (parts[0] === "environments") return { page: "environments", kind: "environments" };
   if (parts[0] === "machines") return parts[1] ? { page: "machines", kind: "host", host: parts[1], role: parts[2] || null } : { page: "machines", kind: "machines" };
   // (the machines were a section of the statistics, and `system` before that: links to them open the machines)
   if (parts[0] === "system" || (parts[0] === "statistics" && parts[1] === "machines")) return { page: "machines", kind: "machines" };

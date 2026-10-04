@@ -1,17 +1,17 @@
 // The hierarchy, on the left, for the page shown: the runs (each run, its steps, their groups, their episodes and
-// the episodes' rollouts), the checkpoints, the suites and the evals playing, the statistics' sections and the runs
-// drawn, or the machines and the roles on each. What is folded is remembered
-// in this browser.
+// the episodes' rollouts), the checkpoints, the suites and the evals playing, the environments with their runs and
+// suites, the statistics' sections and the runs drawn, or the machines and the roles on each. What is folded is
+// remembered in this browser.
 
 import { memo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
+import { useEnvironments, useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
-import { episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
+import { environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
 import { RunDot, running, useRunColor } from "./runs";
@@ -39,7 +39,8 @@ export function Tree({ place }: { place: Place }) {
   return (
     <nav className="tree" aria-label="hierarchy">
       {place.page === "checkpoints" ? <CheckpointsTree place={place} system={system} /> : place.page === "statistics" ? <StatisticsTree place={place} system={system} />
-        : place.page === "evals" ? <EvalsTree place={place} /> : place.page === "machines" ? <MachinesTree place={place} /> : <RunsTree place={place} system={system} />}
+        : place.page === "evals" ? <EvalsTree place={place} /> : place.page === "machines" ? <MachinesTree place={place} />
+          : place.page === "environments" ? <EnvironmentsTree place={place} system={system} /> : <RunsTree place={place} system={system} />}
     </nav>
   );
 }
@@ -247,6 +248,51 @@ function EvalsTree({ place }: { place: Place }) {
                     <span className="name" title={each.name}>{each.checkpoint ? known.short(each.checkpoint) : "base model"}</span>
                     {differ ? <span className="version">{versionTag(each.version)}</span> : null}
                     <span className="tag">{each.done ? entriesText(each.entries) ?? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`}</span>
+                  </Node>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** The environments, each opening to its training runs and the suites that play it. */
+function EnvironmentsTree({ place, system }: { place: Place; system: System }) {
+  const { data: known } = useEnvironments();
+  const [folds, fold] = useFolds();
+  if (!known) return null;
+  if (!known.length) return <div className="empty">No environment yet.</div>;
+  const shown = place.kind === "environment" ? place.environment : null;
+  return (
+    <>
+      {known.map(each => {
+        const key = `environment:${each.environment}`, open = folds[key] ?? each.environment === shown;
+        const runs = (each.runs ?? []).map(id => system.runs.find(run => run.run === id)).filter(run => run !== undefined);
+        const suites = each.suites ?? [];
+        return (
+          <div key={each.environment}>
+            <Node to={environmentPlace(each.environment)} current={each.environment === shown}>
+              <Twist open={open} has={runs.length + suites.length > 0} onToggle={() => fold(key, !open)} />
+              <span className={`dot${each.offered ? " alive" : ""}`} title={each.offered ? "offered by a launcher alive" : "no launcher alive offers it"} />
+              <span className="name" title={each.environment}>{each.name}</span>
+              <span className="tag">{runs.length || ""}</span>
+            </Node>
+            {open && runs.length + suites.length ? (
+              <div className="children">
+                {runs.map(run => (
+                  <Node key={run.run} to={runPlace(run.run)}>
+                    <RunDot run={run} host={system.host} />
+                    <span className="name" title={`id: ${run.run}`}>{nameOf(run)}</span>
+                    <span className="tag">{running(run, system.host)}</span>
+                  </Node>
+                ))}
+                {suites.map(suite => (
+                  <Node key={`suite:${suite}`} to={suitePlace(suite)}>
+                    <span className="num">suite</span>
+                    <span className="name">{suite}</span>
                   </Node>
                 ))}
               </div>

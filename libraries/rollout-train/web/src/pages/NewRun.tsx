@@ -3,7 +3,7 @@
 // checkpoints: a suite (by default the environment's own eval data, where it has some), or none, said so.
 
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useEnvironment, useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
 import type { EvalSuite, Launcher, OfferedProfile } from "../api/types";
 import { EnvironmentPicker } from "../components/environments";
@@ -66,7 +66,8 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const environments = useMemo(() => [...new Set(launchers.flatMap(each => each.environments ?? []))], [launchers]);
   const [profileName, setProfileName] = useState(offered[0]?.profile.profile ?? "");
   const chosen = offered.find(each => each.profile.profile === profileName) ?? offered[0];
-  const [environment, setEnvironment] = useState(environments[0] ?? "");
+  const [asked] = useSearchParams();  // (`?environment=module:name`: the form opened from an environment's page)
+  const [environment, setEnvironment] = useState(asked.get("environment") ?? environments[0] ?? "");
   const [name, setName] = useState("");
   const [start, setStart] = useState("");
   const [bookmark, setBookmark] = useState("");

@@ -430,6 +430,7 @@
   .card header select.picker { font: 12px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong);
     border-radius: 3px; padding: 2px 6px; }
   .tag-version { font: 600 10.5px var(--mono); color: var(--quiet); margin-left: 6px; }
+  .tag-version.current { color: var(--accent); }
   .setting small { grid-column: 2; font-size: 11px; }
   .settings-grid { display: grid; gap: 8px; margin-bottom: 14px; }
   .settings-grid > .linkish { justify-self: start; }

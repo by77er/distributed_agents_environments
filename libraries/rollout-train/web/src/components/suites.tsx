@@ -17,17 +17,19 @@ interface FormProps {
   /** The version edited (its suite's newest): the form makes the next. None: a new suite. */
   version?: SuiteVersion;
   name?: string;
+  /** A new suite's first entry's environment. */
+  environment?: string;
   onDone?: (version: string) => void;
   onCancel?: () => void;
 }
 
-export function SuiteForm({ title, version, name: fixedName, onDone, onCancel }: FormProps) {
+export function SuiteForm({ title, version, name: fixedName, environment, onDone, onCancel }: FormProps) {
   const editing = version != null;
   const [name, setName] = useState(fixedName ?? "");
   const made = useRef(0);
   const keyed = (fields: EntryFields) => ({ key: (made.current += 1), fields });
   const [entries, setEntries] = useState<{ key: number; fields: EntryFields }[]>(() =>
-    (version ? version.entries.map(entry => fieldsOf(entry, version)) : [fieldsOf(undefined, undefined, DRAWN)]).map(keyed));
+    (version ? version.entries.map(entry => fieldsOf(entry, version)) : [fieldsOf(undefined, undefined, DRAWN, environment)]).map(keyed));
   const save = useSaveSuite(name.trim());
   const { body, errors, suite } = suiteBody(entries.map(each => each.fields), version?.number);
   const change = (key: number, fields: EntryFields) => setEntries(entries.map(each => (each.key === key ? { key, fields } : each)));

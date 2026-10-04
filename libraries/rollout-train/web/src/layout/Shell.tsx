@@ -7,6 +7,7 @@ import { Link, useLocation } from "react-router-dom";
 import { type Topic, topics, useEpisode, useEvals, useKnown, useSystem } from "../api/queries";
 import type { System } from "../api/types";
 import { useConnection, useStream } from "../api/stream";
+import { readable } from "../lib/environments";
 import { madeBy, nameOf, stepOf } from "../lib/model";
 import { episodePlace, groupPlace, PAGES, type Place, runPlace, stepPlace, suitePlace, usePlace } from "../lib/places";
 import { Tree } from "./Tree";
@@ -31,6 +32,8 @@ function watched(place: Place, system: System | undefined): Topic[] {
   if (place.kind === "checkpoints") found.push(topics.checkpoints(place.sample));
   if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());
   if (place.page === "evals") found.push(topics.launches());
+  if (place.page === "environments") found.push(topics.environments());
+  if (place.kind === "environment") found.push(topics.environment(place.environment));
   return found;
 }
 
@@ -135,6 +138,7 @@ function Crumbs({ place }: { place: Place }) {
   else if (place.kind === "checkpoints" && place.sample) crumbs.push(["Sample fixture", ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
   else if (place.kind === "host") crumbs.push([place.host, ""]);
+  else if (place.kind === "environment") crumbs.push([readable(place.environment), ""]);
   else if (place.kind === "eval") {
     const played = evals?.evals.find(each => each.run === place.run);
     if (played) crumbs.push([`Suite ${played.suite}`, suitePlace(played.suite)]);
