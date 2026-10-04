@@ -1,7 +1,7 @@
 # The pods' images (deploy/images) are built from the repository's root and install its packages from uv.lock: what
 # they need is the packages' sources and the lock, not local state.
 .git
-.venv
+**/.venv
 .claude
 .agentcord
 .rollout

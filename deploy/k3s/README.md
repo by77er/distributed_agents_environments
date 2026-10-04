@@ -8,6 +8,7 @@ locks the card: Kubernetes only accounts for it, and processes outside the clust
 | `install-wsl.sh` | As root: installs NVIDIA's container toolkit with a CDI spec for WSL2's GPU (`/dev/dxg`), installs K3s with a kubeconfig your user can read, and moves containerd's stream server to port 9910, outside Ray's worker ports (10002-19999) |
 | `device-plugin.yaml` | Values for NVIDIA's device plugin chart: the node advertises its card as one `nvidia.com/gpu`, for one Ray worker pod, and Ray shares it among its actors with fractional `num_gpus` |
 | `services.yaml` | The platform's stores in the `rollout` namespace, as `deploy/local/compose.yaml` has them: Postgres for the ledger, versitygw (S3) for blobs, and a Job that makes the bucket `rollout-blobs` |
+| `build.yaml` | Building images in the cluster: a registry the node pulls from at `localhost:30500`, and BuildKit |
 | `ray-smoke.yaml` | A Ray cluster whose GPU worker group sits at zero pods until a task asks for a GPU; the autoscaler removes the worker after a minute idle |
 
 ## Setup
@@ -32,3 +33,16 @@ In the cluster the ledger is `postgresql://rollout:PASSWORD@postgres.rollout:543
 `s3://rollout-blobs/blobs` at `http://s3.rollout:7070`.
 
 Undo: `sudo /usr/local/bin/k3s-uninstall.sh`, then `sudo apt remove nvidia-container-toolkit`.
+
+## Images
+
+`deploy/images/platform` is built in the cluster from the repository's root and pulled by the node as
+`localhost:30500/rollout-platform:TAG`:
+
+```sh
+kubectl apply -f deploy/k3s/build.yaml
+kubectl -n build port-forward statefulset/buildkit 1234:1234 &
+buildctl --addr tcp://127.0.0.1:1234 build --frontend dockerfile.v0 --local context=. \
+  --local dockerfile=deploy/images/platform \
+  --output type=image,name=registry.build.svc.cluster.local:5000/rollout-platform:dev,push=true
+```

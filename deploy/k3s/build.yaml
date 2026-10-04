@@ -1,0 +1,69 @@
+# Building images in the cluster: a registry the node pulls from at localhost:30500, and BuildKit, which builds
+# from a context sent by `buildctl` on this machine (through `kubectl port-forward`) and pushes to the registry.
+apiVersion: v1
+kind: Namespace
+metadata: {name: build}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: registry, namespace: build}
+spec:
+  serviceName: registry
+  replicas: 1
+  selector: {matchLabels: {app: registry}}
+  template:
+    metadata: {labels: {app: registry}}
+    spec:
+      containers:
+        - name: registry
+          image: registry:3
+          env: [{name: REGISTRY_STORAGE_DELETE_ENABLED, value: "true"}]
+          ports: [{containerPort: 5000}]
+          volumeMounts: [{name: data, mountPath: /var/lib/registry}]
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], storageClassName: local-path, resources: {requests: {storage: 100Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: registry, namespace: build}
+spec:
+  type: NodePort
+  selector: {app: registry}
+  ports: [{port: 5000, nodePort: 30500}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: buildkit, namespace: build}
+spec:
+  serviceName: buildkit
+  replicas: 1
+  selector: {matchLabels: {app: buildkit}}
+  template:
+    metadata: {labels: {app: buildkit}}
+    spec:
+      containers:
+        - name: buildkitd
+          image: moby/buildkit:v0.25.1
+          args: [--addr, "tcp://0.0.0.0:1234", --oci-worker-gc, --oci-worker-gc-keepstorage, "80000"]
+          securityContext: {privileged: true}
+          ports: [{containerPort: 1234}]
+          volumeMounts:
+            - {name: cache, mountPath: /var/lib/buildkit}
+            - {name: config, mountPath: /etc/buildkit}
+          resources: {requests: {cpu: "1", memory: 1Gi}, limits: {memory: 8Gi}}
+      volumes:
+        - name: config
+          configMap: {name: buildkit}
+  volumeClaimTemplates:
+    - metadata: {name: cache}
+      spec: {accessModes: [ReadWriteOnce], storageClassName: local-path, resources: {requests: {storage: 150Gi}}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: buildkit, namespace: build}
+data:
+  buildkitd.toml: |
+    [registry."registry.build.svc.cluster.local:5000"]
+      http = true
