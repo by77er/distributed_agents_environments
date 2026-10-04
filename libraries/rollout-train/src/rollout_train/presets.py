@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import JsonValue
 
 from rollout_train.registry import valid
-from rollout_train.run_settings import key_of
+from rollout_train.run_settings import is_trainers, key_of
 
 if TYPE_CHECKING:
     from rollout_durable.database import Connection, Database
@@ -93,7 +93,7 @@ def checked(name: str, settings: Mapping[str, JsonValue]) -> tuple[str, dict[str
     if "name" in settings:
         raise ValueError("a preset holds no run's name: it is given at each launch")
     for key in settings:
-        if key_of(key) is None and not (key.startswith("trainer.") and key.count(".") == 1):
+        if key_of(key) is None and not is_trainers(key):
             raise ValueError(f"a preset holds run settings, and {key!r} is not one")
     return name, json.loads(json.dumps(dict(settings)))
 

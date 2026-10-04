@@ -14,8 +14,8 @@ reads and checks it into a `Cluster`: an unknown key is an error, every kind is 
 A secret appears only as a reference (`rollout_train.providers.Secret`): a key `NAME_env` (an environment variable's
 name) or `NAME_file` (a file's path), resolved where it is used, at the moment it is needed. A key that looks like a
 secret holding a value is refused, and so is a URL with a password in it. So the parsed `Cluster` holds no secret, and
-is safe to show and to hand on as JSON (`Cluster.described`, `of_json`). `inspect` says, on this node, which secret
-references resolve (by name, never by value) and which environments' projects have no lock.
+is safe to show and to hand on as JSON (`Cluster.described`, which `parsed` reads back). `inspect` says, on this node,
+which secret references resolve (by name, never by value) and which environments' projects have no lock.
 """
 
 import copy
@@ -62,13 +62,15 @@ __all__ = [
     "find",
     "inspect",
     "load",
-    "of_json",
     "parsed",
 ]
 
 HOME = Path("~/.config/rollout")
 ROLES = ("gateway", "monitor", "launcher", "runners", "pools", "engines", "trainers", "workers", "bridges")
 """The roles `[placement.ROLE]` may steer."""
+SCRATCH = "~/.cache/rollout/scratch"
+"""Where a node keeps its working files unless the config says (`[scratch] directory`): on disk, since a machine's /tmp
+may be memory."""
 SECRET_WORDS = ("secret", "password", "token", "credential", "access_key", "api_key", "private_key")
 """A key with one of these in its name holds a secret: it is named (`_env`, `_file`), never written."""
 
@@ -207,7 +209,7 @@ class Cluster:
     """What runs record as where they ran; the Ray namespace is `rollout-NAME`."""
     ledger: LedgerSection
     blobs: BlobsSection = field(default_factory=BlobsSection)
-    scratch: str = "~/.cache/rollout/scratch"
+    scratch: str = SCRATCH
     """Node-local: checkpoints in use, fetched bases, bridge work, built Pythons."""
     ray: RaySection = field(default_factory=RaySection)
     tls: Tls | None = None
@@ -225,7 +227,7 @@ class Cluster:
     """Custom resources each role asks for, by role."""
     bridges: Mapping[str, BridgeSection] = field(default_factory=dict[str, BridgeSection])
     described: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue], repr=False, compare=False)
-    """The config as it was read (relative paths made absolute): what is handed on as JSON (`of_json`)."""
+    """The config as it was read (relative paths made absolute): what is handed on as JSON, and `parsed` reads back."""
 
     @property
     def namespace(self) -> str:
@@ -288,11 +290,6 @@ def load(path: Path) -> Cluster:
     return parsed(described, relative_to=path.parent)
 
 
-def of_json(described: Mapping[str, Any]) -> Cluster:
-    """The cluster a `Cluster.described` says: what a job or an actor is handed."""
-    return parsed(described)
-
-
 def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> Cluster:
     """The cluster a config's table describes, checked; relative paths of environments' projects are from
     `relative_to`."""
@@ -318,7 +315,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     if blob_kind == "files":
         blob_settings.setdefault("directory", "~/.cache/rollout/blobs")
     scratch = table.section("scratch")
-    scratch_directory = scratch.text("directory", "~/.cache/rollout/scratch")
+    scratch_directory = scratch.text("directory", SCRATCH)
     scratch.done()
     ray = table.section("ray")
     ray_said = RaySection(

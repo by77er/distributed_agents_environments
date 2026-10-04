@@ -35,21 +35,19 @@ from pydantic import JsonValue
 
 from rollout.names import named
 from rollout_train.checkpoints import Checkpoints
+from rollout_train.cluster import SCRATCH, Cluster
 from rollout_train.following import Binding, Follower
 from rollout_train.inference.channel import Channel, Engine, Generation, NotLoaded
 from rollout_train.inference.remote import Unreachable
 from rollout_train.presence import presence_of
+from rollout_train.providers import INFERENCE_KINDS
 from rollout_train.serving import qualified
 
 if TYPE_CHECKING:
-    from rollout_train.cluster import Cluster
     from rollout_train.recorder.renderers import Renderer
     from rollout_train.run_settings import RunSettings
 
 __all__ = ["EngineHost", "HostPausable", "HostServer", "HostSpec", "host_spec", "started"]
-
-SCRATCH = "~/.cache/rollout/scratch"
-"""Where an engine host keeps the files of the checkpoints it serves, unless it is told: on disk, on its own node."""
 
 
 class EngineHost:
@@ -215,13 +213,11 @@ class HostSpec:
     """Custom resources it asks for (`[placement.engines]`), which steer it to the nodes that have them."""
 
 
-def host_spec(cluster: "Cluster", provider: str, model: str, *, settings: "RunSettings | None" = None) -> HostSpec:
+def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSettings | None" = None) -> HostSpec:
     """An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
     engine host, `vllm`): its kind's engine, the model's options, a replica's GPUs, and `[placement.engines]`. A run
     whose trainer shares the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the
     replica's GPUs, and its trainer for the other half."""
-    from rollout_train.providers import INFERENCE_KINDS
-
     offered = cluster.inference[provider]
     engine = INFERENCE_KINDS[offered.kind].implementation
     if engine is None or offered.kind != "vllm":

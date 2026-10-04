@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from rollout_train.cluster import Cluster, ClusterError, find, inspect, load, of_json, parsed
+from rollout_train.cluster import Cluster, ClusterError, find, inspect, load, parsed
 from rollout_train.providers import Secret
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -210,7 +210,7 @@ context = 8192
 
 def test_the_parsed_config_is_handed_on_as_json(tmp_path: Path) -> None:
     cluster = load(EXAMPLE)
-    again = of_json(json.loads(json.dumps(cluster.described)))
+    again = parsed(json.loads(json.dumps(cluster.described)))
     assert again == cluster
 
 

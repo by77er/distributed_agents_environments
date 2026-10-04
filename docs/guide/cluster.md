@@ -138,7 +138,7 @@ from), a `cost` table (dollars per million tokens by class: `input`, `cached_inp
 
 A secret appears only by name: a key `NAME_env` (an environment variable) or `NAME_file` (a file). A key that looks
 like a secret but holds a value (`api_key = "sk-…"`, `token = "…"`) is refused, and so is a ledger URL with a
-password. So the parsed `Cluster` holds no secret: its `repr` and its JSON (`Cluster.described`, which `of_json` reads
+password. So the parsed `Cluster` holds no secret: its `repr` and its JSON (`Cluster.described`, which `parsed` reads
 back for a job or an actor) are safe to show. A `Secret` is resolved where it is used, at the moment it is needed
 (`Secret.resolve`). `Cluster.secrets()` lists every reference. `inspect(cluster)` says, on this node, which
 references do not resolve (by name, never by value) and which environment projects have no `uv.lock`.

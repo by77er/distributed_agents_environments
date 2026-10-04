@@ -45,6 +45,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout.names import named
 from rollout_train.checkpoints import Checkpoints, Manifest, kept
+from rollout_train.cluster import SCRATCH
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.trainer import WEIGHTS
 
@@ -225,9 +226,6 @@ BRIDGING = "checkpoints/resharding"
 """The ledger's table of bridges begun, keyed `CHECKPOINT@BRIDGE` (`key`)."""
 BRIDGED = "checkpoints/resharded"
 """The ledger's table of what each bridge made, keyed `CHECKPOINT@BRIDGE`."""
-SCRATCH = "~/.cache/rollout/scratch"
-"""Where a bridge on a Ray worker reads the source's files and writes the target's, unless it is told: on disk (a
-machine's /tmp may be memory)."""
 
 _MANIFEST = TypeAdapter(Manifest)
 
