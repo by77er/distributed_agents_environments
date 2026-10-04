@@ -1,17 +1,19 @@
 # Curricula and evaluation suites
 
-Code: `rollout_train.curriculum` · See [training](../libraries/rollout-train/training.md#the-curriculum),
-[the Minecraft team](../products/minecraft-team.md#tasks-and-curriculum), [the policy graph](policy-dag.md#evaluations)
+Code: `rollout.curriculum` · See [training](../libraries/rollout-train/training.md#the-curriculum),
+[the Minecraft team](../products/minecraft-team.md#tasks-and-curriculum), [evals](../libraries/rollout-train/evals.md)
 
 To train, draw rows by the chance that their next group will hold both solved and unsolved episodes, estimated from
 recent evidence. Unlock rows on enough evidence and never lock them again, and stop playing rows that cannot be built.
 To measure progress, use frozen, stratified suites of starts on world seeds that training never sees. Every tenth
-version plays each start once, and versions are compared start by start. The training curriculum never reads a
+checkpoint plays each start once, and checkpoints are compared start by start. The training curriculum never reads a
 suite's results.
 
-**A proposal.** What exists today is `Curriculum` (below) and a way to play one start of a row with any model.
-Everything else marked *proposed* is a design: no code does it. The figures come from the run `curriculum-9`
-(72 groups, 31 versions) and from three episodes played by a team of `gpt-6-astra`.
+**A proposal.** What exists today is `Curriculum` (below), and suites and evals
+([evals](../libraries/rollout-train/evals.md)): versioned lists of starts, played by a checkpoint or another model,
+by hand or on a run's schedule, with each episode's result recorded. Everything else marked *proposed* is a design:
+no code does it. The figures come from the run `curriculum-9` (72 groups, 31 checkpoints) and from three episodes
+played by a team of `gpt-6-astra`.
 
 ## Recommendation
 
@@ -23,8 +25,8 @@ In order of what each is worth per hour of work:
 | 2 | **`counts_for` credits only successes** | A guided twin is credited with its unguided row's failures. Groups 1–35 were played before ways existed and are filed under unguided rows, so t011, t014, t016 and t021 got only failures (weight 0.05 against up to 1.05) and the run never drew them | Guided rows are tried on their own evidence; fading guidance gets its first rung back |
 | 3 | **Unlock on evidence and never relock; an unguided row waits for its guided twin** | Replayed through today's environment, the frontier moved on single groups of four: t013u at 3 of 4 unlocked up to row 34, t017u at 2 of 4 up to row 38. One group of t017u at 0 of 4 (group 68) locked 11 rows again. 6 of the 10 groups in which nobody scored anything were first tries of newly unlocked rows | Fewer wasted first tries; the frontier stops oscillating |
 | 4 | **Weight by the chance of a mixed group**, from an age-discounted Beta posterior (formula below) | Untried rows weigh 1.0 against at most 1.05 for any row: with the run's final records and 38 rows open, 5 untried rows get 24% of draws. t019 (0 of 16 solved, only partial credit) and t007u (16 of 16) get 4% each | Same informative share at steady state (0.67 against 0.67 at the run's end); better during unlocks. The literature reports 2–3× fewer steps, but from large pools of cheap prompts |
-| 5 | **A frozen `core` suite** of 24 starts on held-out worlds, played once each by every 10th version; a `frontier` suite of 8 long starts for every 40th version and outside models | The training solve rate fell from 63% to 36% as rows unlocked, the team size changed and the harness changed. Nothing in training can separate those from learning | A measured trend: two versions compared on 48 paired episodes show a change of about 0.19; a fit over many versions shows less |
-| 6 | **Records** for curricula, suites and buildability in the shared ledger, and sections of the monitor's statistics page for each | A fold cannot be audited or replayed without its parameters and the version each group was played by | Offline comparison of sampling rules; one buildability table for every run |
+| 5 | **A frozen `core` suite** of 24 starts on held-out worlds, played once each by every 10th checkpoint; a `frontier` suite of 8 long starts for every 40th checkpoint and outside models | The training solve rate fell from 63% to 36% as rows unlocked, the team size changed and the harness changed. Nothing in training can separate those from learning | A measured trend: two checkpoints compared on 48 paired episodes show a change of about 0.19; a fit over many checkpoints shows less |
+| 6 | **Records** for curricula, suites and buildability in the shared ledger, and sections of the monitor's statistics page for each | A fold cannot be audited or replayed without its parameters and the checkpoint each group was played by | Offline comparison of sampling rules; one buildability table for every run |
 
 ## What the run shows
 
@@ -43,7 +45,7 @@ In order of what each is worth per hour of work:
 | Wall time per group | median 64 minutes from decision to last episode. Groups 43–72: 30 groups in 15.4 hours with steps between them |
 | Starts within a row | intraclass correlation of solving 0.46 (16 rows with two or more groups). Between-start variance 0.091, within-start 0.107 |
 
-The intraclass correlation includes everything that changed between a row's groups (versions, team sizes, the
+The intraclass correlation includes everything that changed between a row's groups (checkpoints, team sizes, the
 harness), so it overstates how much starts differ. It still says that episodes of one start are far from independent.
 
 Two corrections to the run's own evidence:
@@ -92,11 +94,12 @@ A group in which no episode completed counts for nothing until `FAILED_GROUPS` (
 
 ### Proposed sampling rule
 
-For row *i*, when a row is drawn while version *v* is the newest:
+For row *i*, when a row is drawn while the newest checkpoint is at depth *v*:
 
 - **Evidence.** Each episode *e* of a group of row *i* counts with age weight a_e = 2^(−(v − v_e)/H), where v_e is
-  the version that played it and H = 8 versions (about 32 groups, 16–20 hours at the run's pace). The clock is the
-  policy's versions, not the row's own groups, so a rarely drawn row's estimate ages as the policy changes.
+  the depth of the checkpoint that played it and H = 8 checkpoints (about 32 groups, 16–20 hours at the run's pace).
+  The clock is the policy's checkpoints, not the row's own groups, so a rarely drawn row's estimate ages as the policy
+  changes.
   s_i = Σ a_e·solved_e and f_i = Σ a_e·(1 − solved_e). A row that `counts_for` row *i* adds its solved episodes to
   s_i only.
 - **Estimate.** p_i ~ Beta(½ + s_i, ½ + f_i).
@@ -172,8 +175,8 @@ do it with the way, which is the reverse curriculum's rule (move the start back 
 ## Evaluation suites
 
 An evaluation suite is a frozen list of starts: row, world seed, layout seed and team. A subject plays it: a
-version, or an outside model (the [policy graph](policy-dag.md#evaluations) proposes its tables). Nothing records an
-evaluation's score today.
+checkpoint, or an outside model. Suites, their versions and the evals that play them exist
+([evals](../libraries/rollout-train/evals.md)); what follows proposes which suites to make and how to read them.
 
 ### How many starts, how many episodes
 
@@ -190,21 +193,21 @@ episode (each builds its own world), spend episodes on starts: one episode per s
 
 Two subjects on different starts would differ with √2 times the first column's error (0.129 for 24 starts). The
 paired column assumes each start is equally hard for both subjects, so that only within-start noise remains. It is
-the reason to keep starts fixed: comparing versions start by start (Miller, 2024,
+the reason to keep starts fixed: comparing checkpoints start by start (Miller, 2024,
 [2411.00640](https://arxiv.org/abs/2411.00640)) removes the variance between starts, the larger part. A single
-evaluated version detects only large changes. A trend is read from a fit of solved against version number over all
-evaluated versions, and standard errors are clustered by start. tinyBenchmarks (Maia Polo et al., 2024,
+evaluated checkpoint detects only large changes. A trend is read from a fit of solved against depth over all
+evaluated checkpoints, and standard errors are clustered by start. tinyBenchmarks (Maia Polo et al., 2024,
 [2402.14992](https://arxiv.org/abs/2402.14992)) estimates a 14,000-question benchmark from 100 questions, using
-item response theory fitted on many models' results. That needs results from many subjects first. Once versions and
+item response theory fitted on many models' results. That needs results from many subjects first. Once checkpoints and
 outside models have played a suite, the same fit can say which starts discriminate and which to replace.
 
 ### The suites (proposed)
 
 | Suite | Starts | Rows | Played by | Cost |
 |---|---|---|---|---|
-| `core` | 24 | skills and short survival, game budget at most 25 minutes | every 10th version, once per start; the base model once | about 6 group-equivalents (3–4 hours at the run's pace) |
+| `core` | 24 | skills and short survival, game budget at most 25 minutes | every 10th checkpoint, once per start; the base model once | about 6 group-equivalents (3–4 hours at the run's pace) |
 | `core-seen` | 8 | the anchors of `core`, on training worlds with new layout seeds | with `core` | 2 group-equivalents. With `core`, 8 for every 40 groups of training: about 20% of play |
-| `frontier` | 8 | long survival (t044–t054u), the nether and end stages; no game rows (240 minutes) | every 40th version; outside models | 4–8 hours a subject (the astra episode of t054u took 2 hours 23 minutes) |
+| `frontier` | 8 | long survival (t044–t054u), the nether and end stages; no game rows (240 minutes) | every 40th checkpoint; outside models | 4–8 hours a subject (the astra episode of t054u took 2 hours 23 minutes) |
 
 `core` by stratum. Players rotate 1, 2, 3, 4 within each stratum (at least 2 for a split kit):
 
@@ -238,26 +241,25 @@ outside models have played a suite, the same fit can say which starts discrimina
 | t018, before ways existed, 4 players | `gpt-6-astra` | solved, 12 diamonds, 12 minutes | t018u: 0 of 4; t018 guided: 60%, mean 4.7 |
 | t054u, 4 players | `gpt-6-astra` | reached diamonds in 64 turns, held 10 at turn 434, ended with 0 after 28 deaths; 2 hours 23 minutes of wall time | never unlocked |
 
-One episode per start is a weak reference, for a frontier model as for a version. On `frontier`, an outside model
+One episode per start is a weak reference, for a frontier model as for a checkpoint. On `frontier`, an outside model
 should play two episodes per start where the budget allows. Its results are a per-stratum ceiling drawn beside the
-versions' trend, not a target the curriculum reads.
+checkpoints' trend, not a target the curriculum reads.
 
 ### When to evaluate
 
-- Every 10th version for `core` and `core-seen` (about every 40 groups). Every 40th for `frontier`.
+- Every 10th checkpoint for `core` and `core-seen` (about every 40 groups). Every 40th for `frontier`.
 - The base model, before training, once per suite.
-- `Retention` keeps every 20th version's files; a version due for evaluation keeps its files until its evaluation
-  ends (as the policy graph proposes). On a single machine, where evaluation episodes take room from training,
-  every 20th version is the cheaper schedule and needs nothing kept.
+- A checkpoint due for evaluation keeps its files until its evaluation ends. On a single machine, where evaluation
+  episodes take room from training, every 20th checkpoint is the cheaper schedule.
 
 ### Should the curriculum read evaluation results?
 
 No. A sampler that reads held-out results trains on them, and the suite stops measuring generalisation. PLR, SFL
 and the reverse curriculum score only training levels. Evaluations feed back through people:
 
-- a stratum that falls by more than two paired standard errors between evaluated versions is flagged (forgetting,
+- a stratum that falls by more than two paired standard errors between evaluated checkpoints is flagged (forgetting,
   or a broken harness, which an anchor like t001 shows first);
-- a stratum where versions trail the outside model by most is where to add environment rows or guidance;
+- a stratum where checkpoints trail the outside model by most is where to add environment rows or guidance;
 - a start that certification could not build is evidence for the buildability table.
 
 ## How curricula and suites are kept (proposed)
@@ -266,19 +268,19 @@ Everything lives in the ledger every run shares (`DatabaseLedger`). Records are 
 
 | Table | Key | Record |
 |---|---|---|
-| `runs/RUN/curriculum` | the group number from which it applies | `kind` (`learnability`); `group_size`; `prior` (½, ½); `half_life` (8 versions); `partial_credit` (0.25); `parked_below` (0.15); `parked_share` (0.05); `start`, `reach`, `unlock_mean` (½), `unlock_episodes` (8), `relock` (false); `ignore` (rows and a time before which their results are left out); `environment` (its reference) |
-| `runs/RUN/groups` | group number | as today, and `version` (the newest version when it was decided), `chance` (the probability the row had), `evidence` (α, β, d of the row then) |
+| `runs/RUN/curriculum` | the group number from which it applies | `kind` (`learnability`); `group_size`; `prior` (½, ½); `half_life` (8 checkpoints); `partial_credit` (0.25); `parked_below` (0.15); `parked_share` (0.05); `start`, `reach`, `unlock_mean` (½), `unlock_episodes` (8), `relock` (false); `ignore` (rows and a time before which their results are left out); `environment` (its reference) |
+| `runs/RUN/groups` | group number | as today, and `depth` (the newest checkpoint's when it was decided), `chance` (the probability the row had), `evidence` (α, β, d of the row then) |
 | `environments/ENVIRONMENT/buildable` | `ROW/WORLD` | `built`, `error`, `at` |
-| `evaluations/SUITE/suite` | `suite` | `environment`, `purpose`, `worlds` (held-out indices), `strata` (name: what it covers), `derived_from` (the suite whose anchors it repeats), `decided` |
-| `evaluations/SUITE/starts` | start number | as in the policy graph (`task`, `title`, `seed`, `parameters`), and `stratum`, `anchor`, `players` |
-| `evaluations/SUITE/SUBJECT/results` | `START-EPISODE` | as in the policy graph, and `peak` (the most of the objective held at any turn), `deaths` |
+| `evaluations/SUITE/suite` | the version's number | as [evals](../libraries/rollout-train/evals.md) keep it, and `purpose`, `worlds` (held-out indices), `strata` (name: what it covers), `derived_from` (the suite whose anchors it repeats); each start with `stratum`, `anchor`, `players` |
+| `evaluations/SUITE/EVAL/results` | `START-EPISODE` | as evals keep them, and `peak` (the most of the objective held at any turn), `deaths` |
 
 A curriculum is an environment's rows, a sampling rule and unlock rules. Since it is a fold, its record and the run's
 results reproduce every draw. A changed rule is a new record, keyed by the group from which it applies. With
 `chance` logged on each group, another rule can be judged offline: reweigh the logged groups by the ratio of the
 new rule's probability to `chance`.
 
-A suite is versioned by name: `core-1`, `core-2`. A new suite names what it `derived_from` and repeats its anchors.
+A suite keeps its versions under its name (`core@1`, `core@2`); a suite made from another names what it
+`derived_from` and repeats its anchors.
 
 The monitor's statistics page ([`#/statistics`](../libraries/rollout-train/monitor.md#the-pages)) already draws
 `outcomes` (solve rate and reward over groups), `rows` (each row's groups, share solved, and the same by team size)
@@ -286,17 +288,17 @@ and `pace` (what was done with each group, and why groups gave nothing to train 
 
 | Section (proposed) | Reads | Shows |
 |---|---|---|
-| `curriculum` | `curriculum`, `groups`, `results` | rows by version as a heat map of the posterior mean; the unlocked count over groups; each step's groups by kind (none solved, mixed, all solved, partial credit only, not built); parked and retired rows; each row's chance when drawn |
-| `suites` | `evaluations/*` | per suite, starts by subjects (solved, peak); per stratum the paired difference to the previous evaluated version with its interval; solve rate against version number, with the outside models as reference lines |
+| `curriculum` | `curriculum`, `groups`, `results` | rows by checkpoint as a heat map of the posterior mean; the unlocked count over groups; each step's groups by kind (none solved, mixed, all solved, partial credit only, not built); parked and retired rows; each row's chance when drawn |
+| `suites` | `evaluations/*` | per suite, starts by subjects (solved, peak); per stratum the paired difference to the previous evaluated checkpoint with its interval; solve rate against depth, with the outside models as reference lines |
 | `buildable` | `environments/*/buildable` | rows by worlds, built or the error |
 
 ## Open questions
 
-- **Half-life.** Eight versions is a guess. Too short brings back today's one-group decisions; too long hides
+- **Half-life.** Eight checkpoints is a guess. Too short brings back today's one-group decisions; too long hides
   forgetting. Replaying logged groups under several values would choose it.
 - **Families.** Learning progress per row family (a kit ladder, a coordination variant) would have enough data for
   TSCL's slope. It is not modelled here.
 - **Hints inside a group.** Guide-GRPO's mixed groups would give unsolved unguided rows a signal without leaving
   the row. That needs the trainer to score tokens under a prompt the episode did not see.
 - **Evaluation on one machine.** Evaluation episodes inside the run's `episodes_at_once`, or on workers of their
-  own. The schedule above takes about 20% of play; every 20th version halves it.
+  own. The schedule above takes about 20% of play; every 20th checkpoint halves it.

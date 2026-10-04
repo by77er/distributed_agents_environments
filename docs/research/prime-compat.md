@@ -1,11 +1,11 @@
 # Prime Intellect's verifiers environments, here
 
 See [verifiers environments](../implementations/rollout-verifiers.md),
-[the recorder over HTTP](../libraries/rollout-train/harness-endpoint.md), [evals](../libraries/rollout-train/evals.md),
+[harnesses over HTTP](../libraries/rollout-train/harness-endpoint.md), [evals](../libraries/rollout-train/evals.md),
 [Thinking Machines' API](thinking-machines.md#prime-intellect-for-contrast)
 
 **A record of a spike.** This page asks how far Prime Intellect's `verifiers` environments run on this system, and
-what does not carry over. `rollout_verifiers` and the recorder's three APIs exist; everything marked *proposed* is
+what does not carry over. `rollout_verifiers` and the gateway's three APIs exist; everything marked *proposed* is
 not built. The facts about verifiers were read from its source (the pinned `0.3.2.dev185`, and `main` at
 `484e6de6c`, 2026-10-03) and from docs.primeintellect.ai on 2026-10-04. Anything not confirmed there is marked
 *unverified*, and the list at the end collects them.
@@ -14,15 +14,15 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 
 - **A verifiers v1 environment runs here as an environment**, with no change to the loop, the scheduler, evals or the
   trainer. Its harness reaches the model through verifiers' own interception server, which relays each request in
-  the harness's own API to the episode's model address. The recorder renders and samples every request, so the
+  the harness's own API to the episode's model address. The gateway renders and samples every request, so the
   tokens and logprobs are recorded by this system and are exact. The adapter, `rollout-verifiers`, is a uv project of
   its own, locked apart from the platform: verifiers' pins never reach the platform's lock.
-- **The recorder now speaks the three APIs verifiers relays:** Chat Completions (verifiers' `null`, `bash` and most
+- **The gateway speaks the three APIs verifiers relays:** Chat Completions (verifiers' `null`, `bash` and most
   harnesses), Responses (Codex) and Messages (Claude Code), with streaming, tool calls, reasoning, errors and
   `Idempotency-Key` in each. This is also the front door for testing black-box harnesses against each other.
 - **The spike:** `primeintellect/gsm8k` 0.1.4 from the Environments Hub, Qwen/Qwen3-0.6B on vLLM. The base model
-  solved 36 of 100 starts of a frozen suite through `rollout eval`; verifiers' own `vf-eval`, against the recorder,
-  scored 0.39 on the same tasks, with the same outcome on 83 of 100 (both measured before the recorder closed
+  solved 36 of 100 starts of a frozen suite through `rollout eval`; verifiers' own `vf-eval`, against the gateway,
+  scored 0.39 on the same tasks, with the same outcome on 83 of 100 (both measured before the gateway closed
   Qwen3's thinking at its budget, so partly limited by finishing within 768 tokens). A LoRA run took 3 steps. The
   recorded logprobs differ from the trainer's, recomputed on the same tokens, by 0.0167 per token on average (median
   0.0007), as vLLM and the trainer always do here: the tokens are the ones sampled.
@@ -44,7 +44,7 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 | `@vf.reward` methods over a `Trace` | The episode's reward (their weighted sum) and `result` | Cleanly. `solved` is ours: a threshold on the reward |
 | `@vf.metric` | The episode's `result` | Cleanly |
 | A harness (`null`, `bash`, Codex, Claude Code) | A harness inside the environment, given a model address | Cleanly: verifiers runs it |
-| The interception server | The recorder over HTTP | Both stand between harness and model; verifiers' relays to ours |
+| The interception server | The gateway's APIs for harnesses | Both stand between harness and model; verifiers' relays to ours |
 | verifiers' renderers rebuilding tokens from requests | Our renderer rendering each request before sampling it | Ours records; verifiers' eval client records no tokens |
 | A runtime (`subprocess`, `docker`, `prime`, `modal`) | Where the episode runner runs the program | `subprocess` here; remote ones need a tunnel ([below](#runtimes-and-sandbox-leases)) |
 | `Env.run(task, agents)` with several agents | A program with several model slots | Not mapped: one address for every agent ([below](#multi-agent-environments)) |
@@ -76,7 +76,7 @@ starts of the test split with seeds 1 to 100 (93 distinct tasks), made before en
 
 verifiers' own eval ran as `vf-eval primeintellect/gsm8k --env.taskset.split test --env.agent.harness.id null
 --env.agent.runtime.type subprocess --client.base-url URL --client.api-key-var VARIABLE --select.include.idx …
---no-push`, against a recorder serving the same channel on `127.0.0.1:8801` with a key made for one session. The
+--no-push`, against a gateway serving the same channel on `127.0.0.1:8801` with a key made for one session. The
 logprobs were scored again with `rollout_lora.policy.Policy.logprobs`. Those two scripts are not in the repository.
 The runs below were played while the adapter was still resolved in the workspace's lock, except
 `e2e-prime-eval-standalone`, which played the same suite from the project's own lock.
@@ -88,9 +88,9 @@ loop, run as a uv script) in the `subprocess` runtime.
 
 **The channel.** Qwen/Qwen3-0.6B, renderer `qwen3`, `thinking_tokens = 512`, `answer_tokens = 256`, turns of at
 most 2,048 tokens, a LoRA adapter of rank 16. Qwen3 opens its own thinking (the `qwen3` renderer's `ThinkingFormat`
-has `prompt_opens=False`). The recorder now samples such thinking in two phases: room to open the block, a forced
-close at the budget if the model is still thinking, then the answer. The spike ran before that, when the recorder
-sampled Qwen3 in one phase and the two budgets acted as one cap of 768 sampled tokens: 71 of the base model's 100
+has `prompt_opens=False`). The gateway samples such thinking in two phases: room to open the block, a forced
+close at the budget if the model is still thinking, then the answer. The spike ran before it did, when Qwen3 was
+sampled in one phase and the two budgets acted as one cap of 768 sampled tokens: 71 of the base model's 100
 eval episodes and 26 of the 32 training episodes ran into it, mostly while still thinking, and scored 0. The solve
 rates below were measured then, and are limited partly by finishing within that cap.
 
@@ -101,7 +101,7 @@ rates below were measured then, and are limited partly by finishing within that 
 | `e2e-prime-lora` | `rollout train`, 8 groups of 4, 2 groups a step | 3 steps (2 groups had equal rewards and taught nothing); checkpoints `mkzlyrlnmwumvzlp` (released), `lmrzxkonrylyznox`, `vmwqpuouttquvwpx` |
 | `e2e-prime-eval-lora` | `rollout eval`, checkpoint `e2e-prime-lora:3` | solved 31 of 100 (mean reward 0.31) |
 | `e2e-prime-eval-standalone` | `rollout eval`, the base model again, from the adapter's own project and lock (`uv run --group spike`) | solved 39 of 100 (mean reward 0.39) |
-| `vf-eval` (not in the ledger) | verifiers' own eval of the suite's 93 tasks, its client pointed at a recorder serving the same channel, `--no-push` | mean reward 0.387 (0.390 over the suite's 100 starts) |
+| `vf-eval` (not in the ledger) | verifiers' own eval of the suite's 93 tasks, its client pointed at a gateway serving the same channel, `--no-push` | mean reward 0.387 (0.390 over the suite's 100 starts) |
 
 The two evals of the base model played each task once with the same channel and sampling, so they differ only by
 the draw: the same outcome on 83 of 100 starts, 7 solved only by ours and 10 only by verifiers'. Three steps of 8
@@ -121,13 +121,13 @@ trainer's numerical difference alone; later steps add staleness. Each step moved
 0.008.
 
 **Token exactness.** Every recorded segment of the base model's turns was scored again by `rollout_lora`'s policy
-(the base model, its adapter zero), token for token, against the logprobs the recorder kept:
+(the base model, its adapter zero), token for token, against the logprobs the gateway kept:
 
 | Segments | Sampled tokens | Mean \|recorded − trainer\| | Mean (recorded − trainer) | Median \|·\| | 99th percentile \|·\| | Largest |
 |---|---|---|---|---|---|---|
 | `e2e-prime-eval-base`, all 100 | 70,636 | 0.0167 | 0.0009 | 0.0007 | 0.154 | 0.53 |
 | `e2e-prime-lora`, the 20 sampled by the base model | 14,811 | 0.0169 | 0.0004 | 0.0006 | 0.169 | 0.44 |
-| `vf-eval`'s 93, recorded by the recorder | 67,013 | 0.0167 | 0.0006 | 0.0007 | 0.153 | 0.85 |
+| `vf-eval`'s 93, recorded by the gateway | 67,013 | 0.0167 | 0.0006 | 0.0007 | 0.153 | 0.85 |
 
 This is the 0.016 per token measured between this trainer and vLLM before ([LoRA trainer](../implementations/rollout-lora.md#measurements)).
 A token recorded out of place, or a prompt rendered differently from what was sampled, would show differences of
@@ -161,7 +161,7 @@ durable runner: its effects are recorded, and a sample repeated under its effect
 interception server, a new harness process, new samples. The harness's requests carry no `Idempotency-Key` (the
 official OpenAI and Anthropic Python clients send none by default; *unverified* for Codex and Claude Code), so a
 replayed request is sampled again; the
-recorder keeps the newer turn where the prompt repeats exactly ([what a session exports](../libraries/rollout-train/recorder.md#what-a-session-exports)),
+gateway keeps the newer turn where the prompt repeats exactly ([what a session exports](../libraries/rollout-train/recorder.md#what-a-session-exports)),
 and a single-turn episode loses nothing. A long multi-turn harness (Codex on a repository) loses the work done.
 Making it resumable would need verifiers to replay a trace into a harness, which it does not offer for subprocess
 harnesses (`SUPPORTS_RESUME` is about user turns over ACP, *unverified* for resuming a crashed rollout).
@@ -185,7 +185,7 @@ dataset again on every eval and selects by position or key.
 ### Sampling and caps
 
 verifiers' interception server owns sampling: it writes the run's `sampling` into each request it relays. The
-recorder ignores a client's sampling parameters, so `--sampling.temperature` and the like have no effect against
+gateway ignores a client's sampling parameters, so `--sampling.temperature` and the like have no effect against
 it; the channel samples as its binding says. A cap on the output is honoured.
 
 ### Ports and processes
@@ -201,7 +201,7 @@ config is a closed union of seven types (`subprocess`, `docker`, `podman`, `appt
 chosen by `type`. A remote runtime reaches the interception server through a tunnel: a Prime tunnel (which needs a
 Prime account) or one of your own (`tunnel.type = "custom"`, a URL and a port; it binds every interface).
 
-*Proposed:* the sandbox leases another agent is building could supply the runtime in one of two ways.
+*Proposed:* a sandbox pool ([sandboxes](../libraries/rollout/sandboxes.md)) could supply the runtime in one of two ways.
 
 1. **A lease as a container host.** The lease hands out a machine with Docker; verifiers' `docker` runtime runs on
    it (`DOCKER_HOST`), and the interception server is reached at the runner's address through a `custom` tunnel.
@@ -209,7 +209,7 @@ Prime account) or one of your own (`tunnel.type = "custom"`, a URL and a port; i
 2. **A lease as a verifiers runtime.** A `Runtime` subclass over the lease's exec and file calls. The closed config
    union means this needs a change in verifiers (or a patch of its union) to be selectable by `type`.
 
-Either way the model calls still go harness → interception server → the recorder, so tokens stay exact.
+Either way the model calls still go harness → interception server → the gateway, so tokens stay exact.
 
 ## How stable the v1 API looked
 
@@ -257,7 +257,7 @@ program, which verifiers would see as one agent with one endpoint.
 
 ## Unverified
 
-- Multi-agent verifiers environments, `bash`, Codex and Claude Code harnesses were not run against the recorder;
+- Multi-agent verifiers environments, `bash`, Codex and Claude Code harnesses were not run against the gateway;
   the Responses and Messages endpoints were tested with the official clients, not with Codex or Claude Code.
 - Whether harnesses other than `null` send `Idempotency-Key`.
 - Whether verifiers can resume a crashed subprocess rollout.

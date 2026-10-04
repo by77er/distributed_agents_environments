@@ -102,7 +102,7 @@ Proposals and designs (what could be built, and the records it would need), and 
 
 | Page | What it covers |
 |---|---|
-| [The policy graph](research/policy-dag.md) | The graph of checkpoints with what trains, serves and evaluates them: distillation (on and off policy), trainers and their queues, the way from written weights to served ones, evaluations |
+| [The checkpoint graph](research/policy-dag.md) | The graph of checkpoints with what trains and serves them: distillation (on and off policy), shared trainers and their queues, the way from written weights to served ones |
 | [Curricula](research/curricula.md) | Building training curricula and frozen evaluation suites from a run's data |
 | [Thinking Machines' API](research/thinking-machines.md) | Training and sampling through Tinker as a trainer and an engine of their own |
 | [Prime Intellect's verifiers](research/prime-compat.md) | verifiers environments run here: what maps, a spike on a Hub environment, how stable the API is, and exporting ours |
