@@ -1,7 +1,8 @@
 """How a machine is doing: its memory, its accelerators, and the disk a directory is on.
 
-A runner measures its machine in each heartbeat (`rollout_train.presence`); the monitor shows those, so it says how
-the machines that run things are doing, wherever it is itself.
+A process that beats (a runner, an engine host, a gateway replica, a launcher) measures its machine in each heartbeat
+(`rollout_train.presence`); the monitor shows those, so it says how the machines that run things are doing, wherever it
+is itself.
 """
 
 import shutil
