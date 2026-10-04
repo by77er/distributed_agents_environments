@@ -1,11 +1,11 @@
-// A suite: the version its name points to (an eval configuration), every subject that played any of its versions start
-// by start, two subjects of one version compared, the form that edits it (a new version), and the form that asks a
-// launcher to play it with a checkpoint (an eval: nothing trained).
+// A suite: the version its name points to (an eval configuration of one or more environments, its entries), every subject
+// that played any of its versions start by start, two subjects of one version compared, the form that edits it (a new
+// version), and the form that asks a launcher to play it with a checkpoint (an eval: nothing trained).
 
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useEvals, useKnown, useLaunches, useSystem } from "../api/queries";
-import type { EvalSuite, SuiteVersion } from "../api/types";
+import type { EvalSuite, SuiteEntry, SuiteVersion } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
 import { anySolved, Played, shareOf, shareText, startName, startShare, type Subject, subjectText, SuiteMatrix } from "../components/evals";
 import { LaunchList } from "../components/launches";
@@ -14,17 +14,10 @@ import { SuiteForm } from "../components/suites";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
 import { Ago } from "../layout/runs";
 import { clock, figure } from "../lib/format";
+import { readable } from "../lib/environments";
 import { evalPlace, evalsPlace } from "../lib/places";
-import { ALL, currentOf, playedVersion, suiteName, versionsOf, versionTag } from "../lib/suites";
+import { ALL, chosenText, currentOf, entryStarts, limitsText, playedVersion, suiteName, versionsOf, versionTag } from "../lib/suites";
 import { NoLauncher } from "./NewRun";
-
-/** A version's sampling limits, in a few words (none: the channel's own). */
-export const limitsText = (version: SuiteVersion): string =>
-  [version.thinking_tokens != null ? `thinking ${version.thinking_tokens}` : "", version.answer_tokens != null ? `answer ${version.answer_tokens}` : ""].filter(Boolean).join(" · ");
-
-/** How a version's starts were chosen, in a few words. */
-export const chosenText = (version: SuiteVersion): string =>
-  version.chosen === "eval data" ? `eval data ${version.eval_data ?? ""}` : version.chosen === "starts" ? "given starts" : "rows and seeds";
 
 export function Suite({ name }: { name: string }) {
   const { data: evals } = useEvals();
@@ -43,30 +36,24 @@ export function Suite({ name }: { name: string }) {
   const ranked = [...suite.subjects].sort((a, b) => (score(b) ?? -Infinity) - (score(a) ?? -Infinity));
   const compared = ranked.filter(subject => playedVersion(subject, name) === shown.id);  // (subjects compare within a version)
   const listed = picked === ALL ? ranked : compared;
-  const rows = [...new Set(shown.starts.map(start => start.task))];
-  const seeds = [...new Set(shown.starts.map(start => String(start.seed)))];
-  const limits = limitsText(shown);
+  const one = shown.entries.length === 1;  // (a best of several environments would weigh one's rewards against another's)
   const action = <button type="button" className="action" onClick={() => setEditing(!editing)}>{editing ? "Close" : "Edit"}</button>;
   return (
     <>
       <Head title={<span className="head-with-action">{suite.suite}{action}</span>}>
         <Specs>
           <Spec label="version">{versionTag(shown.id)}{shown.id === current.id ? (versions.length > 1 ? ` of ${versions.length}` : "") : ` · newest ${versionTag(current.id)}`}</Spec>
-          <Spec label="environment">{shown.environment ?? "–"}{shown.environment_version ? ` · ${shown.environment_version}` : ""}</Spec>
-          <Spec label="starts">{chosenText(shown)}</Spec>
-          <Spec label="rows">{rows.join(", ")}</Spec>
-          <Spec label="seeds">{seeds.join(", ")}</Spec>
-          <Spec label="episodes per start">{shown.episodes}</Spec>
-          {limits ? <Spec label="limits">{limits}</Spec> : null}
+          {one ? <EntrySpecs version={shown} entry={shown.entries[0]} /> : <Spec label="environments">{shown.entries.length}</Spec>}
           {shown.held_out ? <Spec label="held out" kind="good">yes</Spec> : null}
           {shown.made ? <Spec label="made">{clock(shown.made)}</Spec> : null}
         </Specs>
       </Head>
+      {one ? null : <Entries version={shown} />}
       {editing ? <SuiteForm key={current.id} title={`Edit ${suite.suite}`} name={suite.suite} version={current} onDone={() => setEditing(false)} onCancel={() => setEditing(false)} /> : null}
       <Kpis>
         <Kpi label="Starts" value={String(shown.starts.length)} note={versionTag(shown.id)} />
         <Kpi label="Played by" value={String(listed.length)} />
-        <Kpi label="Best" value={compared[0] ? (said ? shareText(shareOf(compared[0])) : figure(compared[0].reward)) : "–"} note={compared[0] ? <SubjectLabel subject={compared[0]} /> : versionTag(shown.id)} />
+        {one ? <Kpi label="Best" value={compared[0] ? (said ? shareText(shareOf(compared[0])) : figure(compared[0].reward)) : "–"} note={compared[0] ? <SubjectLabel subject={compared[0]} /> : versionTag(shown.id)} /> : null}
         <Kpi label="Playing" value={String(playing.length)} note={playing.map(each => each.name).join(", ")} />
       </Kpis>
       {launched ? (launched.launchers.length ? <PlayForm suite={suite} suites={evals.suites} launchers={launched.launchers} system={system} title="Run this suite" /> : <NoLauncher ledger={system.ledger_at} />) : null}
@@ -86,6 +73,45 @@ export function Suite({ name }: { name: string }) {
       </Card>
       {compared.length > 1 && said ? <Compare key={shown.id} version={shown} subjects={compared} /> : null}
     </>
+  );
+}
+
+/** One entry of a version, as the head of a suite of one environment says it. */
+function EntrySpecs({ version, entry }: { version: SuiteVersion; entry: SuiteEntry }) {
+  const starts = entryStarts(version, entry), limits = limitsText(entry);
+  return (
+    <>
+      <Spec label="environment"><span title={entry.environment ?? ""}>{readable(entry.environment)}</span>{entry.environment_version ? ` · ${entry.environment_version}` : ""}</Spec>
+      <Spec label="starts">{chosenText(entry)}</Spec>
+      <Spec label="rows">{[...new Set(starts.map(start => start.task))].join(", ")}</Spec>
+      <Spec label="seeds">{[...new Set(starts.map(start => String(start.seed)))].join(", ")}</Spec>
+      <Spec label="episodes per start">{entry.episodes}</Spec>
+      {limits ? <Spec label="limits">{limits}</Spec> : null}
+    </>
+  );
+}
+
+/** A version's entries, one environment each. */
+function Entries({ version }: { version: SuiteVersion }) {
+  return (
+    <Card title="Environments" note={versionTag(version.id)}>
+      <Table
+        heads={[["environment"], ["version"], ["starts"], ["rows"], ["seeds"], ["episodes", "n"], ["limits"]]}
+        keys={version.entries.map(entry => entry.environment ?? String(entry.offset))}
+        rows={version.entries.map(entry => {
+          const starts = entryStarts(version, entry);
+          return [
+            <span title={entry.environment ?? ""}><b>{readable(entry.environment)}</b>{entry.held_out ? <small className="faint"> held out</small> : null}</span>,
+            entry.environment_version ?? "–",
+            `${entry.starts} · ${chosenText(entry)}`,
+            [...new Set(starts.map(start => start.task))].join(", "),
+            [...new Set(starts.map(start => String(start.seed)))].join(", "),
+            entry.episodes,
+            limitsText(entry) || "–",
+          ];
+        })}
+      />
+    </Card>
   );
 }
 

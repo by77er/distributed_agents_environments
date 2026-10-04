@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
-import { shareText } from "../components/evals";
+import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
 import { episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
@@ -246,7 +246,7 @@ function EvalsTree({ place }: { place: Place }) {
                     <span className={`dot${each.done ? "" : " alive"}`} />
                     <span className="name" title={each.name}>{each.checkpoint ? known.short(each.checkpoint) : "base model"}</span>
                     {differ ? <span className="version">{versionTag(each.version)}</span> : null}
-                    <span className="tag">{each.done ? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`}</span>
+                    <span className="tag">{each.done ? entriesText(each.entries) ?? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`}</span>
                   </Node>
                 ))}
               </div>

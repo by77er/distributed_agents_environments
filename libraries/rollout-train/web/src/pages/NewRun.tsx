@@ -5,7 +5,8 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useEnvironment, useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
-import type { Launcher, OfferedProfile } from "../api/types";
+import type { EvalSuite, Launcher, OfferedProfile } from "../api/types";
+import { EnvironmentPicker } from "../components/environments";
 import { Card, Empty, Head, SectionTitle } from "../components/ui";
 import { Ago } from "../layout/runs";
 import { nameOf } from "../lib/model";
@@ -79,7 +80,11 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const [suite, setSuite] = useState<string | null>(null);  // (none chosen: the profile's, else the environment's eval data)
   const [every, setEvery] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<string | null>(null);
-  const suites = (evals?.suites ?? []).filter(each => !each.environment || each.environment === environment);
+  const playable = (each: EvalSuite) => {  // (a suite whose every environment a launcher of the profile offers)
+    const wanted = currentOf(each).environments.filter((environment): environment is string => Boolean(environment));
+    return (chosen?.launchers ?? []).some(launcher => !launcher.environments?.length || wanted.every(environment => launcher.environments.includes(environment)));
+  };
+  const suites = (evals?.suites ?? []).filter(playable);
   const unplayed = Object.keys(described?.evals ?? {}).filter(each => !suites.some(made => made.suite === each));
   const own = Object.keys(described?.evals ?? {})[0];
   const chosenSuite = suite ?? (shown(defaults[EVALS_SUITE]) || own || "");
@@ -143,11 +148,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             </label>
             <label className="field">
               <span>Environment</span>
-              {environments.length ? (
-                <select value={environment} onChange={event => { setEnvironment(event.target.value); setSuite(null); }}>
-                  {environments.map(each => <option key={each} value={each}>{each}</option>)}
-                </select>
-              ) : <input value={environment} onChange={event => { setEnvironment(event.target.value); setSuite(null); }} placeholder="module:name" required spellCheck={false} />}
+              <EnvironmentPicker value={environment} onChange={picked => { setEnvironment(picked); setSuite(null); }} launching={environments.length > 0} also={environments} />
             </label>
             <label className="field">
               <span>Starts from</span>
@@ -224,7 +225,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             <label className="field">
               <span>Episodes per start</span>
               <input type="number" min={1} value={episodes ?? shown(defaults[EVALS_EPISODES])} onChange={event => setEpisodes(event.target.value)} disabled={!evaluating}
-                placeholder={suiteEpisodes ? String(currentOf(suiteEpisodes).episodes) : "suite's"} />
+                placeholder={suiteEpisodes && new Set(currentOf(suiteEpisodes).entries.map(entry => entry.episodes)).size === 1 ? String(currentOf(suiteEpisodes).entries[0].episodes) : "suite's"} />
               {evalsAsked.errors[EVALS_EPISODES] ? <small className="error-text">{evalsAsked.errors[EVALS_EPISODES]}</small> : null}
             </label>
           </div>

@@ -3,9 +3,11 @@
 
 import { Link } from "react-router-dom";
 import { useCheckpointEvals, useEvals, useKnown, usePath } from "../api/queries";
+import type { CheckpointEval } from "../api/types";
 import { Ago } from "../layout/runs";
 import { clock, figure, percent } from "../lib/format";
 import { evalPlace, runPlace, suitePlace } from "../lib/places";
+import { readable } from "../lib/environments";
 import { pathChart } from "../lib/scores";
 import { versionsOf, versionTag } from "../lib/suites";
 import { LineChart, Sized } from "./charts";
@@ -30,6 +32,19 @@ export function PathCard({ checkpoint }: { checkpoint: string }) {
   );
 }
 
+/** Each environment's share solved (or mean reward) of an eval of several, one a line. */
+function EntryFigures({ entries, solved = false }: { entries: NonNullable<CheckpointEval["entries"]>; solved?: boolean }) {
+  return (
+    <span className="stacked">
+      {entries.map(each => (
+        <span key={each.environment ?? ""} title={each.environment ?? ""}>
+          <small className="faint">{readable(each.environment)}</small> {solved ? (each.share == null ? "–" : percent(each.share)) : figure(each.reward)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** Every eval a checkpoint had, by hand or by its run's schedule, newest first: one opens the eval. */
 export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
   const { data } = useCheckpointEvals(checkpoint);
@@ -45,8 +60,8 @@ export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
           keys={evals.map(each => each.run)}
           rows={evals.map(each => [
             <><Link to={suitePlace(each.suite)} className="linkish" onClick={event => event.stopPropagation()}>{each.suite}</Link>{several.has(each.suite) ? <span className="tag-version">{versionTag(each.version)}</span> : null}</>,
-            each.share == null ? "–" : <span title={`${each.solved} of ${each.played}`}>{percent(each.share)}</span>,
-            figure(each.reward),
+            (each.entries?.length ?? 0) > 1 ? <EntryFigures entries={each.entries!} solved /> : each.share == null ? "–" : <span title={`${each.solved} of ${each.played}`}>{percent(each.share)}</span>,
+            (each.entries?.length ?? 0) > 1 ? <EntryFigures entries={each.entries!} /> : figure(each.reward),
             <span title={`${each.episodes} of each start`}>{each.played === each.expected ? each.played : `${each.played} of ${each.expected}`}</span>,
             each.asked_by === "schedule" && each.by ? (
               <Link to={runPlace(each.by)} className="linkish" onClick={event => event.stopPropagation()}>{known.run(each.by)}{each.step != null ? ` · S${each.step}` : ""}</Link>

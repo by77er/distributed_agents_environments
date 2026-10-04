@@ -72,7 +72,7 @@ from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
 from rollout_train.monitor.machines import kind_of, machines
-from rollout_train.monitor.scores import evals_of, path_of
+from rollout_train.monitor.scores import entry_of, evals_of, path_of
 from rollout_train.monitor.statistics import newest, reported, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
 from rollout_train.record import (
@@ -629,12 +629,19 @@ class System:
             suite = str(latest.get("suite"))
             results: Any = tables.get(subject_table(suite, run, "results"), {})
             who: Any = tables.get(subject_table(suite, run, "subject"), {}).get("subject") or latest
+            parts = parts_of(tables, suite, run)
+            starts_of = [len(cast(dict[str, Any], tables.get(table(str(part["run"]), GROUPS), {}))) for part in parts]
             groups = [
-                group for part in parts_of(tables, suite, run)
+                group for part in parts
                 for group in cast(dict[str, Any], tables.get(table(str(part["run"]), GROUPS), {})).values()
             ]  # fmt: skip
             expected = sum(int(group.get("episodes") or 0) for group in groups)
-            solved = _solved_count(results, eval_episodes(tables, suite, run))
+            episodes = eval_episodes(tables, suite, run)
+            solved = _solved_count(results, episodes)
+            entries: list[dict[str, Any]] = []  # (each environment's, for an eval of several)
+            for part, count in zip(parts, starts_of, strict=True) if len(parts) > 1 else ():
+                said = entry_of(str(part["environment"]), results, episodes, int(part["offset"]), count)
+                entries.append({key: said[key] for key in ("environment", "played", "solved", "share", "reward")})
             evals.append(
                 {
                     "run": run,
@@ -647,6 +654,7 @@ class System:
                     "expected": expected,
                     "solved": solved,
                     "done": bool(groups) and len(results) >= expected,
+                    "entries": entries,
                 }
             )
         evals.sort(key=lambda each: -(each["started"] or 0.0))

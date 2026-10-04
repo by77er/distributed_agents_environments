@@ -7,7 +7,8 @@ import type { Suite } from "../api/types";
 import { figure, percent } from "../lib/format";
 import type { Known } from "../lib/model";
 import { evalPlace, runPlace } from "../lib/places";
-import { ALL, currentOf, gridRows, type Subject, versionGroups, versionTag } from "../lib/suites";
+import { readable } from "../lib/environments";
+import { ALL, type Block, blockScore, blocksOf, currentOf, gridRows, type Subject, versionGroups, versionTag } from "../lib/suites";
 import { CheckpointTag } from "./checkpoints";
 import { solvedClass } from "./ui";
 
@@ -81,10 +82,10 @@ export function columnsOf(subjects: Subject[], known: Known): Column[] {
 
 /** A column's heading: the checkpoint (its short id, what its weights are, its bookmarks) and its step, or the base
  * model's name; under it, how many episodes of each start (opening the eval). */
-function SubjectHead({ subject, runs, className = "" }: { subject: Subject; runs: Set<string>; className?: string }) {
+function SubjectHead({ subject, runs, episodes, className = "" }: { subject: Subject; runs: Set<string>; episodes?: number; className?: string }) {
   const known = useKnown();
   const checkpoint = known.checkpoint(subject.checkpoint);
-  const each = `${subject.episodes ?? 1} per start`;
+  const each = `${episodes ?? subject.episodes ?? 1} per start`;
   const scheduled = subject.asked_by && subject.asked_by !== "by hand" ? " · scheduled" : "";  // (asked for by a run)
   return (
     <th className={`subject${className}`}>
@@ -97,22 +98,26 @@ function SubjectHead({ subject, runs, className = "" }: { subject: Subject; runs
   );
 }
 
-/** Every subject of a suite, start by start: what each solved, and in all. Columns stand by run, then depth; a column
 /** Every subject of a suite, start by start: what each solved, and in all. Columns stand by the version each subject
- * played (newest first, a version's columns marked off from the next), then by run and depth; a row is a start, empty
- * under a version that does not have it. A column opens the eval that played it. `picked` is a version's id, or `ALL`. */
+ * played (newest first, a version's columns marked off from the next), within a version of several environments by its
+ * entry (a column group each, with each subject's total at that entry), then by run and depth; a row is a start, empty
+ * under a group that does not have it. A column opens the eval that played it. `picked` is a version's id, or `ALL`. */
 export function SuiteMatrix({ suite, subjects, picked = ALL }: { suite: Suite; subjects: Subject[]; picked?: string }) {
   const { data: system } = useSystem();
   const known = useKnown();
   const runs = new Set((system?.runs ?? []).map(run => run.run)), said = anySolved(subjects);
   const current = currentOf(suite).id;
   const groups = versionGroups(suite, subjects, picked).filter(group => group.subjects.length);
-  const several = groups.length > 1;
-  const rows = gridRows(groups.map(group => group.version));
-  const stood = groups.map(group => ({ group, columns: columnsOf(group.subjects, known) }));
-  const ordered = stood.flatMap(({ group, columns }) =>
-    columns.flatMap(column => column.subjects).map((subject, place) => ({ subject, version: group.version, first: several && place === 0 })));
-  const edge = (first: boolean) => (first ? " version-start" : "");
+  const blocks = blocksOf(groups);
+  const several = groups.length > 1, entries = blocks.some(block => block.entry != null);
+  const rows = gridRows(blocks);
+  const stood = blocks.map(block => ({ block, columns: columnsOf(block.subjects, known) }));
+  const ordered = stood.flatMap(({ block, columns }, at) =>
+    columns.flatMap(column => column.subjects).map((subject, place) => ({
+      subject, block, edge: place > 0 ? "" : several && (at === 0 || stood[at - 1].block.version.id !== block.version.id) ? " version-start" : entries && at > 0 ? " entry-start" : "",
+    })));
+  const edgeOf = (block: Block, place: number) => ordered.find(each => each.block.key === block.key && place === 0)?.edge ?? "";
+  const heads = 2 + (several ? 1 : 0) + (entries ? 1 : 0);
   return (
     <>
       <div className="table">
@@ -120,46 +125,59 @@ export function SuiteMatrix({ suite, subjects, picked = ALL }: { suite: Suite; s
           <thead>
             {several ? (
               <tr className="groups versions">
-                <th rowSpan={3}>start</th>
+                <th rowSpan={heads}>start</th>
                 {groups.map(group => (
-                  <th key={group.version.id} colSpan={group.subjects.length} className="group version-start">
+                  <th key={group.version.id} colSpan={group.subjects.length * Math.max(1, group.version.entries.length > 1 ? group.version.entries.length : 1)} className="group version-start">
                     {versionTag(group.version.id)}{group.version.id === current ? " · newest" : ""}
                   </th>
                 ))}
               </tr>
             ) : null}
+            {entries ? (
+              <tr className="groups entries">
+                {several ? null : <th rowSpan={heads}>start</th>}
+                {blocks.map(block => (
+                  <th key={block.key} colSpan={block.subjects.length} className={`group${edgeOf(block, 0)}`} title={block.entry?.environment ?? ""}>
+                    {block.entry ? readable(block.entry.environment) : ""}
+                  </th>
+                ))}
+              </tr>
+            ) : null}
             <tr className="groups">
-              {several ? null : <th rowSpan={2}>start</th>}
-              {stood.flatMap(({ group, columns }) => columns.map((column, place) => (
-                <th key={`${group.version.id}:${column.key}`} colSpan={column.subjects.length} className={`group${edge(several && place === 0)}`}>
+              {several || entries ? null : <th rowSpan={2}>start</th>}
+              {stood.flatMap(({ block, columns }) => columns.map((column, place) => (
+                <th key={`${block.key}:${column.key}`} colSpan={column.subjects.length} className={`group${place === 0 ? edgeOf(block, 0) : ""}`}>
                   {column.run && runs.has(column.run) ? <Link to={runPlace(column.run)} className="linkish">{column.label}</Link> : column.label}
                 </th>
               )))}
             </tr>
-            <tr>{ordered.map(({ subject, first }) => <SubjectHead key={subject.subject} subject={subject} runs={runs} className={edge(first)} />)}</tr>
+            <tr>{ordered.map(({ subject, block, edge }) => <SubjectHead key={`${block.key}:${subject.subject}`} subject={subject} runs={runs} episodes={blockScore(subject, block).episodes} className={edge} />)}</tr>
           </thead>
           <tbody>
             <tr className="total">
               <td>{said ? "solved" : "mean reward"}</td>
-              {ordered.map(({ subject, version, first }) => {
-                const expected = (subject.starts || version.starts.length) * (subject.episodes ?? 1);
+              {ordered.map(({ subject, block, edge }) => {
+                const score = blockScore(subject, block);
+                const starts = block.entry ? block.entry.starts : subject.starts || block.version.starts.length;
+                const each = block.entry ? (score.episodes ?? subject.episodes ?? block.entry.episodes) : (subject.episodes ?? 1);
+                const expected = starts * each;
                 return (
-                  <td key={subject.subject} className={`n${edge(first)}`} title={`mean reward ${figure(subject.reward)}`}>
-                    {subject.solved == null ? <b>{figure(subject.reward)}</b> : <b>{subject.solved}/{subject.played}</b>}
-                    {subject.played < expected ? <small className="faint"> {subject.solved == null ? `${subject.played} of ${expected}` : `of ${expected}`}</small> : null}
-                    {subject.solved == null ? null : <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, expected)).toFixed(1)}%` }} /></div>}
+                  <td key={`${block.key}:${subject.subject}`} className={`n${edge}`} title={`mean reward ${figure(score.reward)}`}>
+                    {score.solved == null ? <b>{figure(score.reward)}</b> : <b>{score.solved}/{score.played}</b>}
+                    {score.played < expected ? <small className="faint"> {score.solved == null ? `${score.played} of ${expected}` : `of ${expected}`}</small> : null}
+                    {score.solved == null ? null : <div className="track"><i style={{ width: `${((100 * score.solved) / Math.max(1, expected)).toFixed(1)}%` }} /></div>}
                   </td>
                 );
               })}
             </tr>
             {rows.map(row => (
               <tr key={row.key}>
-                <td className="key" title={row.start.title ?? ""}>{startName(row.start)}</td>
-                {ordered.map(({ subject, version, first }) => {
-                  const number = row.at[version.id];
+                <td className="key" title={[row.start.title, row.start.environment].filter(Boolean).join(" · ")}>{startName(row.start)}</td>
+                {ordered.map(({ subject, block, edge }) => {
+                  const number = row.at[block.key];
                   return number == null
-                    ? <td key={subject.subject} className={`cell-result absent${edge(first)}`} title={`not in ${versionTag(version.id)}`} />
-                    : <td key={subject.subject} className={`cell-result${edge(first)}`}><Played subject={subject} start={{ ...row.start, start: number }} /></td>;
+                    ? <td key={`${block.key}:${subject.subject}`} className={`cell-result absent${edge}`} title={`not in ${versionTag(block.version.id)}${block.entry ? ` ${readable(block.entry.environment)}` : ""}`} />
+                    : <td key={`${block.key}:${subject.subject}`} className={`cell-result${edge}`}><Played subject={subject} start={{ ...row.start, start: number }} /></td>;
                 })}
               </tr>
             ))}
@@ -173,6 +191,11 @@ export function SuiteMatrix({ suite, subjects, picked = ALL }: { suite: Suite; s
     </>
   );
 }
+
+/** Each environment's share solved (else its mean reward) of an eval of several, in a few words; none for an eval of
+ * one. */
+export const entriesText = (entries: { share: number | null; reward: number | null }[] | undefined): string | null =>
+  (entries?.length ?? 0) > 1 ? entries!.map(each => (each.share != null ? percent(each.share) : figure(each.reward))).join(" · ") : null;
 
 /** A share, or a dash for none. */
 export const shareText = (share: number | null): string => (share == null ? "–" : percent(share));

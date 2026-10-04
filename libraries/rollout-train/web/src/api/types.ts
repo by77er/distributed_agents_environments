@@ -145,6 +145,8 @@ export interface Run {
   /** For an eval a training run's schedule asked for: that run, and the step whose checkpoint it plays. */
   by?: string | null;
   by_step?: number | null;
+  /** For a run that plays one entry of an eval of several environments: that eval's run. */
+  part_of?: string | null;
 }
 
 /** A checkpoint: where it came from, what made it, and what is kept of it. */
@@ -393,6 +395,8 @@ export interface LaunchAsked {
   suite?: string | null;
   /** An eval's episodes of each start; none: the suite's own. */
   episodes?: number | null;
+  /** Every other environment it plays: an eval's suite's, a training run's evals' suite's. */
+  environments?: string[];
 }
 
 export type LaunchState = "asked" | "claimed" | "running" | "stopping" | "ended" | "failed" | "stopped";
@@ -615,10 +619,11 @@ export interface Worker {
   sample: boolean;
 }
 
-/** A start of a suite's version: its number in the version, its row and seed, and what it is in every version that has
- * it (`identity`). */
+/** A start of a suite's version: its number in the version, its entry's environment, its row and seed, and what it is in
+ * every version that has it (`identity`). */
 export interface SuiteStart {
   start: string;
+  environment?: string | null;
   task: string;
   seed: number | string;
   title?: string;
@@ -628,13 +633,11 @@ export interface SuiteStart {
 /** How a version's starts were chosen. */
 export type Chosen = "eval data" | "rows and seeds" | "starts";
 
-/** One version of a suite: an eval configuration, never changed. */
-export interface SuiteVersion {
-  id: string;
-  number: number;
+/** One environment of a suite's version: its starts (how many, and how many of the version's come before its first:
+ * `offset`), how they were chosen, its episodes of each start and its sampling limits. */
+export interface SuiteEntry {
   environment: string | null;
   environment_version: string | null;
-  made: number | null;
   chosen: Chosen;
   eval_data: string | null;
   rows: string[] | null;
@@ -643,8 +646,31 @@ export interface SuiteVersion {
   episodes: number;
   thinking_tokens: number | null;
   answer_tokens: number | null;
+  offset: number;
+  starts: number;
+}
+
+/** One version of a suite: an eval configuration of one or more environments (its entries), never changed. */
+export interface SuiteVersion {
+  id: string;
+  number: number;
+  environments: (string | null)[];
+  made: number | null;
+  held_out: boolean;
   edited_from: string | null;
+  entries: SuiteEntry[];
   starts: SuiteStart[];
+}
+
+/** How a subject did at one entry of the version it played. */
+export interface EntryScore {
+  environment: string | null;
+  /** Its episodes of each start of the entry. */
+  episodes?: number;
+  played: number;
+  /** None: none of its episodes said whether it solved its start. */
+  solved: number | null;
+  reward: number | null;
 }
 
 export interface Suite {
@@ -662,7 +688,8 @@ export interface Suite {
     checkpoint?: string;
     model?: string;
     asked_by?: string;
-    episodes?: number;
+    /** Its episodes of each start; none where its entries play different numbers. */
+    episodes?: number | null;
     /** The version it played, by id, and how many starts that version has. */
     version?: string;
     starts?: number;
@@ -671,13 +698,15 @@ export interface Suite {
     solved: number | null;
     reward?: number | null;
     results: Record<string, { solved: boolean | null; reward: number; run_id?: string }[]>;
+    /** How it did at each entry of the version it played. */
+    entries?: EntryScore[];
   }[];
   sample: boolean;
 }
 
-/** A suite as the Evals page has it: a suite, with the environment it was drawn from and when it was made. */
+/** A suite as the Evals page has it: a suite, with the environments its newest version plays and when it was made. */
 export interface EvalSuite extends Suite {
-  environment: string | null;
+  environments: (string | null)[];
   made: number | null;
 }
 
@@ -694,6 +723,8 @@ export interface EvalRun {
   expected: number;
   solved: number | null;
   done: boolean;
+  /** For a suite of several environments, how it did at each (the share solved, where its episodes say). */
+  entries?: (EntryScore & { share: number | null })[];
 }
 
 export interface Evals {
@@ -755,6 +786,8 @@ export interface CheckpointEval {
   started: number | null;
   at: number | null;
   done: boolean;
+  /** Its score at each entry of the version it played. */
+  entries?: (EntryScore & { share: number | null })[];
 }
 
 export interface CheckpointEvals {
@@ -762,13 +795,14 @@ export interface CheckpointEvals {
   evals: CheckpointEval[];
 }
 
-/** A point's score at a suite, over every eval of it there. */
+/** A point's score at a suite, over every eval of it there; and at each of its entries (by environment). */
 export interface PathScore {
   reward: number | null;
   /** The share solved; none where its episodes do not say. */
   solved: number | null;
   played: number;
   evals: string[];
+  entries?: Record<string, { reward: number | null; solved: number | null; played: number }>;
 }
 
 /** A point on a checkpoint's line: the base model (depth 0, no id), then each checkpoint along first parents. */
@@ -789,7 +823,19 @@ export interface Path {
   checkpoint: string;
   points: PathPoint[];
   /** Each version any point was evaluated on: `suite` is its id (what `scores` are keyed by), `label` how it is said. */
-  suites: { suite: string; environment: string | null; name?: string; number?: number; label?: string }[];
+  suites: { suite: string; environments: string[]; name?: string; number?: number; label?: string }[];
+}
+
+/** An environment the system knows of: offered by a launcher alive, started on by a run, or played by a suite. */
+export interface KnownEnvironment {
+  /** As `module:name`. */
+  environment: string;
+  /** In a word. */
+  name: string;
+  /** Its versions seen, in runs' starts and suites' entries. */
+  versions: string[];
+  /** Whether a launcher alive offers it. */
+  offered: boolean;
 }
 
 /** What the suites' forms need of an environment: its version, its rows, and its eval data (how many starts each). */

@@ -1,7 +1,8 @@
-// A suite's versions as the page has them: which version each eval played, a suite's subjects grouped by version with
-// every start of the versions shown, and what the forms that make and edit a suite ask for.
+// A suite's versions as the page has them: which version each eval played, a suite's subjects grouped by version (and,
+// within a version of several environments, by entry) with every start of the versions shown, and what the forms that
+// make and edit a suite ask for.
 
-import type { Chosen, Suite, SuiteStart, SuiteVersion } from "../api/types";
+import type { Chosen, EntryScore, Suite, SuiteEntry, SuiteStart, SuiteVersion } from "../api/types";
 
 export type Subject = Suite["subjects"][number];
 
@@ -25,13 +26,17 @@ export const versionTag = (id: string | null | undefined): string => `v${version
 /** The suite a reference names (`NAME` or `NAME@N`). */
 export const suiteName = (reference: string): string => reference.split("@")[0];
 
-/** Every version of a suite, oldest first (a suite the monitor says no versions of: its version 1). */
-export function versionsOf(suite: Suite & { environment?: string | null }): SuiteVersion[] {
+/** Every version of a suite, oldest first (a suite the monitor says no versions of: its version 1, of one entry). */
+export function versionsOf(suite: Suite & { environments?: (string | null)[] }): SuiteVersion[] {
   if (suite.versions?.length) return suite.versions;
+  const environment = suite.environments?.[0] ?? null;
   return [{
-    id: `${suite.suite}@1`, number: 1, environment: suite.environment ?? null, environment_version: null, made: null,
-    chosen: DRAWN, eval_data: null, rows: null, seeds: null, held_out: false, episodes: 1, thinking_tokens: null,
-    answer_tokens: null, edited_from: null, starts: suite.starts,
+    id: `${suite.suite}@1`, number: 1, environments: [environment], made: null, held_out: false, edited_from: null,
+    entries: [{
+      environment, environment_version: null, chosen: DRAWN, eval_data: null, rows: null, seeds: null, held_out: false,
+      episodes: 1, thinking_tokens: null, answer_tokens: null, offset: 0, starts: suite.starts.length,
+    }],
+    starts: suite.starts,
   }];
 }
 
@@ -44,28 +49,22 @@ export function currentOf(suite: Suite): SuiteVersion {
 /** The version a subject played, by id (one from before versions: version 1). */
 export const playedVersion = (subject: Subject, suite: string): string => subject.version ?? `${suite}@1`;
 
-/** A start, as every version that has it says it: what the monitor calls it, else its row and seed. */
-export const startIdentity = (start: SuiteStart): string => start.identity ?? `${start.task}|${start.seed}`;
+/** A version's starts of one entry. */
+export const entryStarts = (version: SuiteVersion, entry: SuiteEntry): SuiteStart[] =>
+  version.starts.slice(entry.offset, entry.offset + entry.starts);
 
-/** One start of the grid, and its number in each version that has it (by the version's id). */
-export interface GridRow {
+/** A start, as every version that has it says it: its environment, and what the monitor calls it, else its row and
+ * seed. */
+export const startIdentity = (start: SuiteStart): string => `${start.environment ?? ""}|${start.identity ?? `${start.task}|${start.seed}`}`;
+
+/** A group of the grid's columns: a version, or one entry of a version of several. `key` is what its columns' cells are
+ * found by. */
+export interface Block {
   key: string;
-  start: SuiteStart;
-  at: Record<string, string>;
-}
-
-/** Every start of some versions, each once: the newest version's in its order, then those only older ones have. */
-export function gridRows(versions: SuiteVersion[]): GridRow[] {
-  const rows = new Map<string, GridRow>();
-  for (const version of [...versions].sort((a, b) => b.number - a.number)) {
-    for (const start of version.starts) {
-      const key = startIdentity(start);
-      const row = rows.get(key) ?? { key, start, at: {} };
-      row.at[version.id] = start.start;
-      rows.set(key, row);
-    }
-  }
-  return [...rows.values()];
+  version: SuiteVersion;
+  /** The entry, for a version of several; none: every start of the version. */
+  entry: SuiteEntry | null;
+  subjects: Subject[];
 }
 
 /** A version's subjects, as the grid stands them together. */
@@ -84,8 +83,48 @@ export function versionGroups(suite: Suite, subjects: Subject[], picked: string)
     .filter(group => group.subjects.length || group.version.id === picked);
 }
 
-/** What a suite's form has, as typed. */
-export interface SuiteFields {
+/** The grid's column groups: a block for each version shown, and within a version of several environments one for each
+ * of its entries, in order. */
+export function blocksOf(groups: VersionGroup[]): Block[] {
+  return groups.flatMap(({ version, subjects }): Block[] =>
+    version.entries.length > 1
+      ? version.entries.map(entry => ({ key: `${version.id}#${entry.environment ?? ""}`, version, entry, subjects }))
+      : [{ key: version.id, version, entry: null, subjects }]);
+}
+
+/** One start of the grid, and its number in each block that has it (by the block's key). */
+export interface GridRow {
+  key: string;
+  start: SuiteStart;
+  at: Record<string, string>;
+}
+
+/** Every start of some blocks, each once: the newest version's in its order (its entries' in turn), then those only
+ * older ones have. */
+export function gridRows(blocks: Block[]): GridRow[] {
+  const rows = new Map<string, GridRow>();
+  for (const block of [...blocks].sort((a, b) => b.version.number - a.version.number)) {
+    const starts = block.entry ? entryStarts(block.version, block.entry) : block.version.starts;
+    for (const start of starts) {
+      const key = startIdentity(start);
+      const row = rows.get(key) ?? { key, start, at: {} };
+      row.at[block.key] = start.start;
+      rows.set(key, row);
+    }
+  }
+  return [...rows.values()];
+}
+
+/** How a subject did at a block's starts: at its entry (as the monitor says), or at every start of its version. */
+export function blockScore(subject: Subject, block: Block): EntryScore {
+  if (!block.entry) return { environment: null, played: subject.played, solved: subject.solved, reward: subject.reward ?? null };
+  const place = block.version.entries.indexOf(block.entry);
+  return subject.entries?.[place] ?? { environment: block.entry.environment, played: 0, solved: null, reward: null };
+}
+
+/** What one entry of a suite's form has, as typed. */
+export interface EntryFields {
+  environment: string;
   chosen: Chosen | typeof SAME;
   evalData: string;
   /** Row keys; none: every row. */
@@ -118,11 +157,11 @@ const whole = (text: string, least = 1): number | null => {
   return text.trim() !== "" && Number.isInteger(value) && value >= least ? value : null;
 };
 
-/** What a suite's form asks the monitor for (`POST /api/suites/NAME`), or why a field cannot be what was typed. `base` is
- * the version an edit was made from. */
-export function suiteBody(fields: SuiteFields, base?: number): { body: Record<string, unknown>; errors: Record<string, string> } {
+/** What one entry of a suite's form asks the monitor for, or why a field cannot be what was typed. */
+export function entryBody(fields: EntryFields): { body: Record<string, unknown>; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
-  const body: Record<string, unknown> = { chosen: fields.chosen };
+  const body: Record<string, unknown> = { environment: fields.environment.trim(), chosen: fields.chosen };
+  if (!fields.environment.trim()) errors.environment = "which environment";
   if (fields.chosen === EVAL_DATA) {
     if (!fields.evalData.trim()) errors.evalData = "which eval data";
     body.eval_data = fields.evalData.trim();
@@ -146,20 +185,42 @@ export function suiteBody(fields: SuiteFields, base?: number): { body: Record<st
     if (text && value == null) errors[field] = "a whole number, 1 at least, or empty";
     body[key] = value;
   }
-  if (base != null) body.base = base;
   return { body, errors };
 }
 
-/** A suite's form filled from one of its versions (to edit it: its starts kept unless they are chosen again). */
-export function fieldsOf(version: SuiteVersion | undefined, chosen: SuiteFields["chosen"] = SAME): SuiteFields {
+/** What a suite's form asks the monitor for (`POST /api/suites/NAME`: its entries, and `base`, the version an edit was
+ * made from), or why it cannot be: each entry's errors by field, and the suite's (`suite`). */
+export function suiteBody(entries: EntryFields[], base?: number): { body: Record<string, unknown>; errors: Record<string, string>[]; suite: string | null } {
+  const made = entries.map(entryBody);
+  const environments = entries.map(each => each.environment.trim()).filter(Boolean);
+  const twice = environments.find((each, place) => environments.indexOf(each) !== place);
+  const suite = !entries.length ? "an environment at least" : twice ? `${twice} is in two entries` : null;
+  const body: Record<string, unknown> = { entries: made.map(each => each.body) };
+  if (base != null) body.base = base;
+  return { body, errors: made.map(each => each.errors), suite };
+}
+
+/** An entry of a suite's form filled from one of a version's entries (to edit it: its starts kept unless they are
+ * chosen again), or a new one of an environment. */
+export function fieldsOf(entry: SuiteEntry | undefined, version: SuiteVersion | undefined, chosen: EntryFields["chosen"] = SAME, environment = ""): EntryFields {
+  const starts = entry && version ? entryStarts(version, entry) : [];
   return {
+    environment: entry?.environment ?? environment,
     chosen,
-    evalData: version?.eval_data ?? "",
-    rows: version?.chosen === DRAWN ? version.rows ?? [] : [],
-    seeds: version?.chosen === DRAWN ? (version.seeds ?? []).join(", ") : "",
-    starts: version ? version.starts.map(start => `${start.task} ${start.seed}`).join("\n") : "",
-    episodes: String(version?.episodes ?? 1),
-    thinking: version?.thinking_tokens != null ? String(version.thinking_tokens) : "",
-    answer: version?.answer_tokens != null ? String(version.answer_tokens) : "",
+    evalData: entry?.eval_data ?? "",
+    rows: entry?.chosen === DRAWN ? entry.rows ?? [] : [],
+    seeds: entry?.chosen === DRAWN ? (entry.seeds ?? []).join(", ") : "",
+    starts: starts.map(start => `${start.task} ${start.seed}`).join("\n"),
+    episodes: String(entry?.episodes ?? 1),
+    thinking: entry?.thinking_tokens != null ? String(entry.thinking_tokens) : "",
+    answer: entry?.answer_tokens != null ? String(entry.answer_tokens) : "",
   };
 }
+
+/** An entry's sampling limits, in a few words (none: the channel's own). */
+export const limitsText = (entry: SuiteEntry): string =>
+  [entry.thinking_tokens != null ? `thinking ${entry.thinking_tokens}` : "", entry.answer_tokens != null ? `answer ${entry.answer_tokens}` : ""].filter(Boolean).join(" · ");
+
+/** How an entry's starts were chosen, in a few words. */
+export const chosenText = (entry: SuiteEntry): string =>
+  entry.chosen === "eval data" ? `eval data ${entry.eval_data ?? ""}` : entry.chosen === "starts" ? "given starts" : "rows and seeds";

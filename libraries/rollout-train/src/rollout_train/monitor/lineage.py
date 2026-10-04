@@ -41,6 +41,7 @@ from rollout_train.evals import (
     Suite,
     eval_episodes,
     offsets,
+    parts_of,
     played_version,
     start_identity,
     suites_among,
@@ -503,12 +504,12 @@ class _Reading:
                         "kind": about.get("kind", "checkpoint"),
                         "checkpoint": about.get("checkpoint"),
                         "model": about.get("model"),
-                        "episodes": int(about.get("episodes") or 1),
+                        "episodes": _episodes(about),
                         "asked_by": about.get("asked_by"),
                         "version": version,
                         "starts": len(by_id[version].starts) if version in by_id else 0,
                         "results": by_start,
-                        "entries": _entries(by_id.get(version), by_start),
+                        "entries": _entries(by_id.get(version), by_start, parts_of(self.tables, suite, subject)),
                         "played": len(played),
                         "solved": sum(solved) if solved or not played else None,
                         "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
@@ -572,19 +573,24 @@ def _described(suite: Suite) -> dict[str, Any]:
     }
 
 
-def _entries(version: Suite | None, by_start: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    """How a subject did at each entry of the version it played (each its environment, episodes played, solved where
-    its episodes say, and the mean reward), from its episodes by start."""
+def _entries(
+    version: Suite | None, by_start: Mapping[str, list[dict[str, Any]]], parts: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """How a subject did at each entry of the version it played (each its environment, its episodes of each start,
+    episodes played, solved where its episodes say, and the mean reward), from its episodes by start and the runs that
+    played its entries."""
     if version is None:
         return []
     found: list[dict[str, Any]] = []
-    for entry, before in zip(version.entries, offsets(version), strict=True):
+    for place, (entry, before) in enumerate(zip(version.entries, offsets(version), strict=True)):
         played = [each for number in range(1, len(entry.starts) + 1) for each in by_start.get(str(before + number), [])]
         solved = [each["solved"] for each in played if each["solved"] is not None]
         rewards = [float(each["reward"]) for each in played if each["reward"] is not None]
+        episodes = parts[place].get("episodes") if place < len(parts) else None
         found.append(
             {
                 "environment": entry.environment or None,
+                "episodes": int(episodes or entry.episodes),
                 "played": len(played),
                 "solved": sum(solved) if solved or not played else None,
                 "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
@@ -644,3 +650,10 @@ def _series(changes: list[tuple[float, int]]) -> list[list[float]]:
         else:
             series.append([at, count])
     return series
+
+
+def _episodes(subject: Mapping[str, Any]) -> int | None:
+    """A subject's episodes of each start, from its record: none where its entries play different numbers of them."""
+    if subject.get("episodes") is None and subject.get("parts"):
+        return None
+    return int(subject.get("episodes") or 1)

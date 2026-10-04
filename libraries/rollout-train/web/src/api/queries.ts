@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, Episode, Evals, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, System } from "./types";
+import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, Episode, Evals, FeedRun, Group, KnownEnvironment, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -118,6 +118,15 @@ export const useEnvironment = (name: string) =>
     refetchInterval: false,
     retry: false,
     queryFn: ({ signal }) => readJson<EnvironmentInfo>(`api/environments/${encodeURIComponent(name)}`, signal),
+  });
+
+/** Every environment the system knows of, for the pickers: offered by a launcher alive, started on, or played by a
+ * suite (read again now and then: launchers come and go). */
+export const useEnvironments = () =>
+  useQuery({
+    queryKey: ["environments"],
+    refetchInterval: 15_000,
+    queryFn: async ({ signal }) => (await readJson<{ environments: KnownEnvironment[] }>("api/environments", signal)).environments,
   });
 
 /** Make a suite, or its next version (which its name then points to). */

@@ -146,7 +146,7 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
             len(entry.starts) * int(part.get("episodes") or each_start) for entry, part in listed
         )
         entries = [
-            _entry(str(part.get("environment")), results, episodes, int(part["offset"]), len(entry.starts))
+            entry_of(str(part.get("environment")), results, episodes, int(part["offset"]), len(entry.starts))
             for entry, part in listed
         ]
         found.append(
@@ -180,7 +180,7 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
     return found
 
 
-def _entry(
+def entry_of(
     environment: str, results: Mapping[str, Any], episodes: Mapping[str, Any], offset: int, starts: int
 ) -> dict[str, Any]:
     """How an eval did at one entry of its version, whose starts are those after `offset` (`starts` of them): its

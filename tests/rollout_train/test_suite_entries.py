@@ -144,6 +144,9 @@ async def test_an_eval_of_two_environments_plays_each_in_a_part_and_scores_each_
     system = await System(ledger=ledger).evals()
     (listed,) = system["evals"]  # (one eval: its parts are not listed apart)
     assert (listed["run"], listed["played"], listed["expected"], listed["done"]) == ("eval-1", 7, 7, True)
+    assert [(each["environment"], each["played"], each["solved"]) for each in listed["entries"]] == [
+        (WORDS, 4, entries[WORDS]["solved"]), (GUESSING, 3, 0),
+    ]  # fmt: skip
     (shown,) = system["suites"]
     assert shown["environments"] == [WORDS, GUESSING]
     (version,) = shown["versions"]
@@ -152,8 +155,8 @@ async def test_an_eval_of_two_environments_plays_each_in_a_part_and_scores_each_
     ]  # fmt: skip
     assert [each["environment"] for each in version["starts"]] == [WORDS] * 2 + [GUESSING] * 3
     (subject,) = shown["subjects"]
-    assert [(each["environment"], each["played"], each["solved"]) for each in subject["entries"]] == [
-        (WORDS, 4, entries[WORDS]["solved"]), (GUESSING, 3, 0),
+    assert [(each["environment"], each["episodes"], each["played"], each["solved"]) for each in subject["entries"]] == [
+        (WORDS, 2, 4, entries[WORDS]["solved"]), (GUESSING, 1, 3, 0),
     ]  # fmt: skip
     snapshot = await System(ledger=ledger).snapshot()
     parts = {each["run"]: each["part_of"] for each in snapshot["runs"]}

@@ -3,7 +3,8 @@
 
 import { useState } from "react";
 import { useKnown, useLaunch } from "../api/queries";
-import type { EvalSuite, Launcher, OfferedProfile, System } from "../api/types";
+import type { EvalSuite, Launcher, OfferedProfile, SuiteVersion, System } from "../api/types";
+import { readable } from "../lib/environments";
 import { currentOf, versionsOf, versionTag } from "../lib/suites";
 import { Card } from "./ui";
 
@@ -15,10 +16,15 @@ export function free(wanted: string, taken: Set<string>): string {
   return `${wanted} (${number})`;
 }
 
-/** The launchers that can play a suite (those that name no environments play whatever they are asked), and the profiles
- * they offer, each once. */
-export function offeredFor(suite: EvalSuite | undefined, launchers: Launcher[]): OfferedProfile[] {
-  const able = launchers.filter(each => !each.environments?.length || (suite?.environment != null && each.environments.includes(suite.environment)));
+/** The environments a version of a suite plays (its newest, unless another is given). */
+const environmentsOf = (suite: EvalSuite | undefined, version?: SuiteVersion): string[] =>
+  ((version ?? (suite ? currentOf(suite) : undefined))?.environments ?? []).filter((each): each is string => Boolean(each));
+
+/** The launchers that can play a version of a suite (its newest, unless another is given): those that offer each of its
+ * environments (those that name none play whatever they are asked); and the profiles they offer, each once. */
+export function offeredFor(suite: EvalSuite | undefined, launchers: Launcher[], version?: SuiteVersion): OfferedProfile[] {
+  const wanted = environmentsOf(suite, version);
+  const able = launchers.filter(each => !each.environments?.length || (wanted.length > 0 && wanted.every(environment => each.environments.includes(environment))));
   const byName = new Map<string, OfferedProfile>();
   for (const launcher of able) for (const profile of launcher.profiles ?? []) if (!byName.has(profile.profile)) byName.set(profile.profile, profile);
   return [...byName.values()];
@@ -43,7 +49,6 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
   // (by default the first suite a launcher alive can play)
   const [suiteName, setSuiteName] = useState(fixedSuite?.suite ?? (suites.find(each => offeredFor(each, launchers).length) ?? suites[0])?.suite ?? "");
   const suite = fixedSuite ?? suites.find(each => each.suite === suiteName) ?? suites[0];
-  const offered = offeredFor(suite, launchers);
   const [profile, setProfile] = useState("");
   const [chosenSubject, setSubject] = useState("");
   const [episodes, setEpisodes] = useState("");
@@ -51,35 +56,41 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
   const [name, setName] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
   const subject = fixedSubject ?? chosenSubject;
-  const chosen = offered.find(each => each.profile === profile) ?? offered[0];
   const checkpoints = [...system.checkpoints].sort((a, b) => b.made - a.made);
   const bookmarks = Object.keys(system.bookmarks ?? {}).sort();
   const taken = new Set(Object.values(system.names?.runs ?? {}).concat(system.runs.map(run => run.name ?? run.run)));
   const said = subject ? (system.bookmarks[subject] ? subject : known.short(subject)) : "base";
   const every = suite ? [...versionsOf(suite)].reverse() : [];
   const version = (suite && every.find(each => each.id === versions[suite.suite])) ?? (suite ? currentOf(suite) : undefined);
+  const offered = offeredFor(suite, launchers, version);
+  const chosen = offered.find(each => each.profile === profile) ?? offered[0];
   const tag = suite && every.length > 1 && version ? ` ${versionTag(version.id)}` : "";
   const named = name.trim() || free(`${suite?.suite ?? "suite"}${tag} on ${said}`, taken);
-  const count = episodes.trim() ? Number(episodes) : version?.episodes ?? 1;
+  const own = [...new Set((version?.entries ?? []).map(entry => entry.episodes))];  // (each entry's episodes of each start)
+  const count = episodes.trim() ? Number(episodes) : own.length === 1 ? own[0] : 1;
+  const total = (version?.entries ?? []).reduce((sum, entry) => sum + entry.starts * (episodes.trim() ? Math.max(1, count || 1) : entry.episodes), 0);
+  const playing = environmentsOf(suite, version);
+  const unoffered = playing.filter(each => !launchers.some(launcher => !launcher.environments?.length || launcher.environments.includes(each)));
+  const missing = playing.length ? (unoffered.length ? unoffered : playing).map(readable).join(", ") : "its environments";
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!chosen || !suite || !version) return;
     launch.mutate(
-      { kind: "eval", suite: version.id, profile: chosen.profile, environment: version.environment ?? suite.environment ?? "", name: named, start: subject || null, episodes: episodes.trim() ? count : null },
+      { kind: "eval", suite: version.id, profile: chosen.profile, environment: playing[0] ?? "", name: named, start: subject || null, episodes: episodes.trim() ? count : null },
       { onSuccess: made => { setAsked(made.asked.name); setName(""); } },
     );
   };
   if (!suite) return null;
   if (!offered.length && fixedSuite) {
     return (
-      <Card title={title} note={`no launcher alive offers ${suite.environment ?? "its environment"}`}>
-        <pre className="command">{`rollout launcher … --environment ${suite.environment ?? "module:name"}`}</pre>
+      <Card title={title} note={`no launcher alive offers ${missing}`}>
+        <pre className="command">{`rollout launcher …${playing.length ? playing.map(each => ` --environment ${each}`).join("") : " --environment module:name"}`}</pre>
       </Card>
     );
   }
   return (
     <form onSubmit={submit}>
-      <Card title={title} note={offered.length ? undefined : `no launcher alive offers ${suite.environment ?? "its environment"}`}>
+      <Card title={title} note={offered.length ? undefined : `no launcher alive offers ${missing}`}>
         <div className="fields">
           <div className="field-row">
             {fixedSuite ? (
@@ -119,8 +130,8 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
             </label>
             <label className="field">
               <span>Episodes per start</span>
-              <input type="number" min={1} value={episodes} onChange={event => setEpisodes(event.target.value)} placeholder={String(version?.episodes ?? 1)} />
-              <small>{(version?.starts.length ?? suite.starts.length) * Math.max(1, count || 1)} in all</small>
+              <input type="number" min={1} value={episodes} onChange={event => setEpisodes(event.target.value)} placeholder={own.length === 1 ? String(own[0]) : "each entry's"} />
+              <small>{total} in all</small>
             </label>
           </div>
           <div className="field-row">

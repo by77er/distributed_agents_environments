@@ -7,11 +7,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEvals, useKnown, useLaunches, useSystem } from "../api/queries";
 import type { EvalSuite } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
-import { anySolved, shareOf, shareText, type Subject, subjectText } from "../components/evals";
+import { anySolved, entriesText, shareOf, shareText, type Subject, subjectText } from "../components/evals";
 import { LaunchList } from "../components/launches";
 import { SuiteForm } from "../components/suites";
 import { Card, Empty, Head, Mark, Spec, Specs, Table, Tile } from "../components/ui";
 import { Ago } from "../layout/runs";
+import { readable } from "../lib/environments";
 import { clock, figure } from "../lib/format";
 import { evalPlace, suitePlace } from "../lib/places";
 import { currentOf, playedVersion, versionsOf, versionTag } from "../lib/suites";
@@ -34,10 +35,6 @@ export function Evals() {
   if (!evals || !system) return <Empty>Reading the evals…</Empty>;
   const going = evals.evals.filter(each => !each.done).length;
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind === "eval");
-  const environments = [...new Set([
-    ...(launched?.launchers ?? []).flatMap(each => each.environments ?? []),
-    ...evals.suites.map(each => each.environment).filter((each): each is string => Boolean(each)),
-  ])].sort();
   const several = new Set(evals.suites.filter(each => versionsOf(each).length > 1).map(each => each.suite));
   const open = making || !evals.suites.length;
   return (
@@ -49,7 +46,7 @@ export function Evals() {
           {going ? <Spec label="playing" kind="good">{going}</Spec> : null}
         </Specs>
       </Head>
-      {open ? <SuiteForm title="New suite" environments={environments} onDone={version => navigate(suitePlace(version.split("@")[0]))} onCancel={evals.suites.length ? () => setMaking(false) : undefined} /> : null}
+      {open ? <SuiteForm title="New suite" onDone={version => navigate(suitePlace(version.split("@")[0]))} onCancel={evals.suites.length ? () => setMaking(false) : undefined} /> : null}
       {launches.length ? <LaunchList launches={launches} system={system} /> : null}
       {evals.suites.length ? (
         <div className="tiles">{evals.suites.map(suite => <SuiteTile key={suite.suite} suite={suite} />)}</div>
@@ -64,7 +61,7 @@ export function Evals() {
               <><Link to={suitePlace(each.suite)} className="linkish" onClick={event => event.stopPropagation()}>{each.suite}</Link>{several.has(each.suite) ? <span className="tag-version">{versionTag(each.version)}</span> : null}</>,
               <CheckpointTag id={each.checkpoint} link={false} />,
               `${each.played}/${each.expected}`,
-              shareText(each.played && each.solved != null ? each.solved / each.played : null),
+              entriesText(each.entries) ?? shareText(each.played && each.solved != null ? each.solved / each.played : null),
               each.started ? <><Ago at={each.started} /> ago</> : "–",
               <Mark state={each.done ? "ended" : "running"}>{each.done ? "done" : "playing"}</Mark>,
             ])}
@@ -81,14 +78,17 @@ function SuiteTile({ suite }: { suite: EvalSuite }) {
   const current = currentOf(suite), versions = versionsOf(suite);
   const subjects = suite.subjects.filter(subject => playedVersion(subject, suite.suite) === current.id);  // (they compare)
   const said = anySolved(subjects), score = (subject: Subject) => (said ? shareOf(subject) : subject.reward) ?? -Infinity;
-  const best = [...subjects].filter(each => each.played).sort((a, b) => score(b) - score(a))[0];
+  const one = current.entries.length === 1;  // (a best of several environments would weigh one's rewards against another's)
+  const best = one ? [...subjects].filter(each => each.played).sort((a, b) => score(b) - score(a))[0] : undefined;
+  const environments = (suite.environments ?? current.environments).map(readable);
   return (
     <Tile to={suitePlace(suite.suite)} className="rail accent">
-      <header><b>{suite.suite}{versions.length > 1 ? <span className="tag-version">{versionTag(current.id)}</span> : null}</b><span className="what">{suite.environment ?? ""}</span></header>
+      <header><b>{suite.suite}{versions.length > 1 ? <span className="tag-version">{versionTag(current.id)}</span> : null}</b><span className="what" title={(suite.environments ?? []).join(", ")}>{environments.join(" · ")}</span></header>
       <div className="cells three">
         <div className="cell"><span>starts</span><b>{current.starts.length}</b><small>{new Set(current.starts.map(start => start.task)).size} rows</small></div>
         <div className="cell"><span>played by</span><b>{suite.subjects.length}</b><small>{versions.length > 1 ? `${subjects.length} on ${versionTag(current.id)}` : "subjects"}</small></div>
-        <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : ""}</small></div>
+        {one ? <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : ""}</small></div>
+          : <div className="cell"><span>environments</span><b>{current.entries.length}</b><small /></div>}
       </div>
       <div className="facts">{current.made ? <span>made {clock(current.made)}</span> : null}{suite.sample ? <span>sample</span> : null}</div>
     </Tile>

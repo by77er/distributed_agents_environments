@@ -3,16 +3,17 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteVersion } from "./api/types";
+import type { Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteEntry, SuiteVersion } from "./api/types";
 import { scale, sparkPoints } from "./components/charts";
 import { columnsOf, type Subject } from "./components/evals";
+import { pickable, readable } from "./lib/environments";
 import { slotHue } from "./lib/format";
 import { episodeClass, knownOf, lineOf, reported } from "./lib/model";
 import { titleOf } from "./layout/Shell";
 import { placeOf } from "./lib/places";
 import { pathChart } from "./lib/scores";
 import { evalsSettings, NO_EVALS, settingOf, wantedOf } from "./lib/settings";
-import { ALL, DRAWN, fieldsOf, GIVEN, gridRows, SAME, suiteBody, versionGroups, versionTag, wholes } from "./lib/suites";
+import { ALL, blocksOf, DRAWN, entryBody, fieldsOf, GIVEN, gridRows, SAME, suiteBody, versionGroups, versionTag, wholes } from "./lib/suites";
 import { mapRows, resultOf, samplesOf, seenOf } from "./pages/Episode";
 import { Runs } from "./pages/Runs";
 import { Suite } from "./pages/Suite";
@@ -229,7 +230,7 @@ describe("a suite", () => {
     const starts = [{ start: "1", task: "say-yes", seed: 1, title: "yes" }, { start: "2", task: "say-no", seed: 1, title: "no" }];
     const evals: Evals = {
       suites: [{
-        suite: "words-v1", environment: "games:words", made: 1, sample: false, starts,
+        suite: "words-v1", environments: ["games:words"], made: 1, sample: false, starts,
         subjects: [
           { subject: "eval_a", kind: "checkpoint", checkpoint: "kpqxlmnoprstuvwx", model: "tiny", episodes: 1, played: 2, solved: 2, reward: 1,
             results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: true, reward: 1 }] } },
@@ -283,7 +284,7 @@ describe("a checkpoint's line", () => {
   it("draws each suite's score by depth from the base model, marking where it enters a run or changes its weights", () => {
     const path: Path = {
       checkpoint: "c4",
-      suites: [{ suite: "words", environment: "games:words" }, { suite: "maths", environment: "games:maths" }],
+      suites: [{ suite: "words", environments: ["games:words"] }, { suite: "maths", environments: ["games:maths"] }],
       points: [
         point(0, { id: null, short: "base", model: "tiny", run: null, name: null, step: null, kind: "model", scores: { words: score(0.25, 0.3), maths: score(null, -1) } }),
         point(1, { scores: { words: score(0.5, 0.5) } }),
@@ -300,8 +301,23 @@ describe("a checkpoint's line", () => {
     expect(chart.solved).toBe(false);
     expect([...chart.labels.entries()]).toEqual([[0, "base"], [1, "c1"], [2, "merged"], [3, "c3"], [4, "c4"]]);
     expect(chart.marks).toEqual([{ x: 1, label: "lora run" }, { x: 2, label: "outside a run · full" }, { x: 3, label: "stacked · LoRA" }]);
-    expect(pathChart({ ...path, suites: [{ suite: "words", environment: null }] }).solved).toBe(true);
+    expect(pathChart({ ...path, suites: [{ suite: "words", environments: [] }] }).solved).toBe(true);
     expect(pathChart({ checkpoint: "c", points: [], suites: [] }).series).toEqual([]);
+  });
+
+  it("draws a suite of several environments as a line for each environment", () => {
+    const both = (words: number | null, guessing: number) => ({
+      ...score(null, 0), entries: { "games:words": { solved: words, reward: 1, played: 2 }, "games:guessing": { solved: null, reward: guessing, played: 3 } },
+    });
+    const path: Path = {
+      checkpoint: "c2",
+      suites: [{ suite: "mixed@1", label: "mixed", environments: ["games:words", "games:guessing"] }],
+      points: [point(0, { id: null, short: "base", kind: "model", scores: { "mixed@1": both(0.5, 0.25) } }), point(1, {}), point(2, { scores: { "mixed@1": both(1, 0.75) } })],
+    };
+    expect(pathChart(path, place => `color-${place}`).series.map(each => [each.name, each.measure, each.points])).toEqual([
+      ["mixed · words", "solved", [[0, 0.5], [2, 1]]],
+      ["mixed · guessing", "reward", [[0, 0.25], [2, 0.75]]],
+    ]);
   });
 });
 
@@ -353,21 +369,34 @@ describe("a run's settings, as typed", () => {
 });
 
 
-const version = (number: number, starts: [string, number][], extra: Partial<SuiteVersion> = {}): SuiteVersion => ({
-  id: `words@${number}`, number, environment: "games:words", environment_version: "1", made: number, chosen: "rows and seeds", eval_data: null,
-  rows: null, seeds: null, held_out: false, episodes: 1, thinking_tokens: null, answer_tokens: null, edited_from: number > 1 ? `words@${number - 1}` : null,
-  starts: starts.map(([task, seed], place) => ({ start: String(place + 1), task, seed, title: task, identity: `${task}|${seed}` })), ...extra,
+const entry = (environment: string, offset: number, starts: number, extra: Partial<SuiteEntry> = {}): SuiteEntry => ({
+  environment, environment_version: "1", chosen: "rows and seeds", eval_data: null, rows: null, seeds: null, held_out: false, episodes: 1,
+  thinking_tokens: null, answer_tokens: null, offset, starts, ...extra,
 });
 
+/** A version of entries, each its environment and its starts (a row and a seed each). */
+const version = (number: number, entries: [string, [string, number][], Partial<SuiteEntry>?][], name = "words"): SuiteVersion => {
+  const offsets = entries.map((_, place) => entries.slice(0, place).reduce((sum, [, starts]) => sum + starts.length, 0));
+  return {
+    id: `${name}@${number}`, number, environments: entries.map(([environment]) => environment), made: number, held_out: false,
+    edited_from: number > 1 ? `${name}@${number - 1}` : null,
+    entries: entries.map(([environment, starts, extra], place) => entry(environment, offsets[place], starts.length, extra)),
+    starts: entries.flatMap(([environment, starts], place) => starts.map(([task, seed], at) => ({
+      start: String(offsets[place] + at + 1), environment, task, seed, title: task, identity: `${task}|${seed}`,
+    }))),
+  };
+};
+
 const versioned = (): EvalSuite => {
-  const first = version(1, [["say-yes", 1], ["say-no", 1]]), second = version(2, [["say-no", 1], ["say-maybe", 1]], { episodes: 2 });
+  const first = version(1, [["games:words", [["say-yes", 1], ["say-no", 1]]]]);
+  const second = version(2, [["games:words", [["say-no", 1], ["say-maybe", 1]], { episodes: 2 }]]);
   const subject = (name: string, played: string, results: Record<string, boolean[]>): EvalSuite["subjects"][number] => ({
     subject: name, kind: "model", model: `org/${name}`, version: played, starts: 2, episodes: 1, played: Object.values(results).flat().length,
     solved: Object.values(results).flat().filter(Boolean).length,
     results: Object.fromEntries(Object.entries(results).map(([start, solved]) => [start, solved.map(each => ({ solved: each, reward: each ? 1 : 0 }))])),
   });
   return {
-    suite: "words", version: "words@2", number: 2, environment: "games:words", made: 2, sample: false, starts: second.starts, versions: [first, second],
+    suite: "words", version: "words@2", number: 2, environments: ["games:words"], made: 2, sample: false, starts: second.starts, versions: [first, second],
     subjects: [subject("old", "words@1", { "1": [true], "2": [false] }), subject("new", "words@2", { "1": [true], "2": [true] }),
       subject("newer", "words@2", { "1": [false], "2": [true] })],
   };
@@ -386,9 +415,10 @@ describe("a suite's versions", () => {
     ]);
     expect(versionGroups(suite, suite.subjects, "words@1").map(group => group.subjects.map(each => each.subject))).toEqual([["old"]]);
     expect(versionGroups({ ...suite, subjects: [] }, [], "words@2").map(group => group.version.id)).toEqual(["words@2"]);  // (picked, though none played it)
-    const rows = gridRows(suite.versions!);
+    const rows = gridRows(blocksOf(suite.versions!.map(each => ({ version: each, subjects: [] }))));
     expect(rows.map(row => [row.key, row.at])).toEqual([
-      ["say-no|1", { "words@2": "1", "words@1": "2" }], ["say-maybe|1", { "words@2": "2" }], ["say-yes|1", { "words@1": "1" }],
+      ["games:words|say-no|1", { "words@2": "1", "words@1": "2" }], ["games:words|say-maybe|1", { "words@2": "2" }],
+      ["games:words|say-yes|1", { "words@1": "1" }],
     ]);
     expect(versionTag("words@12")).toBe("v12");
     expect(versionTag(undefined)).toBe("v1");  // (an eval from before versions played version 1)
@@ -420,18 +450,105 @@ describe("a suite's versions", () => {
     expect(wholes("1, 2 3,5-7")).toEqual([1, 2, 3, 5, 6, 7]);
     expect(wholes("one")).toBeNull();
     expect(wholes("4-2")).toBeNull();
-    const fields = { ...fieldsOf(undefined, DRAWN), rows: ["say-yes"], seeds: "1-3", episodes: "2", thinking: "64" };
-    expect(suiteBody(fields)).toEqual({
-      body: { chosen: DRAWN, rows: ["say-yes"], seeds: [1, 2, 3], episodes: 2, thinking_tokens: 64, answer_tokens: null }, errors: {},
+    const fields = { ...fieldsOf(undefined, undefined, DRAWN, "games:words"), rows: ["say-yes"], seeds: "1-3", episodes: "2", thinking: "64" };
+    expect(entryBody(fields)).toEqual({
+      body: { environment: "games:words", chosen: DRAWN, rows: ["say-yes"], seeds: [1, 2, 3], episodes: 2, thinking_tokens: 64, answer_tokens: null }, errors: {},
     });
-    expect(suiteBody({ ...fields, rows: [], seeds: "" }).errors).toEqual({ seeds: "whole numbers, as 1, 2, 3 or 1-5" });
-    expect(suiteBody({ ...fields, rows: [] }).body.rows).toBeNull();  // (every row)
-    expect(suiteBody({ ...fields, episodes: "0", answer: "x" }).errors).toEqual({ episodes: "a whole number, 1 at least", answer: "a whole number, 1 at least, or empty" });
-    expect(suiteBody({ ...fields, chosen: GIVEN, starts: "say-yes 1\nsay-no 4\n" }).body.starts).toEqual([{ task: "say-yes", seed: 1 }, { task: "say-no", seed: 4 }]);
-    expect(suiteBody({ ...fields, chosen: GIVEN, starts: "say-yes" }).errors).toEqual({ starts: "a row and a seed on each line" });
-    expect(suiteBody({ ...fields, chosen: "eval data", evalData: "" }).errors).toEqual({ evalData: "which eval data" });
-    const edited = fieldsOf(versioned().versions![1]);
-    expect([edited.chosen, edited.episodes, edited.starts]).toEqual([SAME, "2", "say-no 1\nsay-maybe 1"]);
-    expect(suiteBody({ ...edited, episodes: "3" }, 2).body).toEqual({ chosen: SAME, episodes: 3, thinking_tokens: null, answer_tokens: null, base: 2 });
+    expect(entryBody({ ...fields, rows: [], seeds: "" }).errors).toEqual({ seeds: "whole numbers, as 1, 2, 3 or 1-5" });
+    expect(entryBody({ ...fields, rows: [] }).body.rows).toBeNull();  // (every row)
+    expect(entryBody({ ...fields, episodes: "0", answer: "x" }).errors).toEqual({ episodes: "a whole number, 1 at least", answer: "a whole number, 1 at least, or empty" });
+    expect(entryBody({ ...fields, chosen: GIVEN, starts: "say-yes 1\nsay-no 4\n" }).body.starts).toEqual([{ task: "say-yes", seed: 1 }, { task: "say-no", seed: 4 }]);
+    expect(entryBody({ ...fields, chosen: GIVEN, starts: "say-yes" }).errors).toEqual({ starts: "a row and a seed on each line" });
+    expect(entryBody({ ...fields, chosen: "eval data", evalData: "" }).errors).toEqual({ evalData: "which eval data" });
+    expect(entryBody({ ...fields, environment: " " }).errors).toEqual({ environment: "which environment" });
+    const newest = versioned().versions![1];
+    const edited = fieldsOf(newest.entries[0], newest);
+    expect([edited.environment, edited.chosen, edited.episodes, edited.starts]).toEqual(["games:words", SAME, "2", "say-no 1\nsay-maybe 1"]);
+    expect(suiteBody([{ ...edited, episodes: "3" }], 2)).toEqual({
+      body: { entries: [{ environment: "games:words", chosen: SAME, episodes: 3, thinking_tokens: null, answer_tokens: null }], base: 2 }, errors: [{}], suite: null,
+    });
+  });
+
+  it("are made of entries, each an environment once", () => {
+    const mixed = version(1, [["games:words", [["say-yes", 1]]], ["games:guessing", [["guess-apple", 7], ["guess-river", 7]], { thinking_tokens: 10 }]], "mixed");
+    const [words, guesses] = mixed.entries.map(each => fieldsOf(each, mixed));
+    expect([guesses.environment, guesses.starts, guesses.thinking]).toEqual(["games:guessing", "guess-apple 7\nguess-river 7", "10"]);
+    const made = suiteBody([words, { ...guesses, chosen: DRAWN, seeds: "x" }]);
+    expect(made.errors).toEqual([{}, { seeds: "whole numbers, as 1, 2, 3 or 1-5" }]);
+    expect((made.body.entries as { environment: string }[]).map(each => each.environment)).toEqual(["games:words", "games:guessing"]);
+    expect(suiteBody([words, words]).suite).toBe("games:words is in two entries");
+    expect(suiteBody([]).suite).toBe("an environment at least");
+  });
+});
+
+describe("a suite of several environments", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const mixed = (): EvalSuite => {
+    const only = version(1, [["games:words", [["say-yes", 1]]]], "mixed");
+    const both = version(2, [["games:words", [["say-yes", 1]]], ["games:guessing", [["guess-apple", 7], ["guess-river", 7]]]], "mixed");
+    const subject = (name: string, played: string, results: Record<string, boolean[]>, entries?: Subject["entries"]): Subject => ({
+      subject: name, kind: "model", model: `org/${name}`, version: played, episodes: 1, played: Object.values(results).flat().length,
+      solved: Object.values(results).flat().filter(Boolean).length, entries,
+      results: Object.fromEntries(Object.entries(results).map(([start, solved]) => [start, solved.map(each => ({ solved: each, reward: each ? 1 : 0 }))])),
+    });
+    return {
+      suite: "mixed", version: "mixed@2", number: 2, environments: ["games:words", "games:guessing"], made: 2, sample: false, starts: both.starts,
+      versions: [only, both],
+      subjects: [
+        subject("a", "mixed@2", { "1": [true], "2": [false], "3": [true] },
+          [{ environment: "games:words", played: 1, solved: 1, reward: 1 }, { environment: "games:guessing", played: 2, solved: 1, reward: 0.5 }]),
+        subject("b", "mixed@2", { "1": [false], "2": [false], "3": [false] },
+          [{ environment: "games:words", played: 1, solved: 0, reward: 0 }, { environment: "games:guessing", played: 2, solved: 0, reward: 0 }]),
+        subject("c", "mixed@1", { "1": [true] }, [{ environment: "games:words", played: 1, solved: 1, reward: 1 }]),
+      ],
+    };
+  };
+
+  it("stands a column group for each environment of a version, each with its subjects' totals there", () => {
+    const suite = mixed();
+    const blocks = blocksOf(versionGroups(suite, suite.subjects, ALL));
+    expect(blocks.map(block => [block.key, block.subjects.map(each => each.subject)])).toEqual([
+      ["mixed@2#games:words", ["a", "b"]], ["mixed@2#games:guessing", ["a", "b"]], ["mixed@1", ["c"]],
+    ]);
+    expect(gridRows(blocks).map(row => [row.key, row.at])).toEqual([
+      ["games:words|say-yes|1", { "mixed@2#games:words": "1", "mixed@1": "1" }],
+      ["games:guessing|guess-apple|7", { "mixed@2#games:guessing": "2" }],
+      ["games:guessing|guess-river|7", { "mixed@2#games:guessing": "3" }],
+    ]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
+    const client = newQueryClient();
+    client.setQueryData(topics.system().key, system([]));
+    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    client.setQueryData(topics.evals().key, { suites: [suite], evals: [] } satisfies Evals);
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><Suite name="mixed" /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const texts = (selector: string) => [...container.querySelectorAll(selector)].map(each => each.textContent);
+    expect(texts("table.evals tr.versions th")).toEqual(["start", "v2 · newest", "v1"]);
+    expect(texts("table.evals tr.entries th")).toEqual(["words", "guessing", ""]);
+    expect(container.querySelectorAll("table.evals th.subject.entry-start").length).toBe(1);  // (where the second environment begins)
+    expect(texts("table.evals tr.total td b")).toEqual(["1/1", "0/1", "1/2", "0/2", "1/1"]);  // (each subject at each environment)
+    expect(container.querySelectorAll("table.evals td.absent").length).toBe(2 * 2 + 2 * 1 + 2);  // (a start an environment does not have)
+    expect(texts("section.card h2")).toContain("Environments");
+    expect(screen.queryByText("Best")).toBeNull();  // (a best across environments would weigh one's rewards against another's)
+  });
+
+  it("names environments in a word, and lists the offered first, telling apart two of a name", () => {
+    expect(readable("tests.rollout_train.rollouts.games:words")).toBe("words");
+    expect(readable("minecraft_team.environment:environment")).toBe("minecraft_team");
+    const known = [
+      { environment: "b.games:words", name: "words", versions: [], offered: false },
+      { environment: "a.games:words", name: "words", versions: ["1"], offered: true },
+      { environment: "c:guessing", name: "guessing", versions: [], offered: true },
+    ];
+    expect(pickable(known, ["d:maths"]).map(each => [each.name, each.offered])).toEqual([
+      ["guessing", true], ["words (a.games)", true], ["maths", false], ["words (b.games)", false],
+    ]);
   });
 });
