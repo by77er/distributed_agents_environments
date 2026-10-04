@@ -888,7 +888,7 @@ async def _launcher(
         raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
     profiles, runs = await asyncio.to_thread(profiles.expanduser), await asyncio.to_thread(runs.expanduser)
     found = Launcher(
-        name_of(name=name), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus
+        name_of(name), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus
     )
     await found.serve()
 
