@@ -112,3 +112,4 @@ nav:
       - "Thinking Machines' API": research/thinking-machines.md
       - "Prime Intellect's verifiers": research/prime-compat.md
       - "SFT datasets": research/sft-datasets.md
+      - "Ledger guarantees": research/ledger-guarantees.md
