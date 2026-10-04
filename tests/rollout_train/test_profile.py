@@ -49,6 +49,7 @@ class Steps:
     def __init__(self, model: str, *, segment_tokens: int, segments_per_step: int) -> None:
         self.model = model
         self.budget = Budget(segment_tokens, segments_per_step)
+        self.weights = "lora"
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         (into / WEIGHTS).mkdir(parents=True)

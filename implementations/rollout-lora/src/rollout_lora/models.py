@@ -1,0 +1,39 @@
+"""Where a model's files are on this machine, and what kind of model they hold."""
+
+import json
+from pathlib import Path
+from typing import Any
+
+
+def local(model: str) -> Path:
+    """A model's directory: `model` itself if it is one, else its snapshot in the Hugging Face cache (as the cache's
+    `refs/main` names it: a snapshot missing files a model does not need, such as its README, is still found)."""
+    directory = Path(model).expanduser()
+    if directory.is_dir():
+        return directory
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    cached = Path(HF_HUB_CACHE) / f"models--{model.replace('/', '--')}"
+    reference = cached / "refs" / "main"
+    if not reference.exists():
+        raise FileNotFoundError(f"{model} is neither a directory nor in the Hugging Face cache")
+    return cached / "snapshots" / reference.read_text().strip()
+
+
+def config(model: str) -> dict[str, Any]:
+    return json.loads((local(model) / "config.json").read_text())
+
+
+def multimodal(model: str) -> bool:
+    """Whether a model's text is the language part of a larger model (an image-text one, such as Qwen3.5)."""
+    return any("ConditionalGeneration" in each for each in config(model).get("architectures", []))
+
+
+def quantized(model: str) -> bool:
+    found = config(model)
+    return "quantization_config" in found or "quantization_config" in found.get("text_config", {})
+
+
+COPIED = ("config.json", "generation_config.json", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja",
+          "special_tokens_map.json", "vocab.json", "merges.txt", "preprocessor_config.json")  # fmt: skip
+"""A model's files beside its weights, which a checkpoint made from it keeps too (engines and renderers read them)."""

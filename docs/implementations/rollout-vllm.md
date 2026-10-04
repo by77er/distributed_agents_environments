@@ -49,6 +49,14 @@ trained on. The finish reason is `length` when the token limit ended the sample 
 it samples from it. `remove_adapter(name)` unloads it. The [channel](../libraries/rollout-train/channels.md) decides
 which adapters are loaded and when, as it publishes weights.
 
+## Full weights
+
+`load_weights(path)` reads a full checkpoint's files into the model the engine holds (vLLM's `reload_weights`) and
+clears the prefix cache; the engine serves them from then on, and reads them again on waking. The files are in the
+model's own layout, as the [full-weight trainer](rollout-lora.md#every-weight) or a merge writes them. Where the
+output layer is tied to the embeddings (Qwen3-0.6B), vLLM warns that `ParallelLMHead` failed to load: it shares the
+embeddings, and its logprobs after a reload match an engine started on the same files.
+
 ## Sleep and wake
 
 A trainer that shares the GPU needs it free while it steps: [`Colocated`](../guide/reference.md#colocated) puts the
@@ -57,7 +65,7 @@ channel's engines to sleep for the step ([the trainer](../libraries/rollout-trai
 | Call | What the engine does |
 |---|---|
 | `sleep()` | Discards its prefix cache and sleeps at vLLM's level 2: the weights are dropped, not parked in system memory |
-| `wake()` | Reads the weights again from the checkpoint, then allocates the cache |
+| `wake()` | Reads the weights again (the model's, or the full checkpoint it serves), then allocates the cache |
 
 ## The engine core process
 

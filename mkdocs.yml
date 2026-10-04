@@ -105,3 +105,4 @@ nav:
       - "The policy graph": research/policy-dag.md
       - "Curricula": research/curricula.md
       - "Thinking Machines' API": research/thinking-machines.md
+      - "SFT datasets": research/sft-datasets.md

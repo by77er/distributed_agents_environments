@@ -63,7 +63,10 @@ class Checkpoint:
     depth: int = 1
     """Steps from the base model along its first parents: its first parent's depth and one."""
     base: str | None = None
-    """The model it adapts, by name (`Qwen/Qwen3.5-9B`, say): its first parent's, or the one its line began from."""
+    """What its weights build on: the model its line began from, by name (`Qwen/Qwen3.5-9B`, say); or, for an
+    adapter trained over a full checkpoint, that checkpoint, by id."""
+    kind: str = "lora"
+    """What its weights are: `lora` (an adapter over its base) or `full` (all of a model's weights)."""
     run: str | None = None
     """The run that made it, by id."""
     step: int | None = None
@@ -134,6 +137,19 @@ class Checkpoints:
             raise KeyError(f"there is no checkpoint {id}")
         return _as_released(_VERSION.validate_python(found), await self.ledger.read(RELEASED))
 
+    async def under(self, checkpoint: Checkpoint) -> Checkpoint | None:
+        """The full checkpoint whose weights `checkpoint` is served over: itself, if it is full; the full checkpoint it
+        builds on, if it is an adapter over one; None for an adapter over a model. Raises `ValueError` if that
+        checkpoint was released."""
+        found = checkpoint
+        if checkpoint.kind != "full":
+            if checkpoint.base is None or checkpoint.base not in await self.ledger.read(CHECKPOINTS):
+                return None
+            found = await self.checkpoint(checkpoint.base)
+        if found.weights is None:
+            raise ValueError(f"{found.id} was released: its weights were deleted")
+        return found
+
     async def head(self, run: str) -> Checkpoint | None:
         """The newest checkpoint a run made, if it made one."""
         made = [checkpoint for checkpoint in await self.all() if checkpoint.run == run]
@@ -147,6 +163,7 @@ class Checkpoints:
         weights: Path,
         run: str | None,
         base: str | None = None,
+        kind: str = "lora",
         step: int | None = None,
         state: Path | None = None,
         parents: Sequence[str] = (),
@@ -154,7 +171,9 @@ class Checkpoints:
         metrics: Mapping[str, float] | None = None,
     ) -> Checkpoint:
         """Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
-        Its base is its first parent's; `base` names it for a checkpoint made from the base model. The append is what
+        Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
+        id); for a merge (full weights from an adapter), the `base` it names; else its first parent's base, or `base`
+        for a checkpoint made from the base model. The append is what
         makes the checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id,
         decided before) gets the checkpoint that is there."""
         first = await self.checkpoint(parents[0]) if parents else None
@@ -163,7 +182,8 @@ class Checkpoints:
             weights=await kept(weights, self.blobs),
             parents=tuple(parents),
             depth=(first.depth if first else 0) + 1,
-            base=first.base if first is not None and first.base else base,
+            base=_base(first, kind, base),
+            kind=kind,
             run=run,
             step=step,
             state=await kept(state, self.blobs) if state is not None else None,
@@ -212,6 +232,16 @@ class Checkpoints:
         contents = {relative: await self.blobs.read(reference) for relative, reference in manifest.files.items()}
         await asyncio.to_thread(_written, contents, directory)
         return directory
+
+
+def _base(first: Checkpoint | None, kind: str, base: str | None) -> str | None:
+    if first is None:
+        return base
+    if first.kind == "full" and kind == "lora":  # an adapter over full weights builds on those
+        return first.id
+    if first.kind == "lora" and kind == "full":  # a merge: the model its line began from, as it names it
+        return base or first.base
+    return first.base or base
 
 
 def _written(contents: Mapping[str, bytes], directory: Path) -> None:

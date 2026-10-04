@@ -244,17 +244,29 @@ class Platform:
         self.run = await run_of(directory, self.ledger, self.registry, profile.name)
         if profile.trainer is not None and profile.trainer.start is not None:
             self.origin = await resolved(self.ledger, self.registry, profile.trainer.start)
+        self.blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(directory / BLOBS)
+        self.blobs_at = location(profile.blobs, directory / BLOBS)
+        self.checkpoints = Checkpoints(self.ledger, self.blobs)
+        models = {name: spec.model for name, spec in profile.channels.items()}
+        """What each channel's engines load: the profile's model; for the trained channel of a run that starts from a
+        full checkpoint, or an adapter over one, that full checkpoint's files (the model its adapters, or its full
+        weights, are trained over)."""
+        if self.origin is not None and profile.trainer is not None:
+            under = await self.checkpoints.under(await self.checkpoints.checkpoint(self.origin))
+            if under is not None and under.weights is not None:
+                fetched = await self.checkpoints.files(under.weights, directory / "bases" / under.id)
+                models[profile.trainer.channel] = str(fetched)
         record = directory / PROCESSES
         end_orphans(record)  # an engine a killed process left behind holds its accelerator
         described = profile.trainer
         learner: Trainer | None = None
         if described is not None:
-            learner = named(described.kind)(profile.channels[described.channel].model, **described.settings)
+            learner = named(described.kind)(models[described.channel], **described.settings)
         started: list[Engine] = []
         for name, spec in profile.channels.items():
             engines: list[Engine] = []
             for options in spec.engines:
-                engine: Engine = named(spec.engine)(spec.model, **options)
+                engine: Engine = named(spec.engine)(models[name], **options)
                 stack.callback(engine.close)
                 engines.append(engine)
                 started.append(engine)
@@ -264,7 +276,7 @@ class Platform:
             self.channels[name] = Channel(
                 name,
                 engines,
-                named(spec.renderer)(spec.model),
+                named(spec.renderer)(models[name]),
                 Limits(
                     **{key: value for key, value in limits.items() if value is not None},
                     sequence=trained.budget.segment_tokens if trained is not None else None,
@@ -282,9 +294,6 @@ class Platform:
             tool_sets[name] = named(where)(directory)
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
-        self.blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(directory / BLOBS)
-        self.blobs_at = location(profile.blobs, directory / BLOBS)
-        self.checkpoints = Checkpoints(self.ledger, self.blobs)
         runner: Runner
         if profile.runner == "durable":
             from rollout_durable import DurableRunner
@@ -347,10 +356,12 @@ class Platform:
         if self.registry is not None and self.profile.trainer is not None and self.profile.trainer.bookmark:
             await self.registry.bookmark(self.profile.trainer.bookmark, checkpoint.id)
 
-    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
-        """Serve new weights on a channel from now on; returns the number its samples are stamped with (a
-        checkpoint's depth)."""
-        return await self.recorder.publish(channel, adapter, path, version)
+    async def publish(
+        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
+    ) -> int:
+        """Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
+        samples are stamped with (a checkpoint's depth)."""
+        return await self.recorder.publish(channel, adapter, path, version, full=full)
 
     def _about(self, record: Path) -> dict[str, JsonValue]:
         """What the runner says of this machine in each beat: its host, the run, its measurements, the engines'
@@ -370,7 +381,7 @@ class Platform:
             "machine": measured(self.profile.directory),
             "processes": processes,
             "channels": [
-                {"channel": name, "adapter": channel.adapter, "version": channel.version, **channel.take()}
+                {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
                 for name, channel in self.channels.items()
             ],
         }

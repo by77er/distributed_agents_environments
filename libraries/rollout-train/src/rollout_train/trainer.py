@@ -60,6 +60,8 @@ class Trainer(Protocol):
     where its files go, so any trainer can take any step of any policy."""
 
     budget: Budget
+    weights: str
+    """What its steps make: `lora` (an adapter over the weights the engines hold) or `full` (all the weights)."""
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         """Train on the batch, starting from `parent` (None: from the base model). The new weights are left in

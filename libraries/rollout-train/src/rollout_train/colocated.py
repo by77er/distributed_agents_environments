@@ -29,6 +29,7 @@ class Colocated:
         self._channels = channels
         self._guard = guard
         self.budget = trainer.budget
+        self.weights = trainer.weights
 
     async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
         started = time.monotonic()

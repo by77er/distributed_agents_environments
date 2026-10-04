@@ -21,6 +21,33 @@ segment_tokens = 8000
 A [profile](../guide/deploying.md) calls `LoraTrainer(model, **settings)` with the model of the channel it trains.
 Every key of `[trainer]` other than `kind`, `channel`, `policy` and `colocated` is a setting.
 
+### Every weight
+
+`FullTrainer` trains every weight of a text model, with the same settings (the adapter's, `rank`, are not used) and
+the same fresh process per step. The weights are kept in float32 and the forward pass runs in bfloat16 (autocast);
+each step leaves `weights/` in the model's own layout (float32 safetensors, with the configuration saying
+`bfloat16`, which is what vLLM loads them as, and the tokenizer) and the optimizer's state in `state/`. A step starts
+from its parent's weights and state, or from the model for the first. It refuses a multimodal or quantized model.
+Qwen3-0.6B's step of 4 segments of 600 tokens peaks under 14 GiB on a 16 GB card; its optimizer's state is about
+5 GB.
+
+```toml
+[trainer]
+kind = "rollout_lora:FullTrainer"
+channel = "policy"
+colocated = true
+learning_rate = 1e-6
+```
+
+### Merging
+
+`rollout_lora.merge.merge(base, adapter, into)` folds an adapter in PEFT's layout into a model (a name or a
+directory) and writes the merged model to `into`, reading the base's safetensors files one at a time: each adapted
+layer's weight becomes W + (alpha / rank) · B · A, computed in float32 and stored in the base's dtype, and every
+other weight is copied, with the configuration and tokenizer. It refuses an adapter whose layers the base lacks or
+whose update has another shape. It is what `rollout merge` calls by default
+([full weights and merges](../libraries/rollout-train/checkpoints.md#full-weights-and-merges)).
+
 ## Settings
 
 [`LoraSettings`](../guide/reference.md#lorasettings) is the one place the settings and their defaults are written.
@@ -183,4 +210,8 @@ One RTX 5080 (16 GB), `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32.
 `tests/rollout_lora/` needs torch and is collected only when it is installed. It covers the adapter's file format,
 the direction of the update, what each minibatch did, forced tokens, segments left out, the last minibatch, the KL
 stop, a missing logprob, the likelihood objective, the importance weight and its truncation, the token clip, and the
-segment ratio and its gradient.
+segment ratio and its gradient. `test_merge.py` covers merging on the CPU. `test_small_on_gpu.py` runs only with
+`ROLLOUT_GPU=1` and nothing else on the card: on Qwen3-0.6B (`ROLLOUT_SMALL_MODEL` names another) it trains an
+adapter, takes two steps of every weight, and checks that a merged adapter gives what the adapter gave (an adapter
+that moved logprobs by 2.6 on average, merged, is 0.06 from it: bfloat16 rounds part of a small update away). Its
+steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.

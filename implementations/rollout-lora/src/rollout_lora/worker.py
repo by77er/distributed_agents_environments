@@ -27,17 +27,19 @@ from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Weighted
 
 
 class TrainerProcess:
-    def __init__(self, checkpoint: str, settings: LoraSettings) -> None:
+    def __init__(self, checkpoint: str, settings: LoraSettings, weights: str = "lora") -> None:
         self.checkpoint = checkpoint
         self.settings = settings
+        self.weights = weights
+        """What a step trains: `lora`, an adapter over `checkpoint`; or `full`, every weight (from the parent's)."""
         self._lock = asyncio.Lock()
         self._process: BaseProcess | None = None
 
     async def step(
         self, segments: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path
     ) -> dict[str, float]:
-        """Train one step on the GPU (the engine must have freed it) from `parent`, and leave the adapter in
-        `into/weights` and the optimizer's state in `into/state`."""
+        """Train one step on the GPU (the engine must have freed it) from `parent`, and leave the weights it trains
+        (the adapter, or the full weights) in `into/weights` and the optimizer's state in `into/state`."""
         async with self._lock:
             try:
                 return await asyncio.to_thread(self._run, list(segments), seed, parent, into)
@@ -49,7 +51,7 @@ class TrainerProcess:
     def _run(self, segments: list[Weighted], seed: int, parent: Files | None, into: Path) -> dict[str, float]:
         context = multiprocessing.get_context("spawn")
         ours, child = context.Pipe()
-        arguments = (child, self.checkpoint, self.settings, segments, seed, parent, into)
+        arguments = (child, self.checkpoint, self.settings, self.weights, segments, seed, parent, into)
         process = context.Process(target=_step, args=arguments, name="trainer")
         process.start()
         self._process = process
@@ -77,6 +79,7 @@ def _step(
     connection: Connection,
     checkpoint: str,
     settings: LoraSettings,
+    weights: str,
     segments: list[Weighted],
     seed: int,
     parent: Files | None,
@@ -94,19 +97,24 @@ def _step(
         allowed = max(0.05, min(1.0, (free - MEMORY_MARGIN) / total))
         torch.cuda.set_per_process_memory_fraction(allowed)  # pyright: ignore[reportUnknownMemberType]
 
+        from rollout_lora.full import FullPolicy
         from rollout_lora.layers import load_adapter
         from rollout_lora.policy import Policy
         from rollout_lora.step import PolicyStep
 
-        policy = Policy.load(
-            checkpoint,
-            rank=settings.rank,
-            alpha=settings.alpha,
-            layer_inputs_on_host=settings.layer_inputs_on_host,
-            mlp_rows=settings.mlp_rows,
-        )
-        if parent is not None:
-            load_adapter(policy.model, parent.weights)
+        policy: Policy | FullPolicy
+        if weights == "full":  # every weight, from the parent's (or the model's own)
+            policy = FullPolicy.load(str(parent.weights) if parent is not None else checkpoint)
+        else:
+            policy = Policy.load(
+                checkpoint,
+                rank=settings.rank,
+                alpha=settings.alpha,
+                layer_inputs_on_host=settings.layer_inputs_on_host,
+                mlp_rows=settings.mlp_rows,
+            )
+            if parent is not None:
+                load_adapter(policy.model, parent.weights)
         trainer = PolicyStep(policy, settings)
         if parent is not None and parent.state is not None and (parent.state / OPTIMIZER).exists():
             trainer.optimizer.load_state_dict(torch.load(parent.state / OPTIMIZER, map_location="cuda"))

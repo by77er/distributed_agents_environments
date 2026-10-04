@@ -76,6 +76,9 @@ class ScriptedEngine:
     async def remove_adapter(self, name: str) -> None:
         self.told.append(f"remove {name}")
 
+    async def load_weights(self, path: str) -> None:
+        self.told.append(f"weights {path}")
+
     async def sleep(self) -> None:
         self.told.append("sleep")
 

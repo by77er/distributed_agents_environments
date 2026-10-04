@@ -34,6 +34,7 @@ class Trains:
     """A trainer that trains nothing and leaves files as a trainer would."""
 
     budget = Budget(segments=3)
+    weights = "lora"
 
     def __init__(self) -> None:
         self.steps = 0

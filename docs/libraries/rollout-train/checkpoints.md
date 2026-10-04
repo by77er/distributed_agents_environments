@@ -14,6 +14,8 @@ What is trained is a graph of checkpoints. Every checkpoint grows from a base mo
 - A checkpoint says what it was made from: its **parents** (the checkpoint it was trained from first, then any others it
   learned from, such as a distillation's teachers; none, the base model), the **base** model it adapts
   (`Qwen/Qwen3.5-9B`, its first parent's, or the one its line began from), and the **run** and **step** that made it.
+- Its **kind** says what its weights are: `lora`, an adapter over its base; or `full`, every weight of a model
+  ([full weights](#full-weights-and-merges)).
 - Its **depth** counts the steps from the base model along its first parents. It is the number stamped on the tokens
   it samples, and it grows along any line of training.
 - Nothing about a checkpoint is a name. A checkpoint is found by its id, by where it came from, or by a
@@ -38,7 +40,8 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   before made. Started again, a run goes on from its own newest checkpoint (`head`).
 - **A fork is a run started from any checkpoint.** It shares its parent's blobs and costs nothing until it differs. Its
   checkpoints continue its parent's depth and base.
-- **A run serves its newest checkpoint** on its channel, as the adapter named by its id; the checkpoint before stays
+- **A run serves its newest checkpoint** on its channel, as the adapter named by its id (a full checkpoint, in place
+  of the engines' weights: [full weights](#full-weights-and-merges)); the checkpoint before stays
   loaded until the turns that began under it finish. Runs on other channels serve their own. When its channel names
   a `reshard`, it serves the checkpoint's [resharded](#resharding) files, and waits for them.
 - **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
@@ -48,6 +51,29 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   trained on from where it was; a released one keeps its record (where it came from, what it was trained on, its
   metrics). A release is appended to `checkpoints/released` before its blobs are deleted, and a blob is deleted only if
   no checkpoint still names it. A released checkpoint reads with no `weights`, no `state` and the time it was `released`.
+
+## Full weights and merges
+
+A full checkpoint holds every weight of a model, in the model's own layout (`config.json`, safetensors files, the
+tokenizer), as a trainer of every weight writes it or a merge makes it.
+
+- **A merge folds a LoRA checkpoint into the weights it was trained over** (`rollout_train.merging.merge`; `rollout
+  merge`): each adapted layer's weight becomes W + (alpha / rank) · B · A, in a full checkpoint of its own. Its parent
+  is the LoRA checkpoint, its base the model the merged weights came from, and no run made it. What folds an adapter
+  in is named as `module:name` (`rollout_lora.merge:merge`). An adapter trained over a quantized model merges into
+  the same model's unquantized weights (`--base Qwen/Qwen3.5-9B` for one trained over `…-AWQ-4bit`): the layers have
+  the same names.
+- **A run started from a full checkpoint trains over it.** Its trained channel's engines and its trainer load that
+  checkpoint's files as their model (fetched to `directory/bases/ID`). With a LoRA trainer, the run's first step
+  begins a new adapter over those weights, and its checkpoints' base is the full checkpoint's id; with a trainer of
+  every weight, each step goes on from the weights before. A run started from an adapter over a full checkpoint
+  serves that full checkpoint's files too.
+- **Every weight is trained from full weights only.** A trainer of every weight refuses to start from an adapter:
+  merge it first.
+- **A full checkpoint is served in place**: the channel tells its engines to read the checkpoint's files into the
+  model they hold ([publishing weights](channels.md#publishing-weights)), and the adapters loaded before are dropped.
+- **Merging an adapter over a full checkpoint** folds it into that checkpoint's files; the merged checkpoint's base
+  is still the model the line began from.
 
 ## Manifests
 
@@ -174,6 +200,7 @@ rollout checkpoints --ledger RUN                        # every checkpoint, newe
 rollout bookmark diamonds curriculum-9:20 --ledger RUN    # name a checkpoint, or move the bookmark there
 rollout bookmark diamonds --delete --ledger RUN      # take the bookmark away (the checkpoint stays)
 rollout rename curriculum-9 "diamonds, guided" --ledger RUN   # call a run something else
+rollout merge diamonds --base Qwen/Qwen3.5-9B --bookmark diamonds-merged   # fold an adapter in: a full checkpoint
 ```
 
 A new run started from a checkpoint is a fork: its profile's `[trainer] start = "diamonds"` (any reference), and

@@ -166,6 +166,7 @@ async def imitate(
         weights=into / WEIGHTS,
         run=run,
         base=base,
+        kind=trainer.weights,
         state=into / STATE if await asyncio.to_thread((into / STATE).exists) else None,
         parents=[head.id] if head else [],
         batch=batch,

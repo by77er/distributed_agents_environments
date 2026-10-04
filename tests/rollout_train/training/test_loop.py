@@ -51,6 +51,7 @@ class Counting:
     """A trainer that trains nothing: it writes down what it was given and leaves files as a trainer would."""
 
     budget = Budget(segments=3)
+    weights = "lora"
 
     def __init__(self, fails: int = 0) -> None:
         self.batches: list[list[Weighted]] = []

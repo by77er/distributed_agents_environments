@@ -20,7 +20,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
-- **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
+- **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#tokenizer_of)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#tokenizer_of)
 - **[`rollout_computers`](#rollout_computers)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
@@ -2442,7 +2442,8 @@ class Checkpoint
 | `weights` | `Manifest \| None` | required | None once it was released (`Checkpoints.thin`). |
 | `parents` | `tuple[str, ...]` | `()` | What it was made from, by id: first the checkpoint it was trained from, then any others it learned from (the teachers of a distillation, say). None: from the base model. |
 | `depth` | `int` | `1` | Steps from the base model along its first parents: its first parent's depth and one. |
-| `base` | `str \| None` | `None` | The model it adapts, by name (`Qwen/Qwen3.5-9B`, say): its first parent's, or the one its line began from. |
+| `base` | `str \| None` | `None` | What its weights build on: the model its line began from, by name (`Qwen/Qwen3.5-9B`, say); or, for an adapter trained over a full checkpoint, that checkpoint, by id. |
+| `kind` | `str` | `'lora'` | What its weights are: `lora` (an adapter over its base) or `full` (all of a model's weights). |
 | `run` | `str \| None` | `None` | The run that made it, by id. |
 | `step` | `int \| None` | `None` | The run's step that made it (none for a checkpoint made outside a run's steps, such as by imitation). |
 | `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
@@ -2470,9 +2471,14 @@ Every checkpoint, in a ledger, and their files in a blob store.
 - `def __init__(self, ledger: Ledger, blobs: Blobs) -> None`
 - `async def all(self) -> list[Checkpoint]` — Every checkpoint, oldest first.
 - `async def checkpoint(self, id: str) -> Checkpoint` — The checkpoint an id says.
+- `async def under(self, checkpoint: Checkpoint) -> Checkpoint | None` — The full checkpoint whose weights `checkpoint` is served over: itself, if it is full; the full checkpoint it
+  builds on, if it is an adapter over one; None for an adapter over a model. Raises `ValueError` if that
+  checkpoint was released.
 - `async def head(self, run: str) -> Checkpoint | None` — The newest checkpoint a run made, if it made one.
-- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
-  Its base is its first parent's; `base` names it for a checkpoint made from the base model. The append is what
+- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
+  Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
+  id); for a merge (full weights from an adapter), the `base` it names; else its first parent's base, or `base`
+  for a checkpoint made from the base model. The append is what
   makes the checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id,
   decided before) gets the checkpoint that is there.
 - `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
@@ -2801,6 +2807,7 @@ where its files go, so any trainer can take any step of any policy.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `budget` | `Budget` | required |  |
+| `weights` | `str` | required | What its steps make: `lora` (an adapter over the weights the engines hold) or `full` (all the weights). |
 
 **Methods**
 
@@ -2842,7 +2849,8 @@ class Channel
 | `engines` | `Sequence[Engine]` | required |  |
 | `renderer` | `'Renderer'` | required | The model family's token format. |
 | `limits` | `Limits` | `Limits()` |  |
-| `adapter` | `str \| None` | `None` | The adapter sampling now (None: the base model). |
+| `adapter` | `str \| None` | `None` | The adapter sampling now (None: the weights the engines hold, the model's own or a full checkpoint's). |
+| `serving` | `str \| None` | `None` | What is served, by name: the adapter, or the full checkpoint the engines hold (None: the model's own). |
 | `version` | `int` | `0` | How many times weights have been published; recorded with every sampled token. |
 
 **Methods**
@@ -2850,10 +2858,12 @@ class Channel
 - `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '') -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
   beginnings are cached.
-- `async def publish(self, adapter: str, path: str, version: int | None = None) -> int` — Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the version it
-  is served as: `version` if one is given (the checkpoint's depth, which means the same in every process),
-  or one more than the last. The adapter before stays loaded, so that a turn in progress finishes under the
-  weights it began with; the one before that is dropped. Publishing what is being served changes nothing.
+- `async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
+  checkpoint's weights there, which the engines load in place of what they hold. Returns the version it is
+  served as: `version` if one is given (the checkpoint's depth, which means the same in every process), or
+  one more than the last. An adapter before stays loaded, so that a turn in progress finishes under the
+  weights it began with; the one before that is dropped. Full weights replace the engines' at once, and the
+  adapters trained on the weights before go with them. Publishing what is being served changes nothing.
 - `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
 - `def resume(self) -> None`
 - `async def sleep(self) -> None`
@@ -2881,6 +2891,7 @@ One replica serving a model: in this process, or a client of a server elsewhere.
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
 - `async def load_adapter(self, name: str, path: str) -> None` — Register a LoRA adapter under `name`; requests name it to sample from it.
 - `async def remove_adapter(self, name: str) -> None`
+- `async def load_weights(self, path: str) -> None` — Serve the full weights in `path` (a checkpoint's files) in place of the model's own, from now on.
 - `async def sleep(self) -> None` — Free the accelerator (for a trainer that shares it).
 - `async def wake(self) -> None`
 - `@property def processes(self) -> Sequence[int]` — The processes it started on this machine, for whoever must end them if this process is killed.
@@ -3002,7 +3013,8 @@ class Recorder
 - `def export(self, session_id: str) -> list[Segment]` — The session's segments, oldest first (see the module's description).
 - `def sessions(self, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run exports, by slot.
 - `def forget(self, run_id: str) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel; returns the version they are served as (a checkpoint's depth).
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel (an adapter, or with `full` a full checkpoint's weights); returns the
+  version they are served as (a checkpoint's depth).
 - `def served(self, key: str) -> tuple[str, ModelEndpoint] | None` — The session a harness's key names, and the endpoint that samples for it.
 
 ### `Renderer`
@@ -3169,8 +3181,8 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
   cluster, else here.
 - `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
 - `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int` — Serve new weights on a channel from now on; returns the number its samples are stamped with (a
-  checkpoint's depth).
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
+  samples are stamped with (a checkpoint's depth).
 
 ### `Profile`
 
@@ -3430,6 +3442,7 @@ spent; logprobs are -0.5 per token. Keeps what it was asked and told.
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
 - `async def load_adapter(self, name: str, path: str) -> None`
 - `async def remove_adapter(self, name: str) -> None`
+- `async def load_weights(self, path: str) -> None`
 - `async def sleep(self) -> None`
 - `async def wake(self) -> None`
 - `def close(self) -> None`
@@ -3576,6 +3589,10 @@ class VllmEngine
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
 - `async def load_adapter(self, name: str, path: str) -> None` — Register a LoRA adapter (a PEFT directory) under `name`; samples name it to use it.
 - `async def remove_adapter(self, name: str) -> None`
+- `async def load_weights(self, path: str) -> None` — Serve the full weights in `path` (a checkpoint's files, in the model's own layout) in place of the ones
+  held, from now on: they are read into the model as it is, and read again from there on waking. (vLLM warns
+  that `ParallelLMHead` failed to load where the output layer is tied to the embeddings: it shares them, and
+  serves the new ones.)
 - `async def sleep(self) -> None` — Free the GPU: the cache is discarded and the weights dropped (they are read again on waking).
 - `async def wake(self) -> None`
 - `@property def processes(self) -> list[int]`
@@ -3584,6 +3601,22 @@ class VllmEngine
 ## `rollout_lora`
 
 A trainer for 4-bit checkpoints with LoRA.
+
+### `FullTrainer`
+
+*class* · `implementations/rollout-lora/src/rollout_lora/trainer.py`
+
+```python
+class FullTrainer(LoraTrainer)
+```
+
+Trains every weight of a text model (`rollout_lora.full`), one step at a time in a fresh process: a step
+starts from its parent's full weights (the model's own for the first) and the optimizer's state, and leaves the
+new ones where it is told. `settings` are `LoraSettings`' fields; the adapter's (`rank`) are not used.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `weights` |  | `'full'` |  |
 
 ### `LoraSettings`
 
@@ -3628,6 +3661,10 @@ class LoraTrainer
 Trains a LoRA adapter over `model`'s checkpoint, one step at a time, each in a fresh process on the GPU
 (`rollout_lora.worker`). It keeps nothing between steps: a step starts from the adapter and the optimizer's
 state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `weights` |  | `'lora'` |  |
 
 **Methods**
 

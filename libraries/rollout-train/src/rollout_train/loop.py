@@ -54,10 +54,12 @@ from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Trainer, We
 
 
 class Publisher(Protocol):
-    """Serves new weights on a channel from now on; returns the number its samples are stamped with (the checkpoint's
-    depth)."""
+    """Serves new weights on a channel from now on (with `full`, a full checkpoint's in place of the engines'); returns
+    the number its samples are stamped with (the checkpoint's depth)."""
 
-    async def __call__(self, channel: str, adapter: str, path: str, version: int | None = None) -> int: ...
+    async def __call__(
+        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
+    ) -> int: ...
 
 
 FAILED_UPDATES = 3
@@ -121,6 +123,8 @@ async def train(
     curriculum = curriculum or Curriculum(catalog.rows())
     for number in sorted(recorded):
         curriculum.recorded(recorded[number])
+    if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
+        raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
     await plan(ledger, run, Plan(catalog.program, binding or binding_for(catalog, channel)), fence)
     here = {"from": start, "host": socket.gethostname(), "started": round(time.time(), 1)}
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
@@ -149,7 +153,7 @@ async def train(
             loaded = await checkpoints.files(await reshard(checkpoint, fence), directory / checkpoint.id / "resharded")
         else:
             loaded = (await files(checkpoint)).weights
-        served_as = await publish(channel, checkpoint.id, str(loaded), checkpoint.depth)
+        served_as = await publish(channel, checkpoint.id, str(loaded), checkpoint.depth, full=checkpoint.kind == "full")
         note("published", {"channel": channel, "adapter": checkpoint.id, "version": served_as})
         served = checkpoint
         keep = {checkpoint.id, checkpoint.parent}
@@ -273,7 +277,9 @@ async def train(
             checkpoint = await checkpoints.checkpoint(makes)  # made before this loop died: not made again
         except KeyError:
             parent_id = str(intent["parent"]) if intent["parent"] else None
-            begin = await files(await checkpoints.checkpoint(parent_id)) if parent_id else None
+            parent = await checkpoints.checkpoint(parent_id) if parent_id else None
+            # An adapter's first step over full weights begins a new adapter: the model it trains over is those weights.
+            begin = await files(parent) if parent is not None and parent.kind == trainer.weights else None
             into = directory / makes
             await asyncio.to_thread(shutil.rmtree, into, ignore_errors=True)  # (what a step that died left)
             try:
@@ -297,6 +303,7 @@ async def train(
                 weights=into / WEIGHTS,
                 run=run,
                 base=base,
+                kind=trainer.weights,
                 step=key,
                 state=into / STATE if await asyncio.to_thread((into / STATE).exists) else None,
                 parents=[parent_id] if parent_id else [],

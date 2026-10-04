@@ -67,6 +67,10 @@ nothing.
   weights it began with. The one before that is dropped.
 - Every sampled span records the version it was sampled at
   ([what a session exports](recorder.md#what-a-session-exports)).
+- `publish(…, full=True)` serves a full checkpoint ([full weights](checkpoints.md#full-weights-and-merges)): the
+  channel pauses its engines, has each read the files into the model it holds (`Engine.load_weights`), drops the
+  adapters it had loaded, and samples with no adapter from then on. `Channel.serving` names what is served, an
+  adapter or full weights.
 - Callers publish through the recorder (`Recorder.publish`, which a profile's platform hands on as `publish`),
   naming the channel.
 

@@ -216,6 +216,35 @@ def _as_job(ray: str, given: list[str]) -> None:
     print(f"the launcher runs as Ray job {job}: `ray job logs {job} --follow` shows its output")
 
 
+async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: str | None) -> None:
+    from rollout.harness.blobs import FileBlobStore
+    from rollout_train.checkpoints import Checkpoints
+    from rollout_train.layout import BLOBS
+    from rollout_train.merging import SCOPE, merge
+    from rollout_train.record import STARTS, table
+    from rollout_train.registry import resolved
+    from rollout_train.stores import opened
+
+    ledger, registry = _registry_at(where)
+    try:
+        lora = await resolved(ledger, registry, who)
+    except KeyError as error:
+        raise SystemExit(error.args[0]) from None
+    if lora is None:
+        raise SystemExit("the base model has no adapter to merge")
+    made = await Checkpoints(ledger, FileBlobStore(Path(where) / BLOBS)).checkpoint(lora)  # (its record only)
+    starts: Any = await ledger.read(table(made.run, STARTS)) if made.run else {}
+    kept: Any = starts[max(starts, key=int)].get("blobs") if starts else None  # (where the run keeps its blobs)
+    here = await asyncio.to_thread(Path(where).expanduser)
+    blobs = opened(kept) if kept else FileBlobStore(here / BLOBS)
+    fence = await ledger.take(SCOPE)
+    scratch = Path.home() / ".cache" / "rollout" / "merging"  # (on disk: a merged model may be gigabytes)
+    merged = await merge(Checkpoints(ledger, blobs), fence, lora, base=base, merger=merger, scratch=scratch)
+    if bookmark:
+        await registry.bookmark(bookmark, merged.id)
+    print(f"merged {lora} into its base: {merged.id} (full weights, depth {merged.depth}, base {merged.base})")
+
+
 async def _rename(who: str, name: str, where: str) -> None:
     from rollout_train.registry import Taken
 
@@ -320,6 +349,12 @@ def main() -> None:
     launching.add_argument("--ray", help="a Ray cluster's job server (http://127.0.0.1:8265): each run is a Ray job")
     launching.add_argument("--gpus", type=float, default=1.0, help="accelerators each run's Ray job asks for (1)")
     launching.add_argument("--as-job", action="store_true", help="submit the launcher itself as a Ray job (with --ray)")
+    merging = commands.add_parser("merge", help="fold a LoRA checkpoint into its base: a full checkpoint of its own")
+    merging.add_argument("checkpoint", help="the LoRA checkpoint: a bookmark, RUN:STEP, RUN, or an id or its start")
+    merging.add_argument("--base", help="the model to merge into (by default the one it was trained over)")
+    merging.add_argument("--merger", default="rollout_lora.merge:merge", help="what folds the adapter in (module:name)")
+    merging.add_argument("--bookmark", help="a bookmark to name the merged checkpoint")
+    merging.add_argument("--ledger", default=".", help=where)
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
@@ -341,6 +376,11 @@ def main() -> None:
             dict(_setting(each) for each in arguments.set),
         )
         sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command == "merge":
+        asyncio.run(
+            _merge(arguments.checkpoint, arguments.ledger, arguments.base, arguments.merger, arguments.bookmark)
+        )
+        return
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
         return

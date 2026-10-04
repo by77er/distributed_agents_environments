@@ -145,9 +145,12 @@ class Recorder:
         for key in [key for key, (session, _) in self._keys.items() if of_run(session)]:
             del self._keys[key]
 
-    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None) -> int:
-        """Serve new weights on a channel; returns the version they are served as (a checkpoint's depth)."""
-        return await self.channels[channel].publish(adapter, path, version)
+    async def publish(
+        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
+    ) -> int:
+        """Serve new weights on a channel (an adapter, or with `full` a full checkpoint's weights); returns the
+        version they are served as (a checkpoint's depth)."""
+        return await self.channels[channel].publish(adapter, path, version, full=full)
 
     def served(self, key: str) -> tuple[str, ModelEndpoint] | None:
         """The session a harness's key names, and the endpoint that samples for it."""

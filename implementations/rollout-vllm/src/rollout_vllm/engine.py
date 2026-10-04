@@ -58,6 +58,8 @@ class VllmEngine:
         self._engine: Any = AsyncLLM.from_engine_args(arguments)
         self._requests = itertools.count()
         self._adapters: dict[str, Any] = {}
+        self._weights: str | None = None
+        """The full checkpoint's files the engine serves, if it serves one in place of the model's own."""
         self._adapter_ids = itertools.count(1)
 
     async def generate(
@@ -113,6 +115,15 @@ class VllmEngine:
         if request is not None:
             await self._engine.remove_lora(request.lora_int_id)
 
+    async def load_weights(self, path: str) -> None:
+        """Serve the full weights in `path` (a checkpoint's files, in the model's own layout) in place of the ones
+        held, from now on: they are read into the model as it is, and read again from there on waking. (vLLM warns
+        that `ParallelLMHead` failed to load where the output layer is tied to the embeddings: it shares them, and
+        serves the new ones.)"""
+        await self._engine.collective_rpc("reload_weights", kwargs={"weights_path": path})
+        await self._engine.reset_prefix_cache()  # (what was cached was computed with the weights before)
+        self._weights = path
+
     async def sleep(self) -> None:
         """Free the GPU: the cache is discarded and the weights dropped (they are read again on waking)."""
         await self._engine.reset_prefix_cache()
@@ -120,7 +131,8 @@ class VllmEngine:
 
     async def wake(self) -> None:
         await self._engine.wake_up(tags=["weights"])
-        await self._engine.collective_rpc("reload_weights")
+        served = {"weights_path": self._weights} if self._weights is not None else {}
+        await self._engine.collective_rpc("reload_weights", kwargs=served)
         await self._engine.wake_up(tags=["kv_cache"])
 
     @property

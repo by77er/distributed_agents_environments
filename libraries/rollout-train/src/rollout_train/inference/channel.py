@@ -47,6 +47,10 @@ class Engine(Protocol):
 
     async def remove_adapter(self, name: str) -> None: ...
 
+    async def load_weights(self, path: str) -> None:
+        """Serve the full weights in `path` (a checkpoint's files) in place of the model's own, from now on."""
+        ...
+
     async def sleep(self) -> None:
         """Free the accelerator (for a trainer that shares it)."""
         ...
@@ -83,7 +87,9 @@ class Channel:
     """The model family's token format."""
     limits: Limits = Limits()
     adapter: str | None = None
-    """The adapter sampling now (None: the base model)."""
+    """The adapter sampling now (None: the weights the engines hold, the model's own or a full checkpoint's)."""
+    serving: str | None = None
+    """What is served, by name: the adapter, or the full checkpoint the engines hold (None: the model's own)."""
     version: int = 0
     """How many times weights have been published; recorded with every sampled token."""
     _loaded: list[str] = field(default_factory=list[str])
@@ -148,19 +154,33 @@ class Channel:
         self._counts["generated_tokens"] += len(generation.tokens)
         return generation
 
-    async def publish(self, adapter: str, path: str, version: int | None = None) -> int:
-        """Serve `adapter` (a LoRA directory every engine can read at `path`) from now on; returns the version it
-        is served as: `version` if one is given (the checkpoint's depth, which means the same in every process),
-        or one more than the last. The adapter before stays loaded, so that a turn in progress finishes under the
-        weights it began with; the one before that is dropped. Publishing what is being served changes nothing."""
-        if adapter == self.adapter:
+    async def publish(self, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+        """Serve `adapter` from now on: a LoRA directory every engine can read at `path`, or with `full`, a full
+        checkpoint's weights there, which the engines load in place of what they hold. Returns the version it is
+        served as: `version` if one is given (the checkpoint's depth, which means the same in every process), or
+        one more than the last. An adapter before stays loaded, so that a turn in progress finishes under the
+        weights it began with; the one before that is dropped. Full weights replace the engines' at once, and the
+        adapters trained on the weights before go with them. Publishing what is being served changes nothing."""
+        if adapter == self.serving:
             return self.version
-        await asyncio.gather(*(engine.load_adapter(adapter, path) for engine in self.engines))
-        self.adapter, self.version = adapter, self.version + 1 if version is None else version
-        self._loaded.append(adapter)
-        while len(self._loaded) > 2:
-            dropped = self._loaded.pop(0)
-            await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
+        if full:
+            await self.pause()  # (no turn may be half sampled when the weights under it change)
+            try:
+                await asyncio.gather(*(engine.load_weights(path) for engine in self.engines))
+            finally:
+                self.resume()
+            for dropped in self._loaded:
+                await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
+            self._loaded.clear()
+            self.adapter = None
+        else:
+            await asyncio.gather(*(engine.load_adapter(adapter, path) for engine in self.engines))
+            self.adapter = adapter
+            self._loaded.append(adapter)
+            while len(self._loaded) > 2:
+                dropped = self._loaded.pop(0)
+                await asyncio.gather(*(engine.remove_adapter(dropped) for engine in self.engines))
+        self.serving, self.version = adapter, self.version + 1 if version is None else version
         return self.version
 
     async def pause(self) -> None:
