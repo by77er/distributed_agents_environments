@@ -21,7 +21,7 @@ In order of what each is worth per hour of work:
 |---|---|---|---|
 | 1 | **Redraw the world when a row cannot be built**, keep a record of which rows each world can host, and sweep every row through every world once | 5 of 72 groups never started, costing 99 minutes. t012u and t019u found no trees in their worlds. t022 failed the same way in two worlds ("an ore would be exposed", at 8 places each), which points at its builder. While a row keeps failing, it keeps the untried weight 1.0 for `FAILED_GROUPS` groups: the rule draws broken rows the most | About 7% of groups back; no row drawn for being broken; builder bugs found before a run |
 | 2 | **`counts_for` credits only successes** | A guided twin is credited with its unguided row's failures. Groups 1–35 were played before ways existed and are filed under unguided rows, so t011, t014, t016 and t021 got only failures (weight 0.05 against up to 1.05) and the run never drew them | Guided rows are tried on their own evidence; fading guidance gets its first rung back |
-| 3 | **Unlock on evidence and never relock; an unguided row waits for its guided twin** | Replayed through today's catalog, the frontier moved on single groups of four: t013u at 3 of 4 unlocked up to row 34, t017u at 2 of 4 up to row 38. One group of t017u at 0 of 4 (group 68) locked 11 rows again. 6 of the 10 groups in which nobody scored anything were first tries of newly unlocked rows | Fewer wasted first tries; the frontier stops oscillating |
+| 3 | **Unlock on evidence and never relock; an unguided row waits for its guided twin** | Replayed through today's environment, the frontier moved on single groups of four: t013u at 3 of 4 unlocked up to row 34, t017u at 2 of 4 up to row 38. One group of t017u at 0 of 4 (group 68) locked 11 rows again. 6 of the 10 groups in which nobody scored anything were first tries of newly unlocked rows | Fewer wasted first tries; the frontier stops oscillating |
 | 4 | **Weight by the chance of a mixed group**, from an age-discounted Beta posterior (formula below) | Untried rows weigh 1.0 against at most 1.05 for any row: with the run's final records and 38 rows open, 5 untried rows get 24% of draws. t019 (0 of 16 solved, only partial credit) and t007u (16 of 16) get 4% each | Same informative share at steady state (0.67 against 0.67 at the run's end); better during unlocks. The literature reports 2–3× fewer steps, but from large pools of cheap prompts |
 | 5 | **A frozen `core` suite** of 24 starts on held-out worlds, played once each by every 10th version; a `frontier` suite of 8 long starts for every 40th version and outside models | The training solve rate fell from 63% to 36% as rows unlocked, the team size changed and the harness changed. Nothing in training can separate those from learning | A measured trend: two versions compared on 48 paired episodes show a change of about 0.19; a fit over many versions shows less |
 | 6 | **Records** for curricula, suites and buildability in the shared ledger, and sections of the monitor's statistics page for each | A fold cannot be audited or replayed without its parameters and the version each group was played by | Offline comparison of sampling rules; one buildability table for every run |
@@ -57,7 +57,7 @@ Two corrections to the run's own evidence:
 
 ### What `Curriculum` does today
 
-Rows unlock in catalog order: the first `start` (3), and `reach` (4) past the hardest row whose moving-average solve
+Rows unlock in environment order: the first `start` (3), and `reach` (4) past the hardest row whose moving-average solve
 rate is at least ½. A row's weight is a moving average (`smoothing` 0.5) of whether its groups' task rewards
 differed, plus `floor` (0.05). Untried rows weigh 1.0. A group counts for its row and for every row in `counts_for`.
 A group in which no episode completed counts for nothing until `FAILED_GROUPS` (3) of them in a row.
@@ -65,10 +65,10 @@ A group in which no episode completed counts for nothing until `FAILED_GROUPS` (
 | Right | Wrong |
 |---|---|
 | It samples for signal, not for success: a group-relative update learns nothing from a group whose scores are all equal, which is DAPO's filter applied before playing instead of after | "Rewards differed" is a weak proxy. It counts a group where everyone solved and only the diamond count varied the same as a group with both solved and unsolved episodes. The easy rows t003, t005 and t006 drew 17 of 72 groups |
-| It is a fold over the ledger, replayable and robust to catalog changes | `smoothing` 0.5 makes the last group carry half the estimate. With 4 episodes per group, one group decides unlocking |
+| It is a fold over the ledger, replayable and robust to environment changes | `smoothing` 0.5 makes the last group carry half the estimate. With 4 episodes per group, one group decides unlocking |
 | Pending rows go last, so draws are not made on stale evidence | Unlocks can be revoked, which wastes the groups that explored the newly opened rows |
 | A guided row and its unguided variant share evidence | Failures are shared too, though failing without help says little about doing it with help |
-| Unguided variants sit two steps later in difficulty, so guidance fades row by row | The catalog's order is one line through a partial order: an unguided row can open before its guided twin is solved |
+| Unguided variants sit two steps later in difficulty, so guidance fades row by row | The environment's order is one line through a partial order: an unguided row can open before its guided twin is solved |
 | | A row that cannot be built is the most drawn row while it fails |
 | | The moving average is clocked by the row's own groups: a row drawn rarely keeps an old estimate whatever the policy has learnt since |
 
@@ -83,11 +83,11 @@ A group in which no episode completed counts for nothing until `FAILED_GROUPS` (
 | GRESO (Zheng et al., 2025, [2506.02177](https://arxiv.org/abs/2506.02177)) | Skip a prompt with probability 1 − p_e^z after z zero-variance rounds in a row, keeping at least 5% exploration | Zero-variance rows tend to stay so. Park them but keep a fixed small share of draws to notice when they wake |
 | SEC (Chen et al., 2025, [2505.14970](https://arxiv.org/abs/2505.14970)) | A bandit over categories, rewarded by mean \|advantage\|, updated with Q ← αr + (1−α)Q, α 0.2–0.5, softmax at temperature τ | Close to today's moving average, with a better signal (\|advantage\| ∝ √(p(1−p)) for binary rewards) |
 | Prioritized Level Replay (Jiang et al., 2021, [2010.03934](https://arxiv.org/abs/2010.03934)) | Rank levels by mean \|GAE\|, P ∝ (1/rank)^(1/β), β = 0.1, mixed with staleness at ρ = 0.1 | Rank-based weights are robust to the scale of the score. Staleness is a principled floor: revisit what has not been seen for long |
-| PAIRED ([2012.02096](https://arxiv.org/abs/2012.02096)), Robust PLR ([2110.02439](https://arxiv.org/abs/2110.02439)), ACCEL ([2203.01302](https://arxiv.org/abs/2203.01302)) | Regret-based environment design: an adversary or a curated buffer chooses levels of high regret. Robust PLR updates only on replayed levels; ACCEL edits high-regret levels | No value function or antagonist here, and building is slow. SFL finds that the usual regret proxies track success rate anyway. ACCEL's "edit a level that is almost right" is what the catalog's kit ladder does by hand |
+| PAIRED ([2012.02096](https://arxiv.org/abs/2012.02096)), Robust PLR ([2110.02439](https://arxiv.org/abs/2110.02439)), ACCEL ([2203.01302](https://arxiv.org/abs/2203.01302)) | Regret-based environment design: an adversary or a curated buffer chooses levels of high regret. Robust PLR updates only on replayed levels; ACCEL edits high-regret levels | No value function or antagonist here, and building is slow. SFL finds that the usual regret proxies track success rate anyway. ACCEL's "edit a level that is almost right" is what the environment's kit ladder does by hand |
 | Teacher-Student Curriculum Learning (Matiisen et al., 2017, [1707.00183](https://arxiv.org/abs/1707.00183)) | A bandit over tasks rewarded by the absolute slope of the learning curve, so forgetting draws practice too | Learning progress needs many groups per row to estimate a slope; the run has 1–8. It suits row families more than rows |
-| ALP-GMM (Portelas et al., 2019, [1910.07224](https://arxiv.org/abs/1910.07224)) | Absolute learning progress \|r_new − r_old\| against the nearest earlier task, a GMM over task parameters, 20% uniform sampling | Fits continuous task parameters; the catalog is discrete. The 20% uniform share is the same idea as a floor |
-| Self-paced learning (Kumar et al., 2010, [NeurIPS](https://papers.nips.cc/paper/3923-self-paced-learning-for-latent-variable-models)) | Train on examples whose loss is below a threshold that is relaxed over time | Today's unlocking is a self-paced schedule over the catalog's order |
-| Reverse curriculum generation (Florensa et al., 2017, [1707.05300](https://arxiv.org/abs/1707.05300)); Backplay ([1807.06919](https://arxiv.org/abs/1807.06919)); R³ (Xi et al., 2024, [2402.05808](https://arxiv.org/abs/2402.05808)) | Start near the goal and move the start back. Florensa keeps starts whose success is in [0.1, 0.9] and replays old ones | The catalog is already a reverse curriculum over the tech tree: kits iron → ingots → raw iron → stone → wooden → nothing, and progress tasks from the end portal back to the surface. What is missing is moving along it by a row's own success band instead of a global order |
+| ALP-GMM (Portelas et al., 2019, [1910.07224](https://arxiv.org/abs/1910.07224)) | Absolute learning progress \|r_new − r_old\| against the nearest earlier task, a GMM over task parameters, 20% uniform sampling | Fits continuous task parameters; the environment is discrete. The 20% uniform share is the same idea as a floor |
+| Self-paced learning (Kumar et al., 2010, [NeurIPS](https://papers.nips.cc/paper/3923-self-paced-learning-for-latent-variable-models)) | Train on examples whose loss is below a threshold that is relaxed over time | Today's unlocking is a self-paced schedule over the environment's order |
+| Reverse curriculum generation (Florensa et al., 2017, [1707.05300](https://arxiv.org/abs/1707.05300)); Backplay ([1807.06919](https://arxiv.org/abs/1807.06919)); R³ (Xi et al., 2024, [2402.05808](https://arxiv.org/abs/2402.05808)) | Start near the goal and move the start back. Florensa keeps starts whose success is in [0.1, 0.9] and replays old ones | The environment is already a reverse curriculum over the tech tree: kits iron → ingots → raw iron → stone → wooden → nothing, and progress tasks from the end portal back to the surface. What is missing is moving along it by a row's own success band instead of a global order |
 | QuestA ([2507.13266](https://arxiv.org/abs/2507.13266)), Guide-GRPO ([2506.13923](https://arxiv.org/abs/2506.13923)), StepHint ([2507.02841](https://arxiv.org/abs/2507.02841)) | Hints or partial solutions in the prompt for problems the policy fails, faded over stages (QuestA: 50% then 25% of the solution). Guide adds hints only when all k rollouts fail, and corrects with π(y\|x)/π_old(y\|x̃) toward the unhinted prompt | The guided twin is a hint at row granularity. Mixing guided and unguided episodes in one group, with the importance correction, is a later step: the trainer would score sampled tokens under the unguided prompt |
 
 ### Proposed sampling rule
@@ -135,7 +135,7 @@ and t019 and t007u 0.7% each instead of 4%. The expected share of groups with mi
 |---|---|
 | A row is solved when its posterior mean (½ + s)/(1 + s + f) is at least ½ and it has at least 8 episodes of evidence (s + f ≥ 8, two groups) | instead of a moving average at ½ from one group |
 | Open: the first `start` rows, and `reach` past the hardest row ever solved | an unlock is never revoked: m_i lowers the weight of a row that got harder |
-| A row may name rows it waits for (`Row.requires`, proposed): it is not drawn before each is solved | the catalog fills it: an unguided row waits for its guided twin, a one-kit or split row for the kitted row of the same situation |
+| A row may name rows it waits for (`Row.requires`, proposed): it is not drawn before each is solved | the environment fills it: an unguided row waits for its guided twin, a one-kit or split row for the kitted row of the same situation |
 | `start`, `reach` | 3, 4, as today |
 
 `requires` makes guidance fade where it has done its work: the team gets a situation without the way once it can
@@ -145,7 +145,7 @@ do it with the way, which is the reverse curriculum's rule (move the start back 
 
 - **Cannot be built.** Buildability belongs to a row in a world, not to the policy. A `BuildError` before the first
   turn redraws the start in another world (up to three) instead of failing the group. Each outcome is recorded
-  per (row, world) (proposed table `catalogs/CATALOG/buildable`), and `Teams.start` draws only from worlds where the
+  per (row, world) (proposed table `environments/ENVIRONMENT/buildable`), and `Teams.start` draws only from worlds where the
   row has been built or not yet tried. A row that no world can host is retired: weight 0, listed by the monitor.
   With the ledger shared by runs, this is learnt once. A sweep that builds every row in every world without playing
   (1,200 builds) would fill the table before a run, and tells a builder's bug (t022: the same error everywhere)
@@ -257,7 +257,7 @@ and the reverse curriculum score only training levels. Evaluations feed back thr
 
 - a stratum that falls by more than two paired standard errors between evaluated versions is flagged (forgetting,
   or a broken harness, which an anchor like t001 shows first);
-- a stratum where versions trail the outside model by most is where to add catalog rows or guidance;
+- a stratum where versions trail the outside model by most is where to add environment rows or guidance;
 - a start that certification could not build is evidence for the buildability table.
 
 ## How curricula and suites are kept (proposed)
@@ -266,14 +266,14 @@ Everything lives in the ledger every run shares (`DatabaseLedger`). Records are 
 
 | Table | Key | Record |
 |---|---|---|
-| `runs/RUN/curriculum` | the group number from which it applies | `kind` (`learnability`); `group_size`; `prior` (½, ½); `half_life` (8 versions); `partial_credit` (0.25); `parked_below` (0.15); `parked_share` (0.05); `start`, `reach`, `unlock_mean` (½), `unlock_episodes` (8), `relock` (false); `ignore` (rows and a time before which their results are left out); `catalog` (its reference) |
+| `runs/RUN/curriculum` | the group number from which it applies | `kind` (`learnability`); `group_size`; `prior` (½, ½); `half_life` (8 versions); `partial_credit` (0.25); `parked_below` (0.15); `parked_share` (0.05); `start`, `reach`, `unlock_mean` (½), `unlock_episodes` (8), `relock` (false); `ignore` (rows and a time before which their results are left out); `environment` (its reference) |
 | `runs/RUN/groups` | group number | as today, and `version` (the newest version when it was decided), `chance` (the probability the row had), `evidence` (α, β, d of the row then) |
-| `catalogs/CATALOG/buildable` | `ROW/WORLD` | `built`, `error`, `at` |
-| `evaluations/SUITE/suite` | `suite` | `catalog`, `purpose`, `worlds` (held-out indices), `strata` (name: what it covers), `derived_from` (the suite whose anchors it repeats), `decided` |
+| `environments/ENVIRONMENT/buildable` | `ROW/WORLD` | `built`, `error`, `at` |
+| `evaluations/SUITE/suite` | `suite` | `environment`, `purpose`, `worlds` (held-out indices), `strata` (name: what it covers), `derived_from` (the suite whose anchors it repeats), `decided` |
 | `evaluations/SUITE/starts` | start number | as in the policy graph (`task`, `title`, `seed`, `parameters`), and `stratum`, `anchor`, `players` |
 | `evaluations/SUITE/SUBJECT/results` | `START-EPISODE` | as in the policy graph, and `peak` (the most of the objective held at any turn), `deaths` |
 
-A curriculum is a catalog's rows, a sampling rule and unlock rules. Since it is a fold, its record and the run's
+A curriculum is an environment's rows, a sampling rule and unlock rules. Since it is a fold, its record and the run's
 results reproduce every draw. A changed rule is a new record, keyed by the group from which it applies. With
 `chance` logged on each group, another rule can be judged offline: reweigh the logged groups by the ratio of the
 new rule's probability to `chance`.
@@ -288,7 +288,7 @@ and `pace` (what was done with each group, and why groups gave nothing to train 
 |---|---|---|
 | `curriculum` | `curriculum`, `groups`, `results` | rows by version as a heat map of the posterior mean; the unlocked count over groups; each step's groups by kind (none solved, mixed, all solved, partial credit only, not built); parked and retired rows; each row's chance when drawn |
 | `suites` | `evaluations/*` | per suite, starts by subjects (solved, peak); per stratum the paired difference to the previous evaluated version with its interval; solve rate against version number, with the outside models as reference lines |
-| `buildable` | `catalogs/*/buildable` | rows by worlds, built or the error |
+| `buildable` | `environments/*/buildable` | rows by worlds, built or the error |
 
 ## Open questions
 

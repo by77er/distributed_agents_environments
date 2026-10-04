@@ -1,5 +1,5 @@
 """Two small tasks for the tests of everything above a run: a guessing game on the task loop, and a gate that holds
-a run open until the test lets it through; and a catalog of the guessing game."""
+a run open until the test lets it through; and an environment of the guessing game."""
 
 import asyncio
 import random
@@ -8,8 +8,8 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from rollout.catalog import Row
 from rollout.contracts import Message
+from rollout.environment import Row
 from rollout.harness import End, Observation, ProgramReference, RunContext, Task, agent_program
 
 GATES: dict[str, asyncio.Event] = {}
@@ -53,7 +53,7 @@ class Gated(Guess):
 
 
 class Words:
-    """A catalog of the guessing game: three rows, each a word to say."""
+    """An environment of the guessing game: three rows, each a word to say."""
 
     program: ProgramReference = agent_program(Guess)
 

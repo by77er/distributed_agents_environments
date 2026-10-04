@@ -1,7 +1,7 @@
 """Training: the loop, the group algorithm and the curriculum, and what they ask of a trainer.
 
-- `train` (`loop`): the loop, over a `Catalog`, a `Trainer` and `Checkpoints`, with runners playing the episodes it asks
-  for in the ledger. It can die and be started again.
+- `train` (`loop`): the loop, over an `Environment`, a `Trainer` and `Checkpoints`, with runners playing the episodes it
+  asks for in the ledger. It can die and be started again.
 - `Ledger`, `FileLedger` (`ledger`): append-only tables and fences, the only state the loop has.
 - `Checkpoints`, `Checkpoint`, `Manifest`, `Retention` (`checkpoints`): the graph of checkpoints, each saying where it
   came from, and their files in a blob store.

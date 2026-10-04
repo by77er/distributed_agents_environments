@@ -107,13 +107,13 @@ machines, inference throughput and what is served from these beats.
 - **A span names its sample.** `Span.effect_id` is the effect the run's events know the sample by, so a trajectory
   can be joined to what the action it sampled did. `events_of(record, blobs)` reads the events.
 
-## Catalog
+## Environment
 
-What an environment offers to be trained on is a [`Catalog`](../../guide/reference.md#catalog): the program, its
+What there is to train on is an [`Environment`](../../guide/reference.md#environment): the program, its
 rows (easiest first), and how one start of a row is drawn. A row may name other rows its groups count for too
-(`Row.counts_for`, [the curriculum](training.md#the-curriculum)). `Catalog`, `Row` and `binding_for` live in
-`rollout.catalog`, in the core library, so an environment needs the harness and nothing above it.
-`binding_for(catalog, channel, tools)` binds every model slot of the catalog's program to one channel
+(`Row.counts_for`, [the curriculum](training.md#the-curriculum)). `Environment`, `Row` and `binding_for` live in
+`rollout.environment`, in the core library, so an environment needs the harness and nothing above it.
+`binding_for(environment, channel, tools)` binds every model slot of the environment's program to one channel
 ([three ways in](../../guide/perspectives.md#building-an-environment)).
 
 ## Watching

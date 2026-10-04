@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue
 
-from rollout.catalog import binding_for
+from rollout.environment import binding_for
 from rollout.harness.blobs import FileBlobStore
 from rollout_train import Budget, train
 from rollout_train import testing as support

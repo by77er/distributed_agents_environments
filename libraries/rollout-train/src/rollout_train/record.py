@@ -57,7 +57,7 @@ class Result:
     skipped: str | None = None
     """Why the algorithm found nothing to train on, if it did not."""
     unlocked: int = 0
-    """Rows of the catalog unlocked after this group."""
+    """Rows of the environment unlocked after this group."""
 
     def to_json(self) -> dict[str, Any]:
         """The record as the `results` table keeps it: without what the group's own record and key say (`JOINED`)."""

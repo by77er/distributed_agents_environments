@@ -8,7 +8,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 - **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Memory`](#memory), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
 - **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
-- **[`rollout.catalog`](#rolloutcatalog)** — What an environment offers to be trained on. [`binding_for`](#binding_for), [`Catalog`](#catalog), [`Row`](#row)
+- **[`rollout.environment`](#rolloutenvironment)** — What an environment offers to be trained on. [`binding_for`](#binding_for), [`Environment`](#environment), [`Row`](#row)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#events_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
@@ -1866,28 +1866,28 @@ Context use after a sample.
 | `input_tokens` | `int \| None` | `None` |  |
 | `output_tokens` | `int \| None` | `None` |  |
 
-## `rollout.catalog`
+## `rollout.environment`
 
 What an environment offers to be trained on.
 
 ### `binding_for`
 
-*function* · `libraries/rollout/src/rollout/catalog.py`
+*function* · `libraries/rollout/src/rollout/environment.py`
 
 ```python
-def binding_for(catalog: Catalog, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding
+def binding_for(environment: Environment, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding
 ```
 
-How a catalog's runs are served: every model slot of its program from `channel`, and each of its imports
+How an environment's runs are served: every model slot of its program from `channel`, and each of its imports
 from the tool set of its own name, or where `tools` says. (A program says which slots and imports it has once
-it is given a row: the catalog's first.)
+it is given a row: the environment's first.)
 
-### `Catalog`
+### `Environment`
 
-*class* · `libraries/rollout/src/rollout/catalog.py`
+*class* · `libraries/rollout/src/rollout/environment.py`
 
 ```python
-class Catalog(Protocol)
+class Environment(Protocol)
 ```
 
 | Field | Type | Default | Description |
@@ -1901,7 +1901,7 @@ class Catalog(Protocol)
 
 ### `Row`
 
-*class* · `libraries/rollout/src/rollout/catalog.py`
+*class* · `libraries/rollout/src/rollout/environment.py`
 
 ```python
 class Row
@@ -1909,7 +1909,7 @@ class Row
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `key` | `str` | required | Its name among the catalog's rows. |
+| `key` | `str` | required | Its name among the environment's rows. |
 | `title` | `str` | required | What it is, for people. |
 | `parameters` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
 | `counts_for` | `tuple[str, ...]` | `()` | The keys of other rows that a group of this one is evidence about too: the same situation with more help, say. What it teaches about this row it teaches about them. |
@@ -2537,7 +2537,7 @@ class Curriculum
 - `def sample(self, pending: Collection[str] = (), rng: random.Random | None = None) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
   be choosing on what was known before it, so the others come first.
 - `def recorded(self, line: Result) -> None` — Take a group's result into account: the row of its title, or failing that of its key (a key that is a
-  place in a catalog changes when rows are added). A curriculum is the fold of a run's results.
+  place in an environment changes when rows are added). A curriculum is the fold of a run's results.
 - `def evaluated(self, suite: str, checkpoint: str, results: Sequence[Result]) -> None` — Take an eval into account: `checkpoint` played `suite`, and `results` say how it did at each start. A
   curriculum folds a run's evals in the order they were made, so the newest of each suite is kept.
 - `def weight(self, row: Row) -> float`
@@ -2551,7 +2551,7 @@ class Curriculum
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def evaluate(catalog: Catalog, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
+async def evaluate(environment: Environment, checkpoints: Checkpoints, *, run: str, suite: Suite, subject: str | None, base: str | None, channel: str, directory: Path, publish: Publisher | None, episodes: int = 1, binding: RunBinding | None = None, started: Mapping[str, JsonValue] | None = None, asked_by: str = 'by hand', reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, hooks: Sequence[Hooks] = ()) -> dict[str, Any]
 ```
 
 Play `suite` with `subject` (a checkpoint's id; None: the base model, named `base`) served on `channel`,
@@ -2671,11 +2671,11 @@ class Ledger(Protocol)
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def make_suite(ledger: Ledger, name: str, catalog_name: str, catalog: Catalog, *, rows: Sequence[str] | None, seeds: Sequence[int]) -> Suite
+async def make_suite(ledger: Ledger, name: str, environment_name: str, environment: Environment, *, rows: Sequence[str] | None, seeds: Sequence[int]) -> Suite
 ```
 
-Make a suite of `catalog`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
-`ValueError` for a name that is no name or is taken (a suite is never changed), or a row the catalog lacks.
+Make a suite of `environment`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
+`ValueError` for a name that is no name or is taken (a suite is never changed), or a row the environment lacks.
 
 ### `Manifest`
 
@@ -2716,7 +2716,7 @@ class Result
 | `segments_recorded` | `int` | `0` |  |
 | `segments` | `int` | `0` | Segments the algorithm found to train on: none if it skipped the group. |
 | `skipped` | `str \| None` | `None` | Why the algorithm found nothing to train on, if it did not. |
-| `unlocked` | `int` | `0` | Rows of the catalog unlocked after this group. |
+| `unlocked` | `int` | `0` | Rows of the environment unlocked after this group. |
 
 **Methods**
 
@@ -2763,14 +2763,14 @@ class Schedule
 ```
 
 Evals a training run makes of its own checkpoints: `suite` played by the checkpoint of every `every`th step,
-`episodes` episodes of each start, between that step and the next. `catalog` is the suite's catalog, and `binding`
-how its episodes are played (by default every slot from the trained channel). `run` gives the eval's run for a
-step: the same each time it is asked for that step, and one the run's episode runners play.
+`episodes` episodes of each start, between that step and the next. `environment` is the suite's environment, and
+`binding` how its episodes are played (by default every slot from the trained channel). `run` gives the eval's run
+for a step: the same each time it is asked for that step, and one the run's episode runners play.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `suite` | `Suite` | required |  |
-| `catalog` | `Catalog` | required |  |
+| `environment` | `Environment` | required |  |
 | `run` | `Callable[[int], Awaitable[str]]` | required |  |
 | `every` | `int` | `1` |  |
 | `episodes` | `int` | `1` |  |
@@ -2827,12 +2827,12 @@ A step did not produce weights: the policy is as it was, and a later step may su
 class Suite
 ```
 
-A named list of starts of a catalog's rows, frozen: what every subject plays, start for start.
+A named list of starts of an environment's rows, frozen: what every subject plays, start for start.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | required |  |
-| `catalog` | `str` | required | The catalog, as `module:name`. |
+| `environment` | `str` | required | The environment, as `module:name`. |
 | `starts` | `list[Start]` | required | Its starts, in order: each row it names, once with each seed. |
 | `made` | `float` | `0.0` |  |
 | `rows` | `list[str] \| None` | `None` | The rows it names, by key. |
@@ -2853,28 +2853,28 @@ A suite, if there is one by that name.
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(catalog: Catalog, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, evals: Schedule | None = None) -> None
+async def train(environment: Environment, trainer: Trainer, checkpoints: Checkpoints, *, start: str | None = None, base: str | None = None, channel: str, directory: Path, publish: Publisher, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None, hooks: Sequence[Hooks] = (), kept: Callable[[], Awaitable[Collection[str]]] | None = None, made: Callable[[Checkpoint], Awaitable[object]] | None = None, reshard: Callable[[Checkpoint, Fence], Awaitable[Manifest]] | None = None, evals: Schedule | None = None) -> None
 ```
 
-Train from `start` (a checkpoint's id; else the base model, named `base`) on `catalog` until `groups` more groups
-have been played (those a stopped loop left unplayed among them) and every group played has been trained on, serving
-each checkpoint made on `channel`; a run started again goes on from the newest checkpoint it made. A step is taken
-over the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what is
-left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being served
-and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files are in
-the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is `Grpo()` unless given. `episodes_at_once`
-is how many episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once
-as each has places). `binding` says how the program's model slots and imports are served (by default: every slot
-from `channel`, each import from the tool set of its own name). `curriculum` is one that has recorded nothing: the
-run's results are folded into it. `retention` says which of the checkpoints the run made keep their files (weights
-and trainer state) once a newer one is served (`Retention()` unless given); besides those, what is served, what any
-run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's
-`starts` record says beside what the loop knows (where it starts from, this host, the time): where the run's
-directory is, where the monitor on its machine serves (`address`), and what profile started it, say. `hooks` are
-told of each result and step; `made` is called with each checkpoint made, once it is served (to move a bookmark,
-say). `reshard` gives the files the engines load for a checkpoint (in their layout: `rollout_train.resharding`),
-told the run's fence to note it under; without it, they load the trainer's. `evals` says which checkpoints the run
-evaluates as it makes them, between their step and the next.
+Train from `start` (a checkpoint's id; else the base model, named `base`) on `environment` until `groups` more
+groups have been played (those a stopped loop left unplayed among them) and every group played has been trained on,
+serving each checkpoint made on `channel`; a run started again goes on from the newest checkpoint it made. A step is
+taken over the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what
+is left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being
+served and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files
+are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is `Grpo()` unless given.
+`episodes_at_once` is how many episodes the run keeps work waiting for, whatever groups they are of (runners play
+them, as many at once as each has places). `binding` says how the program's model slots and imports are served (by
+default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is one that has
+recorded nothing: the run's results are folded into it. `retention` says which of the checkpoints the run made keep
+their files (weights and trainer state) once a newer one is served (`Retention()` unless given); besides those, what
+is served, what any run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep theirs.
+`started` is what the run's `starts` record says beside what the loop knows (where it starts from, this host, the
+time): where the run's directory is, where the monitor on its machine serves (`address`), and what profile started
+it, say. `hooks` are told of each result and step; `made` is called with each checkpoint made, once it is served (to
+move a bookmark, say). `reshard` gives the files the engines load for a checkpoint (in their layout:
+`rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's. `evals`
+says which checkpoints the run evaluates as it makes them, between their step and the next.
 
 ### `Trained`
 
@@ -3448,15 +3448,15 @@ class System
   says no checkpoint (or no registry).
 - `async def unbookmark(self, name: str) -> None` — Take a bookmark away (the checkpoint stays). Raises `KeyError` when there is no such bookmark.
 - `async def launches(self) -> dict[str, Any]` — The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
-  settings a launch may change, its catalogs, and whether it has room). A launch whose launcher stopped beating
-  while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
+  settings a launch may change, its environments, and whether it has room). A launch whose launcher stopped
+  beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
 - `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
-  and its catalog starts it. An eval names a suite (whose catalog it plays) and the checkpoint that plays it.
-  Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
+  and its environment starts it. An eval names a suite (whose environment it plays) and the checkpoint that plays
+  it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
   `KeyError` for what no launcher offers or a checkpoint no reference says.
 - `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
   group boundary. Raises `KeyError` when there is no such launch going.
-- `async def evals(self) -> dict[str, Any]` — Every suite (its catalog and starts, and each subject that played it, with how it did at each start) and
+- `async def evals(self) -> dict[str, Any]` — Every suite (its environment and starts, and each subject that played it, with how it did at each start) and
   every eval (its suite, its checkpoint, how far it has got), newest first (`rollout_train.evals`).
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read

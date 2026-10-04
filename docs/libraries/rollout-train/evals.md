@@ -7,22 +7,22 @@ for start. The code is `rollout_train.evals`; the commands are `rollout suite` a
 
 ## Suites
 
-A **suite** is a named list of starts of a catalog's rows: for each row it names (every row, by default) and each
+A **suite** is a named list of starts of an environment's rows: for each row it names (every row, by default) and each
 seed, the row's start drawn with `random.Random(seed)`. It is made once and never changed. To play other starts,
 make another suite.
 
 ```bash
-uv run rollout suite make words-v1 --catalog minecraft_team.catalog:catalog --rows chests,diamonds --seeds 1,2,3 --ledger L
+uv run rollout suite make words-v1 --environment minecraft_team.environment:environment --rows chests,diamonds --seeds 1,2,3 --ledger L
 uv run rollout suite list --ledger L
 ```
 
-`make_suite(ledger, name, catalog_name, catalog, rows=…, seeds=…)` writes it under the fence `suites/NAME`. A name
-that is taken, a row the catalog does not have, or no seeds is refused. `suite_of(ledger, name)` reads it back, and
+`make_suite(ledger, name, environment_name, environment, rows=…, seeds=…)` writes it under the fence `suites/NAME`. A name
+that is taken, a row the environment does not have, or no seeds is refused. `suite_of(ledger, name)` reads it back, and
 `suites_in(ledger)` lists every suite's name. The suite is kept in two tables:
 
 | Table | Key | Holds |
 |---|---|---|
-| `evaluations/SUITE/suite` | `suite` | its catalog (`module:name`), when it was made, its rows and its seeds |
+| `evaluations/SUITE/suite` | `suite` | its environment (`module:name`), when it was made, its rows and its seeds |
 | `evaluations/SUITE/starts` | `1` to `N` | each start: the row's key (`task`) and title, the seed, and the start's `parameters` |
 
 ## An eval
@@ -45,7 +45,7 @@ Without a trainer, the channel's longest turn is what its engines accept, not th
 ends, however it ends, it deletes what it fetched to serve the checkpoint (its directory's `bases/`, `checkpoints/`
 and `resharding/`): a full checkpoint's files are a whole model's.
 
-`evaluate(catalog, checkpoints, run=…, suite=…, subject=…, …)` does the work:
+`evaluate(environment, checkpoints, run=…, suite=…, subject=…, …)` does the work:
 
 1. It writes the run's plan (its program and binding, as a training run does), its start, and a record of who plays.
 2. If a checkpoint plays, it fetches the checkpoint's files into the run's `checkpoints/` (resharded into the
@@ -79,8 +79,8 @@ The monitor's **Evals** page (`#/evals`) lists every suite and every eval. A sui
 The form takes the checkpoint (the base model, a bookmark, or any checkpoint whose weights are kept, by where it came
 from and its short id), the episodes a start, the profile, and the eval's name. It posts a launch of kind `eval`
 (`POST /api/launches`, `{"kind": "eval", "suite", "profile", "name", "start", "episodes"}`). The monitor fills in the
-suite's catalog, checks the launch as it checks a run's, and refuses an unknown suite (404) or fewer than one episode
-a start (409). A launcher that offers the profile and the catalog claims it and starts
+suite's environment, checks the launch as it checks a run's, and refuses an unknown suite (404) or fewer than one episode
+a start (409). A launcher that offers the profile and the environment claims it and starts
 
 ```bash
 python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name NAME --episodes N --checkpoint REF
@@ -102,7 +102,7 @@ episodes = 1            # episodes of each start (1)
 ```
 
 `rollout train` reads the suite (a suite the ledger does not have stops it before it starts) and passes the loop a
-[`Schedule`](../../guide/reference.md#schedule): the suite, its catalog, how often, how many episodes, and the binding
+[`Schedule`](../../guide/reference.md#schedule): the suite, its environment, how often, how many episodes, and the binding
 of the suite's program to the trained channel. After a step whose number is a multiple of `every` makes its checkpoint
 and serves it, the loop:
 

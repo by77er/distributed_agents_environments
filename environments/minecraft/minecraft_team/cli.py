@@ -1,5 +1,5 @@
 """`minecraft-team server [--seed N]`: a temporary server to look at (join with any client; Ctrl-C stops and
-deletes it). Training is `rollout train PROFILE minecraft_team.catalog:catalog`."""
+deletes it). Training is `rollout train PROFILE minecraft_team.environment:environment`."""
 
 import argparse
 import asyncio

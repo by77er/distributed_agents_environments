@@ -110,7 +110,7 @@ async def launching(tmp_path: Path) -> tuple[FileLedger, httpx.AsyncClient]:
         fence, new_id(), weights=weights, run="train"
     )
     await registry.bookmark("best", checkpoint.id)
-    about: JsonValue = {"kind": LAUNCHER, "profiles": [OFFERED], "catalogs": ["c:c"], "at_once": 1, "playing": 0}
+    about: JsonValue = {"kind": LAUNCHER, "profiles": [OFFERED], "environments": ["c:c"], "at_once": 1, "playing": 0}
     await heartbeats.beat("launcher/far", about)
     transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
     return ledger, httpx.AsyncClient(transport=transport, base_url="http://monitor")
@@ -121,16 +121,20 @@ async def test_a_run_is_asked_for_from_the_page_with_its_settings_and_stopped(tm
     async with client:
         listed = (await client.get("/api/launches")).json()
         assert listed["launches"] == [] and [each["launcher"] for each in listed["launchers"]] == ["launcher/far"]
-        asked = {"profile": "one-gpu", "catalog": "c:c", "name": "diamonds, again", "start": "best",
+        asked = {"profile": "one-gpu", "environment": "c:c", "name": "diamonds, again", "start": "best",
                  "settings": {"trainer.learning_rate": 3e-5}, "groups": 40}  # fmt: skip
         answer = await client.post("/api/launches", json=asked)
         assert answer.status_code == 200
         made = answer.json()["launch"]
         assert made["state"] == ASKED and made["asked"]["settings"] == {"trainer.learning_rate": 3e-5}
         assert made["asked"]["groups"] == 40
+        older = {**{key: value for key, value in asked.items() if key != "environment"}, "catalog": "c:c"}
+        older["name"] = "asked as a catalog"  # (a page that says `catalog` asks for that environment)
+        said = (await client.post("/api/launches", json=older)).json()["launch"]
+        assert said["asked"]["environment"] == "c:c" and "catalog" not in said["asked"]
         refused = {
             "unknown profile": ({**asked, "profile": "eight-gpu"}, 404),
-            "unknown catalog": ({**asked, "catalog": "other:catalog"}, 404),
+            "unknown environment": ({**asked, "environment": "other:environment"}, 404),
             "taken name": ({**asked, "name": "taken name"}, 409),
             "no name": ({**asked, "name": " "}, 409),
             "unknown setting": ({**asked, "settings": {"episodes_at_onc": 2}}, 409),
@@ -159,7 +163,7 @@ async def test_no_launch_is_asked_for_a_profile_no_launcher_alive_offers(tmp_pat
     await a_run(ledger, "train")
     system = System(ledger=ledger)
     with pytest.raises(KeyError, match="no launcher alive offers"):
-        await system.launch({"profile": "one-gpu", "catalog": "c:c", "name": "fresh"})
+        await system.launch({"profile": "one-gpu", "environment": "c:c", "name": "fresh"})
     with pytest.raises(Taken):
         await system.launch({"profile": "one-gpu"})
 
@@ -170,10 +174,10 @@ async def test_a_launch_whose_launcher_stopped_beating_is_shown_lost(tmp_path: P
     assert launches is not None
     from rollout_train.launches import RUNNING, Asked
 
-    asked = await launches.ask(Asked(profile="one-gpu", catalog="words:catalog", name="quiet"))
+    asked = await launches.ask(Asked(profile="one-gpu", environment="words:environment", name="quiet"))
     await launches.claim(asked.id, "launcher/gone")  # (a launcher that never beats)
     await launches.note(asked.id, state=RUNNING, pid=4242)
-    waiting = await launches.ask(Asked(profile="one-gpu", catalog="words:catalog", name="waiting"))
+    waiting = await launches.ask(Asked(profile="one-gpu", environment="words:environment", name="waiting"))
     shown = {each["id"]: each for each in (await System(ledger=ledger).launches())["launches"]}
     assert shown[asked.id]["state"] == "lost" and "stopped beating" in shown[asked.id]["detail"]
     assert shown[waiting.id]["state"] == ASKED  # (not claimed: nobody's to lose)

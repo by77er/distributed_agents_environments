@@ -1,9 +1,9 @@
 """A launcher: it starts the runs asked for (`rollout_train.launches`) that it can run.
 
-`rollout launcher --ledger WHERE --profiles DIRECTORY --catalog module:name … --runs DIRECTORY` beats like a runner
+`rollout launcher --ledger WHERE --profiles DIRECTORY --environment module:name … --runs DIRECTORY` beats like a runner
 (`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that
 loads and names a trainer), with what its trainer makes (`lora` or `full` weights) and the settings a launch may change
-and their values in the profile; the catalogs; and whether it has room. It claims the oldest launch asked for one of
+and their values in the profile; the environments; and whether it has room. It claims the oldest launch asked for one of
 its profiles while it plays fewer than `--at-once`, starts `rollout train` for it in a directory of its own under
 `--runs` (`NAME-ID`), and notes how it goes. A launch asked to stop is sent an interrupt: the run stops as it does on
 Ctrl-C, at a group boundary of the ledger.
@@ -102,7 +102,7 @@ class Launcher:
     launches: Launches
     presence: Presence
     profiles: Path
-    catalogs: Sequence[str]
+    environments: Sequence[str]
     runs: Path
     at_once: int = 1
     ray: str | None = None
@@ -168,7 +168,7 @@ class Launcher:
             ]  # fmt: skip
         else:
             command = [
-                sys.executable, "-m", "rollout_train.cli", "train", profile["path"], asked.catalog,
+                sys.executable, "-m", "rollout_train.cli", "train", profile["path"], asked.environment,
                 "--directory", str(directory), "--name", asked.name, "--groups", str(asked.groups),
                 "--groups-per-step", str(asked.groups_per_step), "--seed", str(asked.seed), *changed,
             ]  # fmt: skip
@@ -290,7 +290,7 @@ class Launcher:
             "host": socket.gethostname(),
             "machine": await asyncio.to_thread(measured, self.runs),
             "profiles": self._offered,
-            "catalogs": list(self.catalogs),
+            "environments": list(self.environments),
             "at_once": self.at_once,
             "playing": len(self._playing) + len(self._jobs),
             "backend": "ray" if self.ray else "process",

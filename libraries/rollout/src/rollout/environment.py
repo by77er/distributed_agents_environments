@@ -1,6 +1,6 @@
-"""A catalog: what an environment offers to be trained on, as rows.
+"""An environment: what there is to train on, as rows.
 
-Whoever builds an environment supplies one: the program that plays an episode, the situations it can be set in
+Whoever builds an environment supplies this: the program that plays an episode, the situations it can be set in
 (rows, easiest first), and how one start of a row is drawn. Every run of a group is given the same start, so that
 their differences are the players' doing. Nothing else about the environment is known to what trains on it: how an
 episode went comes back in its result (`Episode.info`).
@@ -16,13 +16,13 @@ from pydantic import JsonValue
 from rollout.harness.imports import ToolBinding
 from rollout.harness.runner import ProgramReference, RunBinding, bind, with_row
 
-__all__ = ["Catalog", "Row", "binding_for"]
+__all__ = ["Environment", "Row", "binding_for"]
 
 
 @dataclass(frozen=True)
 class Row:
     key: str
-    """Its name among the catalog's rows."""
+    """Its name among the environment's rows."""
     title: str
     """What it is, for people."""
     parameters: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
@@ -31,7 +31,7 @@ class Row:
     What it teaches about this row it teaches about them."""
 
 
-class Catalog(Protocol):
+class Environment(Protocol):
     program: ProgramReference
     """What a run executes; its parameters are a start."""
 
@@ -44,9 +44,9 @@ class Catalog(Protocol):
         ...
 
 
-def binding_for(catalog: Catalog, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding:
-    """How a catalog's runs are served: every model slot of its program from `channel`, and each of its imports
+def binding_for(environment: Environment, channel: str, tools: Mapping[str, ToolBinding] | None = None) -> RunBinding:
+    """How an environment's runs are served: every model slot of its program from `channel`, and each of its imports
     from the tool set of its own name, or where `tools` says. (A program says which slots and imports it has once
-    it is given a row: the catalog's first.)"""
-    first = with_row(catalog.program, catalog.start(catalog.rows()[0], random.Random(0)))
+    it is given a row: the environment's first.)"""
+    first = with_row(environment.program, environment.start(environment.rows()[0], random.Random(0)))
     return bind(first, channel, tools=tools)

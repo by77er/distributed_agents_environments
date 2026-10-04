@@ -22,7 +22,7 @@ PUBLIC_MODULES = [
     # libraries/rollout
     ("rollout.harness", "Writing tasks, agents and programs; runners; memory; tool sets."),
     ("rollout.contracts", "Types that cross layers: canonical content, identifiers, digests, effects, events."),
-    ("rollout.catalog", "What an environment offers to be trained on."),
+    ("rollout.environment", "What an environment offers to be trained on."),
     ("rollout.local", "The runner in this process."),
     ("rollout.testing", "Test doubles: a scripted model endpoint and helpers."),
     # libraries/rollout-train

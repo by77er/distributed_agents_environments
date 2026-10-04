@@ -19,7 +19,7 @@ The repository is a workspace of packages in four layers. Each package's directo
 
 | Layer | Packages | What it holds |
 |---|---|---|
-| Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the catalog |
+| Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment |
 | | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; the loop, the group algorithm, the curriculum and the `Trainer` protocol; channels and the `Engine` protocol; the recorder and the `Renderer` protocol; the graph of checkpoints, the ledger and the registry; resharding; evaluation suites and evals; heartbeats, launches and the launcher; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-durable`, `rollout-vllm`, `rollout-lora`, `rollout-qwen`, `rollout-gemma`, `rollout-computers`, `rollout-openai`, `rollout-s3` | One implementation each of an interface a library defines |
 | Products | `project-assistant`, `agent-sessions` | Applications built on the libraries and implementations |
@@ -50,7 +50,7 @@ profile names engines, renderers, trainers and tool sets as `module:name`, so `r
 | [`EnvironmentService`](../guide/reference.md#environmentservice) | `rollout.harness` | runs → computers | `NamespaceEnvironments`, `LocalEnvironments` ([`rollout_computers`](../implementations/rollout-computers.md)) |
 | [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
 | [the ledger's `plans`, `groups`, `claims` and `episodes`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `EpisodeRunner`, on any machine that reaches the ledger and the blob store |
-| [`Catalog`](../guide/reference.md#catalog) | `rollout.catalog` | training → an environment's rows | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
+| [`Environment`](../guide/reference.md#environment) | `rollout.environment` | training → an environment's rows | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
 | [`RunHooks`](../libraries/rollout/hooks.md), `Hooks` | `rollout.harness`, `rollout_train.rollouts` | runners and runs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
 | `Presence`, `Launches` | `rollout_train.presence`, `rollout_train.launches` | runners and launchers → whoever watches or asks for runs | `FilePresence`, `DatabasePresence`; `FileLaunches`, `DatabaseLaunches` ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats), [launchers](../guide/deploying.md#launchers)) |
 | A layout (`module:name`) | `rollout_train.resharding` | checkpoints → the files their engines load | `verbatim`; run in the run's process or as a Ray task (`on_ray`) ([resharding](../libraries/rollout-train/checkpoints.md#resharding)) |

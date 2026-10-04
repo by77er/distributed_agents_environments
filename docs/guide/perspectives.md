@@ -5,7 +5,7 @@ gets a model) and the **episode** (the labelled trajectory that comes out).
 
 | You are | You write | You are given | You never see | You import |
 |---|---|---|---|---|
-| Building an environment | A world and its rulebook: a catalog of situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs | `rollout` |
+| Building an environment | A world and its rulebook: its situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs | `rollout` |
 | Designing training | What to run, how to group it, what each episode counts for | A ledger to ask for episodes in, the finished episodes back, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
 | Deploying | A profile: channels and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms | Nothing: a profile names implementations |
 
@@ -35,7 +35,7 @@ The environment's own infrastructure (game servers, sandboxes) is a **tool set**
 process that runs episodes, or on machines of its own (`rollout tools module:factory`), and the program calls
 `run.tools` the same way.
 
-What there is to train on is a **catalog**:
+What there is to train on is an **environment**:
 
 ```py
 class Words:
@@ -54,8 +54,8 @@ looks like once it is no longer the current one, and what to ask when turns must
 ## Designing training
 
 ```py
-await plan(ledger, "miner-1", Plan(catalog.program, binding), fence)
-group = {"parameters": catalog.start(row, rng), "episodes": 4, "task": row.key}
+await plan(ledger, "miner-1", Plan(environment.program, binding), fence)
+group = {"parameters": environment.start(row, rng), "episodes": 4, "task": row.key}
 await ledger.append(table("miner-1", GROUPS), "12", group, fence)      # runners play it from here
 episodes = await episodes_of(ledger, blobs, "miner-1", 12, 4)          # when all four have ended
 batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
@@ -69,7 +69,7 @@ await publish("policy", makes, f"checkpoints/{makes}/weights", 3)  # served unde
   training needs: every sampled token carries the weights version it was sampled at.
 - An **episode** has its labels, its outcome, its result, and for each model slot its trajectory: the segments of
   tokens the policy saw and continued, with the logprobs it sampled them at.
-- `rollout_train.train` is the loop most runs use: a curriculum over a catalog picks rows, each start is played as a
+- `rollout_train.train` is the loop most runs use: a curriculum over an environment picks rows, each start is played as a
   group of episodes, and a step is taken over several groups at a time, while play goes on
   ([training](../libraries/rollout-train/training.md)).
 - Watching: the ledger (each group, its claims and its episodes, the checkpoints), the runners' heartbeats (their
@@ -86,7 +86,7 @@ entry per replica), the trainer and the channel it trains, the runner, and where
 renderers and trainers are packages of their own, named in the file as `module:name`.
 
 ```bash
-uv run rollout train profile.toml minecraft_team.catalog:catalog
+uv run rollout train profile.toml minecraft_team.environment:environment
 ```
 
 The trainer's longest segment becomes its channel's longest turn, and the channel's limits reach environments only

@@ -7,7 +7,7 @@ runs from picking up diamonds lying in a lit room to beating the game: one 4-bit
 them all, and every agent is rewarded equally with the team's score.
 
 The environment is the package `minecraft-team` (import `minecraft_team`), which depends on `rollout` alone. It is
-a [catalog](../guide/perspectives.md#building-an-environment) of tasks, a program that plays one episode, and a tool
+its tasks as the rows of an [environment](../guide/perspectives.md#building-an-environment), a program that plays one episode, and a tool
 set that owns the servers. It knows nothing of the model, the trainer or where anything runs: the
 [profile](../guide/deploying.md) says that, and the [training loop](../libraries/rollout-train/training.md) is the
 library's.
@@ -16,9 +16,9 @@ library's.
 uv sync --all-extras
 PROFILE=environments/minecraft/profiles/one-gpu.toml         # one 16 GB GPU: an engine, and a trainer that shares it
 uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 --num-gpus 1 --temp-dir ~/.cache/ray
-uv run rollout train $PROFILE minecraft_team.catalog:catalog --directory RUN
+uv run rollout train $PROFILE minecraft_team.environment:environment --directory RUN
 uv run rollout monitor RUN                                   # the page over the run: http://localhost:8765
-scripts/train-with-memory-log.sh RUN $PROFILE minecraft_team.catalog:catalog   # train, log memory, serve the monitor
+scripts/train-with-memory-log.sh RUN $PROFILE minecraft_team.environment:environment   # train, log memory, serve the monitor
 uv run minecraft-team server --seed 12345                   # a temporary server to look at (join with any client)
 ```
 
@@ -48,7 +48,7 @@ Paths are under `environments/minecraft/`.
 | Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
 | Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md) |
 | Worlds | `minecraft_team/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_team.worlds:tools`), or on a machine of its own (`rollout tools minecraft_team.worlds:tools`, and its URL in the profile) |
-| Catalog | `minecraft_team/catalog.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given |
+| Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given |
 | Profile | `profiles/one-gpu.toml` | One machine with one 16 GB GPU |
 | Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
 | Tests | `tests/` | The episode on a made-up world, tasks and scoring, the map, the harness and servers live, and the agreement tests below |
@@ -343,5 +343,5 @@ inside it:
 
 ## Reporting
 
-`rollout report RUN minecraft_team.catalog:catalog` charts the climb through the curriculum, every group's rewards
+`rollout report RUN minecraft_team.environment:environment` charts the climb through the curriculum, every group's rewards
 and what each step did ([reporting](../libraries/rollout-train/training.md#reporting)).

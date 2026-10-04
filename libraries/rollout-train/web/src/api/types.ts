@@ -260,7 +260,7 @@ export interface Machine {
   playing?: number;
   at_once?: number;
   profiles?: OfferedProfile[];
-  catalogs?: string[];
+  environments?: string[];
   history: Beaten[];
 }
 
@@ -271,7 +271,7 @@ export interface Machines {
 /** What a run is asked to be (`rollout_train.launches.Asked`). */
 export interface LaunchAsked {
   profile: string;
-  catalog: string;
+  environment: string;
   name: string;
   start?: string | null;
   bookmark?: string | null;
@@ -306,7 +306,7 @@ export interface Launcher {
   at: number;
   host?: string;
   profiles: OfferedProfile[];
-  catalogs: string[];
+  environments: string[];
   at_once: number;
   playing: number;
 }
@@ -525,9 +525,9 @@ export interface Suite {
   sample: boolean;
 }
 
-/** A suite as the Evals page has it: a suite, with the catalog it was drawn from and when it was made. */
+/** A suite as the Evals page has it: a suite, with the environment it was drawn from and when it was made. */
 export interface EvalSuite extends Suite {
-  catalog: string | null;
+  environment: string | null;
   made: number | null;
 }
 

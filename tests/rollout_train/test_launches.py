@@ -11,7 +11,18 @@ from rollout_train import launcher as launching
 from rollout_train.cli import _setting  # pyright: ignore[reportPrivateUsage]
 from rollout_train.database import DatabaseLedger
 from rollout_train.launcher import LAUNCHER, OUTPUT, Launcher, offered, slug
-from rollout_train.launches import ASKED, CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
+from rollout_train.launches import (
+    ASKED,
+    CLAIMED,
+    ENDED,
+    FAILED,
+    RUNNING,
+    STOPPED,
+    STOPPING,
+    Asked,
+    as_launch,
+    launches_of,
+)
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import presence_of
 from rollout_train.profile import Profile
@@ -26,7 +37,9 @@ def ledgers(tmp_path: Path) -> list[Ledger]:
 async def test_a_launch_is_asked_for_claimed_once_and_noted_as_it_goes(tmp_path: Path, kind: int) -> None:
     launches = launches_of(ledgers(tmp_path)[kind])
     assert launches is not None and await launches.all() == []
-    asked = Asked("one-gpu", "minecraft_team.catalog:catalog", "diamonds", settings={"trainer.learning_rate": 3e-5})
+    asked = Asked(
+        "one-gpu", "minecraft_team.environment:environment", "diamonds", settings={"trainer.learning_rate": 3e-5}
+    )
     first = await launches.ask(asked)
     second = await launches.ask(Asked("one-gpu", "c:c", "later"))
     assert first.state == ASKED and first.id.startswith("launch_") and first.asked == asked
@@ -38,6 +51,11 @@ async def test_a_launch_is_asked_for_claimed_once_and_noted_as_it_goes(tmp_path:
     assert (running.state, running.directory, running.pid, running.launcher) == (RUNNING, "/runs/d", 12, "launcher/a")
     (again,) = [each for each in await launches.all() if each.id == first.id]
     assert again == running and again.asked.settings == {"trainer.learning_rate": 3e-5}
+
+
+def test_a_launch_asked_for_as_a_catalog_reads_as_its_environment() -> None:
+    written = {"id": "launch_1", "at": 1.0, "asked": {"profile": "one-gpu", "catalog": "c:c", "name": "older"}}
+    assert as_launch(written).asked == Asked("one-gpu", "c:c", "older")
 
 
 def profiles(tmp_path: Path) -> Path:
@@ -112,7 +130,7 @@ async def test_a_launcher_starts_what_it_is_asked_for_and_notes_how_it_ends(
     codes = iter([0, 3, 0])
 
     async def spawn(*command: str, stdout: Any, **_: Any) -> Process:
-        stdout.write(b"loading...\nValueError: the catalog has no rows\n")
+        stdout.write(b"loading...\nValueError: the environment has no rows\n")
         stdout.flush()
         started.append((list(command), Process(next(codes))))
         return started[-1][1]
@@ -156,12 +174,12 @@ async def test_a_launcher_starts_what_it_is_asked_for_and_notes_how_it_ends(
     assert started[2][1].signals == [signal.SIGINT]
     by = {each.id: each for each in await launches.all()}
     assert by[ended.id].state == ENDED and by[ended.id].pid == 4242 and by[ended.id].launcher == "launcher/here"
-    assert "the catalog has no rows" in str(by[failing.id].detail)
+    assert "the environment has no rows" in str(by[failing.id].detail)
     directory = Path(str(by[ended.id].directory))
     assert directory.parent == tmp_path / "runs" and directory.name.startswith("ends-well-")
     assert (directory / OUTPUT).exists() and by[elsewhere.id].state == ASKED  # (a profile it does not offer)
     (beat,) = await heartbeats.beats()
-    assert beat.runner == "launcher/here" and beat.about["kind"] == LAUNCHER and beat.about["catalogs"] == ["c:c"]
+    assert beat.runner == "launcher/here" and beat.about["kind"] == LAUNCHER and beat.about["environments"] == ["c:c"]
     listed: Any = beat.about["profiles"]
     assert [each["profile"] for each in listed] == ["small"]
 

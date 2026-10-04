@@ -1,12 +1,12 @@
-"""`rollout`: train on a catalog under a deployment profile, and watch.
+"""`rollout`: train on an environment under a deployment profile, and watch.
 
-rollout train PROFILE CATALOG    the training loop: PROFILE is a TOML file (`rollout_train.profile`), CATALOG names an
-                                 environment's catalog as `module:name`
-rollout report RUN CATALOG       chart a run's progress and summarise it; post both to a Discord webhook
-rollout imitate PROFILE          a supervised step on the run's solved episodes, without their guidance
-rollout monitor WHERE            the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
-rollout ledger copy FROM TO      copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
-rollout tools FACTORY            serve an environment's tool set over HTTP: FACTORY is `module:name`
+rollout train PROFILE ENVIRONMENT   the training loop: PROFILE is a TOML file (`rollout_train.profile`), ENVIRONMENT
+                                    names an environment as `module:name`
+rollout report RUN ENVIRONMENT      chart a run's progress and summarise it; post both to a Discord webhook
+rollout imitate PROFILE             a supervised step on the run's solved episodes, without their guidance
+rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
+rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
+rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`
 
 `rollout COMMAND --help` lists each command's options.
 """
@@ -54,7 +54,7 @@ async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
 async def _train(
     profile: Path,
     directory: Path | None,
-    catalog: str,
+    environment: str,
     groups: int,
     groups_per_step: int,
     seed: int,
@@ -64,7 +64,7 @@ async def _train(
 ) -> None:
     import dataclasses
 
-    from rollout.catalog import binding_for
+    from rollout.environment import binding_for
     from rollout_train import train
     from rollout_train.evals import Schedule, suite_of
     from rollout_train.profile import Profile
@@ -72,7 +72,7 @@ async def _train(
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
-    channel, rows = described.trainer.channel, named(catalog)
+    channel, rows = described.trainer.channel, named(environment)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (its `starts`)
     async with described.open() as platform:
@@ -84,7 +84,7 @@ async def _train(
             suite = await suite_of(platform.ledger, asked.suite)
             if suite is None:
                 raise SystemExit(f"there is no suite {asked.suite!r}: make one with `rollout suite make`")
-            played = named(suite.catalog)
+            played = named(suite.environment)
             schedule = Schedule(
                 suite, played, platform.eval_run, asked.every, asked.episodes,
                 binding_for(played, channel, platform.tool_bindings),
@@ -112,7 +112,7 @@ async def _evaluate(
     import dataclasses
     import shutil
 
-    from rollout.catalog import binding_for
+    from rollout.environment import binding_for
     from rollout_train.evals import evaluate, suite_of
     from rollout_train.profile import Profile
     from rollout_train.registry import resolved
@@ -133,7 +133,7 @@ async def _evaluate(
                 subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
             except KeyError as error:
                 raise SystemExit(error.args[0]) from None
-            rows = named(suite.catalog)
+            rows = named(suite.environment)
             started["blobs"] = platform.blobs_at
             said = await evaluate(
                 rows, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
@@ -148,24 +148,26 @@ async def _evaluate(
     print(f"{suite_name}: solved {said['solved']} of {said['played']} episodes (mean reward {said['reward']})")
 
 
-async def _suite(command: str, where: str, name: str | None, catalog: str | None, rows: str | None, seeds: str) -> None:
+async def _suite(
+    command: str, where: str, name: str | None, environment: str | None, rows: str | None, seeds: str
+) -> None:
     from rollout_train.evals import make_suite, suite_of, suites_in
 
     ledger = _ledger_at(where)
     if command == "make":
-        assert name is not None and catalog is not None
+        assert name is not None and environment is not None
         keys = [each.strip() for each in rows.split(",") if each.strip()] if rows else None
         try:
             numbers = [int(each) for each in seeds.split(",") if each.strip()]
-            made = await make_suite(ledger, name, catalog, named(catalog), rows=keys, seeds=numbers)
+            made = await make_suite(ledger, name, environment, named(environment), rows=keys, seeds=numbers)
         except ValueError as error:
             raise SystemExit(str(error)) from None
-        print(f"the suite {made.name}: {len(made.starts)} starts of {catalog}")
+        print(f"the suite {made.name}: {len(made.starts)} starts of {environment}")
         return
     for each in await suites_in(ledger):
         found = await suite_of(ledger, each)
         assert found is not None
-        print(f"{each:<24} {len(found.starts):>4} starts  {found.catalog}")
+        print(f"{each:<24} {len(found.starts):>4} starts  {found.environment}")
 
 
 async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
@@ -260,7 +262,7 @@ def _registry_at(where: str) -> "tuple[Ledger, Registry]":
 
 
 async def _launcher(
-    where: str, profiles: Path, catalogs: list[str], runs: Path, at_once: int, ray: str | None, gpus: float
+    where: str, profiles: Path, environments: list[str], runs: Path, at_once: int, ray: str | None, gpus: float
 ) -> None:
     from rollout_train.launcher import Launcher, name_of
     from rollout_train.launches import launches_of
@@ -271,7 +273,7 @@ async def _launcher(
     if launches is None or presence is None:
         raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
     profiles, runs = await asyncio.to_thread(profiles.expanduser), await asyncio.to_thread(runs.expanduser)
-    found = Launcher(name_of(), launches, presence, profiles, catalogs, runs, at_once=at_once, ray=ray, gpus=gpus)
+    found = Launcher(name_of(), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus)
     await found.serve()
 
 
@@ -374,11 +376,11 @@ async def _checkpoints(where: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="rollout", description="Train on a catalog under a deployment profile.")
+    parser = argparse.ArgumentParser(prog="rollout", description="Train on an environment under a deployment profile.")
     commands = parser.add_subparsers(dest="command", required=True)
     training = commands.add_parser("train", help="run the training loop")
     training.add_argument("profile", type=Path)
-    training.add_argument("catalog")
+    training.add_argument("environment")
     training.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
     training.add_argument("--groups", type=int, default=100)
     training.add_argument("--groups-per-step", type=int, default=4, help="groups a step waits for (4)")
@@ -391,7 +393,7 @@ def main() -> None:
     )  # fmt: skip
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
-    reporting.add_argument("catalog")
+    reporting.add_argument("environment")
     reporting.add_argument("--watch", action="store_true", help="report again after every group, until interrupted")
     reporting.add_argument("--webhook", help="a Discord webhook (default: the environment's DISCORD_WEBHOOK_URL)")
     imitating = commands.add_parser("imitate", help="a supervised step on solved episodes, without their guidance")
@@ -423,7 +425,7 @@ def main() -> None:
     launching = commands.add_parser("launcher", help="start the training runs asked for that this machine can run")
     launching.add_argument("--ledger", required=True, help="the database's URL (or a ledger's directory)")
     launching.add_argument("--profiles", type=Path, required=True, help="a directory of profiles it offers")
-    launching.add_argument("--catalog", action="append", default=[], help="a catalog it offers (repeatable)")
+    launching.add_argument("--environment", action="append", default=[], help="an environment it offers (repeatable)")
     launching.add_argument("--runs", type=Path, required=True, help="where it makes each run's directory")
     launching.add_argument("--at-once", type=int, default=1, help="runs it plays at once (1: one GPU)")
     launching.add_argument("--ray", help="a Ray cluster's job server (http://127.0.0.1:8265): each run is a Ray job")
@@ -452,7 +454,7 @@ def main() -> None:
     suite_commands = suites.add_subparsers(dest="suite_command", required=True)
     making = suite_commands.add_parser("make", help="make a suite: a start of each row for each seed, frozen")
     making.add_argument("name")
-    making.add_argument("--catalog", required=True, help="module:name")
+    making.add_argument("--environment", required=True, help="module:name")
     making.add_argument("--rows", help="row keys, comma-separated (by default every row)")
     making.add_argument("--seeds", required=True, help="seeds, comma-separated: each row is started once with each")
     making.add_argument("--ledger", default=".", help=where)
@@ -470,7 +472,7 @@ def main() -> None:
         work = _train(
             arguments.profile,
             arguments.directory,
-            arguments.catalog,
+            arguments.environment,
             arguments.groups,
             arguments.groups_per_step,
             arguments.seed,
@@ -494,7 +496,7 @@ def main() -> None:
         made = arguments.suite_command == "make"
         asyncio.run(_suite(
             arguments.suite_command, arguments.ledger, arguments.name if made else None,
-            arguments.catalog if made else None, arguments.rows if made else None, arguments.seeds if made else "",
+            arguments.environment if made else None, arguments.rows if made else None, arguments.seeds if made else "",
         ))  # fmt: skip
         return
     if arguments.command == "rename":
@@ -512,7 +514,7 @@ def main() -> None:
             _as_job(arguments.ray, sys.argv[1:])
             return
         work = _launcher(
-            arguments.ledger, arguments.profiles, arguments.catalog, arguments.runs, arguments.at_once,
+            arguments.ledger, arguments.profiles, arguments.environment, arguments.runs, arguments.at_once,
             arguments.ray, arguments.gpus,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
@@ -529,7 +531,7 @@ def main() -> None:
         from rollout_train.report import report
 
         webhook = arguments.webhook or os.environ.get("DISCORD_WEBHOOK_URL")
-        asyncio.run(report(arguments.directory, named(arguments.catalog).rows(), webhook, watch=arguments.watch))
+        asyncio.run(report(arguments.directory, named(arguments.environment).rows(), webhook, watch=arguments.watch))
     if arguments.command in ("monitor", "tools"):
         import uvicorn
 

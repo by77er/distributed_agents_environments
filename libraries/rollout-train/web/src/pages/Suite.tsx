@@ -31,7 +31,7 @@ export function Suite({ name }: { name: string }) {
     <>
       <Head title={suite.suite}>
         <Specs>
-          <Spec label="catalog">{suite.catalog ?? "–"}</Spec>
+          <Spec label="environment">{suite.environment ?? "–"}</Spec>
           <Spec label="rows">{rows.join(", ")}</Spec>
           <Spec label="seeds">{seeds.join(", ")}</Spec>
           {suite.made ? <Spec label="made">{clock(suite.made)}</Spec> : null}
@@ -120,8 +120,8 @@ function free(wanted: string, taken: Set<string>): string {
 function RunSuite({ suite, launchers, system }: { suite: EvalSuite; launchers: Launcher[]; system: System }) {
   const launch = useLaunch();
   const known = useKnown();
-  // (the launchers that can play its catalog: those that say no catalogs offer whatever they are asked for)
-  const able = launchers.filter(each => !each.catalogs?.length || (suite.catalog != null && each.catalogs.includes(suite.catalog)));
+  // (the launchers that can play its environment: those that say no environments offer whatever they are asked for)
+  const able = launchers.filter(each => !each.environments?.length || (suite.environment != null && each.environments.includes(suite.environment)));
   const offered = useMemo(() => {
     const byName = new Map<string, OfferedProfile>();
     for (const launcher of able) for (const profile of launcher.profiles ?? []) if (!byName.has(profile.profile)) byName.set(profile.profile, profile);
@@ -142,14 +142,14 @@ function RunSuite({ suite, launchers, system }: { suite: EvalSuite; launchers: L
     event.preventDefault();
     if (!chosen) return;
     launch.mutate(
-      { kind: "eval", suite: suite.suite, profile: chosen.profile, catalog: suite.catalog ?? "", name: named, start: subject || null, episodes: Number(episodes) },
+      { kind: "eval", suite: suite.suite, profile: chosen.profile, environment: suite.environment ?? "", name: named, start: subject || null, episodes: Number(episodes) },
       { onSuccess: made => { setAsked(made.asked.name); setName(""); } },
     );
   };
   if (!able.length) {
     return (
-      <Card title="Run this suite" note={`no launcher alive offers ${suite.catalog ?? "its catalog"}`}>
-        <p className="muted" style={{ margin: 0 }}>Start a launcher with <span className="mono">--catalog {suite.catalog ?? "module:name"}</span> to play it.</p>
+      <Card title="Run this suite" note={`no launcher alive offers ${suite.environment ?? "its environment"}`}>
+        <p className="muted" style={{ margin: 0 }}>Start a launcher with <span className="mono">--environment {suite.environment ?? "module:name"}</span> to play it.</p>
       </Card>
     );
   }

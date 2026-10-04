@@ -1,11 +1,11 @@
 """Training runs asked for from anywhere, and started by a launcher on a machine that can run them.
 
-Whoever wants a run (the monitor's page, say) asks for it: a `Launch` names a profile and a catalog, what the run is
-called, the checkpoint it starts from, and the settings it changes (`rollout train --set`); or, for an eval, the suite
-it plays, the checkpoint that plays it and how many episodes of each start (`rollout eval`, `rollout_train.evals`). A
-launcher (`rollout_train.launcher`) on a training machine says in its heartbeat which profiles it can run, claims a
-launch asked for one of them, starts `rollout train` (or `rollout eval`), and notes how it goes: claimed, running (with
-the process), ended or failed (with why). A launch asked to stop is stopped by its launcher.
+Whoever wants a run (the monitor's page, say) asks for it: a `Launch` names a profile and an environment, what the run
+is called, the checkpoint it starts from, and the settings it changes (`rollout train --set`); or, for an eval, the
+suite it plays, the checkpoint that plays it and how many episodes of each start (`rollout eval`,
+`rollout_train.evals`). A launcher (`rollout_train.launcher`) on a training machine says in its heartbeat which profiles
+it can run, claims a launch asked for one of them, starts `rollout train` (or `rollout eval`), and notes how it goes:
+claimed, running (with the process), ended or failed (with why). A launch asked to stop is stopped by its launcher.
 
 This is ordinary state, changed in place, not part of the ledger's append-only record: a file beside a ledger of
 files (`FileLaunches`), a table in a database ledger's database (`rollout_train.database.DatabaseLaunches`).
@@ -47,8 +47,8 @@ class Asked:
 
     profile: str
     """The profile, by the name a launcher offers it under."""
-    catalog: str
-    """The catalog, as `module:name`."""
+    environment: str
+    """The environment, as `module:name`."""
     name: str
     """What the run is called."""
     start: str | None = None
@@ -63,7 +63,7 @@ class Asked:
     kind: str = RUN
     """`run` (a training run) or `eval` (a suite played by `start`, the checkpoint; none: the base model)."""
     suite: str | None = None
-    """For an eval: the suite it plays (its catalog is the suite's)."""
+    """For an eval: the suite it plays (its environment is the suite's)."""
     episodes: int = 1
     """For an eval: episodes of each of the suite's starts."""
 
@@ -89,8 +89,17 @@ class Launch:
 
 def as_launch(data: Mapping[str, Any]) -> Launch:
     fields: dict[str, Any] = dict(data)
-    fields["asked"] = Asked(**fields["asked"])
+    fields["asked"] = Asked(**as_asked(fields["asked"]))
     return Launch(**fields)
+
+
+def as_asked(given: Mapping[str, Any]) -> dict[str, Any]:
+    """What a launch asks, with its environment under `environment` (a launch asked for as a `catalog` says it so)."""
+    asked = dict(given)
+    if "catalog" in asked:
+        named = asked.pop("catalog")
+        asked.setdefault("environment", named)
+    return asked
 
 
 class Launches(Protocol):

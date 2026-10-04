@@ -4,17 +4,17 @@ Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md),
 [API reference](../../guide/reference.md#rollout_train)
 
 The training loop, what it asks of an algorithm and of a trainer, and the curriculum. The loop is written against
-the [ledger](checkpoints.md#the-ledger), a [`Catalog`](rollouts.md#catalog), `Trainer`, `Algorithm` and
+the [ledger](checkpoints.md#the-ledger), an [`Environment`](rollouts.md#environment), `Trainer`, `Algorithm` and
 [`Checkpoints`](checkpoints.md) only: it asks for each group's episodes in the ledger, and [runners](rollouts.md) play them,
 wherever they are. The same loop runs with everything in one process and with the runners, the engines and the
 trainer on machines of their own.
 
 ```python
-await train(catalog, trainer, checkpoints, start=None, base="Qwen/Qwen3.5-9B", channel="policy",
+await train(environment, trainer, checkpoints, start=None, base="Qwen/Qwen3.5-9B", channel="policy",
             directory=cache, publish=recorder.publish, run=run.id, groups=100)
 ```
 
-`rollout train PROFILE CATALOG [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
+`rollout train PROFILE ENVIRONMENT [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
 the profile opens into a trainer, the checkpoints, a way to publish checkpoints and a runner that plays the run's
 episodes, says the checkpoint a new run starts from (`[trainer] start`, by default the base model) and the channel that
 serves what it trains, and sets `episodes_at_once` ([deploying](../../guide/deploying.md)). The run is the one in its
@@ -30,14 +30,14 @@ and its tables; for a `trainer.` key, when the trainer is made with its settings
 
 ## The loop
 
-[`train`](../../guide/reference.md#train) trains a line of [checkpoints](checkpoints.md) on a catalog, from `start` (a
+[`train`](../../guide/reference.md#train) trains a line of [checkpoints](checkpoints.md) on an environment, from `start` (a
 checkpoint's id, of this run or another: a fork; the base model, named `base`, if None), and serves each checkpoint it makes
-on one channel, which `publish` serves checkpoints on. Unless a `binding` says otherwise, every model slot of the catalog's
+on one channel, which `publish` serves checkpoints on. Unless a `binding` says otherwise, every model slot of the environment's
 program is served from that channel. When it starts it writes the run's [plan](rollouts.md#what-a-run-writes): the
-catalog's program and that binding.
+environment's program and that binding.
 
 - **Groups.** A group is `algorithm.group_size` episodes of one start of one row. The curriculum picks the row and
-  the catalog draws the start; the run's `groups` table keeps both, with how many episodes the group asks for and
+  the environment draws the start; the run's `groups` table keeps both, with how many episodes the group asks for and
   when it was decided. Runners play its episodes from there, and `episodes_of` waits for them.
 - **Play and training go their own ways.** Enough groups are kept asked for that `episodes_at_once` episodes (6 by
   default) have work waiting, whatever groups they are of. Runners claim the oldest group's episodes first, as many
@@ -132,7 +132,7 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
   that none is forgotten. Untried rows come first.
 - **Pending rows.** A row whose group is still running comes after the others until that group is recorded:
   choosing it would be choosing on what was known before it.
-- **Unlocking.** Rows unlock in the catalog's order: the first `start` of them, and `reach` past the hardest one
+- **Unlocking.** Rows unlock in the environment's order: the first `start` of them, and `reach` past the hardest one
   solved at least half the time. Whether a row was solved decides only what unlocks.
 - **Rows that teach about others.** A row's `counts_for` names other rows its groups are evidence about too (the
   same situation with more help, say): a group counts for its own row and for each of them.
@@ -143,7 +143,7 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
 - **Evals.** `evaluated(suite, checkpoint, results)` is told of each eval the run makes of its checkpoints, and
   keeps the newest of each suite in `evaluations`, for a curriculum that reads them.
 - **It is a fold.** A curriculum is rebuilt from the run's results when the loop starts: each goes to the row of
-  its title, so records stay with their rows when a catalog changes. The run's evals are folded in after them. A choice is made with a random number
+  its title, so records stay with their rows when an environment changes. The run's evals are folded in after them. A choice is made with a random number
   generator seeded by the group's number, and is written down before it is acted on.
 
 ## The trainer
@@ -195,13 +195,13 @@ every episode, what each step was trained on, and the weights and the trainer's 
 
 ## Reporting
 
-`rollout report RUN CATALOG` writes `progress.png` and `progress.md` into the run's directory: the climb through the
+`rollout report RUN ENVIRONMENT` writes `progress.png` and `progress.md` into the run's directory: the climb through the
 curriculum, every group's rewards, and what each update did. With `--watch` it does so after every group; with a
 Discord webhook (`--webhook`, or `DISCORD_WEBHOOK_URL`) it posts both there. It needs the `report` extra.
 
 ## Trying it without a GPU
 
-`rollout_train.testing` has public test doubles, so that a catalog, an algorithm or a whole profile can be tried
+`rollout_train.testing` has public test doubles, so that an environment, an algorithm or a whole profile can be tried
 with no model and no accelerator.
 
 | Double | Stands for |

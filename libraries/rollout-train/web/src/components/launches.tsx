@@ -45,7 +45,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system }: { launch: Launch
     <Tile className={`rail ${rail[launch.state] ?? ""}`}>
       <header>
         <b>{run ? <Link to={runPlace(run.run)} className="linkish">{asked.name}</Link> : asked.name}</b>
-        <span className="what">{asked.profile} · {asked.catalog}</span>
+        <span className="what">{asked.profile} · {asked.environment}</span>
         <Mark state={launch.state} />
       </header>
       {asked.kind === "eval" ? (

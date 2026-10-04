@@ -70,7 +70,7 @@ Each implements one interface a library defines.
 
 | Directory | Import | What it is | Implements |
 |---|---|---|---|
-| `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.catalog`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, conversations, and a runner in this process | |
+| `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.environment`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, conversations, and a runner in this process | |
 | `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.profile`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the recorder, profiles | |
 | `implementations/rollout-durable` | `rollout_durable` | A runner whose runs survive their process, on DBOS; a database for stores | `Runner` |
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
@@ -82,7 +82,7 @@ Each implements one interface a library defines.
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
 | `products/project-assistant` | `project_assistant` | A conversational agent about one repository | |
 | `products/agent-sessions` | `agent_sessions` (and `agent_sessions.coordination`) | Agents with their own computers, and their coordination | |
-| `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Catalog` |
+| `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
 
 `uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
 `rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone).

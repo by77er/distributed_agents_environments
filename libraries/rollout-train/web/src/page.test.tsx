@@ -214,7 +214,7 @@ describe("a suite", () => {
     const starts = [{ start: "1", task: "say-yes", seed: 1, title: "yes" }, { start: "2", task: "say-no", seed: 1, title: "no" }];
     const evals: Evals = {
       suites: [{
-        suite: "words-v1", catalog: "games:words", made: 1, sample: false, starts,
+        suite: "words-v1", environment: "games:words", made: 1, sample: false, starts,
         subjects: [
           { subject: "eval_a", kind: "checkpoint", checkpoint: "kpqxlmnoprstuvwx", model: "tiny", episodes: 1, played: 2, solved: 2, reward: 1,
             results: { "1": [{ solved: true, reward: 1 }], "2": [{ solved: true, reward: 1 }] } },

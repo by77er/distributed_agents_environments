@@ -1,8 +1,8 @@
 """Evaluations: a frozen suite of starts, played by one checkpoint (or the base model), with nothing trained.
 
-A **suite** is a named list of starts of a catalog's rows, each a row's start drawn with a seed of its own: what every
-subject plays, start for start, so that subjects compare. It is kept in the ledger, written once under the suite's
-fence (`suites/NAME`) and never changed: what it is (`evaluations/SUITE/suite`: its catalog, rows and seeds) and its
+A **suite** is a named list of starts of an environment's rows, each a row's start drawn with a seed of its own: what
+every subject plays, start for start, so that subjects compare. It is kept in the ledger, written once under the suite's
+fence (`suites/NAME`) and never changed: what it is (`evaluations/SUITE/suite`: its environment, rows and seeds) and its
 starts (`evaluations/SUITE/starts`, by number from 1: the row's key and title, the seed, the start's parameters).
 
 An **eval** is one suite played by one subject: a checkpoint (by any reference `rollout_train.registry.resolved`
@@ -29,7 +29,7 @@ from typing import Any, Protocol
 
 from pydantic import JsonValue
 
-from rollout.catalog import Catalog, binding_for
+from rollout.environment import Environment, binding_for
 from rollout.harness.runner import RunBinding
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.launches import EVAL
@@ -68,11 +68,11 @@ class Start:
 
 @dataclass(frozen=True)
 class Suite:
-    """A named list of starts of a catalog's rows, frozen: what every subject plays, start for start."""
+    """A named list of starts of an environment's rows, frozen: what every subject plays, start for start."""
 
     name: str
-    catalog: str
-    """The catalog, as `module:name`."""
+    environment: str
+    """The environment, as `module:name`."""
     starts: list[Start]
     """Its starts, in order: each row it names, once with each seed."""
     made: float = 0.0
@@ -82,25 +82,31 @@ class Suite:
 
 
 async def make_suite(
-    ledger: Ledger, name: str, catalog_name: str, catalog: Catalog, *, rows: Sequence[str] | None, seeds: Sequence[int]
+    ledger: Ledger,
+    name: str,
+    environment_name: str,
+    environment: Environment,
+    *,
+    rows: Sequence[str] | None,
+    seeds: Sequence[int],
 ) -> Suite:
-    """Make a suite of `catalog`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
-    `ValueError` for a name that is no name or is taken (a suite is never changed), or a row the catalog lacks."""
+    """Make a suite of `environment`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
+    `ValueError` for a name that is no name or is taken (a suite is never changed), or a row the environment lacks."""
     name = valid(name)
     if await suite_of(ledger, name) is not None:
         raise ValueError(f"there is a suite {name!r} already: a suite is never changed, make another")
-    known = {row.key: row for row in catalog.rows()}
+    known = {row.key: row for row in environment.rows()}
     if missing := [key for key in rows or [] if key not in known]:
-        raise ValueError(f"the catalog has no row {', '.join(missing)}")
+        raise ValueError(f"the environment has no row {', '.join(missing)}")
     chosen = [known[key] for key in rows] if rows else list(known.values())
     if not seeds:
         raise ValueError("a suite needs a seed at least")
     starts = [
-        Start(row.key, row.title, seed, catalog.start(row, random.Random(seed))) for row in chosen for seed in seeds
+        Start(row.key, row.title, seed, environment.start(row, random.Random(seed))) for row in chosen for seed in seeds
     ]
-    made = Suite(name, catalog_name, starts, round(time.time(), 1), [row.key for row in chosen], list(seeds))
+    made = Suite(name, environment_name, starts, round(time.time(), 1), [row.key for row in chosen], list(seeds))
     fence = await ledger.take(f"suites/{name}")
-    about: Any = {"catalog": catalog_name, "made": made.made, "rows": made.rows, "seeds": made.seeds}
+    about: Any = {"environment": environment_name, "made": made.made, "rows": made.rows, "seeds": made.seeds}
     await ledger.append(suite_table(name, "suite"), "suite", about, fence)
     for number, start in enumerate(starts, start=1):
         record: Any = asdict(start)
@@ -116,8 +122,8 @@ async def suite_of(ledger: Ledger, name: str) -> Suite | None:
         return None
     about = about or {}
     listed = [Start(**record) for _, record in sorted(starts.items(), key=lambda item: int(item[0]))]  # type: ignore[arg-type]
-    return Suite(name, str(about.get("catalog") or ""), listed, float(about.get("made") or 0.0),
-                 about.get("rows"), about.get("seeds"))  # fmt: skip
+    environment = str(about.get("environment") or about.get("catalog") or "")  # (a suite made as a catalog's says so)
+    return Suite(name, environment, listed, float(about.get("made") or 0.0), about.get("rows"), about.get("seeds"))
 
 
 async def suites_in(ledger: Ledger) -> list[str]:
@@ -134,12 +140,12 @@ class Publisher(Protocol):
 @dataclass(frozen=True)
 class Schedule:
     """Evals a training run makes of its own checkpoints: `suite` played by the checkpoint of every `every`th step,
-    `episodes` episodes of each start, between that step and the next. `catalog` is the suite's catalog, and `binding`
-    how its episodes are played (by default every slot from the trained channel). `run` gives the eval's run for a
-    step: the same each time it is asked for that step, and one the run's episode runners play."""
+    `episodes` episodes of each start, between that step and the next. `environment` is the suite's environment, and
+    `binding` how its episodes are played (by default every slot from the trained channel). `run` gives the eval's run
+    for a step: the same each time it is asked for that step, and one the run's episode runners play."""
 
     suite: Suite
-    catalog: Catalog
+    environment: Environment
     run: Callable[[int], Awaitable[str]]
     every: int = 1
     episodes: int = 1
@@ -151,7 +157,7 @@ class Schedule:
 
 
 async def evaluate(
-    catalog: Catalog,
+    environment: Environment,
     checkpoints: Checkpoints,
     *,
     run: str,
@@ -176,7 +182,7 @@ async def evaluate(
     gives its files in the engines' layout (`rollout_train.resharding`); `directory` holds its files on this machine."""
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
     fence = await ledger.take(scope(run))
-    await plan(ledger, run, Plan(catalog.program, binding or binding_for(catalog, channel)), fence)
+    await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
     here: dict[str, JsonValue] = {"kind": EVAL, "suite": suite.name, "checkpoint": subject, "from": subject}
     here |= {"host": socket.gethostname(), "started": round(time.time(), 1)}
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)

@@ -27,6 +27,7 @@ from rollout_train.evals import (
     make_suite,
     subject_table,
     suite_of,
+    suite_table,
     suites_in,
 )
 from rollout_train.launcher import LAUNCHER, Launcher
@@ -49,7 +50,7 @@ from tests.rollout_train.training.test_loop import Counting, answering, here, ma
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
 
-CATALOG = "tests.rollout_train.rollouts.games:words"
+ENVIRONMENT = "tests.rollout_train.rollouts.games:words"
 
 
 @pytest.fixture(autouse=True)
@@ -59,30 +60,40 @@ def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
-async def test_a_suite_is_a_frozen_list_of_starts_of_a_catalogs_rows(tmp_path: Path) -> None:
+async def test_a_suite_is_a_frozen_list_of_starts_of_an_environments_rows(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    made = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1, 2])
+    made = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1, 2])
     assert [(start.task, start.seed) for start in made.starts] == [
         ("say-yes", 1), ("say-yes", 2), ("say-no", 1), ("say-no", 2),
     ]  # fmt: skip
     again = await suite_of(ledger, "words-v1")
-    assert again is not None and again.starts == made.starts and again.catalog == CATALOG
+    assert again is not None and again.starts == made.starts and again.environment == ENVIRONMENT
     assert again.rows == ["say-yes", "say-no"] and again.seeds == [1, 2]
     assert await suites_in(ledger) == ["words-v1"]
     with pytest.raises(ValueError, match="never changed"):
-        await make_suite(ledger, "words-v1", CATALOG, words, rows=None, seeds=[3])
+        await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=None, seeds=[3])
     with pytest.raises(ValueError, match="no row say-perhaps"):
-        await make_suite(ledger, "other", CATALOG, words, rows=["say-perhaps"], seeds=[1])
+        await make_suite(ledger, "other", ENVIRONMENT, words, rows=["say-perhaps"], seeds=[1])
     with pytest.raises(ValueError, match="cannot be a name"):
-        await make_suite(ledger, "a/b", CATALOG, words, rows=None, seeds=[1])
-    every = await make_suite(ledger, "every-row", CATALOG, words, rows=None, seeds=[7])
+        await make_suite(ledger, "a/b", ENVIRONMENT, words, rows=None, seeds=[1])
+    every = await make_suite(ledger, "every-row", ENVIRONMENT, words, rows=None, seeds=[7])
     assert [start.task for start in every.starts] == ["say-yes", "say-no", "say-maybe"]
+
+
+async def test_a_suite_made_as_a_catalogs_reads_as_its_environments(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    fence = await ledger.take("suites/older")
+    await ledger.append(suite_table("older", "suite"), "suite", {"catalog": ENVIRONMENT, "made": 1.0}, fence)
+    start: Any = {"task": "say-yes", "title": "say yes", "seed": 1, "parameters": {"word": "yes", "seed": 1}}
+    await ledger.append(suite_table("older", "starts"), "1", start, fence)
+    found = await suite_of(ledger, "older")
+    assert found is not None and found.environment == ENVIRONMENT and len(found.starts) == 1
 
 
 async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
     weights = tmp_path / "w"
     weights.mkdir()
     (weights / "model.safetensors").write_text("every weight")
@@ -105,7 +116,7 @@ async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tm
 async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
     fence = await ledger.take(scope("trained"))
     weights = tmp_path / "w"
     weights.mkdir()
@@ -145,7 +156,7 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
 
     system = await System(ledger=ledger).evals()
     (listed,) = system["suites"]
-    assert listed["suite"] == "words-v1" and listed["catalog"] == CATALOG and len(listed["starts"]) == 2
+    assert listed["suite"] == "words-v1" and listed["environment"] == ENVIRONMENT and len(listed["starts"]) == 2
     (played,) = listed["subjects"]
     assert played["checkpoint"] == subject.id and played["played"] == 4 and played["solved"] == said["solved"]
     (run,) = system["evals"]
@@ -158,7 +169,7 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
 
 async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-no"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-no"], seeds=[1])
 
     async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
         raise AssertionError("the base model is served as it is")
@@ -189,8 +200,8 @@ async def test_a_launcher_starts_an_eval_launch_as_rollout_eval(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     runs = tmp_path / "runs"
-    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [CATALOG], runs, every=0.01)
-    asked = Asked("small", CATALOG, "words, best", start="best", kind=EVAL, suite="words-v1", episodes=3)
+    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [ENVIRONMENT], runs, every=0.01)
+    asked = Asked("small", ENVIRONMENT, "words, best", start="best", kind=EVAL, suite="words-v1", episodes=3)
     await launches.ask(asked)
     serving = asyncio.create_task(found.serve())
     try:
@@ -208,10 +219,16 @@ async def test_a_launcher_starts_an_eval_launch_as_rollout_eval(
 
 async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes"], seeds=[1])
+    await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
     heartbeats, registry = presence_of(ledger), registry_of(ledger)
     assert heartbeats is not None and registry is not None
-    about: JsonValue = {"kind": LAUNCHER, "profiles": [OFFERED], "catalogs": [CATALOG], "at_once": 1, "playing": 0}
+    about: JsonValue = {
+        "kind": LAUNCHER,
+        "profiles": [OFFERED],
+        "environments": [ENVIRONMENT],
+        "at_once": 1,
+        "playing": 0,
+    }
     await heartbeats.beat("launcher/far", about)
     transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
@@ -219,7 +236,9 @@ async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
         answer = await client.post("/api/launches", json=body)
         assert answer.status_code == 200, answer.text
         launch = answer.json()["launch"]
-        assert launch["asked"]["catalog"] == CATALOG and launch["asked"]["kind"] == EVAL  # (the suite's catalog)
+        assert (
+            launch["asked"]["environment"] == ENVIRONMENT and launch["asked"]["kind"] == EVAL
+        )  # (the suite's environment)
         missing = await client.post("/api/launches", json=body | {"suite": "no-such-suite", "name": "x"})
         assert missing.status_code == 404 and "no suite" in missing.json()["error"]
         none = await client.post("/api/launches", json=body | {"episodes": 0, "name": "y"})
@@ -238,13 +257,13 @@ def test_the_command_makes_and_lists_suites(
         main()
         return capsys.readouterr().out
 
-    made = run("make", "words-v1", "--catalog", CATALOG, "--rows", "say-yes, say-no", "--seeds", "1,2,3")
-    assert made == f"the suite words-v1: 6 starts of {CATALOG}\n"
-    assert run("list").split() == ["words-v1", "6", "starts", CATALOG]
+    made = run("make", "words-v1", "--environment", ENVIRONMENT, "--rows", "say-yes, say-no", "--seeds", "1,2,3")
+    assert made == f"the suite words-v1: 6 starts of {ENVIRONMENT}\n"
+    assert run("list").split() == ["words-v1", "6", "starts", ENVIRONMENT]
     with pytest.raises(SystemExit, match="never changed"):
-        run("make", "words-v1", "--catalog", CATALOG, "--seeds", "4")
+        run("make", "words-v1", "--environment", ENVIRONMENT, "--seeds", "4")
     with pytest.raises(SystemExit, match="invalid literal"):
-        run("make", "other", "--catalog", CATALOG, "--seeds", "one")
+        run("make", "other", "--environment", ENVIRONMENT, "--seeds", "one")
 
 
 class Unmade:
@@ -262,7 +281,7 @@ def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_n
     from rollout_train.cli import main
 
     shared, made = asyncio.run(a_ledger(tmp_path))
-    asyncio.run(make_suite(FileLedger(tmp_path / "ledger"), "words-v1", CATALOG, words, rows=None, seeds=[1]))
+    asyncio.run(make_suite(FileLedger(tmp_path / "ledger"), "words-v1", ENVIRONMENT, words, rows=None, seeds=[1]))
     profile = a_profile(tmp_path, shared, "Unmade", "plain")
     profile.write_text(profile.read_text().replace("test_full_weights:Unmade", "test_evals:Unmade"))
     support.STARTED.clear()
@@ -298,7 +317,7 @@ async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_
 ) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
     recorder, curriculum = answering(), Curriculum(words.rows())
     async with here(ledger, recorder, blobs):
         await train(
@@ -336,7 +355,7 @@ async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_
 async def test_a_run_started_again_finishes_the_eval_it_left_before_it_steps_again(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     checkpoints = Checkpoints(ledger, blobs)
-    suite = await make_suite(ledger, "words-v1", CATALOG, words, rows=["say-yes", "say-no"], seeds=[1])
+    suite = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes", "say-no"], seeds=[1])
     recorder, trainer = answering(), Counting()
 
     async def training(groups: int, curriculum: Curriculum | None = None) -> None:

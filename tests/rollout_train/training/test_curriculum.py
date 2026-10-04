@@ -2,7 +2,7 @@
 
 import random
 
-from rollout.catalog import Row
+from rollout.environment import Row
 from rollout_train import Curriculum, Result
 
 ROWS = [Row(f"r{number:02d}", f"row {number}") for number in range(1, 21)]
@@ -53,11 +53,11 @@ def test_a_row_whose_group_is_still_running_is_not_chosen_again() -> None:
     assert curriculum.sample(pending=[row.key for row in ROWS[:3]]) in ROWS[:3]  # unless nothing else is unlocked
 
 
-def test_a_curriculum_is_the_fold_of_a_runs_results_by_title_whatever_the_catalog_has_become() -> None:
+def test_a_curriculum_is_the_fold_of_a_runs_results_by_title_whatever_the_environment_has_become() -> None:
     lines = [
         Result(1, 0.0, ROWS[4].key, ROWS[4].title, rewards=[1.0, 2.0], solved=[True, False]),
         Result(2, 0.0, ROWS[0].key, ROWS[0].title),  # none of its episodes completed
-        Result(3, 0.0, "gone", "a row the catalog no longer has", rewards=[1.0], solved=[True]),
+        Result(3, 0.0, "gone", "a row the environment no longer has", rewards=[1.0], solved=[True]),
     ]
     shifted = [Row(f"x{index}", row.title) for index, row in enumerate(ROWS[2:])]  # two rows gone: other keys
     curriculum = Curriculum(shifted, random.Random(0))

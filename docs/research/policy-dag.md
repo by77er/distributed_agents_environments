@@ -20,8 +20,8 @@ its own; this page uses only what the graph needs of it.
   `likelihood` objective, and commits the next version. It writes no step record.
 - **Serving**: the loop publishes each new version to its channel (`Channel.publish`: every engine loads the LoRA
   adapter, and the one before stays loaded for turns in flight). The feed notes each publish.
-- An **evaluation** can be played as a run of the catalog's program on one start of a row
-  (`catalog.start(row, random.Random(seed))`), every model slot bound to a version or to another model through
+- An **evaluation** can be played as a run of the environment's program on one start of a row
+  (`environment.start(row, random.Random(seed))`), every model slot bound to a version or to another model through
   `DirectModel`, with a `RunFeed` to watch it. Nothing records its score.
 
 ## Nodes and edges
@@ -174,9 +174,9 @@ evaluation share load exact versions as suites ask for them.
 
 ## Evaluations
 
-An evaluation suite is a fixed set of starts: rows of a catalog, each with a seed, and the parameters
-`catalog.start(row, random.Random(seed))` gave. The parameters are kept, so a suite plays the same starts even if the
-catalog's `start` changes. A **subject** plays it: a version, or another model (a frontier model through `DirectModel`, say). Each episode is scored as a training group's are: reward and solved.
+An evaluation suite is a fixed set of starts: rows of an environment, each with a seed, and the parameters
+`environment.start(row, random.Random(seed))` gave. The parameters are kept, so a suite plays the same starts even if the
+environment's `start` changes. A **subject** plays it: a version, or another model (a frontier model through `DirectModel`, say). Each episode is scored as a training group's are: reward and solved.
 
 | Table (proposed) | Key | Record |
 |---|---|---|

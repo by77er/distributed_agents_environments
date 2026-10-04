@@ -30,7 +30,7 @@ from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Manifest, checkpoints_in, short
 from rollout_train.evals import EVAL, subject_table, suite_of, suite_table
 from rollout_train.launcher import LAUNCHER
-from rollout_train.launches import ASKED, OPEN, STOPPED, STOPPING, Asked, Launch, launches_of
+from rollout_train.launches import ASKED, OPEN, STOPPED, STOPPING, Asked, Launch, as_asked, launches_of
 from rollout_train.launches import RUN as TRAINING
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
@@ -191,8 +191,8 @@ class System:
 
     async def launches(self) -> dict[str, Any]:
         """The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
-        settings a launch may change, its catalogs, and whether it has room). A launch whose launcher stopped beating
-        while it was claimed, running or stopping is shown as `lost`: what became of its run is not known."""
+        settings a launch may change, its environments, and whether it has room). A launch whose launcher stopped
+        beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known."""
         found = launches_of(self._ledger)
         listed = await found.all() if found is not None and await asyncio.to_thread(present, self._ledger) else []
         now = time.time()
@@ -212,22 +212,22 @@ class System:
 
     async def launch(self, body: Mapping[str, Any]) -> Launch:
         """Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
-        and its catalog starts it. An eval names a suite (whose catalog it plays) and the checkpoint that plays it.
-        Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
+        and its environment starts it. An eval names a suite (whose environment it plays) and the checkpoint that plays
+        it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
         `KeyError` for what no launcher offers or a checkpoint no reference says."""
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
-        given = dict(body)
-        if given.get("kind") == EVAL:  # (an eval plays its suite's catalog)
+        given = as_asked(body)  # (a page that asks for a `catalog` asks for that environment)
+        if given.get("kind") == EVAL:  # (an eval plays its suite's environment)
             found = await suite_of(self._ledger, str(given.get("suite") or ""))
             if found is None:
                 raise KeyError(f"there is no suite {given.get('suite')!r}")
-            given["catalog"] = found.catalog
+            given["environment"] = found.environment
         try:
             asked = Asked(**{key: value for key, value in given.items() if key in Asked.__dataclass_fields__})
         except TypeError as error:
-            raise Taken(f"a launch says its profile, its catalog and its name ({error})") from None
+            raise Taken(f"a launch says its profile, its environment and its name ({error})") from None
         if asked.kind not in (TRAINING, EVAL):
             raise Taken(f"a launch is a {TRAINING} or an {EVAL}, not {asked.kind!r}")
         if asked.kind == EVAL and asked.episodes < 1:
@@ -238,9 +238,9 @@ class System:
         ]
         if not profiles:
             raise KeyError(f"no launcher alive offers the profile {asked.profile!r}")
-        catalogs = {catalog for each in offered for catalog in each.get("catalogs", [])}
-        if catalogs and asked.catalog not in catalogs:
-            raise KeyError(f"no launcher alive offers the catalog {asked.catalog!r}")
+        environments = {environment for each in offered for environment in each.get("environments", [])}
+        if environments and asked.environment not in environments:
+            raise KeyError(f"no launcher alive offers the environment {asked.environment!r}")
         checked(asked.name, "", await registry.runs())  # (a name another run has, or no name)
         unknown = [
             key for key in asked.settings if key not in profiles[0]["settings"] and not key.startswith("trainer.")
@@ -267,14 +267,14 @@ class System:
         return registry
 
     async def evals(self) -> dict[str, Any]:
-        """Every suite (its catalog and starts, and each subject that played it, with how it did at each start) and
+        """Every suite (its environment and starts, and each subject that played it, with how it did at each start) and
         every eval (its suite, its checkpoint, how far it has got), newest first (`rollout_train.evals`)."""
         tables = await self._tables()
         called = await names(registry_of(self._ledger))
         suites = _Reading(tables, set(), [], called, time.time()).evaluations()
         for each in suites:
             about: Any = tables.get(suite_table(each["suite"], "suite"), {}).get("suite") or {}
-            each |= {"catalog": about.get("catalog"), "made": about.get("made")}
+            each |= {"environment": about.get("environment") or about.get("catalog"), "made": about.get("made")}
         evals: list[dict[str, Any]] = []
         for run in named_runs(tables):
             starts: Any = tables.get(table(run, STARTS), {})

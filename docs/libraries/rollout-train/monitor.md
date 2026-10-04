@@ -7,7 +7,7 @@ The monitor is a web page over a ledger and every run in it: one monitor shows a
 on whichever machines they run. It has three pages, switched along the top:
 
 - **Runs**: every run, running ones first, and each run laid out as it runs: the **run**, which plays groups and
-  takes steps on them; a **step**, one update over the groups queued when it was taken, and the checkpoint it made; a **group**, one start of one row of the catalog, played as a number of **episodes**; an **episode**, one
+  takes steps on them; a **step**, one update over the groups queued when it was taken, and the checkpoint it made; a **group**, one start of one row of the environment, played as a number of **episodes**; an **episode**, one
   run of the program, with what it reported when it ended; a **rollout**, one agent's (model slot's) part of an
   episode, turn by turn: what it was sent, what it thought, what it did and what came back. Each rollout becomes a
   **trajectory**, the tokens the trainer learns from;
@@ -130,8 +130,8 @@ so a reload stays there.
 | Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
 | Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations; evaluation suites, a column per checkpoint or model ([the checkpoints view](#the-checkpoints-view)) |
 | Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, and the suites it played (each opening the suite) |
-| Evals | Every suite and eval | `#/evals` | the evals asked for from the page; each suite (its catalog, starts, subjects, and the subject that did best); every eval, newest first (its suite, who played, episodes played of those asked for, the share solved, whether it is done), each opening its run |
-| Evals | Suite | `#/evals/SUITE` | its catalog, rows and seeds; the subject that did best; a **Run this suite** form ([evals](evals.md#asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals; two subjects compared at the starts both played |
+| Evals | Every suite and eval | `#/evals` | the evals asked for from the page; each suite (its environment, starts, subjects, and the subject that did best); every eval, newest first (its suite, who played, episodes played of those asked for, the share solved, whether it is done), each opening its run |
+| Evals | Suite | `#/evals/SUITE` | its environment, rows and seeds; the subject that did best; a **Run this suite** form ([evals](evals.md#asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals; two subjects compared at the starts both played |
 | Statistics | Across every run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color |
 
 Renaming on a run's page asks the monitor (`POST /api/rename`, `{"id", "name"}`), which renames it in the registry
@@ -143,20 +143,20 @@ change through its stream.
 
 ## Launching a run
 
-A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --catalog module:name --runs DIR
+A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --environment module:name --runs DIR
 [--at-once N]`, `rollout_train.launcher`) beats every 15 seconds, saying what it offers: each profile under
 `--profiles` that names a trainer, with what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
 says, as `rollout_lora`'s do) and the settings a launch may change and their values in the profile (the trainer's
 settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
-`answer_tokens`, and the `evals.` settings), the catalogs, and how many runs it plays of how many it may.
+`answer_tokens`, and the `evals.` settings), the environments, and how many runs it plays of how many it may.
 
-**New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and a catalog, the
+**New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and an environment, the
 run's name, the checkpoint it starts from (the base model, a bookmark, or any checkpoint whose weights are kept, by where it
 came from and what its weights are; a profile whose trainer trains every weight starts only from full weights, so an
 adapter is merged first), a bookmark for it to carry, its groups, groups a step and seed, and every setting of the profile as a field
 holding the profile's value, with rows for any other `trainer.KEY`. Values are read as numbers, true or false, or JSON
 where they look like them, and as text otherwise. Launching asks the monitor (`POST /api/launches`, with the settings
-changed only), which checks the ask (`System.launch`: a launcher alive offers the profile and the catalog, the name is
+changed only), which checks the ask (`System.launch`: a launcher alive offers the profile and the environment, the name is
 no other run's, every setting is the profile's or a trainer's, the checkpoint is one) and appends it to the launches; a
 refusal (409 or 404) is said under the button. With no launcher alive, the form says so and gives the command that
 starts one.

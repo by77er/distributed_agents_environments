@@ -7,7 +7,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
-from rollout.catalog import Row
+from rollout.environment import Row
 from rollout.harness.blobs import FileBlobStore
 from rollout_train import Checkpoint, Checkpoints, Curriculum, FileLedger, Result, Trained, results, trained
 from rollout_train.record import GROUPS, RESULTS, STEPS, table

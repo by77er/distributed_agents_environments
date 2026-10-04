@@ -47,23 +47,23 @@ episodes = 1                                  # episodes of each start
 ```
 
 ```bash
-uv run rollout train profile.toml minecraft_team.catalog:catalog --groups 100 --directory RUN  # --groups-per-step 4
+uv run rollout train profile.toml minecraft_team.environment:environment --groups 100 --directory RUN  # --groups-per-step 4
 uv run rollout monitor RUN                     # the web page over RUN's ledger and its runs: http://localhost:8765
-uv run rollout report RUN minecraft_team.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
+uv run rollout report RUN minecraft_team.environment:environment --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
 uv run rollout checkpoints --ledger RUN                                 # every checkpoint: where it came from, its bookmarks
 uv run rollout bookmark diamonds first:20 --ledger RUN               # name the checkpoint run "first" made at step 20
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
-uv run rollout train profile.toml CATALOG --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
-uv run rollout suite make words-v1 --catalog CATALOG --seeds 1,2,3 --ledger RUN       # a frozen list of starts
+uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
+uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # a frozen list of starts
 uv run rollout eval profile.toml words-v1 --checkpoint diamonds --episodes 4         # play it with a checkpoint
-uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS   # start runs asked for here
-uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS \
+uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONMENT --runs RUNS   # start runs asked for here
+uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONMENT --runs RUNS \
     --ray http://127.0.0.1:8265 --as-job                             # the same, as a Ray job; each run a Ray job too
 ```
 
-`rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
+`rollout COMMAND --help` lists each command's options. An environment is named as `module:name`, like everything else a
 profile or the command is told by name. `train --name NAME` names a new run (by default after its directory);
 `rename` names a run again, by its name or its id; `bookmark` names a checkpoint by any reference, and `checkpoints` lists
 them all ([checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
@@ -115,9 +115,9 @@ In code, a profile opens into a platform:
 
 ```py
 async with Profile.load(Path("profile.toml")).open() as platform:
-    binding = binding_for(catalog, "policy", platform.tool_bindings)
+    binding = binding_for(environment, "policy", platform.tool_bindings)
     await train(
-        catalog, platform.trainer, platform.checkpoints, start=platform.origin, channel="policy",
+        environment, platform.trainer, platform.checkpoints, start=platform.origin, channel="policy",
         base=platform.profile.channels["policy"].model,
         directory=platform.profile.directory / "checkpoints", publish=platform.publish, binding=binding,
         run=platform.run.id, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
@@ -170,7 +170,7 @@ them. Run one per training machine:
 
 ```bash
 uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
-    --profiles environments/minecraft/profiles --catalog minecraft_team.catalog:catalog \
+    --profiles environments/minecraft/profiles --environment minecraft_team.environment:environment \
     --runs ~/.cache/rollout/runs --at-once 1
 ```
 
@@ -178,7 +178,7 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 |---|---|
 | `--ledger` | the database (or a ledger's directory) the launches and heartbeats are kept beside: the profiles' own |
 | `--profiles` | a directory of profiles it offers: every `*.toml` there that loads and names a trainer, by its file's name |
-| `--catalog` | a catalog it offers, as `module:name` (repeatable) |
+| `--environment` | an environment it offers, as `module:name` (repeatable) |
 | `--runs` | where it makes each run's directory: the run's name in letters, digits and dashes, and the end of the launch's id |
 | `--at-once` | how many runs it plays at once: 1 on one GPU |
 | `--ray` | a Ray cluster's job server (`http://127.0.0.1:8265`): each run is then a Ray job ([Ray](#ray)) |
@@ -188,14 +188,14 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
 `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
-`evals.episodes`); its catalogs; and how many runs it plays.
-A launch (`rollout_train.launches`) names a profile, a catalog, the run's name, the checkpoint it starts from, a
+`evals.episodes`); its environments; and how many runs it plays.
+A launch (`rollout_train.launches`) names a profile, an environment, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, or one
 the profile offers). The launcher claims the oldest launch asked for one of its profiles while it has room (a claim
 is one change, so two launchers never start one launch), and starts
 
 ```bash
-python -m rollout_train.cli train PROFILE CATALOG --directory RUNS/NAME-ID --name NAME --groups G \
+python -m rollout_train.cli train PROFILE ENVIRONMENT --directory RUNS/NAME-ID --name NAME --groups G \
     --groups-per-step K --seed S --set KEY=VALUE ...
 ```
 
@@ -233,7 +233,7 @@ on disk (Ray writes its sessions and spilled objects there, and `/tmp` may be me
 ```bash
 uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 --num-gpus 1 --temp-dir ~/.cache/ray
 uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" --profiles environments/minecraft/profiles \
-    --catalog minecraft_team.catalog:catalog --runs ~/.cache/rollout/runs --ray http://127.0.0.1:8265 --as-job
+    --environment minecraft_team.environment:environment --runs ~/.cache/rollout/runs --ray http://127.0.0.1:8265 --as-job
 uv run ray job list --address http://127.0.0.1:8265                 # the launcher, and each run it submitted
 uv run ray stop
 ```

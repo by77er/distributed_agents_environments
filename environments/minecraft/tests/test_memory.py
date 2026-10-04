@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
-from minecraft_team.catalog import Teams
+from minecraft_team.environment import Teams
 from minecraft_team.episode import TICKS_PER_MINUTE, TeamEpisode, action, answer
 from minecraft_team.prompts import COMPACT, NO_CALL, ONE_CALL
 from minecraft_team.tasks import TEAM, catalog
@@ -278,7 +278,7 @@ def test_every_reply_is_answered_whatever_it_called() -> None:
     }
 
 
-def test_the_catalog_offers_every_task_and_draws_one_start_for_a_whole_group() -> None:
+def test_the_environment_offers_every_task_and_draws_one_start_for_a_whole_group() -> None:
     teams = Teams()
     rows = teams.rows()
     assert len(rows) == 100 and rows[0].key == "t001" and rows[0].parameters == {"task": "t001"}

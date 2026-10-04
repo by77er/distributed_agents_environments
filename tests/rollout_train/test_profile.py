@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from rollout.catalog import binding_for
+from rollout.environment import binding_for
 from rollout_train import Budget, Files, Step, Weighted, train
 from rollout_train import testing as support
 from rollout_train.profile import Profile

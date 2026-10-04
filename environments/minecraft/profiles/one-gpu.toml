@@ -1,5 +1,5 @@
 # One machine with one 16 GB GPU: a single vLLM engine, and a LoRA trainer that shares its card (the engine sleeps
-# while it steps). `rollout train environments/minecraft/profiles/one-gpu.toml minecraft_team.catalog:catalog`
+# while it steps). `rollout train environments/minecraft/profiles/one-gpu.toml minecraft_team.environment:environment`
 directory = "~/.cache/rollout/runs/team"
 feed_runs = 80
 episodes_at_once = 6             # each a Paper server of its own, and up to four agents' requests

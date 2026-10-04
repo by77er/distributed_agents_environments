@@ -142,7 +142,7 @@ async def until_state(launches: Any, id: str, *states: str) -> Any:
 async def test_a_launchers_run_is_a_ray_job_that_asks_for_a_gpu(tmp_path: Path, ends: str, state: str) -> None:
     jobs = Jobs(ends)
     found, launches = await ray_launcher(tmp_path, jobs)
-    asked = await launches.ask(Asked(profile="small", catalog="c:c", name="on ray"))
+    asked = await launches.ask(Asked(profile="small", environment="c:c", name="on ray"))
     await found._step()  # pyright: ignore[reportPrivateUsage]
     (submitted,) = jobs.submitted
     assert submitted["entrypoint_num_gpus"] == 1.0 and submitted["submission_id"] == f"run-{asked.id}"
@@ -157,7 +157,7 @@ async def test_a_launchers_run_is_a_ray_job_that_asks_for_a_gpu(tmp_path: Path, 
 async def test_a_ray_job_is_stopped_and_followed_again_by_a_launcher_started_again(tmp_path: Path) -> None:
     jobs = Jobs(steps=10_000)
     found, launches = await ray_launcher(tmp_path, jobs)
-    asked = await launches.ask(Asked(profile="small", catalog="c:c", name="long"))
+    asked = await launches.ask(Asked(profile="small", environment="c:c", name="long"))
     await found._step()  # pyright: ignore[reportPrivateUsage]
     await until_state(launches, asked.id, RUNNING)
     for task in list(found._watching):  # pyright: ignore[reportPrivateUsage]  (the launcher is gone)

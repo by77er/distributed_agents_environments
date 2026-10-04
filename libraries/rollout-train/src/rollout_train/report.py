@@ -1,7 +1,7 @@
 """Report a training run's progress: a chart of the climb through the curriculum, and a summary in words.
 
 Reads the run's results, steps and checkpoints from its ledger and can post both to a Discord webhook, once
-or after every group (`rollout report RUN CATALOG --watch`). The webhook's address comes from `--webhook` or the
+or after every group (`rollout report RUN ENVIRONMENT --watch`). The webhook's address comes from `--webhook` or the
 environment variable `DISCORD_WEBHOOK_URL`; it is a secret and is never written anywhere.
 """
 
@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from rollout.catalog import Row
+from rollout.environment import Row
 from rollout_train.checkpoints import Checkpoint, checkpoints_in
 from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Ledger, of_run

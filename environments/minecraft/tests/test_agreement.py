@@ -142,7 +142,7 @@ def test_every_task_with_a_ladder_says_its_way_step_by_step_in_actions_the_agent
 
 
 def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
-    from minecraft_team.catalog import catalog as teams
+    from minecraft_team.environment import environment as teams
     from minecraft_team.prompts import guidance, way
 
     task = next(task for task in catalog() if task.kit.value == "ingots" and task.coordination.value == "one_kit")
@@ -169,7 +169,7 @@ def test_a_team_of_any_size_is_told_the_game_as_it_is_for_that_many() -> None:
 
 
 def test_an_unguided_row_counts_for_its_guided_twin() -> None:
-    from minecraft_team.catalog import catalog as teams
+    from minecraft_team.environment import environment as teams
 
     rows = {row.key: row for row in teams.rows()}
     for row in rows.values():

@@ -1,5 +1,5 @@
 """Test doubles for what stands above a run: an engine that answers from a script, and a token format simple enough
-to read. With them a catalog, an algorithm or a whole profile can be tried without a model or a GPU."""
+to read. With them an environment, an algorithm or a whole profile can be tried without a model or a GPU."""
 
 import json
 from collections.abc import Sequence

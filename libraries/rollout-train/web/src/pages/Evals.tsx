@@ -16,7 +16,7 @@ import { runPlace, suitePlace } from "../lib/places";
 export function MakeSuite({ ledger }: { ledger: string }) {
   return (
     <Card title="Make a suite">
-      <pre className="command">{`rollout suite make NAME --catalog module:name --rows ROW,ROW --seeds 1,2,3 --ledger ${ledger}`}</pre>
+      <pre className="command">{`rollout suite make NAME --environment module:name --rows ROW,ROW --seeds 1,2,3 --ledger ${ledger}`}</pre>
     </Card>
   );
 }
@@ -69,7 +69,7 @@ function SuiteTile({ suite }: { suite: EvalSuite }) {
   const best = [...suite.subjects].filter(each => each.played).sort((a, b) => score(b) - score(a))[0];
   return (
     <Tile to={suitePlace(suite.suite)} className="rail accent">
-      <header><b>{suite.suite}</b><span className="what">{suite.catalog ?? ""}</span></header>
+      <header><b>{suite.suite}</b><span className="what">{suite.environment ?? ""}</span></header>
       <div className="cells">
         <div className="cell"><span>starts</span><b>{suite.starts.length}</b><small>{new Set(suite.starts.map(start => start.task)).size} rows</small></div>
         <div className="cell"><span>played by</span><b>{suite.subjects.length}</b><small>subjects</small></div>

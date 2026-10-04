@@ -358,7 +358,7 @@ const MachineCard = memo(function MachineCard({ machine }: { machine: Machine })
           keys={machine.processes.started.map(each => each.pid)} />
       ) : null}
       {launcher && machine.profiles?.length ? (
-        <div className="facts">{machine.profiles.map(profile => <span key={profile.profile} className="chip">{profile.profile}</span>)}{(machine.catalogs ?? []).map(each => <span key={each} className="chip mono">{each}</span>)}</div>
+        <div className="facts">{machine.profiles.map(profile => <span key={profile.profile} className="chip">{profile.profile}</span>)}{(machine.environments ?? []).map(each => <span key={each} className="chip mono">{each}</span>)}</div>
       ) : null}
     </Card>
   );

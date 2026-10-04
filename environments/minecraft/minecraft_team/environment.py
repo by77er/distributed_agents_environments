@@ -1,4 +1,4 @@
-"""The catalog of the Minecraft team: what there is to train on, as rows (`rollout_train.rollouts.Catalog`).
+"""The Minecraft team as an environment: what there is to train on, as rows (`rollout.environment.Environment`).
 
 A row is a task; a start of it is a world, a layout and the names of a team of one to four, drawn at random: episodes
 given the same start begin identically.
@@ -13,7 +13,7 @@ from pydantic import JsonValue
 from minecraft_team.episode import TeamEpisode
 from minecraft_team.tasks import NAMES, TEAM, Coordination
 from minecraft_team.tasks import catalog as tasks
-from rollout.catalog import Row
+from rollout.environment import Row
 from rollout.harness import ProgramReference, register
 
 TASKS = {task.id: task for task in tasks()}
@@ -25,7 +25,7 @@ class Teams:
     """How many world seeds starts are drawn from (a server template is generated for each, once)."""
     seed: int = 0
     only: tuple[str, ...] = ()
-    """Restrict the catalog to these task ids (all tasks when empty)."""
+    """Restrict the rows to these task ids (all tasks when empty)."""
     program: ProgramReference = field(default_factory=lambda: ProgramReference(program=register(TeamEpisode)))
 
     def rows(self) -> Sequence[Row]:
@@ -45,5 +45,5 @@ class Teams:
         return {**row.parameters, "world_seed": world, "layout_seed": layout, "names": rng.sample(NAMES, players)}
 
 
-catalog = Teams()
-"""`rollout train PROFILE minecraft_team.catalog:catalog`."""
+environment = Teams()
+"""`rollout train PROFILE minecraft_team.environment:environment`."""
