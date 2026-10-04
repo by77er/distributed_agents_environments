@@ -57,10 +57,10 @@ dev = [
     "pgembed>=0.2",
     "moto[server]>=5.1",
     "boto3-stubs[s3]>=1.40",
-    "openai>=3.19",  # the official clients, for the recorder's HTTP endpoint
+    "openai>=3.19",  # the official clients, against the gateway's OpenAI and Anthropic APIs
     "anthropic>=1.8",
     "cryptography>=46",  # test certificate authorities, for mutual TLS with pods
-    "pyyaml>=6",  # reading the pods' proxy configuration in tests
+    "pyyaml>=6",  # reading the pods' proxy configuration and the chart in tests
 ]
 docs = [
     "mkdocs>=1.6,<2",
