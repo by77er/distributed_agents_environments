@@ -31,15 +31,22 @@ export function Sized({ children, fallback }: { children: (width: number) => Rea
   return <div ref={ref} style={{ minWidth: 0 }}>{children(width)}</div>;
 }
 
+/** Where a spark's values are drawn, from the lowest of them (or 0) at the bottom to the highest (or 0) at the top, and
+ * the height of 0. */
+export function sparkPoints(values: number[], width: number, height: number): { points: number[][]; zero: number } {
+  const low = Math.min(0, ...values), high = Math.max(0, ...values), range = high - low || 1e-9;
+  const step = (width - 6) / Math.max(1, values.length - 1), y = (value: number) => height - 3 - ((value - low) / range) * (height - 10);
+  return { points: values.map((value, index) => [3 + index * step, y(value)]), zero: y(0) };
+}
+
 export const Spark = memo(function Spark({ values, kind, width, height, fill }: { values: number[]; kind: string; width: number; height: number; fill?: boolean }) {
   if (!values.length) return <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" />;
-  const top = Math.max(...values, 1e-9), step = (width - 6) / Math.max(1, values.length - 1);
-  const points = values.map((value, index) => [3 + index * step, height - 3 - (value / top) * (height - 10)]);
+  const { points, zero } = sparkPoints(values, width, height);
   const [x, y] = points.at(-1)!;
   return (
     <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img">
-      <line x1={0} x2={width} y1={height - 2.5} y2={height - 2.5} className="s-grid" />
-      {fill ? <polygon className={`${kind.replace("s-", "f-")}-soft`} points={[`3,${height - 3}`, ...points.map(point => point.join(",")), `${x},${height - 3}`].join(" ")} /> : null}
+      <line x1={0} x2={width} y1={zero + 0.5} y2={zero + 0.5} className="s-grid" />
+      {fill ? <polygon className={`${kind.replace("s-", "f-")}-soft`} points={[`3,${zero}`, ...points.map(point => point.join(",")), `${x},${zero}`].join(" ")} /> : null}
       {values.length > 1 ? <polyline className={kind} points={points.map(point => point.join(",")).join(" ")} /> : null}
       <circle cx={x} cy={y} r={3} className={kind.replace("s-", "f-")} />
     </svg>
@@ -57,16 +64,15 @@ export const RewardsChart = memo(function RewardsChart({ run, width }: { run: Ru
   const lines = [...run.done].sort((a, b) => order(a) - order(b) || a.group - b.group);
   const left = 32, top = 10, plot = 120, band = top + plot + 10, height = band + 28;
   const count = Math.max(lines.length, 12), column = (width - left - 6) / count;
-  const most = Math.max(1, ...lines.flatMap(line => line.rewards));
-  const power = 10 ** Math.floor(Math.log10(most)), ceiling = Math.ceil(most / power) * power;
-  const y = (value: number) => top + plot - (value / ceiling) * plot;
+  const ys = scale(lines.flatMap(line => line.rewards), { count: 2 });  // (from the lowest reward, or 0, to the highest)
+  const y = (value: number) => top + plot - ((value - ys.low) / (ys.high - ys.low)) * plot;
   const every = Math.max(1, Math.ceil(34 / column)), mark = Math.max(3, Math.min(9, column - 3)), spread = Math.min(3.4, column / 6);
   return (
     <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label="rewards by group">
-      {[0, ceiling / 2, ceiling].map(value => (
+      {ys.ticks.map(value => (
         <g key={value}>
           <line x1={left} x2={width} y1={y(value)} y2={y(value)} className="s-grid" />
-          <text x={left - 8} y={y(value) + 3} textAnchor="end">{String(+value.toFixed(1))}</text>
+          <text x={left - 8} y={y(value) + 3} textAnchor="end">{tick(value)}</text>
         </g>
       ))}
       {lines.map((line, index) => {
@@ -83,7 +89,7 @@ export const RewardsChart = memo(function RewardsChart({ run, width }: { run: Ru
             {step !== before ? <line x1={x - column / 2} x2={x - column / 2} y1={top - 4} y2={height} className="s-grid" pointerEvents="none" /> : null}
             {line.rewards.map((value, place) => (
               <circle key={place} cx={x + (place - (line.rewards.length - 1) / 2) * spread} cy={y(value)} r={Math.min(3.2, Math.max(1.6, column / 5))}
-                className={line.solved[place] ? "f-good" : "f-quiet"} pointerEvents="none" />
+                className={line.solved[place] ? "f-good" : line.solved[place] === false ? "f-quiet" : "f-played"} pointerEvents="none" />
             ))}
             {average != null ? <line x1={x - column * 0.34} x2={x + column * 0.34} y1={y(average)} y2={y(average)} className="s-ink" pointerEvents="none" /> : null}
             <rect x={x - mark / 2} y={band} width={mark} height={mark} rx={2} className={did} pointerEvents="none" />

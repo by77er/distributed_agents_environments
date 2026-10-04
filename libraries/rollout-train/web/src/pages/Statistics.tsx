@@ -7,6 +7,7 @@ import type { Machine, StatisticsGroup, StatisticsRun, System } from "../api/typ
 import { ColumnChart, LineChart, type Series, Sized, spansOf } from "../components/charts";
 import { Card, Dots, Empty, Head, Kpi, Kpis, Legend, Meter, SectionTitle, Share, Table } from "../components/ui";
 import { bytes, clock, figure, mean, percent, span, tick, tickSpan } from "../lib/format";
+import { reported } from "../lib/model";
 import { groupPlace } from "../lib/places";
 import { useStored } from "../lib/stored";
 import { SECTIONS, useHidden } from "../layout/Tree";
@@ -14,7 +15,9 @@ import { Ago, useRunColor } from "../layout/runs";
 
 const DAY = 86400;
 const sectionName = (key: string) => SECTIONS.find(([each]) => each === key)![1];
+/** The share of the groups' episodes that solved their rows (none where none of them says). */
 const solvedShare = (groups: StatisticsGroup[]): number | null => {
+  if (!reported(groups.flatMap(group => group.solved))) return null;
   const solved = groups.reduce((sum, group) => sum + group.solved.filter(Boolean).length, 0);
   const played = groups.reduce((sum, group) => sum + group.rewards.length + group.failed, 0);
   return played ? solved / played : null;
@@ -44,7 +47,7 @@ export function Statistics() {
   const runName = (id: string) => figures.names?.runs[id] ?? known.run(id);  // (a run by its name, as the figures were read)
   const colored = (run: StatisticsRun) => ({ name: runName(run.run), color: colorOf(run.run) });
   const life = new Map(system.runs.map(run => [run.run, run]));
-  const every = runs.flatMap(done);
+  const every = runs.flatMap(done), said = reported(every.flatMap(group => group.solved));
   const title = (key: string, name: string, note: string) => <SectionTitle id={`section-${key}`} title={name} note={note} />;
   if (!runs.length) {
     return (
@@ -115,7 +118,7 @@ export function Statistics() {
         <Kpi label="Runs" value={String(runs.length)} note={`${runs.filter(run => life.get(run.run)?.state === "running").length} running`} />
         <Kpi label="Groups done" value={every.length.toLocaleString()} note={`${runs.reduce((sum, run) => sum + run.groups.filter(group => group.time == null).length, 0)} in flight`} />
         <Kpi label="Episodes" value={episodes.toLocaleString()} note={`${failed} failed`} />
-        <Kpi label="Solved" value={every.length ? percent(solvedShare(every) ?? 0) : "–"} note="of the episodes played" />
+        {said ? <Kpi label="Solved" value={percent(solvedShare(every) ?? 0)} note="of the episodes played" /> : null}
         <Kpi label="Steps" value={String(steps.filter(step => step.state === "committed").length)} note={`${steps.filter(step => step.state === "failed").length} failed`} />
         <Kpi label="Last day" value={`${lastDay.length} groups`} note={`${lastDay.reduce((sum, group) => sum + group.rewards.length + group.failed, 0)} episodes`} />
       </Kpis>
@@ -125,10 +128,12 @@ export function Statistics() {
         {[4, 8, 16, 32].map(size => <button type="button" key={size} className={`seg${size === stretch ? " current" : ""}`} onClick={() => setStretch(size)}>{size} groups</button>)}
       </div>
       <Halves>
-        <Card title="Solve rate" note="the share of a group's episodes that solved its row">
-          <Sized>{width => <LineChart series={solveSeries} width={width} label="solve rate over groups" y={{ min: 0, max: 1 }} yTick={percent} format={percent} xFormat={value => `group ${value}`} dots={false} />}</Sized>
-          <Legendary series={legend} />
-        </Card>
+        {said ? (
+          <Card title="Solve rate" note="the share of a group's episodes that solved its row">
+            <Sized>{width => <LineChart series={solveSeries} width={width} label="solve rate over groups" y={{ min: 0, max: 1 }} yTick={percent} format={percent} xFormat={value => `group ${value}`} dots={false} />}</Sized>
+            <Legendary series={legend} />
+          </Card>
+        ) : null}
         <Card title="Mean reward" note="of the episodes that completed; each row's rewards are its own">
           <Sized>{width => <LineChart series={rewardSeries} width={width} label="mean reward over groups" format={figure} xFormat={value => `group ${value}`} dots={false} />}</Sized>
           <Legendary series={legend} />
@@ -268,7 +273,7 @@ const MachineSection = memo(function MachineSection({ system }: { system: System
         {system.channels.map(channel => {
           const last = channel.throughput.at(-1);
           return (
-            <Card key={`${channel.run}${channel.channel}`} title={`Channel ${channel.channel}`} note={`${known.run(channel.run)} · ${channel.adapter ? `serving ${known.short(channel.adapter)} (${known.origin(channel.adapter)}) since ${clock(channel.published)}` : "serving the base model"}`}>
+            <Card key={`${channel.run}${channel.channel}`} title={`Channel ${channel.channel}`} note={`${known.run(channel.run)} · ${channel.adapter ? `serving ${known.short(channel.adapter)} (${known.origin(channel.adapter)}) since ${clock(channel.published)}` : "serving the model its engines started with"}`}>
               {last ? (
                 <Kpis style={{ marginBottom: 12 }}>
                   <Kpi label="tokens a second" value={figure(last.tokens_per_second)} />
@@ -345,7 +350,7 @@ const MachineCard = memo(function MachineCard({ machine }: { machine: Machine })
       {history.length > 1 ? <p className="small muted" style={{ margin: 0 }}>Its newest {history.length} beats cover {span((latest?.at ?? machine.at) - history[0].at)}.</p> : null}
       {machine.channels?.length ? (
         <Table heads={[["channel"], ["serving"], ["tok/s", "n"], ["at once", "n"]]}
-          rows={machine.channels.map(channel => [channel.channel, channel.adapter ? `${known.short(channel.adapter)} · ${known.origin(channel.adapter)}` : "base model", figure(channel.tokens_per_second), figure(channel.mean_concurrency)])}
+          rows={machine.channels.map(channel => [channel.channel, channel.adapter ? `${known.short(channel.adapter)} · ${known.origin(channel.adapter)}` : "the model it started with", figure(channel.tokens_per_second), figure(channel.mean_concurrency)])}
           keys={machine.channels.map(channel => channel.channel)} />
       ) : null}
       {machine.processes?.started.length ? (

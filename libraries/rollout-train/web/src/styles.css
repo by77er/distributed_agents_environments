@@ -75,6 +75,7 @@
   .dots { display: flex; gap: 3px; flex: none; }
   .dots i { width: 7px; height: 7px; border-radius: 1px; background: var(--line-strong); }
   .dots i.solved { background: var(--good); } .dots i.unsolved { background: var(--faint); } .dots i.failed { background: var(--bad); }
+  .dots i.played { background: var(--quiet); }
   .dots i.running { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
   .dots i.waiting { background: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
 
@@ -190,7 +191,7 @@
   .s-ink { stroke: var(--ink); stroke-width: 1.5; }
   .f-accent { fill: var(--accent); } .f-accent-soft { fill: var(--accent); opacity: .12; } .f-violet { fill: var(--violet); }
   .f-violet-soft { fill: var(--violet); opacity: .12; } .f-warm { fill: var(--warm); } .f-warm-soft { fill: var(--warm); opacity: .12; }
-  .f-good { fill: var(--good); } .f-quiet { fill: var(--faint); } .f-bad { fill: var(--bad); } .f-none { fill: transparent; }
+  .f-good { fill: var(--good); } .f-quiet { fill: var(--faint); } .f-played { fill: var(--quiet); } .f-bad { fill: var(--bad); } .f-none { fill: transparent; }
   .f-hollow { fill: var(--panel); stroke: var(--faint); stroke-width: 1; }
   .column { cursor: pointer; } .column:hover { fill: var(--accent); fill-opacity: .07; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--quiet); font-size: 12px; margin-top: 10px; }
@@ -280,6 +281,7 @@
   .dag-drawing text.score { font-weight: 600; font-size: 10px; }
   .dag-drawing text.bookmark { fill: var(--accent); font-size: 9.5px; font-weight: 600; } .chip.bookmark { color: var(--accent); border-color: var(--accent); }
   .t-good { fill: var(--good); color: var(--good); } .t-warm { fill: var(--warm); color: var(--warm); } .t-bad { fill: var(--bad); color: var(--bad); }
+  .t-quiet { fill: var(--quiet); color: var(--quiet); }
   .t-violet { fill: var(--violet); } .t-accent { fill: var(--accent); }
   .s-quiet { stroke: var(--quiet); stroke-width: 1.4; fill: none; } .dash { stroke-dasharray: 4 3; }
   .dag-drawing line.s-accent, .dag-drawing line.s-warm, .dag-drawing line.s-violet { stroke-width: 2.5; }
@@ -316,6 +318,7 @@
   table.evals .track { height: 5px; margin-top: 4px; }
   .cell-result i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin: 0 1px; vertical-align: middle; }
   .cell-result i.solved { background: var(--good); } .cell-result i.unsolved { background: var(--line-strong); }
+  .cell-result i.played { background: var(--quiet); }
   .cell-result i.unplayed { box-shadow: inset 0 0 0 1px var(--line-strong); }
 
   /* Statistics: charts across runs, each run in its color */

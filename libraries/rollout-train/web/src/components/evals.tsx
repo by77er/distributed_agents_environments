@@ -8,18 +8,23 @@ import { figure, percent } from "../lib/format";
 import type { Known } from "../lib/model";
 import { runPlace } from "../lib/places";
 import { CheckpointTag } from "./checkpoints";
+import { solvedClass } from "./ui";
 
 export type Subject = Suite["subjects"][number];
 export type SuiteStart = Suite["starts"][number];
 
-/** The share of its episodes a subject solved (none: it played none yet). */
-export const shareOf = (subject: Subject): number | null => (subject.played ? subject.solved / subject.played : null);
+/** The share of its episodes a subject solved (none: it played none yet, or its task does not say). */
+export const shareOf = (subject: Subject): number | null =>
+  subject.played && subject.solved != null ? subject.solved / subject.played : null;
 
-/** The share of a start's episodes a subject solved. */
+/** The share of a start's episodes a subject solved (none where none of them says). */
 export function startShare(subject: Subject, start: SuiteStart): number | null {
   const played = subject.results[start.start] ?? [];
-  return played.length ? played.filter(each => each.solved).length / played.length : null;
+  return played.some(each => each.solved != null) ? played.filter(each => each.solved).length / played.length : null;
 }
+
+/** Whether any subject's episodes say if they solved their starts. */
+export const anySolved = (subjects: Subject[]): boolean => subjects.some(subject => subject.solved != null);
 
 /** Who played: the checkpoint (opening its page), or the base model by its name. */
 export const SubjectName = ({ subject }: { subject: Subject }) =>
@@ -39,7 +44,7 @@ export function Played({ subject, start }: { subject: Subject; start: SuiteStart
   return (
     <>
       {played.map((each, place) => (
-        <i key={place} className={each.solved ? "solved" : "unsolved"} title={`${startName(start)}: reward ${figure(each.reward)}${each.solved ? ", solved" : ""}`} />
+        <i key={place} className={solvedClass(each.solved)} title={`${startName(start)}: reward ${figure(each.reward)}${each.solved ? ", solved" : ""}`} />
       ))}
     </>
   );
@@ -48,7 +53,7 @@ export function Played({ subject, start }: { subject: Subject; start: SuiteStart
 /** Every subject of a suite, start by start: what each solved, and in all. A subject opens the eval that played it. */
 export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subject[] }) {
   const { data: system } = useSystem();
-  const runs = new Set((system?.runs ?? []).map(run => run.run));
+  const runs = new Set((system?.runs ?? []).map(run => run.run)), said = anySolved(subjects);
   return (
     <>
       <div className="table">
@@ -66,13 +71,14 @@ export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subje
           </thead>
           <tbody>
             <tr className="total">
-              <td>solved</td>
+              <td>{said ? "solved" : "mean reward"}</td>
               {subjects.map(subject => {
                 const expected = suite.starts.length * (subject.episodes ?? 1);
                 return (
                   <td key={subject.subject} className="n" title={`mean reward ${figure(subject.reward)}`}>
-                    <b>{subject.solved}/{subject.played}</b>{subject.played < expected ? <small className="faint"> of {expected}</small> : null}
-                    <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, expected)).toFixed(1)}%` }} /></div>
+                    {subject.solved == null ? <b>{figure(subject.reward)}</b> : <b>{subject.solved}/{subject.played}</b>}
+                    {subject.played < expected ? <small className="faint"> {subject.solved == null ? `${subject.played} of ${expected}` : `of ${expected}`}</small> : null}
+                    {subject.solved == null ? null : <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, expected)).toFixed(1)}%` }} /></div>}
                   </td>
                 );
               })}
@@ -86,7 +92,10 @@ export function SuiteMatrix({ suite, subjects }: { suite: Suite; subjects: Subje
           </tbody>
         </table>
       </div>
-      <div className="legend"><span><i style={{ background: "var(--good)" }} />solved</span><span><i style={{ background: "var(--line-strong)" }} />not solved</span><span><i className="hollow" />not played yet</span></div>
+      <div className="legend">
+        {said ? <><span><i style={{ background: "var(--good)" }} />solved</span><span><i style={{ background: "var(--line-strong)" }} />not solved</span></> : <span><i style={{ background: "var(--quiet)" }} />played</span>}
+        <span><i className="hollow" />not played yet</span>
+      </div>
     </>
   );
 }

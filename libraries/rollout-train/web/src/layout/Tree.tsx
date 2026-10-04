@@ -8,8 +8,8 @@ import { useNavigate } from "react-router-dom";
 import { useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
 import type { GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
-import { byNumber, figure } from "../lib/format";
-import { asked, episodeClass, groupsOf, madeBy, nameOf, range } from "../lib/model";
+import { byNumber, figure, mean } from "../lib/format";
+import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
 import { episodePlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { RunDot, running, useRunColor } from "./runs";
@@ -93,8 +93,9 @@ const RunBranch = memo(function RunBranch({ run, only, place, folds, fold, showi
     const group = groups.get(number);
     if (!group) return null;
     const key = `group:${run.run}:${number}`, open = folds[key] ?? inGroup(number);
-    const tag = group.open ? group.open.stage : skipped ? "skipped" : group.line!.rewards.length
-      ? `${group.line!.solved.filter(Boolean).length}/${group.line!.rewards.length}` : "failed";
+    const line = group.line;
+    const tag = group.open ? group.open.stage : skipped ? "skipped" : !line?.rewards.length ? "failed"
+      : reported(line.solved) ? `${line.solved.filter(Boolean).length}/${line.rewards.length}` : figure(mean(line.rewards));
     const sorted = [...group.episodes].sort((a, b) => byNumber(String(a.episode), String(b.episode)));
     return (
       <div key={`g${number}`}>
@@ -162,7 +163,7 @@ const RunBranch = memo(function RunBranch({ run, only, place, folds, fold, showi
 });
 
 function EpisodeRow({ each, place, folds, fold }: { each: GroupEpisode; place: Place; folds: Folds; fold: (key: string, open: boolean) => void }) {
-  const key = `episode:${each.run_id}`, slots = each.slots ?? [];
+  const key = `episode:${each.run_id}`, slots = [...(each.slots ?? [])].sort(byNumber);
   const isHere = place.kind === "episode" && place.id === each.run_id;
   const open = folds[key] ?? (isHere && Boolean(place.kind === "episode" && place.slot));
   return (

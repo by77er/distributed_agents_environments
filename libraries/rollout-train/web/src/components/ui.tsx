@@ -4,7 +4,7 @@
 import { memo, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DoneLine } from "../api/types";
-import { figure, hue } from "../lib/format";
+import { figure, slotHue } from "../lib/format";
 import { type Asked, episodeClass, isWaiting, stateKind } from "../lib/model";
 
 /** A fact about the thing shown, as a datasheet gives it: a label and a value, set side by side under the title. */
@@ -136,19 +136,22 @@ export const Twist = ({ open, has = true, onToggle }: { open: boolean; has?: boo
   </button>
 );
 
-/** An agent's badge: its slot's number (`agent-2` → 2) in a color of its own, or, for a slot with no number, its initial. */
+/** An agent's badge: its slot's number (`agent-2` → 2), or, for a slot with no number, its initial, in a color its whole
+ * name gives it. */
 export const Avatar = memo(function Avatar({ name }: { name: string }) {
   const number = name.match(/(\d+)$/)?.[1];
-  const color = number ? (Number(number) * 97 + 160) % 360 : hue(name);
-  return <span className="avatar" style={{ background: `hsl(${color} 55% 46%)` }}>{number ?? name.slice(0, 1)}</span>;
+  return <span className="avatar" title={name} style={{ background: `hsl(${slotHue(name)} 55% 46%)` }}>{number ?? name.slice(0, 1)}</span>;
 });
+
+/** An episode's square: solved, not solved, or ended where its task does not say. */
+export const solvedClass = (solved: boolean | null | undefined): string => (solved == null ? "played" : solved ? "solved" : "unsolved");
 
 export const SampleChip = () => <span className="chip sample" title="from the sample fixture: no run writes this yet">sample</span>;
 
 export const Dots = memo(function Dots({ line }: { line: DoneLine }) {
   return (
     <span className="dots">
-      {line.rewards.map((_, index) => <i key={`r${index}`} className={line.solved[index] ? "solved" : "unsolved"} />)}
+      {line.rewards.map((_, index) => <i key={`r${index}`} className={solvedClass(line.solved[index])} />)}
       {Array.from({ length: line.failed }, (_, index) => <i key={`f${index}`} className="failed" />)}
     </span>
   );

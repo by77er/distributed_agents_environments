@@ -33,6 +33,17 @@ export const tickSpan = (seconds: number): string =>
 
 export const hue = (name: string): number => [...name].reduce((sum, letter) => (sum * 31 + letter.charCodeAt(0)) % 360, 7);
 
+/** A slot's hue, from its whole name: names that differ only in their number (`agent-1`, `agent-2`) are a wide step
+ * apart, and the rest of the name moves them all (`red1` and `blue1` differ). */
+export function slotHue(name: string): number {
+  const [, stem, number] = name.match(/^(.*?)(\d*)$/)!;
+  let hash = 2166136261;
+  for (const letter of stem) hash = Math.imul(hash ^ letter.charCodeAt(0), 16777619);
+  hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+  hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+  return (((hash ^ (hash >>> 16)) >>> 0) + Number(number || 0) * 97) % 360;
+}
+
 /** A share of booleans as a percentage, or a dash for none. */
 export const shareOf = (outcomes: boolean[]): string =>
   outcomes.length ? `${Math.round((100 * outcomes.filter(Boolean).length) / outcomes.length)}%` : "–";

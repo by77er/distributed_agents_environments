@@ -28,6 +28,9 @@ export function typed(text: string): unknown {
 const shown = (value: unknown): string =>
   value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
 
+/** What weights are, in a word or two: full, or a LoRA adapter. */
+const weightsText = (kind: string): string => (kind === "full" ? "full weights" : kind === "lora" ? "LoRA" : kind);
+
 export function NewRun() {
   const { data: launched } = useLaunches();
   const { data: system } = useSystem();
@@ -89,6 +92,11 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const room = chosen ? chosen.launchers.some(each => (each.playing ?? 0) < (each.at_once ?? 1)) : false;
   const checkpoints = [...(system?.checkpoints ?? [])].sort((a, b) => b.made - a.made);
   const bookmarks = Object.keys(system?.bookmarks ?? {}).sort();
+  const full = chosen?.profile.weights === "full";  // (a trainer of every weight starts from full weights, not an adapter)
+  const startable = (id: string, profile = chosen?.profile) => {
+    const checkpoint = known.checkpoint(id);
+    return checkpoint?.weights != null && !(profile?.weights === "full" && checkpoint.kind !== "full");
+  };
 
   const changed = (): Record<string, unknown> => {
     const settings: Record<string, unknown> = {};
@@ -121,13 +129,18 @@ function Form({ launchers }: { launchers: Launcher[] }) {
           <div className="fields">
             <label className="field">
               <span>Name</span>
-              <input value={name} onChange={event => setName(event.target.value)} placeholder="diamonds, unguided" required spellCheck={false} />
+              <input value={name} onChange={event => setName(event.target.value)} placeholder="a name for the run" required spellCheck={false} />
               <small>shown everywhere; it can be changed later</small>
             </label>
             <label className="field">
               <span>Profile</span>
-              <select value={chosen?.profile.profile ?? ""} onChange={event => { setProfileName(event.target.value); setEdits({}); }}>
-                {offered.map(each => <option key={each.profile.profile} value={each.profile.profile}>{each.profile.profile} · {each.profile.model}</option>)}
+              <select value={chosen?.profile.profile ?? ""} onChange={event => {
+                const next = offered.find(each => each.profile.profile === event.target.value)?.profile;
+                const from = start && system?.bookmarks[start] ? system.bookmarks[start] : start;
+                setProfileName(event.target.value); setEdits({});
+                if (from && !startable(from, next)) setStart("");
+              }}>
+                {offered.map(each => <option key={each.profile.profile} value={each.profile.profile}>{each.profile.profile} · {each.profile.model}{each.profile.weights ? ` · ${weightsText(each.profile.weights)}` : ""}</option>)}
               </select>
               <small>offered by {chosen?.launchers.map(each => each.launcher).join(", ")}{room ? "" : " · all busy: it waits for room"}</small>
             </label>
@@ -145,20 +158,27 @@ function Form({ launchers }: { launchers: Launcher[] }) {
                 <option value="">the base model{chosen ? ` (${chosen.profile.model})` : ""}</option>
                 {bookmarks.length ? (
                   <optgroup label="Bookmarks">
-                    {bookmarks.map(mark => <option key={`b${mark}`} value={mark}>{mark} · {known.origin(system!.bookmarks[mark])} · {known.short(system!.bookmarks[mark])}</option>)}
+                    {bookmarks.map(mark => {
+                      const id = system!.bookmarks[mark], checkpoint = known.checkpoint(id);
+                      return (
+                        <option key={`b${mark}`} value={mark} disabled={checkpoint !== undefined && !startable(id)}>
+                          {mark} · {known.origin(id)} · {known.short(id)}{checkpoint ? ` · ${weightsText(checkpoint.kind)}` : ""}
+                        </option>
+                      );
+                    })}
                   </optgroup>
                 ) : null}
                 {checkpoints.length ? (
                   <optgroup label="Checkpoints, newest first">
                     {checkpoints.map(checkpoint => (
-                      <option key={checkpoint.id} value={checkpoint.id} disabled={checkpoint.weights == null}>
-                        {known.origin(checkpoint.id)} · {checkpoint.short}{checkpoint.bookmarks.length ? ` [${checkpoint.bookmarks.join(", ")}]` : ""}{checkpoint.weights == null ? " (released)" : ""}
+                      <option key={checkpoint.id} value={checkpoint.id} disabled={!startable(checkpoint.id)}>
+                        {known.origin(checkpoint.id)} · {checkpoint.short} · {weightsText(checkpoint.kind)}{checkpoint.bookmarks.length ? ` [${checkpoint.bookmarks.join(", ")}]` : ""}{checkpoint.weights == null ? " (released)" : ""}
                       </option>
                     ))}
                   </optgroup>
                 ) : null}
               </select>
-              <small>a checkpoint whose weights were deleted cannot be started from</small>
+              <small>{full ? "its trainer trains every weight: it starts from full weights, so an adapter is merged first (rollout merge)" : "a checkpoint whose weights were deleted cannot be started from"}</small>
             </label>
             <label className="field">
               <span>Carries a bookmark</span>

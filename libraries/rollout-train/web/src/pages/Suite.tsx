@@ -6,11 +6,11 @@ import { Link } from "react-router-dom";
 import { useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
 import type { EvalSuite, Launcher, OfferedProfile, System } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
-import { Played, shareOf, shareText, startName, startShare, type Subject, subjectText, SuiteMatrix } from "../components/evals";
+import { anySolved, Played, shareOf, shareText, startName, startShare, type Subject, subjectText, SuiteMatrix } from "../components/evals";
 import { LaunchList } from "../components/launches";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
 import { Ago } from "../layout/runs";
-import { clock } from "../lib/format";
+import { clock, figure } from "../lib/format";
 import { evalsPlace, runPlace } from "../lib/places";
 import { NoLauncher } from "./NewRun";
 
@@ -23,7 +23,8 @@ export function Suite({ name }: { name: string }) {
   if (!suite) return <Empty>There is no suite {name}. <Link to={evalsPlace} className="linkish">Every suite</Link></Empty>;
   const playing = evals.evals.filter(each => each.suite === name && !each.done);
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind === "eval" && each.asked.suite === name);
-  const subjects = [...suite.subjects].sort((a, b) => (shareOf(b) ?? -1) - (shareOf(a) ?? -1));
+  const said = anySolved(suite.subjects), score = (subject: Subject) => (said ? shareOf(subject) : subject.reward ?? null);
+  const subjects = [...suite.subjects].sort((a, b) => (score(b) ?? -Infinity) - (score(a) ?? -Infinity));
   const rows = [...new Set(suite.starts.map(start => start.task))];
   const seeds = [...new Set(suite.starts.map(start => String(start.seed)))];
   return (
@@ -39,7 +40,7 @@ export function Suite({ name }: { name: string }) {
       <Kpis>
         <Kpi label="Starts" value={String(suite.starts.length)} />
         <Kpi label="Played by" value={String(subjects.length)} note="checkpoints and base models" />
-        <Kpi label="Best" value={subjects[0] ? shareText(shareOf(subjects[0])) : "–"} note={subjects[0] ? <SubjectLabel subject={subjects[0]} /> : "none yet"} />
+        <Kpi label="Best" value={subjects[0] ? (said ? shareText(shareOf(subjects[0])) : figure(subjects[0].reward)) : "–"} note={subjects[0] ? <SubjectLabel subject={subjects[0]} /> : "none yet"} />
         <Kpi label="Playing" value={String(playing.length)} note={playing.map(each => each.name).join(", ")} />
       </Kpis>
       {launched ? (launched.launchers.length ? <RunSuite suite={suite} launchers={launched.launchers} system={system} /> : <NoLauncher ledger={system.ledger_at} />) : null}
@@ -57,7 +58,7 @@ export function Suite({ name }: { name: string }) {
       <Card title="Start by start" note="each subject's episodes at each start, best in all first">
         {subjects.length ? <SuiteMatrix suite={suite} subjects={subjects} /> : <p className="muted">No subject has played it yet.</p>}
       </Card>
-      {subjects.length > 1 ? <Compare suite={suite} subjects={subjects} /> : null}
+      {subjects.length > 1 && said ? <Compare suite={suite} subjects={subjects} /> : null}
     </>
   );
 }

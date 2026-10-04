@@ -123,13 +123,13 @@ so a reload stays there.
 |---|---|---|---|
 | Runs | Every run | `#/runs` (and `#/`) | the launches (each asked-for run: its state, launcher, directory, settings changed, why it failed, a Stop button); each run, running ones first: its state and host, groups in flight and done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
 | Runs | New run | `#/runs/new` | a form asking for a run ([launching a run](#launching-a-run)) |
-| Runs | Run | `#/run/RUN` | its name (with a control to rename it), id, state, base model, the checkpoint it started from and the one it is at, what is served; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played |
+| Runs | Run | `#/run/RUN` | its name (with a control to rename it), id, state, base model (or the full checkpoint its adapters build on), the checkpoint it started from and the one it is at, what each of its channels serves; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played |
 | Runs | Step | `#/run/RUN/step/N` | the checkpoint the step made and its parent, the groups that went into it (and those decided before it that gave nothing to train on), and the update's statistics |
-| Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
-| Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below |
+| Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
+| Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below ([an episode's rollouts](#an-episodes-rollouts)) |
 | Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
 | Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations; evaluation suites, a column per checkpoint or model ([the checkpoints view](#the-checkpoints-view)) |
-| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, base model, run and step), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, and the suites it played (each opening the suite) |
+| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, and the suites it played (each opening the suite) |
 | Evals | Every suite and eval | `#/evals` | the evals asked for from the page; each suite (its catalog, starts, subjects, and the subject that did best); every eval, newest first (its suite, who played, episodes played of those asked for, the share solved, whether it is done), each opening its run |
 | Evals | Suite | `#/evals/SUITE` | its catalog, rows and seeds; the subject that did best; a **Run this suite** form ([evals](evals.md#asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals; two subjects compared at the starts both played |
 | Statistics | Across every run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color |
@@ -145,13 +145,15 @@ change through its stream.
 
 A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --catalog module:name --runs DIR
 [--at-once N]`, `rollout_train.launcher`) beats every 15 seconds, saying what it offers: each profile under
-`--profiles` that names a trainer, with the settings a launch may change and their values in the profile (the
-trainer's settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
+`--profiles` that names a trainer, with what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
+says, as `rollout_lora`'s do) and the settings a launch may change and their values in the profile (the trainer's
+settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
 `answer_tokens`), the catalogs, and how many runs it plays of how many it may.
 
 **New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and a catalog, the
 run's name, the checkpoint it starts from (the base model, a bookmark, or any checkpoint whose weights are kept, by where it
-came from), a bookmark for it to carry, its groups, groups a step and seed, and every setting of the profile as a field
+came from and what its weights are; a profile whose trainer trains every weight starts only from full weights, so an
+adapter is merged first), a bookmark for it to carry, its groups, groups a step and seed, and every setting of the profile as a field
 holding the profile's value, with rows for any other `trainer.KEY`. Values are read as numbers, true or false, or JSON
 where they look like them, and as text otherwise. Launching asks the monitor (`POST /api/launches`, with the settings
 changed only), which checks the ask (`System.launch`: a launcher alive offers the profile and the catalog, the name is
@@ -170,7 +172,7 @@ runners' heartbeats; every chart is drawn to scale and says each series' value u
 
 | Section | Shows |
 |---|---|
-| `outcomes` | the solve rate and the mean reward over groups, in the order their results were written: a line for each run, the mean of the last 4, 8, 16 or 32 groups, and a dot for each group |
+| `outcomes` | the solve rate (where a task says whether it solved) and the mean reward over groups, in the order their results were written: a line for each run, the mean of the last 4, 8, 16 or 32 groups, and a dot for each group |
 | `rows` | every row played: groups, episodes, the share solved, mean and best reward, the newest group's rewards; and, where groups' starts list `names`, the same by how many names a start gives |
 | `steps` | the trainer's statistics over the steps, a chart each: KL moved, KL floor, clip fraction, mean mismatch, mean weight, truncated fraction, loss, the step's time and its start time (as far as each checkpoint says them) |
 | `pace` | episodes and groups an hour (counted when each group's result was written); what was done with each group (trained on, in a step being taken, waiting for a step, nothing to train on, no episode or a failed step, in flight); why groups gave nothing to train on |
@@ -178,10 +180,30 @@ runners' heartbeats; every chart is drawn to scale and says each series' value u
 | `inference` | each run's engines: tokens a second and requests at once, a measurement each beat while they are busy |
 | `machines` | a card for each runner's and launcher's machine, as its heartbeats say: its host, alive or gone (no beat for 90 seconds), memory, accelerators and disk now and over its recent beats, its engines' processes, what each channel serves and how fast, and a launcher's profiles; then each channel's throughput, each runner in the ledger (what it plays now, the claims it has made, its fence), the ledger's fences and tables (`#/system` opens it) |
 
+An episode's reward is summed as the trainer sums it ([rewards](episodes.md#rewards)): the mean of its slots'. One
+still playing is shown with its reward so far, read from its feed the same way, and each slot's where they differ.
+
+Whether an episode solved its task is what its program reported (`info["solved"]`), and a task need not say. The
+monitor serves `solved` as null for an episode that did not say, and, in a group's result (whose `solved` the loop
+writes as true or false for each episode), for each episode of a group none of whose episodes said; an eval's results
+and counts likewise. Where nothing says, the page shows no solve figures (no share solved, no solve rate, no solved and
+not-solved colors) and the mean reward in their place.
+
+### An episode's rollouts
+
+Each agent's rollout is its samples in order, its slots in their numbers' order (`agent-2` before `agent-10`), each in
+a color its whole name gives it. An agent offered tools on its turns that samples with none offered (summarising its
+memory, say) takes no turn then: those samples are folded, closed, under its turn before. For the turn shown:
+
+- **Sees**: what came back since its newest reply (the messages after it, with any tool results), or with **whole
+  context**, every message it was sent. A map in it (the rows under a line opening `Map of what you have seen`, as
+  Minecraft's observations write one) is drawn with its symbols colored;
+- **Thinks**, **Does**: its reasoning, and its reply and calls;
+- **Result**: what came back from each call (the result the next turn's context carries for it), or, for a reply
+  that called nothing, the words the next turn's context added after this one's.
+
 An episode whose feed file has been pruned is read back from the events its runner kept in the blob store: its
-replies and tool calls are there, and what each model was sent is not (it is kept as tokens in the trajectories). A
-grid of single characters in what a model sees (a map) is drawn with its symbols colored. An episode's reward is
-summed as the trainer sums it ([rewards](episodes.md#rewards)).
+replies and tool calls are there, and what each model was sent is not (it is kept as tokens in the trajectories).
 
 `System(directory)` reads a run's directory and its ledger, and `System(ledger=…)` a ledger alone: `snapshot()`
 (where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds),
@@ -223,8 +245,10 @@ label opens it (what is open is remembered in the browser). A checkpoint opens i
 A checkpoint that something here starts from and that this ledger does not have stands in a lane of its own at the top.
 
 `rollout_train.monitor.lineage` reads it from the ledger's tables and the runners' heartbeats, at `/api/checkpoints`. What
-a ledger has today is read as it is: the checkpoints, the runs' steps, bookmarks. A run's steps stand for its trainer's
-queue (a run takes one step at a time), and the channels its runners' beats name for what its engines serve. The tables
+a ledger has today is read as it is: the checkpoints, the runs' steps, bookmarks. Each checkpoint says what its weights
+are (a LoRA adapter, or full weights: those are resharded for the engines' layout on their way there). A run's steps
+stand for its trainer's queue (a run takes one step at a time), whose weights are what the run's checkpoints are, and
+the channels its runners' beats name for what its engines serve. The tables
 for distillation, trainers and inference workers are proposed in [the checkpoint graph](../../research/policy-dag.md),
 and nothing writes them yet; evaluations are written by [evals](evals.md), and a suite's name opens its page. `#/checkpoints/sample` (`?sample=1`)
 shows the view with a fixture of them (`rollout_train/monitor/sample-lineage.json`) beside the ledger, everything from

@@ -3,10 +3,12 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint, Evals, SampleLine } from "./api/types";
-import { knownOf } from "./lib/model";
+import type { Run, System, Checkpoint, Evals, PlainMessage, SampleLine } from "./api/types";
+import { scale, sparkPoints } from "./components/charts";
+import { slotHue } from "./lib/format";
+import { episodeClass, knownOf, reported } from "./lib/model";
 import { placeOf } from "./lib/places";
-import { samplesOf } from "./pages/Episode";
+import { mapRows, resultOf, samplesOf, seenOf } from "./pages/Episode";
 import { Runs } from "./pages/Runs";
 import { Suite } from "./pages/Suite";
 
@@ -42,7 +44,7 @@ describe("places", () => {
 });
 
 const checkpoint = (id: string, short: string, run: string | null, step: number | null, parents: string[] = [], bookmarks: string[] = []): Checkpoint => ({
-  id, short, depth: parents.length + 1, parents, base: "Qwen/Qwen3.5-9B", run, step, made: 1, metrics: {}, weights: null, state: null,
+  id, short, depth: parents.length + 1, parents, base: "Qwen/Qwen3.5-9B", kind: "lora", run, step, made: 1, metrics: {}, weights: null, state: null,
   released: null, batch: false, bookmarks,
 });
 
@@ -58,22 +60,89 @@ describe("checkpoints", () => {
     expect(known.title("klmnopqrstuvwxyz")).toBe("klmnopqrstuvwxyz · depth 2\nmade outside a run, from kpqx");
     expect(knownOf(checkpoints, runs)).toBe(known);  // (the same answer, the same helpers: nothing draws again)
   });
+
+  it("say what a checkpoint builds on: a full checkpoint this ledger has as a checkpoint, else the model by name", () => {
+    const merged = { ...checkpoint("mnopqrstuvwxyzkl", "mnop", "run_1", 4), kind: "full" };
+    const adapter = { ...checkpoint("nopqrstuvwxyzklm", "nopq", "run_2", 1), base: merged.id };
+    const known = knownOf([merged, adapter], { run_1: "first" });
+    expect([known.base(adapter.base), known.base("Qwen/Qwen3.5-9B"), known.base(null)]).toEqual(["mnop (first · S4)", "Qwen/Qwen3.5-9B", "the base model"]);
+    expect(known.title(adapter.id)).toBe("nopqrstuvwxyzklm · depth 1\nrun_2 · S1, from mnop (first · S4)");
+    expect(known.title(merged.id).split("\n")[0]).toBe("mnopqrstuvwxyzkl · depth 1 · full weights");
+  });
 });
 
 describe("an episode's rollouts", () => {
   const sample = (slot: string, tools: string[], text: string): SampleLine => ({
     kind: "sample", slot, at: 0, seconds: 1, messages: [], tools, reply: { text, reasoning: "", calls: [] },
   });
+  const message = (role: string, text: string, results: PlainMessage["results"] = []): PlainMessage => ({ role, text, reasoning: "", calls: [], results });
 
-  it("are every agent's turns, less the summaries of an agent offered actions on its turns", () => {
-    const { slots, summaries } = samplesOf([
-      sample("agent-1", ["mine"], "go"), sample("agent-1", [], "what happened so far"), sample("agent-1", ["mine"], "dig"),
-      sample("policy", [], "candle"),
+  it("are every agent's turns, with an acting agent's samples offered no tools folded under its turn before", () => {
+    const summary = sample("agent-1", [], "what happened so far");
+    const { slots, beside, folded } = samplesOf([
+      sample("agent-1", ["mine"], "go"), summary, sample("agent-1", ["mine"], "dig"), sample("policy", [], "candle"),
     ]);
     expect([...slots].map(([slot, turns]) => [slot, turns.map(turn => turn.reply.text)])).toEqual([
       ["agent-1", ["go", "dig"]], ["policy", ["candle"]],
     ]);
-    expect(summaries).toBe(1);
+    expect(beside.get(slots.get("agent-1")![0])).toEqual([summary]);
+    expect(folded).toBe(1);
+  });
+
+  it("are in their slots' numbers' order", () => {
+    const { slots } = samplesOf(["agent-10", "agent-2", "agent-1"].map(slot => sample(slot, [], "hello")));
+    expect([...slots.keys()]).toEqual(["agent-1", "agent-2", "agent-10"]);
+  });
+
+  it("say what came back: each call's result, or the words the next turn's context added", () => {
+    const first: SampleLine = { ...sample("policy", ["look"], ""), messages: [message("system", "rules"), message("user", "a word?")] };
+    const called = { id: "c1", name: "look", arguments: {} }, other = { id: "c2", name: "look", arguments: { far: true } };
+    const next: SampleLine = {
+      ...first,
+      messages: [...first.messages, message("assistant", "candle"), message("user", "close: try again"), message("user", "turn 2")],
+    };
+    expect(resultOf(first, next)).toEqual({ text: "close: try again\n\nturn 2", error: false });
+    // (a context written anew, a summary in place of what came before: the words after its newest reply)
+    const rewritten: SampleLine = { ...first, messages: [message("user", "so far: candle"), message("assistant", "candle"), message("user", "close")] };
+    expect(resultOf(first, rewritten)).toEqual({ text: "close", error: false });
+    const results: SampleLine = { ...first, messages: [...first.messages, message("tool", "", [{ id: "c1", text: "a tree", error: false }, { id: "c2", text: "a hill", error: true }])] };
+    expect([resultOf(first, results, called), resultOf(first, results, other)]).toEqual([{ id: "c1", text: "a tree", error: false }, { id: "c2", text: "a hill", error: true }]);
+    expect(resultOf(first, undefined)).toBeNull();
+  });
+
+  it("show what an agent saw last: what came back since its newest reply, tool results too", () => {
+    const messages = [message("system", "rules"), message("user", "start"), message("assistant", "look"), message("tool", "", [{ id: "c1", text: "a tree", error: false }])];
+    expect(seenOf(messages)).toEqual([messages[3]]);
+    expect(seenOf(messages.slice(0, 2))).toEqual([messages[1]]);
+  });
+
+  it("draw a map only under the line a map opens with", () => {
+    expect(mapRows("3 1 4 1 5 9 2 6")).toEqual([false]);
+    expect(mapRows("Map of what you have seen within 6 blocks…\ny=64 (your feet):\n-3 # # . . @ . ?\nOn the map: d diamond_ore.\n-3 # # . . @ . ?"))
+      .toEqual([false, false, true, false, false]);
+  });
+});
+
+describe("what is drawn", () => {
+  it("scales rewards below zero from their lowest", () => {
+    const { points, zero } = sparkPoints([-2, 1, -0.5], 100, 40);
+    expect(points.every(([, y]) => y >= 0 && y <= 40)).toBe(true);
+    expect(points[0][1]).toBeGreaterThan(zero);  // (below 0: under the line of 0)
+    const ys = scale([-3, 2], { count: 2 });
+    expect([ys.low <= -3, ys.high >= 2]).toEqual([true, true]);
+  });
+
+  it("colors each agent by its whole name", () => {
+    expect(slotHue("red1")).not.toBe(slotHue("blue1"));
+    const hues = ["agent-1", "agent-2", "agent-3", "agent-4"].map(slotHue);
+    for (const [place, each] of hues.entries()) for (const other of hues.slice(place + 1)) expect(Math.min(Math.abs(each - other), 360 - Math.abs(each - other))).toBeGreaterThan(20);
+    expect(slotHue("agent-2")).toBe(slotHue("agent-2"));
+  });
+
+  it("says nothing of solving where no episode said whether it solved its task", () => {
+    expect([reported([null, null]), reported([null, false]), reported([])]).toEqual([false, true, false]);
+    expect(episodeClass({ run_id: "r", outcome: "completed", solved: null })).toBe("played");
+    expect(episodeClass({ run_id: "r", outcome: "completed", solved: false })).toBe("unsolved");
   });
 });
 
@@ -102,6 +171,19 @@ describe("a page read again", () => {
     await waitFor(() => expect(screen.getByText("beta").closest("a")!.textContent).toContain("of 3 decided"));
     expect(screen.getByText("alpha").closest("a")).toBe(alpha);
     expect(alpha.innerHTML).toBe(alphaText);
+  });
+
+  it("shows a run whose task never says whether it solved by its rewards", () => {
+    const client = newQueryClient(), quiet = run("quiet", 2);
+    client.setQueryData(topics.system().key, system([{ ...quiet, done: quiet.done.map(line => ({ ...line, rewards: [-1, 0.5], solved: [null, null] })) }]));
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><Runs /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const tile = screen.getByText("quiet").closest("a")!;
+    expect(tile.textContent).toContain("mean reward-0.25");
+    expect(tile.textContent).not.toContain("solved");
   });
 
   it("leaves the evals' runs to the evals page", () => {

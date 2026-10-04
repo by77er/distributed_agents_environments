@@ -9,9 +9,9 @@ import type { OpenGroup, Run as RunData, Step, Checkpoint } from "../api/types";
 import { RewardsChart, Sized } from "../components/charts";
 import { Card, Cells, Dots, Empty, Head, Kpi, Kpis, Legend, Mark, SectionTitle, Spec, Specs, Stages, Table, Tile } from "../components/ui";
 import { byNumber, figure, mean, shareOf, span } from "../lib/format";
-import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, stateKind } from "../lib/model";
+import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, reported, stateKind } from "../lib/model";
 import { groupPlace, stepPlace } from "../lib/places";
-import { CheckpointTag } from "../components/checkpoints";
+import { BaseName, CheckpointTag } from "../components/checkpoints";
 import { Ago, Elsewhere, running, Wrote } from "../layout/runs";
 
 export function Run({ name }: { name: string }) {
@@ -31,7 +31,8 @@ export function Run({ name }: { name: string }) {
           <>
             <Sized>{width => <RewardsChart run={run} width={width} />}</Sized>
             <Legend items={[
-              { name: "solved", color: "var(--good)" }, { name: "not solved", color: "var(--faint)" }, { name: "mean", className: "rule" },
+              ...(reported(run.done.flatMap(line => line.solved)) ? [{ name: "solved", color: "var(--good)" }, { name: "not solved", color: "var(--faint)" }] : []),
+              { name: "mean", className: "rule" },
               { name: "trained on", color: "var(--accent)" }, { name: "in the step being taken", color: "var(--violet)" },
               { name: "waits for a step", color: "var(--warm)" }, { name: "skipped", className: "hollow" }, { name: "no episode, or the step failed", color: "var(--bad)" },
             ]} />
@@ -47,16 +48,20 @@ export function Run({ name }: { name: string }) {
 }
 
 const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made: Checkpoint[]; host: string }) {
-  const channel = run.channels.find(each => each.adapter) ?? run.channels[0];
-  const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1);
+  const known = useKnown();
+  const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1), many = run.channels.length > 1;
   return (
     <Head title={<>Run <Rename id={run.run} name={nameOf(run)} /></>}>
       <Specs>
         <Spec label="state" kind={run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}>{running(run, host)} · <Wrote run={run} /></Spec>
-        {newest?.base ? <Spec label="base model">{newest.base}</Spec> : null}
+        {newest?.base ? <Spec label={known.checkpoint(newest.base) ? "over" : "base model"}><BaseName base={newest.base} /></Spec> : null}
         <Spec label="from"><CheckpointTag id={from} /></Spec>
         {newest ? <Spec label="now" kind="violet"><CheckpointTag id={newest.id} bare /></Spec> : null}
-        {channel?.adapter ? <Spec label="serving" kind="accent"><CheckpointTag id={channel.adapter} bare /></Spec> : null}
+        {run.channels.map(channel => (
+          <Spec key={channel.channel} label={many ? `serving on ${channel.channel}` : "serving"} kind="accent">
+            {channel.adapter ? <CheckpointTag id={channel.adapter} bare /> : "the model its engines started with"}
+          </Spec>
+        ))}
         <Spec label="id">{run.run}</Spec>
         <Spec label="fence">{run.fence ?? "–"}</Spec>
         <Spec label="directory">{run.directory ?? "–"}</Spec>
@@ -72,25 +77,26 @@ const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made:
   const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1);
   const trained = run.done.filter(line => line.update).length, last = run.done.at(-1);
   const committed = run.steps.filter(step => step.state === "committed").length;
-  const channel = run.channels.find(each => each.adapter) ?? run.channels[0];
-  const throughput = channel?.throughput.at(-1);
-  const solvedOf = (lines: RunData["done"]) => lines.flatMap(line => line.solved);
-  const outcomes = solvedOf(run.done), half = Math.ceil(run.done.length / 2);
+  // (each channel's newest measurement, summed: every channel the run serves)
+  const measured = run.channels.map(channel => channel.throughput.at(-1)).filter(each => each != null);
+  const sum = (key: "tokens_per_second" | "mean_concurrency") => measured.reduce((total, each) => total + (each[key] ?? 0), 0);
+  const solvedOf = (lines: RunData["done"]) => lines.flatMap(line => line.solved.map(Boolean));
+  const outcomes = solvedOf(run.done), half = Math.ceil(run.done.length / 2), said = reported(run.done.flatMap(line => line.solved));
   const all = run.done.filter(line => line.solved.length && line.solved.every(Boolean)).length;
   const none = run.done.filter(line => line.solved.length && !line.solved.some(Boolean)).length;
   return (
     <Kpis>
-      <Kpi label="Started from" value={from ? known.short(from) : "base"} note={from ? known.origin(from) : made[0]?.base?.split("/").at(-1) ?? "the base model"} />
+      <Kpi label="Started from" value={from ? known.short(from) : "base"} note={from ? known.origin(from) : <BaseName base={made[0]?.base} short />} />
       <Kpi label="Now" value={newest ? newest.short : "–"} note={newest ? `depth ${newest.depth} · ${made.filter(each => each.weights).length} of ${made.length} kept` : "no step committed"} />
       <Kpi label="Steps" value={`${run.steps.length}`} note={`${committed} committed · ${run.next.length} waiting`} />
       <Kpi label="Groups done" value={`${run.done.length}`} note={`${trained} trained on, of ${run.decided} decided`} />
-      <Kpi label="Groups solved" value={`${all} · ${run.done.length - all - none} · ${none}`} note="all · some · none solved" />
-      <Kpi label="Episodes" value={`${outcomes.length}`} note={`${outcomes.filter(Boolean).length} solved · ${shareOf(outcomes)}`} />
-      <Kpi label="Solved, early → late" value={run.done.length > 1 ? `${shareOf(solvedOf(run.done.slice(0, half)))} → ${shareOf(solvedOf(run.done.slice(half)))}` : "–"}
-        note={run.done.length > 1 ? `groups 1–${half}, then the ${run.done.length - half} after` : ""} />
+      {said ? <Kpi label="Groups solved" value={`${all} · ${run.done.length - all - none} · ${none}`} note="all · some · none solved" /> : null}
+      <Kpi label="Episodes" value={`${outcomes.length}`} note={said ? `${outcomes.filter(Boolean).length} solved · ${shareOf(outcomes)}` : ""} />
+      {said ? <Kpi label="Solved, early → late" value={run.done.length > 1 ? `${shareOf(solvedOf(run.done.slice(0, half)))} → ${shareOf(solvedOf(run.done.slice(half)))}` : "–"}
+        note={run.done.length > 1 ? `groups 1–${half}, then the ${run.done.length - half} after` : ""} /> : null}
       <Kpi label="Mean reward" value={figure(mean(run.done.flatMap(line => line.rewards)))} note="over every episode done" />
       <Kpi label="Rows unlocked" value={last ? `${last.unlocked}` : "–"} note="of the catalog" />
-      <Kpi label="Inference" value={throughput ? `${figure(throughput.tokens_per_second)} tok/s` : "–"} note={throughput ? `${figure(throughput.mean_concurrency)} requests at once` : "no measurement yet"} />
+      <Kpi label="Inference" value={measured.length ? `${figure(sum("tokens_per_second"))} tok/s` : "–"} note={measured.length ? `${figure(sum("mean_concurrency"))} requests at once` : "no measurement yet"} />
     </Kpis>
   );
 });
@@ -164,7 +170,7 @@ const StepsCard = memo(function StepsCard({ run }: { run: RunData }) {
             { text: `S${step.step}`, kind: "key" },
             step.state === "committed" ? <span className="mono" title={known.title(step.makes)}>{known.short(step.makes)}</span> : { text: step.state, kind: stateKind(step.state) },
             <span>{range(step.groups)}{step.skipped.length ? <span className="faint"> + {step.skipped.length} skipped</span> : null}</span>,
-            solved.length ? `${solved.filter(Boolean).length}/${solved.length}` : "–",
+            reported(solved) ? `${solved.filter(Boolean).length}/${solved.length}` : "–",
             figure(step.segments),
             checkpoint?.metrics.kl_moved?.toFixed(4) ?? "–",
             span(checkpoint?.metrics.update_seconds ?? checkpoint?.metrics.seconds),
@@ -193,7 +199,7 @@ const TasksCard = memo(function TasksCard({ run }: { run: RunData }) {
         keys={played.map(([key]) => key)}
         rows={played.map(([key, task]) => [
           { text: key, kind: "key" }, task.groups, task.trained, task.last.rewards.map(figure).join(" ") || "–",
-          `${task.last.solved.filter(Boolean).length}/${task.last.rewards.length}`,
+          reported(task.last.solved) ? `${task.last.solved.filter(Boolean).length}/${task.last.rewards.length}` : "–",
         ])}
         to={played.map(([, task]) => groupPlace(run.run, task.last.group))}
       />

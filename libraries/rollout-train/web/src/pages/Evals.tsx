@@ -5,11 +5,11 @@ import { Link } from "react-router-dom";
 import { useEvals, useKnown, useLaunches, useSystem } from "../api/queries";
 import type { EvalSuite } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
-import { shareOf, shareText, subjectText } from "../components/evals";
+import { anySolved, shareOf, shareText, type Subject, subjectText } from "../components/evals";
 import { LaunchList } from "../components/launches";
 import { Card, Empty, Head, Mark, Spec, Specs, Table, Tile } from "../components/ui";
 import { Ago } from "../layout/runs";
-import { clock } from "../lib/format";
+import { clock, figure } from "../lib/format";
 import { runPlace, suitePlace } from "../lib/places";
 
 /** How to make a suite, for a ledger with none (or to make another). */
@@ -52,7 +52,7 @@ export function Evals() {
               <Link to={suitePlace(each.suite)} className="linkish" onClick={event => event.stopPropagation()}>{each.suite}</Link>,
               <CheckpointTag id={each.checkpoint} link={false} />,
               `${each.played}/${each.expected}`,
-              shareText(each.played ? each.solved / each.played : null),
+              shareText(each.played && each.solved != null ? each.solved / each.played : null),
               each.started ? <><Ago at={each.started} /> ago</> : "–",
               <Mark state={each.done ? "ended" : "running"}>{each.done ? "done" : "playing"}</Mark>,
             ])}
@@ -66,14 +66,15 @@ export function Evals() {
 
 function SuiteTile({ suite }: { suite: EvalSuite }) {
   const known = useKnown();
-  const best = [...suite.subjects].filter(each => each.played).sort((a, b) => (shareOf(b) ?? 0) - (shareOf(a) ?? 0))[0];
+  const said = anySolved(suite.subjects), score = (subject: Subject) => (said ? shareOf(subject) : subject.reward) ?? -Infinity;
+  const best = [...suite.subjects].filter(each => each.played).sort((a, b) => score(b) - score(a))[0];
   return (
     <Tile to={suitePlace(suite.suite)} className="rail accent">
       <header><b>{suite.suite}</b><span className="what">{suite.catalog ?? ""}</span></header>
       <div className="cells">
         <div className="cell"><span>starts</span><b>{suite.starts.length}</b><small>{new Set(suite.starts.map(start => start.task)).size} rows</small></div>
         <div className="cell"><span>played by</span><b>{suite.subjects.length}</b><small>subjects</small></div>
-        <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? shareText(shareOf(best)) : "–"}</b><small>{best ? subjectText(best, known) : "none yet"}</small></div>
+        <div className={`cell ${best ? "good" : ""}`}><span>best</span><b>{best ? (said ? shareText(shareOf(best)) : figure(best.reward)) : "–"}</b><small>{best ? subjectText(best, known) : "none yet"}</small></div>
       </div>
       <div className="facts">{suite.made ? <span>made {clock(suite.made)}</span> : null}{suite.sample ? <span>sample</span> : null}</div>
     </Tile>

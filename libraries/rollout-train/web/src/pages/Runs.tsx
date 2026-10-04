@@ -7,7 +7,7 @@ import type { Run } from "../api/types";
 import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
-import { nameOf, stateKind } from "../lib/model";
+import { episodeReward, nameOf, reported, slotRewards, stateKind } from "../lib/model";
 import { Marks } from "../components/checkpoints";
 import { episodePlace, launchPlace, runPlace } from "../lib/places";
 import { LaunchList } from "../components/launches";
@@ -44,18 +44,19 @@ export function Runs() {
 
 const RunTile = memo(function RunTile({ run, host }: { run: Run; host: string }) {
   const known = useKnown();
-  const recent = run.done.slice(-12), solved = recent.flatMap(line => line.solved);
+  const recent = run.done.slice(-12), solved = recent.flatMap(line => line.solved), rewards = recent.flatMap(line => line.rewards);
   const committed = run.steps.filter(step => step.state === "committed").length;
   const head = run.steps.findLast(step => step.state === "committed")?.makes;
   const from = run.from ?? run.steps[0]?.parent ?? null;
   return (
     <Tile to={runPlace(run.run)} className={`rail ${run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}`}>
-      <header><RunDot run={run} host={host} /><b title={`id: ${run.run}`}>{nameOf(run)}</b><span className="what">from {from ? `${known.short(from)} (${known.origin(from)})` : known.checkpoint(head)?.base ?? "the base model"}</span><span className="faint small">{running(run, host)}</span></header>
+      <header><RunDot run={run} host={host} /><b title={`id: ${run.run}`}>{nameOf(run)}</b><span className="what">from {from ? `${known.short(from)} (${known.origin(from)})` : known.base(known.checkpoint(head)?.base)}</span><span className="faint small">{running(run, host)}</span></header>
       <div className="cells four">
         <div className={`cell ${run.open.length ? "accent" : "waiting"}`}><span>in flight</span><b>{run.open.length}</b><small>{run.next.length} toward a step</small></div>
         <div className="cell"><span>groups done</span><b>{run.done.length}</b><small>of {run.decided} decided</small></div>
         <div className="cell violet"><span>steps</span><b>{committed}</b><small className="mono">{head ? known.short(head) : "none yet"}{head ? <> <Marks names={known.bookmarks(head)} /></> : null}</small></div>
-        <div className={`cell ${solved.length ? "good" : ""}`}><span>solved</span><b>{solved.length ? `${Math.round((100 * solved.filter(Boolean).length) / solved.length)}%` : "–"}</b><small>of the last {recent.length} groups</small></div>
+        {reported(solved) ? <div className="cell good"><span>solved</span><b>{`${Math.round((100 * solved.filter(Boolean).length) / solved.length)}%`}</b><small>of the last {recent.length} groups</small></div>
+          : <div className="cell"><span>mean reward</span><b>{figure(mean(rewards))}</b><small>of the last {recent.length} groups</small></div>}
       </div>
       {run.done.length > 1 ? (
         <div>
@@ -83,8 +84,8 @@ export function Outside() {
           {others.map(run => (
             <Tile key={run.run_id} to={episodePlace(run.run_id)} className={`rail ${stateKind(run.state)}`}>
               <header><b>{run.labels.title ?? run.labels.task ?? run.run_id.slice(-8)}</b><span className="what" /><Mark state={run.state} /></header>
-              <div className="big">{Object.values(run.rewards).length ? figure(Object.values(run.rewards)[0]) : <span className="faint">…</span>}</div>
-              <div className="facts"><span><b>{run.samples}</b> samples</span><span><b>{run.slots.length}</b> slots</span><span>{clock(run.started)}</span></div>
+              <div className="big">{Object.values(run.rewards).length ? figure(episodeReward(run.rewards)) : <span className="faint">…</span>}</div>
+              <div className="facts">{slotRewards(run.rewards).map(([slot, value]) => <span key={slot}>{slot} <b>{figure(value)}</b></span>)}<span><b>{run.samples}</b> samples</span><span><b>{run.slots.length}</b> slots</span><span>{clock(run.started)}</span></div>
             </Tile>
           ))}
         </div>

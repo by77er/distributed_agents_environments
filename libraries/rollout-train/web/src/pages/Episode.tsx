@@ -4,9 +4,9 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEpisode, useSystem } from "../api/queries";
-import type { Episode as EpisodeData, Line, SampleLine } from "../api/types";
+import type { Episode as EpisodeData, Line, PlainMessage, SampleLine } from "../api/types";
 import { Avatar, Card, Empty, Head, Kpi, Kpis, SectionTitle, Spec, Specs, Table } from "../components/ui";
-import { figure, tokens } from "../lib/format";
+import { byNumber, figure, plural, tokens } from "../lib/format";
 import { groupsOf, stateKind } from "../lib/model";
 import { episodePlace } from "../lib/places";
 import { useStored } from "../lib/stored";
@@ -69,29 +69,36 @@ const Reported = memo(function Reported({ info }: { info: Record<string, unknown
   );
 });
 
-/** Each agent's samples, in order. An agent offered actions on its turns that summarises its memory is offered none
- * then: those samples are counted apart. An agent never offered an action (a task that is all words) has only turns. */
-export function samplesOf(lines: Line[]): { slots: Map<string, SampleLine[]>; summaries: number } {
+/** Each agent's turns, in order, its slots in their numbers' order. An agent offered actions on its turns that samples
+ * with none offered (summarising its memory, say) takes no turn then: such samples are folded under its turn before
+ * (or its first), in `beside`. An agent never offered an action (a task that is all words) has only turns. */
+export function samplesOf(lines: Line[]): { slots: Map<string, SampleLine[]>; beside: Map<SampleLine, SampleLine[]>; folded: number } {
   const every = new Map<string, SampleLine[]>();
   for (const line of lines) {
     if (line.kind !== "sample") continue;
     if (!every.has(line.slot)) every.set(line.slot, []);
     every.get(line.slot)!.push(line);
   }
-  const slots = new Map<string, SampleLine[]>();
-  let summaries = 0;
+  const slots = new Map<string, SampleLine[]>(), beside = new Map<SampleLine, SampleLine[]>();
+  let folded = 0;
   for (const [slot, samples] of every) {
-    const acting = samples.some(sample => sample.tools.length);
-    const turns = acting ? samples.filter(sample => sample.tools.length) : samples;
-    summaries += samples.length - turns.length;
+    if (!samples.some(sample => sample.tools.length)) { slots.set(slot, samples); continue; }
+    const turns: SampleLine[] = [], early: SampleLine[] = [];
+    for (const sample of samples) {
+      if (sample.tools.length) { turns.push(sample); continue; }
+      const before = turns.at(-1);
+      if (before) beside.set(before, [...(beside.get(before) ?? []), sample]); else early.push(sample);
+      folded += 1;
+    }
+    if (early.length) beside.set(turns[0], [...early, ...(beside.get(turns[0]) ?? [])]);
     slots.set(slot, turns);
   }
-  return { slots: new Map([...slots].sort(([a], [b]) => a.localeCompare(b))), summaries };
+  return { slots: new Map([...slots].sort(([a], [b]) => byNumber(a, b))), beside, folded };
 }
 
 function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string | null }) {
   const navigate = useNavigate();
-  const { slots, summaries } = useMemo(() => samplesOf(episode.lines), [episode.lines]);
+  const { slots, beside, folded } = useMemo(() => samplesOf(episode.lines), [episode.lines]);
   const [chosen, setTurn] = useState(0);
   const [follow, setFollow] = useState(true);
   const [whole, setWhole] = useStored("monitor.whole", false);
@@ -106,7 +113,7 @@ function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string
   const move = (delta: number) => { setTurn(Math.max(0, Math.min(turns - 1, turn + delta))); setFollow(false); };
   return (
     <>
-      <SectionTitle title="Rollouts" note={`${slots.size}, one per agent, each a trajectory to train on${summaries ? ` · ${summaries} memory summaries written` : ""}`} />
+      <SectionTitle title="Rollouts" note={`${slots.size}, one per agent, each a trajectory to train on${folded ? ` · ${plural(folded, "sample")} offered no tools, folded under the turn before` : ""}`} />
       <div className="segmented">
         <button type="button" className={`seg${slot ? "" : " current"}`} onClick={() => navigate(episodePlace(episode.run_id))}>All rollouts</button>
         {[...slots.keys()].map(each => (
@@ -129,11 +136,11 @@ function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string
           </>
         )}
       </div>
-      {whole ? <Timeline shown={shown} turns={turns} episode={episode} full={full} /> : (
+      {whole ? <Timeline shown={shown} turns={turns} episode={episode} beside={beside} full={full} /> : (
         <div className="turns-frame">
           <div className="turns" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(300px, 1fr))` }}>
             {shown.map(([each, samples]) => (
-              <TurnCard key={each} slot={each} sample={samples[turn]} next={samples[turn + 1]} source={episode.source} state={episode.state} full={full} />
+              <TurnCard key={each} slot={each} sample={samples[turn]} next={samples[turn + 1]} beside={samples[turn] && beside.get(samples[turn])} source={episode.source} state={episode.state} full={full} />
             ))}
           </div>
         </div>
@@ -143,19 +150,47 @@ function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string
   );
 }
 
-const callText = (call: SampleLine["reply"]["calls"][number]) =>
+type Call = SampleLine["reply"]["calls"][number];
+type Came = { text: string; error: boolean };
+
+const callText = (call: Call) =>
   `${call.name}(${Object.entries(call.arguments).map(([name, value]) => `${name}: ${JSON.stringify(value)}`).join(", ")})`;
 
-/** What came back from a turn's call: the next sample's result for it, or the words a reply without a call was
- * answered in. */
-function resultOf(next: SampleLine | undefined, callId: string | undefined): { text: string; error: boolean } | null {
+const same = (a: PlainMessage | undefined, b: PlainMessage) => a?.role === b.role && a.text === b.text;
+
+/** What came back from a turn: for a call, the result the next sample carries for it; for a reply without a call, the
+ * words the next sample's context added after this one's own (and its reply), or, where its context was written anew
+ * (summarised, say), those after its newest reply. */
+export function resultOf(sample: SampleLine, next: SampleLine | undefined, call?: Call): Came | null {
   if (!next) return null;
-  for (const message of next.messages) for (const result of message.results) if (result.id === callId) return result;
-  const last = next.messages.filter(message => message.role === "user").at(-2);
-  return last ? { text: last.text, error: false } : null;
+  if (call) {
+    for (const message of next.messages) for (const result of message.results) if (result.id === call.id) return result;
+    return null;
+  }
+  const own = sample.messages.length;
+  const extended = next.messages.length > own && (!own || same(next.messages[own - 1], sample.messages[own - 1]));
+  const after = extended ? own : next.messages.findLastIndex(message => message.role === "assistant") + 1;
+  const words = next.messages.slice(after).filter(message => message.role === "user" && message.text).map(message => message.text);
+  return words.length ? { text: words.join("\n\n"), error: false } : null;
 }
 
-const TurnCard = memo(function TurnCard({ slot, sample, next, source, state, full }: { slot: string; sample: SampleLine | undefined; next: SampleLine | undefined; source: EpisodeData["source"]; state: string | null; full: boolean }) {
+/** Each of a turn's calls with what came back from it, or the reply's answer where it called nothing. */
+const cameOf = (sample: SampleLine, next: SampleLine | undefined): [Call | null, Came | null][] =>
+  sample.reply.calls.length ? sample.reply.calls.map(call => [call, resultOf(sample, next, call)]) : [[null, resultOf(sample, next)]];
+
+const Came = ({ came }: { came: Came }) => <div className={`result${came.error ? " error" : ""}`}>{came.text}</div>;
+
+/** The samples an agent took after a turn with no tools offered (a summary of its memory, say), folded. */
+function Beside({ samples }: { samples: SampleLine[] }) {
+  return (
+    <details>
+      <summary>{plural(samples.length, "sample")} offered no tools</summary>
+      {samples.map((each, index) => <p key={index} className="said">{each.reply.text.trim() || each.reply.reasoning.trim() || "nothing"}</p>)}
+    </details>
+  );
+}
+
+const TurnCard = memo(function TurnCard({ slot, sample, next, beside, source, state, full }: { slot: string; sample: SampleLine | undefined; next: SampleLine | undefined; beside: SampleLine[] | undefined; source: EpisodeData["source"]; state: string | null; full: boolean }) {
   const pre = useRef<HTMLDivElement>(null);
   // (a turn newly shown opens at the bottom of what the agent saw: its newest observation)
   useLayoutEffect(() => {
@@ -164,7 +199,7 @@ const TurnCard = memo(function TurnCard({ slot, sample, next, source, state, ful
   }, [sample, full]);
   const header = <header><Avatar name={slot} /><b>{slot}</b><span>{sample ? `${figure(sample.seconds)} s · ${sample.finish_reason ?? ""}` : ""}</span></header>;
   if (!sample) return <div className="turn">{header}<section><span className="none">no turn yet</span></section></div>;
-  const result = resultOf(next, sample.reply.calls[0]?.id);
+  const came = cameOf(sample, next), many = sample.reply.calls.length > 1;
   return (
     <div className="turn">
       {header}
@@ -178,12 +213,29 @@ const TurnCard = memo(function TurnCard({ slot, sample, next, source, state, ful
       </section>
       <section>
         <h3>Result</h3>
-        {result ? <div className={`result${result.error ? " error" : ""}`}>{result.text}</div>
-          : <span className="none">{source === "archive" ? "not kept" : state === "running" ? "pending" : "the episode ended"}</span>}
+        {came.some(([, each]) => each) ? came.map(([call, each], index) => (
+          <div key={call?.id ?? index}>
+            {many && call ? <div className="faint small">{call.name}</div> : null}
+            {each ? <Came came={each} /> : <span className="none">nothing came back</span>}
+          </div>
+        )) : <span className="none">{source === "archive" ? "not kept" : state === "running" ? "pending" : "the episode ended"}</span>}
       </section>
+      {beside ? <section><Beside samples={beside} /></section> : null}
     </div>
   );
 });
+
+const MAP = "Map of what you have seen";
+/** The lines of a text that are a map's rows, each drawn with its symbols colored: those under a line that opens a map
+ * as a Minecraft observation writes one (`MAP`), up to the map's key (`On the map:`) or the text's end. */
+export function mapRows(text: string): boolean[] {
+  let inside = false;
+  return text.split("\n").map(line => {
+    if (line.startsWith(MAP)) inside = true;
+    else if (line.startsWith("On the map:")) inside = false;
+    return inside && /^-?\d+( \S){6,}$/.test(line);
+  });
+}
 
 /** A row of a map the agent was shown: each cell colored by what it is. */
 function MapRow({ text }: { text: string }) {
@@ -199,25 +251,35 @@ function MapRow({ text }: { text: string }) {
   );
 }
 
+/** What an agent was shown last: the messages after its newest reply (what came back from it, and anything said since),
+ * the system's left out. */
+export function seenOf(messages: PlainMessage[]): PlainMessage[] {
+  const tail = messages.slice(messages.findLastIndex(message => message.role === "assistant") + 1).filter(message => message.role !== "system");
+  return tail.length ? tail : messages.slice(-1);
+}
+
 const Seen = memo(function Seen({ sample, full }: { sample: SampleLine; full: boolean }) {
-  const messages = full ? sample.messages : sample.messages.filter(message => message.role === "user").slice(-1);
+  const messages = full ? sample.messages : seenOf(sample.messages);
   return (
     <pre>
-      {messages.map((message, index) => (
-        <div key={index}>
-          {full ? <div className="faint">— {message.role} —</div> : null}
-          {(message.text || "").split("\n").map((line, place) => /^-?\d+( \S){6,}$/.test(line) ? <MapRow key={place} text={line} /> : <div key={place}>{line || " "}</div>)}
-          {full ? message.calls.map(call => <div key={`c${call.id}`}>→ {call.name}({JSON.stringify(call.arguments)})</div>) : null}
-          {full ? message.results.map(result => <div key={`r${result.id}`}>← {result.text}</div>) : null}
-        </div>
-      ))}
+      {messages.map((message, index) => {
+        const text = message.text || "", drawn = mapRows(text);
+        return (
+          <div key={index}>
+            {full ? <div className="faint">— {message.role} —</div> : null}
+            {text ? text.split("\n").map((line, place) => drawn[place] ? <MapRow key={place} text={line} /> : <div key={place}>{line || " "}</div>) : null}
+            {full ? message.calls.map(call => <div key={`c${call.id}`}>→ {call.name}({JSON.stringify(call.arguments)})</div>) : null}
+            {message.results.map(result => <div key={`r${result.id}`} className={result.error ? "error-text" : undefined}>← {result.text}</div>)}
+          </div>
+        );
+      })}
     </pre>
   );
 });
 
 /** Every turn of the rollouts shown, one row a turn and one column a rollout: what each agent did and what came back,
  * with what it saw and what it thought one click away (drawn when opened; what is open stays open). */
-function Timeline({ shown, turns, episode, full }: { shown: [string, SampleLine[]][]; turns: number; episode: EpisodeData; full: boolean }) {
+function Timeline({ shown, turns, episode, beside, full }: { shown: [string, SampleLine[]][]; turns: number; episode: EpisodeData; beside: Map<SampleLine, SampleLine[]>; full: boolean }) {
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const toggle = (key: string, open: boolean) => setOpened(before => {
     const after = new Set(before);
@@ -230,7 +292,7 @@ function Timeline({ shown, turns, episode, full }: { shown: [string, SampleLine[
     for (const [slot, samples] of shown) {
       const sample = samples[turn];
       if (!sample) { cells.push(<div key={`${slot}${turn}`} className="step"><span className="none">–</span></div>); continue; }
-      cells.push(<TimelineStep key={`${slot}${turn}`} sample={sample} next={samples[turn + 1]} at={`${episode.run_id} ${slot} ${turn}`} opened={opened} toggle={toggle} full={full} />);
+      cells.push(<TimelineStep key={`${slot}${turn}`} sample={sample} next={samples[turn + 1]} beside={beside.get(sample)} at={`${episode.run_id} ${slot} ${turn}`} opened={opened} toggle={toggle} full={full} />);
     }
   }
   return (
@@ -244,23 +306,27 @@ function Timeline({ shown, turns, episode, full }: { shown: [string, SampleLine[
   );
 }
 
-const TimelineStep = memo(function TimelineStep({ sample, next, at, opened, toggle, full }: { sample: SampleLine; next: SampleLine | undefined; at: string; opened: Set<string>; toggle: (key: string, open: boolean) => void; full: boolean }) {
-  const result = resultOf(next, sample.reply.calls[0]?.id);
+const TimelineStep = memo(function TimelineStep({ sample, next, beside, at, opened, toggle, full }: { sample: SampleLine; next: SampleLine | undefined; beside: SampleLine[] | undefined; at: string; opened: Set<string>; toggle: (key: string, open: boolean) => void; full: boolean }) {
   const fold = (key: string, label: string, fill: () => React.ReactNode) => (
     <details open={opened.has(key)} onToggle={event => { const open = (event.target as HTMLDetailsElement).open; if (open !== opened.has(key)) toggle(key, open); }}>
       <summary>{label}</summary>
       {opened.has(key) ? fill() : null}
     </details>
   );
+  const answer = sample.reply.calls.length ? null : resultOf(sample, next);
   return (
     <div className="step">
       {sample.reply.text.trim() ? <p className="said">{sample.reply.text.trim()}</p> : null}
-      {sample.reply.calls.map(call => <div key={call.id}><span className="call">{callText(call)}</span></div>)}
+      {sample.reply.calls.map(call => {
+        const came = resultOf(sample, next, call);
+        return <div key={call.id}><span className="call">{callText(call)}</span>{came ? <Came came={came} /> : null}</div>;
+      })}
       {!sample.reply.calls.length && !sample.reply.text.trim() ? <span className="none">nothing</span> : null}
-      {result ? <div className={`result${result.error ? " error" : ""}`}>{result.text}</div> : null}
+      {answer ? <Came came={answer} /> : null}
       <div className="folds">
         {sample.reply.reasoning ? fold(`${at} thought`, "thought", () => <p className="thought">{sample.reply.reasoning.trim()}</p>) : null}
         {sample.messages.length ? fold(`${at} saw`, "saw", () => <div className="sees"><Seen sample={sample} full={full} /></div>) : null}
+        {beside ? fold(`${at} beside`, `${plural(beside.length, "sample")} offered no tools`, () => beside.map((each, index) => <p key={index} className="thought">{each.reply.text.trim() || each.reply.reasoning.trim() || "nothing"}</p>)) : null}
         <span className="faint small">{figure(sample.seconds)} s</span>
       </div>
     </div>

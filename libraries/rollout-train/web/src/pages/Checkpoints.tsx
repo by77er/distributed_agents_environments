@@ -10,7 +10,8 @@ import { useLineage, useSystem } from "../api/queries";
 import type { Lineage, LineageRun, LineageCheckpoint, Suite, Trainer, Worker } from "../api/types";
 import { QueueChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
-import { Card, Empty, Head, Kpi, Kpis, Mark, SampleChip, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
+import { anySolved } from "../components/evals";
+import { Card, Empty, Head, Kpi, Kpis, Mark, SampleChip, SectionTitle, solvedClass, Spec, Specs, Table, Twist } from "../components/ui";
 import { clock, figure, mean, span } from "../lib/format";
 import { runPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
 import { useFolds } from "../lib/stored";
@@ -258,7 +259,9 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             const life = checkpoint.life, workers = Object.entries(life.workers).filter(([, held]) => held.until == null).map(([worker]) => worker);
             const score = index.scores.get(item.name);
             const real = !checkpoint.sample && inLedger.has(checkpoint.id);
-            const share = score ? score.solved / Math.max(1, score.played) : 0;
+            const share = score?.solved != null ? score.solved / Math.max(1, score.played) : null;  // (none: its task does not say)
+            const scoreKind = share == null ? "quiet" : share >= 0.6 ? "good" : share >= 0.35 ? "warm" : "bad";
+            const scoreText = score ? (score.solved == null ? figure(score.reward) : `${score.solved}/${score.played}`) + (score.played < score.starts ? "…" : "") : "";
             const first = place === (lane.items[0]?.kind === "distill" ? 1 : 0);
             return (
               <g key={id}>
@@ -268,15 +271,15 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
                   <circle cx={cx} cy={cy} r={6} className={checkpoint.kept ? `dot-${kindOfCheckpoint(item.name)}` : "dot-released"} />
                   <text x={cx} y={cy + 22} textAnchor="middle" className="v">{checkpoint.by?.step != null ? `S${checkpoint.by.step}` : checkpoint.short}</text>
                   {checkpoint.bookmarks.length ? <text x={cx} y={cy - 13} textAnchor="middle" className="bookmark">{checkpoint.bookmarks.join(", ")}</text> : null}
-                  {score ? <text x={cx} y={cy - (checkpoint.bookmarks.length ? 24 : 13)} textAnchor="middle" className={`score t-${share >= 0.6 ? "good" : share >= 0.35 ? "warm" : "bad"}`}>{`${score.solved}/${score.played}${score.played < score.starts ? "…" : ""}`}</text> : null}
+                  {score ? <text x={cx} y={cy - (checkpoint.bookmarks.length ? 24 : 13)} textAnchor="middle" className={`score t-${scoreKind}`}>{scoreText}</text> : null}
                   <title>{[
-                    `${checkpoint.id} · depth ${checkpoint.depth}${checkpoint.sample ? " (sample)" : ""}`,
-                    `made ${clock(checkpoint.made)}${checkpoint.by ? ` by ${checkpoint.by.name}${checkpoint.by.step != null ? ` at step ${checkpoint.by.step}` : ""}` : ""}, from ${checkpoint.parents.map(index.shortOf).join(" + ") || `the base model ${checkpoint.base ?? ""}`}`,
+                    `${checkpoint.id} · depth ${checkpoint.depth}${checkpoint.kind === "full" ? " · full weights" : ""}${checkpoint.sample ? " (sample)" : ""}`,
+                    `made ${clock(checkpoint.made)}${checkpoint.by ? ` by ${checkpoint.by.name}${checkpoint.by.step != null ? ` at step ${checkpoint.by.step}` : ""}` : ""}, from ${checkpoint.parents.map(index.shortOf).join(" + ") || (checkpoint.base && index.checkpoints.has(checkpoint.base) ? index.shortOf(checkpoint.base) : `the base model ${checkpoint.base ?? ""}`)}`,
                     checkpoint.bookmarks.length ? `bookmarks: ${checkpoint.bookmarks.join(", ")}` : null,
                     `${life.state}${workers.length ? ` on ${workers.join(", ")}` : ""}${life.waiting ? ` · ${life.waiting} requests waiting` : ""}${life.latest_of ? ` · ${index.runOf(life.latest_of)}'s latest` : ""}`,
                     checkpoint.metrics.kl_moved != null ? `moved ${checkpoint.metrics.kl_moved.toFixed(4)} from its parent` : null,
                     checkpoint.kept ? "its weights are kept" : "released: its weights are gone, its record stays",
-                    score ? `${score.suite}: solved ${score.solved} of ${score.played}${score.played < score.starts ? ` (${score.starts - score.played} starts to play)` : ""}` : null,
+                    score ? `${score.suite}: ${score.solved == null ? `mean reward ${figure(score.reward)} over ${score.played}` : `solved ${score.solved} of ${score.played}`}${score.played < score.starts ? ` (${score.starts - score.played} starts to play)` : ""}` : null,
                   ].filter(Boolean).join("\n")}</title>
                 </g>
               </g>
@@ -319,9 +322,9 @@ function TrainerTile({ trainer, lineage, index }: { trainer: Trainer; lineage: L
   const waited = trainer.queue.filter(entry => entry.began && entry.queued).map(entry => entry.began! - entry.queued!);
   return (
     <div className={`tile rail ${taking.length ? "violet" : queued.length ? "warm" : ""}`}>
-      <header><b>{trainer.trainer}</b><span className="what">{trainer.weights === "full" ? "full weights" : "LoRA"}{trainer.base ? ` on ${short(trainer.base)}` : ""}</span>{trainer.sample ? <SampleChip /> : null}</header>
+      <header><b>{trainer.trainer}</b><span className="what">{trainer.weights === "full" ? "full weights" : trainer.weights === "lora" ? "LoRA" : "nothing made yet"}{trainer.base ? ` on ${index.checkpoints.has(trainer.base) ? index.shortOf(trainer.base) : short(trainer.base)}` : ""}</span>{trainer.sample ? <SampleChip /> : null}</header>
       <div className="facts">
-        <span>{trainer.weights === "full" ? "dedicated to " : trainer.implicit ? "trains for " : "any LoRA of its base: "}<b>{(trainer.runs ?? []).map(index.runOf).join(", ")}</b></span>
+        <span>{trainer.implicit ? "trains for " : trainer.weights === "full" ? "dedicated to " : "any adapter of its base: "}<b>{(trainer.runs ?? []).map(index.runOf).join(", ")}</b></span>
         {trainer.colocated ? <span>shares the engines' accelerator: they sleep while it steps</span> : trainer.where ? <span>{trainer.where}</span> : null}
         {trainer.implicit ? <span>not registered: the run's own, from its profile</span> : null}
       </div>
@@ -393,6 +396,7 @@ function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order:
     };
     return place(a) - place(b);
   });
+  const said = anySolved(subjects);
   return (
     <section className="card">
       <header><h2>Evaluation · {suite.sample ? suite.suite : <Link to={suitePlace(suite.suite)}>{suite.suite}</Link>}</h2><span>{suite.starts.length} fixed starts (row and seed), played by {subjects.length} subjects{suite.sample ? <> <SampleChip /></> : null}</span></header>
@@ -412,11 +416,12 @@ function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order:
             </thead>
             <tbody>
               <tr className="total">
-                <td>solved</td>
+                <td>{said ? "solved" : "mean reward"}</td>
                 {subjects.map(subject => (
                   <td key={subject.subject} className="n">
-                    <b>{subject.solved}/{subject.played}</b>{subject.played < suite.starts.length ? <small className="faint"> of {suite.starts.length}</small> : null}
-                    <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, suite.starts.length)).toFixed(1)}%` }} /></div>
+                    {subject.solved == null ? <b>{figure(subject.reward)}</b> : <b>{subject.solved}/{subject.played}</b>}
+                    {subject.played < suite.starts.length ? <small className="faint"> {subject.solved == null ? `${subject.played} of ${suite.starts.length}` : `of ${suite.starts.length}`}</small> : null}
+                    {subject.solved == null ? null : <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, suite.starts.length)).toFixed(1)}%` }} /></div>}
                   </td>
                 ))}
               </tr>
@@ -427,7 +432,7 @@ function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order:
                     const played = subject.results[start.start] ?? [];
                     return (
                       <td key={subject.subject} className="cell-result">
-                        {played.length ? played.map((each, place) => <i key={place} className={each.solved ? "solved" : "unsolved"} title={`${subject.subject} on ${start.task} seed ${start.seed}: reward ${figure(each.reward)}${each.solved ? ", solved" : ""}`} />)
+                        {played.length ? played.map((each, place) => <i key={place} className={solvedClass(each.solved)} title={`${subject.subject} on ${start.task} seed ${start.seed}: reward ${figure(each.reward)}${each.solved ? ", solved" : ""}`} />)
                           : <i className="unplayed" title="not played yet" />}
                       </td>
                     );
@@ -437,7 +442,10 @@ function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order:
             </tbody>
           </table>
         </div>
-        <div className="legend"><span><i style={{ background: "var(--good)" }} />solved</span><span><i style={{ background: "var(--line-strong)" }} />not solved</span><span><i className="hollow" />not played yet</span></div>
+        <div className="legend">
+          {said ? <><span><i style={{ background: "var(--good)" }} />solved</span><span><i style={{ background: "var(--line-strong)" }} />not solved</span></> : <span><i style={{ background: "var(--quiet)" }} />played</span>}
+          <span><i className="hollow" />not played yet</span>
+        </div>
       </div>
     </section>
   );

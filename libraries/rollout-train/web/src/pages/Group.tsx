@@ -8,7 +8,7 @@ import type { GroupEpisode, Metrics } from "../api/types";
 import { NotFound } from "../api/client";
 import { Card, Dots, Empty, Head, Kpi, Kpis, Mark, Pairs, SectionTitle, Spec, Specs, Stages, Tile } from "../components/ui";
 import { clock, figure, mean, span, tokens } from "../lib/format";
-import { asked, groupsOf, isWaiting, outcomeOf, range, stateKind, stepOf } from "../lib/model";
+import { asked, groupsOf, isWaiting, outcomeOf, range, reported, slotRewards, stateKind, stepOf } from "../lib/model";
 import { episodePlace, groupPlace, stepPlace } from "../lib/places";
 import { Ago, Elsewhere } from "../layout/runs";
 
@@ -38,7 +38,7 @@ export function StepView({ run: name, number }: { run: string; number: number })
       </Head>
       <Kpis>
         <Kpi label="Groups" value={`${step.groups.length}`} note={`${range(step.groups)}${step.skipped.length ? ` · ${step.skipped.length} gave nothing to train on` : ""}`} />
-        <Kpi label="Solved" value={solved.length ? `${solved.filter(Boolean).length} of ${solved.length}` : "–"} note="episodes of its groups" />
+        {reported(solved) ? <Kpi label="Solved" value={`${solved.filter(Boolean).length} of ${solved.length}`} note="episodes of its groups" /> : null}
         <Kpi label="Segments" value={figure(step.segments)} note="trained on" />
         <Kpi label="Moved" value={metrics?.kl_moved != null ? metrics.kl_moved.toFixed(4) : "–"} note="KL from its parent" />
         <Kpi label="Took" value={metrics ? span(metrics.update_seconds ?? metrics.seconds) : step.state === "stepping" && step.decided ? <Ago at={step.decided} /> : "–"} note={step.state === "stepping" ? "so far" : ""} />
@@ -60,7 +60,7 @@ export function StepView({ run: name, number }: { run: string; number: number })
           );
         })}
       </div>
-      <Card title="The update" note={checkpoint ? `${checkpoint.short}, from ${checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : checkpoint.base ?? "the base model"}` : step.state === "failed" ? "the step failed" : "being taken"}>
+      <Card title="The update" note={checkpoint ? `${checkpoint.short}, from ${checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : known.base(checkpoint.base)}` : step.state === "failed" ? "the step failed" : "being taken"}>
         {metrics ? <Pairs entries={updatePairs(metrics)} /> : step.error ? <p className="error-text">{step.error}</p> : <p className="muted">The trainer is working on it.</p>}
       </Card>
     </>
@@ -92,7 +92,9 @@ export function GroupView({ run: name, number }: { run: string; number: number }
       {run ? <Elsewhere run={{ ...run, episodes_at: group.episodes_at }} /> : null}
       <Kpis>
         <Kpi label="Mean reward" value={rewards.length ? figure(mean(rewards)) : "–"} note={rewards.length ? rewards.map(figure).join("  ") : "no episode has ended"} />
-        <Kpi label="Solved" value={result ? `${result.solved.filter(Boolean).length} of ${result.solved.length}` : `${group.episodes.filter(each => each.solved).length} of ${group.count ?? "?"}`} note={result?.failed ? `${result.failed} failed` : ""} />
+        {result ? reported(result.solved) ? <Kpi label="Solved" value={`${result.solved.filter(Boolean).length} of ${result.solved.length}`} note={result.failed ? `${result.failed} failed` : ""} />
+          : result.failed ? <Kpi label="Failed" value={String(result.failed)} note={`of ${result.failed + result.rewards.length}`} /> : null
+          : reported(group.episodes.map(each => each.solved)) ? <Kpi label="Solved" value={`${group.episodes.filter(each => each.solved).length} of ${group.count ?? "?"}`} /> : null}
         <Kpi label="Played for" value={result ? span(result.rollout_seconds) : group.decided ? <Ago at={group.decided} /> : "–"} note={group.decided ? `decided ${clock(group.decided)}` : ""} />
         <Kpi label="To train on" value={result ? `${result.segments}` : "–"} note={result ? `of ${result.segments_recorded} segments` : ""} />
         <Kpi label="Step" value={step ? <Link to={stepPlace(group.run, step.step)}>S{step.step} → {known.short(step.makes)}</Link> : "–"}
@@ -143,16 +145,18 @@ export function GroupView({ run: name, number }: { run: string; number: number }
 
 const EpisodeTile = memo(function EpisodeTile({ episode }: { episode: GroupEpisode }) {
   const info = (episode.info ?? {}) as Record<string, unknown>;
+  const bySlot = slotRewards(episode.rewards);  // (while it plays, where its slots are not rewarded together)
   return (
     <Tile to={episodePlace(episode.run_id)} className={`rail ${episode.interrupted ? "" : stateKind(episode.state)}`}>
       <header>
         <b>Episode {episode.episode ?? "?"}</b><span className="what" />
         <Mark state={episode.interrupted ? "" : episode.state ?? "running"}>{episode.interrupted ? "interrupted" : episode.state ?? "running"}</Mark>
       </header>
-      <div className="big">{episode.outcome ? figure(episode.reward) : <span className="faint">…</span>}</div>
+      <div className="big">{episode.outcome || episode.reward != null ? figure(episode.reward) : <span className="faint">…</span>}</div>
       <div className="facts">
+        {bySlot.map(([slot, value]) => <span key={slot}>{slot} <b>{figure(value)}</b></span>)}
         {info.turns != null ? <span><b>{String(info.turns)}</b> turns</span> : episode.samples != null ? <span><b>{episode.samples}</b> samples</span> : null}
-        {info.duration != null ? <span><b>{figure(info.duration)}</b> game min</span> : null}
+        {info.duration != null ? <span>duration <b>{figure(info.duration)}</b></span> : null}
         {info.ended ? <span>ended by <b>{String(info.ended)}</b></span> : null}
         {episode.sampled ? <span><b>{tokens(episode.sampled)}</b> tokens</span> : null}
         {episode.solved ? <span className="moved">solved</span> : null}

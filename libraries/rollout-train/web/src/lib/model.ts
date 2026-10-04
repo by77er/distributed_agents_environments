@@ -2,6 +2,7 @@
 // and the episodes a group asked for that have not started.
 
 import type { DoneLine, GroupEpisode, OpenGroup, Run, Step, Checkpoint } from "../api/types";
+import { byNumber, mean } from "./format";
 
 export interface GroupEntry {
   number: number;
@@ -81,8 +82,20 @@ export function episodeClass(each: Asked): string {
   if (isWaiting(each)) return "waiting";
   if (each.interrupted) return "";
   const ended = each.outcome ?? (each.state && each.state !== "running" ? each.state : null);
-  return !ended ? "running" : each.solved ? "solved" : ended === "completed" ? "unsolved" : "failed";
+  return !ended ? "running" : each.solved ? "solved" : ended !== "completed" ? "failed" : each.solved === false ? "unsolved" : "played";
 }
+
+/** A playing episode's reward so far, as an ended one's is: the mean of its slots' (none before any is assigned). */
+export const episodeReward = (rewards: Record<string, number>): number | null => mean(Object.values(rewards));
+
+/** Each slot's reward, by slot in their numbers' order, where they differ (none where the slots are rewarded together). */
+export const slotRewards = (rewards: Record<string, number> | undefined): [string, number][] => {
+  const entries = Object.entries(rewards ?? {}).sort(([a], [b]) => byNumber(a, b));
+  return new Set(entries.map(([, value]) => value)).size > 1 ? entries : [];
+};
+
+/** Whether any of these says if its episode solved its task: a task may never say, and then nothing of solving is shown. */
+export const reported = (solved: (boolean | null | undefined)[]): boolean => solved.some(each => each != null);
 
 /** What a run is called: its name, or its id. */
 export const nameOf = (run: { run: string; name?: string | null }): string => run.name || run.run;
@@ -100,6 +113,9 @@ export interface Known {
   title: (id: string | null | undefined) => string;
   /** The bookmarks that name a checkpoint. */
   bookmarks: (id: string | null | undefined) => string[];
+  /** What a checkpoint's weights build on, in words: a checkpoint this ledger has (`kpqx (RUN · S3)`), else the
+   * model's name (or a checkpoint's id this ledger lacks). */
+  base: (base: string | null | undefined) => string;
 }
 
 const knownCache = new WeakMap<object, WeakMap<object, Known>>();
@@ -122,15 +138,17 @@ export function knownOf(checkpoints: Checkpoint[] | undefined, runs: Record<stri
       if (!each) return "not in this ledger";
       return each.run ? `${run(each.run)}${each.step != null ? ` · S${each.step}` : ""}` : "made outside a run";
     };
+    const base = (name: string | null | undefined) =>
+      !name ? "the base model" : byId.has(name) ? `${short(name)} (${origin(name)})` : name;
     found = {
-      run, checkpoint, short, origin,
+      run, checkpoint, short, origin, base,
       bookmarks: id => checkpoint(id)?.bookmarks ?? [],
       title: id => {
         const each = checkpoint(id);
         if (!each) return id ?? "the base model";
-        const from = each.parents.length ? each.parents.map(short).join(" + ") : each.base ?? "the base model";
-        return [`${each.id} · depth ${each.depth}`, `${origin(id)}, from ${from}`, each.bookmarks.length ? `bookmarks: ${each.bookmarks.join(", ")}` : null]
-          .filter(Boolean).join("\n");
+        const from = each.parents.length ? each.parents.map(short).join(" + ") : base(each.base);
+        return [`${each.id} · depth ${each.depth}${each.kind === "full" ? " · full weights" : ""}`, `${origin(id)}, from ${from}`,
+          each.bookmarks.length ? `bookmarks: ${each.bookmarks.join(", ")}` : null].filter(Boolean).join("\n");
       },
     };
     byNames.set(names, found);

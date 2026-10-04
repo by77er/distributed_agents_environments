@@ -6,11 +6,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { useBookmark, useEvals, useKnown, useSystem, useUnbookmark } from "../api/queries";
 import type { Checkpoint as CheckpointData } from "../api/types";
 import { BarChart, Sized } from "../components/charts";
-import { Marks } from "../components/checkpoints";
+import { BaseName, Marks } from "../components/checkpoints";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
 import { bytes, clock, figure, span } from "../lib/format";
 import { evalsPlace, runPlace, stepPlace, checkpointPlace, suitePlace } from "../lib/places";
-import { shareText } from "../components/evals";
+import { shareOf, shareText } from "../components/evals";
 
 export function Checkpoint({ id }: { id: string }) {
   const { data: system } = useSystem();
@@ -32,10 +32,11 @@ export function Checkpoint({ id }: { id: string }) {
   return (
     <>
       <Head title={<span className="mono" title={checkpoint.id}>{checkpoint.short}</span>}
-        sub={<>{known.origin(checkpoint.id)} · depth {checkpoint.depth} · from {checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : checkpoint.base ?? "the base model"}</>}>
+        sub={<>{known.origin(checkpoint.id)} · depth {checkpoint.depth} · from {checkpoint.parents.length ? checkpoint.parents.map(known.short).join(" + ") : known.base(checkpoint.base)}</>}>
         <Specs>
           <Spec label="id">{checkpoint.id}</Spec>
-          <Spec label="base model">{checkpoint.base ?? "–"}</Spec>
+          <Spec label="weights">{checkpoint.kind === "full" ? "full" : "LoRA adapter"}</Spec>
+          <Spec label={known.checkpoint(checkpoint.base) ? "over" : "base model"}>{checkpoint.base ? <BaseName base={checkpoint.base} /> : "–"}</Spec>
           {checkpoint.run ? <Spec label="made by"><Link to={runPlace(checkpoint.run)} title={`id: ${checkpoint.run}`}>{known.run(checkpoint.run)}</Link></Spec> : <Spec label="made by">outside a run</Spec>}
           {checkpoint.run && checkpoint.step != null ? <Spec label="step" kind="violet"><Link to={stepPlace(checkpoint.run, checkpoint.step)}>S{checkpoint.step}</Link></Spec> : null}
           {serving.length ? <Spec label="served on" kind="accent">{serving.map(channel => channel.channel).join(", ")}</Spec> : null}
@@ -51,10 +52,10 @@ export function Checkpoint({ id }: { id: string }) {
         <Kpi label="Kept" value={checkpoint.weights ? bytes(size) : "released"} note={checkpoint.weights ? "weights and trainer state" : "its record stays"} />
         <Kpi label="Grown from it" value={String(children.length)} note={children.length ? children.map(each => each.short).join(", ") : "nothing yet"} />
       </Kpis>
-      <Card title="Its line" note={`from ${line[0]?.base ?? "the base model"}, first parent by first parent: how far each step moved it`}>
+      <Card title="Its line" note={`from ${known.base(line[0]?.base)}, first parent by first parent: how far each step moved it`}>
         {line.length > 1 ? (
           <Sized>{width => <BarChart values={line.map(each => each.metrics.kl_moved ?? 0)} labels={line.map(each => each.short)} width={width} height={150} onBar={index => navigate(placeOf(line[index]))} />}</Sized>
-        ) : <p className="muted">It was trained from the base model{checkpoint.base ? ` ${checkpoint.base}` : ""}.</p>}
+        ) : <p className="muted">It was trained from {checkpoint.base ? <BaseName base={checkpoint.base} /> : "the base model"}.</p>}
       </Card>
       <Card title="What it came from, and what grew from it">
         {related.length ? (
@@ -87,7 +88,7 @@ function Played({ id }: { id: string }) {
           keys={played.map(({ subject }) => subject.subject)}
           rows={played.map(({ suite, subject }) => [
             <b>{suite.suite}</b>, String(suite.starts.length), `${subject.played} of ${suite.starts.length * (subject.episodes ?? 1)}`,
-            shareText(subject.played ? subject.solved / subject.played : null), figure(subject.reward),
+            shareText(shareOf(subject)), figure(subject.reward),
           ])}
           to={played.map(({ suite }) => suitePlace(suite.suite))}
         />

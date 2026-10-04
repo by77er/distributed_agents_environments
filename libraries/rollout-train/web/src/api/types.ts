@@ -29,12 +29,16 @@ export interface GroupEpisode {
   state?: string;
   samples?: number | null;
   slots?: string[];
+  /** The episode's reward: the mean of its slots' (while it plays, as far as they are assigned). */
   reward?: number | null;
+  /** While it plays: each slot's reward so far. */
+  rewards?: Record<string, number>;
   updated?: number | null;
   in_feed?: boolean;
   interrupted?: boolean;
   outcome?: string;
-  solved?: boolean;
+  /** Whether it solved its task; null: the task did not say. */
+  solved?: boolean | null;
   detail?: string | null;
   sampled?: number;
   info?: Record<string, unknown>;
@@ -64,7 +68,8 @@ export interface DoneLine {
   title: string;
   rollout_seconds: number;
   rewards: number[];
-  solved: boolean[];
+  /** Each episode's; null where none of the group's episodes said whether it solved its task. */
+  solved: (boolean | null)[];
   durations: (number | null)[];
   failed: number;
   failures: string[];
@@ -147,7 +152,10 @@ export interface Checkpoint {
   depth: number;
   /** What it was trained from, then anything it learned from beside; none: from the base model. */
   parents: string[];
+  /** What its weights build on: a model, by name; or, for an adapter over a full checkpoint, that checkpoint's id. */
   base: string | null;
+  /** What its weights are: an adapter over its base (`lora`), or all of a model's weights (`full`). */
+  kind: "lora" | "full" | string;
   run: string | null;
   step: number | null;
   made: number;
@@ -230,6 +238,8 @@ export interface OfferedProfile {
   profile: string;
   path: string;
   model: string;
+  /** What its trainer makes: `lora` (adapters) or `full` weights; none where the launcher cannot tell. */
+  weights?: string | null;
   settings: Record<string, unknown>;
 }
 
@@ -368,7 +378,7 @@ export interface Episode {
   run_id: string;
   labels: Record<string, string>;
   state: string | null;
-  ended: (Record<string, unknown> & { reward?: number; solved?: boolean; sampled?: number; info?: Record<string, unknown> }) | null;
+  ended: (Record<string, unknown> & { reward?: number; solved?: boolean | null; sampled?: number; info?: Record<string, unknown> }) | null;
   source: "feed" | "archive" | null;
   lines: Line[];
 }
@@ -381,7 +391,7 @@ export interface StatisticsGroup {
   decided: number | null;
   time: number | null;
   rewards: number[];
-  solved: boolean[];
+  solved: (boolean | null)[];
   failed: number;
   segments: number;
   skipped: string | null;
@@ -433,6 +443,7 @@ export interface LineageCheckpoint {
   depth: number;
   parents: string[];
   base: string | null;
+  kind?: string;
   made: number;
   kept: boolean;
   released: number | boolean | null;
@@ -470,7 +481,8 @@ export interface QueueEntry {
 
 export interface Trainer {
   trainer: string;
-  weights: string;
+  /** What its steps make (`lora` or `full`); none: a run's own trainer that has made nothing yet. */
+  weights: string | null;
   base: string | null;
   runs?: string[];
   colocated?: boolean;
@@ -505,9 +517,10 @@ export interface Suite {
     asked_by?: string;
     episodes?: number;
     played: number;
-    solved: number;
+    /** None: none of its episodes said whether it solved its start. */
+    solved: number | null;
     reward?: number | null;
-    results: Record<string, { solved: boolean; reward: number; run_id?: string }[]>;
+    results: Record<string, { solved: boolean | null; reward: number; run_id?: string }[]>;
   }[];
   sample: boolean;
 }
@@ -527,7 +540,7 @@ export interface EvalRun {
   started: number | null;
   played: number;
   expected: number;
-  solved: number;
+  solved: number | null;
   done: boolean;
 }
 
