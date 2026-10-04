@@ -7,7 +7,7 @@ same size (zero at first, as a new LoRA adapter changes nothing). Training runs,
 on that learnable table:
 
 - `forward` and `forward_backward` compute each datum's logprobs, and the losses as Tinker's documentation writes them
-  (`cross_entropy`, `importance_sampling`, `ppo`, `cispo`, each a sum over rows); the RL losses refuse any input but
+  (`cross_entropy`, `ppo`, `cispo`: those the trainer takes, each a sum over rows); the RL losses refuse any input but
   their three.
 - `forward_backward_custom` does what the SDK does: logprobs, the caller's loss and its gradient, then a
   `cross_entropy` pass whose weights are minus that gradient.
@@ -301,8 +301,6 @@ def _loss(loss_fn: str, each: Datum, logprobs: torch.Tensor, config: Mapping[str
         raise TinkerError(f"{loss_fn} takes target_tokens, logprobs and advantages, not {sorted(given)}")
     sampling, advantages = _floats(each, "logprobs"), _floats(each, "advantages")
     ratio = torch.exp(logprobs - sampling)
-    if loss_fn == "importance_sampling":
-        return -(ratio * advantages).sum()
     low, high = DEFAULT_CLIPS.get(loss_fn, (0.0, 0.0))
     if config:
         low, high = float(config.get("clip_low_threshold", low)), float(config.get("clip_high_threshold", high))

@@ -120,23 +120,22 @@ class Policy:
         *,
         rank: int,
         alpha: float,
-        device: str = "cuda",
-        gradient_checkpointing: bool = True,
         layer_inputs_on_host: bool = False,
         mlp_rows: int | None = None,
     ) -> "Policy":
+        """The checkpoint on the GPU with a new adapter, its layers checkpointed for the backward pass."""
         from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, CompressedTensorsConfig
 
         where = str(local(checkpoint))
         if multimodal(checkpoint):
-            options: dict[str, Any] = {"dtype": torch.bfloat16, "device_map": {"": device}}
+            options: dict[str, Any] = {"dtype": torch.bfloat16, "device_map": {"": "cuda"}}
             if quantized(checkpoint):
                 options["quantization_config"] = CompressedTensorsConfig(run_compressed=True)
             model = cast(nn.Module, AutoModelForImageTextToText.from_pretrained(where, **options))  # pyright: ignore[reportUnknownMemberType]
             replace_compressed_linears(model)
         else:
             model = cast(
-                nn.Module, AutoModelForCausalLM.from_pretrained(where, dtype=torch.bfloat16, device_map={"": device})
+                nn.Module, AutoModelForCausalLM.from_pretrained(where, dtype=torch.bfloat16, device_map={"": "cuda"})
             )  # pyright: ignore[reportUnknownMemberType]
         for parameter in model.parameters():
             parameter.requires_grad_(False)
@@ -152,14 +151,12 @@ class Policy:
         torch.cuda.empty_cache()
         within = "language_model" if multimodal(checkpoint) else "layers"
         add_lora(model, TARGETS, rank=rank, alpha=alpha, within=within, dtype=torch.float32)
-        if gradient_checkpointing:
-            enable = cast(Any, model).gradient_checkpointing_enable
-            enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-            if embedding is None:  # (embeddings read from the file are marked as needing gradients where used)
-                cast(Any, model).enable_input_require_grads()
-            if layer_inputs_on_host or mlp_rows is not None:
-                store = HostStore(pin=device != "cpu") if layer_inputs_on_host else None
-                checkpoint_layers(body(model), store=store, rows=mlp_rows)
+        cast(Any, model).gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        if embedding is None:  # (embeddings read from the file are marked as needing gradients where used)
+            cast(Any, model).enable_input_require_grads()
+        if layer_inputs_on_host or mlp_rows is not None:
+            store = HostStore(pin=True) if layer_inputs_on_host else None
+            checkpoint_layers(body(model), store=store, rows=mlp_rows)
         return cls(model, checkpoint, rank, alpha, embedding)
 
     def parameters(self) -> list[nn.Parameter]:

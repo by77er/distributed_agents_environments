@@ -32,14 +32,14 @@ class FullPolicy:
     """Where it was loaded from: a model's name or directory, or a full checkpoint's files."""
 
     @classmethod
-    def load(cls, checkpoint: str, *, device: str = "cuda", gradient_checkpointing: bool = True) -> "FullPolicy":
+    def load(cls, checkpoint: str, *, gradient_checkpointing: bool = True) -> "FullPolicy":
         from transformers import AutoModelForCausalLM
 
         if multimodal(checkpoint):
             raise ValueError(f"{checkpoint} is an image-text model: full weights are trained on text models only")
         model = cast(
             nn.Module,
-            AutoModelForCausalLM.from_pretrained(str(local(checkpoint)), dtype=torch.float32, device_map={"": device}),
+            AutoModelForCausalLM.from_pretrained(str(local(checkpoint)), dtype=torch.float32, device_map={"": "cuda"}),
         )
         for parameter in model.parameters():
             parameter.requires_grad_(True)
