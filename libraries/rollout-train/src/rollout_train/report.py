@@ -15,9 +15,9 @@ from typing import Any
 
 import httpx
 
+from rollout.curriculum import Curriculum
 from rollout.environment import Row
 from rollout_train.checkpoints import Checkpoint, checkpoints_in
-from rollout_train.curriculum import Curriculum
 from rollout_train.ledger import Ledger, of_run
 from rollout_train.record import Result, Trained, results, trained
 from rollout_train.registry import registry_of, run_of

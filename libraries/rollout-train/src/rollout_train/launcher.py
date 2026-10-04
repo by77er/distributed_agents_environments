@@ -164,6 +164,7 @@ class Launcher:
             command = [
                 sys.executable, "-m", "rollout_train.cli", "eval", profile["path"], str(asked.suite),
                 "--directory", str(directory), "--name", asked.name, "--episodes", str(asked.episodes),
+                *(["--environment", asked.environment] if asked.environment else []),
                 *(["--checkpoint", asked.start] if asked.start else []), *changed,
             ]  # fmt: skip
         else:

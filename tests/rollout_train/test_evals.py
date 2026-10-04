@@ -10,6 +10,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from rollout.curriculum import Curriculum
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
 from rollout_train import evals as evals_module
@@ -17,7 +18,6 @@ from rollout_train import loop as loop_module
 from rollout_train import testing as support
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints, new_id
-from rollout_train.curriculum import Curriculum
 from rollout_train.evals import (
     EVAL,
     NOTHING_TRAINED,
@@ -26,6 +26,7 @@ from rollout_train.evals import (
     evaluate,
     make_suite,
     subject_table,
+    suite_for,
     suite_of,
     suite_table,
     suites_in,
@@ -78,6 +79,22 @@ async def test_a_suite_is_a_frozen_list_of_starts_of_an_environments_rows(tmp_pa
         await make_suite(ledger, "a/b", ENVIRONMENT, words, rows=None, seeds=[1])
     every = await make_suite(ledger, "every-row", ENVIRONMENT, words, rows=None, seeds=[7])
     assert [start.task for start in every.starts] == ["say-yes", "say-no", "say-maybe"]
+
+
+async def test_an_environments_eval_data_is_frozen_as_a_suite_the_first_time_it_is_played(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    assert await suite_of(ledger, "words-held-out") is None
+    made = await suite_for(ledger, "words-held-out", ENVIRONMENT, words)
+    assert made.starts == list(words.evals()["words-held-out"]) and made.held_out and made.version == "1"
+    again = await suite_of(ledger, "words-held-out")
+    assert again is not None and (again.starts, again.held_out, again.version) == (made.starts, True, "1")
+    assert (await suite_for(ledger, "words-held-out", ENVIRONMENT, words)).made == made.made  # (frozen: not again)
+    with pytest.raises(ValueError, match="is of"):
+        await suite_for(ledger, "words-held-out", "other:environment", words)
+    with pytest.raises(KeyError, match="no eval data of that name"):
+        await suite_for(ledger, "words-v9", ENVIRONMENT, words)
+    by_hand = await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
+    assert not by_hand.held_out and by_hand.version == "1"
 
 
 async def test_a_suite_made_as_a_catalogs_reads_as_its_environments(tmp_path: Path) -> None:
@@ -165,6 +182,8 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
     )  # fmt: skip
     snapshot = await System(ledger=ledger).snapshot()
     assert {each["run"]: each["kind"] for each in snapshot["runs"]} == {"eval-1": EVAL}
+    (shown,) = snapshot["runs"]  # (what its environment's results say, as its start records it)
+    assert shown["version"] == "1" and shown["description"] == words.description.to_json()
 
 
 async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:
@@ -214,6 +233,7 @@ async def test_a_launcher_starts_an_eval_launch_as_rollout_eval(
     (command,) = started
     assert command[2:4] == ["rollout_train.cli", "eval"] and command[5] == "words-v1"
     assert command[command.index("--episodes") + 1] == "3" and command[command.index("--checkpoint") + 1] == "best"
+    assert command[command.index("--environment") + 1] == ENVIRONMENT
     assert "--groups" not in command and not any(each.startswith("trainer.start") for each in command)
 
 
@@ -243,6 +263,9 @@ async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
         assert missing.status_code == 404 and "no suite" in missing.json()["error"]
         none = await client.post("/api/launches", json=body | {"episodes": 0, "name": "y"})
         assert none.status_code == 409
+        unplayed = body | {"suite": "words-held-out", "environment": ENVIRONMENT, "name": "held out"}
+        answer = await client.post("/api/launches", json=unplayed)  # (frozen when it is first played)
+        assert answer.status_code == 200 and answer.json()["launch"]["asked"]["suite"] == "words-held-out"
         listed = (await client.get("/api/evals")).json()
         assert [each["suite"] for each in listed["suites"]] == ["words-v1"] and listed["evals"] == []
 
@@ -264,6 +287,15 @@ def test_the_command_makes_and_lists_suites(
         run("make", "words-v1", "--environment", ENVIRONMENT, "--seeds", "4")
     with pytest.raises(SystemExit, match="invalid literal"):
         run("make", "other", "--environment", ENVIRONMENT, "--seeds", "one")
+    unplayed = run("list", "--environment", ENVIRONMENT).splitlines()
+    assert unplayed[-1].split() == ["words-held-out", "6", "starts", ENVIRONMENT, "(not", "played", "yet)"]
+    held = run("make", "words-held-out", "--environment", ENVIRONMENT)
+    assert held == f"the suite words-held-out: 6 starts of {ENVIRONMENT}, held out of training\n"
+    assert [line.split()[0] for line in run("list", "--environment", ENVIRONMENT).splitlines()] == [
+        "words-held-out", "words-v1",
+    ]  # fmt: skip
+    with pytest.raises(SystemExit, match="no eval data of that name"):
+        run("make", "words-v9", "--environment", ENVIRONMENT)
 
 
 class Unmade:
@@ -409,3 +441,35 @@ async def test_a_profile_says_what_its_run_evaluates_and_each_eval_is_a_run_its_
         assert names[made] == f"{platform.run.name}-eval-2"
     with pytest.raises(ValueError, match="1 at least"):
         Profile.load(path, settings={"evals.every": 0})
+
+
+SCHEDULED = """
+directory = "{directory}"
+
+[channels.policy]
+model = "a-checkpoint"
+renderer = "rollout_train.testing:plain_renderer"
+engine = "rollout_train.testing:scripted_engine"
+
+[trainer]
+kind = "tests.rollout_train.test_profile:Steps"
+channel = "policy"
+segment_tokens = 900
+segments_per_step = 3
+
+[evals]
+suite = "words-held-out"
+"""
+
+
+async def test_a_scheduled_eval_names_its_environments_eval_data_frozen_on_first_use(tmp_path: Path) -> None:
+    from rollout_train.cli import _train  # pyright: ignore[reportPrivateUsage]
+
+    path = write(tmp_path, SCHEDULED)
+    await _train(path, None, ENVIRONMENT, groups=2, groups_per_step=1, seed=1)
+    ledger = FileLedger(tmp_path / "run" / "ledger")
+    suite = await suite_of(ledger, "words-held-out")
+    assert suite is not None and suite.held_out and suite.starts == list(words.evals()["words-held-out"])
+    (run,) = [name.split("/")[1] for name in await ledger.tables() if name.endswith(f"/{EVALS}")]
+    evaluated: Any = await ledger.read(table(run, EVALS))
+    assert evaluated and all(each["suite"] == "words-held-out" and each["played"] == 6 for each in evaluated.values())

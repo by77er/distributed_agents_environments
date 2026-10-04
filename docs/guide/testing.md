@@ -137,6 +137,14 @@ release.set()
 await episode
 ```
 
+## Checking an environment
+
+`rollout env check module:name` plays one episode of an environment on a `LocalRunner` with a scripted endpoint
+(`--reply` is what it says each turn), after checking its rows, its starts and its eval data, and holds the episode's
+reward and result to the environment's description. With `--profile P --groups N` it plays N groups with the profile's
+model and flags the groups whose episodes all scored the same, which teach nothing
+([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)).
+
 ## What to assert on
 
 | To check | Look at |

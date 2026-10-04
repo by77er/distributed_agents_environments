@@ -212,18 +212,20 @@ class System:
 
     async def launch(self, body: Mapping[str, Any]) -> Launch:
         """Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
-        and its environment starts it. An eval names a suite (whose environment it plays) and the checkpoint that plays
-        it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
-        `KeyError` for what no launcher offers or a checkpoint no reference says."""
+        and its environment starts it. An eval names a suite (whose environment it plays; a suite not made yet, the
+        environment whose eval data it is) and the checkpoint that plays it. Raises `Taken` for what cannot be asked for
+        (a name taken or no name, a setting the profile does not have), `KeyError` for what no launcher offers or a
+        checkpoint no reference says."""
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
         given = as_asked(body)  # (a page that asks for a `catalog` asks for that environment)
         if given.get("kind") == EVAL:  # (an eval plays its suite's environment)
             found = await suite_of(self._ledger, str(given.get("suite") or ""))
-            if found is None:
+            if found is not None:
+                given["environment"] = found.environment
+            elif not given.get("environment"):  # (else its eval data of that name, frozen when it is first played)
                 raise KeyError(f"there is no suite {given.get('suite')!r}")
-            given["environment"] = found.environment
         try:
             asked = Asked(**{key: value for key, value in given.items() if key in Asked.__dataclass_fields__})
         except TypeError as error:
@@ -552,6 +554,7 @@ class System:
             "episodes_at": "here" if isinstance(found, _Place) else found.address if found else None,
             "reached": found.reached if isinstance(found, _Remote) else None,
             "profile": latest.get("profile"),
+            **{key: latest.get(key) for key in ("environment", "version", "description")},  # (what its results say)
             "from": latest.get("from"),
             "started": latest.get("started"),
             "starts": len(starts),

@@ -48,14 +48,26 @@ from typing import Any, Protocol
 from pydantic import JsonValue
 
 from rollout.contracts import BlobReference
-from rollout.environment import Environment, binding_for
+from rollout.curriculum import Curriculum, curriculum_of
+from rollout.environment import Environment, binding_for, held_out, train_start
 from rollout.harness.runner import RunBinding
 from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
-from rollout_train.curriculum import Curriculum
 from rollout_train.evals import Schedule, evaluate
 from rollout_train.ledger import Fence
-from rollout_train.record import EVALS, FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, results, scope, table
+from rollout_train.record import (
+    EVALS,
+    FAILURES,
+    GROUPS,
+    RESULTS,
+    STARTS,
+    STEPS,
+    Result,
+    described,
+    results,
+    scope,
+    table,
+)
 from rollout_train.rollouts import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
 from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Trainer, Weighted
@@ -110,15 +122,17 @@ async def train(
     `episodes_at_once` is how many episodes the run keeps work waiting for, whatever groups they are of (runners play
     them, as many at once as each has places). `binding` says how the program's model slots and imports are served (by
     default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is one that has
-    recorded nothing: the run's results are folded into it. `retention` says which of the checkpoints the run made keep
-    their files (weights and trainer state) once a newer one is served (`Retention()` unless given); besides those, what
-    is served, what any run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep theirs.
-    `started` is what the run's `starts` record says beside what the loop knows (where it starts from, this host, the
-    time): where the run's directory is, where the monitor on its machine serves (`address`), and what profile started
-    it, say. `hooks` are told of each result and step; `made` is called with each checkpoint made, once it is served (to
-    move a bookmark, say). `reshard` gives the files the engines load for a checkpoint (in their layout:
-    `rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's. `evals`
-    says which checkpoints the run evaluates as it makes them, between their step and the next."""
+    recorded nothing (by default the environment's own, else the generic one: `curriculum_of`): the run's results are
+    folded into it. Each group's start is drawn with `train_start`, never one of the environment's eval starts.
+    `retention` says which of the checkpoints the run made keep their files (weights and trainer state) once a newer one
+    is served (`Retention()` unless given); besides those, what is served, what any run starts from, and whatever `kept`
+    says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's `starts` record says beside what the
+    loop knows (where it starts from, this host, the time): where the run's directory is, where the monitor on its
+    machine serves (`address`), and what profile started it, say. `hooks` are told of each result and step; `made` is
+    called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
+    load for a checkpoint (in their layout: `rollout_train.resharding`), told the run's fence to note it under; without
+    it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
+    and the next."""
     algorithm = algorithm if algorithm is not None else Grpo()
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
@@ -131,7 +145,8 @@ async def train(
     steps = {int(key): _mapping(step) for key, step in (await ledger.read(table(run, STEPS))).items()}
     failures = {int(key) for key in await ledger.read(table(run, FAILURES))}
     evaluated = {int(key): _mapping(said) for key, said in (await ledger.read(table(run, EVALS))).items()}
-    curriculum = curriculum or Curriculum(environment.rows())
+    curriculum = curriculum or curriculum_of(environment)
+    eval_starts = held_out(environment)  # (which training never draws)
     for number in sorted(recorded):
         curriculum.recorded(recorded[number])
     for key in sorted(evaluated):
@@ -140,7 +155,7 @@ async def train(
     if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
         raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
-    here = {"from": start, "host": socket.gethostname(), "started": round(time.time(), 1)}
+    here = {"from": start, "host": socket.gethostname(), "started": round(time.time(), 1)} | described(environment)
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
     asking = -(-(episodes_at_once + algorithm.group_size - 1) // algorithm.group_size)
     """Groups kept asked for: when one of the episodes running ends, another is waiting (a group is decided only once
@@ -235,7 +250,7 @@ async def train(
         group: dict[str, JsonValue] = {
             "task": row.key,
             "title": row.title,
-            "parameters": environment.start(row, rng),
+            "parameters": train_start(environment, row, rng, eval_starts),
             "episodes": algorithm.group_size,
             "decided": round(time.time(), 1),
         }

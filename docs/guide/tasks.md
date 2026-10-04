@@ -209,9 +209,17 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | `await emit(kind, payload, *, to=None)` | durable output, such as a reply to a person ([conversations](conversations.md#sending-and-replying)) |
 | `await gather(*awaitables)` | awaits concurrently and returns the results in order, as `asyncio.gather` does |
 
+## Training on a task
+
+A run trains on, and an eval measures, an **environment** (`rollout.environment.Environment`): a program that plays
+the task, its situations as rows and how one start of a row is drawn (the task's parameters), eval data that training
+never draws, what its results say, a version, and perhaps a curriculum of its own
+([rollouts](../libraries/rollout-train/rollouts.md#environment), [three ways in](perspectives.md#building-an-environment)).
+`rollout env check module:name` checks one before anything trains on it.
+
 ## Environments
 
-A task whose agent needs a computer creates one in `setup` with `await run.environments.create(specification)` and
+The computers below are another sense of the word. A task whose agent needs a computer creates one in `setup` with `await run.environments.create(specification)` and
 keeps the handle on `self`. Every operation on the handle is an effect. The runner destroys any environment the run
 still owns when the run ends. Handles, backends and the ready-made `ComputerTools` are described in
 [environments](../implementations/rollout-computers.md).

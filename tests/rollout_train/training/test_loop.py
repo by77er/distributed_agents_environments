@@ -3,8 +3,10 @@ process, and a durable one. The loop's code is the same; so is what it does."""
 
 import asyncio
 import contextlib
+import dataclasses
 import functools
 import json
+import random
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -12,6 +14,8 @@ from typing import Any, cast
 import pytest
 from pydantic import JsonValue
 
+from rollout.curriculum import Curriculum
+from rollout.environment import Row, Start
 from rollout.harness import Runner
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.local import LocalRunner
@@ -32,7 +36,7 @@ from rollout_train import (
 )
 from rollout_train import loop as loop_module
 from rollout_train.checkpoints import Retention
-from rollout_train.record import STEPS, table
+from rollout_train.record import GROUPS, STARTS, STEPS, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, Hooks, Record, episodes_of, loaded, playing
 from rollout_train.rollouts.scheduler import EPISODES
@@ -79,6 +83,26 @@ class Notes(Hooks):
 
     def on_note(self, event: Mapping[str, JsonValue]) -> None:
         self.kinds.append(str(event["kind"]))
+
+
+@dataclasses.dataclass
+class OnlyNo(Curriculum):
+    def unlocked(self) -> list[Row]:
+        return [row for row in self.rows if row.key == "say-no"]
+
+
+class Narrow(Words):
+    """Words with four starts of each row, two of them held out for evals, and a curriculum of its own."""
+
+    def start(self, row: Row, rng: random.Random) -> JsonValue:
+        return {**row.parameters, "seed": rng.randrange(4)}
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        held = [Start(row.key, row.title, n, {**row.parameters, "seed": n}) for row in self.rows() for n in (0, 1)]
+        return {"narrow": held}
+
+    def curriculum(self) -> Curriculum:
+        return OnlyNo(self.rows())
 
 
 def checkpoints_in(directory: Path) -> Checkpoints:
@@ -377,3 +401,20 @@ async def test_each_version_made_is_told_of_once_it_is_served(tmp_path: Path) ->
         )  # fmt: skip
     ids = [checkpoint.id for checkpoint in await made_by(checkpoints)]
     assert ids and told == [(id, id) for id in ids]  # once each, and the channel already serves it
+
+
+async def test_a_run_draws_no_eval_start_follows_its_environments_curriculum_and_records_its_version(
+    tmp_path: Path,
+) -> None:
+    recorder = answering()
+    checkpoints = checkpoints_in(tmp_path)
+    async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+        await train(
+            Narrow(), Counting(), checkpoints, base="words-base", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=6, groups_per_step=2, seed=1,
+        )  # fmt: skip
+    groups: Any = await checkpoints.ledger.read(table("train", GROUPS))
+    assert len(groups) == 6 and {group["task"] for group in groups.values()} == {"say-no"}
+    assert {group["parameters"]["seed"] for group in groups.values()} <= {2, 3}
+    (start,) = (await checkpoints.ledger.read(table("train", STARTS))).values()
+    assert start["version"] == "1" and start["description"] == Words.description.to_json()  # type: ignore[index]

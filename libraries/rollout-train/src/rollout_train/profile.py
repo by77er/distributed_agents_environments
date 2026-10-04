@@ -84,7 +84,8 @@ class EvalsSpec:
     """Evals a training run makes of its checkpoints as it makes them (`rollout_train.evals.Schedule`)."""
 
     suite: str
-    """The suite each plays, by name (`rollout suite make`)."""
+    """The suite each plays, by name: the environment's eval data of that name (frozen on first use), or a suite made
+    by hand (`rollout suite make`)."""
     every: int = 1
     """The checkpoint of every `every`th step is evaluated."""
     episodes: int = 1

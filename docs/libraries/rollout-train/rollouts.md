@@ -109,12 +109,56 @@ machines, inference throughput and what is served from these beats.
 
 ## Environment
 
-What there is to train on is an [`Environment`](../../guide/reference.md#environment): the program, its
-rows (easiest first), and how one start of a row is drawn. A row may name other rows its groups count for too
-(`Row.counts_for`, [the curriculum](training.md#the-curriculum)). `Environment`, `Row` and `binding_for` live in
-`rollout.environment`, in the core library, so an environment needs the harness and nothing above it.
-`binding_for(environment, channel, tools)` binds every model slot of the environment's program to one channel
-([three ways in](../../guide/perspectives.md#building-an-environment)).
+What a run trains on and an eval measures is an [`Environment`](../../guide/reference.md#rolloutenvironmentenvironment):
+
+| It says | As | Read by |
+|---|---|---|
+| what plays an episode | `program` | runners, through each run's plan |
+| every situation, easiest first | `rows()`: each a `Row` (key, title, parameters, the rows it `counts_for`) | the curriculum |
+| one start of a row | `start(row, rng)`: the parameters every episode of a group is given | the loop, through `train_start` |
+| its eval data | `evals()`: named lists of `Start`s (a row's key and title, a seed, the parameters) | `rollout eval`, which freezes each as a suite ([evals](evals.md)) |
+| what its results say | `description`: a `Description` (the range of its rewards; whether results say `solved` and `saturated`; what `duration` counts; how its observations are shown) | each run's start record, and so the monitor |
+| which it is | `version`, changed whenever rows, starts, eval data or scoring change | each run's start record and each suite's record |
+| what to train on next (optional) | `curriculum()`: a `Curriculum` of its own | the loop (`curriculum_of`) |
+
+A row may name other rows its groups count for too (`Row.counts_for`, [the curriculum](training.md#the-curriculum)).
+All of it lives in `rollout.environment` and `rollout.curriculum`, in the core library, so an environment needs the
+harness and nothing above it. `binding_for(environment, channel, tools)` binds every model slot of the environment's
+program to one channel ([three ways in](../../guide/perspectives.md#building-an-environment)).
+
+### Train and eval
+
+Training never draws an eval start, by construction: the loop draws each group's start with `train_start(environment,
+row, rng, held_out(environment))`, which draws again while what it drew is one of the environment's eval starts (and
+gives up on a row whose every start is one). The check compares starts, not seeds. Keeping train and eval seeds apart
+would hold only for an environment whose starts differ whenever their seeds do, which the platform cannot see; comparing
+what `start` returned holds for every environment, whatever it does with its random numbers.
+
+A start is told apart by its parameters alone (as canonical JSON, `start_key`), so the guarantee is as fine as they
+are: two starts that differ only in a number the episode never reads are the same situation. An environment whose
+evals should hold out whole situations lists eval starts of rows it does not offer to train on, or keeps a part of
+what its starts are drawn from (worlds, say) for its eval data. `drawn(environment, seeds=…, rows=…)` derives eval
+data from rows and seeds when that is enough.
+
+### Checking an environment
+
+```sh
+uv run rollout env check minecraft_team.environment:environment --tools minecraft=minecraft_team.worlds:tools
+uv run rollout env check tests.rollout_train.rollouts.games:guessing --profile PROFILE --groups 4   # with a model
+```
+
+`rollout env check ENVIRONMENT` says, a line for each, whether its rows build (keys and titles unique, `counts_for`
+naming rows it has); whether its description and version say something; whether one seed draws one start and its eval
+data is the same each time; how many of the starts drawn for training were eval starts, and were drawn again; and how
+one episode went on the local runner with a scripted model (`--reply` is what it says each turn; `--row` the row; the
+tool sets its program imports from `--tools NAME=module:factory` or a URL, or the profile's), with a reward in the
+described range and a result that says what the description says it does.
+
+With `--profile P --groups N` it also plays N groups (of the algorithm's group size, or `--episodes`) of the rows the
+environment's curriculum would choose first, on the profile's channel, served by its base model with nothing trained,
+as a run of its own (start `kind: check`, in `~/.cache/rollout/checks/NAME` unless `--directory` says). A group whose
+episodes all scored the same is flagged: it teaches a group-relative update nothing. When every group is so, the check
+fails: a run would take no step at all. It exits 1 when any check fails.
 
 ## Watching
 

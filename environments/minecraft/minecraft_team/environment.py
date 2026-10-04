@@ -1,11 +1,12 @@
 """The Minecraft team as an environment: what there is to train on, as rows (`rollout.environment.Environment`).
 
 A row is a task; a start of it is a world, a layout and the names of a team of one to four, drawn at random: episodes
-given the same start begin identically.
+given the same start begin identically. Its eval data is one start of every task (`teams-every-task`), which training
+never draws.
 """
 
 import random
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from pydantic import JsonValue
@@ -13,7 +14,7 @@ from pydantic import JsonValue
 from minecraft_team.episode import TeamEpisode
 from minecraft_team.tasks import NAMES, TEAM, Coordination
 from minecraft_team.tasks import catalog as tasks
-from rollout.environment import Row
+from rollout.environment import Description, Row, Start, drawn
 from rollout.harness import ProgramReference, register
 
 TASKS = {task.id: task for task in tasks()}
@@ -27,6 +28,10 @@ class Teams:
     only: tuple[str, ...] = ()
     """Restrict the rows to these task ids (all tasks when empty)."""
     program: ProgramReference = field(default_factory=lambda: ProgramReference(program=register(TeamEpisode)))
+    version = "1"
+    description = Description(
+        rewards=(0.0, None), saturated=True, duration="minutes of game time", observations="minecraft"
+    )  # (a team can hold any number of diamonds)
 
     def rows(self) -> Sequence[Row]:
         return [
@@ -43,6 +48,9 @@ class Teams:
         world, layout = rng.choice(seeds), rng.randrange(1 << 30)
         players = rng.randint(fewest, len(TEAM))
         return {**row.parameters, "world_seed": world, "layout_seed": layout, "names": rng.sample(NAMES, players)}
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        return {"teams-every-task": drawn(self, seeds=[1])}
 
 
 environment = Teams()

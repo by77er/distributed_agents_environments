@@ -6,13 +6,14 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 ## Contents
 
-- **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#environment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Memory`](#memory), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
+- **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Address`](#address), [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`ConversationKey`](#conversationkey), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DeliveryMode`](#deliverymode), [`DeliveryPolicy`](#deliverypolicy), [`Deployment`](#deployment), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`Envelope`](#envelope), [`Environment`](#rolloutharnessenvironment), [`Environments`](#environments), [`EnvironmentService`](#environmentservice), [`EnvironmentSpecification`](#environmentspecification), [`ExecutionResult`](#executionresult), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`Interrupted`](#interrupted), [`InvalidObservation`](#invalidobservation), [`Memory`](#memory), [`MessageRouter`](#messagerouter), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Observation`](#observation), [`Priority`](#priority), [`Program`](#program), [`ProgramReference`](#programreference), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunNotLive`](#runnotlive), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`WaitFor`](#waitfor), [`with_row`](#with_row)
 - **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_message_id`](#new_message_id), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`OutcomeUnknown`](#outcomeunknown), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
-- **[`rollout.environment`](#rolloutenvironment)** — What an environment offers to be trained on. [`binding_for`](#binding_for), [`Environment`](#environment), [`Row`](#row)
+- **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#rolloutenvironmentenvironment), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
+- **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
-- **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#events_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
-- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#events_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, the curriculum, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Curriculum`](#curriculum), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Start`](#start), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
+- **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`LedgerEndpoint`](#ledgerendpoint), [`LedgerEnvironments`](#ledgerenvironments), [`local_run`](#local_run), [`payload`](#payload), [`read_ledger`](#read_ledger), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply)
+- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — The model endpoint for trainable channels: token-exact recording. [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`RecordedEndpoint`](#recordedendpoint), [`Recorder`](#recorder), [`Renderer`](#renderer), [`Segment`](#segment), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
@@ -21,8 +22,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_durable`](#rollout_durable)** — A runner whose runs survive their process, on DBOS. [`DurableRunContext`](#durableruncontext), [`DurableRunHandle`](#durablerunhandle), [`DurableRunner`](#durablerunner), [`RunCancelled`](#runcancelled), [`RunStore`](#runstore)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
-- **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#tokenizer_of)
-- **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#tokenizer_of)
+- **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#rollout_qwentokenizer_of)
+- **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#rollout_gemmatokenizer_of)
 - **[`rollout_computers`](#rollout_computers)** — Environment backends: services that give runs computers. [`ImageStore`](#imagestore), [`LocalEnvironments`](#localenvironments), [`NamespaceEnvironments`](#namespaceenvironments)
 - **[`rollout_computers.tools`](#rollout_computerstools)** — Tools for agents that work on a computer: shell, files, edits and images. [`apply_edits`](#apply_edits), [`ComputerTools`](#computertools), [`page_text`](#page_text), [`prepare_image`](#prepare_image), [`Replacement`](#replacement)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
@@ -343,7 +344,7 @@ A message delivered to a run.
 | `message_id` | `str` | `''` | Set by the runner: the caller's idempotency key (a sending run's `effect_id`, say), or a new `m_{ulid}`. |
 | `sender` | `str \| None` | `None` | Set by the runner; never trusted from the payload. |
 
-### `Environment`
+### `Environment` {#rolloutharnessenvironment}
 
 *class* · `libraries/rollout/src/rollout/harness/environments.py`
 
@@ -1868,7 +1869,7 @@ Context use after a sample.
 
 ## `rollout.environment`
 
-What an environment offers to be trained on.
+What a run trains on and an eval measures: rows, starts, eval data, what results say.
 
 ### `binding_for`
 
@@ -1882,7 +1883,40 @@ How an environment's runs are served: every model slot of its program from `chan
 from the tool set of its own name, or where `tools` says. (A program says which slots and imports it has once
 it is given a row: the environment's first.)
 
-### `Environment`
+### `Description`
+
+*class* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+class Description
+```
+
+What an environment's results say, for whatever shows or compares them.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rewards` | `tuple[float \| None, float \| None]` | `(0.0, 1.0)` | The range an episode's reward falls in (None: no bound on that side). |
+| `solved` | `bool` | `True` | Whether its results say `solved`. |
+| `saturated` | `bool` | `False` | Whether its results say `saturated` (nothing was left to earn). |
+| `duration` | `str \| None` | `None` | What a result's `duration` counts (`turns`, `minutes of game time`); None: its results say no duration. |
+| `observations` | `str \| None` | `None` | How its observations are shown (`minecraft`, say); None: as text. |
+
+**Methods**
+
+- `def to_json(self) -> dict[str, JsonValue]`
+
+### `drawn`
+
+*function* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+def drawn(environment: Environment, *, seeds: Sequence[int], rows: Sequence[str] | None = None) -> list[Start]
+```
+
+A start of each row (of `rows`, by key; else every row) for each seed, drawn with `random.Random(seed)`: eval
+data derived from rows and seeds. Raises `ValueError` for a row the environment lacks, or no seeds.
+
+### `Environment` {#rolloutenvironmentenvironment}
 
 *class* · `libraries/rollout/src/rollout/environment.py`
 
@@ -1890,14 +1924,25 @@ it is given a row: the environment's first.)
 class Environment(Protocol)
 ```
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `program` | `ProgramReference` | required | What a run executes; its parameters are a start. |
-
 **Methods**
 
+- `@property def program(self) -> ProgramReference` — What a run executes; its parameters are a start.
+- `@property def version(self) -> str` — Changed whenever its rows, starts, eval data or scoring change: runs and suites record it.
+- `@property def description(self) -> Description`
 - `def rows(self) -> Sequence[Row]` — Every situation, easiest first.
 - `def start(self, row: Row, rng: random.Random) -> JsonValue` — The parameters of one start of `row` (a seed drawn with `rng`, say): what every run of a group is given.
+- `def evals(self) -> Mapping[str, Sequence[Start]]` — Its eval data: named lists of starts, never drawn for training. Each is frozen as a suite of its name the
+  first time it is played (`rollout_train.evals`). `drawn` derives one from rows and seeds.
+
+### `held_out`
+
+*function* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+def held_out(environment: Environment) -> frozenset[str]
+```
+
+The keys of every one of the environment's eval starts (`start_key`): what training never draws.
 
 ### `Row`
 
@@ -1913,6 +1958,121 @@ class Row
 | `title` | `str` | required | What it is, for people. |
 | `parameters` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
 | `counts_for` | `tuple[str, ...]` | `()` | The keys of other rows that a group of this one is evidence about too: the same situation with more help, say. What it teaches about this row it teaches about them. |
+
+### `Start`
+
+*class* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+class Start
+```
+
+One start of a row, drawn with a seed of its own: what an eval plays.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `task` | `str` | required | The row's key. |
+| `title` | `str` | required |  |
+| `seed` | `int` | required |  |
+| `parameters` | `JsonValue` | required | What every episode of it is given: the row's start, drawn with `seed`. |
+
+### `start_key`
+
+*function* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+def start_key(parameters: JsonValue) -> str
+```
+
+A start's parameters as canonical JSON: two starts are the same start when their keys are equal.
+
+### `train_start`
+
+*function* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+def train_start(environment: Environment, row: Row, rng: random.Random, held: Collection[str]) -> JsonValue
+```
+
+A start of `row` for training, drawn with `rng`, and drawn again while it is an eval start (its key in `held`,
+`held_out`). Raises `ValueError` when `DRAWS` draws in a row are.
+
+## `rollout.curriculum`
+
+Which row to train on next, and gates on evals.
+
+### `Curriculum`
+
+*class* · `libraries/rollout/src/rollout/curriculum.py`
+
+```python
+class Curriculum
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rows` | `Sequence[Row]` | required |  |
+| `rng` | `random.Random` | `field(default_factory=random.Random)` |  |
+| `start` | `int` | `3` | This many rows are unlocked from the beginning. |
+| `reach` | `int` | `4` | Rows unlocked past the hardest one solved. |
+| `smoothing` | `float` | `0.5` | Weight of the newest group in the moving averages. |
+| `floor` | `float` | `0.05` |  |
+| `records` | `dict[str, Record]` | `field(default_factory=dict[str, Record])` |  |
+| `evaluations` | `dict[str, tuple[str \| None, list[GroupResult]]]` | `field(default_factory=dict[str, tuple[str \| None, list[GroupResult]]])` | The newest eval of each suite, by the suite's name: the checkpoint that played it (None: the base model), and how it did at each start. |
+
+**Methods**
+
+- `def unlocked(self) -> list[Row]`
+- `def sample(self, pending: Collection[str] = (), rng: random.Random | None = None) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
+  be choosing on what was known before it, so the others come first.
+- `def recorded(self, line: GroupResult) -> None` — Take a group's result into account: the row of its title, or failing that of its key (a key that is a
+  place in an environment changes when rows are added). A curriculum is the fold of a run's results.
+- `def weight(self, row: Row) -> float`
+- `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
+- `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
+  longer untried, and it taught nothing.
+- `def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None` — Take an eval into account: `suite` played by `checkpoint` (None: the base model), one result per start of
+  the suite. The generic curriculum keeps the newest of each suite and decides nothing from it; one that gates on
+  evals overrides this.
+- `def record(self, row: Row) -> Record`
+
+### `curriculum_of`
+
+*function* · `libraries/rollout/src/rollout/curriculum.py`
+
+```python
+def curriculum_of(environment: Environment) -> Curriculum
+```
+
+A curriculum that has recorded nothing: the environment's own (`environment.curriculum()`, if it has one), else
+the generic one over its rows.
+
+### `GroupResult`
+
+*class* · `libraries/rollout/src/rollout/curriculum.py`
+
+```python
+class GroupResult(Protocol)
+```
+
+A group's result, as a curriculum reads it (`rollout_train.record.Result` is one).
+
+**Methods**
+
+- `@property def task(self) -> str` — The row's key.
+- `@property def title(self) -> str`
+- `@property def rewards(self) -> Sequence[float]` — Of the episodes that completed, as is `solved`.
+- `@property def solved(self) -> Sequence[bool]`
+
+### `solved_share`
+
+*function* · `libraries/rollout/src/rollout/curriculum.py`
+
+```python
+def solved_share(results: Sequence[GroupResult]) -> float
+```
+
+The share of the episodes of `results` that solved their row (0 when there are none).
 
 ## `rollout.local`
 
@@ -2035,7 +2195,7 @@ class RewardAssignment
 
 Test doubles: a scripted model endpoint and helpers.
 
-### `events_of`
+### `events_of` {#rollouttestingevents_of}
 
 *function* · `libraries/rollout/src/rollout/testing.py`
 
@@ -2226,7 +2386,7 @@ async def episodes_of(ledger: Ledger, blobs: Blobs, run: str, group: int, count:
 
 A group's episodes once all `count` have ended, waiting for them.
 
-### `events_of`
+### `events_of` {#rollout_trainrolloutsevents_of}
 
 *function* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
@@ -2387,7 +2547,7 @@ What one model slot's rollout leaves to train on: its segments, and its rewards.
 
 ## `rollout_train`
 
-The training loop, the group algorithm, the curriculum, and what they ask of a trainer.
+The training loop, the group algorithm, evals, and what they ask of a trainer.
 
 ### `Algorithm`
 
@@ -2511,40 +2671,6 @@ start (too little memory, say).
 
 - `def __init__(self, trainer: Trainer, channels: Sequence[Pausable], *, guard: Callable[[], None] | None = None) -> None`
 - `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
-
-### `Curriculum`
-
-*class* · `libraries/rollout-train/src/rollout_train/curriculum.py`
-
-```python
-class Curriculum
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `rows` | `Sequence[Row]` | required |  |
-| `rng` | `random.Random` | `field(default_factory=random.Random)` |  |
-| `start` | `int` | `3` | This many rows are unlocked from the beginning. |
-| `reach` | `int` | `4` | Rows unlocked past the hardest one solved. |
-| `smoothing` | `float` | `0.5` | Weight of the newest group in the moving averages. |
-| `floor` | `float` | `0.05` |  |
-| `records` | `dict[str, Record]` | `field(default_factory=dict[str, Record])` |  |
-| `evaluations` | `dict[str, tuple[str, list[Result]]]` | `field(default_factory=dict[str, tuple[str, list[Result]]])` | The newest eval of each suite, by the suite's name: the checkpoint that played it, and how it did at each start (a `Result` each). |
-
-**Methods**
-
-- `def unlocked(self) -> list[Row]`
-- `def sample(self, pending: Collection[str] = (), rng: random.Random | None = None) -> Row` — The next row. `pending` names rows whose latest group has not been recorded yet: choosing one again would
-  be choosing on what was known before it, so the others come first.
-- `def recorded(self, line: Result) -> None` — Take a group's result into account: the row of its title, or failing that of its key (a key that is a
-  place in an environment changes when rows are added). A curriculum is the fold of a run's results.
-- `def evaluated(self, suite: str, checkpoint: str, results: Sequence[Result]) -> None` — Take an eval into account: `checkpoint` played `suite`, and `results` say how it did at each start. A
-  curriculum folds a run's evals in the order they were made, so the newest of each suite is kept.
-- `def weight(self, row: Row) -> float`
-- `def update(self, row: Row, rewards: Sequence[float], solved: Sequence[bool]) -> None` — Record a group of episodes of `row`: each one's reward and whether it solved the row.
-- `def failed(self, row: Row) -> None` — Record a group of `row` none of whose episodes completed. After `FAILED_GROUPS` of them in a row it is no
-  longer untried, and it taught nothing.
-- `def record(self, row: Row) -> Record`
 
 ### `evaluate`
 
@@ -2671,11 +2797,12 @@ class Ledger(Protocol)
 *function* · `libraries/rollout-train/src/rollout_train/evals.py`
 
 ```python
-async def make_suite(ledger: Ledger, name: str, environment_name: str, environment: Environment, *, rows: Sequence[str] | None, seeds: Sequence[int]) -> Suite
+async def make_suite(ledger: Ledger, name: str, environment_name: str, environment: Environment, *, rows: Sequence[str] | None = None, seeds: Sequence[int] = (), starts: Sequence[Start] | None = None) -> Suite
 ```
 
-Make a suite of `environment`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
-`ValueError` for a name that is no name or is taken (a suite is never changed), or a row the environment lacks.
+Make a suite of `environment`: `starts`, the environment's eval data of that name (held out of training); or,
+by hand, a start of each row (of `rows`, by key; else every row) for each seed (`drawn`). Raises `ValueError` for a
+name that is no name or is taken (a suite is never changed), a row the environment lacks, or no starts.
 
 ### `Manifest`
 
@@ -2780,23 +2907,6 @@ for a step: the same each time it is asked for that step, and one the run's epis
 
 - `def due(self, checkpoint: Checkpoint, run: str) -> bool` — Whether `checkpoint` is evaluated: a checkpoint `run` made at a step the schedule names.
 
-### `Start`
-
-*class* · `libraries/rollout-train/src/rollout_train/evals.py`
-
-```python
-class Start
-```
-
-One start of a suite: a row's start, drawn with a seed of its own.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `task` | `str` | required | The row's key. |
-| `title` | `str` | required |  |
-| `seed` | `int` | required |  |
-| `parameters` | `JsonValue` | required | What every episode of it is given: the row's start, drawn with `seed`. |
-
 ### `Step`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -2837,6 +2947,19 @@ A named list of starts of an environment's rows, frozen: what every subject play
 | `made` | `float` | `0.0` |  |
 | `rows` | `list[str] \| None` | `None` | The rows it names, by key. |
 | `seeds` | `list[int] \| None` | `None` |  |
+| `version` | `str \| None` | `None` | The environment's version when the suite was made. |
+| `held_out` | `bool` | `False` | Whether it is the environment's eval data, whose starts training never draws. |
+
+### `suite_for`
+
+*function* · `libraries/rollout-train/src/rollout_train/evals.py`
+
+```python
+async def suite_for(ledger: Ledger, name: str, environment_name: str, environment: Environment) -> Suite
+```
+
+The suite `name`: the one in the ledger, or else the environment's eval data of that name, frozen now (on first
+use). Raises `KeyError` when neither has it, `ValueError` when the ledger's is another environment's.
 
 ### `suite_of`
 
@@ -2866,15 +2989,17 @@ are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` i
 `episodes_at_once` is how many episodes the run keeps work waiting for, whatever groups they are of (runners play
 them, as many at once as each has places). `binding` says how the program's model slots and imports are served (by
 default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is one that has
-recorded nothing: the run's results are folded into it. `retention` says which of the checkpoints the run made keep
-their files (weights and trainer state) once a newer one is served (`Retention()` unless given); besides those, what
-is served, what any run starts from, and whatever `kept` says (the bookmarked checkpoints, say) keep theirs.
-`started` is what the run's `starts` record says beside what the loop knows (where it starts from, this host, the
-time): where the run's directory is, where the monitor on its machine serves (`address`), and what profile started
-it, say. `hooks` are told of each result and step; `made` is called with each checkpoint made, once it is served (to
-move a bookmark, say). `reshard` gives the files the engines load for a checkpoint (in their layout:
-`rollout_train.resharding`), told the run's fence to note it under; without it, they load the trainer's. `evals`
-says which checkpoints the run evaluates as it makes them, between their step and the next.
+recorded nothing (by default the environment's own, else the generic one: `curriculum_of`): the run's results are
+folded into it. Each group's start is drawn with `train_start`, never one of the environment's eval starts.
+`retention` says which of the checkpoints the run made keep their files (weights and trainer state) once a newer one
+is served (`Retention()` unless given); besides those, what is served, what any run starts from, and whatever `kept`
+says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's `starts` record says beside what the
+loop knows (where it starts from, this host, the time): where the run's directory is, where the monitor on its
+machine serves (`address`), and what profile started it, say. `hooks` are told of each result and step; `made` is
+called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
+load for a checkpoint (in their layout: `rollout_train.resharding`), told the run's fence to note it under; without
+it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
+and the next.
 
 ### `Trained`
 
@@ -3271,7 +3396,7 @@ Evals a training run makes of its checkpoints as it makes them (`rollout_train.e
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `suite` | `str` | required | The suite each plays, by name (`rollout suite make`). |
+| `suite` | `str` | required | The suite each plays, by name: the environment's eval data of that name (frozen on first use), or a suite made by hand (`rollout suite make`). |
 | `every` | `int` | `1` | The checkpoint of every `every`th step is evaluated. |
 | `episodes` | `int` | `1` | Episodes of each of the suite's starts. |
 
@@ -3451,9 +3576,10 @@ class System
   settings a launch may change, its environments, and whether it has room). A launch whose launcher stopped
   beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
 - `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
-  and its environment starts it. An eval names a suite (whose environment it plays) and the checkpoint that plays
-  it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have),
-  `KeyError` for what no launcher offers or a checkpoint no reference says.
+  and its environment starts it. An eval names a suite (whose environment it plays; a suite not made yet, the
+  environment whose eval data it is) and the checkpoint that plays it. Raises `Taken` for what cannot be asked for
+  (a name taken or no name, a setting the profile does not have), `KeyError` for what no launcher offers or a
+  checkpoint no reference says.
 - `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
   group boundary. Raises `KeyError` when there is no such launch going.
 - `async def evals(self) -> dict[str, Any]` — Every suite (its environment and starts, and each subject that played it, with how it did at each start) and
@@ -3829,7 +3955,7 @@ def qwen35(model: str | Tokenizer) -> Renderer
 
 Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer.
 
-### `tokenizer_of`
+### `tokenizer_of` {#rollout_qwentokenizer_of}
 
 *function* · `implementations/rollout-qwen/src/rollout_qwen/__init__.py`
 
@@ -3880,7 +4006,7 @@ class GemmaFunctionCalls
 
 - `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
 
-### `tokenizer_of`
+### `tokenizer_of` {#rollout_gemmatokenizer_of}
 
 *function* · `implementations/rollout-gemma/src/rollout_gemma/__init__.py`
 

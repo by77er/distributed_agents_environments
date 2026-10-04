@@ -35,18 +35,27 @@ The environment's own infrastructure (game servers, sandboxes) is a **tool set**
 process that runs episodes, or on machines of its own (`rollout tools module:factory`), and the program calls
 `run.tools` the same way.
 
-What there is to train on is an **environment**:
+What a run trains on and an eval measures is an **environment**:
 
 ```py
 class Words:
     program = agent_program(Guess)
+    version = "1"                                         # changed whenever rows, starts, evals or scoring change
+    description = Description(rewards=(0.0, 1.0), saturated=True, duration="turns")  # what its results say
 
     def rows(self) -> Sequence[Row]:                      # every situation, easiest first
         return [Row("say-yes", "say yes", {"word": "yes"}), Row("say-no", "say no", {"word": "no"})]
 
     def start(self, row: Row, rng: random.Random) -> JsonValue:   # one start: what every run of a group is given
         return {**row.parameters, "seed": rng.randrange(1000)}
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:     # eval data: starts training never draws
+        return {"words-held-out": drawn(self, seeds=[1, 2])}
 ```
+
+It may also have a `curriculum()` of its own: what to train on next, and when to open harder rows (on an eval's
+results, say). `rollout env check module:name` checks it before anything trains on it
+([rollouts](../libraries/rollout-train/rollouts.md#environment)).
 
 A model's limits reach an environment only as outcomes. A long game uses `Memory`: the environment says what a turn
 looks like once it is no longer the current one, and what to ask when turns must go; the library decides when.

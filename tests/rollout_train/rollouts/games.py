@@ -1,15 +1,23 @@
-"""Two small tasks for the tests of everything above a run: a guessing game on the task loop, and a gate that holds
-a run open until the test lets it through; and an environment of the guessing game."""
+"""Small tasks for the tests of everything above a run: a guessing game on the task loop, and a gate that holds a run
+open until the test lets it through; an environment of the guessing game (`words`); and a guessing game a real model
+plays (`guessing`).
+
+`guessing` is an example environment for a small model: of three words, the model names the one the start says, and
+only what it says after thinking counts. Qwen3-0.6B names the right one about a third of the time, so a group's rewards
+differ, and a group-relative update has something to learn from:
+
+    PYTHONPATH=. uv run rollout env check tests.rollout_train.rollouts.games:guessing --profile PROFILE --groups 4
+"""
 
 import asyncio
 import random
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import JsonValue
 
 from rollout.contracts import Message
-from rollout.environment import Row
+from rollout.environment import Description, Row, Start, drawn
 from rollout.harness import End, Observation, ProgramReference, RunContext, Task, agent_program
 
 GATES: dict[str, asyncio.Event] = {}
@@ -56,6 +64,8 @@ class Words:
     """An environment of the guessing game: three rows, each a word to say."""
 
     program: ProgramReference = agent_program(Guess)
+    version = "1"
+    description = Description(saturated=True, duration="turns")
 
     def rows(self) -> Sequence[Row]:
         return [Row(f"say-{word}", f"say {word}", {"word": word}) for word in ("yes", "no", "maybe")]
@@ -63,5 +73,52 @@ class Words:
     def start(self, row: Row, rng: random.Random) -> JsonValue:
         return {**row.parameters, "seed": rng.randrange(1000)}
 
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        return {"words-held-out": drawn(self, seeds=[1, 2])}
+
 
 words = Words()
+
+CHOICES = ("apple", "river", "candle")
+
+
+class Choose(Task):
+    """Name the word in `parameters["word"]` of `CHOICES`; only what is said after `</think>` counts, and naming every
+    word is no guess."""
+
+    def __init__(self, parameters: Any = None) -> None:
+        super().__init__(parameters)
+        self.word = str(parameters["word"])
+
+    async def start(self, run: RunContext) -> Observation:
+        return Observation(
+            f"I am thinking of one of these words: {', '.join(CHOICES)}. Reply with that word only. /no_think"
+        )
+
+    async def respond(self, run: RunContext, reply: Message) -> Observation:
+        answer = reply.text.rsplit("</think>", 1)[-1].lower()  # (what it said, not what it thought)
+        named = [word for word in CHOICES if word in answer]
+        said = named == [self.word]
+        await run.emit("result", {"solved": said, "saturated": said, "duration": 1})
+        return End(reward=1.0 if said else 0.0)
+
+
+class Guessing:
+    """The guessing game for a real model: a row for each word of `CHOICES`. A start's seed is never read, so its eval
+    starts are the same situations as its training starts: a toy, not a held-out measure."""
+
+    program: ProgramReference = agent_program(Choose)
+    version = "1"
+    description = Description(saturated=True, duration="turns")
+
+    def rows(self) -> Sequence[Row]:
+        return [Row(f"guess-{word}", f"guess {word}", {"word": word}) for word in CHOICES]
+
+    def start(self, row: Row, rng: random.Random) -> JsonValue:
+        return {**row.parameters, "seed": rng.randrange(1000)}
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        return {"guessing-held-out": drawn(self, seeds=[1, 2, 3])}
+
+
+guessing = Guessing()

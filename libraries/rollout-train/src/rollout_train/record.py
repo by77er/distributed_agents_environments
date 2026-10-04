@@ -1,7 +1,8 @@
 """What a training run writes down: six tables in a ledger.
 
 - `starts`: each time the run was started, where and by what (its directory and host, where the monitor on its
-  machine serves, the profile, the policy, when), by the number of the fence its loop took. Written as the loop
+  machine serves, the profile, the policy, when, and its environment: as `module:name`, its version and what its
+  results say), by the number of the fence its loop took. Written as the loop
   starts, so that whatever reads the ledger (the monitor) finds every run that shares it, and where each keeps the
   rest.
 - `groups`: what the run decided to play (the row, and the start every episode of the group is given), by the
@@ -27,6 +28,7 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
+from rollout.environment import Environment
 from rollout_train.checkpoints import checkpoints_in
 from rollout_train.ledger import Ledger, between
 
@@ -77,6 +79,11 @@ class Result:
             title=str(group.get("title", "")),
             rollout_seconds=round(written - float(decided), 1) if isinstance(decided, int | float) else 0.0,
         )
+
+
+def described(environment: Environment) -> dict[str, JsonValue]:
+    """What a run's start says of its environment: its version, and what its results say (`Description`)."""
+    return {"version": environment.version, "description": environment.description.to_json()}
 
 
 JOINED = ("group", "task", "title", "rollout_seconds")

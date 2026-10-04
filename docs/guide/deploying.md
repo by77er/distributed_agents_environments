@@ -41,7 +41,7 @@ runs_gib = 6                                  # must be available to admit runs
 training_gib = 4                              # and to start a step
 
 [evals]
-suite = "words-v1"                            # optional: evaluate checkpoints as they are made, on this suite
+suite = "words-held-out"                      # optional: evaluate checkpoints as they are made (its eval data, say)
 every = 2                                     # the checkpoint of every second step
 episodes = 1                                  # episodes of each start
 ```
@@ -56,8 +56,10 @@ uv run rollout bookmark diamonds first:20 --ledger RUN               # name the 
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
 uv run rollout train profile.toml ENVIRONMENT --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
+uv run rollout env check ENVIRONMENT --profile profile.toml --groups 4   # does it hold together; do its groups teach
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --ledger RUN       # a frozen list of starts
 uv run rollout eval profile.toml words-v1 --checkpoint diamonds --episodes 4         # play it with a checkpoint
+uv run rollout eval profile.toml teams-every-task --environment ENVIRONMENT     # its eval data, frozen on first use
 uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONMENT --runs RUNS   # start runs asked for here
 uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONMENT --runs RUNS \
     --ray http://127.0.0.1:8265 --as-job                             # the same, as a Ray job; each run a Ray job too
@@ -68,7 +70,9 @@ profile or the command is told by name. `train --name NAME` names a new run (by 
 `rename` names a run again, by its name or its id; `bookmark` names a checkpoint by any reference, and `checkpoints` lists
 them all ([checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
 of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)). `suite` makes and
-lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](../libraries/rollout-train/evals.md)); `report` and
+lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](../libraries/rollout-train/evals.md)); `env check`
+checks an environment before anything trains on it, and with a profile plays a few groups and flags those that teach
+nothing ([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)); `report` and
 `imitate` are described in [reporting](../libraries/rollout-train/training.md#reporting) and
 [imitation](../libraries/rollout-train/training.md#imitation).
 

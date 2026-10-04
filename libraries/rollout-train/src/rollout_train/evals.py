@@ -1,9 +1,12 @@
 """Evaluations: a frozen suite of starts, played by one checkpoint (or the base model), with nothing trained.
 
 A **suite** is a named list of starts of an environment's rows, each a row's start drawn with a seed of its own: what
-every subject plays, start for start, so that subjects compare. It is kept in the ledger, written once under the suite's
-fence (`suites/NAME`) and never changed: what it is (`evaluations/SUITE/suite`: its environment, rows and seeds) and its
-starts (`evaluations/SUITE/starts`, by number from 1: the row's key and title, the seed, the start's parameters).
+every subject plays, start for start, so that subjects compare. Most come from an environment's eval data
+(`Environment.evals()`), frozen under their name the first time they are played (`suite_for`): training never draws
+those starts. One can be made by hand too, of rows and seeds (`make_suite`), with no such promise. It is kept in the
+ledger, written once under the suite's fence (`suites/NAME`) and never changed: what it is (`evaluations/SUITE/suite`:
+its environment and its version, its rows and seeds, whether it is held out of training) and its starts
+(`evaluations/SUITE/starts`, by number from 1: the row's key and title, the seed, the start's parameters).
 
 An **eval** is one suite played by one subject: a checkpoint (by any reference `rollout_train.registry.resolved`
 takes), or the base model. It is a run of its own, registered and fenced like any run, whose start says what it is
@@ -19,7 +22,6 @@ run of its own (`rollout_train.loop.train`).
 """
 
 import asyncio
-import random
 import socket
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -29,12 +31,12 @@ from typing import Any, Protocol
 
 from pydantic import JsonValue
 
-from rollout.environment import Environment, binding_for
+from rollout.environment import Environment, Start, binding_for, drawn
 from rollout.harness.runner import RunBinding
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.launches import EVAL
 from rollout_train.ledger import Fence, Ledger, between
-from rollout_train.record import GROUPS, RESULTS, STARTS, Result, results, scope, table
+from rollout_train.record import GROUPS, RESULTS, STARTS, Result, described, results, scope, table
 from rollout_train.registry import valid
 from rollout_train.rollouts.episodes import Episode
 from rollout_train.rollouts.scheduler import Hooks, Plan, episodes_of, plan
@@ -55,18 +57,6 @@ def subject_table(suite: str, subject: str, part: str) -> str:
 
 
 @dataclass(frozen=True)
-class Start:
-    """One start of a suite: a row's start, drawn with a seed of its own."""
-
-    task: str
-    """The row's key."""
-    title: str
-    seed: int
-    parameters: JsonValue
-    """What every episode of it is given: the row's start, drawn with `seed`."""
-
-
-@dataclass(frozen=True)
 class Suite:
     """A named list of starts of an environment's rows, frozen: what every subject plays, start for start."""
 
@@ -79,6 +69,10 @@ class Suite:
     rows: list[str] | None = None
     """The rows it names, by key."""
     seeds: list[int] | None = None
+    version: str | None = None
+    """The environment's version when the suite was made."""
+    held_out: bool = False
+    """Whether it is the environment's eval data, whose starts training never draws."""
 
 
 async def make_suite(
@@ -87,31 +81,45 @@ async def make_suite(
     environment_name: str,
     environment: Environment,
     *,
-    rows: Sequence[str] | None,
-    seeds: Sequence[int],
+    rows: Sequence[str] | None = None,
+    seeds: Sequence[int] = (),
+    starts: Sequence[Start] | None = None,
 ) -> Suite:
-    """Make a suite of `environment`: a start of each row (of `rows`, by key; else every row) for each seed. Raises
-    `ValueError` for a name that is no name or is taken (a suite is never changed), or a row the environment lacks."""
+    """Make a suite of `environment`: `starts`, the environment's eval data of that name (held out of training); or,
+    by hand, a start of each row (of `rows`, by key; else every row) for each seed (`drawn`). Raises `ValueError` for a
+    name that is no name or is taken (a suite is never changed), a row the environment lacks, or no starts."""
     name = valid(name)
     if await suite_of(ledger, name) is not None:
         raise ValueError(f"there is a suite {name!r} already: a suite is never changed, make another")
-    known = {row.key: row for row in environment.rows()}
-    if missing := [key for key in rows or [] if key not in known]:
-        raise ValueError(f"the environment has no row {', '.join(missing)}")
-    chosen = [known[key] for key in rows] if rows else list(known.values())
-    if not seeds:
-        raise ValueError("a suite needs a seed at least")
-    starts = [
-        Start(row.key, row.title, seed, environment.start(row, random.Random(seed))) for row in chosen for seed in seeds
-    ]
-    made = Suite(name, environment_name, starts, round(time.time(), 1), [row.key for row in chosen], list(seeds))
+    listed = list(starts) if starts is not None else drawn(environment, seeds=seeds, rows=rows)
+    if not listed:
+        raise ValueError("a suite needs a start at least")
+    made = Suite(
+        name, environment_name, listed, round(time.time(), 1), list(dict.fromkeys(start.task for start in listed)),
+        list(dict.fromkeys(start.seed for start in listed)), environment.version, held_out=starts is not None,
+    )  # fmt: skip
     fence = await ledger.take(f"suites/{name}")
-    about: Any = {"environment": environment_name, "made": made.made, "rows": made.rows, "seeds": made.seeds}
+    about: Any = {key: value for key, value in asdict(made).items() if key not in ("name", "starts")}
     await ledger.append(suite_table(name, "suite"), "suite", about, fence)
-    for number, start in enumerate(starts, start=1):
+    for number, start in enumerate(listed, start=1):
         record: Any = asdict(start)
         await ledger.append(suite_table(name, "starts"), str(number), record, fence)
     return made
+
+
+async def suite_for(ledger: Ledger, name: str, environment_name: str, environment: Environment) -> Suite:
+    """The suite `name`: the one in the ledger, or else the environment's eval data of that name, frozen now (on first
+    use). Raises `KeyError` when neither has it, `ValueError` when the ledger's is another environment's."""
+    found = await suite_of(ledger, name)
+    if found is not None:
+        if found.environment and found.environment != environment_name:
+            raise ValueError(f"the suite {name!r} is of {found.environment}, not {environment_name}")
+        return found
+    data = environment.evals()
+    if name not in data:
+        known = ", ".join(sorted(data)) or "none"
+        raise KeyError(f"there is no suite {name!r}, and {environment_name} has no eval data of that name ({known})")
+    return await make_suite(ledger, name, environment_name, environment, starts=data[name])
 
 
 async def suite_of(ledger: Ledger, name: str) -> Suite | None:
@@ -123,7 +131,8 @@ async def suite_of(ledger: Ledger, name: str) -> Suite | None:
     about = about or {}
     listed = [Start(**record) for _, record in sorted(starts.items(), key=lambda item: int(item[0]))]  # type: ignore[arg-type]
     environment = str(about.get("environment") or about.get("catalog") or "")  # (a suite made as a catalog's says so)
-    return Suite(name, environment, listed, float(about.get("made") or 0.0), about.get("rows"), about.get("seeds"))
+    return Suite(name, environment, listed, float(about.get("made") or 0.0), about.get("rows"), about.get("seeds"),
+                 about.get("version"), bool(about.get("held_out")))  # fmt: skip
 
 
 async def suites_in(ledger: Ledger) -> list[str]:
@@ -184,7 +193,7 @@ async def evaluate(
     fence = await ledger.take(scope(run))
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
     here: dict[str, JsonValue] = {"kind": EVAL, "suite": suite.name, "checkpoint": subject, "from": subject}
-    here |= {"host": socket.gethostname(), "started": round(time.time(), 1)}
+    here |= {"host": socket.gethostname(), "started": round(time.time(), 1)} | described(environment)
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
     who: dict[str, JsonValue] = {
         "kind": "checkpoint" if subject else "model",

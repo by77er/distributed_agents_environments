@@ -3,6 +3,7 @@
 rollout train PROFILE ENVIRONMENT   the training loop: PROFILE is a TOML file (`rollout_train.profile`), ENVIRONMENT
                                     names an environment as `module:name`
 rollout report RUN ENVIRONMENT      chart a run's progress and summarise it; post both to a Discord webhook
+rollout env check ENVIRONMENT       whether an environment holds together; with --profile, groups played by a model
 rollout imitate PROFILE             a supervised step on the run's solved episodes, without their guidance
 rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
@@ -66,31 +67,29 @@ async def _train(
 
     from rollout.environment import binding_for
     from rollout_train import train
-    from rollout_train.evals import Schedule, suite_of
+    from rollout_train.evals import Schedule, suite_for
     from rollout_train.profile import Profile
 
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
-    channel, rows = described.trainer.channel, named(environment)
+    channel, offered = described.trainer.channel, named(environment)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (its `starts`)
+    started["environment"] = environment
     async with described.open() as platform:
         assert platform.trainer is not None
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
-        binding = binding_for(rows, channel, platform.tool_bindings)
+        binding = binding_for(offered, channel, platform.tool_bindings)
         schedule: Schedule | None = None
-        if (asked := described.evals) is not None:
-            suite = await suite_of(platform.ledger, asked.suite)
-            if suite is None:
-                raise SystemExit(f"there is no suite {asked.suite!r}: make one with `rollout suite make`")
-            played = named(suite.environment)
-            schedule = Schedule(
-                suite, played, platform.eval_run, asked.every, asked.episodes,
-                binding_for(played, channel, platform.tool_bindings),
-            )  # fmt: skip
+        if (asked := described.evals) is not None:  # (a suite not made yet is the environment's eval data of the name)
+            try:
+                suite = await suite_for(platform.ledger, asked.suite, environment, offered)
+            except (KeyError, ValueError) as error:
+                raise SystemExit(error.args[0]) from None
+            schedule = Schedule(suite, offered, platform.eval_run, asked.every, asked.episodes, binding)
         await train(
-            rows, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
+            offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
             base=described.channels[channel].model,
             directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
             groups_per_step=groups_per_step, seed=seed, episodes_at_once=described.episodes_at_once, binding=binding,
@@ -108,12 +107,13 @@ async def _evaluate(
     monitor: str | None = None,
     name: str | None = None,
     settings: dict[str, Any] | None = None,
+    environment: str | None = None,
 ) -> None:
     import dataclasses
     import shutil
 
     from rollout.environment import binding_for
-    from rollout_train.evals import evaluate, suite_of
+    from rollout_train.evals import evaluate, suite_for, suite_of
     from rollout_train.profile import Profile
     from rollout_train.registry import resolved
 
@@ -126,20 +126,25 @@ async def _evaluate(
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
     try:
         async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
-            suite = await suite_of(platform.ledger, suite_name)
-            if suite is None:
-                raise SystemExit(f"there is no suite {suite_name!r}: make one with `rollout suite make`")
             try:
+                if environment is not None:  # (its eval data of that name is frozen as the suite, if it is not yet)
+                    suite = await suite_for(platform.ledger, suite_name, environment, named(environment))
+                elif (found := await suite_of(platform.ledger, suite_name)) is not None:
+                    suite = found
+                else:
+                    raise KeyError(
+                        f"there is no suite {suite_name!r}: name its environment (--environment), or make one"
+                    )
                 subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
-            except KeyError as error:
+            except (KeyError, ValueError) as error:
                 raise SystemExit(error.args[0]) from None
-            rows = named(suite.environment)
-            started["blobs"] = platform.blobs_at
+            played = named(suite.environment)
+            started |= {"blobs": platform.blobs_at, "environment": suite.environment}
             said = await evaluate(
-                rows, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
+                played, platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
                 base=described.channels[channel].model, channel=channel,
                 directory=described.directory / "checkpoints", publish=platform.publish, episodes=episodes,
-                binding=binding_for(rows, channel, platform.tool_bindings), started=started,
+                binding=binding_for(played, channel, platform.tool_bindings), started=started,
                 reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
             )  # fmt: skip
     finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
@@ -151,7 +156,7 @@ async def _evaluate(
 async def _suite(
     command: str, where: str, name: str | None, environment: str | None, rows: str | None, seeds: str
 ) -> None:
-    from rollout_train.evals import make_suite, suite_of, suites_in
+    from rollout_train.evals import make_suite, suite_for, suite_of, suites_in
 
     ledger = _ledger_at(where)
     if command == "make":
@@ -159,15 +164,86 @@ async def _suite(
         keys = [each.strip() for each in rows.split(",") if each.strip()] if rows else None
         try:
             numbers = [int(each) for each in seeds.split(",") if each.strip()]
-            made = await make_suite(ledger, name, environment, named(environment), rows=keys, seeds=numbers)
-        except ValueError as error:
-            raise SystemExit(str(error)) from None
-        print(f"the suite {made.name}: {len(made.starts)} starts of {environment}")
+            if numbers or keys:  # (by hand, of rows and seeds)
+                made = await make_suite(ledger, name, environment, named(environment), rows=keys, seeds=numbers)
+            elif await suite_of(ledger, name) is not None:
+                raise ValueError(f"there is a suite {name!r} already: a suite is never changed, make another")
+            else:  # (the environment's eval data of that name)
+                made = await suite_for(ledger, name, environment, named(environment))
+        except (KeyError, ValueError) as error:
+            raise SystemExit(error.args[0]) from None
+        held = ", held out of training" if made.held_out else ""
+        print(f"the suite {made.name}: {len(made.starts)} starts of {environment}{held}")
         return
-    for each in await suites_in(ledger):
+    listed = await suites_in(ledger)
+    for each in listed:
         found = await suite_of(ledger, each)
         assert found is not None
         print(f"{each:<24} {len(found.starts):>4} starts  {found.environment}")
+    if environment is not None:  # (its eval data, frozen as a suite the first time it is played)
+        for each, starts in named(environment).evals().items():
+            if each not in listed:
+                print(f"{each:<24} {len(starts):>4} starts  {environment}  (not played yet)")
+
+
+async def _check(
+    environment: str,
+    row: str | None,
+    reply: str,
+    tools: list[str],
+    profile: Path | None,
+    groups: int,
+    episodes: int | None,
+    directory: Path | None,
+    name: str | None,
+    seed: int,
+    settings: dict[str, Any] | None = None,
+) -> int:
+    import dataclasses
+
+    from rollout.environment import binding_for
+    from rollout.harness.imports import ToolBinding
+    from rollout_train.algorithm import Grpo
+    from rollout_train.check import checked, played, scripted
+    from rollout_train.profile import Profile
+
+    offered = named(environment)
+    found = checked(offered)
+    for each in found:
+        print(each, flush=True)
+    if not found[0].passed:  # (with no rows, there is nothing to play)
+        return 1
+    scratch = directory or Path.home() / ".cache" / "rollout" / "checks" / (name or environment.replace(":", "-"))
+    given = dict(_setting(each) for each in tools)  # (NAME=module:factory, or NAME=URL)
+    if profile is not None:
+        given = {**Profile.load(profile).tools, **given}
+    urls = {key: ToolBinding(url=str(where)) for key, where in given.items() if str(where).startswith("http")}
+    await asyncio.to_thread(scratch.mkdir, parents=True, exist_ok=True)
+    local = {key: named(str(where))(scratch) for key, where in given.items() if key not in urls}
+    try:
+        episode = await scripted(offered, row=row, reply=reply, tool_sets=local, tools=urls)
+    finally:
+        for each in local.values():  # (as a profile closes its tool sets)
+            close = getattr(each, "close", None)
+            if close is not None and asyncio.iscoroutine(closing := close()):
+                await closing
+    print(episode, flush=True)
+    found.append(episode)
+    if profile is not None and groups > 0:
+        loaded = Profile.load(profile, directory=scratch, settings=settings)
+        described = dataclasses.replace(loaded, trainer=None, name=name or scratch.name)  # (the base model, untrained)
+        channel = loaded.trainer.channel if loaded.trainer else next(iter(loaded.channels))
+        async with described.open() as platform:
+            binding = binding_for(offered, channel, platform.tool_bindings)
+            started: dict[str, Any] = {"environment": environment, "profile": str(profile), "blobs": platform.blobs_at}
+            started["directory"] = str(await asyncio.to_thread(scratch.absolute))
+            for each in await played(
+                offered, platform.ledger, platform.blobs, run=platform.run.id, binding=binding, groups=groups,
+                episodes=episodes or Grpo().group_size, seed=seed, started=started,
+            ):  # fmt: skip
+                print(each, flush=True)
+                found.append(each)
+    return 0 if all(each.passed for each in found) else 1
 
 
 async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limit: int | None, seed: int) -> None:
@@ -446,6 +522,9 @@ def main() -> None:
         "--checkpoint", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id (none: the base model)"
     )
     evaluating.add_argument("--episodes", type=int, default=1, help="episodes of each start (1)")
+    evaluating.add_argument(
+        "--environment", help="module:name: a suite not made yet is its eval data of that name, frozen now"
+    )
     evaluating.add_argument("--directory", type=Path, help="the eval's directory (instead of the profile's)")
     evaluating.add_argument("--name", help="what the eval is called (by default its directory's name)")
     evaluating.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
@@ -456,10 +535,30 @@ def main() -> None:
     making.add_argument("name")
     making.add_argument("--environment", required=True, help="module:name")
     making.add_argument("--rows", help="row keys, comma-separated (by default every row)")
-    making.add_argument("--seeds", required=True, help="seeds, comma-separated: each row is started once with each")
+    making.add_argument(
+        "--seeds", default="", help="seeds, comma-separated: each row started once with each (none: its eval data NAME)"
+    )
     making.add_argument("--ledger", default=".", help=where)
     suite_listing = suite_commands.add_parser("list", help="every suite")
     suite_listing.add_argument("--ledger", default=".", help=where)
+    suite_listing.add_argument("--environment", help="module:name: its eval data not played yet too")
+    environments = commands.add_parser("env", help="work with environments")
+    environment_commands = environments.add_subparsers(dest="env_command", required=True)
+    checking = environment_commands.add_parser("check", help="whether an environment holds together")
+    checking.add_argument("environment", help="module:name")
+    checking.add_argument("--row", help="the row the scripted episode plays (by default the first)")
+    checking.add_argument("--reply", default="hello", help="what the scripted model says each turn")
+    checking.add_argument(
+        "--tools", action="append", default=[], metavar="NAME=WHERE",
+        help="a tool set its program imports: module:factory, or a URL (repeatable; a profile's are used too)",
+    )  # fmt: skip
+    checking.add_argument("--profile", type=Path, help="play groups on this profile's channel, with its base model")
+    checking.add_argument("--groups", type=int, default=4, help="groups played with --profile (4)")
+    checking.add_argument("--episodes", type=int, help="episodes of each group (by default the algorithm's group size)")
+    checking.add_argument("--directory", type=Path, help="the check's directory (~/.cache/rollout/checks/NAME)")
+    checking.add_argument("--name", help="what the check's run is called")
+    checking.add_argument("--seed", type=int, default=0)
+    checking.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="change a profile setting")
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
@@ -489,16 +588,22 @@ def main() -> None:
     if arguments.command == "eval":
         work = _evaluate(
             arguments.profile, arguments.suite, arguments.checkpoint, arguments.episodes, arguments.directory,
-            arguments.monitor, arguments.name, dict(_setting(each) for each in arguments.set),
+            arguments.monitor, arguments.name, dict(_setting(each) for each in arguments.set), arguments.environment,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "suite":
         made = arguments.suite_command == "make"
         asyncio.run(_suite(
             arguments.suite_command, arguments.ledger, arguments.name if made else None,
-            arguments.environment if made else None, arguments.rows if made else None, arguments.seeds if made else "",
+            arguments.environment, arguments.rows if made else None, arguments.seeds if made else "",
         ))  # fmt: skip
         return
+    if arguments.command == "env":
+        sys.exit(asyncio.run(_check(
+            arguments.environment, arguments.row, arguments.reply, arguments.tools, arguments.profile,
+            arguments.groups, arguments.episodes, arguments.directory, arguments.name, arguments.seed,
+            dict(_setting(each) for each in arguments.set),
+        )))  # fmt: skip
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, arguments.ledger))
         return

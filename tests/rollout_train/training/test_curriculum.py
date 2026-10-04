@@ -1,9 +1,14 @@
-"""The curriculum unlocks harder rows as easier ones are solved, and favors rows whose groups differ."""
+"""The curriculum unlocks harder rows as easier ones are solved, and favors rows whose groups differ; an environment's
+own can gate rows on evals."""
 
 import random
+from collections.abc import Sequence
+from dataclasses import dataclass
 
+from rollout.curriculum import Curriculum, GroupResult, curriculum_of, solved_share
 from rollout.environment import Row
-from rollout_train import Curriculum, Result
+from rollout_train import Result
+from tests.rollout_train.rollouts.games import Words
 
 ROWS = [Row(f"r{number:02d}", f"row {number}") for number in range(1, 21)]
 
@@ -80,3 +85,43 @@ def test_a_group_counts_for_the_rows_its_row_counts_for_as_well() -> None:
     assert curriculum.record(alone).signal == curriculum.record(guided).signal == 0.0  # all alike: nothing to teach
     curriculum.recorded(Result(2, 0.0, "t1", guided.title, rewards=[1.0, 0.0], solved=[True, False]))
     assert curriculum.record(guided).attempts == 2 and curriculum.record(alone).attempts == 1  # not the other way
+
+
+@dataclass
+class Gated(Curriculum):
+    """Rows past the third wait until the suite `held-out` is solved at least 60% of the time by a checkpoint."""
+
+    opened_by: str | None = None
+
+    def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None:
+        super().evaluated(suite, checkpoint, results)
+        if suite == "held-out" and solved_share(results) >= 0.6 and self.opened_by is None:
+            self.opened_by = checkpoint
+
+    def unlocked(self) -> list[Row]:
+        return super().unlocked() if self.opened_by else super().unlocked()[:3]
+
+
+class Staged(Words):
+    def curriculum(self) -> Curriculum:
+        return Gated(ROWS)
+
+
+def test_a_curriculum_can_gate_rows_on_an_evals_results() -> None:
+    curriculum = curriculum_of(Staged())
+    assert isinstance(curriculum, Gated) and isinstance(curriculum_of(Words()), Curriculum)
+    curriculum.update(ROWS[2], [1.0], [True])  # solved: the generic curriculum would unlock four more
+    assert curriculum.unlocked() == ROWS[:3]
+    curriculum.evaluated("other", "c1", [Result(1, 0.0, "r01", rewards=[1.0], solved=[True])])
+    curriculum.evaluated("held-out", "c1", [Result(1, 0.0, "r01", rewards=[1.0, 0.0], solved=[True, False])])
+    assert curriculum.unlocked() == ROWS[:3]  # half solved is not enough
+    played = [
+        Result(1, 0.0, "r01", rewards=[1.0, 1.0], solved=[True, True]),
+        Result(2, 0.0, "r02", solved=[True, False]),
+    ]
+    curriculum.evaluated("held-out", "c2", played)
+    assert curriculum.opened_by == "c2" and curriculum.unlocked() == ROWS[:7]
+    assert curriculum.evaluations["held-out"] == ("c2", played) and curriculum.evaluations["other"][0] == "c1"
+    generic = Curriculum(ROWS)
+    generic.evaluated("held-out", None, played)  # (the generic one keeps the newest of each suite, and decides nothing)
+    assert generic.evaluations == {"held-out": (None, played)} and generic.unlocked() == ROWS[:3]

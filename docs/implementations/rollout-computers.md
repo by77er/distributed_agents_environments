@@ -26,7 +26,7 @@ class Build(ComputerTools, Task):                      # the agent gets shell an
 ## What task code sees
 
 The types are in the reference: [`EnvironmentSpecification`](../guide/reference.md#environmentspecification),
-[`Environments`](../guide/reference.md#environments), [`Environment`](../guide/reference.md#environment) and
+[`Environments`](../guide/reference.md#environments), [`Environment`](../guide/reference.md#rolloutharnessenvironment) and
 [`ExecutionResult`](../guide/reference.md#executionresult).
 
 | Operation | Effect | Does |

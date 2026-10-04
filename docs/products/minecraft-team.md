@@ -48,7 +48,7 @@ Paths are under `environments/minecraft/`.
 | Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
 | Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md) |
 | Worlds | `minecraft_team/worlds.py` | The tool set `minecraft`: temporary worlds, actions, observations and ground-truth scores. In the process that runs episodes (`minecraft_team.worlds:tools`), or on a machine of its own (`rollout tools minecraft_team.worlds:tools`, and its URL in the profile) |
-| Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given |
+| Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given; its eval data, one start of every task (`teams-every-task`), which training never draws; what its results say (rewards from 0 up, `solved`, `saturated`, `duration` in minutes of game time) |
 | Profile | `profiles/one-gpu.toml` | One machine with one 16 GB GPU |
 | Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
 | Tests | `tests/` | The episode on a made-up world, tasks and scoring, the map, the harness and servers live, and the agreement tests below |

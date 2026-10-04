@@ -50,7 +50,7 @@ The [glossary](../architecture/glossary.md) defines every term; these are the on
 | **Model endpoint** | What serves a model slot: a recorder, an API adapter, or a scripted endpoint in tests. |
 | **Effect** | An operation that leaves task or agent code, such as a model sample. It has a stable `effect_id`. |
 | **Run event** | A typed record of something that happened in a run, in a gapless sequence. |
-| **Environment** | What there is to train on: rows, easiest first, and how to draw a start of one. |
+| **Environment** | What a run trains on and an eval measures: rows, easiest first, and how to draw a start of one; eval data training never draws; what its results say; a version; perhaps a curriculum of its own. |
 | **Group** | One start of one row, played as several episodes that are compared with each other. |
 | **Step** | One update by the trainer, over several groups: it makes a checkpoint from the one before. |
 | **Checkpoint** | Weights a step made: a node of a graph that grows from a base model, with an id, its parents, and the run and step that made it. A **bookmark** can name one. |
@@ -66,10 +66,11 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 | `rollout.harness` | `rollout` | `Task`, `Agent`, `tool`, `Observation`, `End`, `WaitFor`, `RunContext`, `rollout`, `Program`, `Memory`, conversation types |
 | `rollout.contracts` | `rollout` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
 | `rollout.local` | `rollout` | `LocalRunner`, `LocalRunContext`: runs in this process |
-| `rollout.environment` | `rollout` | `Environment`, `Row`, `binding_for` |
+| `rollout.environment` | `rollout` | `Environment`, `Row`, `Start`, `Description`, `drawn`, `train_start`, `binding_for` |
+| `rollout.curriculum` | `rollout` | `Curriculum`, `curriculum_of`, `solved_share` |
 | `rollout.testing` | `rollout` | `ScriptedModelEndpoint`, `local_run`, `events_of`, `payload`, `tool_call_reply` |
 | `rollout_train.rollouts` | `rollout-train` | `EpisodeRunner`, `Plan`, `plan`, `episodes_of`, `playing`, `Hooks`, `Episode`, `Record` |
-| `rollout_train` | `rollout-train` | `train`, `Grpo`, `Curriculum`, `Trainer`, `Colocated`, `Checkpoints`, `FileLedger` |
+| `rollout_train` | `rollout-train` | `train`, `Grpo`, `Trainer`, `Colocated`, `Checkpoints`, `FileLedger` |
 | `rollout_train.inference`, `rollout_train.recorder` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Recorder`, `Segment`, `Renderer` |
 | `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
 | `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |

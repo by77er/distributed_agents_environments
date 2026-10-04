@@ -30,14 +30,17 @@ and its tables; for a `trainer.` key, when the trainer is made with its settings
 
 ## The loop
 
-[`train`](../../guide/reference.md#train) trains a line of [checkpoints](checkpoints.md) on an environment, from `start` (a
-checkpoint's id, of this run or another: a fork; the base model, named `base`, if None), and serves each checkpoint it makes
-on one channel, which `publish` serves checkpoints on. Unless a `binding` says otherwise, every model slot of the environment's
-program is served from that channel. When it starts it writes the run's [plan](rollouts.md#what-a-run-writes): the
-environment's program and that binding.
+[`train`](../../guide/reference.md#train) trains a line of [checkpoints](checkpoints.md) on an environment, from `start`
+(a checkpoint's id, of this run or another: a fork; the base model, named `base`, if None), and serves each checkpoint
+it makes on one channel, which `publish` serves checkpoints on. Unless a `binding` says otherwise, every model slot of
+the environment's program is served from that channel. When it starts it writes the run's
+[plan](rollouts.md#what-a-run-writes) (the environment's program and that binding) and its start record, which says,
+besides where and by what it was started, the environment (as `module:name`), its `version` and its `description`
+(what its results say, for the monitor).
 
 - **Groups.** A group is `algorithm.group_size` episodes of one start of one row. The curriculum picks the row and
-  the environment draws the start; the run's `groups` table keeps both, with how many episodes the group asks for and
+  the environment draws the start, never one of its eval starts (`train_start`,
+  [train and eval](rollouts.md#train-and-eval)); the run's `groups` table keeps both, with how many episodes the group asks for and
   when it was decided. Runners play its episodes from there, and `episodes_of` waits for them.
 - **Play and training go their own ways.** Enough groups are kept asked for that `episodes_at_once` episodes (6 by
   default) have work waiting, whatever groups they are of. Runners claim the oldest group's episodes first, as many
@@ -125,7 +128,8 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
 
 ## The curriculum
 
-[`Curriculum`](../../guide/reference.md#curriculum) says which row to train on next.
+[`Curriculum`](../../guide/reference.md#curriculum) (`rollout.curriculum`) says which row to train on next. The loop
+uses the environment's own when it has one (`environment.curriculum()`, `curriculum_of`), else the generic one below.
 
 - **Weight.** A group-relative update learns from the differences between a group's episodes, so a row's weight is
   the share of its recent groups whose rewards differed (a moving average), plus a little for every unlocked row so
@@ -140,11 +144,27 @@ group. Another algorithm is passed as `train(..., algorithm=...)`.
   start may be one the row can be set up from. After `FAILED_GROUPS` such groups in a row, the row counts as tried,
   and as having taught nothing.
 - **What it sees.** The task's own rewards, whatever the algorithm adds to them.
-- **Evals.** `evaluated(suite, checkpoint, results)` is told of each eval the run makes of its checkpoints, and
-  keeps the newest of each suite in `evaluations`, for a curriculum that reads them.
 - **It is a fold.** A curriculum is rebuilt from the run's results when the loop starts: each goes to the row of
-  its title, so records stay with their rows when an environment changes. The run's evals are folded in after them. A choice is made with a random number
-  generator seeded by the group's number, and is written down before it is acted on.
+  its title, so records stay with their rows when an environment changes. The run's evals are folded in after them,
+  in the order they ended. A choice is made with a random number generator seeded by the group's number, and is
+  written down before it is acted on.
+- **Evals, and gates on them.** `evaluated(suite, checkpoint, results)` takes an eval the run made of its checkpoints
+  into account ([evals during training](evals.md#evals-during-training)): the suite, the checkpoint that played it,
+  and one result per start. The generic curriculum keeps the newest of each suite in `evaluations` and decides nothing
+  from it. An environment's own overrides it to open rows on how a checkpoint did:
+
+```py
+@dataclass
+class Gated(Curriculum):
+    passed: bool = False
+
+    def evaluated(self, suite: str, checkpoint: str | None, results: Sequence[GroupResult]) -> None:
+        super().evaluated(suite, checkpoint, results)
+        self.passed = self.passed or (suite == "teams-stage-2" and solved_share(results) >= 0.6)
+
+    def unlocked(self) -> list[Row]:  # stage 3 (rows 20 on) waits for the suite
+        return super().unlocked() if self.passed else super().unlocked()[:20]
+```
 
 ## The trainer
 

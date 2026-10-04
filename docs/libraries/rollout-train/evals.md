@@ -7,32 +7,41 @@ for start. The code is `rollout_train.evals`; the commands are `rollout suite` a
 
 ## Suites
 
-A **suite** is a named list of starts of an environment's rows: for each row it names (every row, by default) and each
-seed, the row's start drawn with `random.Random(seed)`. It is made once and never changed. To play other starts,
-make another suite.
+A **suite** is a named list of starts of an environment's rows, made once and never changed. To play other starts,
+make another suite. Most suites are an environment's **eval data** (`Environment.evals()`, [train and
+eval](rollouts.md#train-and-eval)): each of its named lists of starts is frozen as a suite of that name the first time
+it is played (or made), and training never draws those starts. A suite can be made by hand too, of rows and seeds:
+for each row it names (every row, by default) and each seed, the row's start drawn with `random.Random(seed)`. Nothing
+keeps a hand-made suite's starts out of training.
 
 ```bash
-uv run rollout suite make words-v1 --environment minecraft_team.environment:environment --rows chests,diamonds --seeds 1,2,3 --ledger L
-uv run rollout suite list --ledger L
+uv run rollout suite list --environment minecraft_team.environment:environment --ledger L  # its eval data too
+uv run rollout suite make teams-every-task --environment minecraft_team.environment:environment --ledger L
+uv run rollout suite make words-v1 --environment E --rows chests,diamonds --seeds 1,2,3 --ledger L   # by hand
 ```
 
-`make_suite(ledger, name, environment_name, environment, rows=…, seeds=…)` writes it under the fence `suites/NAME`. A name
-that is taken, a row the environment does not have, or no seeds is refused. `suite_of(ledger, name)` reads it back, and
-`suites_in(ledger)` lists every suite's name. The suite is kept in two tables:
+`suite_for(ledger, name, environment_name, environment)` is the suite of that name in the ledger, or else the
+environment's eval data of that name, frozen now; a suite in the ledger of another environment, or a name neither has,
+is refused. `make_suite(ledger, name, environment_name, environment, rows=…, seeds=…)` makes one by hand (or, with
+`starts=`, of given starts) under the fence `suites/NAME`. A name that is taken, a row the environment does not have,
+or no seeds is refused. `suite_of(ledger, name)` reads one back, and `suites_in(ledger)` lists every suite's name. The
+suite is kept in two tables:
 
 | Table | Key | Holds |
 |---|---|---|
-| `evaluations/SUITE/suite` | `suite` | its environment (`module:name`), when it was made, its rows and its seeds |
+| `evaluations/SUITE/suite` | `suite` | its environment (`module:name`) and its `version` then, when it was made, its rows and seeds, and whether it is `held_out` (the environment's eval data) |
 | `evaluations/SUITE/starts` | `1` to `N` | each start: the row's key (`task`) and title, the seed, and the start's `parameters` |
 
 ## An eval
 
 ```bash
 uv run rollout eval profile.toml words-v1 --checkpoint diamonds --episodes 4 --directory EVAL
+uv run rollout eval profile.toml teams-every-task --environment minecraft_team.environment:environment --directory EVAL
 ```
 
+With `--environment`, a suite not made yet is that environment's eval data of the name, frozen as the eval starts.
 An eval is a run of its own, with its own id and name in the registry ([runs](checkpoints.md#runs)) and its own
-fence. Its start record says `kind: eval`, the suite, and the checkpoint. `--checkpoint` takes any
+fence. Its start record says `kind: eval`, the suite, the checkpoint, and the environment's version and description. `--checkpoint` takes any
 [reference](checkpoints.md#references): a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id. A bookmark is read
 once, when the eval starts. Without `--checkpoint`, the base model of the profile's trained channel (or its first
 channel) plays.
@@ -79,11 +88,13 @@ The monitor's **Evals** page (`#/evals`) lists every suite and every eval. A sui
 The form takes the checkpoint (the base model, a bookmark, or any checkpoint whose weights are kept, by where it came
 from and its short id), the episodes a start, the profile, and the eval's name. It posts a launch of kind `eval`
 (`POST /api/launches`, `{"kind": "eval", "suite", "profile", "name", "start", "episodes"}`). The monitor fills in the
-suite's environment, checks the launch as it checks a run's, and refuses an unknown suite (404) or fewer than one episode
-a start (409). A launcher that offers the profile and the environment claims it and starts
+suite's environment (a suite not made yet is an environment's eval data, and the launch says the `environment`),
+checks the launch as it checks a run's, and refuses an unknown suite (404) or fewer than one episode a start (409). A
+launcher that offers the profile and the environment claims it and starts
 
 ```bash
-python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name NAME --episodes N --checkpoint REF
+python -m rollout_train.cli eval PROFILE SUITE --directory RUNS/NAME-ID --name NAME --episodes N --environment E \
+    --checkpoint REF
 ```
 
 as a process of its own, or as a Ray job with `--ray` ([launchers](../../guide/deploying.md#launchers)). The suite's
@@ -96,15 +107,16 @@ A profile's `[evals]` table has a training run evaluate its own checkpoints as i
 
 ```toml
 [evals]
-suite = "words-v1"      # made beforehand with `rollout suite make`, in the run's ledger
+suite = "words-held-out"  # the environment's eval data of that name, frozen on first use; or a suite made by hand
 every = 2               # the checkpoint of every second step (1 unless it says otherwise)
 episodes = 1            # episodes of each start (1)
 ```
 
-`rollout train` reads the suite (a suite the ledger does not have stops it before it starts) and passes the loop a
-[`Schedule`](../../guide/reference.md#schedule): the suite, its environment, how often, how many episodes, and the binding
-of the suite's program to the trained channel. After a step whose number is a multiple of `every` makes its checkpoint
-and serves it, the loop:
+`rollout train` finds the suite with `suite_for`: the ledger's suite of that name, or else the environment's eval data
+of that name, frozen now (a name neither has stops it before it starts). It passes the loop a
+[`Schedule`](../../guide/reference.md#schedule): the suite, its environment, how often, how many episodes, and the
+binding of the suite's program to the trained channel. After a step whose number is a multiple of `every` makes its
+checkpoint and serves it, the loop:
 
 1. Registers the eval's run, `NAME-eval-STEP` (its id kept in `directory/evals/RUN-eval-STEP/run.json`, so the same
    run each time it is asked for), and adds it to the runs the profile's episode runner plays.

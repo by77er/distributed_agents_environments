@@ -22,12 +22,13 @@ PUBLIC_MODULES = [
     # libraries/rollout
     ("rollout.harness", "Writing tasks, agents and programs; runners; memory; tool sets."),
     ("rollout.contracts", "Types that cross layers: canonical content, identifiers, digests, effects, events."),
-    ("rollout.environment", "What an environment offers to be trained on."),
+    ("rollout.environment", "What a run trains on and an eval measures: rows, starts, eval data, what results say."),
+    ("rollout.curriculum", "Which row to train on next, and gates on evals."),
     ("rollout.local", "The runner in this process."),
     ("rollout.testing", "Test doubles: a scripted model endpoint and helpers."),
     # libraries/rollout-train
     ("rollout_train.rollouts", "Episodes a run asks for in the ledger, claimed and played by runners, and read back."),
-    ("rollout_train", "The training loop, the group algorithm, the curriculum, and what they ask of a trainer."),
+    ("rollout_train", "The training loop, the group algorithm, evals, and what they ask of a trainer."),
     ("rollout_train.inference", "Channels: trainable models being served, and what they ask of an engine."),
     ("rollout_train.recorder", "The model endpoint for trainable channels: token-exact recording."),
     ("rollout_train.profile", "A deployment, described and opened."),
@@ -93,15 +94,23 @@ def render() -> str:
         module = importlib.import_module(module_name)
         definitions = [find_definition(module_name, name) for name in sorted(module.__all__, key=str.lower)]
         sections.append((module_name, summary, definitions))
+    named = [definition.name for _, _, definitions in sections for definition in definitions]
+    twice = {name for name in named if named.count(name) > 1}
+    """Names two modules define (`Environment`): their anchors say the module too (`rolloutenvironmentenvironment`)."""
+
+    def place(module_name: str, name: str) -> str:
+        return anchor(f"{module_name}.{name}" if name in twice else name)
+
     lines += ["## Contents", ""]
     for module_name, summary, definitions in sections:
-        names = ", ".join(f"[`{definition.name}`](#{anchor(definition.name)})" for definition in definitions)
+        names = ", ".join(f"[`{each.name}`](#{place(module_name, each.name)})" for each in definitions)
         lines += [f"- **[`{module_name}`](#{anchor(module_name)})** — {summary} {names}"]
     lines.append("")
     for module_name, summary, definitions in sections:
         lines += [f"## `{module_name}`", "", summary, ""]
         for definition in definitions:
-            lines += render_definition(definition)
+            given = f" {{#{place(module_name, definition.name)}}}" if definition.name in twice else ""
+            lines += render_definition(definition, given)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -220,9 +229,10 @@ def format_arguments(arguments: ast.arguments) -> str:
     return ", ".join(parts)
 
 
-def render_definition(definition: Definition) -> list[str]:
+def render_definition(definition: Definition, given: str = "") -> list[str]:
+    """The definition's section; `given` is an anchor of its own for the heading (` {#id}`)."""
     node = definition.node
-    lines = [f"### `{definition.name}`", "", f"*{definition.kind}* · `{definition.path}`", ""]
+    lines = [f"### `{definition.name}`{given}", "", f"*{definition.kind}* · `{definition.path}`", ""]
     if isinstance(node, ast.ClassDef):
         bases = ", ".join(ast.unparse(base) for base in node.bases)
         lines += ["```python", f"class {node.name}({bases})" if bases else f"class {node.name}", "```", ""]
