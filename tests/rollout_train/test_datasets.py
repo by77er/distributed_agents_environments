@@ -11,7 +11,7 @@ from pydantic import JsonValue
 
 from rollout.contracts import RunEvent
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Checkpoints, FileLedger
+from rollout_train import Checkpoints, FileLedger, Files, Step, Weighted
 from rollout_train.checkpoints import new_id
 from rollout_train.datasets import (
     LEFT_OUT,
@@ -204,6 +204,38 @@ async def test_a_step_on_a_dataset_learns_from_the_checkpoints_that_sampled_it(t
     alone = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("fresh")), run="fresh",
                           start=None, base="qwen", directory=tmp_path / "checkpoints")  # fmt: skip
     assert alone.parents == () and alone.depth == 1 and alone.dataset == made.id  # (from the base model)
+
+
+class Stateful(Counting):
+    """A trainer that trains nothing and notes the trainer state each step was given."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.states: list[str | None] = []
+
+    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+        self.states.append((parent.state / "optimizer.bin").read_text() if parent and parent.state else None)
+        return await super().step(batch, seed=seed, parent=parent, into=into)
+
+
+async def test_a_step_starts_its_optimizer_afresh_unless_told_to_resume_it(tmp_path: Path) -> None:
+    played = Played(tmp_path)
+    checkpoints, (_, second) = await guesses(played, tmp_path)
+    (tmp_path / "moments").mkdir()
+    (tmp_path / "moments" / "optimizer.bin").write_text("moments of a policy gradient")
+    trained = await checkpoints.add(await played.ledger.take(scope("train")), new_id(), weights=tmp_path / "weights",
+                                    state=tmp_path / "moments", run="train", step=3, parents=[second])  # fmt: skip
+    made = await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at)
+    taught = await examples(played.ledger, made, plain_renderer("plain"))
+    trainer = Stateful()
+    fresh = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("sft")), run="sft",
+                          start=trained.id, base="qwen", directory=tmp_path / "checkpoints")  # fmt: skip
+    assert trainer.parents == ["weights"] and trainer.states == [None]  # (the start's weights, not its moments)
+    assert fresh.metrics["optimizer_resumed"] == 0.0 and fresh.parents[0] == trained.id
+    resumed = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("again")), run="again",
+                            start=trained.id, base="qwen", directory=tmp_path / "checkpoints",
+                            resume_optimizer=True)  # fmt: skip
+    assert trainer.states == [None, "moments of a policy gradient"] and resumed.metrics["optimizer_resumed"] == 1.0
 
 
 class Trains:

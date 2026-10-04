@@ -89,7 +89,8 @@ Guidance is cut when the examples are made: each example's prompt loses the guid
 ## A step on a dataset
 
 ```bash
-rollout imitate PROFILE --dataset REF [--start REF] [--name NAME] [--directory RUN] [--limit N] [--seed N]
+rollout imitate PROFILE --dataset REF [--start REF] [--name NAME] [--directory RUN] [--limit N] [--seed N] \
+    [--resume-optimizer]
 ```
 
 The profile's trainer takes the step with `objective = "likelihood"`: the LoRA trainer, or the trainer of every
@@ -103,10 +104,12 @@ the newest checkpoint the run made, else `--start` (any [reference](checkpoints.
   by depth. The checkpoint graph shows those as learned-from edges, as it shows a distillation's teachers. A step
   from the base model has no parents; its `dataset` still says where its examples came from.
 - **Its record names the dataset** (`dataset`, the id), and its metrics add `imitated_episodes` and
-  `imitated_segments`. Its batch records each example's source, as a training step's does. The monitor serves the
+  `imitated_segments` and `optimizer_resumed`. Its batch records each example's source, as a training step's does. The monitor serves the
   `dataset` of each checkpoint with the rest of its record.
-- **From where it starts:** a step goes on from its parent's weights and trainer state when the trainer makes what the
-  parent is (an adapter from an adapter, every weight from every weight). A LoRA step from a full checkpoint begins a
+- **From where it starts:** a step goes on from its parent's weights when the trainer makes what the parent is (an
+  adapter from an adapter, every weight from every weight), with its optimizer started afresh: the parent's trainer
+  state holds the moments of another objective (a policy gradient's, say). `--resume-optimizer` goes on from that
+  state instead. The metric `optimizer_resumed` (1 or 0) says which. A LoRA step from a full checkpoint begins a
   new adapter over those weights; its trainer and its base are that checkpoint. A step of every weight from an
   adapter is refused: [merge](checkpoints.md#full-weights-and-merges) the adapter first.
 - **`--limit N`** trains on N examples drawn at random (by `--seed`); the batch says which.

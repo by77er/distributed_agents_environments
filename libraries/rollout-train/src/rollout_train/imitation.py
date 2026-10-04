@@ -145,13 +145,16 @@ async def imitate(
     directory: Path,
     limit: int | None = None,
     seed: int = 0,
+    resume_optimizer: bool = False,
 ) -> Checkpoint:
     """One supervised step of `trainer` (whose objective is likelihood) on `taught`, from the newest checkpoint `run`
     made (else from `start`, a checkpoint's id, or the base model, named `base`), made as the run's next: started again,
     the run trains on from it. `limit` takes that many segments at random. `directory` holds the checkpoints' files on
     this machine. `fence` is the run's. The checkpoint's parents are the one it was trained from, then the checkpoints
     that sampled the segments it trained on (`taught.sampled_by`), by depth; one trained from the base model has none.
-    An adapter's step from full weights begins a new adapter over them (`trainer` was made over those weights)."""
+    An adapter's step from full weights begins a new adapter over them (`trainer` was made over those weights). The
+    step starts its optimizer afresh, unless `resume_optimizer`: then from the trainer state of the checkpoint it trains
+    from (moments a step of another objective left, say). Its metrics say which (`optimizer_resumed`)."""
     chosen = list(taught.segments)
     if limit is not None and len(chosen) > limit:
         chosen = random.Random(seed).sample(chosen, limit)
@@ -164,13 +167,19 @@ async def imitate(
         if head.weights is None:
             raise ValueError(f"{head.id} was released: its weights are gone")
         weights = await checkpoints.files(head.weights, here / WEIGHTS)
-        parent = Files(weights, await checkpoints.files(head.state, here / STATE) if head.state else None)
+        resumed = head.state is not None and resume_optimizer
+        parent = Files(weights, await checkpoints.files(head.state, here / STATE) if head.state and resumed else None)
     makes = new_id()
     into = directory / makes
     trained: list[JsonValue] = [[weighted.source, weighted.advantage] for weighted in chosen]
     batch = await checkpoints.blobs.put(json.dumps(trained).encode(), "application/json")
     step = await trainer.step(chosen, seed=seed, parent=parent, into=into)
-    metrics = {**step.metrics, "imitated_episodes": float(taught.episodes), "imitated_segments": float(len(chosen))}
+    metrics = {
+        **step.metrics,
+        "imitated_episodes": float(taught.episodes),
+        "imitated_segments": float(len(chosen)),
+        "optimizer_resumed": float(parent is not None and parent.state is not None),
+    }
     learned: list[Checkpoint] = []
     if head is not None:
         for id in dict.fromkeys(taught.sampled_by[each.source] for each in chosen if each.source in taught.sampled_by):

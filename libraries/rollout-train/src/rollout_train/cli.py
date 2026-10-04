@@ -257,6 +257,7 @@ async def _imitate(
     dataset: str | None = None,
     start_at: str | None = None,
     name: str | None = None,
+    resume_optimizer: bool = False,
 ) -> None:
     import socket
     import time
@@ -316,7 +317,7 @@ async def _imitate(
         checkpoint = await imitate(
             checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
             directory=described.directory / "checkpoints",
-            limit=limit, seed=seed,
+            limit=limit, seed=seed, resume_optimizer=resume_optimizer,
         )  # fmt: skip
     except ValueError as error:
         raise SystemExit(str(error)) from None
@@ -591,6 +592,10 @@ def main() -> None:
     imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
     imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
     imitating.add_argument("--seed", type=int, default=0)
+    imitating.add_argument(
+        "--resume-optimizer", action="store_true",
+        help="go on from the trainer state of the checkpoint it trains from (by default the optimizer starts afresh)",
+    )  # fmt: skip
     datasets = commands.add_parser("dataset", help="make or list datasets: examples chosen from runs' episodes")
     dataset_commands = datasets.add_subparsers(dest="dataset_command", required=True)
     dataset_making = dataset_commands.add_parser("make", help="make a dataset by an episode rule and turn filters")
@@ -768,7 +773,7 @@ def main() -> None:
     if arguments.command == "imitate":
         work = _imitate(
             arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed,
-            arguments.dataset, arguments.start, arguments.name,
+            arguments.dataset, arguments.start, arguments.name, arguments.resume_optimizer,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "dataset":

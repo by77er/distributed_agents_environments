@@ -79,6 +79,25 @@ def test_every_weight_trains_in_its_own_process_and_is_saved_in_float32(tmp_path
     parent = Files(weights, tmp_path / "first" / "state")
     second = asyncio.run(trainer.step(batch, seed=1, parent=parent, into=tmp_path / "second"))
     assert second.metrics["segments"] == 4
+    # A step can go on from the weights alone, its optimizer started afresh (as a supervised step does by default).
+    fresh = asyncio.run(trainer.step(batch, seed=2, parent=Files(weights, None), into=tmp_path / "fresh"))
+    assert fresh.metrics["segments"] == 4 and (tmp_path / "fresh" / "state" / "optimizer.pt").exists()
+
+
+def test_an_adapter_goes_on_from_its_weights_with_its_optimizer_afresh(tmp_path: Path) -> None:
+    from rollout_lora.policy import Policy
+    from rollout_lora.trainer import LoraTrainer
+    from rollout_train.trainer import Files
+
+    reference = Policy.load(MODEL, rank=8, alpha=16.0)
+    batch = segments(reference.logprobs)
+    del reference
+    torch.cuda.empty_cache()
+    trainer = LoraTrainer(MODEL, rank=8, learning_rate=1e-4, tokens_per_step=400, max_kl=None, objective="likelihood")
+    asyncio.run(trainer.step(batch, seed=0, parent=None, into=tmp_path / "first"))
+    adapter = tmp_path / "first" / "weights"
+    fresh = asyncio.run(trainer.step(batch, seed=1, parent=Files(adapter, None), into=tmp_path / "fresh"))
+    assert fresh.metrics["segments"] == 4 and (tmp_path / "fresh" / "weights" / "adapter_model.safetensors").exists()
 
 
 def test_an_adapter_folded_in_gives_what_the_adapter_gave(tmp_path: Path) -> None:
