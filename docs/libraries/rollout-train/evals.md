@@ -139,6 +139,6 @@ trainer colocated, it does not: a second process needs engines of its own beside
 run's engines and the trainer, and a launcher must be running. The loop already serves the new checkpoint on engines
 that are awake between steps, and its runner can play the eval's episodes beside the run's, so playing the suite
 there needs no memory and no engines of its own. The cost is time: the next step waits for the eval (training groups
-are still played meanwhile, so the engines stay busy). A run whose evals should not hold up its steps asks for launches instead, from the page or with
-`rollout eval`.
+are still played meanwhile, so the engines stay busy). A run whose evals should not hold up its steps asks for
+launches instead, from the page or with `rollout eval`.
 
