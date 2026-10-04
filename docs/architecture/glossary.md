@@ -39,7 +39,7 @@ of segments.
 | **Catalog / row** | What an environment offers to train on, easiest first / one situation of it, of which a start is drawn for each group. See [three ways in](../guide/perspectives.md#building-an-environment). |
 | **Training run** | One training loop (`rollout_train.train`, `rollout train`) over a catalog, kept in one directory and in the ledger: its groups, their results and its steps. See [training](../libraries/rollout-train/training.md). |
 | **Step** | One call of the trainer, over the groups queued with something to train on (at least `groups_per_step` of them, except at the end of the run); it makes one version, from the one the step before made. |
-| **Group** | One start of one row, played as several episodes (its record says how many: `group_size`) that are compared with each other. Its episodes are numbered from 1 within it and carry the labels `run`, `group` and `episode`; the rest of it is in its record. |
+| **Group** | One start of one row, played as several episodes (its record's `episodes`, the algorithm's `group_size`) that are compared with each other. Its episodes are numbered from 1 within it and carry the labels `run`, `group` and `episode`; the rest of it is in its record. |
 | **Episode** | One run of a program, as training sees it once it has ended: labels, outcome, result, and a trajectory per model slot. See [episodes](../libraries/rollout-train/episodes.md). |
 | **Rollout** | One model slot's part of an episode as it plays: every turn of one agent. Each rollout becomes a trajectory. |
 | **Session** | The recorder's record of one rollout: every sample of one model slot of one run. |
@@ -48,7 +48,9 @@ of segments.
 | **Behavior logprob** | The log-probability of a sampled token under the distribution it was sampled from. |
 | **Plan** | How a training run's episodes are played: its program and its binding, in the run's `plans` table. |
 | **Episode runner** | Claims the episodes runs ask for in the ledger, plays them on a runner and records them, at most as many at once as it has places. Several, on one machine or many, share the work. It knows no algorithm. See [rollouts](../libraries/rollout-train/rollouts.md). |
-| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under. |
+| **Claim** | An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` table: the first append wins, and it holds while the runner keeps the fence it made it under and beats. |
+| **Heartbeat** | What a runner or a launcher writes every 15 seconds beside the ledger: its host, its machine's measurements, its engines and channels, or what it offers. One silent for 90 seconds is taken to be gone. See [heartbeats](../libraries/rollout-train/rollouts.md#heartbeats). |
+| **Launch / launcher** | A training run asked for (its profile, catalog, name, starting version and settings) / the process on a training machine that claims launches for the profiles it offers and starts `rollout train` for them. See [launchers](../guide/deploying.md#launchers). |
 | **Version** | Weights a step (or imitation) made: a node of a graph, with an id of its own (shown by its shortest unique start), its parents (what it was trained from, and any others it learned from), its base model, its depth, and the run and step that made it. See [versions](../libraries/rollout-train/versions.md). |
 | **Base model** | The model a version adapts (`Qwen/Qwen3.5-9B`): the root every line of versions grows from. |
 | **Depth** | A version's steps from its base model along its first parents: the number stamped on the tokens it samples. |

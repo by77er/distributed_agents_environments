@@ -96,7 +96,8 @@ export interface Channel {
   version?: number | null;
   published?: number | null;
   throughput: Throughput[];
-  directory?: string;
+  /** The run whose engines serve it (as its runners' heartbeats say). */
+  run?: string;
 }
 
 export interface Played {
@@ -202,10 +203,100 @@ export interface Measurement {
   disk: { free: number; total: number } | null;
 }
 
+/** A channel as a heartbeat says it: what it serves, and what passed through it since the beat before. */
+export interface BeatChannel {
+  channel: string;
+  adapter?: string | null;
+  version?: number | null;
+  requests?: number;
+  generated_tokens?: number;
+  tokens_per_second?: number;
+  tokens_per_second_per_stream?: number;
+  mean_concurrency?: number;
+}
+
+/** What a runner's (or launcher's) earlier beats measured. */
+export interface Beaten {
+  at: number;
+  machine?: Measurement;
+  channels?: BeatChannel[];
+  playing?: number;
+}
+
+/** A profile a launcher can run: by its name, with the settings a launch may change and their values in it. */
+export interface OfferedProfile {
+  profile: string;
+  path: string;
+  model: string;
+  settings: Record<string, unknown>;
+}
+
+/** A runner's or a launcher's machine, as its heartbeats say: alive or not, what it said last, its recent beats. */
 export interface Machine {
-  host: string;
-  now: Measurement;
-  history: Measurement[];
+  runner: string;
+  at: number;
+  alive: boolean;
+  /** `launcher` for a launcher; nothing for an episode runner. */
+  kind?: string;
+  host?: string;
+  run?: string;
+  directory?: string;
+  machine?: Measurement;
+  processes?: { owner: number; started: { pid: number; name: string; alive: boolean }[] } | null;
+  channels?: BeatChannel[];
+  places?: number;
+  playing?: number;
+  at_once?: number;
+  profiles?: OfferedProfile[];
+  catalogs?: string[];
+  history: Beaten[];
+}
+
+export interface Machines {
+  machines: Machine[];
+}
+
+/** What a run is asked to be (`rollout_train.launches.Asked`). */
+export interface LaunchAsked {
+  profile: string;
+  catalog: string;
+  name: string;
+  start?: string | null;
+  bookmark?: string | null;
+  groups?: number;
+  groups_per_step?: number;
+  seed?: number;
+  settings?: Record<string, unknown>;
+}
+
+export type LaunchState = "asked" | "claimed" | "running" | "stopping" | "ended" | "failed" | "stopped";
+
+export interface Launch {
+  id: string;
+  asked: LaunchAsked;
+  at: number;
+  state: LaunchState;
+  launcher: string | null;
+  directory: string | null;
+  pid: number | null;
+  detail: string | null;
+  updated: number;
+}
+
+/** A launcher alive: what it offers, and whether it has room. */
+export interface Launcher {
+  launcher: string;
+  at: number;
+  host?: string;
+  profiles: OfferedProfile[];
+  catalogs: string[];
+  at_once: number;
+  playing: number;
+}
+
+export interface Launches {
+  launches: Launch[];
+  launchers: Launcher[];
 }
 
 /** An episode in a feed, summarised. */

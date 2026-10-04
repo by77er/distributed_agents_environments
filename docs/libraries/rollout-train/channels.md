@@ -86,5 +86,5 @@ members of a channel:
 
 `Channel.take()` returns what passed through since the last call, and starts counting again: requests, tokens in
 and out, tokens per second over the time the channel was generating, tokens per second per stream, and mean
-concurrency. An open [profile](../../guide/deploying.md) takes it at intervals and sends it to the
-[monitor](monitor.md) as an `inference` event.
+concurrency. An open [profile](../../guide/deploying.md)'s runner takes it in each heartbeat, with the adapter and
+version the channel serves ([heartbeats](rollouts.md#heartbeats)), and the [monitor](monitor.md) shows it from there.

@@ -122,7 +122,7 @@ asyncio.run(test_a_reply_can_depend_on_the_request())
 To test what happens while the model is replying (steering, interruption), use an `async` entry that waits for an
 event. The [conversations](conversations.md#interrupting) page has a complete example. The pattern:
 
-```python fragment
+```py
 started, release = asyncio.Event(), asyncio.Event()
 
 async def held(request: SampleRequest) -> Message:

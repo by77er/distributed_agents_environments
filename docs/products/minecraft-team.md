@@ -22,7 +22,7 @@ uv run minecraft-team server --seed 12345                   # a temporary server
 ```
 
 `rollout train` writes the monitor's feed to `RUN/feed`, and `rollout monitor RUN` serves the page over the run's
-directory; `scripts/train-with-memory-log.sh` starts both, and writes `train.log` and the memory logs into `RUN`. The
+ledger (every run in it) and its feed; `scripts/train-with-memory-log.sh` starts both, and writes `train.log` and the memory logs into `RUN`. The
 page shows the run's steps and the groups that went into each, every episode of every group and, for each agent, what
 it sees (the map included), what it thinks, what it does and what comes back
 ([monitor](../libraries/rollout-train/monitor.md)).
@@ -317,10 +317,11 @@ tool call takes about 40 tokens. No turn is longer than the trainer's `segment_t
 A group's turns may be a step or two old when it is trained on, and a straggler plays on under newer weights; during
 a step every running episode waits, its world frozen between turns.
 
-A run started again in the same directory goes on where it stopped, from its latest adapter and its curriculum, and
-plays the groups it had decided from the same starts
+A run started again in the same directory goes on where it stopped, from the newest version it made and its
+curriculum, and plays the groups it had decided from the same starts
 ([dying and starting again](../libraries/rollout-train/training.md#dying-and-starting-again)). Episodes the stopped
-run left unfinished show as cancelled in the monitor, and servers it left behind are removed.
+run left unfinished are claimed and played again (its feed shows them cancelled), and servers it left behind are
+removed.
 
 ## Running on a small machine
 
@@ -330,7 +331,7 @@ inside it:
 | Concern | What the system does |
 |---|---|
 | System memory between steps | The [trainer](../implementations/rollout-lora.md#a-fresh-process-per-step) exits after every step, and the [engine](../implementations/rollout-vllm.md#sleep-and-wake) drops its weights when it sleeps |
-| System memory for episodes | Each Paper server has a heap of its own (`PaperServer.heap`). The profile's `[memory]` table says what must be available before episodes are admitted and before a step starts; short of it, the run stops with a message |
+| System memory for episodes | Each Paper server has a heap of its own (`PaperServer.heap`). The profile's `[memory]` table says what must be available before episodes are admitted (short of it, the runner waits) and before a step starts (short of it, the run stops with a message) |
 | GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, 2 to 3 GiB of the card stay in use by the desktop and a game client |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
 | Stopping | A run asked to stop ends its servers, its engine and a step in progress; servers and engines a killed run left are ended by the next one ([deploying](../guide/deploying.md#stopping)) |

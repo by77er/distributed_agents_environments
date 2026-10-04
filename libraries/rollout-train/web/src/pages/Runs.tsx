@@ -2,31 +2,34 @@
 
 import { memo } from "react";
 import { Link } from "react-router-dom";
-import { useFeeds, useKnown, useSystem } from "../api/queries";
+import { useFeeds, useKnown, useLaunches, useSystem } from "../api/queries";
 import type { Run } from "../api/types";
 import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
 import { nameOf, stateKind } from "../lib/model";
 import { Marks } from "../components/versions";
-import { episodePlace, runPlace } from "../lib/places";
+import { episodePlace, launchPlace, runPlace } from "../lib/places";
+import { LaunchList } from "../components/launches";
 import { RunDot, running, Wrote } from "../layout/runs";
 
 export function Runs() {
   const { data: system } = useSystem();
   const { data: feeds } = useFeeds();
+  const { data: launched } = useLaunches();
   if (!system) return <Empty>Reading the runs…</Empty>;
   const others = (feeds ?? []).filter(run => !run.labels.run);
   const states = (["running", "idle", "ended"] as const).map(name => [name, system.runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
   return (
     <>
-      <Head title="Runs" sub="The runs in the ledger, running ones first. A run opens its steps, groups, episodes and rollouts.">
+      <Head title={<span className="head-with-action">Runs<Link to={launchPlace} className="action">New run</Link></span>} sub="The runs in the ledger, running ones first. A run opens its steps, groups, episodes and rollouts.">
         <Specs>
           <Spec label="ledger">{system.ledger_at}</Spec>
           {states.map(([name, count]) => <Spec key={name} label={name} kind={name === "running" ? "good" : name === "idle" ? "warm" : ""}>{count}</Spec>)}
           <Spec label="this host">{system.host}</Spec>
         </Specs>
       </Head>
+      {launched?.launches?.length ? <LaunchList launches={launched.launches} system={system} /> : null}
       {system.runs.length ? <div className="tiles wide-tiles">{system.runs.map(run => <RunTile key={run.run} run={run} host={system.host} />)}</div> : <Empty>The ledger has no run yet.</Empty>}
       {others.length ? (
         <Card title="Episodes outside a run" note={`${others.length} in the feeds`}>

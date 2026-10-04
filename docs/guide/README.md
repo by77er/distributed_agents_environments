@@ -4,7 +4,7 @@ How to build with `rollout`: write tasks, tools and agents, run episodes, test t
 [documentation index](../README.md) lists everything else.
 
 Every block tagged exactly `python` in this guide runs as part of the test suite (`tests/test_docs.py`). A block
-tagged `python fragment` shows a shape and is not run. Every profile in a `toml` block is loaded by the tests. The
+tagged `py` shows a shape and is not run. Every profile in a `toml` block is loaded by the tests. The
 [API reference](reference.md) is generated from the source, and a test fails when it is out of date.
 
 ## Pages

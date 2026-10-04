@@ -15,8 +15,10 @@ from rollout.local import LocalRunner
 from rollout_train import Budget, Checkpoint, FileLedger, Step, Versions, Weighted, train
 from rollout_train.layout import BLOBS, FEED, LEDGER
 from rollout_train.ledger import Ledger
+from rollout_train.machine import measured
 from rollout_train.monitor import FeedReader, RunFeed, System
 from rollout_train.monitor.system import DONE, ENDED, PLAYING, WAITING
+from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, STEPS, scope, table
 from rollout_train.recorder import Recorder
 from rollout_train.registry import registry_of
@@ -55,13 +57,25 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     ledger = FileLedger(tmp_path / LEDGER)
     versions = Versions(ledger, blobs)
     local = LocalRunner(recorder=recorder, hooks=[feed])
-    runner = EpisodeRunner("here", ledger, local, recorder, blobs, places=4, hooks=[feed], every=0.05)
+    presence = presence_of(ledger)
+    assert presence is not None
+    channel = recorder.channels["policy"]
+
+    def about() -> dict[str, Any]:  # (what the platform says of its machine and its channel in each beat)
+        serving = {"channel": "policy", "adapter": channel.adapter, "version": channel.version, **channel.take()}
+        return {"run": "train", "machine": measured(tmp_path), "channels": [serving]}
+
+    runner = EpisodeRunner(
+        "here", ledger, local, recorder, blobs, places=4, hooks=[feed], every=0.05,
+        presence=presence, about=about, beating=0.05,
+    )  # fmt: skip
     async with playing(runner):
         await train(
             Words(), Trains(), versions, base="tiny", channel="policy", directory=tmp_path / "versions",
             publish=recorder.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
             started={"directory": str(tmp_path)},
         )  # fmt: skip
+    await presence.beat("here", {**about(), "places": 4, "playing": 0})  # (its last beat, the last version served)
     await local.close()
     feed.close()
     registry = registry_of(ledger)
@@ -73,7 +87,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     transport = httpx.ASGITransport(app=create_app(tmp_path))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         system = (await client.get("/api/system")).json()
-        machine = (await client.get("/api/machine")).json()
+        machines = (await client.get("/api/machines")).json()["machines"]
         group = (await client.get("/api/groups/train/1")).json()
         script = re.search(r'src="\./(assets/[^"]+\.js)"', (await client.get("/")).text)
         assert script and (await client.get(f"/{script.group(1)}")).status_code == 200  # (the page, as built)
@@ -131,7 +145,10 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert system["ledger"]["fences"] == {scope("train"): 1, runner_scope("here"): 1}
     assert system["ledger"]["tables"][table("train", GROUPS)] == 3
     assert system["kept"]["versions"] > 0 and system["kept"]["episodes"] > 0
-    assert machine["now"]["disk"]["total"] > 0 and system["written"] <= system["at"]
+    (machine,) = machines
+    assert machine["runner"] == "here" and machine["alive"] and machine["run"] == "train"
+    assert machine["machine"]["disk"]["total"] > 0 and machine["places"] == 4 and len(machine["history"]) > 1
+    assert system["written"] <= system["at"]
 
 
 async def ended(ledger: Ledger, run: str, group: int, number: int, run_id: str, runner: str = "here") -> None:
@@ -250,7 +267,7 @@ async def test_a_directory_that_is_no_run_has_nothing_to_show_and_is_left_as_it_
     system = await System(tmp_path, FeedReader(tmp_path / FEED)).snapshot()
     assert system["runs"] == system["versions"] == system["runners"] == system["channels"] == []
     assert system["bookmarks"] == {}
-    assert system["written"] is None and system["processes"] is None
+    assert system["written"] is None and "processes" not in system
     assert not (tmp_path / LEDGER).exists()  # (reading makes no ledger)
 
 

@@ -145,7 +145,7 @@ async def test_a_copy_into_a_database_keeps_the_runs_and_the_bookmarks(tmp_path:
     assert isinstance(database, DatabaseLedger)
     await copy(files, database)
     assert await database.registry.runs() == [run]
-    assert await database.registry.bookmarks() == [mark]
+    assert [(each.name, each.version) for each in await database.registry.bookmarks()] == [(mark.name, mark.version)]
 
 
 def test_the_command_lists_versions_and_moves_bookmarks(

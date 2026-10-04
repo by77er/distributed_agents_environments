@@ -17,7 +17,7 @@ segments = recorder.sessions(run_id)             # by model slot: what each expo
 |---|---|
 | `endpoint(binding)` | the model endpoint for a recorded binding. A binding that names no channel of the recorder raises `ValueError`. |
 | `export(session_id)`, `sessions(run_id)` | what one session exports, and what every slot of a run exports |
-| `publish(channel, adapter, path)` | serves new weights on a channel ([publishing weights](channels.md#publishing-weights)) |
+| `publish(channel, adapter, path, version)` | serves new weights on a channel, and returns the version they are served as ([publishing weights](channels.md#publishing-weights)) |
 | `forget(run_id)` | drops everything kept of a run: its turns, its recorded results and the keys of its harnesses |
 | `base_url` | where the recorder is served over HTTP, for [harnesses that bring their own loop](harness-endpoint.md) |
 
@@ -96,5 +96,6 @@ on this protocol.
   `JsonToolCalls`) and [`ThinkingFormat`](../../guide/reference.md#thinkingformat).
 - Tool call arguments that a family writes as text (`XmlFunctionCalls`) are converted to the types the tool's schema
   declares.
-- `rollout_qwen` has the functions for the Qwen families: [Qwen renderers](../../implementations/rollout-qwen.md).
+- `rollout_qwen` has the functions for the Qwen families ([Qwen renderers](../../implementations/rollout-qwen.md)),
+  `rollout_gemma` the one for Gemma ([Gemma renderers](../../implementations/rollout-gemma.md)).
   `PlainRenderer` is a readable format for tests ([training](training.md#trying-it-without-a-gpu)).

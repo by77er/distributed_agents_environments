@@ -3,10 +3,11 @@ that changes when what it says does.
 
 A topic is a thing the page shows, by name:
 
-- `system`: where every run stands (`System.snapshot`, without the machine's measurements);
-- `machine`: the machine's measurements;
+- `system`: where every run stands (`System.snapshot`);
+- `machines`: every runner's machine, as its heartbeats say (`System.machines`);
+- `launches`: the runs asked for, and the launchers alive with what each offers (`System.launches`);
 - `feeds`: every episode in the runs' feeds, summarised (`System.feeds`);
-- `statistics`: every run in figures (`System.statistics`, without the machine);
+- `statistics`: every run in figures (`System.statistics`, without the machines);
 - `versions`, `versions/sample`: the versions as a graph, without or with the sample fixture (`System.lineage`);
 - `group/RUN/NUMBER`: one group (`System.group`);
 - `episode/RUN_ID`: one episode's lines; its version is how many there are, where from and its state, and the page
@@ -98,16 +99,16 @@ class Hub:
     async def _payload(self, topic: str) -> Any:
         system = self.system
         if topic == "system":
-            snapshot = await system.snapshot()
-            snapshot.pop("machine", None)
-            return snapshot
-        if topic == "machine":
-            return {"host": system.host, **await asyncio.to_thread(system.machine.shown)}
+            return await system.snapshot()
+        if topic == "machines":
+            return await system.machines()
+        if topic == "launches":
+            return await system.launches()
         if topic == "feeds":
             return await asyncio.to_thread(system.feeds)
         if topic == "statistics":
             figures = await system.statistics()
-            figures.pop("machine", None)
+            figures.pop("machines", None)
             return figures
         if topic in ("versions", "versions/sample"):
             return await system.lineage(sample=topic.endswith("/sample"))

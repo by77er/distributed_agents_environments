@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, Entry, Episode, FeedRun, Group, Lineage, Machine, Statistics, System } from "./types";
+import type { Bookmark, Entry, Episode, FeedRun, Group, Launch, LaunchAsked, Launches, Lineage, Machines, Statistics, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -18,7 +18,8 @@ export interface Topic {
 export const topics = {
   system: (): Topic => ({ topic: "system", key: ["system"], path: "api/system" }),
   feeds: (): Topic => ({ topic: "feeds", key: ["feeds"], path: "api/runs" }),
-  machine: (): Topic => ({ topic: "machine", key: ["machine"], path: "api/machine" }),
+  machines: (): Topic => ({ topic: "machines", key: ["machines"], path: "api/machines" }),
+  launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
   versions: (sample: boolean): Topic => ({
     topic: sample ? "versions/sample" : "versions",
@@ -95,8 +96,29 @@ export const useUnbookmark = () =>
 export const useFeeds = () =>
   useQuery({ queryKey: topics.feeds().key, queryFn: ({ signal }) => readJson<FeedRun[]>(topics.feeds().path, signal) });
 
-export const useMachine = () =>
-  useQuery({ queryKey: topics.machine().key, queryFn: ({ signal }) => readJson<Machine>(topics.machine().path, signal) });
+export const useMachines = () =>
+  useQuery({ queryKey: topics.machines().key, queryFn: ({ signal }) => readJson<Machines>(topics.machines().path, signal) });
+
+export const useLaunches = () =>
+  useQuery({ queryKey: topics.launches().key, queryFn: ({ signal }) => readJson<Launches>(topics.launches().path, signal) });
+
+/** Ask for a run: a launcher alive that offers its profile starts it. */
+export function useLaunch() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (launch: LaunchAsked) => (await asked<{ launch: Launch }>("api/launches", "POST", launch)).launch,
+    onSuccess: () => client.invalidateQueries({ queryKey: topics.launches().key }),
+  });
+}
+
+/** Ask a launch to stop: one not started is stopped at once; a run going is stopped by its launcher. */
+export function useStop() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await asked<{ launch: Launch }>(`api/launches/${encodeURIComponent(id)}/stop`, "POST")).launch,
+    onSuccess: () => client.invalidateQueries({ queryKey: topics.launches().key }),
+  });
+}
 
 export const useStatistics = () =>
   useQuery({

@@ -495,7 +495,7 @@ export function Versions({ sample }: { sample: boolean }) {
           <span><i style={{ background: "var(--warm)" }} />distilled off-policy: on its teachers' samples</span>
           <span><i style={{ background: "var(--violet)" }} />distilled on-policy: it samples, its teachers score each token</span>
           <span><b className="t-accent">name</b> a bookmark</span>
-          <span><i className="hollow" />released (weights let go)</span><span><i className="ring-good" />serving</span>
+          <span><i className="hollow" />released (weights deleted)</span><span><i className="ring-good" />serving</span>
           <span><i className="ring-warm" />rolling out</span><span><i className="ring-violet" />resharding</span>
           {lineage.evaluations.length ? <span><b className="t-good">9/16</b> solved of the suite played</span> : null}
         </div>

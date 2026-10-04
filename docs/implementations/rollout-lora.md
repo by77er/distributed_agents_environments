@@ -95,7 +95,7 @@ Two things still grow with a segment's length, and `rollout_lora.activations` ta
   gradient arrives each piece is computed with gradients and takes its backward step before the next. Nothing is
   computed more often than without it.
 
-Both give the same logprobs and gradients. A pass without a gradient stores nothing.
+On a small model both give the same logprobs and gradients. On the 4-bit Qwen3.5-9B checkpoint, `tests/rollout_lora/test_on_gpu.py` finds a segment's logprobs with both set up to 0.07 apart from those without (its tolerance is 0.01), so neither is set by a profile until that difference is explained. A pass without a gradient stores nothing.
 
 ## The policy
 

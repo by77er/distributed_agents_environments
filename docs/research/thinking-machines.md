@@ -1,7 +1,7 @@
 # Hosted training: Thinking Machines' Tinker, and Prime Intellect for contrast
 
 See [training](../libraries/rollout-train/training.md), [channels and engines](../libraries/rollout-train/channels.md),
-[policies](../libraries/rollout-train/versions.md), [deploying](../guide/deploying.md),
+[versions](../libraries/rollout-train/versions.md), [deploying](../guide/deploying.md),
 [LoRA trainer](../implementations/rollout-lora.md), [the policy graph](policy-dag.md)
 
 **A proposal.** This page asks how this system could train and sample through Thinking Machines' hosted API (Tinker)
@@ -369,7 +369,7 @@ How the pieces fit:
 
 ### `TinkerTrainer`
 
-```python fragment
+```py
 # implementations/rollout-tinker/src/rollout_tinker/trainer.py (proposed)
 from collections.abc import Sequence
 from pathlib import Path
@@ -464,7 +464,7 @@ How `passed` works:
 
 ### `TinkerEngine`
 
-```python fragment
+```py
 # implementations/rollout-tinker/src/rollout_tinker/engine.py (proposed)
 from rollout_train.inference import Generation
 

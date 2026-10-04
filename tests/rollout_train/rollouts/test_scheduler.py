@@ -6,13 +6,16 @@ from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
 from typing import Any
 
+import pytest
 from pydantic import JsonValue
 
 from rollout.contracts import RunEventType
 from rollout.harness import ModelBinding, RecordedModel, RunBinding, agent_program
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
+from rollout_train import presence
 from rollout_train.ledger import FileLedger, Ledger
+from rollout_train.presence import Beat, FilePresence
 from rollout_train.record import GROUPS, scope, table
 from rollout_train.recorder import Recorder
 from rollout_train.rollouts import EpisodeRunner, Outcome, Plan, Record, episodes_of, events_of, plan, playing
@@ -212,3 +215,53 @@ async def test_a_runner_plays_only_the_runs_it_can_serve(tmp_path: Path) -> None
     assert [(each.run, each.group) for each in await played.open()] == [("mine", 1)]
     played.runs = None
     assert sorted(each.run for each in await played.open()) == ["mine", "theirs"]  # not the run it has no channel for
+
+
+class Heard:
+    """Heartbeats beside a ledger of files, with how many claims the ledger had at each beat."""
+
+    def __init__(self, ledger: FileLedger) -> None:
+        self.ledger = ledger
+        self.kept = FilePresence(ledger.directory)
+        self.claims_at_beats: list[int] = []
+
+    async def beat(self, runner: str, about: Mapping[str, JsonValue]) -> None:
+        self.claims_at_beats.append(len(await self.ledger.read(table("train", CLAIMS))))
+        await self.kept.beat(runner, about)
+
+    async def beats(self) -> list[Beat]:
+        return await self.kept.beats()
+
+
+async def test_a_runner_beats_before_it_claims_and_then_every_few_seconds_saying_what_it_plays(
+    tmp_path: Path,
+) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    heard = Heard(ledger)
+    played, _, _ = runner(tmp_path, "yes", presence=heard, about=lambda: {"host": "a-host"}, beating=0.02)
+    await ask(ledger, "train", {1: ({"word": "yes"}, 2)})
+    async with served(played):
+        await episodes_of(ledger, played.blobs, "train", 1, 2, every=0.01)
+        await asyncio.sleep(0.1)
+    assert heard.claims_at_beats[0] == 0 and len(heard.claims_at_beats) > 2  # (alive before it claims anything)
+    (beat,) = await heard.beats()
+    assert beat.runner == "here" and beat.about == {"host": "a-host", "places": 8, "playing": 0}
+    assert len(beat.history) > 2 and all("playing" in point for point in beat.history)
+
+
+async def test_a_claim_of_a_runner_that_stopped_beating_is_open_again_though_its_fence_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    heartbeats = FilePresence(ledger.directory)
+    played, _, _ = runner(tmp_path, "yes", presence=heartbeats)
+    await ask(ledger, "train", {1: ({"word": "yes"}, 2)})
+    fence = await ledger.take("runners/elsewhere")  # a runner on a machine that has since died
+    await ledger.append(table("train", CLAIMS), "1/1/1", {"runner": "elsewhere", "fence": fence.number}, fence)
+    other = await ledger.take("runners/never-beat")  # and one that never beat at all
+    await ledger.append(table("train", CLAIMS), "1/2/1", {"runner": "never-beat", "fence": other.number}, other)
+    await heartbeats.beat("elsewhere", {"places": 1})
+    held = await played.open()
+    assert [(each.number, each.attempt) for each in held] == [(2, 2)]  # (only a runner that beats holds its claim)
+    monkeypatch.setattr(presence, "STALE", -1.0)  # its newest beat is now too old
+    assert [(each.number, each.attempt) for each in await played.open()] == [(1, 2), (2, 2)]

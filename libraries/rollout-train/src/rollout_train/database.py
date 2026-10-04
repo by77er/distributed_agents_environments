@@ -8,13 +8,16 @@ replaced is refused (`Fenced`) whichever process it is in. SQLite serves one mac
 
 `DatabaseRegistry` is the registry (`rollout_train.registry`) beside it, in two tables of the same database: `runs`
 (each run's id and name, a name once) and `bookmarks` (each bookmark's name and version); a database ledger's is its
-`registry`.
+`registry`. `DatabasePresence` holds the runners' heartbeats (`rollout_train.presence`) in a third, `presence`: a row
+per runner, changed in place; a database ledger's is its `presence`. `DatabaseLaunches` holds the runs asked for
+(`rollout_train.launches`) in a fourth, `launches`; a database ledger's is its `launches`.
 """
 
 import asyncio
 import json
 import time
-from dataclasses import asdict
+from collections.abc import Mapping
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +25,9 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 
 from rollout_durable.database import Connection, Database, fetch_all, fetch_one, sql
+from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, new_launch
 from rollout_train.ledger import Fence, Fenced, Ledger
+from rollout_train.presence import Beat, kept
 from rollout_train.registry import Bookmark, Entry, Taken, checked, found, new_run_id, registry_of, valid
 
 METADATA = sa.MetaData()
@@ -54,6 +59,22 @@ BOOKMARKS = sa.Table(
     sa.Column("name", sa.Text, primary_key=True),
     sa.Column("version", sa.Text, nullable=False),
     sa.Column("moved", sa.Float(), nullable=False),
+)
+LAUNCHES = sa.Table(
+    "launches",
+    METADATA,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("at", sa.Float(), nullable=False),
+    sa.Column("state", sa.Text, nullable=False),
+    sa.Column("launch", sa.Text, nullable=False),
+)
+PRESENCE = sa.Table(
+    "presence",
+    METADATA,
+    sa.Column("runner", sa.Text, primary_key=True),
+    sa.Column("at", sa.Float(), nullable=False),
+    sa.Column("about", sa.Text, nullable=False),
+    sa.Column("history", sa.Text, nullable=False),
 )
 
 
@@ -123,8 +144,18 @@ class DatabaseLedger:
 
     @property
     def registry(self) -> "DatabaseRegistry":
-        """The registry of runs and policies, in this ledger's database."""
+        """The registry of run names and bookmarks, in this ledger's database."""
         return DatabaseRegistry(self.database)
+
+    @property
+    def launches(self) -> "DatabaseLaunches":
+        """The runs asked for, in this ledger's database."""
+        return DatabaseLaunches(self.database)
+
+    @property
+    def presence(self) -> "DatabasePresence":
+        """The runners' heartbeats, in this ledger's database."""
+        return DatabasePresence(self.database)
 
     def close(self) -> None:
         self.database.close()
@@ -189,6 +220,89 @@ class DatabaseRegistry:
                 raise KeyError(f"there is no bookmark {name!r}")
 
         await asyncio.to_thread(self.database.write, taken, exclusive="registry")
+
+
+class DatabaseLaunches:
+    """`Launches` (`rollout_train.launches`) in the `launches` table of a database."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def ask(self, asked: Asked) -> Launch:
+        made = new_launch(asked)
+
+        def added(connection: Connection) -> None:
+            sql(connection, "INSERT INTO launches (id, at, state, launch) VALUES (:id, :at, :state, :launch)",
+                {"id": made.id, "at": made.at, "state": made.state, "launch": json.dumps(asdict(made))})  # fmt: skip
+
+        await asyncio.to_thread(self.database.write, added, exclusive="launches")
+        return made
+
+    async def all(self) -> list[Launch]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            return fetch_all(connection, "SELECT launch FROM launches ORDER BY at DESC")
+
+        return [as_launch(json.loads(launch)) for (launch,) in await asyncio.to_thread(self.database.read, rows)]
+
+    async def claim(self, id: str, launcher: str) -> Launch | None:
+        def claimed(connection: Connection) -> Launch | None:
+            row = fetch_one(connection, "SELECT launch FROM launches WHERE id = :id AND state = :asked",
+                            {"id": id, "asked": ASKED})  # fmt: skip
+            if row is None:
+                return None
+            launch = replace(as_launch(json.loads(row[0])), state=CLAIMED, launcher=launcher, updated=time.time())
+            self._write(connection, launch)
+            return launch
+
+        return await asyncio.to_thread(self.database.write, claimed, exclusive="launches")
+
+    async def note(self, id: str, **changes: Any) -> Launch:
+        def noted(connection: Connection) -> Launch:
+            row = fetch_one(connection, "SELECT launch FROM launches WHERE id = :id", {"id": id})
+            if row is None:
+                raise KeyError(f"there is no launch {id}")
+            launch = replace(as_launch(json.loads(row[0])), **changes, updated=round(time.time(), 1))
+            self._write(connection, launch)
+            return launch
+
+        return await asyncio.to_thread(self.database.write, noted, exclusive="launches")
+
+    @staticmethod
+    def _write(connection: Connection, launch: Launch) -> None:
+        sql(connection, "UPDATE launches SET state = :state, launch = :launch WHERE id = :id",
+            {"id": launch.id, "state": launch.state, "launch": json.dumps(asdict(launch))})  # fmt: skip
+
+
+class DatabasePresence:
+    """`Presence` (`rollout_train.presence`) in the `presence` table of a database."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def beat(self, runner: str, about: Mapping[str, JsonValue]) -> None:
+        at = round(time.time(), 1)
+
+        def noted(connection: Connection) -> None:
+            row = fetch_one(connection, "SELECT history FROM presence WHERE runner = :runner", {"runner": runner})
+            history = kept(json.loads(row[0]) if row else [], at, about)
+            sql(
+                connection,
+                "INSERT INTO presence (runner, at, about, history) VALUES (:runner, :at, :about, :history) "
+                "ON CONFLICT (runner) DO UPDATE SET at = excluded.at, about = excluded.about, "
+                "history = excluded.history",
+                {"runner": runner, "at": at, "about": json.dumps(dict(about)), "history": json.dumps(history)},
+            )
+
+        await asyncio.to_thread(self.database.write, noted, exclusive=f"presence:{runner}")
+
+    async def beats(self) -> list[Beat]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            return fetch_all(connection, "SELECT runner, at, about, history FROM presence ORDER BY runner")
+
+        found = await asyncio.to_thread(self.database.read, rows)
+        return [
+            Beat(str(runner), float(at), json.loads(about), json.loads(history)) for runner, at, about, history in found
+        ]
 
 
 def _runs(connection: Connection) -> list[Entry]:

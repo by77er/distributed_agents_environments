@@ -6,7 +6,7 @@ keep episode state on `self`.
 
 ## Anatomy
 
-```python fragment
+```py
 class MyTask(Task):
     # Declarations: class attributes
     models = {"policy": ModelSlot()}      # model slots; the agent acts through "policy"

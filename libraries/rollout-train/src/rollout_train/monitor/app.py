@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -46,8 +46,10 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     """Serves the page and what it asks for, over a ledger or a run's directory (`watched`):
 
     - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
-    - `/api/system`: where every run stands (`System.snapshot`, without the machine's measurements);
-    - `/api/machine`: the machine's measurements, now and over the last hours;
+    - `/api/system`: where every run stands (`System.snapshot`);
+    - `/api/machines`: every runner's machine as its heartbeats say, now and over its recent beats;
+    - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run (`System.launch`),
+      `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
@@ -89,8 +91,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
             return JSONResponse(await system.snapshot(relayed=True))
         return answered(request, await hub.read("system"))
 
-    async def machine(request: Request) -> Response:
-        return answered(request, await hub.read("machine"))
+    async def machines(request: Request) -> Response:
+        return answered(request, await hub.read("machines"))
 
     async def group(request: Request) -> Response:
         run, number = request.path_params["run"], int(request.path_params["number"])
@@ -182,6 +184,29 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
         return await written(change)
 
+    async def launches(request: Request) -> Response:
+        if request.method == "GET":
+            return answered(request, await hub.read("launches"))
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "say the run to launch, as JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "say the run to launch, as JSON"}, status_code=400)
+
+        async def change() -> Any:
+            return {"launch": asdict(await system.launch(cast(dict[str, Any], body)))}
+
+        return await written(change)
+
+    async def stop(request: Request) -> Response:
+        id = request.path_params["id"]
+
+        async def change() -> Any:
+            return {"launch": asdict(await system.stop(id))}
+
+        return await written(change)
+
     async def unbookmark(request: Request) -> Response:
         name = request.path_params["name"]
 
@@ -193,7 +218,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
     @contextlib.asynccontextmanager
     async def measuring(app: Starlette) -> AsyncGenerator[None]:
-        tasks = [asyncio.create_task(system.machine.watch()), asyncio.create_task(hub.run())]
+        tasks = [asyncio.create_task(hub.run())]
         try:
             yield
         finally:
@@ -203,7 +228,9 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     routes = [
         Route("/", page),
         Route("/api/system", state),
-        Route("/api/machine", machine),
+        Route("/api/machines", machines),
+        Route("/api/launches", launches, methods=["GET", "POST"]),
+        Route("/api/launches/{id}/stop", stop, methods=["POST"]),
         Route("/api/groups/{run}/{number:int}", group),
         Route("/api/episodes/{run_id}", episode),
         Route("/api/versions", versions),

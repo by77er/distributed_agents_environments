@@ -59,7 +59,7 @@ assert specification.input_schema == {
 
 ## Options
 
-```python fragment
+```py
 @tool(name="search_catalog", retry_class=RetryClass.IDEMPOTENT, timeout=timedelta(seconds=10))
 async def search(self, query: str) -> list[str]: ...
 ```
@@ -136,7 +136,7 @@ asyncio.run(main())
 
 Override `respond` to add environment logic, and call `run_tools` for replies that make tool calls:
 
-```python fragment
+```py
 async def respond(self, run: RunContext, reply: Message) -> Observation:
     if reply.tool_calls:
         return await self.run_tools(run, reply)  # executes all calls concurrently
@@ -148,7 +148,7 @@ async def respond(self, run: RunContext, reply: Message) -> Observation:
 `tools_for_turn(run)` returns the specifications offered on each turn; the default offers every `@tool` method,
 then every imported tool. Override it to change the action space as the episode progresses:
 
-```python fragment
+```py
 def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]:
     tools = super().tools_for_turn(run)
     return [tool for tool in tools if tool.name != "submit"] if run.turn < 2 else tools

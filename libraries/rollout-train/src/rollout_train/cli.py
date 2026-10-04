@@ -60,6 +60,7 @@ async def _train(
     seed: int,
     monitor: str | None = None,
     name: str | None = None,
+    settings: dict[str, Any] | None = None,
 ) -> None:
     import dataclasses
 
@@ -67,14 +68,15 @@ async def _train(
     from rollout_train import train
     from rollout_train.profile import Profile
 
-    described = dataclasses.replace(Profile.load(profile, directory=directory), name=name)
+    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=settings), name=name)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
     channel, rows = described.trainer.channel, named(catalog)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
-    started = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (the run's `starts` record)
+    started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (its `starts`)
     async with described.open() as platform:
         assert platform.trainer is not None
+        started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
         binding = binding_for(rows, channel, platform.tool_bindings)
         await train(
             rows, platform.trainer, platform.versions, start=platform.origin, channel=channel,
@@ -121,6 +123,20 @@ async def _imitate(profile: Path, directory: Path | None, kinds: list[str], limi
     print(f"made {version.id}: {json.dumps({key: round(value, 4) for key, value in version.metrics.items()})}")
 
 
+def _setting(given: str) -> tuple[str, Any]:
+    """`KEY=VALUE` as a profile setting: the value read as TOML (`3e-5`, `true`, `[1, 2]`, `"text"`), or else as
+    the text it is."""
+    import tomllib
+
+    key, _, value = given.partition("=")
+    if not key or not _:
+        raise SystemExit(f"--set {given!r}: it should be KEY=VALUE")
+    try:
+        return key.strip(), tomllib.loads(f"value = {value}")["value"]
+    except tomllib.TOMLDecodeError:
+        return key.strip(), value
+
+
 def _ledger_at(where: str) -> "Ledger":
     """A ledger by where it is: a database's URL, a run's directory (as its `ledger.json` says), or a directory of
     files."""
@@ -160,6 +176,19 @@ def _registry_at(where: str) -> "tuple[Ledger, Registry]":
     if registry is None:
         raise SystemExit(f"the ledger at {where} has no registry beside it")
     return ledger, registry
+
+
+async def _launcher(where: str, profiles: Path, catalogs: list[str], runs: Path, at_once: int) -> None:
+    from rollout_train.launcher import Launcher, name_of
+    from rollout_train.launches import launches_of
+    from rollout_train.presence import presence_of
+
+    ledger = _ledger_at(where)
+    launches, presence = launches_of(ledger), presence_of(ledger)
+    if launches is None or presence is None:
+        raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
+    profiles, runs = await asyncio.to_thread(profiles.expanduser), await asyncio.to_thread(runs.expanduser)
+    await Launcher(name_of(), launches, presence, profiles, catalogs, runs, at_once=at_once).serve()
 
 
 async def _rename(who: str, name: str, where: str) -> None:
@@ -222,6 +251,10 @@ def main() -> None:
     training.add_argument("--seed", type=int, default=0)
     training.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
     training.add_argument("--name", help="what a new run is called (by default its directory's name)")
+    training.add_argument(
+        "--set", action="append", default=[], metavar="KEY=VALUE",
+        help="change a profile setting, by dotted key: --set trainer.learning_rate=3e-5 (a TOML value; repeatable)",
+    )  # fmt: skip
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
     reporting.add_argument("catalog")
@@ -253,6 +286,12 @@ def main() -> None:
     marking.add_argument("version", nargs="?", help="a bookmark, RUN:STEP, RUN, or a version's id or its start")
     marking.add_argument("--delete", action="store_true", help="take the bookmark away (the version stays)")
     marking.add_argument("--ledger", default=".", help=where)
+    launching = commands.add_parser("launcher", help="start the training runs asked for that this machine can run")
+    launching.add_argument("--ledger", required=True, help="the database's URL (or a ledger's directory)")
+    launching.add_argument("--profiles", type=Path, required=True, help="a directory of profiles it offers")
+    launching.add_argument("--catalog", action="append", default=[], help="a catalog it offers (repeatable)")
+    launching.add_argument("--runs", type=Path, required=True, help="where it makes each run's directory")
+    launching.add_argument("--at-once", type=int, default=1, help="runs it plays at once (1: one GPU)")
     listing = commands.add_parser("versions", help="every version, newest first: where it came from")
     listing.add_argument("--ledger", default=".", help=where)
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
@@ -271,6 +310,7 @@ def main() -> None:
             arguments.seed,
             arguments.monitor,
             arguments.name,
+            dict(_setting(each) for each in arguments.set),
         )
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "rename":
@@ -281,6 +321,9 @@ def main() -> None:
             parser.error("bookmark: name a version, or --delete")
         asyncio.run(_bookmark(arguments.name, arguments.version, arguments.delete, arguments.ledger))
         return
+    if arguments.command == "launcher":
+        work = _launcher(arguments.ledger, arguments.profiles, arguments.catalog, arguments.runs, arguments.at_once)
+        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "versions":
         asyncio.run(_versions(arguments.ledger))
         return

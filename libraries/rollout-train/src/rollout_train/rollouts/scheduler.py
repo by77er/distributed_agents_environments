@@ -8,7 +8,8 @@ first append wins, so two runners never play one attempt). It plays the episode,
 the blob store, and records it under `GROUP/EPISODE` (`runs/RUN/episodes`) when it ends. The run reads a group's
 episodes from there once they have all ended.
 
-A claim holds while its runner is the one that made it: a runner started again takes its fence anew, and what it had
+A claim holds while its runner is the one that made it and is alive: a runner started again takes its fence anew, and
+a runner beats every few seconds (`rollout_train.presence`), so one whose machine died stops beating; what either had
 claimed is claimed again by whoever has room. An episode its runner cut short by closing is noted
 (`runs/RUN/interrupted`) and claimed again too. Several runners, on one machine or many, share the work the same way:
 which machine plays a group's episodes is only a matter of where runners are.
@@ -27,6 +28,7 @@ from rollout.contracts import RunEvent
 from rollout.harness.blobs import Blobs
 from rollout.harness.runner import ProgramReference, RunBinding, Runner, RunSpecification, with_row
 from rollout_train.ledger import Fence, Ledger
+from rollout_train.presence import Presence, alive
 from rollout_train.record import GROUPS, RESULTS, runs_in, table
 from rollout_train.recorder import Segment
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, assemble, loaded, stored
@@ -114,7 +116,9 @@ class Open:
 class EpisodeRunner:
     """Claims the episodes runs ask for in `ledger` and plays them on `runner`, at most `places` at once: those of the
     runs it can serve (whose models its recorder's channels serve and whose imports are among `imports`), and of `runs`
-    only, if given. `guard` is called before claiming and raises to wait (a machine short of memory, say)."""
+    only, if given. `guard` is called before claiming and raises to wait (a machine short of memory, say). With
+    `presence`, it beats every `beating` seconds, with what `about` says of its machine besides its places and how
+    many it plays, and a claim holds only while its runner beats."""
 
     name: str
     ledger: Ledger
@@ -126,8 +130,13 @@ class EpisodeRunner:
     runs: Collection[str] | None = None
     hooks: Sequence[Hooks] = ()
     guard: Callable[[], None] | None = None
+    presence: Presence | None = None
+    about: Callable[[], Mapping[str, JsonValue]] | None = None
+    """What the runner says of its machine in each beat (called in a thread: it may measure)."""
     every: float = 0.5
     """Seconds between looks for work while nothing ends."""
+    beating: float = 15.0
+    """Seconds between beats."""
     _fence: Fence | None = None
     _playing: dict[str, asyncio.Task[None]] = field(default_factory=dict[str, asyncio.Task[None]])
     _news: asyncio.Event = field(default_factory=asyncio.Event)
@@ -135,6 +144,10 @@ class EpisodeRunner:
     async def serve(self) -> None:
         """Claim and play episodes until cancelled; what is playing then is cut short and noted."""
         self._fence = await self.ledger.take(runner_scope(self.name))
+        beating: asyncio.Task[None] | None = None
+        if self.presence is not None:
+            await self._beat()  # (alive before it claims anything)
+            beating = asyncio.create_task(self._beats())
         try:
             while True:
                 room = self.places - len(self._playing)
@@ -145,14 +158,26 @@ class EpisodeRunner:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._news.wait(), self.every)
         finally:
-            playing = list(self._playing.values())
+            playing = [*self._playing.values(), *([beating] if beating else [])]
             for task in playing:
                 task.cancel()
             await asyncio.gather(*playing, return_exceptions=True)
 
+    async def _beats(self) -> None:
+        while True:
+            await asyncio.sleep(self.beating)
+            with contextlib.suppress(Exception):  # (a beat missed is noticed only if many are)
+                await self._beat()
+
+    async def _beat(self) -> None:
+        assert self.presence is not None
+        said: Mapping[str, JsonValue] = await asyncio.to_thread(self.about) if self.about is not None else {}
+        await self.presence.beat(self.name, {**said, "places": self.places, "playing": len(self._playing)})
+
     async def open(self) -> list[Open]:
         """The episodes nobody plays now, of the runs this runner serves, oldest group first."""
         fences = await self.ledger.fences()
+        beats = {beat.runner: beat for beat in await self.presence.beats()} if self.presence is not None else None
         found: list[Open] = []
         for run in await runs_in(self.ledger):
             if self.runs is not None and run not in self.runs:
@@ -169,7 +194,9 @@ class EpisodeRunner:
             for key, claim in claims.items():
                 group, number, attempt = key.split("/")
                 made = _mapping(claim)
-                holds = key not in cut and fences.get(runner_scope(str(made["runner"]))) == made["fence"]
+                runner = str(made["runner"])
+                holds = key not in cut and fences.get(runner_scope(runner)) == made["fence"]
+                holds = holds and (beats is None or runner == self.name or alive(beats.get(runner)))
                 attempts.setdefault(f"{group}/{number}", []).append((int(attempt), holds))
             for key, group in groups.items():
                 record = _mapping(group)

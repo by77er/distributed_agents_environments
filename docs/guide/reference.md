@@ -2185,7 +2185,9 @@ class EpisodeRunner
 
 Claims the episodes runs ask for in `ledger` and plays them on `runner`, at most `places` at once: those of the
 runs it can serve (whose models its recorder's channels serve and whose imports are among `imports`), and of `runs`
-only, if given. `guard` is called before claiming and raises to wait (a machine short of memory, say).
+only, if given. `guard` is called before claiming and raises to wait (a machine short of memory, say). With
+`presence`, it beats every `beating` seconds, with what `about` says of its machine besides its places and how
+many it plays, and a claim holds only while its runner beats.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -2199,7 +2201,10 @@ only, if given. `guard` is called before claiming and raises to wait (a machine 
 | `runs` | `Collection[str] \| None` | `None` |  |
 | `hooks` | `Sequence[Hooks]` | `()` |  |
 | `guard` | `Callable[[], None] \| None` | `None` |  |
+| `presence` | `Presence \| None` | `None` |  |
+| `about` | `Callable[[], Mapping[str, JsonValue]] \| None` | `None` | What the runner says of its machine in each beat (called in a thread: it may measure). |
 | `every` | `float` | `0.5` | Seconds between looks for work while nothing ends. |
+| `beating` | `float` | `15.0` | Seconds between beats. |
 
 **Methods**
 
@@ -2769,7 +2774,7 @@ class Version
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
-| `released` | `float \| None` | `None` | When its files were let go (`Versions.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
+| `released` | `float \| None` | `None` | When its files were deleted (`Versions.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
 
 **Methods**
 
@@ -2795,7 +2800,7 @@ Every version, in a ledger, and their files in a blob store.
   Its base is its first parent's; `base` names it for a version made from the base model. The append is what makes
   the version exist: a writer that dies before it has made nothing, and one that repeats it (the same id, decided
   before) gets the version that is there.
-- `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Let go of the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
+- `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
   nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
   release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no version
   still names it, so this may be repeated after a crash at any point.
@@ -3187,7 +3192,8 @@ class Profile
 
 **Methods**
 
-- `@classmethod def load(cls, path: Path, *, directory: Path | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs). A key the
+- `@classmethod def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
+  `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
   file has and a profile does not is an error: a misspelt guard would otherwise be no guard.
 - `async def open(self) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way).
 
@@ -3290,11 +3296,20 @@ class System
   bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
   says no version (or no registry).
 - `async def unbookmark(self, name: str) -> None` — Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark.
+- `async def launches(self) -> dict[str, Any]` — The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
+  settings a launch may change, its catalogs, and whether it has room). A launch whose launcher stopped beating
+  while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
+- `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile and its
+  catalog starts it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the
+  profile does not have), `KeyError` for what no launcher offers or a version no reference says.
+- `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
+  group boundary. Raises `KeyError` when there is no such launch going.
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
   beside the ledger.
 - `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
-  throughput from its feed, what the runs are called, and the machine's measurements.
+  throughput from its runners' heartbeats, what the runs are called, and the runners' machines.
+- `async def machines(self) -> dict[str, Any]` — Every runner's machine, as its heartbeats say: now, and over its recent beats.
 - `async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
   its step and the version it made, and its outcome.
 - `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the

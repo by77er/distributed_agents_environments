@@ -7,7 +7,7 @@ environment is named in it only by its tool set. This page is the one place the 
 described. The code is `rollout_train.profile`, and the command is `rollout` (`rollout_train.cli`).
 
 ```toml
-directory = "~/.cache/rollout/runs/first"     # the run's state: versions in use, metrics, the monitor's feed
+directory = "~/.cache/rollout/runs/first"     # the run's own: run.json, versions in use, the monitor's feed
 runner = "local"                              # or "durable": runs survive this process
 serve = "0.0.0.0:8900"                        # optional: the model endpoint for harnesses, over HTTP
 address = "http://trainer-1:8900"             # what others reach it at, if not http://{serve}
@@ -47,9 +47,11 @@ uv run rollout monitor RUN                     # the web page over RUN's ledger 
 uv run rollout report RUN minecraft_team.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
 uv run rollout versions --ledger RUN                                 # every version: where it came from, its bookmarks
-uv run rollout bookmark diamonds RUN:20 --ledger RUN                 # name a version (or move the bookmark there)
-uv run rollout rename RUN "diamonds, unguided" --ledger RUN          # call a run something else (its id stays)
+uv run rollout bookmark diamonds first:20 --ledger RUN               # name the version run "first" made at step 20
+uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
+uv run rollout train profile.toml CATALOG --set trainer.learning_rate=3e-5 --set trainer.start=diamonds  # change settings
+uv run rollout launcher --ledger URL --profiles PROFILES --catalog CATALOG --runs RUNS   # start runs asked for here
 ```
 
 `rollout COMMAND --help` lists each command's options. A catalog is named as `module:name`, like everything else a
@@ -72,9 +74,9 @@ A key the profile does not have is an error, so a misspelt guard is never silent
 | `runner` | `local` runs episodes in this process; `durable` records them so that they survive it ([durable runner](../implementations/rollout-durable/README.md)) | |
 | `serve`, `address` | Where the [model endpoint for harnesses](../libraries/rollout-train/harness-endpoint.md) listens, and the URL others reach it at | |
 | `tools` | Each tool set an environment imports by name: `module:name` of what makes it in this process, or a URL | Run `rollout tools` where the environment's servers should live |
-| `ledger` | Where the run's tables and the versions are kept ([the ledger](../libraries/rollout-train/versions.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. The registry of runs' names and bookmarks is kept beside it | Runs that share a ledger and a blob store share one graph of versions, and can start from each other's |
+| `ledger` | Where the run's tables and the versions are kept ([the ledger](../libraries/rollout-train/versions.md#the-ledger)): a directory (`ledger = "path"`), or a table naming a ledger (`[ledger]` with `kind = "rollout_train.database:DatabaseLedger"` and a `url`: `sqlite:///~/…` on one machine, `postgresql://…` for several; `rollout ledger copy` moves one to the other). Without it, `directory/ledger`. Beside it are kept, as ordinary state changed in place: the registry of runs' names and bookmarks, the runners' heartbeats, and the launches | Runs that share a ledger and a blob store share one graph of versions, and can start from each other's |
 | `blobs` | Where episodes, each step's batch and what each step left behind are kept. Without it, files under `directory/blobs`. With `kind = "module:name"`, the store that makes, called with the table's other entries (`rollout_s3:S3BlobStore`, say) | Point it at an object store that the machines share |
-| `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the step stops with `NotEnoughMemory`) rather than exhaust its machine | |
+| `memory` | System memory that must be available before the runner claims another episode (`runs_gib`: short of it, it waits) and before a colocated step starts (`training_gib`: short of it, the run stops with `NotEnoughMemory`, before the step) rather than exhaust its machine | |
 | `feed_runs` | How many episodes the [monitor](../libraries/rollout-train/monitor.md)'s feed keeps | |
 | `episodes_at_once` | How many episodes the run keeps work waiting for, and the places of this machine's runner: the most it plays at once, whatever groups they are of (6 unless it says otherwise), what the engines and the memory for the programs' worlds can take | Raise it with the engines' `max_num_seqs` and the machine's memory |
 
@@ -99,20 +101,22 @@ with `uv sync --all-extras`.
 
 In code, a profile opens into a platform:
 
-```python fragment
+```py
 async with Profile.load(Path("profile.toml")).open() as platform:
     binding = binding_for(catalog, "policy", platform.tool_bindings)
     await train(
         catalog, platform.trainer, platform.versions, start=platform.origin, channel="policy",
+        base=platform.profile.channels["policy"].model,
         directory=platform.profile.directory / "versions", publish=platform.publish, binding=binding,
         run=platform.run.id, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
     )
 ```
 
-Opening starts, in order: the trainer; each channel's engines; the channels, the trained one with the trainer's
-longest segment as its longest turn; the recorder; the monitor's feed in `directory/feed`; the tool sets; the blob
-store and the versions; the run (registered the first time: `run.json`) and the version it starts from; the
-runner, and the [episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
+Opening starts, in order: the run (registered the first time: `run.json`) and the version it starts from; the
+engines a killed process left behind are ended (`engine.json`); the trainer; each channel's engines; the channels,
+the trained one with the trainer's longest segment as its longest turn; the recorder; the monitor's feed in
+`directory/feed`; the tool sets; the blob store and the versions; the runner, and the
+[episode runner](../libraries/rollout-train/rollouts.md#a-runner) over it. A colocated trainer is wrapped in [`Colocated`](reference.md#colocated). With `serve`, the endpoint for harnesses
 listens there.
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
 run's newest version (else the one it starts from) on its channel when it starts.
@@ -133,6 +137,52 @@ claimed is open to be played again.
 Runners on other machines share a run's work through the ledger and the blob store alone: a database ledger they
 all reach (`postgresql://…`) and a blob store they all reach (an object store), with the channels and tool sets the
 run's plan names. The run does not know where its episodes were played.
+
+Each runner beats every 15 seconds ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats)): its host, its
+machine's memory, GPUs and disk, its engines' processes, and what each channel serves and how fast. A runner that
+stops beating for 90 seconds is taken to be gone, and what it had claimed is played by others. `rollout train` also
+writes into the run's start where its blob store is (its kind and settings; a store's credentials come from its
+environment and are never written), so a monitor anywhere reads the run's finished episodes back, and shows its
+machines and engines from the beats: from the run's machine it reads only the episodes still playing (its feed).
+
+## Launchers
+
+A launcher starts the training runs asked for (from the monitor's page, say) on a machine that can run them. Run one
+per training machine:
+
+```bash
+uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
+    --profiles environments/minecraft/profiles --catalog minecraft_team.catalog:catalog \
+    --runs ~/.cache/rollout/runs --at-once 1
+```
+
+| Option | What it is |
+|---|---|
+| `--ledger` | the database (or a ledger's directory) the launches and heartbeats are kept beside: the profiles' own |
+| `--profiles` | a directory of profiles it offers: every `*.toml` there that loads and names a trainer, by its file's name |
+| `--catalog` | a catalog it offers, as `module:name` (repeatable) |
+| `--runs` | where it makes each run's directory: the run's name in letters, digits and dashes, and the end of the launch's id |
+| `--at-once` | how many runs it plays at once: 1 on one GPU |
+
+It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
+may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
+`episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`); its catalogs; and how many runs it plays.
+A launch (`rollout_train.launches`) names a profile, a catalog, the run's name, the version it starts from, a
+bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, or one
+the profile offers). The launcher claims the oldest launch asked for one of its profiles while it has room (a claim
+is one change, so two launchers never start one launch), and starts
+
+```bash
+python -m rollout_train.cli train PROFILE CATALOG --directory RUNS/NAME-ID --name NAME --groups G \
+    --groups-per-step K --seed S --set KEY=VALUE ...
+```
+
+with its output in the run's `train.log`. It notes how the launch goes: `claimed`, `running` (with the process),
+then `ended`, or `failed` with the end of the output. A launch asked to stop before it is claimed is `stopped` at
+once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). Launches are ordinary
+state beside the ledger: `launches.json` beside a ledger of files, the `launches` table in a database ledger's
+database. The runs a launcher started go on if the launcher stops, but nothing is left to note how they end: once the
+launcher stops beating, the monitor shows their launches as `lost`.
 
 ## Stopping
 

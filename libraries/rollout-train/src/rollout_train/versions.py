@@ -35,7 +35,7 @@ from rollout.harness.blobs import Blobs
 from rollout_train.ledger import Fence, Ledger
 
 VERSIONS, RELEASED = "versions", "versions/released"
-"""The ledger's tables of versions, and of the versions whose files were let go."""
+"""The ledger's tables of versions, and of the versions whose files were deleted."""
 SHORTEST = 4
 """The fewest characters of an id a version is shown by."""
 _ALPHABET = "klmnopqrstuvwxyz"
@@ -76,7 +76,7 @@ class Version:
     made: float = 0.0
     """When, in seconds since the epoch."""
     released: float | None = None
-    """When its files were let go (`Versions.thin`), if they were: its weights and its trainer state are then None.
+    """When its files were deleted (`Versions.thin`), if they were: its weights and its trainer state are then None.
     Its record stays: where it came from, what it was trained on, and its metrics."""
 
     @property
@@ -171,7 +171,7 @@ class Versions:
         return version
 
     async def thin(self, fence: Fence, run: str, retention: "Retention", keep: Collection[str] = ()) -> list[str]:
-        """Let go of the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
+        """Delete the files (weights and trainer state) of the versions `run` made that `retention` does not keep,
         nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
         release is appended to the ledger before its blobs are deleted, and a blob is deleted only if no version
         still names it, so this may be repeated after a crash at any point."""
@@ -243,7 +243,7 @@ async def versions_in(ledger: Ledger) -> list[Version]:
 
 
 def _as_released(version: Version, released: Mapping[str, JsonValue]) -> Version:
-    """A version as it is once its files were let go, if they were."""
+    """A version as it is once its files were deleted, if they were."""
     record: Any = released.get(version.id)
     return replace(version, weights=None, state=None, released=float(record["at"])) if record is not None else version
 

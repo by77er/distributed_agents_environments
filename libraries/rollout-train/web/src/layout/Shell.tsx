@@ -17,7 +17,8 @@ function watched(place: Place): Topic[] {
   const found = [topics.system(), topics.feeds()];
   if (place.kind === "group") found.push(topics.group(place.run, place.number));
   if (place.kind === "episode") found.push(topics.episode(place.id));
-  if (place.kind === "statistics") found.push(topics.statistics(), topics.machine());
+  if (place.kind === "statistics") found.push(topics.statistics(), topics.machines());
+  if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches());
   if (place.kind === "versions") found.push(topics.versions(place.sample));
   return found;
 }
@@ -117,6 +118,7 @@ function Crumbs({ place }: { place: Place }) {
     crumbs.push([labels.episode ? `Episode ${labels.episode}` : "Episode", place.slot ? episodePlace(place.id) : ""]);
     if (place.slot) crumbs.push([`Rollout ${place.slot}`, ""]);
   } else if (place.kind === "outside") crumbs.push(["Episodes outside a run", ""]);
+  else if (place.kind === "launch") crumbs.push(["New run", ""]);
   else if (place.kind === "version") crumbs.push([`Version ${known.short(place.id)}`, ""]);
   else if (place.kind === "versions" && place.sample) crumbs.push(["Sample fixture", ""]);
   return (

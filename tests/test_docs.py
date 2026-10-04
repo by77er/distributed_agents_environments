@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GUIDE = ROOT / "docs" / "guide"
 PAGES = sorted(page for page in GUIDE.glob("*.md") if page.name != "reference.md")
 RUNNABLE_BLOCK = re.compile(r"^```python\n(.*?)^```$", re.MULTILINE | re.DOTALL)
-"""Only blocks tagged exactly `python` run; a fragment is tagged `python fragment`."""
+"""Only blocks tagged exactly `python` run; a fragment is tagged `py` (highlighted the same, not run)."""
 
 
 @pytest.mark.parametrize("page", PAGES, ids=lambda page: page.name)

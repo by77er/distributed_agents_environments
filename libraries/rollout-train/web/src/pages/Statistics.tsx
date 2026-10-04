@@ -1,9 +1,9 @@
-// Statistics across every run: each run in its own color, read from the ledger (and from a run's feed for its
-// engines); then the machine this monitor runs on, the engines, the runners and the ledger.
+// Statistics across every run: each run in its own color, read from the ledger (and from its runners' heartbeats for
+// its engines); then the machines that run things, as their heartbeats say, the engines, the runners and the ledger.
 
 import { memo, useMemo } from "react";
-import { useKnown, useMachine, useStatistics, useSystem } from "../api/queries";
-import type { StatisticsGroup, StatisticsRun, System } from "../api/types";
+import { useKnown, useMachines, useStatistics, useSystem } from "../api/queries";
+import type { Machine, StatisticsGroup, StatisticsRun, System } from "../api/types";
 import { ColumnChart, LineChart, type Series, Sized, spansOf } from "../components/charts";
 import { Card, Dots, Empty, Head, Kpi, Kpis, Legend, Meter, SectionTitle, Share, Table } from "../components/ui";
 import { bytes, clock, figure, mean, percent, span, tick, tickSpan } from "../lib/format";
@@ -98,7 +98,7 @@ export function Statistics() {
   const reasons = new Map<string, number>();
   for (const run of runs) for (const group of done(run)) if (group.skipped) reasons.set(group.skipped, (reasons.get(group.skipped) ?? 0) + 1);
 
-  // In flight and waiting, over time; inference, from each run's feed.
+  // In flight and waiting, over time; inference, from each run's runners' heartbeats.
   const until = (run: StatisticsRun) => (life.get(run.run)?.state === "running" ? figures.now : run.wrote);
   const measured = runs.filter(run => run.inference.length);
   const channelSeries = (place: number): Series[] => measured.flatMap(run => run.inference.map(channel => ({
@@ -110,7 +110,7 @@ export function Statistics() {
 
   return (
     <>
-      <Head title="Statistics" sub="Each run in its own color, read from the ledger (and from a run's feed for its engines). Leave runs out in the sidebar." />
+      <Head title="Statistics" sub="Each run in its own color, read from the ledger (and from its runners' heartbeats for its engines). Leave runs out in the sidebar." />
       <Kpis>
         <Kpi label="Runs" value={String(runs.length)} note={`${runs.filter(run => life.get(run.run)?.state === "running").length} running`} />
         <Kpi label="Groups done" value={every.length.toLocaleString()} note={`${runs.reduce((sum, run) => sum + run.groups.filter(group => group.time == null).length, 0)} in flight`} />
@@ -241,7 +241,7 @@ export function Statistics() {
             <Legendary series={channelSeries(2)} />
           </Card>
         </Halves>
-      ) : <Empty>No feed of these runs has a measurement of its engines (a run's feed is read where its directory is on this machine).</Empty>}
+      ) : <Empty>No runner of these runs has measured its engines yet (a runner says what its channels served in each heartbeat).</Empty>}
 
       <MachineSection system={system} />
     </>
@@ -252,58 +252,23 @@ const LastAgo = ({ at }: { at: number }) => <><Ago at={at} /> ago</>;
 
 const gib = (value: number) => value / 2 ** 30;
 
-/** The machine this monitor is on (memory, accelerators and disk, now and over the last hours), the engines, the
- * runners in the ledger, the fences and the tables. */
+/** Every runner's and launcher's machine, as its heartbeats say (memory, accelerators and disk, now and over its
+ * recent beats; its engines' processes and channels), the engines, the runners in the ledger, the fences and tables. */
 const MachineSection = memo(function MachineSection({ system }: { system: System }) {
-  const { data: machine } = useMachine();
+  const { data: found } = useMachines();
   const known = useKnown();
-  const accelerators = (machine?.now.accelerators ?? []).map((each, place) => ({ name: each.name, color: `var(--series-${place + 1})`, place }));
-  const history = machine?.history ?? [];
-  const latest = machine?.now;
+  const machines = found?.machines ?? [];
   return (
     <>
-      <SectionTitle id="section-machine" title="Machine" note="the machine this monitor runs on, the engines it can read, the runners in the ledger, and the ledger" />
-      {latest ? (
-        <div className="cols">
-          <Card title="Memory in use" note={latest.memory.total ? `of ${bytes(latest.memory.total)}` : "not measured"}>
-            <Sized>{width => (
-              <LineChart width={width} time label="memory in use" dots={false}
-                series={[{ name: "in use", color: "var(--series-1)", points: history.filter(each => each.memory.total).map(each => [each.at, gib(each.memory.total! - each.memory.available!)]) }]}
-                rules={latest.memory.total ? [{ value: gib(latest.memory.total), label: "total" }] : []} yTick={value => `${tick(value)} GiB`} format={value => `${value.toFixed(1)} GiB`} />
-            )}</Sized>
-          </Card>
-          {accelerators.length ? (
-            <Card title="Accelerator memory in use" note={accelerators.map(each => each.name).join(", ")}>
-              <Sized>{width => (
-                <LineChart width={width} time label="accelerator memory in use" dots={false}
-                  series={accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, gib(one.accelerators[each.place].used)]) }))}
-                  rules={[{ value: gib(latest.accelerators[0].total), label: "total" }]} yTick={value => `${tick(value)} GiB`} format={value => `${value.toFixed(1)} GiB`} />
-              )}</Sized>
-              <Legendary series={accelerators} />
-            </Card>
-          ) : null}
-          {accelerators.length ? (
-            <Card title="Accelerators busy" note="the share of time a kernel ran">
-              <Sized>{width => (
-                <LineChart width={width} time label="accelerators busy" dots={false} y={{ min: 0, max: 1 }} yTick={percent} format={percent}
-                  series={accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, one.accelerators[each.place].busy]) }))} />
-              )}</Sized>
-              <Legendary series={accelerators} />
-            </Card>
-          ) : null}
-          <Card title="Machine" note={`where this monitor runs: ${machine.host}`}>
-            {latest.memory.total ? <Meter name="memory" used={latest.memory.total - (latest.memory.available ?? 0)} total={latest.memory.total} says={`${bytes(latest.memory.available)} available of ${bytes(latest.memory.total)}`} /> : null}
-            {latest.accelerators.map(each => <Meter key={each.name} name={each.name} used={each.used} total={each.total} says={`${bytes(each.used)} of ${bytes(each.total)} · ${Math.round(100 * each.busy)}% busy`} />)}
-            {latest.disk ? <Meter name="disk" used={latest.disk.total - latest.disk.free} total={latest.disk.total} says={`${bytes(latest.disk.free)} free`} /> : null}
-            <p className="small muted" style={{ margin: "4px 0 0" }}>Measured every 15 s while this monitor runs; the newest {history.length} cover {span(latest.at - (history[0]?.at ?? latest.at))}.</p>
-          </Card>
-        </div>
-      ) : <Empty>Measuring the machine…</Empty>}
+      <SectionTitle id="section-machines" title="Machines" note="each runner's and launcher's machine, as its heartbeats say; the engines, the runners in the ledger, and the ledger" />
+      {found === undefined ? <Empty>Reading the heartbeats…</Empty>
+        : machines.length ? <div className="cols">{machines.map(machine => <MachineCard key={machine.runner} machine={machine} />)}</div>
+        : <Empty>No runner or launcher has beaten yet: a run's runner beats every 15 s while it runs.</Empty>}
       <div className="cols">
         {system.channels.map(channel => {
           const last = channel.throughput.at(-1);
           return (
-            <Card key={`${channel.directory}${channel.channel}`} title={`Channel ${channel.channel}`} note={`${(channel.directory ?? "").split("/").at(-1)} · ${channel.adapter ? `serving ${known.short(channel.adapter)} (${known.origin(channel.adapter)}) since ${clock(channel.published)}` : "serving the base model"}`}>
+            <Card key={`${channel.run}${channel.channel}`} title={`Channel ${channel.channel}`} note={`${known.run(channel.run)} · ${channel.adapter ? `serving ${known.short(channel.adapter)} (${known.origin(channel.adapter)}) since ${clock(channel.published)}` : "serving the base model"}`}>
               {last ? (
                 <Kpis style={{ marginBottom: 12 }}>
                   <Kpi label="tokens a second" value={figure(last.tokens_per_second)} />
@@ -335,5 +300,62 @@ const MachineSection = memo(function MachineSection({ system }: { system: System
         </Card>
       </div>
     </>
+  );
+});
+
+/** One machine, as a runner's or a launcher's heartbeats say: alive or not, its meters now, and its memory and
+ * accelerators over its recent beats; its engines' processes and what its channels serve. */
+const MachineCard = memo(function MachineCard({ machine }: { machine: Machine }) {
+  const known = useKnown();
+  const latest = machine.machine;
+  const history = machine.history.filter(each => each.machine).map(each => ({ ...each.machine!, at: each.at }));
+  const accelerators = (latest?.accelerators ?? []).map((each, place) => ({ name: each.name, color: `var(--series-${place + 1})`, place }));
+  const launcher = machine.kind === "launcher";
+  const what = launcher
+    ? `launcher · ${machine.profiles?.length ?? 0} profile${machine.profiles?.length === 1 ? "" : "s"} · ${machine.playing ?? 0} of ${machine.at_once ?? 1} playing`
+    : `runner${machine.run ? ` of ${known.run(machine.run)}` : ""} · ${machine.playing ?? 0} of ${machine.places ?? "?"} places`;
+  return (
+    <Card className={`machine${machine.alive ? "" : " stale"}`}
+      title={<span className="machine-title"><span className={`dot ${machine.alive ? "alive" : "gone"}`} />{machine.host ?? machine.runner}</span>}
+      note={<>{what} · {machine.alive ? "beat" : "gone: last beat"} <LastAgo at={machine.at} /></>}>
+      <div className="small faint mono machine-name" title={machine.runner}>{machine.runner}</div>
+      {latest ? (
+        <>
+          {latest.memory.total ? <Meter name="memory" used={latest.memory.total - (latest.memory.available ?? 0)} total={latest.memory.total} says={`${bytes(latest.memory.available)} available of ${bytes(latest.memory.total)}`} /> : null}
+          {latest.accelerators.map(each => <Meter key={each.name} name={each.name} used={each.used} total={each.total} says={`${bytes(each.used)} of ${bytes(each.total)} · ${Math.round(100 * each.busy)}% busy`} />)}
+          {latest.disk ? <Meter name="disk" used={latest.disk.total - latest.disk.free} total={latest.disk.total} says={`${bytes(latest.disk.free)} free`} /> : null}
+        </>
+      ) : <p className="muted small">Its beats measure nothing.</p>}
+      {history.length > 1 ? (
+        <Sized>{width => (
+          <LineChart width={width} height={150} time label="memory in use" dots={false} yTick={value => `${tick(value)} GiB`} format={value => `${value.toFixed(1)} GiB`}
+            series={[
+              ...(history.some(each => each.memory.total) ? [{ name: "memory", color: "var(--quiet)", points: history.filter(each => each.memory.total).map(each => [each.at, gib(each.memory.total! - (each.memory.available ?? 0))] as [number, number]) }] : []),
+              ...accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, gib(one.accelerators[each.place].used)] as [number, number]) })),
+            ]} />
+        )}</Sized>
+      ) : null}
+      {history.length > 1 && accelerators.length ? (
+        <Sized>{width => (
+          <LineChart width={width} height={120} time label="accelerators busy" dots={false} y={{ min: 0, max: 1 }} yTick={percent} format={percent}
+            series={accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, one.accelerators[each.place].busy] as [number, number]) }))} />
+        )}</Sized>
+      ) : null}
+      {history.length > 1 ? <Legendary series={[...(history.some(each => each.memory.total) ? [{ name: "memory", color: "var(--quiet)" }] : []), ...accelerators]} /> : null}
+      {history.length > 1 ? <p className="small muted" style={{ margin: 0 }}>Its newest {history.length} beats cover {span((latest?.at ?? machine.at) - history[0].at)}.</p> : null}
+      {machine.channels?.length ? (
+        <Table heads={[["channel"], ["serving"], ["tok/s", "n"], ["at once", "n"]]}
+          rows={machine.channels.map(channel => [channel.channel, channel.adapter ? `${known.short(channel.adapter)} · ${known.origin(channel.adapter)}` : "base model", figure(channel.tokens_per_second), figure(channel.mean_concurrency)])}
+          keys={machine.channels.map(channel => channel.channel)} />
+      ) : null}
+      {machine.processes?.started.length ? (
+        <Table heads={[["process"], ["pid", "n"], ["state"]]}
+          rows={machine.processes.started.map(each => [each.name, String(each.pid), { text: each.alive ? "running" : "gone", kind: each.alive ? "t-good" : "t-bad" }])}
+          keys={machine.processes.started.map(each => each.pid)} />
+      ) : null}
+      {launcher && machine.profiles?.length ? (
+        <div className="facts">{machine.profiles.map(profile => <span key={profile.profile} className="chip">{profile.profile}</span>)}{(machine.catalogs ?? []).map(each => <span key={each} className="chip mono">{each}</span>)}</div>
+      ) : null}
+    </Card>
   );
 });

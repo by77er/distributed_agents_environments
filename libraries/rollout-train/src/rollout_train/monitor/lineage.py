@@ -16,7 +16,7 @@ serve). The other tables read here are proposed in docs/research/policy-dag.md, 
   when it began each;
 - `versions/resharding`, `versions/resharded`: a full-weight version's files rewritten as the engines load them;
 - `workers/NAME/registered`, `workers/NAME/loaded`, `workers/NAME/unloaded`: an inference worker (what it holds, its
-  adapter slots), and each version it loaded and let go;
+  adapter slots), and each version it loaded and unloaded;
 - `evaluations/SUITE/starts`, `evaluations/SUITE/SUBJECT/subject`, `evaluations/SUITE/SUBJECT/results`: a fixed suite
   of starts, and how a version (or another model) played it.
 
@@ -64,7 +64,7 @@ WRITTEN, RESHARDING, RESHARDED, ROLLING, SERVING, SUPERSEDED = (
 )
 """A version's way to the engines: its files are written (its append), rewritten as the engines load them (where
 they need to be), loaded by workers one by one once it is its run's latest (or as requests name it exactly), then
-let go of."""
+unloaded."""
 
 _VERSION = TypeAdapter(Version)
 _RUNS, _TRAINERS, _WORKERS, _EVALUATIONS = "runs/", "trainers/", "workers/", "evaluations/"
@@ -338,7 +338,7 @@ class _Reading:
         return edges, outside
 
     def loads(self) -> dict[str, dict[str, dict[str, Any]]]:
-        """Each version's workers: when each loaded it, and let go of it (None: it still serves it). Where no worker
+        """Each version's workers: when each loaded it, and unloaded it (None: it still serves it). Where no worker
         is registered, a run's engines stand for one worker that loads what the feed says the run published, and
         lets each go at the next."""
         loads: dict[str, dict[str, dict[str, Any]]] = {}

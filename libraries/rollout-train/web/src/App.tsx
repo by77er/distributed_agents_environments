@@ -3,6 +3,7 @@
 import { Shell } from "./layout/Shell";
 import { usePlace } from "./lib/places";
 import { Episode } from "./pages/Episode";
+import { NewRun } from "./pages/NewRun";
 import { GroupView, StepView } from "./pages/Group";
 import { Run } from "./pages/Run";
 import { Outside, Runs } from "./pages/Runs";
@@ -19,6 +20,7 @@ function View() {
     // (an episode's view is its own while one moves between its rollouts; another episode starts afresh)
     case "episode": return <Episode key={place.id} id={place.id} slot={place.slot} />;
     case "outside": return <Outside />;
+    case "launch": return <NewRun />;
     case "versions": return <Versions sample={place.sample} />;
     case "version": return <Version id={place.id} />;
     case "statistics": return <Statistics />;

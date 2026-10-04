@@ -14,12 +14,13 @@ import contextlib
 import json
 import math
 import socket
-import time
 import tomllib
 from collections.abc import AsyncGenerator, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import JsonValue
 
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.harness.imports import ToolBinding, ToolSet
@@ -29,11 +30,15 @@ from rollout.processes import end_orphans, note_processes
 from rollout_train import Colocated, Ledger, Trainer, Version, Versions
 from rollout_train.inference import Channel, Engine, Limits
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
-from rollout_train.ledger import LOCATION, opened
+from rollout_train.ledger import LOCATION
+from rollout_train.ledger import opened as ledger_at
+from rollout_train.machine import alive, measured
+from rollout_train.presence import presence_of
 from rollout_train.recorder import Recorder
 from rollout_train.recorder.recorder import SERVED_UNDER
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
 from rollout_train.rollouts.scheduler import EpisodeRunner
+from rollout_train.stores import location, opened
 
 __all__ = ["ChannelSpec", "NotEnoughMemory", "Platform", "Profile", "TrainerSpec"]
 
@@ -128,10 +133,17 @@ class Profile:
     `rollout rename`; its id, in the directory's `run.json`, never changes."""
 
     @classmethod
-    def load(cls, path: Path, *, directory: Path | None = None) -> "Profile":
-        """The profile a TOML file describes; `directory` replaces the file's (one profile, many runs). A key the
+    def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> "Profile":
+        """The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
+        `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
         file has and a profile does not is an error: a misspelt guard would otherwise be no guard."""
         described = tomllib.loads(path.read_text())
+        for dotted, value in (settings or {}).items():
+            *tables, key = dotted.split(".")
+            place: dict[str, Any] = described
+            for name in tables:
+                place = place.setdefault(name, {})
+            place[key] = value
         channels: dict[str, ChannelSpec] = {}
         for name, channel in _table(described, "channels").items():
             known = ("model", "renderer", "engine", "engines", "thinking_tokens", "answer_tokens")
@@ -189,7 +201,7 @@ class Platform:
         self.profile = profile
         self.location: dict[str, Any] = dict(profile.ledger) or {"directory": str(profile.directory / LEDGER)}
         """Where the ledger is; written into the run's directory, for whatever reads the run."""
-        self.ledger: Ledger = opened(self.location)
+        self.ledger: Ledger = ledger_at(self.location)
         self.versions: Versions
         """The versions, in the ledger and the blob store."""
         self.registry: Registry | None = registry_of(self.ledger)
@@ -208,6 +220,8 @@ class Platform:
         """Where a run finds each tool set the profile names (for a run's binding)."""
         self.blobs: Blobs
         """Where episodes' trajectories and events, and versions' files, are kept."""
+        self.blobs_at: dict[str, Any] = {}
+        """Where that is, as any process opens it (`rollout_train.stores`), for the run's `starts` record."""
 
     @classmethod
     async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack) -> "Platform":
@@ -259,8 +273,8 @@ class Platform:
             tool_sets[name] = named(where)(directory)
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
-        store = dict(profile.blobs)
-        self.blobs = named(store.pop("kind"))(**store) if store else FileBlobStore(directory / BLOBS)
+        self.blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(directory / BLOBS)
+        self.blobs_at = location(profile.blobs, directory / BLOBS)
         self.versions = Versions(self.ledger, self.blobs)
         runner: Runner
         if profile.runner == "durable":
@@ -289,13 +303,14 @@ class Platform:
             runs=[self.run.id],
             hooks=[feed],
             guard=_needs(profile.runs_gib, "to run more episodes"),
+            presence=presence_of(self.ledger),
+            about=lambda: self._about(record),
         )
         _background(stack, self.runner.serve())
         self.trainer = learner
         if learner is not None and described is not None and described.colocated:
             ready = _needs(profile.training_gib, "to train")
             self.trainer = Colocated(learner, list(self.channels.values()), guard=ready)
-        _background(stack, self._measure(feed))
         if profile.serve:
             _background(stack, self._serve(profile.serve))
         return self
@@ -313,15 +328,28 @@ class Platform:
         """Serve new weights on a channel from now on; returns the version they are served as."""
         return await self.recorder.publish(channel, adapter, path, version)
 
-    async def _measure(self, feed: Any, every: float = 60.0) -> None:
-        """Tell whoever watches how the engines are doing, once a minute."""
-        while True:
-            await asyncio.sleep(every)
-            for name, channel in self.channels.items():
-                counts = channel.take()
-                if counts["requests"]:
-                    at = round(time.time(), 3)
-                    feed.on_note({"kind": "inference", "at": at, "channel": name, "version": channel.version, **counts})
+    def _about(self, record: Path) -> dict[str, JsonValue]:
+        """What the runner says of this machine in each beat: its host, the run, its measurements, the engines'
+        processes, and what each channel serves and how fast since the beat before."""
+        processes: Any = None
+        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+            noted = json.loads(record.read_text())
+            started = [
+                {"pid": int(pid), "name": str(name), "alive": alive(int(pid))}
+                for pid, name in noted["processes"].items()
+            ]
+            processes = {"owner": int(noted["owner"]), "started": started}
+        return {
+            "host": socket.gethostname(),
+            "run": self.run.id,
+            "directory": str(self.profile.directory),
+            "machine": measured(self.profile.directory),
+            "processes": processes,
+            "channels": [
+                {"channel": name, "adapter": channel.adapter, "version": channel.version, **channel.take()}
+                for name, channel in self.channels.items()
+            ],
+        }
 
     async def _serve(self, address: str) -> None:
         """The harness endpoint, over HTTP."""

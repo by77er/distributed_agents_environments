@@ -10,7 +10,7 @@ and how to read it.
 effect identities, records events, and delivers messages. Nothing persists; a process crash loses the run. The
 `LocalRunner` creates one per run; tests create one with `local_run` ([testing](testing.md)).
 
-```python fragment
+```py
 LocalRunContext(
     run_id: str,                                 # r_{ulid}; see rollout.contracts.new_run_id
     endpoints: Mapping[str, ModelEndpoint],      # one endpoint per model slot

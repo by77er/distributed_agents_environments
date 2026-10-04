@@ -30,8 +30,7 @@ async def started(ledger: Ledger, run: str, at: float, **where: JsonValue) -> No
 
 
 async def played(ledger: Ledger, directory: Path, run: str, run_id: str, at: float) -> None:
-    """A run's one episode, recorded by its runner, and its directory with a feed that measured its engines once;
-    every file written at `at`."""
+    """A run's one episode, recorded by its runner, and its directory with a feed; every file written at `at`."""
     fence = await ledger.take(runner_scope(f"{run}-runner"))
     trajectories = {"ada": Trajectory([], {"default": 1.0})}
     labels = {"run": run, "group": "1", "episode": "1"}
@@ -39,9 +38,7 @@ async def played(ledger: Ledger, directory: Path, run: str, run_id: str, at: flo
     record: JsonValue = Record(episode, sampled={"ada": 10}).to_json()
     await ledger.append(table(run, EPISODES), "1/1", record, fence)
     feed = RunFeed(directory / FEED)
-    feed.on_note(
-        {"kind": "inference", "at": at, "channel": "policy", "tokens_per_second": 50.0, "mean_concurrency": 2.0}
-    )
+    feed.on_note({"kind": "started", "at": at, "run": run})
     feed.close()
     for path in (directory / FEED).iterdir():
         os.utime(path, (at, at))
@@ -59,6 +56,8 @@ async def test_one_monitor_shows_every_run_of_a_database_each_from_its_own_direc
     await started(ledger, "gone", now - 5 * 3600, directory="/nowhere/gone")
     await played(ledger, busy, "busy", "r_busy", now - 30)
     await played(ledger, quiet, "quiet", "r_quiet", now - 3600)
+    serving = {"channel": "policy", "adapter": None, "version": 0, "requests": 3, "tokens_per_second": 50.0}
+    await ledger.presence.beat("busy-runner", {"run": "busy", "channels": [{**serving, "mean_concurrency": 2.0}]})
 
     system = System(ledger=ledger)
     snapshot = await system.snapshot()

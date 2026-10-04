@@ -14,11 +14,8 @@ find.
 import asyncio
 import json
 import lzma
-import shutil
 import socket
-import subprocess
 import time
-from collections import deque
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -29,17 +26,21 @@ import httpx
 from pydantic import JsonValue
 
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
-from rollout.harness.blobs import FileBlobStore
-from rollout_train.layout import BLOBS, FEED, PROCESSES, RUN
+from rollout.harness.blobs import Blobs, FileBlobStore
+from rollout_train.launcher import LAUNCHER
+from rollout_train.launches import ASKED, OPEN, STOPPED, STOPPING, Asked, Launch, launches_of
+from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
 from rollout_train.monitor.statistics import newest, statistics
+from rollout_train.presence import Beat, alive, presence_of
 from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, runs_in, table
 from rollout_train.record import scope as run_scope
-from rollout_train.registry import Bookmark, Entry, Registry, found, names, registry_of, resolved
+from rollout_train.registry import Bookmark, Entry, Registry, Taken, checked, found, names, registry_of, resolved
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
+from rollout_train.stores import opened
 from rollout_train.versions import Manifest, Version, short, versions_in
 
 WAITING = "waiting"
@@ -57,6 +58,8 @@ it again."""
 COMMITTED = "committed"
 FAILED = "failed"
 
+LOST = "lost"
+"""How a launch is shown when its launcher stopped beating before it finished."""
 RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED)
 """A run's tables, as the page reads them."""
 ARCHIVED = 8
@@ -95,7 +98,6 @@ class System:
             raise ValueError("a run's directory or a ledger")
         self.directory = directory.resolve() if directory is not None else None
         self._ledger = ledger if ledger is not None else of_run(cast(Path, self.directory))
-        self.machine = Machine(self.directory or Path.home())
         self.host = socket.gethostname()
         self._client = client or httpx.Client(timeout=2.0, headers={RELAYED: "1"})
         self._places: dict[Path, _Place] = {}
@@ -108,6 +110,8 @@ class System:
         """Where each run's episodes are, as it was last found."""
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
+        self._stores: dict[str, Blobs] = {}
+        """The blob stores the runs' starts name, opened once each."""
         self._opened = _run_in(self.directory) if self.directory is not None else None
         """The id of the run in the directory this was opened on."""
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
@@ -156,7 +160,8 @@ class System:
             tables = await self._tables()
             versions = await versions_in(self._ledger)
         called = await names(registry_of(self._ledger))
-        snapshot = await asyncio.to_thread(self._assembled, tables, fences, versions, called, relayed)
+        beats = await self._beats()
+        snapshot = await asyncio.to_thread(self._assembled, tables, fences, versions, called, beats, relayed)
         return snapshot | {"names": called}
 
     async def rename(self, who: str, name: str) -> Entry:
@@ -182,6 +187,66 @@ class System:
         """Take a bookmark away (the version stays). Raises `KeyError` when there is no such bookmark."""
         await self._registry().unbookmark(name)
 
+    async def launches(self) -> dict[str, Any]:
+        """The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
+        settings a launch may change, its catalogs, and whether it has room). A launch whose launcher stopped beating
+        while it was claimed, running or stopping is shown as `lost`: what became of its run is not known."""
+        found = launches_of(self._ledger)
+        listed = await found.all() if found is not None and await asyncio.to_thread(present, self._ledger) else []
+        now = time.time()
+        launchers = [
+            {"launcher": beat.runner, "at": beat.at, **beat.about}
+            for beat in await self._beats()
+            if beat.about.get("kind") == LAUNCHER and alive(beat, now)
+        ]
+        beating = {str(each["launcher"]) for each in launchers}
+        shown = [
+            asdict(each) | {"state": LOST, "detail": "its launcher stopped beating"}
+            if each.state in OPEN and each.state != ASKED and each.launcher not in beating
+            else asdict(each)
+            for each in listed
+        ]
+        return {"launches": shown, "launchers": launchers}
+
+    async def launch(self, body: Mapping[str, Any]) -> Launch:
+        """Ask for a run (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile and its
+        catalog starts it. Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the
+        profile does not have), `KeyError` for what no launcher offers or a version no reference says."""
+        launches, registry = launches_of(self._ledger), self._registry()
+        if launches is None:
+            raise KeyError("this ledger keeps no launches")
+        try:
+            asked = Asked(**{key: value for key, value in body.items() if key in Asked.__dataclass_fields__})
+        except TypeError as error:
+            raise Taken(f"a launch says its profile, its catalog and its name ({error})") from None
+        offered = [each for each in (await self.launches())["launchers"] if each.get("playing", 0) is not None]
+        profiles = [
+            profile for each in offered for profile in each.get("profiles", []) if profile["profile"] == asked.profile
+        ]
+        if not profiles:
+            raise KeyError(f"no launcher alive offers the profile {asked.profile!r}")
+        catalogs = {catalog for each in offered for catalog in each.get("catalogs", [])}
+        if catalogs and asked.catalog not in catalogs:
+            raise KeyError(f"no launcher alive offers the catalog {asked.catalog!r}")
+        checked(asked.name, "", await registry.runs())  # (a name another run has, or no name)
+        unknown = [
+            key for key in asked.settings if key not in profiles[0]["settings"] and not key.startswith("trainer.")
+        ]
+        if unknown:
+            raise Taken(f"the profile {asked.profile!r} has no setting {', '.join(unknown)}")
+        if asked.start:
+            await resolved(self._ledger, registry, asked.start)  # (raises KeyError for a reference to nothing)
+        return await launches.ask(asked)
+
+    async def stop(self, id: str) -> Launch:
+        """Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
+        group boundary. Raises `KeyError` when there is no such launch going."""
+        launches = launches_of(self._ledger)
+        found = next((each for each in await launches.all() if each.id == id), None) if launches else None
+        if launches is None or found is None or found.state not in OPEN:
+            raise KeyError(f"there is no launch {id} going")
+        return await launches.note(id, state=STOPPED if found.state == ASKED else STOPPING)
+
     def _registry(self) -> Registry:
         registry = registry_of(self._ledger)
         if registry is None:
@@ -193,35 +258,36 @@ class System:
         With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
         beside the ledger."""
         tables = await self._tables()
-        notes = await asyncio.to_thread(self._notes, tables)
+        notes = _noted(await self._beats())
         every = [note for each in notes.values() for note in each]
         called = await names(registry_of(self._ledger))
         return await asyncio.to_thread(lineage, tables, every, names=called, sample=sample)
 
     async def statistics(self) -> dict[str, Any]:
         """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
-        throughput from its feed, what the runs are called, and the machine's measurements."""
+        throughput from its runners' heartbeats, what the runs are called, and the runners' machines."""
         tables = await self._tables()
-        notes = await asyncio.to_thread(self._notes, tables)
-        figures = await asyncio.to_thread(statistics, tables, notes)
+        beats = await self._beats()
+        figures = await asyncio.to_thread(statistics, tables, _noted(beats))
         called = await names(registry_of(self._ledger))
-        machine = await asyncio.to_thread(self.machine.shown)
-        return {**figures, "names": {"runs": called["runs"]}, "machine": machine}
+        return {**figures, "names": {"runs": called["runs"]}, "machines": _machines(beats)}
+
+    async def machines(self) -> dict[str, Any]:
+        """Every runner's machine, as its heartbeats say: now, and over its recent beats."""
+        return {"machines": _machines(await self._beats())}
+
+    async def _beats(self) -> list[Beat]:
+        """Every runner's newest heartbeat (none where there is no ledger: reading makes none)."""
+        presence = presence_of(self._ledger)
+        if presence is None or not await asyncio.to_thread(present, self._ledger):
+            return []
+        return await presence.beats()
 
     async def _tables(self) -> dict[str, dict[str, JsonValue]]:
         """Every table of the ledger, by name (none where there is no ledger: reading makes none)."""
         if not await asyncio.to_thread(present, self._ledger):
             return {}
         return {name: await self._ledger.read(name) for name in await self._ledger.tables()}
-
-    def _notes(self, tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, list[dict[str, Any]]]:
-        """The notes in each run's feed, by run (for the runs whose directory is on this machine)."""
-        notes: dict[str, list[dict[str, Any]]] = {}
-        for run in named_runs(tables):
-            found = self._source(run, tables.get(table(run, STARTS), {}), relayed=True)
-            if isinstance(found, _Place):
-                notes[run] = found.feed.notes()
-        return notes
 
     async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
@@ -293,10 +359,12 @@ class System:
             for remote in list(self._remotes.values()):
                 if (answer := await asyncio.to_thread(remote.episode, run_id, after)) is not None:
                     return answer
+        store = await self._store(known[0]) if known is not None else None
+        store = store or (place.blobs if place is not None else None)
         if place is not None and summary is not None:
             source, lines = "feed", await asyncio.to_thread(place.feed.lines, run_id, after)
-        elif place is not None and ended is not None and ended.get("events"):
-            source, lines = "archive", (await self._archived(place, run_id, ended["events"]))[after:]
+        elif store is not None and ended is not None and ended.get("events"):
+            source, lines = "archive", (await self._archived(store, run_id, ended["events"]))[after:]
         else:
             source, lines = None, []
         labels: Any = (ended or {}).get("labels") or (summary or {}).get("labels") or {}  # (the record's, once kept)
@@ -324,9 +392,20 @@ class System:
         found = self._sources.get(run) if run is not None else None
         return (found if isinstance(found, _Place) else None), ended, None
 
-    async def _archived(self, place: "_Place", run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
+    async def _store(self, run: str) -> Blobs | None:
+        """The blob store a run's newest start says its blobs are in (as any machine opens it), if it says."""
+        starts: Any = await self._ledger.read(table(run, STARTS))
+        where: Any = starts[max(starts, key=int)].get("blobs") if starts else None
+        if not where:
+            return None
+        key = json.dumps(where, sort_keys=True)
+        if key not in self._stores:
+            self._stores[key] = await asyncio.to_thread(opened, where)
+        return self._stores[key]
+
+    async def _archived(self, store: Blobs, run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
         if run_id not in self._archive:
-            data = await place.blobs.read(BlobReference.model_validate(events))
+            data = await store.read(BlobReference.model_validate(events))
             lines = (await asyncio.to_thread(lzma.decompress, data)).decode().splitlines()
             self._archive[run_id] = _replayed([RunEvent.model_validate_json(line) for line in lines])
             while len(self._archive) > ARCHIVED:
@@ -339,8 +418,14 @@ class System:
         fences: Mapping[str, int],
         versions: list[Version],
         called: Mapping[str, Any],
+        beats: list[Beat],
         relayed: bool,
     ) -> dict[str, Any]:
+        noted = _noted(beats)
+        beaten: dict[str, float] = {}  # each run's runners' newest beat
+        for beat in beats:
+            if beat.about.get("run"):
+                beaten[str(beat.about["run"])] = max(beaten.get(str(beat.about["run"]), 0.0), beat.at)
         made = {version.id: version for version in versions}
         shorter = short(made)
         blobs = {digest: size for version in versions for digest, size in _blobs(version)}  # (each kept once)
@@ -357,11 +442,10 @@ class System:
             own = {name: tables.get(table(run, name), {}) for name in RUN_TABLES}
             played[run] = _Played(run, own, fences, self._records)
             listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
-            seen = self._read(run, starts, found, listed["wrote"], now)
+            seen = self._read(run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run))
             runs.append(listed | seen | {"played": played[run].counts(), "name": called["runs"].get(run, run)})
         rank = {RUNNING: 0, IDLE: 1, GONE: 2}
         runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
-        read = list(self._places.values())
         return {
             "at": round(now, 1),
             "name": self.directory.name if self.directory else self.ledger,
@@ -369,20 +453,14 @@ class System:
             "ledger_at": self.ledger,
             "host": self.host,
             "written": newest(run["written"] for run in runs),
-            "processes": _processes(self.directory / PROCESSES) if self.directory else None,
             "runs": runs,
             "versions": [
                 _version(version, shorter) | {"bookmarks": sorted(marks.get(version.id, []))} for version in versions
             ],
             "bookmarks": dict(called["bookmarks"]),
             "runners": _runners(fences, played),
-            "channels": [
-                channel | {"directory": str(place.directory)}
-                for place in read
-                for channel in _channels(place.feed.notes())
-            ],
+            "channels": [channel | {"run": run} for run, notes in noted.items() for channel in _channels(notes)],
             "ledger": {"fences": dict(fences), "tables": {name: len(records) for name, records in tables.items()}},
-            "machine": self.machine.shown(),
             "kept": {
                 "versions": sum(blobs.values()),
                 "episodes": sum(each.kept for each in played.values()),
@@ -390,18 +468,25 @@ class System:
         }
 
     def _read(
-        self, run: str, starts: Mapping[str, Any], found: "_Place | _Remote | None", wrote: float | None, now: float
+        self,
+        run: str,
+        starts: Mapping[str, Any],
+        found: "_Place | _Remote | None",
+        wrote: float | None,
+        now: float,
+        notes: list[dict[str, Any]],
+        beaten: float | None,
     ) -> dict[str, Any]:
-        """What a run's start says (where it is, what started it) and what its episodes' place adds: its groups in
-        flight with their episodes, and its engines; when it last wrote, and so whether it is running."""
+        """What a run's start says (where it is, what started it), its engines (as its runners' heartbeats say),
+        and what its episodes' place adds (its groups in flight with their episodes); when it last wrote or beat,
+        and so whether it is running."""
         latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
-        added: dict[str, Any] = {"channels": []}
-        written = newest([wrote, latest.get("started")])
+        added: dict[str, Any] = {"channels": _channels(notes)}
+        written = newest([wrote, latest.get("started"), beaten])
         if isinstance(found, _Place):
-            added = {"channels": _channels(found.feed.notes())}
             written = newest([written, found.written()])
         elif isinstance(found, _Remote) and (there := found.run(run)) is not None:
-            added = {key: there[key] for key in ("open", "done", "channels") if key in there}
+            added |= {key: there[key] for key in ("open", "done") if key in there}
             written = newest([written, there.get("written")])
         quiet = now - written if written is not None else float("inf")
         return {
@@ -742,22 +827,6 @@ def _channels(job: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(channels.values())
 
 
-def _processes(record: Path) -> dict[str, Any] | None:
-    """The run's process and the ones it noted having started, and whether each is there."""
-    try:
-        noted = json.loads(record.read_text())
-        owner, processes = int(noted["owner"]), dict(noted["processes"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    started = [{"pid": int(pid), "name": str(name), "alive": _alive(int(pid))} for pid, name in processes.items()]
-    return {"owner": owner, "alive": _alive(owner), "started": started}
-
-
-def _alive(pid: int) -> bool:
-    """Whether a process is there, on this host."""
-    return Path(f"/proc/{pid}").exists()
-
-
 class _Played:
     """A run's episodes as the ledger has them: those that ended, by group, and those runners play now (their claims
     that hold: not cut short, made by a runner whose fence is the one it made them under)."""
@@ -860,60 +929,37 @@ def _runners(fences: Mapping[str, int], played: Mapping[str, _Played]) -> list[d
     return sorted(found.values(), key=lambda runner: (not runner["playing"], -(runner["last"] or 0.0)))
 
 
-class Machine:
-    """The machine the monitor is on (the run's, when they share one): memory, accelerators, and the disk the run's
-    directory is on. It keeps the newest measurements, to show how they moved."""
-
-    def __init__(self, directory: Path, keep: int = SHOWN) -> None:
-        self.directory = directory
-        self.history: deque[dict[str, Any]] = deque(maxlen=keep)
-
-    def measure(self) -> dict[str, Any]:
-        memory = {"available": None, "total": None}
-        try:
-            fields = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
-            memory = {
-                "available": int(fields["MemAvailable"].split()[0]) * 1024,
-                "total": int(fields["MemTotal"].split()[0]) * 1024,
-            }
-        except (OSError, KeyError, ValueError):
-            pass
-        disk = shutil.disk_usage(self.directory) if self.directory.exists() else None
-        measured = {
-            "at": round(time.time(), 1),
-            "memory": memory,
-            "accelerators": _accelerators(),
-            "disk": {"free": disk.free, "total": disk.total} if disk else None,
-        }
-        self.history.append(measured)
-        return measured
-
-    def shown(self, within: float = 5.0) -> dict[str, Any]:
-        """The newest measurement (taken now, unless one was within `within` seconds) and the ones before it."""
-        if not self.history or time.time() - self.history[-1]["at"] > within:
-            self.measure()
-        return {"now": self.history[-1], "history": list(self.history)}
-
-    async def watch(self, every: float = 15.0) -> None:
-        """Measure for as long as this runs, so that there is a history when someone looks."""
-        while True:
-            await asyncio.to_thread(self.shown, every / 2)
-            await asyncio.sleep(every)
+def _machines(beats: list[Beat]) -> list[dict[str, Any]]:
+    """Every runner's machine as its heartbeats say: whether it is alive, what it said last, and its recent beats."""
+    now = time.time()
+    return [
+        {"runner": beat.runner, "at": beat.at, "alive": alive(beat, now), **beat.about, "history": beat.history}
+        for beat in sorted(beats, key=lambda each: (not alive(each, now), -each.at))
+    ]
 
 
-def _accelerators() -> list[dict[str, Any]]:
-    query = ["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"]
-    try:
-        listed = subprocess.run(query, capture_output=True, text=True, timeout=5, check=True).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    accelerators: list[dict[str, Any]] = []
-    for line in listed.strip().splitlines():
-        name, used, total, busy = (part.strip() for part in line.split(","))
-        try:
-            accelerators.append(
-                {"name": name, "used": int(used) * 2**20, "total": int(total) * 2**20, "busy": int(busy) / 100}
-            )
-        except ValueError:  # (a field the driver does not report)
+def _noted(beats: list[Beat]) -> dict[str, list[dict[str, Any]]]:
+    """What each run's engines did, by run, as notes read from its runners' recent beats: each channel's
+    throughput over each beat (`inference`), and each change in what it serves (`published`)."""
+    notes: dict[str, list[dict[str, Any]]] = {}
+    for beat in beats:
+        run = str(beat.about.get("run") or "")
+        if not run:
             continue
-    return accelerators
+        serving: dict[str, Any] = {}
+        for point in beat.history:
+            listed: Any = point.get("channels") or []
+            for channel in listed:
+                name = str(channel.get("channel"))
+                counts = {key: value for key, value in channel.items() if key not in ("channel", "adapter")}
+                if serving.get(name) != channel.get("adapter"):
+                    serving[name] = channel.get("adapter")
+                    notes.setdefault(run, []).append(
+                        {"kind": "published", "run": run, "channel": name, "adapter": channel.get("adapter"),
+                         "version": channel.get("version"), "at": point["at"]}
+                    )  # fmt: skip
+                if channel.get("requests"):
+                    notes.setdefault(run, []).append(
+                        {"kind": "inference", "at": point["at"], "channel": name, **counts}
+                    )
+    return notes

@@ -215,7 +215,7 @@ function VersionsTree({ place, system }: { place: Place; system: System }) {
 }
 
 export const SECTIONS: [string, string][] = [
-  ["outcomes", "Outcomes"], ["rows", "Rows"], ["steps", "Steps"], ["pace", "Pace"], ["queue", "Queue"], ["inference", "Inference"], ["machine", "Machine"],
+  ["outcomes", "Outcomes"], ["rows", "Rows"], ["steps", "Steps"], ["pace", "Pace"], ["queue", "Queue"], ["inference", "Inference"], ["machines", "Machines"],
 ];
 
 /** The runs left out of the statistics, as this browser remembers them. */

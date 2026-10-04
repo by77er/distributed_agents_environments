@@ -8,7 +8,7 @@ one reply. Any agent runs on any task, so training and evaluation can vary one w
 `Agent()` samples the `policy` model slot once per turn, with an optional system prompt followed by the history,
 shaped by the task's context hints, and offers the tools the task exposes that turn.
 
-```python fragment
+```py
 class Agent:
     system_prompt: str | None = None
 

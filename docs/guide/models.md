@@ -10,7 +10,7 @@ adapter for the OpenAI Responses API.
 A `DirectModel` binding names a provider, a model and sampling parameters. The runner creates the endpoint with the
 factory registered for that provider:
 
-```python fragment
+```py
 from rollout_openai import codex_provider
 from rollout.harness import DirectModel, ModelBinding, RunBinding, SamplingParameters
 from rollout.local import LocalRunner
@@ -39,7 +39,7 @@ A task that declares more slots gets one binding per slot, and slots may use dif
 and writes the new tokens back in Codex's own format, so the Codex CLI and this adapter keep working side by side.
 `codex_provider()` uses it; for an API key, register a factory yourself:
 
-```python fragment
+```py
 from rollout_openai import ApiKey, ResponsesEndpoint
 
 key = ApiKey(os.environ["OPENAI_API_KEY"])

@@ -12,8 +12,8 @@ on whichever machines they run. It has three pages, switched along the top:
   episode, turn by turn: what it was sent, what it thought, what it did and what came back. Each rollout becomes a
   **trajectory**, the tokens the trainer learns from;
 - **Versions**: every version, each alone and all of them as a graph growing from their base models;
-- **Statistics**: figures across the runs, a series for each, and the machine the monitor is on, the engines, the
-  runners and the ledger.
+- **Statistics**: figures across the runs, a series for each, and the machines that run things (as their runners' and
+  launchers' heartbeats say), the engines, the runners and the ledger.
 
 ```bash
 rollout monitor RUN                                   # http://localhost:8765: RUN's ledger, and every run in it
@@ -21,10 +21,11 @@ rollout monitor sqlite:///~/.cache/rollout/ledger.db  # a database's runs (or po
 ```
 
 `WHERE` is a run's directory (its ledger, as `ledger.json` there says, or files under `ledger`), a ledger's
-directory of files, or a database's URL. The monitor reads, and writes names in the registry
-([the registry](versions.md#the-registry)): a run's, when it is renamed on its page, and bookmarks, made, moved and
-taken away on a version's page. The runs' processes write the rest, and need not be running: the page shows a stopped
-run as it was left.
+directory of files, or a database's URL. The monitor reads, and writes three things: names in the registry
+([the registry](versions.md#the-registry)) (a run's, when it is renamed on its page, and bookmarks, made, moved and
+deleted on a version's page), and launches: runs asked for from the page ([launching a run](#launching-a-run)),
+and asked to stop. The runs' processes write the rest, and need not be running: the page shows a stopped run as it
+was left.
 
 A run is shown by its name; its id (what everything kept of it is under) is on its page and under the pointer. A
 version is shown by where it came from (the run that made it and its step: `diamonds · S3`) and the shortest start of
@@ -38,12 +39,14 @@ package (`rollout_train/monitor/static`), and the monitor serves it as files: `r
 page draws each view from what it has read, and reads again only what the monitor says changed.
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
-  `feeds`, `machine`, `statistics`, `versions` (or `versions/sample`), `group/RUN/N`, `episode/RUN_ID`. The
+  `feeds`, `machines`, `launches`, `statistics`, `versions` (or `versions/sample`), `group/RUN/N`,
+  `episode/RUN_ID`. The
   monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives each reading a **version**, a hash
   of what it says (leaving out when it was read).
 - **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the version of each topic asked for at
   once, then a `version` event each time one changes. The page watches the topics of the place shown (always
-  `system` and `feeds`; a group, an episode, the statistics or the graph as they are shown), and opens a new stream
+  `system` and `feeds`; the launches on Runs and New run; a group, an episode, the statistics and the machines, or
+  the graph, as they are shown), and opens a new stream
   when it moves elsewhere. While nobody watches, the monitor reads nothing.
 - **ETags.** Each JSON answer carries its topic's version as its ETag. The page sends the version it has
   (`If-None-Match`), and the monitor answers 304, with nothing, when it is the same. An episode's lines are asked for
@@ -78,8 +81,10 @@ them ([rollouts](rollouts.md)), and the versions. Each run keeps the rest in its
 |---|---|---|
 | the ledger | each run's `starts`, `groups`, `results`, `steps` and `failures`; its `episodes`, `claims` and `interrupted`; the `versions`; the fences ([versions](versions.md)) | every run, its steps, groups and their stages, the episodes that ended and what each reported, which runner plays what, outcomes, versions, the statistics |
 | the registry | each run's id and name, and the bookmarks ([the registry](versions.md#the-registry)) | what each run is called, and the bookmarks that name each version |
-| a run's `feed` | what is happening now, written by `RunFeed` | episodes still running, their rollouts turn by turn, the engines' throughput |
-| a run's `blobs` | each ended episode's events | the rollouts of episodes the feed has let go |
+| the heartbeats | each runner's and launcher's newest beat, with its recent beats' measurements (`rollout_train.presence`) | the machines (memory, accelerators, disk, the engines' processes), each channel's version and throughput, whether a run is running, which launchers are alive and what they offer |
+| the launches | the runs asked for and how each goes (`rollout_train.launches`) | the launches on Runs, and the New run form |
+| a run's `feed` | what is happening now, written by `RunFeed` | episodes still running, their rollouts turn by turn |
+| the run's blob store | each ended episode's events, where the run's newest start says its blobs are (`blobs`: files, or S3) | the rollouts of episodes no longer in the feed |
 
 Where a run's episodes are read is decided in one place (`System._source`), from the run's newest `starts` record:
 
@@ -92,8 +97,12 @@ Where a run's episodes are read is decided in one place (`System._source`), from
 3. else **nowhere**: the page shows what the ledger has (groups, results, steps, versions, ended episodes) and says
    so.
 
+Everything but the live feed is in the database (with a database ledger) or the blob store, so a monitor anywhere that
+reaches them shows every run, its machines and its finished episodes; only episodes still playing need the run's
+directory or the monitor on its machine.
+
 A run is **running** while it writes (something this reads was written within 20 minutes: a record in the ledger,
-its start, or its feed), **idle** until three hours have passed without a write, and **ended** after. No process is
+its start, a runner's beat, or its feed), **idle** until three hours have passed without a write, and **ended** after. No process is
 asked, so a run on any machine is told apart the same way.
 
 ## The pages
@@ -110,7 +119,8 @@ so a reload stays there.
 
 | Page | View | Address | Shows |
 |---|---|---|---|
-| Runs | Every run | `#/runs` (and `#/`) | each run, running ones first: its state and host, groups in flight and done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
+| Runs | Every run | `#/runs` (and `#/`) | the launches (each asked-for run: its state, launcher, directory, settings changed, why it failed, a Stop button); each run, running ones first: its state and host, groups in flight and done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
+| Runs | New run | `#/runs/new` | a form asking for a run ([launching a run](#launching-a-run)) |
 | Runs | Run | `#/run/RUN` | its name (with a control to rename it), id, state, base model, the version it started from and the one it is at, what is served; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played |
 | Runs | Step | `#/run/RUN/step/N` | the version the step made and its parent, the groups that went into it (and those decided before it that gave nothing to train on), and the update's statistics |
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the version it made, or why it was skipped), and its start |
@@ -127,8 +137,32 @@ name it, or moves one there (`POST /api/bookmarks`, `{"name", "version"}`, where
 one that says `/`, `@` or `:`, is refused (409) and the page says why. Every page open on the monitor hears of the
 change through its stream.
 
+## Launching a run
+
+A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --catalog module:name --runs DIR
+[--at-once N]`, `rollout_train.launcher`) beats every 15 seconds, saying what it offers: each profile under
+`--profiles` that names a trainer, with the settings a launch may change and their values in the profile (the
+trainer's settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
+`answer_tokens`), the catalogs, and how many runs it plays of how many it may.
+
+**New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and a catalog, the
+run's name, the version it starts from (the base model, a bookmark, or any version whose weights are kept, by where it
+came from), a bookmark for it to carry, its groups, groups a step and seed, and every setting of the profile as a field
+holding the profile's value, with rows for any other `trainer.KEY`. Values are read as numbers, true or false, or JSON
+where they look like them, and as text otherwise. Launching asks the monitor (`POST /api/launches`, with the settings
+changed only), which checks the ask (`System.launch`: a launcher alive offers the profile and the catalog, the name is
+no other run's, every setting is the profile's or a trainer's, the version is one) and appends it to the launches; a
+refusal (409 or 404) is said under the button. With no launcher alive, the form says so and gives the command that
+starts one.
+
+The launcher claims it, makes the run's directory under `--runs` (`NAME-ID`), and starts `rollout train` there with
+`--name` and each setting as `--set KEY=VALUE`; its output goes to `train.log` in that directory. The launch's state
+follows: `asked`, `claimed`, `running` (with the process), and `ended`, `failed` (with the end of its output) or
+`stopped`. **Stop** (`POST /api/launches/ID/stop`) cancels a launch not yet claimed at once; a running one is sent an
+interrupt, and the run stops as on Ctrl-C, at a group boundary. Once the run writes its start, its tile links to it.
+
 The statistics, read from the ledger (`rollout_train.monitor.statistics`) and, for the engines, from each run's
-feed; every chart is drawn to scale and says each series' value under the pointer:
+runners' heartbeats; every chart is drawn to scale and says each series' value under the pointer:
 
 | Section | Shows |
 |---|---|
@@ -137,8 +171,8 @@ feed; every chart is drawn to scale and says each series' value under the pointe
 | `steps` | the trainer's statistics over the steps, a chart each: KL moved, KL floor, clip fraction, mean mismatch, mean weight, truncated fraction, loss, the step's time and its start time (as far as each version says them) |
 | `pace` | episodes and groups an hour (counted when each group's result was written); what was done with each group (trained on, in a step being taken, waiting for a step, nothing to train on, no episode or a failed step, in flight); why groups gave nothing to train on |
 | `queue` | how many groups were in flight (decided, their result not written), and how many waited for a step (recorded with something to train on, no step begun over them), over time |
-| `inference` | each run's engines: tokens a second and requests at once, a measurement a minute while they are busy |
-| `machine` | the machine the monitor is on (memory, accelerators and disk, now and over the last hour, measured every 15 seconds while the monitor runs), each channel's throughput, each runner in the ledger (what it plays now, the claims it has made, its fence), the ledger's fences and tables (`#/system` opens it) |
+| `inference` | each run's engines: tokens a second and requests at once, a measurement each beat while they are busy |
+| `machines` | a card for each runner's and launcher's machine, as its heartbeats say: its host, alive or gone (no beat for 90 seconds), memory, accelerators and disk now and over its recent beats, its engines' processes, what each channel serves and how fast, and a launcher's profiles; then each channel's throughput, each runner in the ledger (what it plays now, the claims it has made, its fence), the ledger's fences and tables (`#/system` opens it) |
 
 An episode whose feed file has been pruned is read back from the events its runner kept in the blob store: its
 replies and tool calls are there, and what each model was sent is not (it is kept as tokens in the trajectories). A
@@ -147,8 +181,8 @@ summed as the trainer sums it ([rewards](episodes.md#rewards)).
 
 `System(directory)` reads a run's directory and its ledger, and `System(ledger=…)` a ledger alone: `snapshot()`
 (where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds),
-`lineage(sample)` (the versions view), `statistics()` (with each run's name), `rename(who, name)`,
-`bookmark(name, version)` and `unbookmark(name)`. `create_app(where)` serves them,
+`lineage(sample)` (the versions view), `statistics()` (with each run's name), `machines()` (the heartbeats),
+`launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, version)` and `unbookmark(name)`. `create_app(where)` serves them,
 the stream and the page; its routes are listed in `rollout_train.monitor.app`.
 
 A group's stage is read from the records alone, so it is what a [loop](training.md) that started now would find:
@@ -184,9 +218,9 @@ label opens it (what is open is remembered in the browser). A version opens its 
 
 A version that something here starts from and that this ledger does not have stands in a lane of its own at the top.
 
-`rollout_train.monitor.lineage` reads it from the ledger's tables and the runs' feeds' notes, at `/api/versions`. What
+`rollout_train.monitor.lineage` reads it from the ledger's tables and the runners' heartbeats, at `/api/versions`. What
 a ledger has today is read as it is: the versions, the runs' steps, bookmarks. A run's steps stand for its trainer's
-queue (a run takes one step at a time), and the `published` notes in the feed for what its engines serve. The tables
+queue (a run takes one step at a time), and the channels its runners' beats name for what its engines serve. The tables
 for distillation, trainers, inference workers and evaluations are proposed in
 [the version graph](../../research/policy-dag.md), and nothing writes them yet. `#/versions/sample` (`?sample=1`)
 shows the view with a fixture of them (`rollout_train/monitor/sample-lineage.json`) beside the ledger, everything from
@@ -209,8 +243,7 @@ what the page shows to a directory, as it happens.
   holds every message sent (text, reasoning, tool calls, tool results), the names of the tools offered, and the
   reply.
 - **One file of notes**, `_notes.jsonl`, with one line per [note](rollouts.md#watching): episodes as runners start
-  and end them, published weights, the training loop's `result` and `step` notes, and the engines' throughput
-  (`inference`).
+  and end them, published weights, and the training loop's `result` and `step` notes.
 - **The directory is bounded.** `keep` is the number of runs kept; the oldest are deleted.
 - **One writer at a time.** Runs that an earlier writer left without an end, because its process was stopped, are
   marked cancelled when the next writer starts, so that the page does not show them running for ever.

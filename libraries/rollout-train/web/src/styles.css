@@ -380,6 +380,52 @@
   .distills .says-text { margin: 0; font-size: 14px; font-weight: 500; color: var(--ink); }
   .diamond { width: 10px; height: 10px; transform: rotate(45deg); flex: none; border-radius: 1px; }
 
+  /* A new run: the form that asks for it, the launches and how each goes */
+  .head-with-action { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .action { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid var(--accent);
+            border-radius: 2px; padding: 5px 11px; vertical-align: middle; }
+  .action:hover { background: var(--accent-soft); }
+  .launch-form { display: grid; gap: 18px; }
+  .fields { display: grid; gap: 14px; }
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field > span { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--quiet); }
+  .field small { color: var(--faint); font-size: 12px; }
+  .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; }
+  .launch-form input, .launch-form select { font: 13px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong);
+                                             border-radius: 3px; padding: 6px 9px; min-width: 0; width: 100%; }
+  .launch-form input.mono, .setting input { font-family: var(--mono); font-size: 12.5px; }
+  .launch-form input:focus, .launch-form select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .settings-grid { display: grid; gap: 8px; margin-bottom: 14px; }
+  .settings-grid > .linkish { justify-self: start; }
+  .setting { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 10px; align-items: center; }
+  .setting > span { font-size: 12px; color: var(--quiet); overflow-wrap: anywhere; }
+  .setting.changed > span { color: var(--accent); font-weight: 600; }
+  .setting.changed input { border-color: var(--accent); }
+  .setting .linkish { grid-column: 2; justify-self: start; font-size: 11px; }
+  .setting.extra { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .setting.extra .linkish { grid-column: auto; }
+  .launch-submit { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .launch-submit button[type=submit] { font: 600 12px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--panel);
+                                        background: var(--accent); border: 1px solid var(--accent); border-radius: 2px; padding: 8px 16px; cursor: pointer; }
+  .launch-submit button:disabled { opacity: .5; cursor: default; }
+  pre.command { background: var(--code); border: 1px solid var(--line); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+  .launches .launch-directory { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .launch-detail summary { cursor: pointer; color: var(--bad); font-size: 12px; }
+  .launch-detail pre { background: var(--code); border: 1px solid var(--line); padding: 8px 10px; margin-top: 6px; max-height: 260px; overflow: auto; }
+  .launch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .launch-actions .danger { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--bad); background: var(--raised);
+                            border: 1px solid var(--bad); border-radius: 2px; padding: 4px 10px; cursor: pointer; }
+  .launch-actions .danger:hover { background: var(--bad-soft); }
+  .launch-actions .danger:disabled { opacity: .5; cursor: default; }
+  .settings-changed span b { color: var(--accent); }
+  .more { margin-top: -6px; justify-self: start; }
+
+  /* A machine, as its heartbeats say */
+  .machine .body { display: grid; gap: 10px; }
+  .machine.stale { opacity: .72; }
+  .machine-title { display: inline-flex; align-items: center; gap: 8px; }
+  .machine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -6px; }
+
   @media (max-width: 900px) {
     html, body, #root { height: auto; }
     .shell { display: block; height: auto; }
@@ -399,4 +445,6 @@
     .stages { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .scrub { top: 50px; }
     .spec { padding: 0 12px; }
+    .setting, .setting.extra { grid-template-columns: minmax(0, 1fr); }
+    .setting .linkish { grid-column: 1; }
   }

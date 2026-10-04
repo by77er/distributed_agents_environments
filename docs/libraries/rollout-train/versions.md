@@ -38,9 +38,9 @@ files = await versions.files(head.weights, cache / head.id)         # on any mac
   before made. Started again, a run goes on from its own newest version (`head`).
 - **A fork is a run started from any version.** It shares its parent's blobs and costs nothing until it differs. Its
   versions continue its parent's depth and base.
-- **Several versions can be served at once**, each on its own channel: a run's newest, and the teachers a
-  distillation was given.
-- **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` lets go of the files, weights
+- **A run serves its newest version** on its channel, as the adapter named by its id; the version before stays
+  loaded until the turns that began under it finish. Runs on other channels serve their own.
+- **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
   and trainer state, of the versions a run made, but the newest `recent` and every `every`-th by depth. Whatever
   retention says, a version keeps its files while it is served (and its parent, for a turn in progress), while any
   run starts from it, and while a bookmark names it (`keep`). A kept version can be served, compared, forked and
@@ -103,7 +103,10 @@ under [dying and starting again](training.md#dying-and-starting-again).
 What runs and versions are called is kept beside the ledger, in the registry (`rollout_train.registry`):
 `registry.json` beside a ledger of files, the `runs` and `bookmarks` tables in a database ledger's database
 (`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
-the ledger keeps is under a name, so naming anything again moves nothing. A name says none of `/`, `@` and `:` (they
+the ledger keeps is under a name, so naming anything again moves nothing. Two more kinds of ordinary state are kept
+beside the ledger the same way: the runners' and launchers' heartbeats (`presence.json`, the `presence` table;
+[heartbeats](rollouts.md#heartbeats)) and the runs asked for (`launches.json`, the `launches` table;
+[launchers](../../guide/deploying.md#launchers)). A name says none of `/`, `@` and `:` (they
 are what a reference is made of), and is not `base`.
 
 ### Runs

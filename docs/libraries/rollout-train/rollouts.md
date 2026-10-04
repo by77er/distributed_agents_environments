@@ -39,13 +39,17 @@ nothing more.
 
 - **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
   the one whose append is refused looks for other work.
-- **A claim holds while its runner keeps its fence.** A runner takes the fence of `runners/NAME` when it starts. Its
-  claims hold until it is started again (under the same name, its fence moves on) or it notes an attempt as
-  interrupted. An episode with no record and no claim that holds is open: the next claim is its next attempt.
+- **A claim holds while its runner keeps its fence and beats.** A runner takes the fence of `runners/NAME` when it
+  starts. Its claims hold until it is started again (under the same name, its fence moves on), it notes an attempt
+  as interrupted, or, where runners beat ([heartbeats](#heartbeats)), its newest beat is older than 90 seconds (its
+  machine died, say). An episode with no record and no claim that holds is open: the next claim is its next attempt.
+  A runner does not wait on its own beat: its own claims hold for it while its fence is its own.
 - **Every attempt that ends is an episode**, whatever its outcome: completed, failed (the program raised, or the run
   could not start), cancelled. The first record of an episode is its record.
 - **An episode's trajectories and its run's events go to the blob store**; the record names both
-  ([the record](#the-record)).
+  ([the record](#the-record)). A run started by `rollout train` says in its `starts` record where that store is
+  (`rollout_train.stores`: its kind and settings, never a credential), so that any machine can read a finished
+  episode back.
 
 ## A runner
 
@@ -61,14 +65,32 @@ open episodes and plays them on a [`Runner`](../rollout/README.md#runner).
 - **`guard`** is called before claiming, and raises to wait: a machine short of memory claims nothing until it has
   room.
 - **An episode is played** as the run's program with the group's `parameters` as its row, labelled `run`, `group`
-  and `episode`. When it ends, the runner takes the run's segments from the recorder, assembles the
-  [episode](episodes.md), stores it and appends its record. The recorder then forgets the run.
-- **Closing** cancels what it plays, in the runner too, and notes each attempt in `interrupted`: the episode is open
-  again, for any runner with room.
+  and `episode`. When it ends, the runner takes the run's segments from the recorder (which then forgets the run),
+  assembles the [episode](episodes.md), stores it and appends its record.
+- **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
+  `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
+  is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop.
 
 `serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
 [`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`
 episodes of a group have records and returns them, trajectories and all.
+
+### Heartbeats
+
+With `presence` (a `Presence`, `rollout_train.presence`), a runner beats when it
+starts, before it claims anything, and every `beating` seconds (15) after. A beat holds what `about()` says of its
+machine (called in a thread: it may measure), with its `places` and how many episodes it is `playing`. Each runner's newest beat
+is kept with the measurements of its recent ones (240: an hour), so its machine can be shown from anywhere.
+
+Beats are kept beside the ledger, as ordinary state changed in place, not appended: `presence.json` beside a ledger
+of files, the `presence` table in a database ledger's database (`DatabasePresence`); `presence_of(ledger)` finds
+them. A runner whose newest beat is older than `STALE` (90 seconds) is taken to be gone, and its claims lapse.
+
+An open profile's runner says, in each beat: its host, the run it serves, the run's directory, its machine
+(`rollout_train.machine`: memory, each GPU's memory and how busy, the disk the directory is on), its engines'
+processes and whether each is alive, and what each channel serves (adapter and version) with what passed through it
+since the beat before (requests, tokens, tokens a second, requests at once). The [monitor](monitor.md) shows
+machines, inference throughput and what is served from these beats.
 
 ## The record
 

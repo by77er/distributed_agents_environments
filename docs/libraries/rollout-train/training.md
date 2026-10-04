@@ -21,6 +21,13 @@ serves what it trains, and sets `episodes_at_once` ([deploying](../../guide/depl
 directory: its id is in the directory's `run.json`, and its name is chosen with `--name` and changed with
 `rollout rename` ([runs](versions.md#runs)).
 
+`--set KEY=VALUE` (repeatable) changes a setting of the profile for this run, by dotted key, without editing its
+file: `--set trainer.learning_rate=3e-5`, `--set episodes_at_once=4`, `--set trainer.start=curriculum-9:20`,
+`--set trainer.bookmark=diamonds`. The value is read as TOML (`3e-5`, `true`, `[1, 2]`, `"text"`), or else as the
+text it is. A key the profile cannot have is an error, as in the file: when the profile is loaded, for its top level
+and its tables; for a `trainer.` key, when the trainer is made with its settings
+([`Profile.load(path, settings=...)`](../../guide/reference.md#profile)).
+
 ## The loop
 
 [`train`](../../guide/reference.md#train) trains a line of [versions](versions.md) on a catalog, from `start` (a
@@ -50,8 +57,8 @@ catalog's program and that binding.
 ## Dying and starting again
 
 The loop can be killed at any moment and started again. It keeps nothing it cannot read back: what it decides and
-what happens are appended to four tables in the [ledger](versions.md#the-ledger), and every action is one that can
-be taken twice.
+what happens are appended to the run's tables in the [ledger](versions.md#the-ledger) (these four, besides its
+`plans` and `starts`), and every action is one that can be taken twice.
 
 | Table | Keyed by | Written | Holds |
 |---|---|---|---|
@@ -153,7 +160,8 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the version it
 starts from (`from`), the host, when, and what `train(started=…)` adds; `rollout train` adds the run's directory, the profile and, with
-`--monitor URL`, where the monitor on that machine serves (`address`), as other machines reach it. A run started
+`--monitor URL`, where the monitor on that machine serves (`address`), as other machines reach it, and where the run's
+blobs are (`blobs`, [rollouts](rollouts.md#what-runners-write)). A run started
 again appends another. That is how a [monitor](monitor.md) over a shared ledger finds every run, and where each keeps
 its episodes.
 
@@ -207,14 +215,14 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   does.) A segment where no such stretch is found is left out.
 - **`examples(ledger, run, blobs, renderer, kinds=...)`** reads a run's episodes for those that carried guidance
   of those kinds and solved their task, and gives their segments, cut, each weighted 1.
-- **`imitate(versions, trainer, examples, fence=..., run=..., start=...)`** takes one step of a trainer whose
+- **`imitate(versions, trainer, examples, fence=..., run=..., start=..., base=..., directory=...)`** takes one step of a trainer whose
   objective is likelihood ([LoRA trainer](../../implementations/rollout-lora.md)) from the newest version the run
   made (else from `start`), and appends the version it makes as the run's (with no step).
 
 ```bash
-rollout imitate PROFILE [--without KIND ...] [--limit N]    # with the run stopped: it takes the run's fence
+rollout imitate PROFILE [--directory RUN] [--without KIND ...] [--limit N] [--seed N]   # with the run stopped
 ```
 
-The command reads the episodes of the run in the directory for guidance of the kinds given (`way` by default), steps
+It takes the run's fence, so the run must be stopped. It reads the episodes of the run in the directory for guidance of the kinds given (`way` by default), steps
 the profile's trainer with `objective = "likelihood"`, and adds `imitated_episodes` to the version's metrics. Started
 again, the training loop serves the version imitation made (the run's newest) and trains on from it.

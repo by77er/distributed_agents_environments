@@ -24,7 +24,7 @@ it went. It is a package that depends on `rollout` and on nothing above it (`tes
 In all three, the reward goes through the run (`run.reward`, or an observation's `reward`), and the result says how it
 went in the world's own terms:
 
-```python fragment
+```py
 await run.emit("result", {"solved": True, "saturated": False, "duration": 3.5})
 ```
 
@@ -37,7 +37,7 @@ process that runs episodes, or on machines of its own (`rollout tools module:fac
 
 What there is to train on is a **catalog**:
 
-```python fragment
+```py
 class Words:
     program = agent_program(Guess)
 
@@ -53,7 +53,7 @@ looks like once it is no longer the current one, and what to ask when turns must
 
 ## Designing training
 
-```python fragment
+```py
 await plan(ledger, "miner-1", Plan(catalog.program, binding), fence)
 group = {"parameters": catalog.start(row, rng), "episodes": 4, "task": row.key}
 await ledger.append(table("miner-1", GROUPS), "12", group, fence)      # runners play it from here
@@ -72,8 +72,9 @@ await publish("policy", makes, f"versions/{makes}/weights", 3)  # served under i
 - `rollout_train.train` is the loop most runs use: a curriculum over a catalog picks rows, each start is played as a
   group of episodes, and a step is taken over several groups at a time, while play goes on
   ([training](../libraries/rollout-train/training.md)).
-- Watching: the ledger (each group, its claims and its episodes), the notes runners and the loop write (episodes
-  started and ended, published weights, results, steps), and each run's feed, on one page (`rollout monitor RUN`).
+- Watching: the ledger (each group, its claims and its episodes, the versions), the runners' heartbeats (their
+  machines, and what each channel serves and how fast), and each run's feed of the episodes playing now, on one page
+  (`rollout monitor RUN`).
 
 The same code serves when the runners are in this process and when they are on other machines: they share only the
 ledger and the blob store ([rollouts](../libraries/rollout-train/rollouts.md)).

@@ -93,7 +93,9 @@ Proposals: what could be built, and the records it would need.
 
 | Page | What it covers |
 |---|---|
-| [The policy graph](research/policy-dag.md) | Every policy as a graph of versions: training, forks, distillation (on and off policy), trainers and their queues, the way from written weights to served ones, evaluations; the monitor's draft view |
+| [The policy graph](research/policy-dag.md) | The graph of versions with what trains, serves and evaluates them: distillation (on and off policy), trainers and their queues, the way from written weights to served ones, evaluations |
+| [Curricula](research/curricula.md) | Building training curricula and frozen evaluation suites from a run's data |
+| [Thinking Machines' API](research/thinking-machines.md) | Training and sampling through Tinker as a trainer and an engine of their own |
 
 ## Conventions
 

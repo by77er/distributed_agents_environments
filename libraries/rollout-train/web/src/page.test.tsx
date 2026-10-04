@@ -31,7 +31,8 @@ describe("places", () => {
     expect(placeOf("/episode/r_1/agent-2")).toEqual({ page: "runs", kind: "episode", id: "r_1", slot: "agent-2" });
     expect(placeOf("/versions/sample")).toEqual({ page: "versions", kind: "versions", sample: true });
     expect(placeOf("/version/kpqx")).toEqual({ page: "versions", kind: "version", id: "kpqx" });
-    expect(placeOf("/system")).toEqual({ page: "statistics", kind: "statistics", section: "machine" });
+    expect(placeOf("/system")).toEqual({ page: "statistics", kind: "statistics", section: "machines" });
+    expect(placeOf("/runs/new")).toEqual({ page: "runs", kind: "launch" });
     expect(placeOf("")).toEqual({ page: "runs", kind: "runs" });
   });
 });
@@ -80,5 +81,16 @@ describe("a page read again", () => {
     await waitFor(() => expect(screen.getByText("beta").closest("a")!.textContent).toContain("of 3 decided"));
     expect(screen.getByText("alpha").closest("a")).toBe(alpha);
     expect(alpha.innerHTML).toBe(alphaText);
+  });
+});
+
+describe("a new run's settings", () => {
+  it("are read as numbers, true or false, or JSON where they look like them, and as text otherwise", async () => {
+    const { typed } = await import("./pages/NewRun");
+    expect(typed("3e-5")).toBe(3e-5);
+    expect(typed("384")).toBe(384);
+    expect(typed("true")).toBe(true);
+    expect(typed("[1, 2]")).toEqual([1, 2]);
+    expect(typed("rollout_lora:LoraTrainer")).toBe("rollout_lora:LoraTrainer");
   });
 });
