@@ -1244,3 +1244,13 @@ The user settled the design's open questions on 2026-10-04:
   removed by the autoscaler; the gateway reaches its engines over HTTP and its followers read runs' serving records,
   so a run's retry does not reload models. On a one-GPU node the run's trainer pod and a pool's
   engine pod share the card by time-slicing into two, with the engine's memory share capped to leave the trainer room.
+- **A follower follows a pool, and is told only where things are.** It starts with three things: where the ledger
+  is, with a token limited to reading serving records and writing beats; where the blob store is, with read-only
+  credentials; and its pool's name (`ROLLOUT_POOL`). The ledger keeps each pool's bindings (the runs bound to it and
+  the adapter slots each holds), and the follower loads every bound run's serving checkpoints, so runs join and leave
+  a pool without restarting it. A follower in the cluster reads these from the cluster config (a ConfigMap and a
+  Secret, naming internal addresses); a pod outside the cluster gets them as environment variables from the launcher
+  when it is created, with step-ca's one-time token. So the cluster config declares, for the ledger and the blob
+  store, a public address beside the internal one, and the launcher hands each provider the address for where it
+  runs. Outside the cluster the ledger is the HTTP ledger service, never the database itself. The gateway finds
+  followers by their beats (address and certificate identity), as before.
