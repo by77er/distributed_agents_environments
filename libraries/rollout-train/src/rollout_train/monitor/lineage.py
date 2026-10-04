@@ -1,18 +1,16 @@
-"""The checkpoints as a graph, with what trains, serves and evaluates them: what the monitor's lineage view draws.
+"""The checkpoints as a graph, with what trains and serves them: what the monitor's lineage view draws.
 
 Every checkpoint grows from a base model, along its parents (`rollout_train.checkpoints`): its first parent is what it
 was trained from, any others what it learned from beside (a merge's). A checkpoint with no parent was trained from its
 base model, which is the root its line hangs from. Each checkpoint was made by a step of some run, and says which. A
 run that starts from another run's checkpoint forks there. Beside the graph stand each run's trainer with its queue of
-steps, the engines and what each serves, and evaluations.
+steps, and the engines and what each serves.
 
 What is read: the checkpoints (each says what its weights are: an adapter, or full weights, which a bridge makes into
 the engines' files), the runs' steps (which stand for their trainer's queue: a run takes one step at a time; its own
 trainer makes what the run's checkpoints are), bookmarks, each checkpoint's bridges (`checkpoints/resharding`,
 `checkpoints/resharded`, keyed `CHECKPOINT@BRIDGE`, which `rollout_train.bridges` writes), the `published` notes read
-from the runners' heartbeats (which stand for what the run's engines serve), and the suites' versions with how each
-subject played them (`evaluations/SUITE/suite`, `evaluations/SUITE/SUBJECT/subject`,
-`evaluations/SUITE/SUBJECT/results`; `rollout_train.evals`).
+from the runners' heartbeats (which stand for what the run's engines serve).
 """
 
 import time
@@ -24,19 +22,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.bridges import BRIDGED, BRIDGING, checkpoint_of
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
-from rollout_train.evals import (
-    Suite,
-    eval_episodes,
-    offsets,
-    parts_of,
-    played_version,
-    start_identity,
-    suites_among,
-    version_id,
-    versions_in,
-)
 from rollout_train.ledger import between
-from rollout_train.monitor.statistics import reported
 from rollout_train.record import newest_record
 
 QUEUED, TAKING, MADE, FAILED = "queued", "taking", "made", "failed"
@@ -45,7 +31,7 @@ WRITTEN, RESHARDING, RESHARDED, SERVING, SUPERSEDED = "written", "resharding", "
 they need to be), served once its run publishes it, then let go at the next."""
 
 _VERSION = TypeAdapter(Checkpoint)
-_RUNS, _EVALUATIONS = "runs/", "evaluations/"
+_RUNS = "runs/"
 
 
 def lineage(
@@ -111,7 +97,6 @@ class _Reading:
             "bookmarks": dict(self.names.get("bookmarks", {})),
             "trainers": self.trainers(runs, made),
             "workers": self.workers(loads),
-            "evaluations": self.evaluations(),
         }
 
     def checkpoints(self) -> dict[str, Checkpoint]:
@@ -315,132 +300,6 @@ class _Reading:
             "segments": step["segments"] if step else None,
         }
 
-    def evaluations(self) -> list[dict[str, Any]]:
-        """Each suite: the version its name points to (`version`, by id; where the registry's `names` say, else its
-        newest) with that version's starts, every version (`versions`, oldest first, each with its starts), and each
-        subject that played it (a checkpoint, or another model), with the version it played and how it did at each
-        start (by the start's number in that version) and at each of that version's entries (`entries`)."""
-        suites: list[dict[str, Any]] = []
-        pointed: Mapping[str, str] = self.names.get("suites", {})
-        for suite in suites_among(self.tables):
-            versions = versions_in(self.tables, suite)
-            if not versions:
-                continue
-            current = next((each for each in versions if each.id == pointed.get(suite)), versions[-1])
-            by_id = {each.id: each for each in versions}
-            subjects: list[dict[str, Any]] = []
-            for subject in self.named(f"{_EVALUATIONS}{suite}/", "/results"):
-                about = self.record(f"{_EVALUATIONS}{suite}/{subject}/subject", "subject")
-                version = played_version(about)
-                by_start: dict[str, list[dict[str, Any]]] = {}
-                episodes = eval_episodes(self.tables, suite, subject)  # (an eval's subject is its run)
-                for key, result in self.read(f"{_EVALUATIONS}{suite}/{subject}/results").items():
-                    said = bool(reported(episodes.get(key.replace("-", "/", 1))))
-                    by_start.setdefault(key.partition("-")[0], []).append(
-                        {"solved": bool(result.get("solved")) if said else None, "reward": result.get("reward")}
-                        | {"run_id": result.get("run_id")}
-                    )
-                played = [each for listed in by_start.values() for each in listed]
-                solved = [each["solved"] for each in played if each["solved"] is not None]
-                rewards = [float(each["reward"]) for each in played if each["reward"] is not None]
-                subjects.append(
-                    {
-                        "subject": subject,
-                        "kind": about.get("kind", "checkpoint"),
-                        "checkpoint": about.get("checkpoint"),
-                        "model": about.get("model"),
-                        "episodes": _episodes(about),
-                        "asked_by": about.get("asked_by"),
-                        "version": version,
-                        "starts": len(by_id[version].starts) if version in by_id else 0,
-                        "results": by_start,
-                        "entries": _entries(by_id.get(version or ""), by_start, parts_of(self.tables, suite, subject)),
-                        "played": len(played),
-                        "solved": sum(solved) if solved or not played else None,
-                        "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
-                    }
-                )
-            suites.append(
-                {
-                    "suite": suite,
-                    "version": current.id,
-                    "number": current.number,
-                    "starts": _starts(current),
-                    "versions": [_described(each) for each in versions],
-                    "subjects": subjects,
-                }
-            )
-        return suites
-
-
-def _starts(suite: Suite) -> list[dict[str, Any]]:
-    """A version's starts as the page shows them: each by its number in the version, its entry's environment, its row,
-    title and seed, and what it is in every version that has it (`identity`)."""
-    return [
-        {"start": str(before + number), "environment": entry.environment or None, "task": start.task}
-        | {"title": start.title, "seed": start.seed}
-        | {"identity": start_identity({"task": start.task, "parameters": start.parameters})}
-        for entry, before in zip(suite.entries, offsets(suite), strict=True)
-        for number, start in enumerate(entry.starts, start=1)
-    ]
-
-
-def _described(suite: Suite) -> dict[str, Any]:
-    """A version as the page shows it: what it is, its entries (each with how many of its starts come before its
-    first: `offset`), and its starts."""
-    return {
-        "id": suite.id,
-        "number": suite.number,
-        "environments": [each or None for each in suite.environments],
-        "made": suite.made or None,
-        "held_out": suite.held_out,
-        "edited_from": version_id(suite.name, suite.edited_from) if suite.edited_from else None,
-        "entries": [
-            {
-                "environment": entry.environment or None,
-                "environment_version": entry.environment_version,
-                "chosen": entry.chosen,
-                "eval_data": entry.eval_data,
-                "rows": entry.rows,
-                "seeds": entry.seeds,
-                "held_out": entry.held_out,
-                "episodes": entry.episodes,
-                "thinking_tokens": entry.thinking_tokens,
-                "answer_tokens": entry.answer_tokens,
-                "offset": before,
-                "starts": len(entry.starts),
-            }
-            for entry, before in zip(suite.entries, offsets(suite), strict=True)
-        ],
-        "starts": _starts(suite),
-    }
-
-
-def _entries(
-    version: Suite | None, by_start: Mapping[str, list[dict[str, Any]]], parts: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """How a subject did at each entry of the version it played (each its environment, its episodes of each start,
-    episodes played, solved where its episodes say, and the mean reward), from its episodes by start and the runs that
-    played its entries."""
-    if version is None:
-        return []
-    found: list[dict[str, Any]] = []
-    for place, (entry, before) in enumerate(zip(version.entries, offsets(version), strict=True)):
-        played = [each for number in range(1, len(entry.starts) + 1) for each in by_start.get(str(before + number), [])]
-        solved = [each["solved"] for each in played if each["solved"] is not None]
-        rewards = [float(each["reward"]) for each in played if each["reward"] is not None]
-        episodes = parts[place].get("episodes") if place < len(parts) else None
-        found.append(
-            {
-                "environment": entry.environment or None,
-                "episodes": int(episodes or entry.episodes),
-                "played": len(played),
-                "solved": sum(solved) if solved or not played else None,
-                "reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
-            }
-        )
-    return found
-
 
 def _state(life: Mapping[str, Any]) -> str:
     """Where a checkpoint is on its way to the engines (`WRITTEN` to `SERVING`, or `SUPERSEDED`)."""
@@ -489,10 +348,3 @@ def _series(changes: list[tuple[float, int]]) -> list[list[float]]:
         else:
             series.append([at, count])
     return series
-
-
-def _episodes(subject: Mapping[str, Any]) -> int | None:
-    """A subject's episodes of each start, from its record: none where its entries play different numbers of them."""
-    if subject.get("episodes") is None and subject.get("parts"):
-        return None
-    return int(subject.get("episodes") or 1)

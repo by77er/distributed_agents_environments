@@ -113,7 +113,7 @@ async def test_every_role_on_every_machine_with_what_it_holds(tmp_path: Path) ->
     (host,) = shown["engines"]
     assert host["follows"] == "train"
     (channel,) = host["channels"]
-    assert channel == channel | {"serving": "ck-1", "version": 1, "wanted": "ck-2", "wanted_version": 2, "behind": 1}
+    assert channel == channel | {"serving": "ck-1", "version": 1, "wanted": "ck-2", "behind": 1}
     assert channel["tokens_per_second"] == 90.0 and channel["engines"] == [
         {"address": "http://gpu-2:8000", "serving": "ck-1", "version": 1, "behind": 1}
     ]

@@ -137,7 +137,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert [checkpoint["id"] for checkpoint in shown] == [step["makes"] for step in run["steps"]]
     first, last = shown[0], shown[-1]
     assert first["parents"] == [] and first["base"] == "tiny" and first["depth"] == 1 and first["run"] == "train"
-    assert first["weights"]["files"] == 1 and first["state"]["files"] == 1 and first["batch"]
+    assert first["weights"]["files"] == 1 and first["state"]["files"] == 1
     assert all(each["parents"] == [before["id"]] for before, each in itertools.pairwise(shown))
     assert last["id"] == head.id and last["depth"] == len(shown) and last["bookmarks"] == ["best"]
     assert system["bookmarks"] == {"best": head.id} and last["short"] and head.id.startswith(last["short"])
@@ -208,7 +208,7 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     feed._write("r_one", {"kind": "event", "type": "run.created", "at": 6.0, "payload": created})  # pyright: ignore[reportPrivateUsage]
     feed._write("r_one", {"kind": "sample", "slot": "ada", "at": 7.0})  # pyright: ignore[reportPrivateUsage]
     (episode,) = (await group())["episodes"]
-    assert episode == {**episode, "run_id": "r_one", "episode": "1", "state": "running", "samples": 1, "in_feed": True}
+    assert episode == {**episode, "run_id": "r_one", "episode": "1", "state": "running", "samples": 1}
 
     # The second episode's first attempt is cut short when its runner closes: it is claimed again, and played again.
     await ledger.append(table("train", CLAIMS), "1/2/1", claim, runner)

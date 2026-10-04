@@ -31,8 +31,8 @@ GOING = (CLAIMED, RUNNING, STOPPING)
 """The states of a launch its launcher is playing."""
 OFFERED = ("profile", "model", "weights")
 """What the page shows of each profile a launcher offers."""
-THROUGHPUT = ("requests", "generated_tokens", "tokens_per_second", "tokens_per_second_per_stream", "mean_concurrency")
-"""What a channel's beat says passed through it since the beat before."""
+THROUGHPUT = ("tokens_per_second", "mean_concurrency")
+"""What the page shows of what a channel's beat says passed through it since the beat before."""
 
 
 def machines(
@@ -66,7 +66,7 @@ def machines(
                 shown
                 | {"run": said.get("run"), "places": places, "playing": played, "free": max(places - played, 0)}
                 | {"claims": playing.get(beat.runner, []), "pools": [f"{name}@{beat.runner}" for name in held]}
-                | {"channels": _channels(said.get("channels")), "processes": said.get("processes")}
+                | {"channels": _channels(said.get("channels"))}
             )
             for name, capacity in dict(held).items():
                 pools[f"{name}@{beat.runner}"] = _pool(shown, f"{name}@{beat.runner}", name, capacity, beat.runner)
@@ -210,7 +210,6 @@ def _served(channel: Mapping[str, Any], wanted: Mapping[str, Mapping[str, Any]])
     return {
         **_channel(channel),
         "wanted": should["checkpoint"] if should is not None else None,
-        "wanted_version": target,
         "behind": behind(channel.get("version")),
         "error": channel.get("error"),
         "engines": engines,

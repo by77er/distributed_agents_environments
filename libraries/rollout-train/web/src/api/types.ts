@@ -34,7 +34,6 @@ export interface GroupEpisode {
   /** While it plays: each slot's reward so far. */
   rewards?: Record<string, number>;
   updated?: number | null;
-  in_feed?: boolean;
   interrupted?: boolean;
   outcome?: string;
   /** Whether it solved its task; null: the task did not say. */
@@ -170,7 +169,6 @@ export interface Checkpoint {
   weights: { files: number; bytes: number } | null;
   state: { files: number; bytes: number } | null;
   released: number | boolean | null;
-  batch: boolean;
   bookmarks: string[];
 }
 
@@ -244,10 +242,7 @@ export interface RoleChannel {
   channel: string;
   serving: string | null;
   version: number | null;
-  requests: number | null;
-  generated_tokens: number | null;
   tokens_per_second: number | null;
-  tokens_per_second_per_stream: number | null;
   mean_concurrency: number | null;
   /** A routed channel's servers: each one's address, what it would sample from now, and how far behind. */
   servers?: { address: string; serving: string | null; version: number | null; behind: number | null; answers?: boolean }[];
@@ -273,7 +268,6 @@ export interface RunnerRole extends Role {
   /** Its pools, by name. */
   pools: string[];
   channels: RoleChannel[];
-  processes: { owner: number; started: { pid: number; name: string; alive: boolean }[] } | null;
 }
 
 /** A sandbox held under a key, as the `sandboxes` table says. */
@@ -318,7 +312,6 @@ export interface EngineServed {
 
 export interface EngineChannel extends RoleChannel {
   wanted: string | null;
-  wanted_version: number | null;
   behind: number | null;
   error: string | null;
   engines: EngineServed[];
@@ -643,7 +636,6 @@ export interface SuiteVersion {
   environments: (string | null)[];
   made: number | null;
   held_out: boolean;
-  edited_from: string | null;
   entries: SuiteEntry[];
   starts: SuiteStart[];
 }
@@ -737,7 +729,6 @@ export interface Lineage {
   edges: Edge[];
   trainers: Trainer[];
   workers: Worker[];
-  evaluations: Suite[];
 }
 
 /** An eval a checkpoint had: the suite, the eval's run, who asked for it (by hand, or a training run's schedule at a
@@ -753,7 +744,6 @@ export interface CheckpointEval {
   model: string | null;
   asked_by: "by hand" | "schedule";
   by: string | null;
-  by_name: string | null;
   step: number | null;
   /** Episodes of each start. */
   episodes: number;

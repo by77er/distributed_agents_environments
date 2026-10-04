@@ -1,5 +1,5 @@
-"""The checkpoints as a graph: growing from base models, forks and merges, the runs' trainers, their engines and
-evaluations."""
+"""The checkpoints as a graph: growing from base models, forks and merges, the runs' trainers and their engines; and
+the suites with how each subject played them."""
 
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from rollout_train.monitor.lineage import (
     WRITTEN,
     lineage,
 )
+from rollout_train.monitor.scores import suites_in
 from tests.rollout_train.support import monitor_client
 
 NOW = 1_800_000_000.0
@@ -122,7 +123,7 @@ def test_every_version_grows_from_its_base_model_along_its_parents() -> None:
     assert graph["bookmarks"] == NAMES["bookmarks"] and graph["outside"] == []
 
 
-def test_the_graph_has_each_runs_checkpoints_and_what_trains_serves_and_evaluates_them() -> None:
+def test_the_graph_has_each_runs_checkpoints_and_what_trains_and_serves_them() -> None:
     graph = lineage(tables(), NOTES, names=NAMES, now=NOW)
     runs = {run["run"]: run for run in graph["runs"]}
     assert runs["merge"]["checkpoints"] == ["bothone"] and runs["merge"]["from"] == "minerthree"
@@ -141,7 +142,9 @@ def test_the_graph_has_each_runs_checkpoints_and_what_trains_serves_and_evaluate
     assert digger["runs"] == ["dig"] and digger["base"] == "small"
     assert {worker["worker"]: worker["serving"] for worker in graph["workers"]} == {"dig engines": ["diggertwo"]}
 
-    (suite,) = graph["evaluations"]
+
+def test_each_suite_lists_the_subjects_that_played_it_and_how_they_did() -> None:
+    (suite,) = suites_in(tables(), NAMES)
     subjects = {subject["subject"]: subject for subject in suite["subjects"]}
     assert (
         subjects["minerthree"]["solved"] == 1

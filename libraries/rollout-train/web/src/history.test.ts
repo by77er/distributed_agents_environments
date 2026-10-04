@@ -8,7 +8,7 @@ const WORDS = "games:words", GUESSING = "games:guessing";
 const entry = (environment: string, share: number | null, reward: number | null, played = 2) => ({ environment, played, solved: share == null ? null : share * played, share, reward });
 
 const anEval = (run: string, version: string, started: number | null, entries: ReturnType<typeof entry>[] = []): CheckpointEval => ({
-  suite: version.split("@")[0], version, run, name: run, kind: "checkpoint", checkpoint: "kpqx", model: null, asked_by: "by hand", by: null, by_name: null,
+  suite: version.split("@")[0], version, run, name: run, kind: "checkpoint", checkpoint: "kpqx", model: null, asked_by: "by hand", by: null,
   step: null, episodes: 1, played: 2, expected: 2, solved: 1, share: 0.5, reward: 0.25, started, at: started, done: true, entries,
 });
 

@@ -15,7 +15,7 @@ const measured = (at: number, used: number): Measurement => ({
 });
 
 const runner = (name: string, host: string, playing: number, places: number, alive = true): RunnerRole => ({
-  name, host, alive, at: 90, run: null, places, playing, free: Math.max(places - playing, 0), claims: [], pools: [], channels: [], processes: null,
+  name, host, alive, at: 90, run: null, places, playing, free: Math.max(places - playing, 0), claims: [], pools: [], channels: [],
 });
 
 const pool = (name: string, kind: string, host: string, leased: number | null, size: number | null, alive = true): PoolRole => ({

@@ -54,7 +54,7 @@ describe("places", () => {
 
 const checkpoint = (id: string, short: string, run: string | null, step: number | null, parents: string[] = [], bookmarks: string[] = []): Checkpoint => ({
   id, short, depth: parents.length + 1, parents, base: "Qwen/Qwen3.5-9B", kind: "lora", run, step, made: 1, metrics: {}, weights: null, state: null,
-  released: null, batch: false, bookmarks,
+  released: null, bookmarks,
 });
 
 describe("checkpoints", () => {
@@ -437,7 +437,6 @@ const version = (number: number, entries: [string, [string, number][], Partial<S
   const offsets = entries.map((_, place) => entries.slice(0, place).reduce((sum, [, starts]) => sum + starts.length, 0));
   return {
     id: `${name}@${number}`, number, environments: entries.map(([environment]) => environment), made: number, held_out: false,
-    edited_from: number > 1 ? `${name}@${number - 1}` : null,
     entries: entries.map(([environment, starts, extra], place) => entry(environment, offsets[place], starts.length, extra)),
     starts: entries.flatMap(([environment, starts], place) => starts.map(([task, seed], at) => ({
       start: String(offsets[place] + at + 1), environment, task, seed, title: task, identity: `${task}|${seed}`,

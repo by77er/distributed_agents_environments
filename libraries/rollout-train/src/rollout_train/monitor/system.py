@@ -67,9 +67,9 @@ from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.environments import Read, described, listed, page_of
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
-from rollout_train.monitor.lineage import _Reading, lineage  # pyright: ignore[reportPrivateUsage]
+from rollout_train.monitor.lineage import lineage
 from rollout_train.monitor.machines import kind_of, machines
-from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in
+from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in, suites_in
 from rollout_train.monitor.statistics import newest, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
 from rollout_train.record import (
@@ -625,10 +625,10 @@ class System:
     async def evals(self) -> dict[str, Any]:
         """Every suite (the version its name points to, with its environment and starts; every version; and each
         subject that played it, with the version it played and how it did at each start) and every eval (its suite, the
-        version it played, its checkpoint, how far it has got), newest first (`rollout_train.evals`)."""
+        version it played, its checkpoint, how far it has got), newest first (`rollout_train.monitor.scores`)."""
         tables = await self._tables()
         called = await self._names()
-        suites = _Reading(tables, [], called, time.time()).evaluations()
+        suites = suites_in(tables, called)
         for each in suites:
             current = next(version for version in each["versions"] if version["id"] == each["version"])
             each |= {"environments": current["environments"], "made": current["made"]}
@@ -649,7 +649,7 @@ class System:
         return {"suites": suites, "evals": evals}
 
     async def lineage(self) -> dict[str, Any]:
-        """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`)."""
+        """The checkpoints as a graph, with what trains and serves them (`rollout_train.monitor.lineage`)."""
         tables = await self._tables()
         notes = _noted(await self._beats())
         every = [note for each in notes.values() for note in each]
@@ -1190,12 +1190,11 @@ def _group(
                 "reward": sum(each["rewards"].values()) / len(each["rewards"]) if each["rewards"] else None,
                 "rewards": each["rewards"],
                 "updated": each["updated"],
-                "in_feed": True,
                 "interrupted": each["state"] == Outcome.CANCELLED.value and each["run_id"] not in ended,
             }
     for run_id, each in ended.items():
         shown = {name: value for name, value in each.items() if name not in ("events", "kept")}
-        episodes.setdefault(run_id, {"samples": None, "updated": None, "in_feed": False}).update(shown)
+        episodes.setdefault(run_id, {"samples": None, "updated": None}).update(shown)
     key, intent = next(
         ((key, step) for key, step in cast(Mapping[str, Any], tables[STEPS]).items() if int(number) in _covers(step)),
         (None, None),
@@ -1368,7 +1367,6 @@ def _checkpoint(checkpoint: Checkpoint, shorter: Mapping[str, str]) -> dict[str,
         else None,
         "state": {"files": len(checkpoint.state.files), "bytes": size(checkpoint.state)} if checkpoint.state else None,
         "released": checkpoint.released,
-        "batch": checkpoint.batch is not None,
         "dataset": checkpoint.dataset,
     }
 
