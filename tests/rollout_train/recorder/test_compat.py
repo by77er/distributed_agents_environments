@@ -9,7 +9,6 @@ from typing import Any, cast
 import httpx
 import pytest
 
-from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, ToolSpecification
 from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.gateway import GatewayEndpoints, create_app
@@ -17,7 +16,7 @@ from rollout_train.inference import Channel, Limits
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine, admitted, recording
+from rollout_train.testing import Characters, ScriptedEngine, admitted, recording
 
 pytest.importorskip("starlette")
 pytest.importorskip("openai")
@@ -29,6 +28,8 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response as OpenAIResponse
 from starlette.applications import Starlette
 
+from tests.rollout_train.support import ThinkingRenderer
+
 GUESS: dict[str, Any] = {
     "type": "function",
     "function": {
@@ -39,23 +40,6 @@ GUESS: dict[str, Any] = {
 }
 SCRIPT = [('call guess {"n": 5}\n', "stop"), ("I knew it~It was five.\n", "stop")]
 """A tool call, then reasoning (before the `~`) and an answer."""
-
-
-class ThinkingRenderer(PlainRenderer):
-    """The plain format, with reasoning written before a `~`: `assistant: thought~answer`."""
-
-    def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message:
-        message = super().parse(completion, tools)
-        if "~" not in message.text:
-            return message
-        thought, answer = message.text.split("~", 1)
-        reasoning = Reasoning(scope=ReasoningScope.PORTABLE, text=thought)
-        return Message(role=Role.ASSISTANT, content=[reasoning, Text(text=answer)])
-
-    @staticmethod
-    def _said(message: Message) -> str:
-        thought = "".join(block.text for block in message.content if isinstance(block, Reasoning))
-        return (f"{thought}~" if thought else "") + PlainRenderer._said(message)
 
 
 async def served(

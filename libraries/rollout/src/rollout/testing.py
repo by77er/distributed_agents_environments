@@ -1,6 +1,7 @@
 """Test doubles for code built on the core: a model endpoint that replies from a script, and sandboxes that are only
 records."""
 
+import asyncio
 import inspect
 import json
 import time
@@ -47,6 +48,7 @@ __all__ = [
     "payload",
     "read_ledger",
     "tool_call_reply",
+    "until",
 ]
 
 type ScriptedReply = Message | str | Callable[[SampleRequest], Message | Awaitable[Message]]
@@ -276,6 +278,23 @@ class FakeSandboxes:
         except PermissionError as error:
             return ToolResult(content=[Text(text=str(error))], is_error=True)
         return ToolResult(content=[Text(text=json.dumps(answered))], structured=answered)
+
+
+async def until(
+    condition: Callable[[], object], seconds: float = 15.0, *, every: float = 0.01, message: str = "not met in time"
+) -> None:
+    """Wait until `condition()` is true, asking every `every` seconds; it may return an awaitable, which is awaited.
+    Raises `AssertionError` (with `message`) once `seconds` have passed."""
+    deadline = time.monotonic() + seconds
+    while True:
+        met = condition()
+        if inspect.isawaitable(met):
+            met = await met
+        if met:
+            return
+        if time.monotonic() > deadline:
+            raise AssertionError(message)
+        await asyncio.sleep(every)
 
 
 def read_ledger(ledger: Path) -> list[dict[str, str]]:

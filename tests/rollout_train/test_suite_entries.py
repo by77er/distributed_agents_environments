@@ -4,7 +4,6 @@ schedule plays each on its channel and folds each into its curriculum, the entry
 offer every environment of; and the page makes, edits and lists such suites, and lists the environments it knows."""
 
 import asyncio
-import functools
 from pathlib import Path
 from typing import Any, cast
 
@@ -14,8 +13,6 @@ from pydantic import JsonValue
 
 from rollout.curriculum import Curriculum
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import evals as evals_module
-from rollout_train import loop as loop_module
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.evals import (
@@ -39,7 +36,7 @@ from rollout_train.monitor.scores import evals_of, path_of
 from rollout_train.monitor.system import System
 from rollout_train.presence import presence_of
 from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, table
-from rollout_train.rollouts.scheduler import PLANS, Plan, episodes_of
+from rollout_train.rollouts.scheduler import PLANS, Plan
 from tests.rollout_train.rollouts.games import guessing, words
 from tests.rollout_train.support import Counting, Process, answering, here, made_by, profiles
 
@@ -48,12 +45,6 @@ from rollout_train.monitor.app import create_app
 
 WORDS = "tests.rollout_train.rollouts.games:words"
 GUESSING = "tests.rollout_train.rollouts.games:guessing"
-
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(evals_module, "episodes_of", functools.partial(episodes_of, every=0.01))
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 def two_entries() -> list[Any]:

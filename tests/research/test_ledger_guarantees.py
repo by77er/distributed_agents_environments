@@ -46,6 +46,7 @@ from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.support import ask_boxed
 
 pytest.importorskip("rollout_durable")
+from rollout.testing import until
 from rollout_train.database import DatabaseLedger
 
 BOX = SandboxSpec(kind="fake")
@@ -99,12 +100,6 @@ async def beats_of(presence: Presence) -> dict[str, Any]:
 async def idle(runner: EpisodeRunner) -> bool:
     """Whether a runner plays nothing now."""
     return not runner._playing  # pyright: ignore[reportPrivateUsage]
-
-
-async def until(condition: Callable[[], Awaitable[bool]], seconds: float = 10.0) -> None:
-    async with asyncio.timeout(seconds):
-        while not await condition():  # noqa: ASYNC110 (other tasks write)
-            await asyncio.sleep(0.01)
 
 
 class Hooked:

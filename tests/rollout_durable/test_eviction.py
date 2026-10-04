@@ -24,7 +24,7 @@ from rollout.harness import (
     WaitFor,
     agent_program,
 )
-from rollout.testing import ScriptedModelEndpoint, payload
+from rollout.testing import ScriptedModelEndpoint, payload, until
 from rollout_durable import DurableRunner, RunStore
 
 
@@ -67,14 +67,6 @@ async def evicting(tmp_path: Path, database: str | None) -> AsyncIterator[Setup]
         runner.deploy(Deployment(name=f"test/{task.__name__.lower()}", specification=spec))
     yield runner, endpoint
     await runner.close()
-
-
-async def until(condition, seconds: float = 15) -> None:  # type: ignore[no-untyped-def]
-    for _ in range(int(seconds * 20)):
-        if condition():
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError("condition not reached")
 
 
 def replies(runner: DurableRunner, run_id: str) -> list[str]:

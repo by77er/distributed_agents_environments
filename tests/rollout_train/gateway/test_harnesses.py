@@ -12,13 +12,13 @@ import httpx
 import pytest
 from pydantic import TypeAdapter
 
-from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, ToolSpecification
+from rollout.contracts import Reasoning, Role
 from rollout_train.gateway import create_app
 from rollout_train.inference import Channel, Limits
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.compat import messages, responses
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine
+from rollout_train.testing import Characters, ScriptedEngine
 from tests.rollout_train.gateway.support import client, gateway_over, grant, keyring, stores
 
 pytest.importorskip("anthropic")
@@ -26,29 +26,14 @@ pytest.importorskip("openai")
 from anthropic.types.beta import BetaRawMessageStreamEvent
 from openai.types.responses import ResponseStreamEvent
 
+from tests.rollout_train.support import ThinkingRenderer
+
 RECORDED = Path(__file__).parent / "harnesses"
 
 
 def recorded(name: str) -> dict[str, Any]:
     """A recorded request: `{"harness", "path", "headers", "body"}`."""
     return json.loads((RECORDED / f"{name}.json").read_text())
-
-
-class ThinkingRenderer(PlainRenderer):
-    """The plain format, with reasoning written before a `~`: `assistant: thought~answer`."""
-
-    def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message:
-        message = super().parse(completion, tools)
-        if "~" not in message.text:
-            return message
-        thought, answer = message.text.split("~", 1)
-        reasoning = Reasoning(scope=ReasoningScope.PORTABLE, text=thought)
-        return Message(role=Role.ASSISTANT, content=[reasoning, Text(text=answer)])
-
-    @staticmethod
-    def _said(message: Message) -> str:
-        thought = "".join(block.text for block in message.content if isinstance(block, Reasoning))
-        return (f"{thought}~" if thought else "") + PlainRenderer._said(message)
 
 
 async def served(tmp_path: Path, script: Sequence[tuple[str, str]]) -> tuple[Any, str, httpx.AsyncClient]:

@@ -20,7 +20,7 @@ from rollout.harness import (
     SandboxSpec,
     register,
 )
-from rollout.testing import FakeSandbox, FakeSandboxes
+from rollout.testing import FakeSandbox, FakeSandboxes, until
 from rollout_train import presence
 from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.ledger import FileLedger, Ledger
@@ -41,12 +41,6 @@ async def kept(pool: SandboxPool, ledger: Ledger, beats: FilePresence | None) ->
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-
-
-async def until(condition: Any) -> None:
-    async with asyncio.timeout(5.0):
-        while not await condition():  # noqa: ASYNC110 (the runners write)
-            await asyncio.sleep(0.01)
 
 
 async def test_an_episodes_sandboxes_are_leased_under_its_claim_and_released_when_it_ends(tmp_path: Path) -> None:

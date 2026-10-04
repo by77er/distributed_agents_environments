@@ -8,7 +8,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
@@ -27,7 +26,7 @@ from rollout_train.settings import desired_settings_of
 from tests.rollout_train.rollouts.games import words
 
 pytest.importorskip("starlette")
-from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import monitor_client
 
 ENVIRONMENT = "tests.rollout_train.rollouts.games:words"
 
@@ -105,8 +104,7 @@ async def a_line(tmp_path: Path) -> tuple[FileLedger, dict[str, Checkpoint]]:
 
 async def test_a_checkpoint_lists_every_eval_it_had_by_hand_or_by_its_runs_schedule(tmp_path: Path) -> None:
     _, made = await a_line(tmp_path)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         second: Any = (await client.get(f"/api/checkpoints/{made['second'].id[:6]}/evals")).json()  # (by its start)
         first: Any = (await client.get(f"/api/checkpoints/{made['first'].id}/evals")).json()
         assert (await client.get("/api/checkpoints/nothing/evals")).status_code == 404
@@ -125,8 +123,7 @@ async def test_a_checkpoints_line_runs_from_the_base_model_through_merges_with_e
     tmp_path: Path,
 ) -> None:
     _, made = await a_line(tmp_path)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         path: Any = (await client.get(f"/api/checkpoints/{made['stacked'].id}/path")).json()
     points = path["points"]
     assert [point["id"] for point in points] == [None, *(made[name].id for name in ("first", "second", "merged",
@@ -162,8 +159,7 @@ async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path
             "settings": {**changeable, "trainer.learning_rate": rate},
         }
         await ledger.append(table("train", STEPS), key, step, fence)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         said: Any = (await client.get("/api/runs/train/settings")).json()
         assert said["fixed"] == {"model": "tiny", "trainer.rank": 8} and said["changeable"] == changeable
         assert said["now"]["trainer.learning_rate"] == 3e-5 and said["desired"] == {}

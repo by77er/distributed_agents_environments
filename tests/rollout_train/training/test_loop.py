@@ -38,9 +38,7 @@ from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
 from rollout_train.trainer import WEIGHTS
 from tests.rollout_train.rollouts.games import Words
-from tests.rollout_train.support import Counting, Notes, Running, answering, here, made_by, quickly
-
-__all__ = ["quickly"]  # (the loop looks for its groups' episodes often)
+from tests.rollout_train.support import Counting, Notes, Running, answering, here, made_by
 
 
 @dataclasses.dataclass

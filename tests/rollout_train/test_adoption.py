@@ -23,6 +23,7 @@ from rollout_train.testing import plain_channel, recording
 from tests.rollout_train.support import BOX, BOX_GATES, ask_boxed
 
 pytest.importorskip("rollout_durable")
+from rollout.testing import until
 from rollout_durable import DurableRunner
 
 
@@ -91,12 +92,6 @@ class Restarts:
         if self.durable is not None:
             await self.durable.close()
         self.serving = self.durable = None
-
-
-async def until(condition: Any, seconds: float = 15.0) -> None:
-    async with asyncio.timeout(seconds):
-        while not await condition():  # noqa: ASYNC110 (the runners write)
-            await asyncio.sleep(0.02)
 
 
 async def test_a_runner_started_again_adopts_its_durable_runs_and_they_play_on_in_their_sandboxes(

@@ -3,19 +3,15 @@ nothing trained; asked for from the page and started by a launcher; and made by 
 between its steps."""
 
 import asyncio
-import functools
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
 from rollout.curriculum import Curriculum
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import evals as evals_module
-from rollout_train import loop as loop_module
 from rollout_train import testing as support
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints, new_id
@@ -43,7 +39,7 @@ from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, STEPS, results,
 from rollout_train.registry import registry_of
 from rollout_train.resuming import _asked  # pyright: ignore[reportPrivateUsage]
 from rollout_train.rollouts import EpisodeRunner, Record, loaded, playing
-from rollout_train.rollouts.scheduler import EPISODES, episodes_of
+from rollout_train.rollouts.scheduler import EPISODES
 from tests.rollout_train.rollouts.games import words
 from tests.rollout_train.support import (
     OFFERED,
@@ -59,15 +55,7 @@ from tests.rollout_train.support import (
 )
 
 pytest.importorskip("starlette")
-from rollout_train.monitor.app import create_app
-from tests.rollout_train.support import ENVIRONMENT, a_schedule
-
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An eval, and a run, look for their groups' episodes in the ledger often (a run looks twice a second)."""
-    monkeypatch.setattr(evals_module, "episodes_of", functools.partial(episodes_of, every=0.01))
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
+from tests.rollout_train.support import ENVIRONMENT, a_schedule, monitor_client
 
 
 async def test_a_suite_is_a_list_of_starts_of_an_environments_rows(tmp_path: Path) -> None:
@@ -272,8 +260,7 @@ async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
         "playing": 0,
     }
     await heartbeats.beat("launcher/far", about)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         body = {"kind": EVAL, "suite": "words-v1", "profile": OFFERED["profile"], "name": "on words", "episodes": 2}
         answer = await client.post("/api/launches", json=body)
         assert answer.status_code == 200, answer.text

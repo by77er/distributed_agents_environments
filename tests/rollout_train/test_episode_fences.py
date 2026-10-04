@@ -12,7 +12,7 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness import LeaseRefused, SandboxPool
-from rollout.testing import FakeSandboxes
+from rollout.testing import FakeSandboxes, until
 from rollout_train.ledger import Fence, Fenced, FileLedger
 from rollout_train.loop import newest
 from rollout_train.presence import FilePresence
@@ -33,12 +33,6 @@ from rollout_train.rollouts.scheduler import (
 )
 from rollout_train.sandboxes import admits, ending, keep, leases_of, pool_scope
 from tests.rollout_train.support import BOX, BOX_GATES, ask_boxed, episode_runner
-
-
-async def until(condition: Any, seconds: float = 5.0) -> None:
-    async with asyncio.timeout(seconds):
-        while not await condition():  # noqa: ASYNC110 (the runners write)
-            await asyncio.sleep(0.01)
 
 
 async def test_each_episode_is_recorded_under_a_fence_of_its_own_taken_when_it_was_claimed(tmp_path: Path) -> None:

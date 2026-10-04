@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
@@ -32,6 +31,7 @@ from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPT
 from rollout_train.testing import Policy, plain_channel, recording, sample_request
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
+from tests.rollout_train.support import monitor_client
 
 
 class Trains:
@@ -54,7 +54,6 @@ class Trains:
 
 async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tmp_path: Path) -> None:
     pytest.importorskip("starlette")
-    from rollout_train.monitor.app import create_app
 
     feed = RunFeed(tmp_path / FEED)
     policy = Policy(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]))
@@ -90,8 +89,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     assert head is not None
     await registry.bookmark("best", head.id)
 
-    transport = httpx.ASGITransport(app=create_app(tmp_path))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(tmp_path) as client:
         system = (await client.get("/api/system")).json()
         machines = (await client.get("/api/machines")).json()
         group = (await client.get("/api/groups/train/1")).json()

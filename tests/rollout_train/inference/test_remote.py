@@ -4,7 +4,6 @@ says, stamping each token with the depth of the checkpoint its answer names. The
 OpenAI-compatible server."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +12,7 @@ import pytest
 from rollout.contracts import Message, ModelEndpointError
 from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
+from rollout.testing import until
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.gateway import GatewayEndpoints
 from rollout_train.inference import Connection, RemoteEngine, Route, Routes
@@ -26,15 +26,6 @@ from rollout_train.testing import PlainRenderer, admitted, recording, sample_req
 from tests.rollout_train.machines import MODEL, Saying, engine_host, fake_vllm, passing_on, served
 
 OPTIONS: dict[str, Any] = {"max_tokens": 20, "temperature": 1.0, "top_p": 1.0, "stop_token_ids": [10]}
-
-
-async def until(condition: Callable[[], bool | Awaitable[bool]], seconds: float = 5.0) -> None:
-    async with asyncio.timeout(seconds):
-        while True:
-            met = condition()
-            if met if isinstance(met, bool) else await met:
-                return
-            await asyncio.sleep(0.02)
 
 
 async def made(checkpoints: Checkpoints, fence: Fence, tmp_path: Path, parent: Checkpoint | None = None) -> Checkpoint:

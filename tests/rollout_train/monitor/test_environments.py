@@ -2,18 +2,14 @@
 counted; and one's rows with what the training runs played of each, its eval data, curriculum, runs, suites, the evals
 of its suites at its entry, and its newest check."""
 
-import functools
 import time
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
 from rollout.environment import binding_for
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import evals as evals_module
-from rollout_train import loop as loop_module
 from rollout_train import train
 from rollout_train.check import NOTHING_TAUGHT, played
 from rollout_train.checkpoints import Checkpoints
@@ -24,21 +20,14 @@ from rollout_train.monitor.environments import Read, Sighting, listed
 from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
 from rollout_train.registry import registry_of
-from rollout_train.rollouts.scheduler import episodes_of
 from tests.rollout_train.rollouts.games import words
 from tests.rollout_train.support import Counting, answering, here, made_by
 
 pytest.importorskip("starlette")
-from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import monitor_client
 
 WORDS = "tests.rollout_train.rollouts.games:words"
 GUESSING = "tests.rollout_train.rollouts.games:guessing"
-
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(evals_module, "episodes_of", functools.partial(episodes_of, every=0.01))
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 async def scratch(directory: Path, groups: int = 4) -> FileLedger:
@@ -76,8 +65,7 @@ async def scratch(directory: Path, groups: int = 4) -> FileLedger:
 
 async def test_the_list_and_an_environments_page_say_what_was_done_with_it(tmp_path: Path) -> None:
     await scratch(tmp_path)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         known = (await client.get("/api/environments")).json()["environments"]
         answer = await client.get(f"/api/environments/{WORDS}")
         assert answer.status_code == 200, answer.text
@@ -145,8 +133,7 @@ async def test_an_environment_that_does_not_load_here_is_shown_from_its_runs(tmp
         await ledger.append(table("walk", GROUPS), str(number), {"task": task, "title": f"the {task}"}, fence)
         line: Any = {"time": time.time(), "rewards": rewards, "solved": [False] * len(rewards), "failed": 1}
         await ledger.append(table("walk", RESULTS), str(number), line, fence)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         page = (await client.get(f"/api/environments/{gone}")).json()
     assert (page["loads"], page["version"], page["versions"], page["curriculum"]) == (False, None, ["7"], None)
     assert "does not load here" in page["error"]
@@ -174,8 +161,7 @@ async def test_an_environment_of_another_project_is_listed_from_its_launchers_of
     heartbeats = presence_of(ledger)
     assert heartbeats is not None
     await heartbeats.beat("launcher/verifiers", {"kind": LAUNCHER, "profiles": [], "environments": [gsm8k]})
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         (line,) = (await client.get("/api/environments")).json()["environments"]
         page = (await client.get(f"/api/environments/{gsm8k}")).json()
     assert (line["environment"], line["name"], line["offered"], line["runs"]) == (gsm8k, "gsm8k", True, [])

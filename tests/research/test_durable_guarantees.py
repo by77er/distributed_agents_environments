@@ -4,7 +4,7 @@ A test marked `xfail(strict=True)` shows a guarantee that does not hold; its rea
 """
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -26,6 +26,7 @@ from rollout.harness import (
 from rollout.testing import FakeSandboxes, ScriptedModelEndpoint
 
 pytest.importorskip("rollout_durable")
+from rollout.testing import until
 from rollout_durable import DurableRunner
 
 
@@ -52,12 +53,6 @@ class SlowToRelease(SandboxPool):
         if self.releasing == 1:
             await self.released.wait()
         await super().release(key)
-
-
-async def until(condition: Callable[[], bool], seconds: float = 15.0) -> None:
-    async with asyncio.timeout(seconds):
-        while not condition():  # noqa: ASYNC110 (the runner writes)
-            await asyncio.sleep(0.05)
 
 
 def durable(directory: Path, pool: SandboxPool) -> DurableRunner:

@@ -32,6 +32,7 @@ loudly. Pass `contract=CapabilityContract(...)` to test behavior near limits.
 | `tool_call_reply(*calls, text="")` | an assistant message that makes tool calls |
 | `events_of(run, RunEventType.X)` | the run's events of one type |
 | `payload(event)` | an event's payload as a JSON object |
+| `until(condition, seconds=15)` | waits until `condition()` (a function, or one returning an awaitable) is true, asking every hundredth of a second; raises `AssertionError` after `seconds` |
 
 `local_run` gives the run no imported tools, sandboxes, environments or blob store. A task that uses them is tested
 through a `LocalRunner` built with `tool_sets=`, `pools=`, `environments=` or `blobs=` and a scripted endpoint as its

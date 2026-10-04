@@ -4,7 +4,6 @@ points to when each step is decided. The page makes and edits suites, and a trai
 the evals it makes."""
 
 import asyncio
-import functools
 import random
 from pathlib import Path
 from typing import Any
@@ -14,8 +13,6 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import evals as evals_module
-from rollout_train import loop as loop_module
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.evals import (
@@ -40,21 +37,15 @@ from rollout_train.monitor.system import System
 from rollout_train.presence import presence_of
 from rollout_train.record import EVALS, STEPS, table
 from rollout_train.registry import Taken, registry_of
-from rollout_train.rollouts.scheduler import episodes_of
 from tests.rollout_train.rollouts.games import guessing, words
 from tests.rollout_train.support import Counting, Process, answering, here, profiles
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import monitor_client
 
 ENVIRONMENT = "tests.rollout_train.rollouts.games:words"
 GUESSING = "tests.rollout_train.rollouts.games:guessing"
-
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(evals_module, "episodes_of", functools.partial(episodes_of, every=0.01))
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 async def test_an_edit_makes_a_new_version_and_moves_the_suites_name_to_it(tmp_path: Path) -> None:
@@ -213,8 +204,7 @@ async def test_a_scheduled_eval_plays_the_version_its_suites_name_points_to_when
 async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     await ledger.take("suites/none")  # (a ledger of files, as the monitor finds it)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         said = (await client.get(f"/api/environments/{ENVIRONMENT}")).json()
         assert [row["key"] for row in said["rows"]] == ["say-yes", "say-no", "say-maybe"]
         assert said["evals"] == {"words-held-out": 6} and said["version"] == "1"

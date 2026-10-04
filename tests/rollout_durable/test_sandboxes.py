@@ -1,7 +1,6 @@
 """A durable run acquires its sandboxes each time it is executed, under the same lease: resumed, it gets the same
 sandboxes back; unloaded, it keeps them; ended, it releases them."""
 
-import asyncio
 from collections.abc import Mapping
 from datetime import timedelta
 from pathlib import Path
@@ -27,7 +26,7 @@ from rollout.harness import (
     WaitFor,
     register,
 )
-from rollout.testing import FakeSandboxes, ScriptedModelEndpoint, payload
+from rollout.testing import FakeSandboxes, ScriptedModelEndpoint, payload, until
 from rollout_durable import DurableRunner
 
 
@@ -55,14 +54,6 @@ class Counted(SandboxPool):
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
         self.asked.append(key)
         return await super().acquire(spec, key, environment)
-
-
-async def until(condition, seconds: float = 15) -> None:  # type: ignore[no-untyped-def]
-    for _ in range(int(seconds * 20)):
-        if condition():
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError("condition not reached")
 
 
 def durable(directory: Path, pool: SandboxPool) -> DurableRunner:

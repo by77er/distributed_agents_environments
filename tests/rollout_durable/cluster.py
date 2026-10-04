@@ -1,18 +1,18 @@
 """Runners in separate processes sharing one Postgres database, driven from a test (see peer.py)."""
 
 import asyncio
+import functools
 import itertools
 import json
 import os
 import signal
 import sys
-import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Self
 
 import scenarios
 
+from rollout import testing
 from rollout.contracts import RunEvent, RunEventType
 from rollout_durable import RunStore
 from rollout_durable.database import Database
@@ -145,9 +145,5 @@ class Cluster:
         return self.store.conversation_runs(address)
 
 
-async def until(condition: Callable[[], bool], seconds: float = 60, message: str = "condition not reached") -> None:
-    deadline = time.monotonic() + seconds
-    while not condition():
-        if time.monotonic() > deadline:
-            raise AssertionError(message)
-        await asyncio.sleep(0.1)
+until = functools.partial(testing.until, seconds=60, every=0.1)
+"""Waiting as `rollout.testing.until` does, as long as a cluster of processes may take."""

@@ -3,7 +3,6 @@ evaluations."""
 
 from pathlib import Path
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
@@ -16,6 +15,7 @@ from rollout_train.monitor.lineage import (
     WRITTEN,
     lineage,
 )
+from tests.rollout_train.support import monitor_client
 
 NOW = 1_800_000_000.0
 
@@ -193,10 +193,8 @@ def test_a_runs_own_trainer_and_resharding_follow_what_its_checkpoints_are() -> 
 
 async def test_the_page_asks_for_the_graph(tmp_path: Path) -> None:
     pytest.importorskip("starlette")
-    from rollout_train.monitor.app import create_app
 
-    transport = httpx.ASGITransport(app=create_app(tmp_path))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(tmp_path) as client:
         graph = (await client.get("/api/checkpoints")).json()
     assert graph["checkpoints"] == [] and graph["bases"] == []
     assert not (tmp_path / "ledger").exists()  # (a reader makes no ledger where none is)

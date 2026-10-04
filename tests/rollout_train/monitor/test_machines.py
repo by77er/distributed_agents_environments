@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
@@ -27,7 +26,7 @@ from rollout_train.sandboxes import POOL, FileLeases
 from rollout_train.serving import Serving, record_serving
 
 pytest.importorskip("starlette")
-from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import monitor_client
 
 GPU: dict[str, Any] = {"name": "RTX", "used": 2**30, "total": 2**34, "busy": 0.5}
 MACHINE: dict[str, Any] = {"memory": {"available": 2**33, "total": 2**34}, "accelerators": [GPU], "disk": None}
@@ -126,8 +125,7 @@ async def test_every_role_on_every_machine_with_what_it_holds(tmp_path: Path) ->
     (gateway,) = shown["gateways"]
     assert gateway == gateway | {"name": "gateway/edge/0.0.0.0:8443", "host": "edge", "listen": "0.0.0.0:8443"}
 
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         answer = await client.get("/api/machines")
         assert answer.status_code == 200 and [each["name"] for each in answer.json()["runners"]] == ["gpu-1/train"]
         again = await client.get("/api/machines", headers={"If-None-Match": answer.headers["ETag"]})

@@ -10,6 +10,7 @@ from pydantic import JsonValue
 
 from rollout.contracts import RunEventType
 from rollout.harness import ModelBinding, RecordedModel, RunBinding, agent_program
+from rollout.testing import until
 from rollout_train import presence
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import Beat, FilePresence
@@ -18,12 +19,6 @@ from rollout_train.rollouts import Outcome, Plan, Record, episodes_of, events_of
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, ended
 from tests.rollout_train.rollouts.games import GATES, Gated, Guess
 from tests.rollout_train.support import ask, runner, served
-
-
-async def until(condition: Any) -> None:
-    async with asyncio.timeout(5.0):
-        while not await condition():  # noqa: ASYNC110 (the runners write)
-            await asyncio.sleep(0.01)
 
 
 async def test_a_groups_episodes_are_claimed_played_and_recorded_in_the_ledger(tmp_path: Path) -> None:

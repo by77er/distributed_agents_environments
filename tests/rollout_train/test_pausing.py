@@ -4,7 +4,6 @@ gone, going on from the ledger."""
 
 import asyncio
 import contextlib
-import inspect
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -15,6 +14,7 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
+from rollout.testing import until
 from rollout_train import Checkpoints, Files, Step, Weighted, train
 from rollout_train import loop as loop_module
 from rollout_train.cli import _train  # pyright: ignore[reportPrivateUsage]
@@ -30,15 +30,6 @@ from rollout_train.settings import PAUSED, desired_settings_of, paused
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
 from tests.rollout_train.rollouts.games import GATES, Gated, Words
 from tests.rollout_train.support import ENVIRONMENT, Counting, Notes, Running, Steps, ask, here, runner, served
-
-
-async def until(condition: Callable[[], Any], seconds: float = 10.0) -> None:
-    async with asyncio.timeout(seconds):
-        while True:
-            met = condition()
-            if await met if inspect.isawaitable(met) else met:
-                return
-            await asyncio.sleep(0.01)
 
 
 def wanted_of(ledger: Ledger, run: str = "train") -> Callable[[], Awaitable[Mapping[str, JsonValue]]]:

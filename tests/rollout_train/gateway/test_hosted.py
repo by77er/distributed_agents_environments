@@ -6,7 +6,6 @@ the turns recorded by the gateway in the ledger and blob store the two share."""
 import asyncio
 import contextlib
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -25,6 +24,7 @@ from rollout_train.monitor.system import System
 from rollout_train.profile import Profile
 from tests.rollout_train.gateway.support import SECRETS
 from tests.rollout_train.rollouts.games import words
+from tests.rollout_train.support import free_port
 
 pytest.importorskip("uvicorn")
 
@@ -50,12 +50,6 @@ url = "http://127.0.0.1:{port}"
 listen = "127.0.0.1:{port}"
 keys = "{directory}/keys"
 """
-
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 def a_profile(directory: Path, port: int, text: str = PROFILE) -> Path:

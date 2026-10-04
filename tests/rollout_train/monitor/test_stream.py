@@ -4,7 +4,6 @@ nothing changed (304), the stream of versions, and a rename that every open page
 import asyncio
 import contextlib
 import json
-import socket
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from rollout_train.registry import registry_of
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import free_port, monitor_client
 
 
 async def a_run(tmp_path: Path) -> FileLedger:
@@ -116,8 +116,7 @@ async def test_a_watcher_hears_each_version_at_once_and_then_each_change(tmp_pat
 
 async def test_an_answer_names_its_version_and_one_asked_again_with_it_is_told_nothing_changed(tmp_path: Path) -> None:
     await a_run(tmp_path)
-    transport = httpx.ASGITransport(app=create_app(tmp_path, beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(tmp_path, beat=0.0) as client:
         for path in (
             "/api/system",
             "/api/runs",
@@ -136,8 +135,7 @@ async def test_an_answer_names_its_version_and_one_asked_again_with_it_is_told_n
 
 async def test_a_run_is_named_again_and_the_page_hears_of_it(tmp_path: Path) -> None:
     await a_run(tmp_path)
-    transport = httpx.ASGITransport(app=create_app(tmp_path, beat=60.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(tmp_path, beat=60.0) as client:
         before = await client.get("/api/system")
         renamed = await client.post("/api/rename", json={"id": "train", "name": "first-try"})
         entry = renamed.json()["entry"]
@@ -162,8 +160,7 @@ async def test_a_bookmark_is_made_moved_and_taken_away_and_the_page_hears_of_it(
     second = await checkpoints.add(
         fence, new_id(), weights=tmp_path / "weights", run="train", step=2, parents=[first.id]
     )
-    transport = httpx.ASGITransport(app=create_app(tmp_path, beat=60.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(tmp_path, beat=60.0) as client:
 
         async def marked() -> dict[str, list[str]]:
             system = (await client.get("/api/system")).json()
@@ -184,12 +181,6 @@ async def test_a_bookmark_is_made_moved_and_taken_away_and_the_page_hears_of_it(
         assert (await client.delete("/api/bookmarks/good")).status_code == 200
         assert await marked() == {first.id: [], second.id: []}
         assert (await client.delete("/api/bookmarks/good")).status_code == 404
-
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 @contextlib.asynccontextmanager

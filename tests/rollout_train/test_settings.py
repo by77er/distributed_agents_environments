@@ -2,7 +2,6 @@
 place; and a running loop that reads them each time it is about to decide a step, takes only the changeable ones from
 that step on, and says in each step's record which settings it used."""
 
-import functools
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,6 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import loop as loop_module
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.colocated import Colocated
@@ -19,7 +17,6 @@ from rollout_train.evals import Schedule, make_suite, suite_entry
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.profile import EvalsSpec, Profile
 from rollout_train.record import EVALS, STEPS, table
-from rollout_train.rollouts.scheduler import episodes_of
 from rollout_train.settings import (
     CHANGEABLE,
     EVALS_EVERY,
@@ -34,11 +31,6 @@ from rollout_train.settings import (
 from rollout_train.trainer import Changeable, Files, Step, Weighted
 from tests.rollout_train.rollouts.games import words
 from tests.rollout_train.support import ENVIRONMENT, Counting, a_schedule, answering, here, made_by, write
-
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 class Rated(Counting):

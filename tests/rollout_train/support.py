@@ -5,14 +5,15 @@ take notes (`Notes`, `Running`, `Seen`); profiles (`PROFILE`, `write`, `profiles
 
 import asyncio
 import contextlib
-import functools
+import socket
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-import pytest
+import httpx
 from pydantic import JsonValue
 
+from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, ToolSpecification
 from rollout.harness import (
     ModelBinding,
     PoolBinding,
@@ -40,7 +41,6 @@ from rollout_train import (
     StepFailed,
     Weighted,
 )
-from rollout_train import loop as loop_module
 from rollout_train.evals import (
     Schedule,
     Suite,
@@ -52,20 +52,13 @@ from rollout_train.rollouts import (
     EpisodeRunner,
     Hooks,
     Plan,
-    episodes_of,
     plan,
     playing,
 )
 from rollout_train.stores import FILES
-from rollout_train.testing import Policy, plain_channel, recording
+from rollout_train.testing import PlainRenderer, Policy, plain_channel, recording
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Guess
-
-
-@pytest.fixture(autouse=True)
-def quickly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The loop looks for its groups' episodes in the ledger often (a run looks twice a second)."""
-    monkeypatch.setattr(loop_module, "episodes_of", functools.partial(episodes_of, every=0.01))
 
 
 class Counting:
@@ -378,3 +371,37 @@ OFFERED: dict[str, Any] = {
     "model": "m",
     "settings": {"trainer.learning_rate": 5e-5, "episodes_at_once": 6, "trainer.start": None},
 }
+
+
+class ThinkingRenderer(PlainRenderer):
+    """The plain format, with reasoning written before a `~`: `assistant: thought~answer`."""
+
+    def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message:
+        message = super().parse(completion, tools)
+        if "~" not in message.text:
+            return message
+        thought, answer = message.text.split("~", 1)
+        reasoning = Reasoning(scope=ReasoningScope.PORTABLE, text=thought)
+        return Message(role=Role.ASSISTANT, content=[reasoning, Text(text=answer)])
+
+    @staticmethod
+    def _said(message: Message) -> str:
+        thought = "".join(block.text for block in message.content if isinstance(block, Reasoning))
+        return (f"{thought}~" if thought else "") + PlainRenderer._said(message)
+
+
+def free_port() -> int:
+    """A port no process on this machine listens on now."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+@contextlib.asynccontextmanager
+async def monitor_client(where: str | Path, **options: Any) -> AsyncGenerator[httpx.AsyncClient]:
+    """A client of a monitor of `where` (as `create_app` takes it), served in this process."""
+    from rollout_train.monitor.app import create_app
+
+    transport = httpx.ASGITransport(app=create_app(where, **options))
+    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+        yield client

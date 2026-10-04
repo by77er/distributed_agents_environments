@@ -10,6 +10,7 @@ from rollout.contracts import Message, Reasoning, ReasoningScope, Role, Text, To
 from rollout.local import LocalRunner
 from rollout_train.monitor import FeedReader, RunFeed, plain
 from tests.rollout.harness.support import Miner, specification
+from tests.rollout_train.support import monitor_client
 
 
 def test_messages_are_shown_plainly() -> None:
@@ -35,7 +36,6 @@ def test_messages_are_shown_plainly() -> None:
 
 async def test_the_feed_holds_a_run_as_it_happened_and_the_page_can_ask_for_it(tmp_path: Path) -> None:
     pytest.importorskip("starlette")
-    from rollout_train.monitor.app import create_app
 
     feed = RunFeed(tmp_path / "feed")
     runner = LocalRunner(providers={"scripted": lambda model: Miner()}, hooks=[feed])
@@ -47,8 +47,7 @@ async def test_the_feed_holds_a_run_as_it_happened_and_the_page_can_ask_for_it(t
     assert run["labels"] == {"group": "0001", "task": "t003", "episode": "2"}
     assert run["rewards"] == {"ada": 2.0} and run["slots"] == ["ada"] and run["samples"] == 1
 
-    transport = httpx.ASGITransport(app=create_app(tmp_path))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with monitor_client(tmp_path) as client:
         assert "Rollout" in (await client.get("/")).text
         assert (await client.get("/api/runs")).json()[0]["run_id"] == handle.run_id
         lines = (await client.get(f"/api/episodes/{handle.run_id}")).json()["lines"]
