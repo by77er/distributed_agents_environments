@@ -18,10 +18,8 @@ class MyTask(Task):
     def __init__(self, parameters=None): ...   # once per run, with the row's parameters
 
     async def setup(self, run): ...        # optional: acquire resources
-    async def start(self, run): ...        # required: first Observation, or WaitFor a message
+    async def start(self, run): ...        # required: the first Observation
     async def respond(self, run, reply): ...   # each reply → next Observation (default: run tools)
-    async def resume(self, run, envelope): ... # a message → next Observation (conversations.md)
-    async def steer(self, run, envelopes, observation): ...  # merge mid-turn messages (conversations.md)
     async def score(self, run): ...        # optional: episode-level reward
     async def teardown(self, run): ...     # optional: always runs once setup began
 
@@ -32,10 +30,8 @@ class MyTask(Task):
 | Hook | Called | Returns | Default |
 |---|---|---|---|
 | `setup` | once, first | nothing | does nothing |
-| `start` | once, after `setup` | `Observation` or `WaitFor` | **must be implemented** |
-| `respond` | after every reply | `Observation` or `WaitFor` | executes the reply's tool calls; ends the episode when there are none |
-| `resume` | when a message satisfies a `WaitFor`, or interrupts a reply | `Observation` or `WaitFor` | the message becomes a USER observation |
-| `steer` | when messages arrived during the turn with mode `STEER` | `Observation` | appends them as USER messages |
+| `start` | once, after `setup` | `Observation` | **must be implemented** |
+| `respond` | after every reply | `Observation` | executes the reply's tool calls; ends the episode when there are none |
 | `score` | once, after the episode ends normally | `float` or `None` | `None` |
 | `teardown` | always, if `setup` began | nothing | does nothing |
 
@@ -50,7 +46,7 @@ An `Observation` is what the model sees next. Its first argument takes text, a `
 
 ```python
 from rollout.contracts import Message, Role, Text
-from rollout.harness import End, Ending, Observation, WaitFor
+from rollout.harness import End, Ending, Observation
 
 Observation("Guess the word.")                                   # one USER text message
 Observation(Message.user("Guess the word."))                     # the same, explicitly
@@ -71,9 +67,6 @@ assert End(truncated=True).end is Ending.TRUNCATED
 | `end` | `None` while the episode continues. `Ending.TERMINATED` for a real end state; `Ending.TRUNCATED` when a limit stopped it (value-based methods may bootstrap from a truncated state). |
 | `info` | Logged in the run's events; never shown to the model. |
 
-`WaitFor(kind="message", timeout=None)` suspends the run until a message arrives; see
-[conversations](conversations.md).
-
 ### Validation
 
 Every observation a hook returns is checked before it is recorded. A violation raises `InvalidObservation`, and a
@@ -82,7 +75,7 @@ runner fails the run with class `invalid_observation`:
 1. Observations contain only USER and TOOL messages. The system prompt belongs to the agent, and assistant turns
    belong to the model.
 2. If the reply made tool calls, the observation contains a tool result for every call, even when it ends the
-   episode. Tool results must answer calls of that reply. A reply with tool calls cannot be answered by `WaitFor`.
+   episode. Tool results must answer calls of that reply.
 3. An observation that does not end the episode has at least one message.
 
 ## Rewards
@@ -196,20 +189,18 @@ Every hook receives the run context as `run`. It is everything task and agent co
 | Member | Meaning |
 |---|---|
 | `run_id` | the run's identifier, `r_{ulid}` |
-| `conversation` | the `ConversationKey` when the run serves a conversation, otherwise `None` ([conversations](conversations.md)) |
 | `turn` | the number of replies recorded so far |
 | `history` | the episode, read-only: `turns`, and `messages(hints)` ([agents](agents.md#what-the-model-sees)) |
 | `models`, `model` | the declared model slots by name; `model` is `models["policy"]` ([agents](agents.md#the-model-interface)) |
 | `tools` | the imported tools: `specifications()`, `await call(name, arguments)`, `name in run.tools` ([tools](tools.md#imported-tools)) |
 | `sandbox(name)` | a sandbox the task or program declared, acquired for the run: its addresses, its environment, and its operations, each an effect ([sandboxes](../libraries/rollout/sandboxes.md)) |
-| `environments` | creates computers the run owns; `None` when the runner has no environment service ([environments](#environments)) |
 | `blobs` | stores bytes for `Media` blocks; `None` when the runner has no blob store ([content](content.md#media-and-blobs)) |
 | `context_hints` | the task's `context_hints`, for the agent |
 | `now()` | the current time, as a `datetime` |
 | `random` | a `random.Random` seeded from `run_id` |
 | `reward(value, *, slot="policy", key="default")` | assigns a reward ([rewards](#rewards)); an unknown slot raises `ValueError` |
 | `exclude_from_training(reason)` | marks the run as unsuitable for training ([rewards](#rewards)) |
-| `await emit(kind, payload, *, to=None)` | output of the run, such as a reply to a person ([conversations](conversations.md#sending-and-replying)) |
+| `await emit(kind, payload)` | output of the run, such as its result: an `output.emit` effect and an `output.emitted` event |
 | `await gather(*awaitables)` | awaits concurrently and returns the results in order, as `asyncio.gather` does |
 
 ## Training on a task
@@ -219,13 +210,6 @@ the task, its situations as rows and how one start of a row is drawn (the task's
 never draws, what its results say, a version, and perhaps a curriculum of its own
 ([rollouts](../libraries/rollout-train/rollouts.md#environment), [three ways in](perspectives.md#building-an-environment)).
 `rollout env check module:name` checks one before anything trains on it.
-
-## Environments
-
-The computers below are another sense of the word. A task whose agent needs a computer creates one in `setup` with `await run.environments.create(specification)` and
-keeps the handle on `self`. Every operation on the handle is an effect. The runner destroys any environment the run
-still owns when the run ends. The computers come from the runner's environment service, an
-[`EnvironmentService`](reference.md#environmentservice) it is given (`LocalRunner(environments=...)`).
 
 ## State and determinism
 

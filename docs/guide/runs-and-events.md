@@ -7,7 +7,7 @@ and how to read it.
 ## The local run context
 
 `LocalRunContext` implements the [run context](tasks.md#the-run-context) in process: it owns the history, assigns
-effect identities, records events, and delivers messages. Nothing persists; a process crash loses the run. The
+effect identities and records events. Nothing persists; a process crash loses the run. The
 `LocalRunner` creates one per run; tests create one with `local_run` ([testing](testing.md)).
 
 ```py
@@ -16,10 +16,8 @@ LocalRunContext(
     endpoints: Mapping[str, ModelEndpoint],      # one endpoint per model slot
     *,
     context_hints: ContextHints | None = None,   # the task's hints, for the agent
-    tool_sets: Mapping[str, ToolSet] | None = None,          # import name → tool set; becomes run.tools
-    environment_service: EnvironmentService | None = None,   # the backend behind run.environments
+    tool_sets: Mapping[str, ToolSet] | None = None,   # import name → tool set; becomes run.tools
     blobs: Blobs | None = None,                  # run.blobs
-    conversation: ConversationKey | None = None,
     on_event: Callable[[RunEvent], None] | None = None,   # called for each event as it is recorded
 )
 ```
@@ -31,7 +29,6 @@ Beyond the run context's own members it has:
 | `events` | every `RunEvent`, in order |
 | `rewards` | every `run.reward(...)` assignment, as `RewardAssignment(slot, value, key)`, including the episode reward from `score` |
 | `excluded_from_training` | the reason given to `run.exclude_from_training`, or `None` |
-| `deliver(envelope, mode)` | delivers a message ([conversations](conversations.md)) |
 
 ## Effects and their identity
 
@@ -41,8 +38,6 @@ An **effect** is an operation that leaves task or agent code:
 |---|---|
 | `model.sample` | `run.models[slot].sample(...)` |
 | `tool.call` | a call to an imported tool (`run.tools.call`, which the default `respond` uses) |
-| `environment.lifecycle` | `run.environments.create(...)` and `Environment.destroy()` |
-| `environment.call` | `Environment.execute`, `put` and `get` |
 | `output.emit` | `run.emit(...)` |
 
 Each effect gets an identity, which receivers use to perform it once: the gateway answers a sample asked for again
@@ -56,8 +51,8 @@ under its `effect_id` with the turn it recorded ([determinism](../libraries/roll
 | `arguments_digest` | SHA-256 of the canonical JSON of the effect's arguments | `b09f2be8…` |
 
 Both reach whatever performs the effect, so a receiver that deduplicates performs each `effect_id` once and can
-tell a repeat from a different call. `EffectIdentity.parse`, `SessionIdentity.parse` and `ConversationKey.parse`
-split identifiers into their parts; no other identifier should be parsed
+tell a repeat from a different call. `EffectIdentity.parse` and `SessionIdentity.parse` split
+identifiers into their parts; no other identifier should be parsed
 ([identifiers](../libraries/rollout/contracts/identifiers.md)).
 
 ## Events
@@ -137,17 +132,16 @@ async def run_with_runner() -> None:
 asyncio.run(run_with_runner())
 ```
 
-The handle's `context` is the run's `LocalRunContext`. Sending messages, cancelling, deployments and bindings are in
-the [harness reference](../libraries/rollout/README.md#runner).
+The handle's `context` is the run's `LocalRunContext`. Cancelling and bindings are in the
+[harness reference](../libraries/rollout/README.md#runner).
 
 ## Event types
 
 | Group | Types |
 |---|---|
-| Lifecycle | `run.created`, `tools.resolved`, `sandboxes.acquired`, `run.suspended`, `run.cancel_requested`, and one terminal event: `run.completed`, `run.failed` ([failures](../libraries/rollout/README.md#failures)) or `run.cancelled` |
+| Lifecycle | `run.created`, `tools.resolved`, `sandboxes.acquired`, `run.cancel_requested`, and one terminal event: `run.completed`, `run.failed` ([failures](../libraries/rollout/README.md#failures)) or `run.cancelled` |
 | Episode | `observation.recorded`, `reward.assigned` (`run.reward`, and `score`), `training.excluded`, `output.emitted` (`run.emit`) |
 | Effects | `effect.requested`, `effect.completed` with status `ok` or `failed` |
-| Messages | `message.received`, `turn.interrupted` |
 
 A sample's completion carries the canonical reply, the finish reason and the usage. Tokens and logprobs never appear
 in run events; they live in the gateway's turn store. Each type's payload and the order of events are specified in

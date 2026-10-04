@@ -131,10 +131,5 @@ shown to the model.
 
 Agents see canonical messages, the tools offered this turn, the slot's capability contract and usage, and the
 task's context hints. They never see tokens, logprobs, which policy or weights version answered, engines,
-environments or credentials. The same agent code therefore runs against an API model, a local engine being
+machines or credentials. The same agent code therefore runs against an API model, a local engine being
 trained, or a script.
-
-## Interruption
-
-A message delivered with mode `INTERRUPT` while the agent is acting cancels `act`, including any sample in flight,
-and the loop continues with `Task.resume`. Agents need no code for this. See [conversations](conversations.md).

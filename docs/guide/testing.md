@@ -34,8 +34,8 @@ loudly. Pass `contract=CapabilityContract(...)` to test behavior near limits.
 | `payload(event)` | an event's payload as a JSON object |
 | `until(condition, seconds=15)` | waits until `condition()` (a function, or one returning an awaitable) is true, asking every hundredth of a second; raises `AssertionError` after `seconds` |
 
-`local_run` gives the run no imported tools, sandboxes, environments or blob store. A task that uses them is tested
-through a `LocalRunner` built with `tool_sets=`, `pools=`, `environments=` or `blobs=` and a scripted endpoint as its
+`local_run` gives the run no imported tools, sandboxes or blob store. A task that uses them is tested through a
+`LocalRunner` built with `tool_sets=`, `pools=` or `blobs=` and a scripted endpoint as its
 provider, as in [tools](tools.md#imported-tools). `FakeSandboxes` is a sandbox provider whose sandboxes are records
 that honour their specs: `pools={"fake": SandboxPool(FakeSandboxes())}` ([sandboxes](../libraries/rollout/sandboxes.md)).
 
@@ -116,8 +116,8 @@ asyncio.run(test_a_reply_can_depend_on_the_request())
 
 ## Holding a reply open
 
-To test what happens while the model is replying (steering, interruption), use an `async` entry that waits for an
-event. The [conversations](conversations.md#interrupting) page has a complete example. The pattern:
+To test what happens while the model is replying, such as a cancellation, use an `async` entry that waits for an
+event. The pattern:
 
 ```py
 started, release = asyncio.Event(), asyncio.Event()
@@ -129,9 +129,9 @@ async def held(request: SampleRequest) -> Message:
 
 episode = asyncio.create_task(rollout(task, Agent(), run))
 await started.wait()                 # the reply is now in flight
-run.deliver(envelope, DeliveryMode.STEER)
-release.set()
-await episode
+episode.cancel()                     # cancels the sample in flight; teardown runs
+with pytest.raises(asyncio.CancelledError):
+    await episode
 ```
 
 ## Checking an environment
@@ -151,7 +151,7 @@ model and flags the groups whose episodes all scored the same, which teach nothi
 | replies and observations | `run.history.turns` |
 | rewards per reply | `turn.observation.reward`, or `observation.recorded` events |
 | episode rewards | `run.rewards` |
-| effects, suspensions, interruptions | `events_of(run, RunEventType.…)` |
+| effects, cancellations | `events_of(run, RunEventType.…)` |
 
 ## Tests on Ray
 

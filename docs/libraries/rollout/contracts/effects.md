@@ -13,11 +13,9 @@ direct call, recorded as run events.
 |---|---|---|---|
 | `model.sample` | `run.models[slot].sample` | the slot's model endpoint | the sample result: message, finish reason, usage |
 | `tool.call` | `run.tools.call`, which the default `respond` uses for imported tools | the import's tool set | the tool result |
-| `environment.call` | `Environment.execute`, `put`, `get` | the runner's environment service | the execution result; nothing; the size read |
-| `environment.lifecycle` | `run.environments.create`, `Environment.destroy` | the runner's environment service | the `environment_id`; nothing |
 | `output.emit` | `run.emit` | the run context | nothing. An `output.emitted` event follows it. |
 
-`@tool` methods are task code, not effects. The effects they request, such as environment calls, are.
+`@tool` methods are task code, not effects. The effects they request, such as imported tool calls, are.
 
 ## Identity
 
@@ -33,13 +31,10 @@ Every effect has an `effect_id` and an `arguments_digest`.
 |---|---|
 | `model.sample` | the `session_id`, the context digest, the spec hashes of the tools offered, `max_output_tokens`, `tool_choice` |
 | `tool.call` | the tool's name and the call's arguments |
-| `environment.call` | the `environment_id`, the operation, and the command with its time limit and directory, or the path. A `put` gives the SHA-256 and size of the content, not the content. |
-| `environment.lifecycle` | the operation, and the environment's specification for a creation or its `environment_id` for a destruction |
-| `output.emit` | `kind`, `payload`, and `to` when given |
+| `output.emit` | `kind` and `payload` |
 
 Both identifiers go to whatever performs the effect: a model endpoint receives them in the `SampleRequest`, a tool
-set as arguments of `call` (and in the body of `POST /call` when it is served over HTTP), an environment service
-receives the `effect_id` of a command.
+set as arguments of `call` (and in the body of `POST /call` when it is served over HTTP).
 
 ## Completion
 
@@ -50,7 +45,7 @@ An effect records two events: `effect.requested` when it starts and `effect.comp
 | Status | When | What the code that requested it sees |
 |---|---|---|
 | `ok` | the effect was performed | its result |
-| `failed` | whatever performed it raised, or the run was cancelled or interrupted while it was in flight | the exception |
+| `failed` | whatever performed it raised, or the run was cancelled while it was in flight | the exception |
 
 ## Receivers that deduplicate
 
@@ -61,8 +56,6 @@ safe to request again depends on its receiver:
 |---|---|---|
 | `model.sample` | the gateway returns the recorded result for an `effect_id` it has recorded | yes |
 | `model.sample` | a direct adapter does not deduplicate | yes: it samples again, and nothing is lost |
-| `environment.lifecycle`, and the `put` and `get` of `environment.call` | an environment service makes these safe to repeat. A creation finds the environment it already made, because the id comes from the `effect_id`. | yes |
-| `Environment.execute` | a command is not safe to repeat | no |
 | `tool.call` of a tool whose `retry_class` is `PURE` or `IDEMPOTENT` | any tool set | yes |
 | `tool.call` of a tool whose `retry_class` is `SIDE_EFFECTING` or `UNKNOWN` | a [`DeduplicatingToolSet`](../../../guide/reference.md#deduplicatingtoolset) whose `deduplicates` is true | yes: the tool set performs it at most once |
 | the same | any other tool set | no |

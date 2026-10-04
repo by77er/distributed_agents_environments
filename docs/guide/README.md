@@ -16,7 +16,6 @@ tagged `py` shows a shape and is not run. Every profile in a `toml` block is loa
 | [Tasks](tasks.md) | define an environment: hooks, observations, rewards, endings, extra model slots |
 | [Tools](tools.md) | give the model an action space with `@tool` methods and imported tool sets |
 | [Agents](agents.md) | control what the model sees and how it acts |
-| [Conversations](conversations.md) | wait for messages, and handle messages that arrive mid-turn |
 | [Content](content.md) | build and read messages, tool calls, tool results; blobs; digests |
 | [Runs and events](runs-and-events.md) | understand what a run records: effects, identifiers, events; start runs with the local runner |
 | [Models](models.md) | run against a real model through the Responses API |
@@ -62,7 +61,7 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 
 | Import from | Package | For |
 |---|---|---|
-| `rollout.harness` | `rollout` | `Task`, `Agent`, `tool`, `Observation`, `End`, `WaitFor`, `RunContext`, `rollout`, `Program`, `Memory`, conversation types |
+| `rollout.harness` | `rollout` | `Task`, `Agent`, `tool`, `Observation`, `End`, `RunContext`, `rollout`, `Program`, `Memory` |
 | `rollout.contracts` | `rollout` | `Message`, content blocks, `ToolSpecification`, `ToolResult`, identifiers, digests, events |
 | `rollout.local` | `rollout` | `LocalRunner`, `LocalRunContext`: runs in this process |
 | `rollout.environment` | `rollout` | `Environment`, `Row`, `Start`, `Description`, `drawn`, `train_start`, `binding_for` |

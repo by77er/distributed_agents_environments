@@ -5,16 +5,16 @@ Code: `rollout.harness` · See [developer guide](../../guide/README.md), [contra
 The harness is the loop that runs one episode and the interfaces around it. The loop drives a **task** (the
 environment the agent acts in) with an **agent** (the policy side). A **runner** executes runs of it.
 
-Writing tasks, tools, agents and conversations is covered by the developer guide. This page covers the rest: the
-loop, programs, run specifications, runners and how messages are routed. The fields and signatures of every type
+Writing tasks, tools and agents is covered by the developer guide. This page covers the rest: the loop, programs,
+run specifications and runners. Agent products and long-lived conversational runs are built in the separate
+rollout-agents repository. The fields and signatures of every type
 named here are in the [API reference](../../guide/reference.md#rolloutharness).
 
 | Page | Covers |
 |---|---|
-| [guide: tasks](../../guide/tasks.md) | `Task`, `Observation`, `End`, `WaitFor`, rewards, `RunContext` |
+| [guide: tasks](../../guide/tasks.md) | `Task`, `Observation`, `End`, rewards, `RunContext` |
 | [guide: tools](../../guide/tools.md) | `@tool` methods, imported tools, `ToolSet` |
 | [guide: agents](../../guide/agents.md) | `Agent`, `History`, `ContextHints`, `Model` |
-| [guide: conversations](../../guide/conversations.md) | `Envelope`, `Address`, priorities, delivery modes |
 | [guide: runs and events](../../guide/runs-and-events.md) | effects, identifiers, run events |
 | [sandboxes.md](sandboxes.md) | `SandboxSpec`, `Sandbox`, pools and providers: what a program runs against, leased for the run |
 | [hooks.md](hooks.md) | `RunHooks`: watching every event and model sample of a runner |
@@ -27,21 +27,15 @@ named here are in the [API reference](../../guide/reference.md#rolloutharness).
 `rollout(task, agent, run)` runs one episode (`rollout.harness.loop`). The order of a task's hooks is in
 [tasks](../../guide/tasks.md#anatomy). The loop guarantees:
 
-- Every observation that `start`, `respond`, `resume` and `steer` return is checked against the
+- Every observation that `start` and `respond` return is checked against the
   [validation rules](../../guide/tasks.md#validation) before it is recorded. A violation raises `InvalidObservation`.
-- `run.record` appends a turn to the history and records an `observation.recorded` event. A `WaitFor` records only
-  the reply it answers. `run.turn` counts recorded replies.
-- A `WaitFor` suspends the run until a message of its kind arrives or its timeout passes. A message goes to
-  `Task.resume`; a timeout continues with the wait's `on_timeout`.
+- `run.record` appends a turn to the history and records an `observation.recorded` event. `run.turn` counts
+  recorded replies.
 - When `max_turns` replies have been made and the episode has not ended, the loop records `End(truncated=True)`.
-- The agent acts inside `run.interruptible`. An interruption goes to `Task.resume`, and the reply that was cancelled
-  is not recorded.
 - `agent.act` must return an ASSISTANT message; anything else raises `TypeError`.
-- Steering messages are taken after `respond`, and only when its observation does not end the episode.
 - `score` runs only when the loop ends with an observation whose `end` is set. After an exception it does not run.
 - `teardown` runs on every path, including failure and cancellation.
-- `record`, `wait_for_message`, `take_steering_messages` and `interruptible` are the members of `RunContext` that
-  only the loop uses.
+- `record` is the one member of `RunContext` that only the loop uses.
 
 ## Program
 
@@ -77,14 +71,13 @@ what task and agent code must not: which model serves a slot, how it samples, wh
 
 | Type | Says |
 |---|---|
-| [`RunBinding`](../../guide/reference.md#runbinding) | how each model slot and each import is served, which pool serves each kind of sandbox, and how priorities map to delivery modes ([conversations](../../guide/conversations.md#priority-and-delivery-mode)) |
+| [`RunBinding`](../../guide/reference.md#runbinding) | how each model slot and each import is served, and which pool serves each kind of sandbox |
 | [`ModelBinding`](../../guide/reference.md#modelbinding) | exactly one of `direct` and `recorded` |
 | [`DirectModel`](../../guide/reference.md#directmodel) | a provider's API. `provider` is the key of an endpoint factory registered with the runner. Nothing is recorded. |
 | [`RecordedModel`](../../guide/reference.md#recordedmodel) | a channel served through the [gateway](../rollout-train/gateway.md), which records every sample |
 | [`SamplingParameters`](../../guide/reference.md#samplingparameters) | how a bound model samples. It belongs to bindings; task and agent code cannot set it. |
 | [`ToolBinding`](../../guide/reference.md#toolbinding) | exactly one of `local` (a tool set registered with the runner) and `url` (a tool set served over HTTP, [tools](../../guide/tools.md#serving-a-tool-set-over-http)) |
 | [`PoolBinding`](../../guide/reference.md#poolbinding) | exactly one of `local` (a pool registered with the runner) and `url` (a pool served over HTTP, [sandboxes](sandboxes.md#over-http)) |
-| [`Deployment`](../../guide/reference.md#deployment) | a name, `{namespace}/{name}`, and the specification that a conversation addressed to it runs |
 
 ## Runner
 
@@ -96,8 +89,8 @@ Code written against them holds any implementation:
 | `LocalRunner(...)` | `rollout.local` | Runs each program as a task on the current asyncio loop. Nothing persists: a process crash loses its runs. |
 
 It takes `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
-bindings, by name), `pools` (for local pool bindings, by name), `environments` (an `EnvironmentService`), `blobs`,
-`recorder` (serves recorded bindings) and `hooks`.
+bindings, by name), `pools` (for local pool bindings, by name), `blobs`, `recorder`
+(serves recorded bindings) and `hooks`.
 
 What the protocols guarantee:
 
@@ -106,40 +99,14 @@ What the protocols guarantee:
 - `start` begins a run and returns its handle. The run's `labels` are recorded in its `run.created` event. Its
   sandboxes are acquired under its `lease` (by default its `run_id`) before the program starts
   ([sandboxes](sandboxes.md#the-runner)).
-- `deploy` registers or replaces a deployment. A conversation's next run uses the current one.
 - `run(run_id)` returns a run's handle, and raises `KeyError` for a run the runner does not know.
-  `conversation_of` gives the conversation a run serves; `conversation_runs` gives a conversation's runs, oldest
-  first.
 - A handle's `events(from_seq=...)` yields every event from `from_seq`, then new ones as they are recorded, and
   ends with the run. `recorded_events()` returns what is recorded so far. `outcome` is `None` while the run is live.
 - `cancel` records `run.cancel_requested`, lets `teardown` run, and returns once the run has ended. The
   `LocalRunner` cancels the run's task at once.
-- When a run ends, its runner destroys the environments the run still owns and releases its sandboxes.
+- When a run ends, its runner releases its sandboxes.
 
 A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
-
-## Sending messages
-
-Both runners inherit `send` from [`MessageRouter`](../../guide/reference.md#messagerouter). A runner supplies only
-the transport: where its runs are, how a message reaches one, and where delivered messages are remembered. Using
-`send` is covered in [conversations](../../guide/conversations.md#sending-and-replying). The router guarantees:
-
-- **One identity per message.** The `message_id` is the caller's `idempotency_key`, or a new `m_{ulid}`. The
-  runner writes it and the `sender` on the envelope.
-- **Claim after delivery.** A message is remembered as delivered only once it is delivered. A send that fails
-  before that can be retried with the same key. A retry of a delivered message returns its `message_id` and
-  delivers nothing. This holds for run addresses and conversation addresses alike.
-- **A conversation address** reaches the conversation's live run, and starts a run of the deployment's current
-  specification when none is live. The `reply_to` of the message that starts a conversation becomes its `origin`.
-  An address that names no deployed agent raises `ValueError`.
-- **A run address** reaches that run, and raises [`RunNotLive`](../../guide/reference.md#runnotlive) when the run
-  has ended or is unknown.
-- **An external address** raises `ValueError`: a runner delivers to runs and conversations.
-- **The delivery mode** comes from the receiving run's `DeliveryPolicy`, after the sender's priority is capped.
-- **Hand-over.** Messages that a conversation's finished run never consumed go to its next run, which is started
-  unless one is live. They are queued for it whatever the delivery policy says, in the order they were sent.
-- **Exclusion.** A message is checked, delivered and claimed under one hold per address, among everything that
-  sends to it.
 
 ## Failures
 

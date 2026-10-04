@@ -1,7 +1,7 @@
 [project]
 name = "rollout"
 version = "0.0.0"
-description = "Agents and environments: tasks, agents, programs, tools, conversations, and a runner in this process"
+description = "Agents and environments: tasks, agents, programs, tools, sandboxes, and a runner in this process"
 requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.11",

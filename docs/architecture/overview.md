@@ -25,7 +25,7 @@ The repository is a workspace of packages in three layers. Each package's direct
 
 | Layer | Packages | What it holds |
 |---|---|---|
-| Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, sandboxes and their pools, conversations, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment and the curriculum |
+| Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, sandboxes and their pools, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment and the curriculum |
 | | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; recording (the thinking budget, segments) and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; bridges; evaluation suites and evals; heartbeats, launches and the launcher; the cluster config, providers, run settings and the check of a run; the profile, the `rollout` command and the monitor |
 | Implementations | `rollout-vllm`, `rollout-lora`, `rollout-tinker`, `rollout-qwen`, `rollout-gemma`, `rollout-openai`, `rollout-s3`, `rollout-runpod`, `rollout-verifiers` | One implementation each of an interface a library defines |
 | Environments | `minecraft-team`, `gridworld` | Environments to train on |
@@ -55,7 +55,6 @@ imports none of them.
 | [`ToolSet`](../guide/reference.md#toolset) | `rollout.harness` | runs → imported tools | a tool set in process, `RemoteToolSet` over HTTP ([tools](../guide/tools.md#imported-tools)) |
 | [`Pool`](../guide/reference.md#pool), [`Provider`](../guide/reference.md#provider) | `rollout.harness` | runners → sandboxes, leased per run; pools → the sandboxes of one kind | `SandboxPool` over a provider, `RemotePool` over HTTP; `MinecraftWorlds`, `FakeSandboxes` ([sandboxes](../libraries/rollout/sandboxes.md)) |
 | [`Leases`](../guide/reference.md#leases) | `rollout.harness` | pools → where their leases are kept | `MemoryLeases`; `FileLeases`, `DatabaseLeases` beside the ledger, where a pool's keeper ends a lease with its claim ([sandboxes](../libraries/rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)) |
-| [`EnvironmentService`](../guide/reference.md#environmentservice) | `rollout.harness` | runs → computers | none in the workspace: a runner given one offers it to runs as `run.environments` ([environments](../guide/tasks.md#environments)) |
 | [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
 | [the ledger's `plans`, `groups`, `claims` and `episodes`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `EpisodeRunner`, on any machine that reaches the ledger and the blob store |
 | [the ledger's `serving`](../libraries/rollout-train/channels.md#what-a-channel-should-serve) | `rollout_train.serving` | training → whatever serves and samples its channels | `Follower` (`rollout engines`, or a runner's own engines), `EngineHost` (a Ray actor: [engine hosts](../libraries/rollout-train/channels.md#engine-hosts)), `RemoteChannel` in a gateway |
@@ -88,8 +87,8 @@ The agent samples a reply; the task responds with an observation.
 agent.act ──▶ Model.sample ──▶ model endpoint ──▶ (gateway ──▶ channel ──▶ engine: tokens in; tokens, logprobs out
           ◀── canonical reply + usage                                ──▶ turn kept in the ledger and the blob store)
 harness ──▶ a model API + signed key ──▶ gateway ──▶ endpoint (the checkpoint, by name) ──▶ turn kept ──▶ reply
-task.respond(reply) ──▶ run_tools ──▶ @tool method ──▶ (an imported tool set, a sandbox, an environment, a blob store)
-          ◀── Observation(tool results) ──▶ steering messages merged ──▶ next turn
+task.respond(reply) ──▶ run_tools ──▶ @tool method ──▶ (an imported tool set, a sandbox, a blob store)
+          ◀── Observation(tool results) ──▶ next turn
 ```
 
 Everything that leaves task or agent code on the way is an **effect** with an identity:
@@ -97,7 +96,7 @@ Everything that leaves task or agent code on the way is an **effect** with an id
 
 The `LocalRunner` runs code in the caller's process, and performs each effect once, as a call recorded as run
 events. After a crash the runs in flight are lost: their episodes are open again in the ledger, and an episode runner
-plays them again. Messages are delivered once by `message_id`.
+plays them again.
 
 A tool's `retry_class` says whether a call is safe to make again: `PURE` and `IDEMPOTENT` calls are; `SIDE_EFFECTING`
 and `UNKNOWN` calls are only against a tool set that deduplicates by effect identity

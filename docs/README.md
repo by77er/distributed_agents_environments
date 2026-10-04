@@ -16,7 +16,7 @@ How to build with it. Runnable examples are part of the test suite.
 | [Three ways in](guide/perspectives.md) | The three surfaces: environments, training, deployment |
 | [Getting started](guide/getting-started.md) | Install, a first task, one episode against a scripted model |
 | [Tasks](guide/tasks.md), [Tools](guide/tools.md), [Agents](guide/agents.md) | Environments, action spaces, what the model sees |
-| [Conversations](guide/conversations.md), [Content](guide/content.md) | Messages and waiting; canonical content, blobs, digests |
+| [Content](guide/content.md) | Canonical content, blobs, digests |
 | [Runs and events](guide/runs-and-events.md) | What a run records: effects, identifiers, events; the local runner |
 | [Models](guide/models.md), [Testing](guide/testing.md) | Third-party models through the Responses API (`rollout-openai`); scripted models |
 | [Deploying](guide/deploying.md) | The profile file and the `rollout` command |

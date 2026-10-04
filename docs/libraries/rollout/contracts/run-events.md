@@ -23,10 +23,9 @@ internals.
 
 | Type | Recorded when | Payload |
 |---|---|---|
-| `run.created` | a runner starts the run. It is the run's first event. | `specification`, `conversation` (or `null`), `labels` |
+| `run.created` | a runner starts the run. It is the run's first event. | `specification`, `labels` |
 | `tools.resolved` | the run starts with tools. It follows `run.created`. | `specifications`: the program's `@tool` methods, then the imported tools |
 | `sandboxes.acquired` | the runner has acquired the sandboxes the program declares, before the program starts | `sandboxes`: each one's `Lease` by its name ([sandboxes](../sandboxes.md)) |
-| `run.suspended` | the loop starts to wait for a message and none of the wanted kind is held | `waiting_for`: `kind`, and `timeout` in seconds or `null` |
 | `run.cancel_requested` | a cancellation reaches the run | `reason`, `by` |
 | `run.completed` | the program returned | `outcome` |
 | `run.failed` | the program raised | `class` (a [`RunFailureClass`](../../../guide/reference.md#runfailureclass)), `detail` ([failures](../README.md#failures)) |
@@ -39,7 +38,7 @@ internals.
 | `observation.recorded` | the loop records an observation | `messages`, `reward`, `end`, `reply_effect_id` (the sample whose reply it answers, or `null`), `info`, `digest` (of the messages, the reward and the ending) |
 | `reward.assigned` | `run.reward(...)`, which the loop also calls with what `score` returns | `slot`, `value`, `key` |
 | `training.excluded` | `run.exclude_from_training(reason)` | `reason` |
-| `output.emitted` | `run.emit(...)`, after its effect has completed | `kind`, `payload`, `to` when given, `effect_id` |
+| `output.emitted` | `run.emit(...)`, after its effect has completed | `kind`, `payload`, `effect_id` |
 
 ### Effects
 
@@ -50,13 +49,6 @@ internals.
 
 A model sample completes with the sample result: the canonical reply, the finish reason and the usage. Tokens and
 logprobs never appear in run events; the gateway keeps them ([the turn store](../../rollout-train/gateway.md#the-turn-store)).
-
-### Messages
-
-| Type | Recorded when | Payload |
-|---|---|---|
-| `message.received` | a message is delivered to the run | `envelope`, `mode` |
-| `turn.interrupted` | a message delivered with mode `interrupt` cancels the agent's reply | `reply_effect_id`: the sample that was cancelled, or `null` when none was in flight |
 
 ## Order
 
@@ -74,4 +66,4 @@ logprobs never appear in run events; the gateway keeps them ([the turn store](..
 |---|---|
 | An [episode runner](../../rollout-train/rollouts.md#a-runner) | `run.created` (labels), rewards on observations and `reward.assigned`, `output.emitted` of kind `result`, `training.excluded`, and the terminal event: together an [episode](../../rollout-train/episodes.md#how-an-episode-is-assembled) |
 | [Hooks](../hooks.md) | every event, as it is recorded |
-| A client of a conversation | `output.emitted`: what the agent said, and to whom |
+| A caller that watches a run's events | `output.emitted`: what the run produced |

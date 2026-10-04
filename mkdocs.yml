@@ -53,7 +53,6 @@ nav:
       - "Tasks": guide/tasks.md
       - "Tools": guide/tools.md
       - "Agents": guide/agents.md
-      - "Conversations": guide/conversations.md
       - "Content": guide/content.md
       - "Runs and events": guide/runs-and-events.md
       - "Models": guide/models.md
