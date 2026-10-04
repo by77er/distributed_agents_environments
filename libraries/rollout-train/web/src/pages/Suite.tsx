@@ -78,7 +78,7 @@ export function Suite({ name }: { name: string }) {
 
 /** One entry of a version, as the head of a suite of one environment says it. */
 function EntrySpecs({ version, entry }: { version: SuiteVersion; entry: SuiteEntry }) {
-  const starts = entryStarts(version, entry), limits = limitsText(entry);
+  const starts = entryStarts(version, entry);
   return (
     <>
       <Spec label="environment"><span title={entry.environment ?? ""}>{readable(entry.environment)}</span>{entry.environment_version ? ` · ${entry.environment_version}` : ""}</Spec>
@@ -86,7 +86,7 @@ function EntrySpecs({ version, entry }: { version: SuiteVersion; entry: SuiteEnt
       <Spec label="rows">{[...new Set(starts.map(start => start.task))].join(", ")}</Spec>
       <Spec label="seeds">{[...new Set(starts.map(start => String(start.seed)))].join(", ")}</Spec>
       <Spec label="episodes per start">{entry.episodes}</Spec>
-      {limits ? <Spec label="limits">{limits}</Spec> : null}
+      <Spec label="limits">{limitsText(entry)}</Spec>
     </>
   );
 }
@@ -107,7 +107,7 @@ function Entries({ version }: { version: SuiteVersion }) {
             [...new Set(starts.map(start => start.task))].join(", "),
             [...new Set(starts.map(start => String(start.seed)))].join(", "),
             entry.episodes,
-            limitsText(entry) || "–",
+            limitsText(entry),
           ];
         })}
       />

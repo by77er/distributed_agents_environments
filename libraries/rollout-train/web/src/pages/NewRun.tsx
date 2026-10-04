@@ -19,6 +19,11 @@ const EVALS = [EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES];
 /** What weights are, in a word or two: full, or a LoRA adapter. */
 const weightsText = (kind: string): string => (kind === "full" ? "full weights" : kind === "lora" ? "LoRA" : kind);
 
+/** Whether a setting is a channel's thinking or answer budget, which a launch may set to "none" (no budget). */
+const isBudget = (key: string): boolean => /^channels\.[^.]+\.(thinking|answer)_tokens$/.test(key);
+/** What an unset setting is: "none" for a channel's budget, else "not set". */
+const unsetText = (key: string): string => (isBudget(key) ? "none" : "not set");
+
 export function NewRun() {
   const { data: launched } = useLaunches();
   const { data: system } = useSystem();
@@ -106,7 +111,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
     const settings: Record<string, unknown> = {};
     for (const [key, text] of Object.entries(edits)) {
       if (!(key in defaults)) continue;
-      const value = typed(text);
+      const value = !text.trim() && isBudget(key) ? "none" : typed(text);  // (a budget emptied: none, no budget)
       if (shown(value) !== shown(defaults[key])) settings[key] = value;
     }
     for (const row of rows) if (row.key.trim()) settings[row.key.trim()] = typed(row.value);
@@ -198,8 +203,8 @@ function Form({ launchers }: { launchers: Launcher[] }) {
               return (
                 <label key={key} className={`setting${isChanged ? " changed" : ""}`}>
                   <span className="mono">{key}</span>
-                  <input value={value} onChange={event => setEdits({ ...edits, [key]: event.target.value })} placeholder="not set" spellCheck={false} />
-                  {isChanged ? <button type="button" className="linkish" onClick={() => { const next = { ...edits }; delete next[key]; setEdits(next); }}>reset to {shown(defaults[key]) || "not set"}</button> : null}
+                  <input value={value} onChange={event => setEdits({ ...edits, [key]: event.target.value })} placeholder={unsetText(key)} spellCheck={false} />
+                  {isChanged ? <button type="button" className="linkish" onClick={() => { const next = { ...edits }; delete next[key]; setEdits(next); }}>reset to {shown(defaults[key]) || unsetText(key)}</button> : null}
                 </label>
               );
             })}

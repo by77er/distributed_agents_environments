@@ -23,7 +23,7 @@ export function RunSettingsSection({ run }: { run: string }) {
       <div className="cols">
         <SettingsForm settings={settings} />
         <Card title="Fixed">
-          <Pairs entries={Object.entries(settings.fixed).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, <span className="mono">{shown(value) || "–"}</span>])} />
+          <Pairs entries={Object.entries(settings.fixed).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, <span className="mono">{shown(value) || "none"}</span>])} />
         </Card>
       </div>
     </>

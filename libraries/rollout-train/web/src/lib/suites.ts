@@ -217,9 +217,10 @@ export function fieldsOf(entry: SuiteEntry | undefined, version: SuiteVersion | 
   };
 }
 
-/** An entry's sampling limits, in a few words (none: the channel's own). */
+/** An entry's sampling limits, in a few words: a limit it leaves unset is the channel's own (which may be none). */
 export const limitsText = (entry: SuiteEntry): string =>
-  [entry.thinking_tokens != null ? `thinking ${entry.thinking_tokens}` : "", entry.answer_tokens != null ? `answer ${entry.answer_tokens}` : ""].filter(Boolean).join(" · ");
+  entry.thinking_tokens == null && entry.answer_tokens == null ? "channel's own"
+    : `thinking ${entry.thinking_tokens ?? "channel's"} · answer ${entry.answer_tokens ?? "channel's"}`;
 
 /** How an entry's starts were chosen, in a few words. */
 export const chosenText = (entry: SuiteEntry): string =>

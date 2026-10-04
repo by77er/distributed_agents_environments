@@ -227,7 +227,8 @@ it) and keeps it beside the
 ledger; a fixed setting, or one the run does not have, is
 refused (409) and the page says why. The run takes them when it next decides a step (or, stopped, when it is started
 again). **Fixed** lists the rest as they are: the model, what the trainer is and makes, the adapter's rank, the
-channels and their engines, how many episodes it plays at once, the groups and seed it was started with. A run whose
+channels and their engines (each channel's `thinking_tokens` and `answer_tokens`, "none" for no budget), how many
+episodes it plays at once, the groups and seed it was started with; a value that is unset reads "none". A run whose
 start records no settings (one started before runs recorded them) shows none.
 
 ## Launching a run
@@ -248,7 +249,8 @@ adapter is merged first), a bookmark for it to carry, its groups, groups a step 
 checkpoints (a suite whose every environment a launcher of the profile offers, by its name, which follows its newest
 version, or none; every how many steps;
 and episodes per start, empty for the suite's own: the launch's `evals.suite`, `evals.every` and `evals.episodes`),
-and every other setting of the profile as a field holding the profile's value,
+and every other setting of the profile as a field holding the profile's value (a channel's `thinking_tokens` or
+`answer_tokens` the profile leaves unset reads "none", and one emptied is sent as `none`: no budget),
 with rows for any other `trainer.KEY`. Values are read as numbers, true or false, or JSON
 where they look like them, and as text otherwise. The suite is the profile's `[evals]` suite, else the environment's
 own eval data (the first it has), else chosen: the run is not launched until it says a suite or none. Launching asks

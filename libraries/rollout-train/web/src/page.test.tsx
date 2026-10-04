@@ -13,7 +13,7 @@ import { titleOf } from "./layout/Shell";
 import { placeOf } from "./lib/places";
 import { pathChart } from "./lib/scores";
 import { evalsSettings, NO_EVALS, settingOf, wantedOf } from "./lib/settings";
-import { ALL, blocksOf, DRAWN, entryBody, fieldsOf, GIVEN, gridRows, SAME, suiteBody, versionGroups, versionTag, wholes } from "./lib/suites";
+import { ALL, blocksOf, DRAWN, entryBody, fieldsOf, GIVEN, gridRows, limitsText, SAME, suiteBody, versionGroups, versionTag, wholes } from "./lib/suites";
 import { mapRows, resultOf, samplesOf, seenOf } from "./pages/Episode";
 import { Runs } from "./pages/Runs";
 import { Suite } from "./pages/Suite";
@@ -473,6 +473,7 @@ describe("a suite's versions", () => {
     const mixed = version(1, [["games:words", [["say-yes", 1]]], ["games:guessing", [["guess-apple", 7], ["guess-river", 7]], { thinking_tokens: 10 }]], "mixed");
     const [words, guesses] = mixed.entries.map(each => fieldsOf(each, mixed));
     expect([guesses.environment, guesses.starts, guesses.thinking]).toEqual(["games:guessing", "guess-apple 7\nguess-river 7", "10"]);
+    expect(mixed.entries.map(limitsText)).toEqual(["channel's own", "thinking 10 · answer channel's"]);  // (unset: the channel's)
     const made = suiteBody([words, { ...guesses, chosen: DRAWN, seeds: "x" }]);
     expect(made.errors).toEqual([{}, { seeds: "whole numbers, as 1, 2, 3 or 1-5" }]);
     expect((made.body.entries as { environment: string }[]).map(each => each.environment)).toEqual(["games:words", "games:guessing"]);
