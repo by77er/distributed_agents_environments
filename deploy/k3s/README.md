@@ -8,7 +8,6 @@ processes outside the cluster keep using it.
 |---|---|
 | `install-wsl.sh` | As root: installs NVIDIA's container toolkit with a CDI spec for WSL2's GPU (`/dev/dxg`), installs K3s with a kubeconfig your user can read, and moves containerd's stream server to port 9910, outside Ray's worker ports (10002-19999) |
 | `device-plugin.yaml` | Values for NVIDIA's device plugin chart: the node advertises its card as one `nvidia.com/gpu`, for one Ray worker pod, and Ray shares it among its actors with fractional `num_gpus` |
-| `services.yaml` | The platform's stores alone, as `deploy/local/compose.yaml` has them: Postgres for the ledger, versitygw (S3) for blobs, and a Job that makes the bucket `rollout-blobs`. The chart has the same stores, under the same names |
 | `build.yaml` | Building images in the cluster: a registry the node pulls from at `localhost:30500`, and BuildKit |
 | `ray-smoke.yaml` | A Ray cluster whose GPU worker group sits at zero pods until a task asks for a GPU; the autoscaler removes the worker after a minute idle |
 | `migrate.sh` | Copies the platform's state on this machine into the chart's stores and volume, reading the host's files only; `--dry-run` says what it would do |
@@ -84,17 +83,6 @@ helm upgrade --install rollout deploy/chart/rollout -n rollout
 The Secret `tinker` holds both what `tinker auth login` wrote, which Tinker's SDK reads from `/root/.tinker`, and its
 default key as `TINKER_API_KEY`, which the cluster config names; `rollout cluster check` in a pod then finds every
 secret resolved.
-
-Where `services.yaml` was applied before, the chart takes its stores over with their data: mark them as the release's
-and delete the bucket Job (the chart's runs at each install and upgrade), then install.
-
-```sh
-for each in statefulset/postgres statefulset/s3 service/postgres service/s3; do
-  kubectl -n rollout label "$each" app.kubernetes.io/managed-by=Helm --overwrite
-  kubectl -n rollout annotate "$each" meta.helm.sh/release-name=rollout meta.helm.sh/release-namespace=rollout --overwrite
-done
-kubectl -n rollout delete job buckets
-```
 
 ### Moving the host's state in
 

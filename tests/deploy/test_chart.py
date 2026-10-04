@@ -1,6 +1,5 @@
 """The Helm chart (deploy/chart/rollout), rendered: its cluster config and profiles read as the code reads them and name
-the cluster's stores; every container says what it needs and the most memory it may take; the stores keep the names
-and claims deploy/k3s/services.yaml gave them, so an install takes over their data. Skipped where helm is not
+the cluster's stores; every container says what it needs and the most memory it may take. Skipped where helm is not
 installed."""
 
 import shutil
@@ -93,18 +92,3 @@ def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(re
     (gpu,) = [group for group in ray["spec"]["workerGroupSpecs"] if group["groupName"] == "gpu"]
     assert (gpu["minReplicas"], gpu["maxReplicas"], gpu["template"]["spec"]["runtimeClassName"]) == (0, 1, "nvidia")
     assert ray["spec"]["enableInTreeAutoscaling"] is True
-
-
-def test_the_stores_keep_the_names_and_claims_services_yaml_gave_them(rendered: list[dict[str, Any]]) -> None:
-    given = [each for each in yaml.safe_load_all((ROOT / "deploy" / "k3s" / "services.yaml").read_text()) if each]
-    for before in (each for each in given if each["kind"] in ("StatefulSet", "Service")):
-        (after,) = [
-            each for each in rendered
-            if each["kind"] == before["kind"] and each["metadata"]["name"] == before["metadata"]["name"]
-        ]  # fmt: skip
-        if before["kind"] == "Service":
-            assert after["spec"] == before["spec"]
-            continue
-        for key in ("serviceName", "selector", "volumeClaimTemplates"):
-            assert after["spec"][key] == before["spec"][key], key
-        assert after["spec"]["template"] == before["spec"]["template"]

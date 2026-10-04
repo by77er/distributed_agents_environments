@@ -19,8 +19,7 @@ secrets:
   gatewayKeys: gateway-keys   # gateway.keys: one `KID SECRET` line
   tinker: tinker              # TINKER_API_KEY, or credentials.json (what `tinker auth login` writes); optional
 
-# The ledger and the blob store, as deploy/k3s/services.yaml had them: the StatefulSets keep their names and claims,
-# so an install over those resources takes them over with their data.
+# The ledger and the blob store.
 stores:
   postgres:
     image: postgres:17
