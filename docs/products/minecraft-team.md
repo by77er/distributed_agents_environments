@@ -296,7 +296,9 @@ their groups' rewards differ; of a group's saturated episodes, the one that took
 more in the advantages ([training](../libraries/rollout-train/training.md)). The result also names the team (the
 names, slot by slot) and the guidance its prompt carried, word for word and by kind (`guidance`: `way`,
 `teamwork`), so that a learner can take it back out of the prompts
-([imitation](../libraries/rollout-train/training.md#imitation)).
+([imitation](../libraries/rollout-train/training.md#imitation)). A dataset of the team's play can keep only the turns
+whose action worked: the turn filter `minecraft_team.datasets:worked` reads each agent's next observation
+([datasets](../libraries/rollout-train/datasets.md#choosing-examples)).
 
 ## Model and training
 

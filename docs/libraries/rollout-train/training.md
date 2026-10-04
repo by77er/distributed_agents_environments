@@ -1,6 +1,6 @@
 # Training
 
-Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md),
+Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md), [datasets](datasets.md),
 [API reference](../../guide/reference.md#rollout_train)
 
 The training loop, what it asks of an algorithm and of a trainer, and the curriculum. The loop is written against
@@ -247,14 +247,19 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   does.) A segment where no such stretch is found is left out.
 - **`examples(ledger, run, blobs, renderer, kinds=...)`** reads a run's episodes for those that carried guidance
   of those kinds and solved their task, and gives their segments, cut, each weighted 1.
-- **`imitate(checkpoints, trainer, examples, fence=..., run=..., start=..., base=..., directory=...)`** takes one step of a trainer whose
-  objective is likelihood ([LoRA trainer](../../implementations/rollout-lora.md)) from the newest checkpoint the run
-  made (else from `start`), and appends the checkpoint it makes as the run's (with no step).
+- **`imitate(checkpoints, trainer, examples, fence=..., run=..., start=..., base=..., directory=...)`** takes one
+  step of a trainer whose objective is likelihood ([LoRA trainer](../../implementations/rollout-lora.md), or the
+  trainer of every weight) from the newest checkpoint the run made (else from `start`), and appends the checkpoint it
+  makes as the run's (with no step). Its parents are the checkpoint it trained from, then the checkpoints that sampled
+  its examples, where those are known.
 
 ```bash
 rollout imitate PROFILE [--directory RUN] [--without KIND ...] [--limit N] [--seed N]   # with the run stopped
+rollout imitate PROFILE --dataset REF [--start REF] [--name NAME]                     # a dataset's examples
 ```
 
-It takes the run's fence, so the run must be stopped. It reads the episodes of the run in the directory for guidance of the kinds given (`way` by default), steps
-the profile's trainer with `objective = "likelihood"`, and adds `imitated_episodes` to the checkpoint's metrics. Started
-again, the training loop serves the checkpoint imitation made (the run's newest) and trains on from it.
+It takes the run's fence, so the run must be stopped, and writes a start of `kind: imitation`. It reads the episodes
+of the run in the directory for guidance of the kinds given (`way` by default), or, with `--dataset`, a
+[dataset's](datasets.md) examples; steps the profile's trainer with `objective = "likelihood"`; and adds
+`imitated_episodes` and `imitated_segments` to the checkpoint's metrics. Started again, the training loop serves the
+checkpoint imitation made (the run's newest) and trains on from it.

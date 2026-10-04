@@ -1,7 +1,10 @@
 # SFT datasets by rejection sampling
 
-A proposal, measured on curriculum-9's ledger on 4 October 2026. Nothing here is built except a prototype script in
-the working notes; the dataset record and the training command below are designs.
+Measured on curriculum-9's ledger on 4 October 2026. Datasets are built as described under
+[a dataset as a record](#a-dataset-as-a-record) ([datasets](../libraries/rollout-train/datasets.md)): the episode
+rules solved-all, best-of-group and capped-per-task, the turn filter "actions that worked"
+(`minecraft_team.datasets:worked`), and a supervised step on a dataset with either trainer. The recommended first
+dataset is made: `xymwprlxvxxnvvxy` in the shared ledger, named `curriculum-9-best-of-group-worked`.
 
 The recommended first dataset is **best-of-group, actions that worked**: from each group with a solved episode, the
 best solved episode, and of it every agent's turn whose action came back ok. Today that is 26 episodes, 13 tasks,
@@ -61,7 +64,7 @@ What the risks mean here:
 
 ## A dataset as a record
 
-Proposed: a dataset is an artifact like a checkpoint, made once and never changed.
+A dataset is a record like a checkpoint, made once and never changed.
 
 - **Its record**, in the ledger table `datasets`, keyed by a random id like a checkpoint's: the selection rule and its
   parameters (runs, episode filter, turn filter, guidance kinds cut, caps), the counts (episodes, tasks, turns,
@@ -71,17 +74,17 @@ Proposed: a dataset is an artifact like a checkpoint, made once and never change
   episodes' blobs when a step trains on them, as `imitation.examples` does, so a dataset costs a few kilobytes per
   thousand examples, not a copy of the trajectories.
 - **Its name** is optional, in the registry beside run names and bookmarks.
-- **More data later is a new dataset**, its record naming the one it extends.
+- **More data later is a new dataset.**
 - **An SFT step on a dataset makes a checkpoint** whose first parent is the checkpoint it trained from, and whose
   other parents are the checkpoints that sampled the data (the depths in the manifest, mapped to the sampling run's
   checkpoints: @18 to @29 for the first dataset). The graph then shows "learned from" edges to where the data came
   from, the way a distillation's teachers are shown. The step's batch already records each example's source; its
   record adds the dataset's id.
-- **Both trainers can take one**: the LoRA trainer's likelihood objective now, and the full-weight trainer
+- **Both trainers take one**, with the likelihood objective: the LoRA trainer and the full-weight trainer
   (`rollout_lora:FullTrainer`), through the same `Weighted` segments.
 
-A command for it, proposed: `rollout dataset make RULE --run RUN [filters]` writes the record and the manifest;
-`rollout imitate PROFILE --dataset ID` (or the New run form's start version plus a dataset) takes the step.
+The commands: `rollout dataset make RULE --run RUN [--turns FILTER ...] [--name NAME]` writes the record and the
+manifest; `rollout imitate PROFILE --dataset REF` takes the step.
 
 ## The first dataset
 
@@ -101,11 +104,14 @@ By action: move 922, mine 783, idle 85, chat 73, craft 42. By task: t018 629, t0
 A step on all of it costs about what five of curriculum-9's steps did. Its step 31 took 38 minutes for 384 segments,
 about 6 s a segment, so 1,966 segments take about 3.2 hours on the one GPU.
 
-The prototype, `sft_datasets.py` in the working notes, measures every candidate above and writes this dataset's
-manifest (`sft-best-of-group.jsonl`, 1,966 lines and a header). It reads the ledger read-only and one episode's
-blobs at a time, in about 20 seconds.
+It is made by `rollout dataset make best-of-group --run curriculum-9 --turns all --turns
+minecraft_team.datasets:worked`, which reads the ledger and the 26 episodes' blobs in a few seconds. Its record is
+`xymwprlxvxxnvvxy`: 26 episodes, 26 groups, 13 tasks, 1,966 turns, 436,963 sampled tokens and 9,730,279 context
+tokens, sampled by @18 to @29; 2,969 turns left out because the action failed and 906 because no outcome was seen.
+1,212 of its examples carry `way` guidance to cut, and every cut is exact. Its manifest is 17 KB. The other
+candidates' sizes were measured by a script in the working notes.
 
-Two things it had to work out from the data, which a real implementation should record instead:
+Two things the turn filter works out from the data, which the environment could record instead:
 
 - **Which observation goes with which turn.** A model sample's effect names neither its slot nor its agent. The
   segment's span names the sample, and the agent's next `observe` reports the action's outcome.

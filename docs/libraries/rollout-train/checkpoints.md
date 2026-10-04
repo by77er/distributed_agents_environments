@@ -1,6 +1,7 @@
 # Checkpoints, runs and the ledger
 
 Code: `rollout_train.checkpoints`, `rollout_train.registry`, `rollout_train.ledger` · See [training](training.md),
+[datasets](datasets.md),
 [`Checkpoints`](../../guide/reference.md#checkpoints), [`Checkpoint`](../../guide/reference.md#checkpoint),
 [`Manifest`](../../guide/reference.md#manifest), [`Retention`](../../guide/reference.md#retention),
 [`Ledger`](../../guide/reference.md#ledger)
@@ -12,8 +13,10 @@ What is trained is a graph of checkpoints. Every checkpoint grows from a base mo
   process and on every machine. It is what a channel serves, the name of the adapter an engine loads, and what a
   request to an engine names.
 - A checkpoint says what it was made from: its **parents** (the checkpoint it was trained from first, then any others it
-  learned from, such as a distillation's teachers; none, the base model), the **base** model it adapts
-  (`Qwen/Qwen3.5-9B`, its first parent's, or the one its line began from), and the **run** and **step** that made it.
+  learned from, such as a distillation's teachers, or the checkpoints that sampled a dataset it was trained on; none,
+  the base model), the **base** model it adapts (`Qwen/Qwen3.5-9B`, its first parent's, or the one its line began
+  from), and the **run** and **step** that made it. A checkpoint a supervised step on a [dataset](datasets.md) made
+  names the dataset (`dataset`).
 - Its **kind** says what its weights are: `lora`, an adapter over its base; or `full`, every weight of a model
   ([full weights](#full-weights-and-merges)).
 - Its **depth** counts the steps from the base model along its first parents. It is the number stamped on the tokens
@@ -150,8 +153,8 @@ rollout ledger copy ~/.cache/rollout/runs/curriculum-9 postgresql://trainer@db-1
 then the profile's `[ledger]` names the same `url`. `copy` (`rollout_train.database.copy`) takes any ledger, a run's
 directory, files or a database, into a database that has none of its tables yet: every record under its key, in the
 order it was appended, and every fence, so a writer from before the move is still shut out. `--point` makes the run's
-directory name the copy at once (an open profile writes the same when it starts). The runs and bookmarks registered
-beside the source are registered beside the copy.
+directory name the copy at once (an open profile writes the same when it starts). The runs, bookmarks and dataset
+names registered beside the source are registered beside the copy.
 
 A ledger also lists its tables and its scopes' fences: `runs_in` reads from the tables' names which runs it has, and
 `checkpoints_in` reads every checkpoint; the [monitor](monitor.md) shows them. The training loop's tables are described
@@ -159,9 +162,9 @@ under [dying and starting again](training.md#dying-and-starting-again).
 
 ## The registry
 
-What runs and checkpoints are called is kept beside the ledger, in the registry (`rollout_train.registry`):
-`registry.json` beside a ledger of files, the `runs` and `bookmarks` tables in a database ledger's database
-(`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
+What runs, checkpoints and datasets are called is kept beside the ledger, in the registry (`rollout_train.registry`):
+`registry.json` beside a ledger of files, the `runs`, `bookmarks` and `dataset_names` tables in a database ledger's
+database (`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
 the ledger keeps is under a name, so naming anything again moves nothing. Two more kinds of ordinary state are kept
 beside the ledger the same way: the runners' and launchers' heartbeats (`presence.json`, the `presence` table;
 [heartbeats](rollouts.md#heartbeats)) and the runs asked for (`launches.json`, the `launches` table;
@@ -185,6 +188,12 @@ its id, so that either finds one run.
 A bookmark is a name for a checkpoint. It is made, moved and taken away by hand (`rollout bookmark`), or carried by a
 run: a profile's `[trainer] bookmark` moves it to each checkpoint the run makes, once the checkpoint is served. A checkpoint
 a bookmark names keeps its files. A checkpoint needs no bookmark: it is shown by where it came from.
+
+### Dataset names
+
+A [dataset](datasets.md) can be given a name when it is made (`rollout dataset make … --name NAME`, or
+`Registry.name_dataset`). A name says one dataset for good, as the dataset never changes; another dataset cannot be
+given it.
 
 ## References
 
