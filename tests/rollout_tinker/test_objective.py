@@ -15,7 +15,7 @@ from rollout_tinker import TinkerTrainer
 from rollout_tinker.testing import FakeService
 from rollout_tinker.weights import pointer
 from rollout_train.trainer import STATE, WEIGHTS, Files
-from tests.support import Bigram, segments
+from tests.rollout_tinker.support import Bigram, segments
 
 SAME = ("loss", "clip_fraction", "mean_ratio", "kl_floor", "mean_mismatch", "mean_weight", "truncated_fraction",
         "kl_moved", "tokens", "segments", "segments_too_long", "optimizer_steps", "stopped_at_max_kl", "gradient_norm",

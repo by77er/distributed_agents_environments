@@ -27,8 +27,8 @@ class TinkerSettings:
     rank: int = 32
     """Of the adapter. Tinker scales it by its own `lora_alpha / rank`, not by our twice the rank."""
     learning_rate: float = 1e-4
-    """Twice `LoraTrainer`'s default: Tinker's cookbook takes its adapters' alpha to be 32, half our scale at rank 32,
-    and Adam moves a weight by about the rate whatever its scale."""
+    """Twice `LoraTrainer`'s default: Tinker's adapters have an alpha of 32 (its archives say so), half our scale at
+    rank 32, and Adam moves a weight by about the rate whatever its scale."""
     clip_low: float = 0.2
     clip_high: float = 0.28
     """A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high`."""

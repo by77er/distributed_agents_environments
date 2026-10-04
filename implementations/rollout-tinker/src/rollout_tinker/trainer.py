@@ -47,8 +47,8 @@ from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of,
 from rollout_tinker.settings import CHANGEABLE, TinkerSettings
 from rollout_tinker.weights import (
     checkpoint_name,
-    converted,
     downloaded,
+    peft_adapter,
     pointer,
     write_pointer,
 )
@@ -371,7 +371,7 @@ class TinkerTrainer:
             scratch = into / "archive"
             try:
                 found = await downloaded(archive.url, scratch)
-                await converted(found, into / WEIGHTS, self.model)
+                await asyncio.to_thread(peft_adapter, found, into / WEIGHTS, self.model)
             finally:
                 await asyncio.to_thread(shutil.rmtree, scratch, ignore_errors=True)
 

@@ -1,6 +1,6 @@
 # The workspace: interface libraries, implementations of what they define, products, and environments.
 #   uv sync                 everything that needs no GPU
-#   uv sync --all-extras    with the engine, the trainer, the model families' renderers (Linux, NVIDIA GPU) and Ray
+#   uv sync --all-extras    with the engine, the trainer, the model families' renderers (Linux, NVIDIA GPU), Tinker and Ray
 [project]
 name = "rollout-workspace"
 version = "0.0.0"
@@ -24,11 +24,12 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["rollout-vllm", "rollout-lora", "rollout-qwen"]
 gemma = ["rollout-gemma"]
+tinker = ["rollout-tinker"]  # a trainer and an engine at Thinking Machines
 ray = ["rollout-train[ray]"]  # a launcher that submits runs as Ray jobs, and resharding as Ray tasks
 
 [tool.uv.workspace]
 members = ["libraries/*", "implementations/*", "products/*", "environments/minecraft", "environments/gridworld"]
-exclude = ["implementations/rollout-verifiers", "implementations/rollout-tinker"]  # projects of their own, locked apart
+exclude = ["implementations/rollout-verifiers"]  # a project of its own, locked apart
 
 [tool.uv.sources]
 rollout = { workspace = true }
@@ -42,6 +43,7 @@ rollout-computers = { workspace = true }
 rollout-openai = { workspace = true }
 rollout-s3 = { workspace = true }
 rollout-runpod = { workspace = true }
+rollout-tinker = { workspace = true }
 project-assistant = { workspace = true }
 agent-sessions = { workspace = true }
 minecraft-team = { workspace = true }
@@ -80,7 +82,7 @@ ignore = ["RUF012"]
 
 [tool.pyright]
 include = ["libraries", "implementations", "products", "environments", "tests", "scripts"]
-exclude = ["implementations/rollout-tinker", "**/node_modules", "**/__pycache__", "**/.*"]  # (checked in its own project)
+exclude = ["**/node_modules", "**/__pycache__", "**/.*"]
 extraPaths = [
     "libraries/rollout/src",
     "libraries/rollout-train/src",
@@ -93,6 +95,7 @@ extraPaths = [
     "implementations/rollout-openai/src",
     "implementations/rollout-s3/src",
     "implementations/rollout-runpod/src",
+    "implementations/rollout-tinker/src",
     "implementations/rollout-verifiers/src",
     "products/project-assistant/src",
     "products/agent-sessions/src",

@@ -3,16 +3,18 @@
 sampling keeps its contract, its logprobs agree with a training pass, a step round-trips to a new sampler, and its
 adapter, downloaded and converted, serves on this machine's vLLM. Each test deletes the checkpoints it made.
 
-Opt-in, and skipped without a key (`TINKER_API_KEY`, or `tinker auth login`). It spends well under ten cents. The
-last test also starts vLLM on the GPU, and the model's files (about 9 GB) are fetched from the Hub the first time:
+Run only when asked (`ROLLOUT_TINKER=1`), and skipped without a key (`TINKER_API_KEY`, or `tinker auth login`). It
+spends well under ten cents. The last test also starts vLLM on the GPU, and the model's files (about 9 GB) are fetched
+from the Hub the first time:
 
-    flock ~/.cache/rollout/gpu.lock uv run --group local pytest -m tinker -s tests/test_live.py
+    ROLLOUT_TINKER=1 flock ~/.cache/rollout/gpu.lock uv run pytest -s tests/rollout_tinker/test_live.py
 
 What it finds is printed and written to `~/.cache/rollout/tinker-smoke.json` (no key, no secrets: what was measured).
 """
 
 import hashlib
 import json
+import os
 import statistics
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,7 +33,7 @@ from rollout_train.recorder import Renderer, Segment, Span
 from rollout_train.trainer import STATE, WEIGHTS, Weighted
 
 pytestmark = [
-    pytest.mark.tinker,
+    pytest.mark.skipif(os.environ.get("ROLLOUT_TINKER") != "1", reason="calls Tinker (ROLLOUT_TINKER=1)"),
     pytest.mark.skipif(not has_key(), reason="no Tinker key: set TINKER_API_KEY or run `tinker auth login`"),
 ]
 
@@ -187,7 +189,7 @@ async def test_its_adapter_serves_on_this_machines_vllm(service: Service, render
         await forgotten(service, into)
     largest = ranks(into / WEIGHTS)
     noted("peft", {"largest_rank": largest, "config": json.loads((into / WEIGHTS / "adapter_config.json").read_text())})
-    engine = VllmEngine(MODEL, gpu_memory_utilization=0.6, max_model_len=4096, max_num_seqs=4,
+    engine = VllmEngine(MODEL, gpu_memory_utilization=0.8, max_model_len=4096, max_num_seqs=4,
                         max_lora_rank=next(rank for rank in (32, 64, 128, 256) if rank >= largest))  # fmt: skip
     try:
         await engine.load_adapter("smoke", str(into / WEIGHTS))

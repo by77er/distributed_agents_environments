@@ -21,7 +21,7 @@ from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Renderer
 from rollout_train.testing import PlainRenderer, admitted, recording, sample_request
 from rollout_train.trainer import StepFailed
-from tests.support import segments
+from tests.rollout_tinker.support import segments
 
 
 def refused() -> BillingError:

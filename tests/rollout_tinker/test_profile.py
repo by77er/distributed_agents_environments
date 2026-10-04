@@ -17,7 +17,7 @@ from rollout_tinker.weights import POINTER, pointer
 from rollout_train import train
 from rollout_train.profile import Profile
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class SayA(Task):
