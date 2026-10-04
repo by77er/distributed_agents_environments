@@ -35,7 +35,7 @@ from typing import Any, Protocol
 from pydantic import JsonValue
 
 from rollout_train.ledger import FileLedger, Ledger
-from rollout_train.record import STARTS, table
+from rollout_train.record import STARTS, newest_record, table
 
 GROUPS_PER_STEP = "groups_per_step"
 MAX_LAG = "max_lag"
@@ -94,9 +94,8 @@ async def paused(ledger: Ledger, run: str, store: DesiredSettings | None = None)
         if found is not None and found.settings.get(PAUSED) is True:
             return True
         starts = await ledger.read(table(each, STARTS))
-        newest = starts[max(starts, key=int)] if starts else None
-        if isinstance(newest, dict):
-            waiting += [str(newest[key]) for key in ("by", "part_of") if newest.get(key)]
+        newest = newest_record(starts)
+        waiting += [str(newest[key]) for key in ("by", "part_of") if newest.get(key)]
     return False
 
 

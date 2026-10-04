@@ -61,7 +61,6 @@ import json
 import os
 import random
 import shutil
-import socket
 import time
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import replace
@@ -83,14 +82,15 @@ from rollout_train.record import (
     EVALS,
     FAILURES,
     GROUPS,
-    PROCESS,
     RESULTS,
     STARTS,
     STEPS,
     Result,
     described,
+    mapping,
     results,
     scope,
+    start_header,
     table,
 )
 from rollout_train.resharding import RESHARDED
@@ -183,14 +183,16 @@ async def train(
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
     fence = await ledger.take(scope(run))  # whoever ran this before can no longer write
-    decided = {int(number): _mapping(group) for number, group in (await ledger.read(table(run, GROUPS))).items()}
+    decided = {int(number): mapping(group) for number, group in (await ledger.read(table(run, GROUPS))).items()}
     recorded = {
-        int(key): Result.from_json(_mapping(line), int(key), decided.get(int(key), {}))
+        int(key): Result.from_json(mapping(line), int(key), decided.get(int(key), {}))
         for key, line in (await ledger.read(table(run, RESULTS))).items()
     }
-    steps = {int(key): _mapping(step) for key, step in (await ledger.read(table(run, STEPS))).items()}
+    steps: dict[int, dict[str, JsonValue]] = {
+        int(key): mapping(step) for key, step in (await ledger.read(table(run, STEPS))).items()
+    }
     failures = {int(key) for key in await ledger.read(table(run, FAILURES))}
-    evaluated = {int(key): _mapping(said) for key, said in (await ledger.read(table(run, EVALS))).items()}
+    evaluated = {int(key): mapping(said) for key, said in (await ledger.read(table(run, EVALS))).items()}
     curriculum = curriculum or curriculum_of(environment)
     eval_starts = held_out(environment)  # (which training never draws)
     for number in sorted(recorded):
@@ -202,7 +204,7 @@ async def train(
     if start is not None and trainer.weights == "full" and (await checkpoints.checkpoint(start)).kind != "full":
         raise ValueError(f"{start} is an adapter: merge it (`rollout merge`) to train every weight from it")
     await plan(ledger, run, Plan(environment.program, binding or binding_for(environment, channel)), fence)
-    here = {"from": start, "host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1)}
+    here = start_header(**{"from": start})
     here |= described(environment)
     await ledger.append(table(run, STARTS), str(fence.number), {**here, **(started or {})}, fence)
     asking = -(-(episodes_at_once + algorithm.group_size - 1) // algorithm.group_size)
@@ -267,9 +269,7 @@ async def train(
     async def keeping() -> set[str]:
         """The checkpoints that keep their files whatever retention says."""
         starts = [await ledger.read(name) for name in await ledger.tables() if name.endswith(f"/{STARTS}")]
-        begun = {
-            str(record["from"]) for each in starts for record in map(_mapping, each.values()) if record.get("from")
-        }
+        begun = {str(record["from"]) for each in starts for record in map(mapping, each.values()) if record.get("from")}
         serving = {served.id, *served.parents} if served is not None else set[str]()
         return begun | serving | set(await kept() if kept is not None else ())
 
@@ -638,8 +638,3 @@ def _groups(step: dict[str, JsonValue]) -> list[int]:
     """The groups a step covers, by their numbers."""
     listed = step.get("groups")
     return [int(str(group)) for group in listed] if isinstance(listed, list) else []
-
-
-def _mapping(record: JsonValue) -> dict[str, JsonValue]:
-    assert isinstance(record, dict)
-    return record

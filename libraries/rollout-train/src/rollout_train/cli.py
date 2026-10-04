@@ -689,9 +689,9 @@ def _as_job(ray: str, given: list[str]) -> None:
 async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: str | None) -> None:
     from rollout.harness.blobs import FileBlobStore
     from rollout_train.checkpoints import Checkpoints
+    from rollout_train.datasets import where_blobs_are
     from rollout_train.layout import BLOBS
     from rollout_train.merging import SCOPE, merge
-    from rollout_train.record import STARTS, table
     from rollout_train.registry import resolved
     from rollout_train.stores import opened
 
@@ -703,10 +703,11 @@ async def _merge(who: str, where: str, base: str | None, merger: str, bookmark: 
     if lora is None:
         raise SystemExit("the base model has no adapter to merge")
     made = await Checkpoints(ledger, FileBlobStore(Path(where) / BLOBS)).checkpoint(lora)  # (its record only)
-    starts: Any = await ledger.read(table(made.run, STARTS)) if made.run else {}
-    kept: Any = starts[max(starts, key=int)].get("blobs") if starts else None  # (where the run keeps its blobs)
     here = await asyncio.to_thread(Path(where).expanduser)
-    blobs = opened(kept) if kept else FileBlobStore(here / BLOBS)
+    try:
+        blobs = opened(await where_blobs_are(ledger, made.run)) if made.run else FileBlobStore(here / BLOBS)
+    except ValueError:  # (a run that does not say where its blobs are keeps them in the ledger's directory)
+        blobs = FileBlobStore(here / BLOBS)
     fence = await ledger.take(SCOPE)
     scratch = Path.home() / ".cache" / "rollout" / "merging"  # (on disk: a merged model may be gigabytes)
     merged = await merge(Checkpoints(ledger, blobs), fence, lora, base=base, merger=merger, scratch=scratch)

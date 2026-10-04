@@ -24,12 +24,19 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoint, short
-from rollout_train.evals import eval_episodes, parsed, parts_of, played_version, versions_in
+from rollout_train.evals import (
+    EVALUATIONS,
+    eval_episodes,
+    parsed,
+    parts_of,
+    played_version,
+    subject_table,
+    versions_in,
+)
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
-from rollout_train.record import EVALS, GROUPS, STARTS, table
+from rollout_train.record import EVALS, GROUPS, STARTS, newest_record, table
 
-EVALUATIONS = "evaluations/"
 CHECKPOINT, MODEL = "checkpoint", "model"
 """What a subject is: a checkpoint, or a base model."""
 BY_HAND, BY_SCHEDULE = "by hand", "schedule"
@@ -219,7 +226,7 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
         suite, run = middle.split("/", 1)
         about = cast(dict[str, Any], tables[name].get("subject") or {})
         starts = cast(dict[str, Any], tables.get(table(run, STARTS), {}))
-        begun: dict[str, Any] = starts[max(starts, key=int)] if starts else {}
+        begun = newest_record(starts)
         parts = parts_of(tables, suite, run)
         groups = [
             group
@@ -227,7 +234,7 @@ def _evals(tables: Mapping[str, Mapping[str, JsonValue]], names: Mapping[str, An
             for group in cast(dict[str, Any], tables.get(table(str(part["run"]), GROUPS), {})).values()
         ]
         episodes = eval_episodes(tables, suite, run)
-        results = cast(dict[str, Any], tables.get(f"{EVALUATIONS}{suite}/{run}/results", {}))
+        results = cast(dict[str, Any], tables.get(subject_table(suite, run, "results"), {}))
         by, step = scheduled.get(run, (begun.get("by"), begun.get("step")))
         version = played_version(about)
         said = [result for key, result in results.items() if reported(episodes.get(key.replace("-", "/", 1)))]

@@ -26,7 +26,7 @@ from rollout_train.launcher import LAUNCHER
 from rollout_train.launches import EVAL, OPEN, RUN, Asked, Launch, launches_of
 from rollout_train.ledger import Ledger
 from rollout_train.presence import Beat, alive, presence_of
-from rollout_train.record import ENDS, FINISHED, GROUPS, RESULTS, STARTS, table
+from rollout_train.record import ENDS, FINISHED, GROUPS, RESULTS, STARTS, newest_record, table
 from rollout_train.registry import registry_of
 from rollout_train.settings import GROUPS_PER_STEP, PAUSED, Desired, desired_settings_of
 
@@ -65,7 +65,7 @@ async def resume(ledger: Ledger, run: str) -> Resumed:
     starts: Any = await ledger.read(table(run, STARTS))
     if not starts:
         raise KeyError(f"there is no run {run}")
-    newest: Mapping[str, Any] = starts[max(starts, key=int)]
+    newest = newest_record(starts)
     if newest.get("part_of"):
         raise ValueError(f"{run} plays a part of the eval {newest['part_of']}: resume that eval")
     wanted = await store.desired(run)

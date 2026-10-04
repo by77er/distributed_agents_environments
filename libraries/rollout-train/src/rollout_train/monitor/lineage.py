@@ -36,6 +36,7 @@ from rollout_train.evals import (
 )
 from rollout_train.ledger import between
 from rollout_train.monitor.statistics import reported
+from rollout_train.record import newest_record
 
 QUEUED, TAKING, MADE, FAILED = "queued", "taking", "made", "failed"
 WRITTEN, RESHARDING, RESHARDED, SERVING, SUPERSEDED = "written", "resharding", "resharded", "serving", "superseded"
@@ -122,7 +123,7 @@ class _Reading:
             failures = self.read(f"{_RUNS}{run}/failures")
             steps = sorted(self.read(f"{_RUNS}{run}/steps").items(), key=lambda item: int(item[0]))
             starts = self.read(f"{_RUNS}{run}/starts")
-            begun = starts[max(starts, key=int)].get("from") if starts else None
+            begun = newest_record(starts).get("from")
             listed: list[dict[str, Any]] = []
             for key, step in steps:
                 makes = str(step.get("makes"))

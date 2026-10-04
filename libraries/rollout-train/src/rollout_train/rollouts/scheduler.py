@@ -67,7 +67,7 @@ from rollout.harness.sandboxes import Pool, PoolBinding, SandboxLost
 from rollout_train.gateway.client import Attempt
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.presence import Beat, Presence, alive
-from rollout_train.record import GROUPS, RESULTS, runs_in, scope, table
+from rollout_train.record import GROUPS, RESULTS, mapping, newest_record, runs_in, scope, table
 from rollout_train.recorder import Segment
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, assemble, loaded, stored
 from rollout_train.settings import desired_settings_of, paused
@@ -123,7 +123,7 @@ class Claims:
     async def read(cls, ledger: Ledger, run: str) -> "Claims":
         claims = await ledger.read(table(run, CLAIMS))
         return cls(
-            {key: _mapping(claim) for key, claim in claims.items()},
+            {key: mapping(claim) for key, claim in claims.items()},
             set(await ledger.read(table(run, INTERRUPTED))),
             set(await ledger.read(table(run, EPISODES))),
             set(await ledger.read(table(run, ADOPTED))),
@@ -198,7 +198,7 @@ async def ended(ledger: Ledger, blobs: Blobs, run: str, group: int, count: int) 
     keys = [f"{group}/{number}" for number in range(1, count + 1)]
     if not all(key in records for key in keys):
         return None
-    return [await loaded(Record.from_json(_mapping(records[key])), blobs) for key in keys]
+    return [await loaded(Record.from_json(mapping(records[key])), blobs) for key in keys]
 
 
 async def episodes_of(
@@ -386,7 +386,7 @@ class EpisodeRunner:
             if self.runs is not None and run not in self.runs:
                 continue
             plans = await self.ledger.read(table(run, PLANS))
-            if not plans or not await self._serves(run, Plan.from_json(_mapping(plans[max(plans, key=int)]))):
+            if not plans or not await self._serves(run, Plan.from_json(newest_record(plans))):
                 continue
             if await paused(self.ledger, run, desired):
                 halted.add(run)
@@ -398,7 +398,7 @@ class EpisodeRunner:
             claims = await Claims.read(self.ledger, run)
             held = {key.rsplit("/", 1)[0] for key in claims.holding(fences, beats, self.name)}
             for key, group in groups.items():
-                record = _mapping(group)
+                record = mapping(group)
                 count = record.get("episodes")
                 if key in results or not isinstance(count, int):
                     continue
@@ -426,13 +426,13 @@ class EpisodeRunner:
         a URL). `plans` keeps the runs' plans, as read."""
         if each.run not in plans:
             written = await self.ledger.read(table(each.run, PLANS))
-            plans[each.run] = Plan.from_json(_mapping(written[max(written, key=int)]))
+            plans[each.run] = Plan.from_json(newest_record(written))
         played = plans[each.run]
         if not played.binding.pools:
             return Counter[str]()
         kinds = self._kinds.get((each.run, each.group))
         if kinds is None:
-            group = _mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
+            group = mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
             try:
                 program = instantiate(with_row(played.program, group["parameters"]))
                 kinds = Counter(spec.kind for spec in program.sandboxes().values())
@@ -546,8 +546,8 @@ class EpisodeRunner:
 
     async def _play(self, each: Open, key: str, run_id: str, fence: Fence) -> None:
         plans = await self.ledger.read(table(each.run, PLANS))
-        played = Plan.from_json(_mapping(plans[max(plans, key=int)]))
-        group = _mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
+        played = Plan.from_json(newest_record(plans))
+        group = mapping((await self.ledger.read(table(each.run, GROUPS)))[str(each.group)])
         specification = RunSpecification(program=with_row(played.program, group["parameters"]), binding=played.binding)
         labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
         self.recorder.admit(run_id, Attempt(each.run, fence, f"{each.group}/{each.number}", each.attempt))
@@ -639,8 +639,3 @@ async def playing(runner: EpisodeRunner) -> AsyncGenerator[None]:
 def _named(binding: PoolBinding) -> str:
     """A pool as a binding names it: its local name, or its URL."""
     return binding.local or str(binding.url)
-
-
-def _mapping(record: JsonValue) -> dict[str, Any]:
-    assert isinstance(record, dict)
-    return record

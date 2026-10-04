@@ -25,7 +25,7 @@ from rollout.environment import Environment
 from rollout_train.check import CHECK
 from rollout_train.evals import EVAL, parsed, started_version, subject_table, suites_among, versions_in
 from rollout_train.monitor.scores import evals_in
-from rollout_train.record import ENDS, GROUPS, RESULTS, STARTS, named_runs, table
+from rollout_train.record import ENDS, GROUPS, RESULTS, STARTS, named_runs, newest_record, table
 
 GENERIC = {"environment", "env", "environments", "main"}
 """Names an environment's object is often given, which say nothing of it."""
@@ -372,7 +372,7 @@ def _check(
                 "skipped": line.get("skipped") if line else None,
             }
         )
-    ended = cast(dict[str, Any], ends[max(ends, key=int)]) if ends else None
+    ended = dict(newest_record(ends)) or None
     return {
         "run": run,
         "name": called.get(run, run),

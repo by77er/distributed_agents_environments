@@ -31,6 +31,7 @@ from rollout.environment import Environment, Start
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.names import named
 from rollout_train.checkpoints import Checkpoint, Manifest, checkpoints_in, short
+from rollout_train.datasets import where_blobs_are
 from rollout_train.evals import (
     DRAWN,
     EVAL,
@@ -85,6 +86,7 @@ from rollout_train.record import (
     STEPS,
     Result,
     named_runs,
+    newest_record,
     runs_in,
     table,
 )
@@ -209,7 +211,7 @@ class System:
         - else the monitor at the address its newest start names, which serves its machine's runs (unless this was
           asked by another monitor: then nothing more is asked of others);
         - else nowhere this can read: what is shown of the run is what the ledger has."""
-        latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
+        latest = newest_record(starts)
         if latest.get("directory"):
             where: Path | None = Path(str(latest["directory"])).expanduser().resolve()
         elif self.directory is not None and run == self._opened:
@@ -514,7 +516,7 @@ class System:
         starts: Any = await self._ledger.read(table(run, STARTS))
         if not starts:
             return None
-        latest: Mapping[str, Any] = starts[max(starts, key=int)]
+        latest = newest_record(starts)
         said: Mapping[str, Any] = latest.get("settings") or {}
         changeable: dict[str, Any] = dict(said.get("changeable") or {})
         steps: Any = await self._ledger.read(table(run, STEPS))
@@ -634,7 +636,7 @@ class System:
         evals: list[dict[str, Any]] = []
         for run in named_runs(tables):
             starts: Any = tables.get(table(run, STARTS), {})
-            latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
+            latest = newest_record(starts)
             if latest.get("kind") != EVAL or latest.get("part_of"):  # (a part is shown as its eval)
                 continue
             suite = str(latest.get("suite"))
@@ -838,9 +840,9 @@ class System:
 
     async def _store(self, run: str) -> Blobs | None:
         """The blob store a run's newest start says its blobs are in (as any machine opens it), if it says."""
-        starts: Any = await self._ledger.read(table(run, STARTS))
-        where: Any = starts[max(starts, key=int)].get("blobs") if starts else None
-        if not where:
+        try:
+            where = await where_blobs_are(self._ledger, run)
+        except ValueError:
             return None
         key = json.dumps(where, sort_keys=True)
         if key not in self._stores:
@@ -926,7 +928,7 @@ class System:
             seen |= _how_it_ended(seen["state"], starts, own[ENDS], beaten.get(run) is not None)
             if seen["state"] in (RUNNING, IDLE) and run in held:  # (its process is there, and a runner says it paused)
                 seen["state"] = PAUSED
-            begun: Any = starts[max(starts, key=int)] if starts else {}
+            begun = newest_record(starts)
             kind = str(begun.get("kind") or "run")
             if kind == EVAL and own[GROUPS] and set(own[GROUPS]) <= set(own[RESULTS]) and seen["state"] not in ENDINGS:
                 seen |= {"state": FINISHED, "channels": []}  # (an eval that played every start has ended)
@@ -983,7 +985,7 @@ class System:
         """What a run's start says (where it is, what started it), its engines (as its runners' heartbeats say),
         and what its episodes' place adds (its groups in flight with their episodes); when it last wrote or beat
         (`beaten`, and how long ago by the beats' store, `age`), and so whether it is running."""
-        latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
+        latest = newest_record(starts)
         beating = age is not None and age <= STALE
         added: dict[str, Any] = {"channels": _channels(notes) if beating else []}  # (what a gone process served is not)
         written = newest([wrote, latest.get("started"), beaten])

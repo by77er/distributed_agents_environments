@@ -46,7 +46,6 @@ the same whatever the environment), each eval a run of its own, and each entry p
 
 import asyncio
 import hashlib
-import socket
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -65,13 +64,14 @@ from rollout_train.record import (
     ENDS,
     FINISHED,
     GROUPS,
-    PROCESS,
     RESULTS,
     STARTS,
     Result,
     described,
+    mapping,
     results,
     scope,
+    start_header,
     table,
 )
 from rollout_train.registry import registry_of, valid, version_number
@@ -303,7 +303,7 @@ async def make_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry]) -
     there = await ledger.append_returning(suite_table(name, FIRST), FIRST, made.record(), fence)
     if there.wrote:
         return made
-    return _as_suite(name, 1, _mapping(there.record))  # (another maker's, made meanwhile)
+    return _as_suite(name, 1, mapping(there.record))  # (another maker's, made meanwhile)
 
 
 async def edit_suite(ledger: Ledger, name: str, entries: Sequence[SuiteEntry], *, base: int | None = None) -> Suite:
@@ -410,16 +410,16 @@ def versions_in(tables: Mapping[str, Mapping[str, JsonValue]], name: str) -> lis
 def _versions(name: str, records: Mapping[str, JsonValue]) -> list[Suite]:
     found: list[Suite] = []
     if records.get(FIRST) is not None:
-        found.append(_as_suite(name, 1, _mapping(records.get(FIRST))))
+        found.append(_as_suite(name, 1, mapping(records.get(FIRST))))
     for key, record in records.items():
         if key.isdigit() and int(key) > 1:
-            found.append(_as_suite(name, int(key), _mapping(record)))
+            found.append(_as_suite(name, int(key), mapping(record)))
     return sorted(found, key=lambda each: each.number)
 
 
 def _as_suite(name: str, number: int, about: Mapping[str, Any]) -> Suite:
     """A version from its record."""
-    entries = [_as_entry(_mapping(each)) for each in cast(list[Any], about.get("entries") or [])]
+    entries = [_as_entry(mapping(each)) for each in cast(list[Any], about.get("entries") or [])]
     return Suite(name, entries, float(about.get("made") or 0.0), number, about.get("edited_from"))
 
 
@@ -435,7 +435,7 @@ def _as_entry(about: Mapping[str, Any]) -> SuiteEntry:
 
 def _start(record: JsonValue) -> Start:
     """A start as a version's record holds it (one that says less reads with what it says)."""
-    said = _mapping(record)
+    said = mapping(record)
     return Start(str(said.get("task") or ""), str(said.get("title") or ""), said.get("seed", 0), said.get("parameters"))
 
 
@@ -451,10 +451,6 @@ def suites_among(names: Iterable[str]) -> list[str]:
     return sorted(name for name in found if name and "/" not in name)
 
 
-def _mapping(record: JsonValue) -> Mapping[str, Any]:
-    return record if isinstance(record, dict) else {}
-
-
 async def suites_in(ledger: Ledger) -> list[str]:
     """Every suite a ledger has, by name."""
     return suites_among(await ledger.tables())
@@ -464,11 +460,11 @@ def parts_of(tables: Mapping[str, Mapping[str, Any]], suite: str, run: str) -> l
     """The runs an eval played its version's entries in, from a ledger's tables as read (by name): each its
     `environment`, its `run`, its `episodes` of each start, and the number of its first start in the version less one
     (`offset`)."""
-    about = _mapping(tables.get(subject_table(suite, run, "subject"), {}).get("subject"))
+    about = mapping(tables.get(subject_table(suite, run, "subject"), {}).get("subject"))
     version = next((each for each in versions_in(tables, suite) if each.id == played_version(about)), None)
     said = cast(list[Any], about.get("parts") or [])
     places = offsets(version) if version is not None and len(version.entries) == len(said) else [0] * len(said)
-    return [dict(_mapping(each)) | {"offset": place} for each, place in zip(said, places, strict=True)]
+    return [dict(mapping(each)) | {"offset": place} for each, place in zip(said, places, strict=True)]
 
 
 def eval_episodes(tables: Mapping[str, Mapping[str, Any]], suite: str, run: str) -> dict[str, Any]:
@@ -605,7 +601,7 @@ async def evaluate(
     fences = [fence] if not several else [await ledger.take(scope(each)) for each in runs]
     counts = [episodes or entry.episodes for entry in suite.entries]
     here: dict[str, JsonValue] = {"kind": EVAL, "suite": suite.name, SUITE_VERSION: suite.id, "checkpoint": subject}
-    here |= {"from": subject, "host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1)}
+    here |= start_header(**{"from": subject})
     first = loaded[suite.entries[0].environment]
     whole = {**here, **(described(first) if not several else {"parts": cast(JsonValue, runs)}), **(started or {})}
     await ledger.append(table(run, STARTS), str(fence.number), whole, fence)

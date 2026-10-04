@@ -20,7 +20,7 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import CHECKPOINTS
 from rollout_train.launches import EVAL
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, newest_record, table
 from rollout_train.rollouts.scheduler import EPISODES
 
 STEP_METRICS = (
@@ -72,9 +72,7 @@ def statistics(
 
 def _evaluates(tables: Mapping[str, Mapping[str, JsonValue]], run: str) -> bool:
     """Whether a run is an eval, or a part of one: its newest start says so."""
-    starts = tables.get(table(run, STARTS), {})
-    newest: Any = starts[max(starts, key=int)] if starts else {}
-    return isinstance(newest, dict) and cast(dict[str, Any], newest).get("kind") == EVAL
+    return newest_record(tables.get(table(run, STARTS), {})).get("kind") == EVAL
 
 
 def _checkpoints(tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, dict[str, Any]]:

@@ -129,6 +129,23 @@ def scope(run: str) -> str:
     return _RUNS + run
 
 
+def newest_record(records: Mapping[str, JsonValue]) -> dict[str, Any]:
+    """The newest of a table's records keyed by fence number (a run's starts, ends or plans): the one under the
+    greatest number. Empty for none, or for one that is no object."""
+    return mapping(records[max(records, key=int)]) if records else {}
+
+
+def mapping(record: JsonValue) -> dict[str, Any]:
+    """A record as an object (empty for one that is no object)."""
+    return cast(dict[str, Any], record) if isinstance(record, dict) else {}
+
+
+def start_header(**more: JsonValue) -> dict[str, JsonValue]:
+    """What a run's start says of where and when it started: the machine (`host`), this process (`PROCESS`) and the
+    time; with `more`."""
+    return {"host": socket.gethostname(), "process": PROCESS, "started": round(time.time(), 1), **more}
+
+
 def table(run: str, name: str) -> str:
     """A run's table in the ledger."""
     return f"{scope(run)}/{name}"

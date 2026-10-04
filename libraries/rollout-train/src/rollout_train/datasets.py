@@ -46,7 +46,7 @@ from rollout.names import named
 from rollout_train.checkpoints import SHORTEST, checkpoints_in, new_id
 from rollout_train.imitation import GUIDANCE, Examples, without
 from rollout_train.ledger import Ledger
-from rollout_train.record import GROUPS, STARTS, table
+from rollout_train.record import GROUPS, STARTS, newest_record, table
 from rollout_train.recorder.renderers import Renderer
 from rollout_train.registry import Registry
 from rollout_train.rollouts.episodes import COMPRESSED, Episode, Record, events_of, loaded
@@ -333,8 +333,7 @@ async def served_at(ledger: Ledger, run: str) -> dict[int, str]:
 async def where_blobs_are(ledger: Ledger, run: str, reference: BlobReference | None = None) -> dict[str, JsonValue]:
     """Where a run's blobs are: as its newest start says; else (a run recorded before starts said so) the directory of
     files that holds `reference`, one of its blobs."""
-    starts: Any = await ledger.read(table(run, STARTS))
-    kept: Any = starts[max(starts, key=int)].get("blobs") if starts else None
+    kept = newest_record(await ledger.read(table(run, STARTS))).get("blobs")
     if isinstance(kept, dict):
         return cast(dict[str, JsonValue], kept)
     if reference is not None and reference.uri.startswith("file://"):
