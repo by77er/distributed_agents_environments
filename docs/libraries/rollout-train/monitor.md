@@ -171,7 +171,8 @@ trainer's (`trainer.learning_rate`, say), each holding what is wanted of it, els
 and not yet used says what the run uses now. Under it, each step that used other settings than the step before, with
 what changed. **Save** asks the monitor (`POST /api/runs/RUN/settings`, `{"settings": {KEY: VALUE}}`, only those
 changed), which checks each (`System.want`: a setting the run can change, a whole number of 1 at least where one is
-needed, no suite of another environment than the run's) and keeps it beside the ledger; a fixed setting, or one the run does not have, is
+needed, no suite of another environment than the run's; a name the ledger has no suite of is the environment's eval
+data of that name, frozen when the run first plays it) and keeps it beside the ledger; a fixed setting, or one the run does not have, is
 refused (409) and the page says why. The run takes them when it next decides a step (or, stopped, when it is started
 again). **Fixed** lists the rest as they are: the model, what the trainer is and makes, the adapter's rank, the
 channels and their engines, how many episodes it plays at once, the groups and seed it was started with. A run whose

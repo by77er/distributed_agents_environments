@@ -645,6 +645,8 @@ export interface Path {
 export interface RunSettings {
   run: string;
   kind: string;
+  /** The environment it trains on, as `module:name` (its evals' suites are that environment's). */
+  environment?: string | null;
   fixed: Record<string, unknown>;
   changeable: Record<string, unknown>;
   now: Record<string, unknown>;

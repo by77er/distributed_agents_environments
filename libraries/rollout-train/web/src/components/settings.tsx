@@ -42,7 +42,7 @@ function SettingsForm({ settings }: { settings: RunSettings }) {
     event.preventDefault();
     want.mutate(wanted, { onSuccess: () => setFields({}) });
   };
-  const suites = (evals?.suites ?? []).map(each => each.suite);
+  const suites = (evals?.suites ?? []).filter(each => !settings.environment || !each.environment || each.environment === settings.environment).map(each => each.suite);
   return (
     <form onSubmit={submit}>
       <Card title="Changeable">

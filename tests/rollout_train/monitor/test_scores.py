@@ -143,11 +143,12 @@ async def test_a_checkpoints_line_runs_from_the_base_model_through_merges_with_e
 async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
     await make_suite(ledger, "words-v1", ENVIRONMENT, words, rows=["say-yes"], seeds=[1])
+    await make_suite(ledger, "other-words", "games:other", words, rows=["say-yes"], seeds=[1])
     fence = await ledger.take(scope("train"))
     changeable: dict[str, JsonValue] = {"groups_per_step": 4, "evals.suite": None, "evals.every": 1,
                                         "evals.episodes": 1, "trainer.learning_rate": 5e-5}  # fmt: skip
     recorded: JsonValue = {"fixed": {"model": "tiny", "trainer.rank": 8}, "changeable": changeable}
-    begun: JsonValue = {"from": None, "started": time.time(), "settings": recorded}
+    begun: JsonValue = {"from": None, "started": time.time(), "settings": recorded, "environment": ENVIRONMENT}
     await ledger.append(table("train", STARTS), "1", begun, fence)
     for key, rate in (("1", 5e-5), ("2", 5e-5), ("3", 3e-5)):
         step: JsonValue = {
@@ -166,7 +167,7 @@ async def test_a_runs_settings_are_read_and_changed_from_the_page(tmp_path: Path
         answer = await client.post("/api/runs/train/settings", json={"settings": wanted})
         assert answer.status_code == 200, answer.text
         assert (await client.get("/api/runs/train/settings")).json()["desired"] == wanted
-        for refused in ({"trainer.rank": 16}, {"model": "big"}, {"evals.every": 0}, {"evals.suite": "no-such-suite"},
+        for refused in ({"trainer.rank": 16}, {"model": "big"}, {"evals.every": 0}, {"evals.suite": "other-words"},
                         {"trainer.learning_rate": [1]}):  # fmt: skip
             answer = await client.post("/api/runs/train/settings", json={"settings": refused})
             assert answer.status_code == 409, refused

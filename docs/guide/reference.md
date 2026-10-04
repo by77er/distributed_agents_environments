@@ -3610,8 +3610,10 @@ class System
   start says, what is wanted of them now, those its newest step used, and each step that used other settings than
   the one before, with what changed. None where there is no such run.
 - `async def want(self, run: str, settings: Mapping[str, Any]) -> Desired` — Want these of a run's changeable settings from its next step on. Raises `Taken` for a setting it does not
-  have or cannot change, or a value it cannot take (a suite there is not, say); `KeyError` where there is no such
-  run, or nowhere to keep what is wanted.
+  have or cannot change, or a value it cannot take (a suite of another environment than the run's, say);
+  `KeyError` where there is no such run, or nowhere to keep what is wanted. A suite the ledger does not have is
+  taken: the run resolves it from its environment's eval data (`rollout_train.evals.suite_for`), or evaluates
+  nothing.
 - `async def checkpoint_evals(self, checkpoint: str) -> dict[str, Any] | None` — Every eval a checkpoint (by its id or the start of it) has had, by hand or by a schedule, newest first
   (`rollout_train.monitor.scores.evals_of`); None where there is no such checkpoint.
 - `async def path(self, checkpoint: str) -> dict[str, Any] | None` — A checkpoint's line from the base model, with each point's scores at each suite

@@ -203,7 +203,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
               <span>Suite</span>
               <select value={suite ?? shown(defaults[EVALS_SUITE])} onChange={event => setSuite(event.target.value)}>
                 {shown(defaults[EVALS_SUITE]) ? null : <option value="">none</option>}
-                {(evals?.suites ?? []).map(each => <option key={each.suite} value={each.suite}>{each.suite} · {each.starts.length} starts</option>)}
+                {(evals?.suites ?? []).filter(each => !each.environment || each.environment === environment).map(each => <option key={each.suite} value={each.suite}>{each.suite} · {each.starts.length} starts</option>)}
                 {shown(defaults[EVALS_SUITE]) && !evals?.suites.some(each => each.suite === defaults[EVALS_SUITE]) ? <option value={shown(defaults[EVALS_SUITE])}>{shown(defaults[EVALS_SUITE])}</option> : null}
               </select>
             </label>

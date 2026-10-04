@@ -296,6 +296,7 @@ class System:
         return {
             "run": run,
             "kind": str(latest.get("kind") or "run"),
+            "environment": latest.get("environment"),
             "fixed": dict(said.get("fixed") or {}),
             "changeable": changeable,
             "now": dict(before),
@@ -306,8 +307,10 @@ class System:
 
     async def want(self, run: str, settings: Mapping[str, Any]) -> Desired:
         """Want these of a run's changeable settings from its next step on. Raises `Taken` for a setting it does not
-        have or cannot change, or a value it cannot take (a suite there is not, say); `KeyError` where there is no such
-        run, or nowhere to keep what is wanted."""
+        have or cannot change, or a value it cannot take (a suite of another environment than the run's, say);
+        `KeyError` where there is no such run, or nowhere to keep what is wanted. A suite the ledger does not have is
+        taken: the run resolves it from its environment's eval data (`rollout_train.evals.suite_for`), or evaluates
+        nothing."""
         found = await self.settings(run)
         store = desired_settings_of(self._ledger)
         if found is None or store is None:
@@ -325,8 +328,10 @@ class System:
                 given[key] = checked_setting(key, value)
             except ValueError as error:
                 raise Taken(str(error)) from None
-            if key == EVALS_SUITE and given[key] and await suite_of(self._ledger, str(given[key])) is None:
-                raise Taken(f"there is no suite {given[key]!r}")
+            if key == EVALS_SUITE and given[key]:  # (one not made yet is the environment's eval data of the name)
+                suite = await suite_of(self._ledger, str(given[key]))
+                if suite is not None and found["environment"] and suite.environment not in ("", found["environment"]):
+                    raise Taken(f"the suite {given[key]!r} is of {suite.environment}, not {found['environment']}")
         return await store.want(run, given)
 
     async def checkpoint_evals(self, checkpoint: str) -> dict[str, Any] | None:
