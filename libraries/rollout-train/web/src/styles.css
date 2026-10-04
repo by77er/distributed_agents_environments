@@ -346,7 +346,7 @@
   .small-card > header { padding: 9px 14px 8px; } .small-card .body { padding: 10px 14px 12px; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
   .node.off { opacity: .45; } .node.off .swatch { background: none !important; box-shadow: inset 0 0 0 1.5px var(--faint); }
-  .dot.idle { background: var(--warm); }
+  .dot.idle { background: var(--warm); } .dot.paused { background: var(--violet); }
   .share { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; }
   .share .track { flex: 1; height: 6px; min-width: 60px; } .share .track.good i { background: var(--good); }
   .share b { font: 600 12px var(--mono); min-width: 34px; text-align: right; }
@@ -400,6 +400,9 @@
             border-radius: 2px; padding: 5px 11px; vertical-align: middle; }
   .action:hover { background: var(--accent-soft); }
   button.action { background: none; cursor: pointer; }
+  button.action:disabled { opacity: .5; cursor: default; }
+  .action.danger { color: var(--bad); border-color: var(--bad); } .action.danger:hover { background: var(--bad-soft); }
+  .run-controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .launch-form { display: grid; gap: 18px; }
   .fields { display: grid; gap: 14px; }
   .field { display: grid; gap: 4px; min-width: 0; }

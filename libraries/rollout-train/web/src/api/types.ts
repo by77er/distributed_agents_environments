@@ -147,6 +147,8 @@ export interface Run {
   by_step?: number | null;
   /** For a run that plays one entry of an eval of several environments: that eval's run. */
   part_of?: string | null;
+  /** Whether it is wanted paused (its state says paused once its process has paused it). */
+  pause?: boolean;
 }
 
 /** A checkpoint: where it came from, what made it, and what is kept of it. */
@@ -397,6 +399,9 @@ export interface LaunchAsked {
   episodes?: number | null;
   /** Every other environment it plays: an eval's suite's, a training run's evals' suite's. */
   environments?: string[];
+  /** The run it starts again, for a launch that resumes one, and that run's directory, where it runs. */
+  resumes?: string | null;
+  directory?: string | null;
 }
 
 export type LaunchState = "asked" | "claimed" | "running" | "stopping" | "ended" | "failed" | "stopped";
@@ -960,6 +965,6 @@ export interface RunSettings {
   changes: { step: number; changed: Record<string, unknown> }[];
 }
 
-/** Running or idle while its process beats; how it ended, once it said; lost if it stopped beating without saying;
- * ended for a run from before runs said how they ended. */
-export type RunState = "running" | "idle" | "finished" | "stopped" | "failed" | "lost" | "ended";
+/** Running, idle or paused while its process beats; how it ended, once it said; lost if it stopped beating without
+ * saying; ended for a run from before runs said how they ended. */
+export type RunState = "running" | "idle" | "paused" | "finished" | "stopped" | "failed" | "lost" | "ended";

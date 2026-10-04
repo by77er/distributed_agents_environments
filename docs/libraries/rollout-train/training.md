@@ -235,6 +235,42 @@ load where the run is, there is none, and nothing is evaluated.
 An edit of the suite (a new version, [versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken applies from
 the next one, and a run that is stopped takes it when it is started again.
 
+## Pausing and resuming
+
+A run can be paused and resumed two ways (`rollout_train.resuming`): in place, while its process stays; and, once it
+is stopped, by starting it again in its own directory.
+
+**Paused in place**, a run's process keeps beating and holding its engines and GPU, and nothing new starts:
+
+- Its desired settings say `paused: true` (`rollout_train.settings.PAUSED`, beside the changeable ones, kept where
+  they are: [changing a running run's settings](#changing-a-running-runs-settings)). `rollout pause RUN` and the
+  monitor's **Pause** write it.
+- The loop looks each time it is about to decide a group or a step (between groups: no step boundary is waited for).
+  Paused, it decides neither: episodes already playing play out and are recorded, a step being taken is finished and
+  served, and groups already decided wait. It looks again every `PAUSE_LOOK` seconds (1), and notes `paused` and
+  `resumed` to its hooks (the feed).
+- A runner looks each time it looks for work (every half second), whether or not it has room, and claims nothing of a
+  paused run (`rollout_train.settings.paused`), nor of an eval a paused run's schedule asked for (`by`) or of a part of
+  a paused eval (`part_of`): so a run's scheduled evals pause with it, and an eval launched on its own pauses the same
+  way. Its beats say which of the runs it serves are paused (`paused`), and it beats at once when that changes: the
+  monitor shows such a run **paused**.
+- **Resume** (`rollout resume RUN`, the monitor's **Resume**) sets `paused` false while the run's process beats, and
+  the loop and runners go on within a second.
+
+**Stopped**, a run's process is gone and its machine free: a launch's **Stop** interrupts it at a group boundary and
+it ends `stopped` ([launchers](../../guide/deploying.md#launchers)). Resuming a run that stopped, failed or was lost
+asks a launcher to start it again (`rollout_train.launches`): a launch that names the run (`resumes`) and its
+directory, which the launcher starts `rollout train` (or `rollout eval`) in, with what the run's last launch asked (a
+run started by hand: its newest start's profile, environment, seed and groups a step). The directory names the run, so
+it goes on from the ledger as any run started again does ([dying and starting again](#dying-and-starting-again)): no
+step that made its checkpoint is taken again and no recorded episode is played again. A training run is asked for the
+groups it had left: those its newest start was to play, less those it has played since. A launcher alive must offer
+its profile (by the name its last launch used, else by path, else by file name) and its environments.
+
+Resume refuses a run whose process is there (it beats and its newest start has not said how it ended) and is not
+paused, one that finished, one a launch is going for already, an eval a run's schedule asked for (that run plays it),
+and a part of an eval (its eval is resumed).
+
 ## The record
 
 When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the checkpoint it

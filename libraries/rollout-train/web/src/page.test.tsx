@@ -3,12 +3,14 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteEntry, SuiteVersion } from "./api/types";
+import type { Launch, Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteEntry, SuiteVersion } from "./api/types";
 import { scale, sparkPoints } from "./components/charts";
+import { RunControls } from "./components/control";
 import { columnsOf, type Subject } from "./components/evals";
 import { pickable, readable } from "./lib/environments";
 import { slotHue } from "./lib/format";
 import { episodeClass, knownOf, lineOf, reported } from "./lib/model";
+import { running } from "./layout/runs";
 import { titleOf } from "./layout/Shell";
 import { placeOf } from "./lib/places";
 import { pathChart } from "./lib/scores";
@@ -212,6 +214,62 @@ describe("a page read again", () => {
     );
     expect(screen.getByText("alpha")).toBeTruthy();
     expect(screen.queryByText("words on kpqx")).toBeNull();
+  });
+});
+
+describe("a run's controls", () => {
+  const fetched = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>(
+    async () => new Response("{}", { headers: { "Content-Type": "application/json" } }),
+  );
+  beforeEach(() => { vi.stubGlobal("fetch", fetched); });
+  afterEach(() => {
+    cleanup();
+    fetched.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  const launch = (state: Launch["state"], resumes: string | null): Launch => ({
+    id: "launch_1", asked: { profile: "one-gpu", environment: "c:c", name: "alpha", resumes }, at: 1, state, launcher: "launcher/far",
+    directory: "/elsewhere", pid: null, detail: null, updated: 1,
+  });
+
+  function shown(given: Run, launches: Launch[] = []): string[] {
+    const client = newQueryClient();
+    client.setQueryData(topics.launches().key, { launches, launchers: [] });
+    render(<QueryClientProvider client={client}><RunControls run={given} /></QueryClientProvider>);
+    const said = screen.queryAllByRole("button").map(button => button.textContent ?? "");
+    cleanup();
+    return said;
+  }
+
+  it("are shown by where the run is: pause while it goes, resume once paused or ended, stop while its launch goes", () => {
+    const alpha = run("alpha", 1);
+    expect(shown({ ...alpha, state: "running" })).toEqual(["pause"]);
+    expect(shown({ ...alpha, state: "running", pause: true })).toEqual(["resume"]);
+    expect(running({ ...alpha, state: "running", pause: true }, "here")).toBe("pausing");
+    expect(shown({ ...alpha, state: "paused", pause: true })).toEqual(["resume"]);
+    expect(shown({ ...alpha, state: "stopped" })).toEqual(["resume"]);
+    expect(shown({ ...alpha, state: "stopped" }, [launch("running", "alpha")])).toEqual(["stop"]);  // (being resumed)
+    expect(shown({ ...alpha, state: "stopped" }, [launch("stopping", "alpha")])).toEqual([]);
+    expect(shown({ ...alpha, state: "finished" })).toEqual([]);
+    expect(shown({ ...alpha, state: "stopped", kind: "eval", by: "train" })).toEqual([]);  // (its run plays it)
+  });
+
+  it("ask the monitor to pause the run", async () => {
+    const client = newQueryClient();
+    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    render(<QueryClientProvider client={client}><RunControls run={{ ...run("a/b", 1), state: "idle" }} /></QueryClientProvider>);
+    act(() => { screen.getByRole("button", { name: "pause" }).click(); });
+    await waitFor(() => expect(fetched).toHaveBeenCalledWith("api/runs/a%2Fb/pause", expect.objectContaining({ method: "POST" })));
+  });
+
+  it("show a paused run's tile as paused", () => {
+    const client = newQueryClient();
+    client.setQueryData(topics.system().key, system([{ ...run("alpha", 2), state: "paused", pause: true }]));
+    render(<QueryClientProvider client={client}><MemoryRouter><Runs /></MemoryRouter></QueryClientProvider>);
+    const tile = screen.getByText("alpha").closest("a")!;
+    expect(tile.className).toContain("violet");
+    expect(tile.textContent).toContain("paused");
   });
 });
 

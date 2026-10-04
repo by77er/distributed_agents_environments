@@ -170,4 +170,4 @@ export const madeBy = (checkpoints: Checkpoint[], run: string): Checkpoint[] =>
 
 /** The color a run's state is said in. */
 export const runKind = (state: string): string =>
-  state === "running" ? "good" : state === "idle" ? "warm" : state === "failed" || state === "lost" ? "bad" : "";
+  state === "running" ? "good" : state === "idle" ? "warm" : state === "paused" ? "violet" : state === "failed" || state === "lost" ? "bad" : "";

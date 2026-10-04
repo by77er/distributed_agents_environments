@@ -149,7 +149,9 @@ With `presence` (a `Presence`, `rollout_train.presence`), a runner beats when it
 starts, before it claims anything, and every `beating` seconds (15) after; `beat()` beats at once besides (an open
 profile's runner does when a channel serves a new checkpoint). A beat holds what `about()` says of its machine (called
 in a thread: it may measure), with its `places`, how many episodes it is `playing`, and, when it has pools, how full
-each is (`pools`: `size`, `leased`, `free`). Each runner's newest beat
+each is (`pools`: `size`, `leased`, `free`), and, when any of the runs it serves is paused, which (`paused`: it claims
+none of their episodes, and beats at once when that changes: [pausing and resuming](training.md#pausing-and-resuming)).
+Each runner's newest beat
 is kept with the measurements of its recent ones (240: an hour), so its machine can be shown from anywhere.
 
 Beats are kept beside the ledger, as ordinary state changed in place, not appended: `presence.json` beside a ledger

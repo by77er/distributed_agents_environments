@@ -1,5 +1,5 @@
 // How a run is said wherever it appears: whether it is running (its process is there and writes), idle (there, and
-// quiet) or ended, on which host when not this one, when it last wrote, its color, and where its episodes are read.
+// quiet), paused (there, and asked to start nothing new) or ended, on which host when not this one, when it last wrote, its color, and where its episodes are read.
 
 import { useCallback } from "react";
 import { useSystem } from "../api/queries";
@@ -7,7 +7,10 @@ import type { Run } from "../api/types";
 import { span } from "../lib/format";
 import { useNow } from "../lib/now";
 
-export const running = (run: Run, host: string): string => `${run.state}${run.host && run.host !== host ? ` on ${run.host}` : ""}`;
+/** A run's state in a word: `pausing` while it is wanted paused and its process has not paused it yet. */
+export const stateOf = (run: Run): string => (run.pause && (run.state === "running" || run.state === "idle") ? "pausing" : run.state);
+
+export const running = (run: Run, host: string): string => `${stateOf(run)}${run.host && run.host !== host ? ` on ${run.host}` : ""}`;
 
 /** How long ago the run last wrote, counting up. */
 export function Wrote({ run }: { run: { written: number | null } }) {
@@ -22,7 +25,7 @@ export function Ago({ at, otherwise = "–" }: { at: number | null | undefined; 
 }
 
 export const RunDot = ({ run, host }: { run: Run; host: string }) => (
-  <span className={`dot ${run.state === "running" ? "alive" : run.state === "idle" ? "idle" : run.state === "failed" || run.state === "lost" ? "gone" : ""}`} title={running(run, host)} />
+  <span className={`dot ${run.state === "running" ? "alive" : run.state === "idle" ? "idle" : run.state === "paused" ? "paused" : run.state === "failed" || run.state === "lost" ? "gone" : ""}`} title={running(run, host)} />
 );
 
 /** A run's color: the categorical slots in order, by the run's place among every run (so it keeps its color whatever

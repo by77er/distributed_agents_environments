@@ -60,6 +60,8 @@ uv run rollout imitate profile.toml --directory RUN                  # a supervi
 uv run rollout checkpoints --ledger RUN                                 # every checkpoint: where it came from, its bookmarks
 uv run rollout bookmark diamonds first:20 --ledger RUN               # name the checkpoint run "first" made at step 20
 uv run rollout rename first "diamonds, unguided" --ledger RUN        # call a run something else (its id stays)
+uv run rollout pause first --ledger URL                              # nothing new starts; what plays plays out
+uv run rollout resume first --ledger URL                             # paused: goes on; stopped: launched again
 uv run rollout pool minecraft_team.worlds:worlds --directory DATA --ledger URL --port 8710   # worlds on a machine of their own
 uv run rollout tools FACTORY --directory DATA --port 8700            # a tool set on a machine of its own
 uv run rollout engines engines.toml --run first   # load what run first serves into this machine's vLLM servers
@@ -78,7 +80,8 @@ uv run rollout launcher --ledger URL --profiles PROFILES --environment ENVIRONME
 
 `rollout COMMAND --help` lists each command's options. An environment is named as `module:name`, like everything else a
 profile or the command is told by name. `train --name NAME` names a new run (by default after its directory);
-`rename` names a run again, by its name or its id; `bookmark` names a checkpoint by any reference, and `checkpoints` lists
+`rename` names a run again, by its name or its id; `pause` and `resume` pause a run and resume it, in place or by a
+launcher ([pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming)); `bookmark` names a checkpoint by any reference, and `checkpoints` lists
 them all ([checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `train` plays `--groups` groups and takes a step whenever `--groups-per-step`
 of them have something to train on ([training](../libraries/rollout-train/training.md#the-loop)). `suite` makes,
 edits (each edit a version of its own) and lists suites, and `eval` plays one with a checkpoint, training nothing ([evals](../libraries/rollout-train/evals.md)); `env check`
@@ -439,7 +442,10 @@ python -m rollout_train.cli eval PROFILE SUITE@N --directory RUNS/NAME-ID --name
 
 ([evals](../libraries/rollout-train/evals.md#made-edited-and-asked-for-from-the-page)). It notes how the launch goes: `claimed`, `running` (with the process),
 then `ended`, or `failed` with the end of the output. A launch asked to stop before it is claimed is `stopped` at
-once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). Launches are ordinary
+once; a run going is sent an interrupt and stops as on Ctrl-C (`stopping`, then `stopped`). A launch that resumes a
+run (`resumes`: the run, `directory`: its own; made by `rollout resume` or the monitor's **Resume**, never by the New run
+form) is started the same way in that directory, which names the run, so it goes on from the ledger
+([pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming)). Launches are ordinary
 state beside the ledger: `launches.json` beside a ledger of files, the `launches` table in a database ledger's
 database.
 
@@ -486,6 +492,10 @@ Ray's workers run in the cluster's own environment: the run tells Ray not to sta
 build each a fresh environment without the extras.
 
 ## Stopping
+
+A run can be paused instead: its process stays, with its engines and GPU, and starts nothing new until it is resumed
+(`rollout pause`, `rollout resume`, or the monitor's buttons). A run stopped, failed or lost is resumed by a launch into
+its own directory ([pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming)).
 
 A run asked to stop (an interrupt, a termination, a hang-up) stops what it started: its episodes, its tool sets, its
 engines, a step in progress. One that is killed outright cannot. It leaves its engines' process ids in `engine.json`

@@ -7,11 +7,13 @@ import { useEvals, useKnown, useSystem } from "../api/queries";
 import type { SuiteStart } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
 import { Played, startName, type Subject } from "../components/evals";
+import { RunControls } from "../components/control";
 import { Rename } from "../components/Rename";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
 import { clock, figure, mean, percent, span } from "../lib/format";
 import { readable } from "../lib/environments";
-import { nameOf } from "../lib/model";
+import { nameOf, runKind } from "../lib/model";
+import { stateOf } from "../layout/runs";
 import { runPlace, stepPlace, suitePlace } from "../lib/places";
 import { entryStarts, playedVersion, versionsOf, versionTag } from "../lib/suites";
 
@@ -32,16 +34,16 @@ export function EvalRun({ run }: { run: string }) {
   const said = played.filter(each => each.solved != null);
   const share = said.length ? said.filter(each => each.solved).length / said.length : null;
   const rewards = played.map(each => each.reward).filter(each => each != null);
-  const ended = (entry != null && !["running", "idle"].includes(entry.state)) || listed?.done;
+  const ended = (entry != null && !["running", "idle", "paused"].includes(entry.state)) || listed?.done;
   const by = entry?.by, step = entry?.by_step;
   const checkpoint = listed?.checkpoint ?? null;
   const name = entry ? nameOf(entry) : listed?.name ?? run;
   const several = (version?.entries.length ?? 0) > 1;
   return (
     <>
-      <Head title={<>Eval <Rename id={run} name={name} /></>}>
+      <Head title={<span className="head-with-action"><span>Eval <Rename id={run} name={name} /></span>{entry && !listed?.done ? <RunControls run={entry} /> : null}</span>}>
         <Specs>
-          <Spec label="state" kind={ended ? "" : "good"}>{listed?.done ? "done" : entry?.state ?? "–"}</Spec>
+          <Spec label="state" kind={ended ? "" : entry ? runKind(entry.state) : "good"}>{listed?.done ? "done" : entry ? stateOf(entry) : "–"}</Spec>
           <Spec label="played by">{checkpoint ? <CheckpointTag id={checkpoint} /> : <CheckpointTag id={null} base={subject?.model} />}</Spec>
           <Spec label="suite">{listed ? <><Link to={suitePlace(listed.suite)}>{listed.suite}</Link> {versionTag(version?.id ?? listed.version)}</> : "–"}</Spec>
           <Spec label="asked by">

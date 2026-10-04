@@ -168,6 +168,15 @@ export function useStop() {
   });
 }
 
+/** Pause a run, or resume it: in place while its process is there, else launched again in its directory. */
+export function useRunControl(run: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (action: "pause" | "resume") => asked<unknown>(`api/runs/${encodeURIComponent(run)}/${action}`, "POST"),
+    onSuccess: () => Promise.all([topics.system(), topics.launches()].map(topic => client.invalidateQueries({ queryKey: topic.key }))),
+  });
+}
+
 export const useStatistics = () =>
   useQuery({
     queryKey: topics.statistics().key,
