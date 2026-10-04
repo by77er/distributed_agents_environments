@@ -31,7 +31,11 @@ function watched(place: Place, system: System | undefined): Topic[] {
   if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches());
   if (place.kind === "checkpoints") found.push(topics.checkpoints(place.sample));
   if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());
-  if (place.page === "evals") found.push(topics.launches());
+  if (place.page === "evals") found.push(topics.launches(), topics.evalSubjects());
+  if (place.kind === "subject") {
+    const id = place.subject === "checkpoint" ? system?.checkpoints.find(each => each.id === place.id || each.id.startsWith(place.id))?.id ?? place.id : place.id;
+    found.push(topics.history(place.subject, place.id), ...(place.subject === "checkpoint" ? [topics.path(id)] : []));
+  }
   if (place.page === "environments") found.push(topics.environments());
   if (place.kind === "environment") found.push(topics.environment(place.environment));
   return found;
@@ -64,7 +68,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav className="pages" aria-label="pages">
           {PAGES.map(([page, name, to]) => {
             const count = page === "runs" ? system?.runs.filter(run => run.kind !== "eval").length : page === "checkpoints" ? system?.checkpoints.length
-              : page === "evals" ? system?.runs.filter(run => run.kind === "eval").length : null;
+              : page === "evals" ? system?.runs.filter(run => run.kind === "eval" && !run.part_of).length : null;
             return (
               <Link key={page} to={to} className={place.page === page ? "current" : undefined} aria-current={place.page === page ? "page" : undefined}>
                 {name}{count != null ? <span className="count">{count}</span> : null}
@@ -137,6 +141,7 @@ function Crumbs({ place }: { place: Place }) {
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
   else if (place.kind === "checkpoints" && place.sample) crumbs.push(["Sample fixture", ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
+  else if (place.kind === "subject") crumbs.push([place.subject === "checkpoint" ? `Checkpoint ${known.short(place.id)}` : `Base model ${place.id}`, ""]);
   else if (place.kind === "host") crumbs.push([place.host, ""]);
   else if (place.kind === "environment") crumbs.push([readable(place.environment), ""]);
   else if (place.kind === "eval") {

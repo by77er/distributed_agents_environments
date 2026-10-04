@@ -12,7 +12,8 @@ on whichever machines they run. Its pages are switched along the top:
   episode, turn by turn: what it was sent, what it thought, what it did and what came back. Each rollout becomes a
   **trajectory**, the tokens the trainer learns from;
 - **Checkpoints**: every checkpoint, each alone and all of them as a graph growing from their base models;
-- **Statistics**: figures across the runs, a series for each, what each channel serves, and the ledger;
+- **Evals**: the suites, every eval, and each checkpoint's or base model's evals over time;
+- **Statistics**: figures across the training runs, a series for each, what each channel serves, and the ledger;
 - **Machines**: every machine that beats and the roles on it (runners, sandbox pools, engine hosts, launchers and
   gateways), with what each holds and how full it is ([the machines](#the-machines)).
 
@@ -42,7 +43,8 @@ page draws each view from what it has read, and reads again only what the monito
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
   `feeds`, `machines`, `launches`, `statistics`, `checkpoints` (or `checkpoints/sample`), `environments`,
-  `environment/MODULE:NAME`, `group/RUN/N`, `episode/RUN_ID`. The
+  `environment/MODULE:NAME`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
+  `group/RUN/N`, `episode/RUN_ID`. The
   monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives each reading a **checkpoint**, a hash
   of what it says (leaving out when it was read).
 - **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the checkpoint of each topic asked for at
@@ -133,9 +135,11 @@ it, marked skipped. Runs, steps, groups and episodes fold open and closed: an op
 group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph (with or without the sample
 fixture), the checkpoints bookmarks name, and each run's newest. On **Evals**, the suites, each folding open to the
 evals that played it (each marked with the version it played, where a suite's evals played more than one), and the
-eval shown. An eval's run is on Evals, not among the runs: its page is `#/eval/RUN`. On **Environments**, every
+eval shown; then the checkpoints (and base models) that have had an eval, the one evaluated last first, each opening
+its history and folding open to its evals. An eval's run is on Evals, not among the runs, nor in the statistics: its
+page is `#/eval/RUN`. On **Environments**, every
 environment (a square, lit where a launcher alive offers it), each folding open to its training runs and the suites
-with a version that plays it. On **Statistics**, its sections, and the runs drawn: a click leaves a run out or takes it
+with a version that plays it. On **Statistics**, its sections, and the training runs drawn: a click leaves a run out or takes it
 back. What is folded and what is left out are remembered in the browser. The address (after `#`) names what is shown,
 so a reload stays there.
 
@@ -148,14 +152,15 @@ so a reload stays there.
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
 | Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below ([an episode's rollouts](#an-episodes-rollouts)) |
 | Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
-| Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations; evaluation suites, each at the version its name points to, a column per checkpoint or model ([the checkpoints view](#the-checkpoints-view)) |
-| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, each version of a suite's score along its line, each environment's apart for a suite of several ([scores along a line](#scores-along-a-line)), every eval it had (by hand or by its run's schedule: the suite and, for a suite of more than one version, the version played, the share solved where its episodes say, the mean reward, each environment's apart for a suite of several, episodes, who asked for it, when; each opening the eval), a **Run an eval** form (a suite, its version, newest by default, episodes per start, a profile and a name: it posts the same launch as a suite's **Run this suite** form), and the evals of it asked for so, with how each goes |
-| Evals | Every suite and eval | `#/evals` | a **New suite** form ([made, edited and asked for from the page](evals.md#made-edited-and-asked-for-from-the-page)); the evals asked for from the page; each suite (the version its name points to, where it has more than one, its environments, starts, subjects, and, for a suite of one environment, the subject that did best at that version); every eval, newest first (its suite and, for a suite of more than one version, the version it played, who played, episodes played of those asked for, the share solved, each environment's for a suite of several, whether it is done), each opening its page |
+| Checkpoints | Every checkpoint, as a graph | `#/checkpoints`, `#/checkpoints/sample` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; what each distillation does, in words; the trainers and their queues over time; each checkpoint's way to the engines and the workers that serve it; the runs and distillations ([the checkpoints view](#the-checkpoints-view)) |
+| Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, each version of a suite's score along its line, each environment's apart for a suite of several ([scores along a line](#scores-along-a-line)), every eval it had (by hand or by its run's schedule: the suite and, for a suite of more than one version, the version played, the share solved where its episodes say, the mean reward, each environment's apart for a suite of several, episodes, who asked for it, when; each opening the eval; and **history**, opening its history on Evals), a **Run an eval** form (a suite, its version, newest by default, episodes per start, a profile and a name: it posts the same launch as a suite's **Run this suite** form), and the evals of it asked for so, with how each goes |
+| Evals | Every suite and eval | `#/evals` | a **New suite** form ([made, edited and asked for from the page](evals.md#made-edited-and-asked-for-from-the-page)); the evals asked for from the page; each suite (the version its name points to, where it has more than one, its environments, starts, subjects, and, for a suite of one environment, the subject that did best at that version); every checkpoint and base model that has had an eval, the one evaluated last first (where it came from, its evals counted and those playing, the suites they played, when the newest began), each opening its history; every eval, newest first (its suite and, for a suite of more than one version, the version it played, who played, episodes played of those asked for, the share solved, each environment's for a suite of several, whether it is done), each opening its page |
 | Evals | Eval | `#/eval/RUN` | the buttons its state allows, while it is not done ([pausing, resuming and stopping](#pausing-resuming-and-stopping)); who played (a checkpoint, or the base model), the suite and the version it played, who asked for it (by hand, or a run's schedule at a step), when it started; its share solved and mean reward (each environment's, for a suite of several), episodes played of those asked for, how long it took; and at each start of that version (by environment, for a suite of several), its episodes, how many solved and their mean reward. A run that plays one environment of an eval (`part_of`) shows its eval |
+| Evals | A checkpoint's or base model's evals | `#/evals/checkpoint/ID` (or the start of one), `#/evals/model/NAME` | what it is (a checkpoint's shortest id and bookmarks, its id opening its page, the run and step that made it; or the base model's name), its evals and suites counted; for a checkpoint, each version of a suite's score along its line ([scores along a line](#scores-along-a-line)); then every eval it has had ([a subject's history](#a-subjects-history)), a card for each version of a suite it played (suites by name, a suite's versions newest first, a suite's name opening its page): each environment's share solved where its episodes say (else its mean reward) over time, and its evals, newest first, each with its share solved and mean reward at each environment, episodes, who asked for it (by hand, or a run's schedule at a step), when it started and whether it is done, each opening the eval |
 | Evals | Suite | `#/evals/SUITE` | the version its name points to (another, once picked): its version, environment and its version, how its starts were chosen, rows, seeds, episodes per start, limits (for a suite of several environments, a table of them, one each), whether it is held out of training; an **Edit** form that saves its next version, adding and removing environments; for a suite of one environment, the subject that did best at that version; a **Run this suite** form ([evals](evals.md#made-edited-and-asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals: a column group for each version played, newest first and marked off from the next (a version picker shows one), within a version of several environments a column group for each environment with each subject's total there, a row for each start of the versions shown (struck through under a version that does not have it), and within a version a column per subject: the base model first, then each run's checkpoints under the run's name (those made outside a run together), runs in the order their checkpoints grew and within a run by depth, each column saying the checkpoint, what its weights are (`full`, or `over full` for an adapter over full weights), its step, its episodes per start (opening the eval) and whether a schedule asked for it; two subjects of one version compared at the starts both played |
 | Environments | Every environment | `#/environments` | every environment the system knows of ([environments](#environments)), by name: its `module:name`, whether a launcher alive offers it, the versions seen, its training runs and suites counted, and when a run last started on it; each opening its page |
 | Environments | Environment | `#/environment/MODULE:NAME` | its name and `module:name`, whether a launcher alive offers it, its version as it loads on the monitor's machine (or that it does not load there) and every version seen, what its results say (the reward range, whether they say solved, what a duration counts) and its curriculum (the generic one, or its own by class); **New run** (the new run's form with it chosen) and **New suite** (the new suite's form with it as the first entry); its rows, easiest first as it orders them, each with the groups and episodes its training runs played of it, the share solved, the mean reward and its eval starts (a row only its eval data has is marked eval only), and every row together; each list of its eval data and how many starts; the suites with a version that plays it (each version, the one its name points to marked); its training runs (state, version, groups, episodes, share solved, when started); every eval of such a suite, by who played it, with its score at this environment's entry; its newest check, each group with its rewards and whether every episode scored the same |
-| Statistics | Across every run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color |
+| Statistics | Across every training run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color; evals and their parts are on Evals |
 
 Renaming on a run's page asks the monitor (`POST /api/rename`, `{"id", "name"}`), which renames it in the registry
 (`System.rename`; a run from before the registry is registered under its key first). A checkpoint's page makes a bookmark
@@ -216,6 +221,30 @@ newest checkpoint.
 A checkpoint's evals (`/api/checkpoints/ID/evals`, `rollout_train.monitor.scores.evals_of`) are read from each
 suite's subjects (`evaluations/SUITE/EVAL/subject`, whose `checkpoint` it is) and their results, the eval's start (when,
 and `by` and `step` for one a schedule asked for), and the training runs' `evals` tables.
+
+## A subject's history
+
+A subject is what an eval played: a checkpoint, or a base model by name. Every subject that has had an eval
+(`/api/evals/subjects`, `rollout_train.monitor.scores.subjects_in`) is listed the one evaluated last first:
+
+```json
+{"subjects": [{"kind": "checkpoint", "id": "oznzomovunlxwyow", "short": "oznz", "run": "lora-run",
+               "name": "lora-run", "step": 2, "base": "tiny", "bookmarks": ["best"],
+               "evals": ["eval-second-v2", "eval-second"], "suites": ["words-v1"], "started": 1790904111.6,
+               "playing": 0}]}
+```
+
+`evals` are its evals' runs, newest first; `started` is when the newest began, and `playing` how many have not played
+everything yet. A base model's `kind` is `model`, its `id` and `short` its name, and it has no run, step, base or
+bookmarks.
+
+A subject's history (`/api/evals/checkpoint/ID`, where the id may be the start of one, and `/api/evals/model/NAME`,
+`rollout_train.monitor.scores.history_of`) is `{"subject": ..., "evals": [...]}`: the subject as listed, and every
+eval it has had, newest first, each as a checkpoint's evals are (its suite and version, who asked for it and when,
+episodes played of those expected, the share solved and the mean reward, and the same at each entry of its version,
+by environment). A checkpoint or base model with no eval has a history with none; one the ledger neither has, nor
+builds a checkpoint on, nor has evaluated answers 404. Both are scored as a checkpoint's evals are, by one reading of
+the evals' subjects and results.
 
 ## A run's settings
 
@@ -390,7 +419,7 @@ Every checkpoint grows from a base model along its first parents ([checkpoints](
 root, with a lane of its own; under it a lane for each run whose first checkpoint was trained from it, the run's checkpoints
 from the left; and under a run's lane, each run that starts from one of its checkpoints: a fork, or a distillation's
 start. A lane is folded to the checkpoints something points at (its first and newest, a checkpoint another run starts from,
-a teacher, a bookmarked or evaluated checkpoint, one on its way to the engines), with a gap for the rest; a click on its
+a teacher, a bookmarked checkpoint, one on its way to the engines), with a gap for the rest; a click on its
 label opens it (what is open is remembered in the browser). A checkpoint opens its page. Between lanes:
 
 - from a **base model** to the first checkpoint of each line trained from it;
@@ -411,7 +440,7 @@ are (a LoRA adapter, or full weights: those are resharded for the engines' layou
 stand for its trainer's queue (a run takes one step at a time), whose weights are what the run's checkpoints are, and
 the channels its runners' beats name for what its engines serve. The tables
 for distillation, trainers and inference workers are proposed in [the checkpoint graph](../../research/policy-dag.md),
-and nothing writes them yet; evaluations are written by [evals](evals.md), and a suite's name opens its page. `#/checkpoints/sample` (`?sample=1`)
+and nothing writes them yet. Evals are on the Evals page ([a subject's history](#a-subjects-history)). `#/checkpoints/sample` (`?sample=1`)
 shows the view with a fixture of them (`rollout_train/monitor/sample-lineage.json`) beside the ledger, everything from
 it marked sample.
 

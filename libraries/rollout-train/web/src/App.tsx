@@ -13,6 +13,7 @@ import { Checkpoints } from "./pages/Checkpoints";
 import { Evals } from "./pages/Evals";
 import { EvalRun } from "./pages/EvalRun";
 import { Suite } from "./pages/Suite";
+import { SubjectView } from "./pages/Subject";
 import { Environment, Environments } from "./pages/Environments";
 import { MachineHost, Machines } from "./pages/Machines";
 
@@ -31,6 +32,7 @@ function View() {
     case "evals": return <Evals />;
     case "suite": return <Suite name={place.suite} />;
     case "eval": return <EvalRun run={place.run} />;
+    case "subject": return <SubjectView key={`${place.subject}:${place.id}`} kind={place.subject} id={place.id} />;
     case "environments": return <Environments />;
     case "environment": return <Environment key={place.environment} name={place.environment} />;
     case "statistics": return <Statistics />;

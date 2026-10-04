@@ -3,8 +3,8 @@
 An **eval** plays one version of a suite with one checkpoint (or the base model), trains on nothing, and records how
 each episode went. A suite may play several environments, each with settings of its own. Every checkpoint that plays the
 same version plays the same starts in the same way, so checkpoints compare start for start. The code is
-`rollout_train.evals`; the commands are `rollout suite` and `rollout eval`; the monitor's **Evals** page shows them,
-makes and edits suites, and asks for new evals.
+`rollout_train.evals`; the commands are `rollout suite` and `rollout eval`; the monitor's **Evals** page shows them
+(and each checkpoint's or base model's evals over time), makes and edits suites, and asks for new evals.
 
 ## Suites
 
@@ -203,6 +203,12 @@ and when), each opening the eval's own page (`#/eval/RUN`: who played, the suite
 and how it did at each start of that version), and charts each version's score along its line from the base model
 ([scores along a line](monitor.md#scores-along-a-line)).
 
+The **Evals** page lists every checkpoint and base model that has had an eval, the one evaluated last first, and each
+opens its history (`#/evals/checkpoint/ID`, `#/evals/model/NAME`; a checkpoint's page links to it): every eval it has
+had, a card for each version of a suite it played, with each environment's share solved (else its mean reward) over
+time and each eval's scores at each environment, who asked for it and when; and, for a checkpoint, its scores along
+its line ([a subject's history](monitor.md#a-subjects-history)).
+
 On a suite's page, within a version, a column stands for each subject: the base model first, then each run's
 checkpoints under the run's name, runs in the order their checkpoints grew and within a run by depth. A start a
 version does not have is struck through under its columns.
@@ -249,7 +255,7 @@ loop:
 | `runs/RUN/evals` | step | the suite, the `version` played, the checkpoint, the eval's run (`run`), `played`, `solved`, `reward`, each entry's `environment`, `run`, `played`, `solved`, `share` and `reward` (`entries`), and when it ended (`at`) |
 
 The eval is an eval like any other: it is listed on the **Evals** page, the suite's grid (under its version and its
-run's name, with its step) and the checkpoint's page, with a page of its own.
+run's name, with its step), the checkpoint's page and its history, with a page of its own.
 
 The evals are among a run's changeable settings ([changing a running run's
 settings](training.md#changing-a-running-runs-settings)): set when the run is launched (the **New run** form's suite,

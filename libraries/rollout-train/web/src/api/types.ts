@@ -800,6 +800,41 @@ export interface CheckpointEvals {
   evals: CheckpointEval[];
 }
 
+/** What an eval played: a checkpoint (by id), or a base model (by name). */
+export type SubjectKind = "checkpoint" | "model";
+
+/** A subject that has had an eval: what it is, and its evals. */
+export interface EvalSubject {
+  kind: SubjectKind;
+  /** The checkpoint's id, or the base model's name. */
+  id: string;
+  /** The checkpoint's shortest id, or the base model's name. */
+  short: string;
+  /** The run and step that made the checkpoint, the run's name, and what it builds on. */
+  run: string | null;
+  name: string | null;
+  step: number | null;
+  base: string | null;
+  bookmarks: string[];
+  /** Its evals, by run, newest first. */
+  evals: string[];
+  suites: string[];
+  /** When its newest eval began. */
+  started: number | null;
+  /** Its evals still playing. */
+  playing: number;
+}
+
+export interface EvalSubjects {
+  subjects: EvalSubject[];
+}
+
+/** A subject's history: every eval it has had, newest first. */
+export interface SubjectHistory {
+  subject: EvalSubject;
+  evals: CheckpointEval[];
+}
+
 /** A point's score at a suite, over every eval of it there; and at each of its entries (by environment). */
 export interface PathScore {
   reward: number | null;

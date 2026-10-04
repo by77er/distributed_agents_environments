@@ -1,5 +1,5 @@
-// Statistics across every run: each run in its own color, read from the ledger (and from its runners' heartbeats for
-// its engines); then what each channel serves now, and the ledger.
+// Statistics across every training run (evals are on the evals page): each run in its own color, read from the ledger
+// (and from its runners' heartbeats for its engines); then what each channel serves now, and the ledger.
 
 import { memo, useMemo } from "react";
 import { useKnown, useStatistics, useSystem } from "../api/queries";

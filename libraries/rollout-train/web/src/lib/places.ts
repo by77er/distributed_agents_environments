@@ -2,6 +2,7 @@
 // on one of the pages: the runs, the checkpoints, the evals, the environments, the statistics, the machines.
 
 import { useLocation } from "react-router-dom";
+import type { SubjectKind } from "../api/types";
 
 export type Page = "runs" | "checkpoints" | "evals" | "environments" | "statistics" | "machines";
 
@@ -18,6 +19,7 @@ export type Place =
   | { page: "evals"; kind: "evals" }
   | { page: "evals"; kind: "suite"; suite: string }
   | { page: "evals"; kind: "eval"; run: string }
+  | { page: "evals"; kind: "subject"; subject: SubjectKind; id: string }
   | { page: "environments"; kind: "environments" }
   | { page: "environments"; kind: "environment"; environment: string }
   | { page: "statistics"; kind: "statistics"; section: string | null }
@@ -37,6 +39,8 @@ export const checkpointsPlace = (sample: boolean) => `/checkpoints${sample ? "/s
 export const evalsPlace = "/evals";
 export const suitePlace = (suite: string) => `/evals/${encodeURIComponent(suite)}`;
 export const evalPlace = (run: string) => `/eval/${encodeURIComponent(run)}`;
+/** A subject's history: a checkpoint's by id, a base model's by name. */
+export const subjectPlace = (kind: SubjectKind, id: string) => `/evals/${kind}/${encodeURIComponent(id)}`;
 export const environmentsPlace = "/environments";
 export const environmentPlace = (environment: string) => `/environment/${encodeURIComponent(environment)}`;
 export const statisticsPlace = (section?: string | null) => `/statistics${section ? `/${section}` : ""}`;
@@ -65,6 +69,7 @@ export function placeOf(pathname: string): Place {
   if (parts[0] === "checkpoints" || parts[0] === "versions") return { page: "checkpoints", kind: "checkpoints", sample: parts[1] === "sample" };
   if ((parts[0] === "checkpoint" || parts[0] === "version") && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
   if (parts[0] === "eval" && parts[1]) return { page: "evals", kind: "eval", run: parts[1] };
+  if (parts[0] === "evals" && (parts[1] === "checkpoint" || parts[1] === "model") && parts[2]) return { page: "evals", kind: "subject", subject: parts[1], id: parts.slice(2).join("/") };
   if (parts[0] === "evals") return parts[1] ? { page: "evals", kind: "suite", suite: parts[1] } : { page: "evals", kind: "evals" };
   if (parts[0] === "environment" && parts[1]) return { page: "environments", kind: "environment", environment: parts[1] };
   if (parts[0] === "environments") return { page: "environments", kind: "environments" };

@@ -6,7 +6,7 @@ import { useCheckpointEvals, useEvals, useKnown, usePath } from "../api/queries"
 import type { CheckpointEval } from "../api/types";
 import { Ago } from "../layout/runs";
 import { clock, figure, percent } from "../lib/format";
-import { evalPlace, runPlace, suitePlace } from "../lib/places";
+import { evalPlace, runPlace, subjectPlace, suitePlace } from "../lib/places";
 import { readable } from "../lib/environments";
 import { pathChart } from "../lib/scores";
 import { versionsOf, versionTag } from "../lib/suites";
@@ -45,7 +45,8 @@ function EntryFigures({ entries, solved = false }: { entries: NonNullable<Checkp
   );
 }
 
-/** Every eval a checkpoint had, by hand or by its run's schedule, newest first: one opens the eval. */
+/** Every eval a checkpoint had, by hand or by its run's schedule, newest first: one opens the eval; `history` opens
+ * them all on the evals page. */
 export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
   const { data } = useCheckpointEvals(checkpoint);
   const { data: suites } = useEvals();
@@ -53,7 +54,7 @@ export function CheckpointEvalsCard({ checkpoint }: { checkpoint: string }) {
   const several = new Set((suites?.suites ?? []).filter(each => versionsOf(each).length > 1).map(each => each.suite));
   const evals = data?.evals ?? [];
   return (
-    <Card title="Evals">
+    <Card title="Evals" note={evals.length ? <Link to={subjectPlace("checkpoint", checkpoint)} className="linkish">history</Link> : null}>
       {evals.length ? (
         <Table
           heads={[["suite"], ["solved", "n"], ["mean reward", "n"], ["episodes", "n"], ["asked by"], ["started"], ["eval"]]}

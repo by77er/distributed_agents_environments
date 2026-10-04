@@ -1,19 +1,18 @@
 // Every checkpoint, as a graph: each base model a root, and under it a lane for each run with the checkpoints it made from
 // the left (folded to the ones that matter until it is opened); a run that starts from another's checkpoint hangs under
 // that run's lane, and the lines between lanes say what came from what. Below it the distillations, each with what its
-// mode means in words; the trainers with their queues, the inference workers with what each serves, and evaluations.
+// mode means in words; the trainers with their queues, and the inference workers with what each serves.
 // What no run writes yet comes from the sample fixture, when it is asked for, and is marked so.
 
 import { memo, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useLineage, useSystem } from "../api/queries";
-import type { Lineage, LineageRun, LineageCheckpoint, Suite, Trainer, Worker } from "../api/types";
+import type { Lineage, LineageRun, LineageCheckpoint, Trainer, Worker } from "../api/types";
 import { QueueChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
-import { anySolved } from "../components/evals";
-import { Card, Empty, Head, Kpi, Kpis, Mark, SampleChip, SectionTitle, solvedClass, Spec, Specs, Table, Twist } from "../components/ui";
-import { clock, figure, mean, span } from "../lib/format";
-import { runPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
+import { Card, Empty, Head, Kpi, Kpis, Mark, SampleChip, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
+import { clock, mean, span } from "../lib/format";
+import { runPlace, checkpointPlace, checkpointsPlace } from "../lib/places";
 import { useFolds } from "../lib/stored";
 
 const LANE = 78, COLUMN = 62, PAD = 34;
@@ -26,20 +25,15 @@ const ago = (lineage: Lineage, at: number | null | undefined) => (at ? span(Math
 interface Index {
   checkpoints: Map<string, LineageCheckpoint>;
   runs: Map<string, LineageRun>;
-  scores: Map<string, Suite["subjects"][number] & { suite: string; starts: number }>;
   shortOf: (id: string | null | undefined) => string;
   runOf: (id: string | null | undefined) => string;
 }
 
-/** What each checkpoint is, wherever it is drawn: where it came from, the run that made it, its evaluations. */
+/** What each checkpoint is, wherever it is drawn: where it came from, the run that made it. */
 function indexOf(lineage: Lineage): Index {
   const checkpoints = new Map(lineage.checkpoints.map(checkpoint => [checkpoint.id, checkpoint])), runs = new Map(lineage.runs.map(run => [run.run, run]));
-  const scores: Index["scores"] = new Map();
-  for (const suite of lineage.evaluations) for (const subject of suite.subjects) {
-    if (subject.checkpoint && !scores.has(subject.checkpoint)) scores.set(subject.checkpoint, { ...subject, suite: suite.suite, starts: subject.starts || suite.starts.length });
-  }
   return {
-    checkpoints, runs, scores,
+    checkpoints, runs,
     shortOf: id => (id ? checkpoints.get(id)?.short ?? String(id).slice(0, 12) : "the base model"),
     runOf: id => (id ? runs.get(id)?.name ?? id : ""),
   };
@@ -137,7 +131,6 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
   const [folds, fold] = useFolds();
   // (what an edge between lanes points at; an edge along a lane, from a checkpoint to the next its run made, pins nothing)
   const anchors = new Set<string>(lineage.edges.filter(edge => edge.kind !== "trained").flatMap(edge => [edge.from, edge.kind === "learned" || edge.kind === "base" ? edge.to : null]).filter((each): each is string => Boolean(each)));
-  for (const name of index.scores.keys()) anchors.add(name);
   for (const edge of lineage.edges) {
     if (edge.kind === "trained" && index.checkpoints.get(edge.from)?.by?.run !== index.checkpoints.get(edge.to)?.by?.run) { anchors.add(edge.from); anchors.add(edge.to); }
   }
@@ -257,11 +250,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
               );
             }
             const life = checkpoint.life, workers = Object.entries(life.workers).filter(([, held]) => held.until == null).map(([worker]) => worker);
-            const score = index.scores.get(item.name);
             const real = !checkpoint.sample && inLedger.has(checkpoint.id);
-            const share = score?.solved != null ? score.solved / Math.max(1, score.played) : null;  // (none: its task does not say)
-            const scoreKind = share == null ? "quiet" : share >= 0.6 ? "good" : share >= 0.35 ? "warm" : "bad";
-            const scoreText = score ? (score.solved == null ? figure(score.reward) : `${score.solved}/${score.played}`) + (score.played < score.starts ? "…" : "") : "";
             const first = place === (lane.items[0]?.kind === "distill" ? 1 : 0);
             return (
               <g key={id}>
@@ -271,7 +260,6 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
                   <circle cx={cx} cy={cy} r={6} className={checkpoint.kept ? `dot-${kindOfCheckpoint(item.name)}` : "dot-released"} />
                   <text x={cx} y={cy + 22} textAnchor="middle" className="v">{checkpoint.by?.step != null ? `S${checkpoint.by.step}` : checkpoint.short}</text>
                   {checkpoint.bookmarks.length ? <text x={cx} y={cy - 13} textAnchor="middle" className="bookmark">{checkpoint.bookmarks.join(", ")}</text> : null}
-                  {score ? <text x={cx} y={cy - (checkpoint.bookmarks.length ? 24 : 13)} textAnchor="middle" className={`score t-${scoreKind}`}>{scoreText}</text> : null}
                   <title>{[
                     `${checkpoint.id} · depth ${checkpoint.depth}${checkpoint.kind === "full" ? " · full weights" : ""}${checkpoint.sample ? " (sample)" : ""}`,
                     `made ${clock(checkpoint.made)}${checkpoint.by ? ` by ${checkpoint.by.name}${checkpoint.by.step != null ? ` at step ${checkpoint.by.step}` : ""}` : ""}, from ${checkpoint.parents.map(index.shortOf).join(" + ") || (checkpoint.base && index.checkpoints.has(checkpoint.base) ? index.shortOf(checkpoint.base) : `the base model ${checkpoint.base ?? ""}`)}`,
@@ -279,7 +267,6 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
                     `${life.state}${workers.length ? ` on ${workers.join(", ")}` : ""}${life.waiting ? ` · ${life.waiting} requests waiting` : ""}${life.latest_of ? ` · ${index.runOf(life.latest_of)}'s latest` : ""}`,
                     checkpoint.metrics.kl_moved != null ? `moved ${checkpoint.metrics.kl_moved.toFixed(4)} from its parent` : null,
                     checkpoint.kept ? "its weights are kept" : "released: its weights are gone, its record stays",
-                    score ? `${score.suite}: ${score.solved == null ? `mean reward ${figure(score.reward)} over ${score.played}` : `solved ${score.solved} of ${score.played}`}${score.played < score.starts ? ` (${score.starts - score.played} starts to play)` : ""}` : null,
                   ].filter(Boolean).join("\n")}</title>
                 </g>
               </g>
@@ -387,70 +374,6 @@ function Way({ checkpoint }: { checkpoint: LineageCheckpoint }) {
   );
 }
 
-function SuiteCard({ suite, index, order }: { suite: Suite; index: Index; order: (checkpoint: LineageCheckpoint) => number }) {
-  const current = (subject: Suite["subjects"][number]) => !suite.version || (subject.version ?? `${suite.suite}@1`) === suite.version;
-  const subjects = suite.subjects.filter(current).sort((a, b) => {  // (the version its name points to: they compare)
-    const place = (subject: Suite["subjects"][number]) => {
-      const checkpoint = subject.checkpoint ? index.checkpoints.get(subject.checkpoint) : undefined;
-      return checkpoint ? order(checkpoint) * 1000 + checkpoint.depth : subject.checkpoint ? 9e8 : 1e9;
-    };
-    return place(a) - place(b);
-  });
-  const said = anySolved(subjects);
-  return (
-    <section className="card">
-      <header><h2>Evaluation · {suite.sample ? suite.suite : <Link to={suitePlace(suite.suite)}>{suite.suite}</Link>}</h2><span>{suite.starts.length} starts · {subjects.length} subjects{suite.sample ? <> <SampleChip /></> : null}</span></header>
-      <div className="body">
-        <div className="table">
-          <table className="evals">
-            <thead>
-              <tr>
-                <th>start</th>
-                {subjects.map(subject => (
-                  <th key={subject.subject} className="subject">
-                    <div title={subject.checkpoint ?? subject.subject}>{subject.checkpoint ? index.shortOf(subject.checkpoint) : subject.model ?? subject.subject}</div>
-                    <small>{subject.kind === "model" ? short(subject.subject.split(".").at(-1)) : subject.asked_by === "by hand" ? "" : "scheduled"}</small>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="total">
-                <td>{said ? "solved" : "mean reward"}</td>
-                {subjects.map(subject => (
-                  <td key={subject.subject} className="n">
-                    {subject.solved == null ? <b>{figure(subject.reward)}</b> : <b>{subject.solved}/{subject.played}</b>}
-                    {subject.played < suite.starts.length ? <small className="faint"> {subject.solved == null ? `${subject.played} of ${suite.starts.length}` : `of ${suite.starts.length}`}</small> : null}
-                    {subject.solved == null ? null : <div className="track"><i style={{ width: `${((100 * subject.solved) / Math.max(1, suite.starts.length)).toFixed(1)}%` }} /></div>}
-                  </td>
-                ))}
-              </tr>
-              {suite.starts.map(start => (
-                <tr key={start.start}>
-                  <td className="key" title={start.title ?? ""}>{start.task} · {start.seed}</td>
-                  {subjects.map(subject => {
-                    const played = subject.results[start.start] ?? [];
-                    return (
-                      <td key={subject.subject} className="cell-result">
-                        {played.length ? played.map((each, place) => <i key={place} className={solvedClass(each.solved)} title={`${subject.subject} on ${start.task} seed ${start.seed}: reward ${figure(each.reward)}${each.solved ? ", solved" : ""}`} />)
-                          : <i className="unplayed" title="not played yet" />}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="legend">
-          {said ? <><span><i style={{ background: "var(--good)" }} />solved</span><span><i style={{ background: "var(--line-strong)" }} />not solved</span></> : <span><i style={{ background: "var(--quiet)" }} />played</span>}
-          <span><i className="hollow" />not played yet</span>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export function Checkpoints({ sample }: { sample: boolean }) {
   const { data: lineage } = useLineage(sample);
   const { data: system } = useSystem();
@@ -478,7 +401,6 @@ export function Checkpoints({ sample }: { sample: boolean }) {
           <Spec label="distillations" kind="warm">{lineage.runs.filter(run => run.kind === "distill").length}</Spec>
           <Spec label="trainers" kind="violet">{lineage.trainers.length}</Spec>
           <Spec label="workers" kind="accent">{lineage.workers.length}</Spec>
-          <Spec label="suites">{lineage.evaluations.length}</Spec>
         </Specs>
         <div className="segmented">
           <Link to={checkpointsPlace(false)} className={`seg${sample ? "" : " current"}`}>The ledger</Link>
@@ -505,7 +427,6 @@ export function Checkpoints({ sample }: { sample: boolean }) {
           <span><b className="t-accent">name</b> a bookmark</span>
           <span><i className="hollow" />released</span><span><i className="ring-good" />serving</span>
           <span><i className="ring-warm" />rolling out</span><span><i className="ring-violet" />resharding</span>
-          {lineage.evaluations.length ? <span><b className="t-good">9/16</b> solved of a suite</span> : null}
         </div>
       </section>
       {lineage.runs.some(run => run.kind === "distill") ? (
@@ -564,8 +485,6 @@ export function Checkpoints({ sample }: { sample: boolean }) {
           to={lineage.runs.map(run => (inLedger.has(run.run) && !run.sample ? runPlace(run.run) : null))}
         />
       </Card>
-      <SectionTitle title="Evaluations" />
-      {lineage.evaluations.length ? lineage.evaluations.map(suite => <SuiteCard key={suite.suite} suite={suite} index={index} order={checkpoint => order.get(laneOf(checkpoint)) ?? 99} />) : <Empty>No suite yet.</Empty>}
     </>
   );
 }

@@ -1,11 +1,12 @@
 // The evals: every suite (an eval configuration, kept in versions) with the subject that does best at the version its
-// name points to, the form that makes a new suite, every eval (one version of a suite played by one checkpoint, nothing
-// trained) newest first, and the evals asked for from the page.
+// name points to, the form that makes a new suite, every subject (a checkpoint or a base model) that has had an eval,
+// each opening its history, every eval (one version of a suite played by one subject, nothing trained) newest first, and
+// the evals asked for from the page.
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useEvals, useKnown, useLaunches, useSystem } from "../api/queries";
-import type { EvalSuite } from "../api/types";
+import { useEvalSubjects, useEvals, useKnown, useLaunches, useSystem } from "../api/queries";
+import type { EvalSubject, EvalSuite } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
 import { anySolved, entriesText, shareOf, shareText, type Subject, subjectText } from "../components/evals";
 import { LaunchList } from "../components/launches";
@@ -14,7 +15,7 @@ import { Card, Empty, Head, Mark, Spec, Specs, Table, Tile } from "../components
 import { Ago } from "../layout/runs";
 import { readable } from "../lib/environments";
 import { clock, figure } from "../lib/format";
-import { evalPlace, suitePlace } from "../lib/places";
+import { evalPlace, subjectPlace, suitePlace } from "../lib/places";
 import { currentOf, playedVersion, versionsOf, versionTag } from "../lib/suites";
 
 /** How to make a suite from the command line, for a ledger with none. */
@@ -51,6 +52,7 @@ export function Evals() {
       {evals.suites.length ? (
         <div className="tiles">{evals.suites.map(suite => <SuiteTile key={suite.suite} suite={suite} />)}</div>
       ) : null}
+      <SubjectsCard />
       <Card title="Every eval">
         {evals.evals.length ? (
           <Table
@@ -70,6 +72,32 @@ export function Evals() {
         ) : <p className="muted">None yet.</p>}
       </Card>
     </>
+  );
+}
+
+/** Who played: a checkpoint (where it came from, its shortest id, its bookmarks), or a base model by its name. */
+export const SubjectTag = ({ subject }: { subject: Pick<EvalSubject, "kind" | "id"> }) =>
+  subject.kind === "checkpoint" ? <CheckpointTag id={subject.id} link={false} /> : <CheckpointTag id={null} base={subject.id} />;
+
+/** Every subject that has had an eval, the one evaluated last first: one opens its history. */
+function SubjectsCard() {
+  const { data } = useEvalSubjects();
+  const subjects = data?.subjects ?? [];
+  if (!subjects.length) return null;
+  return (
+    <Card title="Checkpoints">
+      <Table
+        heads={[["subject"], ["evals", "n"], ["suites"], ["last eval"]]}
+        keys={subjects.map(each => `${each.kind}:${each.id}`)}
+        rows={subjects.map(each => [
+          <SubjectTag subject={each} />,
+          each.playing ? `${each.evals.length} · ${each.playing} playing` : each.evals.length,
+          each.suites.join(", "),
+          each.started ? <><Ago at={each.started} /> ago</> : "–",
+        ])}
+        to={subjects.map(each => subjectPlace(each.kind, each.id))}
+      />
+    </Card>
   );
 }
 

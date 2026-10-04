@@ -1,17 +1,17 @@
 // The hierarchy, on the left, for the page shown: the runs (each run, its steps, their groups, their episodes and
-// the episodes' rollouts), the checkpoints, the suites and the evals playing, the environments with their runs and
-// suites, the statistics' sections and the runs drawn, or the machines and the roles on each. What is folded is
-// remembered in this browser.
+// the episodes' rollouts), the checkpoints, the suites and the checkpoints evaluated (each with its evals), the
+// environments with their runs and suites, the statistics' sections and the training runs drawn, or the machines and
+// the roles on each. What is folded is remembered in this browser.
 
 import { memo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useEnvironments, useEpisode, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
-import type { GroupEpisode, Run, System } from "../api/types";
+import { useEnvironments, useEpisode, useEvalSubjects, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
+import type { EvalRun, GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, SampleChip, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
-import { environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, suitePlace } from "../lib/places";
+import { environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, checkpointsPlace, subjectPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
 import { RunDot, running, useRunColor } from "./runs";
@@ -219,16 +219,25 @@ function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   );
 }
 
-/** The suites, each opening to its evals, newest first: who played it and how it went. */
+/** How an eval did, in a few words: each environment's share solved (else its mean reward), or how far it has got. */
+const evalTag = (each: EvalRun): string =>
+  each.done ? entriesText(each.entries) ?? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`;
+
+/** The suites, each opening to its evals, newest first: who played it and how it went; then the checkpoints and base
+ * models evaluated, each opening its history and opening to its evals, newest first. */
 function EvalsTree({ place }: { place: Place }) {
   const { data: evals } = useEvals();
+  const { data: subjects } = useEvalSubjects();
   const [folds, fold] = useFolds();
   const known = useKnown();
   if (!evals) return null;
   if (!evals.suites.length) return <div className="empty">No suite yet.</div>;
   const shown = place.kind === "eval" ? evals.evals.find(each => each.run === place.run)?.suite : place.kind === "suite" ? place.suite : null;
+  const byRun = new Map(evals.evals.map(each => [each.run, each]));
+  const evaluated = subjects?.subjects ?? [];
   return (
     <>
+      <div className="label">Suites</div>
       {evals.suites.map(suite => {
         const key = `suite:${suite.suite}`, open = folds[key] ?? suite.suite === shown;
         const played = evals.evals.filter(each => each.suite === suite.suite).sort((a, b) => (b.started ?? 0) - (a.started ?? 0));
@@ -247,7 +256,38 @@ function EvalsTree({ place }: { place: Place }) {
                     <span className={`dot${each.done ? "" : " alive"}`} />
                     <span className="name" title={each.name}>{each.checkpoint ? known.short(each.checkpoint) : "base model"}</span>
                     {differ ? <span className="version">{versionTag(each.version)}</span> : null}
-                    <span className="tag">{each.done ? entriesText(each.entries) ?? shareText(each.played && each.solved != null ? each.solved / each.played : null) : `${each.played}/${each.expected}`}</span>
+                    <span className="tag">{evalTag(each)}</span>
+                  </Node>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      {evaluated.length ? <div className="label">Checkpoints</div> : null}
+      {evaluated.map(subject => {
+        const key = `subject:${subject.kind}:${subject.id}`;
+        const here = place.kind === "subject" && place.subject === subject.kind && (place.id === subject.id || (subject.kind === "checkpoint" && subject.id.startsWith(place.id)));
+        const open = folds[key] ?? here;
+        const played = subject.evals.map(run => byRun.get(run)).filter(each => each !== undefined);
+        return (
+          <div key={key}>
+            <Node to={subjectPlace(subject.kind, subject.id)} current={here}>
+              <Twist open={open} has={played.length > 0} onToggle={() => fold(key, !open)} />
+              {subject.playing ? <span className="dot alive" /> : null}
+              <span className={`name${subject.kind === "checkpoint" ? " mono" : ""}`} title={subject.kind === "checkpoint" ? known.title(subject.id) : subject.id}>
+                {subject.kind === "checkpoint" ? known.short(subject.id) : `base ${subject.id.split("/").at(-1)}`}
+              </span>
+              <span className="tag">{subject.kind === "checkpoint" ? subject.bookmarks.join(", ") || known.origin(subject.id) : ""}</span>
+            </Node>
+            {open && played.length ? (
+              <div className="children">
+                {played.map(each => (
+                  <Node key={each.run} to={evalPlace(each.run)} current={place.kind === "eval" && place.run === each.run}>
+                    <span className={`dot${each.done ? "" : " alive"}`} />
+                    <span className="name" title={each.name}>{each.suite}</span>
+                    {(evals.suites.find(suite => suite.suite === each.suite)?.versions?.length ?? 1) > 1 ? <span className="version">{versionTag(each.version)}</span> : null}
+                    <span className="tag">{evalTag(each)}</span>
                   </Node>
                 ))}
               </div>
@@ -311,18 +351,19 @@ export const SECTIONS: [string, string][] = [
 /** The runs left out of the statistics, as this browser remembers them. */
 export const useHidden = () => useStored<string[]>("monitor.hidden", []);
 
-/** The statistics: its sections, and the runs drawn (each in its color; a click leaves it out or takes it back). */
+/** The statistics: its sections, and the training runs drawn (each in its color; a click leaves it out or takes it back). */
 function StatisticsTree({ place, system }: { place: Place; system: System }) {
   const [hidden, setHidden] = useHidden();
   const colorOf = useRunColor();
+  const runs = system.runs.filter(run => run.kind !== "eval");  // (evals are on the evals page)
   const toggle = (run: string) => setHidden(hidden.includes(run) ? hidden.filter(each => each !== run) : [...hidden, run]);
   return (
     <>
       {SECTIONS.map(([key, name]) => (
         <Node key={key} to={statisticsPlace(key)} current={place.kind === "statistics" && place.section === key}><span className="name">{name}</span></Node>
       ))}
-      <div className="label">Runs · {system.runs.filter(run => !hidden.includes(run.run)).length} of {system.runs.length}</div>
-      {system.runs.map(run => {
+      <div className="label">Runs · {runs.filter(run => !hidden.includes(run.run)).length} of {runs.length}</div>
+      {runs.map(run => {
         const off = hidden.includes(run.run);
         return (
           <div

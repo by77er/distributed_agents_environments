@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, Episode, Evals, FeedRun, Group, KnownEnvironment, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, System } from "./types";
+import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, Episode, EvalSubjects, Evals, FeedRun, Group, KnownEnvironment, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, SubjectHistory, SubjectKind, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -22,6 +22,8 @@ export const topics = {
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
   evals: (): Topic => ({ topic: "evals", key: ["evals"], path: "api/evals" }),
+  evalSubjects: (): Topic => ({ topic: "eval-subjects", key: ["eval-subjects"], path: "api/evals/subjects" }),
+  history: (kind: SubjectKind, id: string): Topic => ({ topic: `history/${kind}/${id}`, key: ["history", kind, id], path: `api/evals/${kind}/${encodeURIComponent(id)}` }),
   environments: (): Topic => ({ topic: "environments", key: ["environments"], path: "api/environments" }),
   environment: (name: string): Topic => ({ topic: `environment/${name}`, key: ["environment", name], path: `api/environments/${encodeURIComponent(name)}` }),
   checkpoints: (sample: boolean): Topic => ({
@@ -190,6 +192,14 @@ export const useStatistics = () =>
 /** Every eval a checkpoint had. */
 export const useCheckpointEvals = (id: string | null | undefined) =>
   useQuery({ queryKey: topics.checkpointEvals(id ?? "").key, enabled: Boolean(id), queryFn: ({ signal }) => readJson<CheckpointEvals>(topics.checkpointEvals(id!).path, signal) });
+
+/** Every subject (a checkpoint or a base model) that has had an eval. */
+export const useEvalSubjects = () =>
+  useQuery({ queryKey: topics.evalSubjects().key, queryFn: ({ signal }) => readJson<EvalSubjects>(topics.evalSubjects().path, signal) });
+
+/** Every eval a subject has had. */
+export const useHistory = (kind: SubjectKind, id: string) =>
+  useQuery({ queryKey: topics.history(kind, id).key, queryFn: ({ signal }) => readJson<SubjectHistory>(topics.history(kind, id).path, signal) });
 
 /** A checkpoint's line from the base model, with each point's scores. */
 export const usePath = (id: string | null | undefined) =>
