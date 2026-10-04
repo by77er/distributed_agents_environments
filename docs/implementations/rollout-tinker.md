@@ -87,6 +87,10 @@ mean the same, so a profile switches trainers by changing `kind`.
 `service` (trainer and engine) is what calls Tinker: by default a session the SDK opens; `module:name` of what makes
 another, as the tests name `rollout_tinker.testing:fake_service`.
 
+The trainer takes some settings between steps, as the LoRA trainer does (`Changeable`): `learning_rate`, the clips,
+`truncate`, `tokens_per_step`, `max_kl`, `strict_kl` and `max_gradient_norm`. The next step reads them, on the same
+client.
+
 ## A step
 
 A step takes the same minibatches as the [LoRA step](rollout-lora.md#the-step): segments longer than `segment_tokens`
