@@ -5,14 +5,16 @@ Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may b
 
 - `paper/`: the Paper jar, checked against its published SHA-256;
 - `bootstrap/`: one server started once, for the libraries and the patched jar every server shares;
-- `jdk/`: a JDK, only to compile the plugin (a Java runtime is enough to run Paper);
 - `plugin/`: the plugin jar, rebuilt when its sources change;
 - `templates/seed-N-KEY/`: a configured server whose world was generated from seed N, the overworld around the
   origin included (`GENERATED_CHUNKS`): servers copied from it hold the same chunks, where servers that each
-  generated their own differed in details (a tree here, two ores there). KEY covers config/, the Paper build and
-  the generated area;
+  generate their own differ in details (a tree here, two ores there). KEY covers config/, the Paper build and the
+  generated area;
 - `servers/`: temporary servers, copies of a template, deleted when stopped. A server ends with the process that
   started it, and what such a process left behind is removed by the next one (`sweep`).
+
+A JDK, only to compile the plugin when there is no `javac` on the path (a Java runtime is enough to run Paper), is
+downloaded beside it, to `~/.cache/rollout/jdk`.
 
 Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEULA) for a local, offline server.
 """

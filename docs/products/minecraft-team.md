@@ -49,7 +49,7 @@ Paths are under `environments/minecraft/`.
 | Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md). It declares its world, a sandbox named `world` |
 | Worlds | `minecraft_team/worlds.py` | Temporary worlds as sandboxes of the kind `minecraft` ([below](#the-worlds)): actions, observations and ground-truth scores. In a pool in the process that runs episodes (`[pools.minecraft]` naming `minecraft_team.worlds:worlds`), or on a machine of its own (`rollout pool minecraft_team.worlds:worlds`, and its URL in the profile) |
 | Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given; its eval data, one start of every task (`teams-every-task`), which training never draws; what its results say (rewards from 0 up, `solved`, `saturated`, `duration` in minutes of game time) |
-| Profile | `profiles/one-gpu.toml` | One machine with one 16 GB GPU |
+| Profiles | `profiles/` | `one-gpu.toml`: one machine with one 16 GB GPU. `tinker.toml`: the full Qwen3.5-9B trained and sampled on Tinker, with the worlds on this machine |
 | Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
 | Tests | `tests/` | The episode on a made-up world, tasks and scoring, the map, the harness and servers live, and the agreement tests below |
 
@@ -319,7 +319,7 @@ system memory. What each part is, and what it measures on that card, is on its o
 | Policy | The channel `policy`: `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rendered by `rollout_qwen:qwen35` | [Qwen renderers](../implementations/rollout-qwen.md) |
 | Engine | One `rollout_vllm:VllmEngine`. Its `max_num_seqs` is 20: the `episodes_at_once` (6) episodes of one to four agents ask for fifteen requests on average, and the engine queues the rest | [vLLM engine](../implementations/rollout-vllm.md) |
 | Trainer | `rollout_lora:LoraTrainer` on the same checkpoint, `colocated`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
-| Tool set | `minecraft`, made in the process that runs episodes | [The tool set](#the-tool-set) |
+| Worlds | `[pools.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the process that runs episodes | [The worlds](#the-worlds) |
 | Memory | `runs_gib` and `training_gib`: each episode runs a Paper server | [Deploying](../guide/deploying.md) |
 | Bridge | `reshard = "verbatim"` on the channel, and `ray = "auto"`: each checkpoint is bridged as a Ray task on the machine's Ray cluster (vLLM loads the LoRA files as they are), so a run with this profile needs `ray start --head` first | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
 
@@ -348,7 +348,7 @@ inside it:
 | GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, 2 to 3 GiB of the card stay in use by the desktop and a game client |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
 | Stopping | A run asked to stop ends its servers, its engine and a step in progress; servers and engines a killed run left are ended by the next one ([deploying](../guide/deploying.md#stopping)) |
-| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft`, and the profile's run directory under `~/.cache/rollout`. `/tmp` is memory on WSL |
+| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK, if one is downloaded, under `~/.cache/rollout/jdk`), and the profile's run directory under `~/.cache/rollout`. `/tmp` is memory on WSL |
 | Listening ports | A server's ports are chosen just before Java starts, from outside the range the system gives outgoing connections, and never one this process has given to a server that has yet to listen. A server must answer its health check by its own name; a start that fails is tried once more with other ports |
 | Evidence | `scripts/train-with-memory-log.sh` writes available system memory and GPU memory to `memory.log` every two seconds and, under WSL, the host's free memory to `host-memory.log`. In a run of two consecutive updates, available memory never fell below 7.2 GiB |
 
