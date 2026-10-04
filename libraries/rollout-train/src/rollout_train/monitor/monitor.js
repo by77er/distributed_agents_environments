@@ -1,8 +1,8 @@
 "use strict";
-// The monitor's page, organised as a run is: the training run; its steps (each one update of the policy, over the
-// groups it covers); each group (a task, a start, a number of episodes); each episode (one run of the program) and
-// its rollouts, one per agent, each of which becomes a trajectory to train on; and beside them the policies (each
-// alone, and all of them as a graph) and the machine.
+// The monitor's page, in three: the runs, each organised as a run is (its steps, each one update of the policy over
+// the groups it covers; each group, a task, a start and a number of episodes; each episode, one run of the program,
+// and its rollouts, one per agent, each of which becomes a trajectory to train on); the policies, each alone and all
+// of them as a graph; and statistics across every run, with the machine, the engines and the ledger.
 
 const h = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -22,7 +22,7 @@ const svg = (tag, attributes = {}, ...children) => {
   return node;
 };
 
-const state = { system: null, runs: [], group: null, episode: null, turn: 0, follow: true, full: false, drawn: "" };
+const state = { system: null, runs: [], group: null, episode: null, statistics: null, turn: 0, follow: true, full: false, drawn: "" };
 
 // Words and numbers
 const span = seconds => seconds == null ? "" : seconds < 90 ? `${Math.round(seconds)} s`
@@ -51,18 +51,21 @@ const groupPlace = (run, number) => `${runPlace(run)}/group/${number}`;
 const stepPlace = (run, number) => `${runPlace(run)}/step/${number}`;
 const episodePlace = (id, slot) => `#/episode/${encodeURIComponent(id)}${slot ? `/${encodeURIComponent(slot)}` : ""}`;
 const policyPlace = name => `#/policy/${encodeURIComponent(name)}`;
+// The three pages, each with its sidebar; every place is on one of them.
+const PAGES = [["runs", "Runs", "#/runs"], ["policies", "Policies", "#/policies"], ["statistics", "Statistics", "#/statistics"]];
 function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
-  if (parts[0] === "run" && parts[2] === "group") return { kind: "group", run: parts[1], number: Number(parts[3]) };
-  if (parts[0] === "run" && parts[2] === "step") return { kind: "step", run: parts[1], number: Number(parts[3]) };
-  if (parts[0] === "run") return { kind: "run", run: parts[1] };
-  if (parts[0] === "episode") return { kind: "episode", id: parts[1], slot: parts[2] || null };
-  if (parts[0] === "policies") return { kind: "policies", sample: parts[1] === "sample" };
-  if (parts[0] === "policy") return { kind: "policy", name: parts[1] };
-  if (parts[0] === "system") return { kind: "system" };
-  if (parts[0] === "episodes") return { kind: "outside" };
-  const first = state.system?.runs[0];
-  return first ? { kind: "run", run: first.run } : state.system ? { kind: "outside" } : { kind: "loading" };
+  const at = (page, place) => ({ page, ...place });
+  if (parts[0] === "run" && parts[2] === "group") return at("runs", { kind: "group", run: parts[1], number: Number(parts[3]) });
+  if (parts[0] === "run" && parts[2] === "step") return at("runs", { kind: "step", run: parts[1], number: Number(parts[3]) });
+  if (parts[0] === "run") return at("runs", { kind: "run", run: parts[1] });
+  if (parts[0] === "episode") return at("runs", { kind: "episode", id: parts[1], slot: parts[2] || null });
+  if (parts[0] === "episodes") return at("runs", { kind: "outside" });
+  if (parts[0] === "policies") return at("policies", { kind: "policies", sample: parts[1] === "sample" });
+  if (parts[0] === "policy") return at("policies", { kind: "policy", name: parts[1] });
+  if (parts[0] === "statistics") return at("statistics", { kind: "statistics", section: parts[1] || null });
+  if (parts[0] === "system") return at("statistics", { kind: "statistics", section: "machine" });  // (the machine is a section of the statistics)
+  return at("runs", { kind: "runs" });
 }
 
 // Shared pieces
@@ -219,18 +222,44 @@ function episodeClass(each) {
   return !ended ? "running" : each.solved ? "solved" : ended === "completed" ? "unsolved" : "failed";
 }
 
+// Whether a run is running (its process is there and writes), idle (there, and quiet) or ended, and on which host
+// when not this one; and when it last wrote.
+const running = run => `${run.state}${run.host && run.host !== state.system.host ? ` on ${run.host}` : ""}`;
+const wrote = run => run.written ? `wrote ${span(Math.max(0, state.system.at - run.written))} ago` : "wrote nothing yet";
+const runDot = run => h("span", { class: `dot ${run.state === "running" ? "alive" : run.state === "idle" ? "idle" : ""}`, title: running(run) });
+// Where a run's episodes are read: its directory on this machine (nothing to say), the monitor on its own machine
+// (said, with a link, and whether it answers), or nowhere (what is shown is the ledger's).
+function elsewhere(run) {
+  if (run.episodes_at === "here") return null;
+  const there = run.episodes_at, address = there ? link(there, { class: "linkish", target: "_blank", rel: "noopener" }, there) : null;
+  if (there && run.reached !== false) return h("div", { class: "tile rail accent notice" }, h("header", {}, h("b", {}, "Episodes from the monitor on its machine"), h("span", { class: "what" }, run.host ?? "")),
+    h("p", { class: "muted small" }, "Its directory is not on this machine: its groups in flight, its episodes and its engines are asked of ", address, "; the rest is the ledger's."));
+  return h("div", { class: "tile rail warm notice" }, h("header", {}, h("b", {}, "Read from the ledger alone"), h("span", { class: "what" }, run.directory ?? "")),
+    h("p", { class: "muted small" }, there ? ["Its directory is not on this machine, and the monitor on its machine (", address, ") does not answer: its episodes are there."]
+      : `Its directory is not on this machine${run.host ? ` (it was started on ${run.host})` : ""}, and its start names no monitor to ask: its episodes are not shown.`));
+}
+
 function drawTree() {
   const system = state.system, here = route(), tree = document.getElementById("tree");
   if (!system) return;
-  document.getElementById("where").textContent = system.directory;
-  const showing = here.kind === "episode" ? state.episode?.labels : null;
-  const nodes = [];
+  document.getElementById("where").textContent = system.ledger_at;
+  const nodes = here.page === "policies" ? policiesTree(here) : here.page === "statistics" ? statisticsTree(here) : runsTree(here);
+  const scroll = tree.scrollTop;
+  tree.replaceChildren(...nodes);
+  tree.scrollTop = scroll;
+}
+
+// The runs: every run of the ledger, and under each its hierarchy: the groups toward its next step, then every step,
+// newest first, each with the groups that went into it, their episodes and the episodes' rollouts.
+function runsTree(here) {
+  const system = state.system, showing = here.kind === "episode" ? state.episode?.labels : null;
+  const nodes = [link("#/runs", { class: `label${here.kind === "runs" ? " here" : ""}` }, `Runs · ${system.runs.length}`)];
   for (const run of system.runs) {
-    const runKey = `run:${run.run}`, runOpen = folds[runKey] ?? true;
-    nodes.push(h("div", { class: "label" }, "Training run"));
+    const runKey = `run:${run.run}`, mine = here.run === run.run || showing?.job === run.run;
+    const runOpen = folds[runKey] ?? (mine || system.runs.length === 1);
     nodes.push(node(runPlace(run.run), here.kind === "run" && here.run === run.run, twist(runKey, runOpen),
-      h("span", { class: `dot ${system.processes?.alive ? "alive" : ""}` }), h("span", { class: "name" }, run.run),
-      h("span", { class: "tag" }, `${run.steps.length} steps`)));
+      runDot(run), h("span", { class: "name" }, run.run),
+      h("span", { class: "tag" }, running(run))));
     if (!runOpen) continue;
     const groups = groupsOf(run), children = [];
     const inGroup = number => (here.kind === "group" && here.run === run.run && here.number === number)
@@ -281,50 +310,84 @@ function drawTree() {
     }
     nodes.push(h("div", { class: "children" }, children));
   }
-  nodes.push(h("div", { class: "label" }, "Policies"));
-  nodes.push(node(policiesPlace(here.kind === "policies" && here.sample), here.kind === "policies", h("span", { class: "name" }, "Every policy, as a graph"),
-    h("span", { class: "tag" }, `${system.policies.length}`)));
-  for (const policy of system.policies) nodes.push(node(policyPlace(policy.policy), here.kind === "policy" && here.name === policy.policy,
-    h("span", { class: "name" }, policy.policy), h("span", { class: "tag" }, versionOf(policy.head))));
-  nodes.push(h("div", { class: "label" }, "Around it"));
-  nodes.push(node("#/system", here.kind === "system", h("span", { class: "name" }, "Machine, engines and ledger")));
   const others = state.runs.filter(run => !run.labels.job);
-  if (others.length) nodes.push(node("#/episodes", here.kind === "outside", h("span", { class: "name" }, "Episodes outside a run"), h("span", { class: "tag" }, String(others.length))));
-  const scroll = tree.scrollTop;
-  tree.replaceChildren(...nodes);
-  tree.scrollTop = scroll;
+  nodes.push(h("div", { class: "label" }, "Outside a run"));
+  nodes.push(node("#/episodes", here.kind === "outside", h("span", { class: "name" }, "Episodes outside a run"), h("span", { class: "tag" }, String(others.length))));
+  return nodes;
 }
 
-function drawBar(crumbs) {
+// The policies: the graph of them all, with or without the sample fixture, then each policy.
+function policiesTree(here) {
   const system = state.system;
+  return [link(policiesPlace(false), { class: `label${here.kind === "policies" && !here.sample ? " here" : ""}` }, `Policies · ${system.policies.length}`),
+    ...system.policies.map(policy => node(policyPlace(policy.policy), here.kind === "policy" && here.name === policy.policy,
+      h("span", { class: "name" }, policy.policy), h("span", { class: "tag" }, `${versionOf(policy.head)} · ${policy.versions.length}`))),
+    system.policies.length ? null : h("div", { class: "empty" }, "No policy yet."),
+    h("div", { class: "label" }, "Sample"),
+    node(policiesPlace(true), here.kind === "policies" && here.sample, h("span", { class: "name" }, "Sample fixture"), h("span", { class: "chip sample" }, "sample"))].filter(Boolean);
+}
+
+// The statistics: its sections, and the runs drawn (each in its color; a click leaves it out or takes it back).
+const SECTIONS = [["outcomes", "Outcomes"], ["rows", "Rows"], ["steps", "Steps"], ["pace", "Pace"], ["queue", "Queue"], ["inference", "Inference"], ["machine", "Machine"]];
+const sectionName = key => SECTIONS.find(([each]) => each === key)[1];
+function statisticsTree(here) {
+  const runs = state.system.runs;
+  return [h("div", { class: "label" }, "Sections"),
+    ...SECTIONS.map(([key, name]) => node(`#/statistics/${key}`, here.section === key, h("span", { class: "name" }, name))),
+    h("div", { class: "label" }, `Runs · ${runs.filter(run => !hidden.has(run.run)).length} of ${runs.length}`),
+    ...runs.map(run => h("div", { class: `node${hidden.has(run.run) ? " off" : ""}`, role: "checkbox", tabindex: 0, "aria-checked": String(!hidden.has(run.run)),
+      title: hidden.has(run.run) ? "draw this run" : "leave this run out", onclick: () => hide(run.run), onkeydown: event => { if (event.key === "Enter" || event.key === " ") hide(run.run); } },
+    h("span", { class: "swatch", style: `background:${runColor(run.run)}` }), h("span", { class: "name" }, run.run), h("span", { class: "tag" }, running(run))))];
+}
+const hidden = new Set((() => { try { return JSON.parse(localStorage.getItem("monitor.hidden") ?? "[]"); } catch { return []; } })());
+function hide(run) {
+  if (hidden.has(run)) hidden.delete(run); else hidden.add(run);
+  try { localStorage.setItem("monitor.hidden", JSON.stringify([...hidden])); } catch { /* (a browser that keeps nothing) */ }
+  redraw();
+}
+// A run's color: the categorical slots in order, by the run's place among every run (so it keeps its color whatever
+// is drawn); a run past the eighth is drawn in gray.
+const runColor = name => {
+  const place = (state.system?.runs ?? []).map(run => run.run).sort().indexOf(name);
+  return place >= 0 && place < 8 ? `var(--series-${place + 1})` : "var(--faint)";
+};
+
+function drawBar(crumbs) {
+  const system = state.system, here = route();
+  const counts = { runs: system?.runs.length, policies: system?.policies.length, statistics: null };
+  document.getElementById("pages").replaceChildren(...PAGES.map(([page, name, place]) => link(place, { class: here.page === page ? "current" : null, "aria-current": here.page === page ? "page" : null },
+    name, counts[page] != null ? h("span", { class: "count" }, String(counts[page])) : null)));
   document.getElementById("crumbs").replaceChildren(...crumbs.flatMap((crumb, index) => [
     ...(index ? [h("span", { class: "sep" }, "/")] : []), index === crumbs.length - 1 ? h("b", {}, crumb[0]) : link(crumb[1], {}, crumb[0])]));
   const live = document.getElementById("live");
   if (!system) { live.replaceChildren("connecting…"); return; }
-  const alive = system.processes?.alive;
-  live.replaceChildren(h("span", { class: `dot ${alive ? "alive" : system.processes ? "gone" : ""}` }),
-    system.processes ? (alive ? "running" : "not running") : "", system.written ? ` · wrote ${span(Math.max(0, system.at - system.written))} ago` : "");
+  const busy = system.runs.filter(run => run.state === "running").length;
+  live.replaceChildren(h("span", { class: `dot ${busy ? "alive" : ""}` }), `${busy} of ${system.runs.length} run${system.runs.length === 1 ? "" : "s"} running`,
+    system.written ? ` · wrote ${span(Math.max(0, system.at - system.written))} ago` : "");
 }
 
 // The training run
 function drawRun(name) {
   const system = state.system, run = system.runs.find(each => each.run === name);
   if (!run) return [h("div", { class: "empty" }, `There is no run ${name}.`)];
-  const policy = system.policies[0], channel = system.channels.find(each => each.adapter) ?? system.channels[0];
+  // (the policy its steps make, or its start names; its engines, as its feed has them)
+  const trains = run.steps.findLast(step => step.makes)?.makes?.split("@")[0] ?? run.policy;
+  const policy = system.policies.find(each => each.policy === trains);
+  const channel = run.channels.find(each => each.adapter) ?? run.channels[0];
   const trained = run.done.filter(line => line.update).length, last = run.done.at(-1);
   const committed = run.steps.filter(step => step.state === "committed").length;
   const throughput = channel?.throughput.at(-1);
   const width = Math.max(300, document.getElementById("main").clientWidth - 100);
   const head = h("div", { class: "head" }, h("h1", {}, `Run ${run.run}`),
-    specs(policy ? spec("trains", policy.policy, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
-      spec("fence", run.fence ?? "–"), spec("directory", system.directory)));
+    specs(spec("state", `${running(run)} · ${wrote(run)}`, run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""), policy ? spec("trains", policy.policy, "violet") : null, channel?.adapter ? spec("serving", channel.adapter, "accent") : null,
+      spec("fence", run.fence ?? "–"), spec("directory", run.directory ?? "–"), run.starts > 1 ? spec("started", `${run.starts} times`) : null));
   const kpis = h("div", { class: "kpis" },
     kpi("Steps", `${run.steps.length}`, `${committed} committed · ${run.next.length} groups toward the next`),
     kpi("Groups done", `${run.done.length}`, `${trained} trained on, of ${run.decided} decided`),
     kpi("Rows unlocked", last ? `${last.unlocked}` : "–", "of the catalog"),
     kpi("Policy head", policy ? versionOf(policy.head) : "–", policy ? `${policy.versions.length} versions` : ""),
     kpi("Inference", throughput ? `${figure(throughput.tokens_per_second)} tok/s` : "–", throughput ? `${figure(throughput.mean_concurrency)} requests at once` : "no measurement yet"),
-    kpi("Episodes ended", `${system.jobs.find(job => job.job === run.run)?.episodes ?? 0}`, `${tokens(system.jobs.find(job => job.job === run.run)?.sampled)} tokens sampled`));
+    kpi("Episodes ended", run.job ? `${run.job.episodes}` : "–", run.job ? `${tokens(run.job.sampled)} tokens sampled` : "its job's log is not here"));
   const groups = groupsOf(run), stepping = run.steps.filter(step => step.state === "stepping");
   const waiting = run.next.filter(number => groups.get(number)?.line);
   const member = number => {
@@ -353,7 +416,7 @@ function drawRun(name) {
     task.groups += 1; task.trained += line.update ? 1 : 0; task.last = line; tasks.set(line.task, task);
   }
   const played = [...tasks].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
-  return [head, kpis,
+  return [head, elsewhere(run), kpis,
     h("div", { class: "section-title" }, h("h2", {}, "In flight"),
       h("span", {}, [`${run.open.length} groups playing`, stepping.length ? `step ${stepping.map(step => step.step).join(", ")} being taken` : null].filter(Boolean).join(" · "))), flight,
     card("Rewards by group", "each dot an episode; rewards are each task's own",
@@ -464,7 +527,8 @@ function drawGroup(here) {
       : h("p", { class: "muted" }, "The group is still being played."));
   const start = card("Start", "what every episode of the group was given", pairs(Object.entries(group.parameters ?? {}).map(([key, value]) => [key, figure(value)])));
   const failures = result?.failures?.length ? card("Why episodes failed", `${result.failures.length}`, result.failures.map(failure => h("p", { class: "error-text" }, failure))) : null;
-  return [head, kpis, group.stage !== "done" ? card("Stage", "", stages(group)) : null,
+  const run = state.system.runs.find(each => each.run === group.run);
+  return [head, run ? elsewhere({ ...run, episodes_at: group.episodes_at }) : null, kpis, group.stage !== "done" ? card("Stage", "", stages(group)) : null,
     h("div", { class: "section-title" }, h("h2", {}, "Episodes"), h("span", {}, group.ticket ? `${group.count ?? "?"} asked for under ticket ${group.ticket}` : "")), episodes,
     h("div", { class: "cols" }, what, start), failures];
 }
@@ -925,7 +989,7 @@ function drawPolicies(here) {
       spec("distillations", String(lineage.runs.filter(run => run.kind === "distill").length), "warm"), spec("trainers", String(lineage.trainers.length), "violet"),
       spec("workers", String(lineage.workers.length), "accent"), spec("suites", String(lineage.evaluations.length))), toggle);
   const notice = here.sample ? h("div", { class: "tile rail warm notice" }, h("header", {}, h("b", {}, "Sample fixture"), sampleChip()),
-    h("p", { class: "muted small" }, "Everything marked sample comes from rollout_train/monitor/sample-lineage.json: the tables proposed in docs/research/policy-dag.md (a run's plan, trainers and their queues, resharding, inference workers and their loads, the router's waiting requests, evaluation suites). No run writes them yet. The rest is this run's ledger and feed."))
+    h("p", { class: "muted small" }, "Everything marked sample comes from rollout_train/monitor/sample-lineage.json: the tables proposed in docs/research/policy-dag.md (a run's plan, trainers and their queues, resharding, inference workers and their loads, the router's waiting requests, evaluation suites). No run writes them yet. The rest is the ledger's, and the runs' feeds'."))
     : null;
   const opened = lanes.filter(lane => folds[`lane:${lane.key}`]).length;
   const all = open => () => { for (const lane of lanes) folds[`lane:${lane.key}`] = open; keepFolds(); redraw(); };
@@ -1001,34 +1065,377 @@ function drawPolicies(here) {
     ...(suites.length ? suites : [h("div", { class: "empty" }, "No evaluation suite is in the ledger.")])];
 }
 
-// The machine, the engines, the jobs and the ledger
-function drawSystem() {
-  const system = state.system, machine = system.machine.now, history = system.machine.history;
-  const width = Math.min(560, Math.max(260, document.getElementById("main").clientWidth / 2 - 90));
-  const machineCard = card("Machine", "where this monitor runs",
-    machine.memory.total ? meter("memory", machine.memory.total - machine.memory.available, machine.memory.total, `${bytes(machine.memory.available)} available of ${bytes(machine.memory.total)}`) : null,
-    machine.accelerators.map(each => meter(each.name, each.used, each.total, `${bytes(each.used)} of ${bytes(each.total)} · ${Math.round(100 * each.busy)}% busy`)),
-    machine.disk ? meter("disk", machine.disk.total - machine.disk.free, machine.disk.total, `${bytes(machine.disk.free)} free`) : null,
-    history.length > 1 && machine.memory.total ? [spark(history.map(each => each.memory.available ?? 0), "s-warm", width, 56, true),
-      h("div", { class: "small muted" }, `Memory available over the last ${span(machine.at - history[0].at)}.`)] : null,
-    system.processes ? h("p", { class: "small muted", style: "margin:12px 0 0" }, `Process ${system.processes.owner} ${system.processes.alive ? "running" : "gone"}`,
-      system.processes.started.map(each => ` · ${each.name} ${each.pid} ${each.alive ? "running" : "gone"}`)) : null);
+// Every run of the ledger: running ones first, each with how it is going.
+function drawRuns() {
+  const system = state.system, others = state.runs.filter(run => !run.labels.job);
+  const tiles = system.runs.map(run => {
+    const recent = run.done.slice(-12), solved = recent.flatMap(line => line.solved);
+    const committed = run.steps.filter(step => step.state === "committed").length;
+    const head = run.steps.findLast(step => step.state === "committed")?.makes;
+    const trains = head?.split("@")[0] ?? run.policy;
+    return link(runPlace(run.run), { class: `tile rail ${run.state === "running" ? "good" : run.state === "idle" ? "warm" : ""}` },
+      h("header", {}, runDot(run), h("b", {}, run.run), h("span", { class: "what" }, trains ? `trains ${trains}` : ""), h("span", { class: "faint small" }, running(run))),
+      h("div", { class: "cells four" },
+        h("div", { class: `cell ${run.open.length ? "accent" : "waiting"}` }, h("span", {}, "in flight"), h("b", {}, String(run.open.length)), h("small", {}, `${run.next.length} toward a step`)),
+        h("div", { class: "cell" }, h("span", {}, "groups done"), h("b", {}, String(run.done.length)), h("small", {}, `of ${run.decided} decided`)),
+        h("div", { class: "cell violet" }, h("span", {}, "steps"), h("b", {}, String(committed)), h("small", {}, head ? versionOf(head) : "none yet")),
+        h("div", { class: `cell ${solved.length ? "good" : ""}` }, h("span", {}, "solved"), h("b", {}, solved.length ? `${Math.round(100 * solved.filter(Boolean).length / solved.length)}%` : "–"),
+          h("small", {}, `of the last ${recent.length} groups`))),
+      run.done.length > 1 ? h("div", {}, spark(run.done.map(line => mean(line.rewards) ?? 0), "s-accent", 420, 40, true),
+        h("div", { class: "small muted" }, "each group's mean reward, in order")) : null,
+      h("div", { class: "facts" }, h("span", {}, wrote(run)), run.host ? h("span", {}, "on ", h("b", {}, run.host)) : null,
+        run.episodes_at === "here" ? null : h("span", { class: run.reached === false || !run.episodes_at ? "t-warm" : "" }, run.episodes_at ? `episodes on ${run.episodes_at}` : "ledger only")));
+  });
+  const states = ["running", "idle", "ended"].map(name => [name, system.runs.filter(run => run.state === name).length]).filter(([, count]) => count);
+  return [h("div", { class: "head" }, h("h1", {}, "Runs"),
+    h("div", { class: "sub" }, "The runs in the ledger, running ones first. A run opens its steps, groups, episodes and rollouts."),
+    specs(spec("ledger", system.ledger_at), ...states.map(([name, count]) => spec(name, String(count), name === "running" ? "good" : name === "idle" ? "warm" : "")),
+      spec("this host", system.host))),
+  system.runs.length ? h("div", { class: "tiles wide-tiles" }, tiles) : h("div", { class: "empty" }, "The ledger has no run yet."),
+  others.length ? card("Episodes outside a run", `${others.length} in the feeds`, h("p", { class: "muted small", style: "margin:0" },
+    link("#/episodes", { class: "linkish" }, "Evaluations, tests and programs run by hand"), " that no training run asked for.")) : null];
+}
+
+// Charts across runs, drawn to scale: round ticks on one axis each way, a line or column for each run in its own
+// color, and under the pointer a rule with every series' value there.
+const DAY = 86400;
+const TIME_STEPS = [60, 300, 900, 1800, 3600, 7200, 10800, 21600, 43200, DAY, 2 * DAY, 7 * DAY];
+const day = at => new Date(at * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+const tick = value => Math.abs(value) >= 1e6 ? `${+(value / 1e6).toPrecision(3)}M` : Math.abs(value) >= 1e4 ? `${+(value / 1e3).toPrecision(3)}k` : String(+value.toPrecision(3));
+const percent = value => `${Math.round(100 * value)}%`;
+const tickSpan = seconds => seconds < 120 ? `${Math.round(seconds)} s` : seconds < 7200 ? `${+(seconds / 60).toPrecision(2)} min` : `${+(seconds / 3600).toPrecision(2)} h`;
+
+// A scale from the values to round ends, with its ticks: `zero` takes it down (or up) to 0; `min` and `max` fix an end.
+function scale(values, { zero = true, min, max, count = 4 } = {}) {
+  const finite = values.filter(Number.isFinite);
+  let low = min ?? Math.min(...finite, ...(zero ? [0] : [])), high = max ?? Math.max(...finite, ...(zero ? [0] : []));
+  if (!finite.length && min == null && max == null) [low, high] = [0, 1];
+  if (!(high > low)) { const pad = Math.abs(high) * 0.1 || 1; if (min == null) low -= zero && low === 0 ? 0 : pad; if (max == null) high += pad; }
+  const raw = (high - low) / count, power = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map(each => each * power).find(each => each >= raw * 0.999);
+  if (min == null) low = Math.floor(low / step + 1e-9) * step;
+  if (max == null) high = Math.ceil(high / step - 1e-9) * step;
+  const ticks = [];
+  for (let value = Math.ceil(low / step - 1e-9) * step; value <= high + step * 1e-6; value += step) ticks.push(+value.toPrecision(12));
+  return { low, high, ticks, step };
+}
+// Ticks on local clock times (or days), about `count` of them.
+function timeTicks(low, high, count) {
+  const step = TIME_STEPS.find(each => (high - low) / each <= count) ?? 7 * DAY, offset = new Date(low * 1000).getTimezoneOffset() * 60;
+  const ticks = [];
+  for (let at = Math.ceil((low - offset) / step) * step + offset; at <= high; at += step) ticks.push([at, step >= DAY || (at - offset) % DAY === 0 ? day(at) : clock(at)]);
+  return ticks;
+}
+const plain = value => figure(value);
+
+// A line for each series ({name, color, points: [[x, y]], until?, scatter?}) over x (a group's place, a step, or a
+// time with `time`), on one y scale (`y`: as `scale` takes it). `stepped` holds each value until the next (a count);
+// `rules` are reference lines ({value, label}).
+function lineChart({ series, width, height = 210, time = false, y = {}, stepped = false, rules = [], label, format = plain, xFormat = plain, yTick, dots, gap = Infinity }) {
+  const left = 50, right = 14, top = 12, bottom = 26;
+  const drawing = svg("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img", "aria-label": label, class: "chart" });
+  const shown = series.filter(each => each.points.length);
+  const points = shown.flatMap(each => [...each.points, ...(each.scatter ?? [])]).filter(point => Number.isFinite(point[1]));
+  if (!points.length) {
+    drawing.append(svg("text", { x: width / 2, y: height / 2, "text-anchor": "middle" }, "nothing to draw yet"));
+    return drawing;
+  }
+  let x0 = Math.min(...points.map(point => point[0])), x1 = Math.max(...points.map(point => point[0]), ...shown.map(each => each.until ?? -Infinity));
+  if (!(x1 > x0)) { x0 -= time ? 1800 : 1; x1 += time ? 1800 : 1; }
+  const ys = scale([...points.map(point => point[1]), ...rules.map(rule => rule.value)], y);
+  const X = value => left + (value - x0) / (x1 - x0) * (width - left - right), Y = value => top + (ys.high - value) / (ys.high - ys.low) * (height - top - bottom);
+  const decimals = Math.max(0, -Math.floor(Math.log10(ys.step) + 1e-9));  // (as many as the ticks' step needs)
+  const labelOf = yTick ?? (value => Math.abs(value) >= 1e4 ? tick(value) : value.toFixed(decimals));
+  for (const value of ys.ticks) {
+    drawing.append(svg("line", { x1: left, x2: width - right, y1: Y(value), y2: Y(value), class: "s-grid" }));
+    drawing.append(svg("text", { x: left - 7, y: Y(value) + 3.5, "text-anchor": "end" }, labelOf(value)));
+  }
+  const across = Math.max(2, Math.floor((width - left - right) / (time ? 96 : 64)));
+  const xTicks = time ? timeTicks(x0, x1, across) : scale([x0, x1], { zero: false, min: x0, max: x1, count: across }).ticks.filter(Number.isInteger).map(value => [value, xFormat(value)]);
+  for (const [value, text] of xTicks) {
+    drawing.append(svg("line", { x1: X(value), x2: X(value), y1: height - bottom, y2: height - bottom + 4, class: "s-grid" }));
+    drawing.append(svg("text", { x: X(value), y: height - bottom + 15, "text-anchor": "middle" }, text));
+  }
+  drawing.append(svg("line", { x1: left, x2: width - right, y1: height - bottom + 0.5, y2: height - bottom + 0.5, class: "s-axis" }));
+  for (const rule of rules) {
+    drawing.append(svg("line", { x1: left, x2: width - right, y1: Y(rule.value), y2: Y(rule.value), class: "s-rule" }));
+    drawing.append(svg("text", { x: width - right - 2, y: Y(rule.value) - 4, "text-anchor": "end" }, rule.label));
+  }
+  for (const each of shown) {
+    for (const [x, value] of each.scatter ?? []) drawing.append(svg("circle", { cx: X(x), cy: Y(value), r: 2.2, style: `fill:${each.color}`, class: "scatter" }));
+    const line = each.points.filter(point => Number.isFinite(point[1]));
+    if (!line.length) continue;
+    let path = `M ${X(line[0][0])} ${Y(line[0][1])}`;
+    line.slice(1).forEach(([x, value], place) => {  // (a line breaks where measurements stopped for longer than `gap`)
+      path += stepped ? ` H ${X(x)} V ${Y(value)}` : `${x - line[place][0] > gap ? " M" : " L"} ${X(x)} ${Y(value)}`;
+    });
+    if (stepped && each.until != null && each.until > line.at(-1)[0]) path += ` H ${X(each.until)}`;
+    drawing.append(svg("path", { d: path, class: "series", style: `stroke:${each.color}` }));
+    if (dots ?? line.length <= 40) for (const [x, value] of line) drawing.append(svg("circle", { cx: X(x), cy: Y(value), r: 3, class: "dot-series", style: `fill:${each.color}` }));
+    else drawing.append(svg("circle", { cx: X(line.at(-1)[0]), cy: Y(line.at(-1)[1]), r: 3, class: "dot-series", style: `fill:${each.color}` }));
+  }
+  hover(drawing, { width, height, left, right, top, bottom, x0, x1, X, Y, time, format, xFormat, stepped,
+    series: shown.map(each => ({ ...each, points: each.points.filter(point => Number.isFinite(point[1])) })) });
+  return drawing;
+}
+
+// Under the pointer: a rule at the nearest x any series has, and a label with each series' value there (a stepped
+// series: its value then).
+function hover(drawing, { width, height, left, right, top, bottom, x0, x1, X, Y, time, format, xFormat, stepped, series }) {
+  const layer = svg("g", { class: "hover", "pointer-events": "none" });
+  const xs = [...new Set(series.flatMap(each => each.points.map(point => point[0])))].sort((a, b) => a - b);
+  const valueAt = (each, x) => {
+    if (stepped) { const before = each.points.filter(point => point[0] <= x).at(-1); return before && (each.until == null || x <= each.until || x === before[0]) ? before[1] : null; }
+    return each.points.find(point => point[0] === x)?.[1] ?? null;
+  };
+  const area = svg("rect", { x: left, y: top, width: width - left - right, height: height - top - bottom, class: "f-none" });
+  area.addEventListener("mousemove", event => {
+    const box = drawing.getBoundingClientRect(), at = x0 + ((event.clientX - box.left) * width / box.width - left) / (width - left - right) * (x1 - x0);
+    const x = xs.reduce((best, each) => Math.abs(each - at) < Math.abs(best - at) ? each : best, xs[0]);
+    const rows = series.map(each => [each, valueAt(each, x)]).filter(([, value]) => value != null);
+    layer.replaceChildren(svg("line", { x1: X(x), x2: X(x), y1: top, y2: height - bottom, class: "s-cross" }));
+    for (const [each, value] of rows) layer.append(svg("circle", { cx: X(x), cy: Y(value), r: 4, class: "dot-series", style: `fill:${each.color}` }));
+    const lines = [[null, time ? `${day(x)} ${clock(x)}` : xFormat(x)], ...rows.map(([each, value]) => [each, `${each.name}  ${format(value)}`])];
+    const wide = Math.max(...lines.map(([, text]) => text.length)) * 6.3 + 26, tall = lines.length * 15 + 8;
+    const tipX = X(x) + 10 + wide > width - right ? X(x) - 10 - wide : X(x) + 10, tipY = top + 2;
+    layer.append(svg("rect", { x: tipX, y: tipY, width: wide, height: tall, rx: 3, class: "tip" }));
+    lines.forEach(([each, text], place) => {
+      if (each) layer.append(svg("rect", { x: tipX + 8, y: tipY + 9 + place * 15, width: 8, height: 8, rx: 1, style: `fill:${each.color}` }));
+      layer.append(svg("text", { x: tipX + (each ? 21 : 8), y: tipY + 16 + place * 15, class: each ? "tip-text" : "tip-head" }, text));
+    });
+  });
+  area.addEventListener("mouseleave", () => layer.replaceChildren());
+  drawing.append(layer, area);
+}
+
+// Columns over time, one for each span of `step` seconds, stacked by series (a value per series in each), on one
+// scale; each column says what it holds when pointed at.
+function columnChart({ spans, series, width, height = 190, label, format = plain }) {
+  const left = 50, right = 14, top = 12, bottom = 26;
+  const drawing = svg("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img", "aria-label": label, class: "chart" });
+  if (!spans.length) {
+    drawing.append(svg("text", { x: width / 2, y: height / 2, "text-anchor": "middle" }, "nothing to draw yet"));
+    return drawing;
+  }
+  const x0 = spans[0].from, x1 = spans.at(-1).to;
+  const ys = scale(spans.map(each => each.values.reduce((sum, value) => sum + value, 0)), {});
+  const X = value => left + (value - x0) / (x1 - x0) * (width - left - right), Y = value => top + (ys.high - value) / (ys.high - ys.low) * (height - top - bottom);
+  for (const value of ys.ticks) {
+    drawing.append(svg("line", { x1: left, x2: width - right, y1: Y(value), y2: Y(value), class: "s-grid" }));
+    drawing.append(svg("text", { x: left - 7, y: Y(value) + 3.5, "text-anchor": "end" }, tick(value)));
+  }
+  for (const [value, text] of timeTicks(x0, x1, Math.max(2, Math.floor((width - left - right) / 96)))) {
+    drawing.append(svg("line", { x1: X(value), x2: X(value), y1: height - bottom, y2: height - bottom + 4, class: "s-grid" }));
+    drawing.append(svg("text", { x: X(value), y: height - bottom + 15, "text-anchor": "middle" }, text));
+  }
+  for (const each of spans) {
+    const x = X(each.from) + 1, wide = Math.max(1, X(each.to) - X(each.from) - 2);
+    let base = 0;
+    const column = svg("g", { class: "column-stack" });
+    each.values.forEach((value, place) => {
+      if (!value) return;
+      const y1 = Y(base), y2 = Y(base + value);
+      column.append(svg("rect", { x, y: y2, width: wide, height: Math.max(1, y1 - y2 - (base ? 1 : 0)), style: `fill:${series[place].color}` }));
+      base += value;
+    });
+    column.append(svg("rect", { x: X(each.from), y: top, width: X(each.to) - X(each.from), height: height - top - bottom, class: "f-none" },
+      svg("title", {}, [`${day(each.from)} ${clock(each.from)} to ${clock(each.to)}`, ...series.map((one, place) => each.values[place] ? `${one.name}: ${format(each.values[place])}` : null).filter(Boolean)].join("\n"))));
+    drawing.append(column);
+  }
+  drawing.append(svg("line", { x1: left, x2: width - right, y1: height - bottom + 0.5, y2: height - bottom + 0.5, class: "s-axis" }));
+  return drawing;
+}
+
+// A legend for two series or more (one needs none: the title names it).
+const legendOf = series => series.length > 1 ? h("div", { class: "legend" }, series.map(each => h("span", {}, h("i", { style: `background:${each.color}` }), each.name))) : null;
+// A count of things that happened at times, in spans of a round length (about `count` of them between `from` and `to`),
+// for each series.
+function spansOf(times, from, to, count = 48) {
+  const step = TIME_STEPS.find(each => (to - from) / each <= count) ?? 7 * DAY, offset = new Date(from * 1000).getTimezoneOffset() * 60;
+  const start = Math.floor((from - offset) / step) * step + offset, spans = [];
+  for (let at = start; at <= to; at += step) spans.push({ from: at, to: at + step, values: times.map(() => 0) });
+  times.forEach((list, place) => { for (const at of list) { const bucket = spans[Math.floor((at - start) / step)]; if (bucket) bucket.values[place] += 1; } });
+  return { spans, step };
+}
+const solvedShare = groups => {
+  const solved = groups.reduce((sum, group) => sum + group.solved.filter(Boolean).length, 0), played = groups.reduce((sum, group) => sum + group.rewards.length + group.failed, 0);
+  return played ? solved / played : null;
+};
+const share = (value, kind = "") => ({ node: value == null ? h("span", { class: "faint" }, "–")
+  : h("span", { class: "share" }, h("span", { class: `track ${kind}` }, h("i", { style: `width:${(100 * value).toFixed(1)}%` })), h("b", {}, percent(value))) });
+const STEP_FIGURES = [["kl_moved", "KL moved", "from the version before"], ["kl_floor", "KL floor", "the update's noise floor"], ["clip_fraction", "Clip fraction", "of tokens clipped"],
+  ["mean_mismatch", "Mean mismatch", "sampler against trainer"], ["mean_weight", "Mean weight", "the off-policy correction"], ["truncated_fraction", "Truncated fraction", "of weights truncated"],
+  ["loss", "Loss", "the objective"], ["seconds", "Step time", "the update, start to end"], ["start_seconds", "Start time", "before the first optimizer step"]];
+
+function drawStatistics(here) {
+  const figures = state.statistics, system = state.system;
+  if (!figures) return [h("div", { class: "empty" }, "Reading the statistics…")];
+  const main = document.getElementById("main"), frame = Math.min(1400, main.clientWidth - 64);
+  const whole = Math.max(280, frame - 38), half = frame >= 980 ? Math.floor((frame - 22) / 2 - 38) : whole;
+  const runs = figures.runs.filter(run => !hidden.has(run.run)).sort((a, b) => a.run.localeCompare(b.run));
+  const colored = run => ({ name: run.run, color: runColor(run.run) });
+  const life = new Map(system.runs.map(run => [run.run, run]));
+  const done = run => run.groups.filter(group => group.time != null).sort((a, b) => a.time - b.time);
+  const every = runs.flatMap(done);
+  const title = (key, name, note) => h("div", { class: "section-title", id: `section-${key}` }, h("h2", {}, name), h("span", {}, note));
+  if (!runs.length) return [h("div", { class: "head" }, h("h1", {}, "Statistics")), h("div", { class: "empty" }, figures.runs.length ? "Every run is left out: choose some in the sidebar." : "The ledger has no run yet."), ...machine(half)];
+
+  // Totals
+  const episodes = every.reduce((sum, group) => sum + group.rewards.length + group.failed, 0), failed = every.reduce((sum, group) => sum + group.failed, 0);
+  const lastDay = every.filter(group => group.time > figures.now - DAY);
+  const steps = runs.flatMap(run => run.steps);
+  const kpis = h("div", { class: "kpis" },
+    kpi("Runs", String(runs.length), `${runs.filter(run => life.get(run.run)?.state === "running").length} running`),
+    kpi("Groups done", every.length.toLocaleString(), `${runs.reduce((sum, run) => sum + run.groups.filter(group => group.time == null).length, 0)} in flight`),
+    kpi("Episodes", episodes.toLocaleString(), `${failed} failed`),
+    kpi("Solved", every.length ? percent(solvedShare(every)) : "–", "of the episodes played"),
+    kpi("Steps", String(steps.filter(step => step.state === "committed").length), `${steps.filter(step => step.state === "failed").length} failed`),
+    kpi("Last day", `${lastDay.length} groups`, `${lastDay.reduce((sum, group) => sum + group.rewards.length + group.failed, 0)} episodes`));
+  const head = h("div", { class: "head" }, h("h1", {}, "Statistics"),
+    h("div", { class: "sub" }, "Each run in its own color, read from the ledger (and from a run's feed for its engines). Leave runs out in the sidebar."));
+
+  // Outcomes over groups: a rolling solve rate and mean reward, a line for each run.
+  const stretch = Number(stored("monitor.window", 8));
+  const rolling = (groups, value) => groups.map((group, place) => {
+    const span = groups.slice(Math.max(0, place + 1 - stretch), place + 1);
+    return [place + 1, value(span)];
+  });
+  const meanReward = groups => mean(groups.flatMap(group => group.rewards));
+  const windows = h("div", { class: "segmented" }, [4, 8, 16, 32].map(size => h("button", { class: `seg${size === stretch ? " current" : ""}`,
+    onclick: () => { keep("monitor.window", size); redraw(); } }, `${size} groups`)));
+  const solveSeries = runs.map(run => ({ ...colored(run), points: rolling(done(run), solvedShare), scatter: done(run).map((group, place) => [place + 1, solvedShare([group])]) }));
+  const rewardSeries = runs.map(run => ({ ...colored(run), points: rolling(done(run), meanReward), scatter: done(run).map((group, place) => [place + 1, mean(group.rewards)]) }));
+  const outcomes = [title("outcomes", sectionName("outcomes"), `groups in the order their results were written; the line the mean of the last ${stretch}, a dot each group`),
+    windows, h("div", { class: "cols" },
+      card("Solve rate", "the share of a group's episodes that solved its row", lineChart({ series: solveSeries, width: half, label: "solve rate over groups", y: { min: 0, max: 1 }, yTick: percent, format: percent, xFormat: value => `group ${value}`, dots: false }), legendOf(runs.map(colored))),
+      card("Mean reward", "of the episodes that completed; each row's rewards are its own", lineChart({ series: rewardSeries, width: half, label: "mean reward over groups", format: value => figure(value), xFormat: value => `group ${value}`, dots: false }), legendOf(runs.map(colored))))];
+
+  // Results by row
+  const rows = new Map();
+  for (const run of runs) for (const group of done(run)) {
+    const row = rows.get(group.task) ?? { task: group.task, title: group.title, runs: new Set(), groups: [], best: null };
+    row.runs.add(run.run); row.groups.push({ ...group, run: run.run });
+    for (const reward of group.rewards) row.best = row.best == null ? reward : Math.max(row.best, reward);
+    rows.set(group.task, row);
+  }
+  const byRow = [...rows.values()].sort((a, b) => String(a.task).localeCompare(String(b.task), undefined, { numeric: true }));
+  const rowTable = card("Rows", `${byRow.length} rows; the last rewards are of the row's newest group`,
+    table([["row"], ["title"], ...(runs.length > 1 ? [["runs", "n"]] : []), ["groups", "n"], ["episodes", "n"], ["solved"], ["mean", "n"], ["best", "n"], ["last rewards"], ["last", "n"]],
+      byRow.map(row => {
+        const last = row.groups.at(-1);
+        return [{ text: row.task ?? "–", kind: "key" }, { node: h("span", { class: "muted" }, row.title ?? "") }, ...(runs.length > 1 ? [row.runs.size] : []), row.groups.length,
+          row.groups.reduce((sum, group) => sum + group.rewards.length + group.failed, 0), share(solvedShare(row.groups), "good"),
+          figure(meanReward(row.groups)), figure(row.best), { node: h("span", {}, dotsOf(last), " ", h("span", { class: "faint small" }, last.rewards.map(figure).join(" "))) },
+          `${span(figures.now - last.time)} ago`];
+      }),
+      byRow.map(row => { const last = row.groups.at(-1); return () => go(groupPlace(last.run, last.group)); })));
+  const named = every.filter(group => group.names != null);
+  const sizes = [...new Set(named.map(group => group.names))].sort((a, b) => a - b);
+  const bySize = named.length ? card("By the names a start gives", "groups whose start lists names, by how many",
+    table([["names", "n"], ["groups", "n"], ["episodes", "n"], ["solved"], ["mean reward", "n"]], sizes.map(size => {
+      const groups = named.filter(group => group.names === size);
+      return [size, groups.length, groups.reduce((sum, group) => sum + group.rewards.length + group.failed, 0), share(solvedShare(groups), "good"), figure(meanReward(groups))];
+    }))) : null;
+
+  // Steps: each statistic of the update over the steps, a line for each run.
+  const present = STEP_FIGURES.filter(([key]) => steps.some(step => step.metrics[key] != null || (key === "seconds" && step.metrics.update_seconds != null)));
+  const small = Math.max(260, Math.floor((frame - 14 * (Math.max(1, Math.floor((frame + 14) / 334)) - 1)) / Math.max(1, Math.floor((frame + 14) / 334)) - 34));
+  const valueOf = (step, key) => key === "seconds" ? step.metrics.update_seconds ?? step.metrics.seconds : step.metrics[key];
+  const multiples = h("div", { class: "multiples" }, present.map(([key, name, note]) => {
+    const seconds = key.endsWith("seconds");
+    return h("section", { class: "card small-card" }, h("header", {}, h("h2", {}, name), h("span", {}, note)), h("div", { class: "body" },
+      lineChart({ series: runs.map(run => ({ ...colored(run), points: run.steps.filter(step => valueOf(step, key) != null).map(step => [step.step, valueOf(step, key)]) })),
+        width: small, height: 150, label: `${name} over steps`, y: { zero: seconds || ["clip_fraction", "truncated_fraction", "kl_moved"].includes(key) },
+        yTick: seconds ? tickSpan : undefined, format: seconds ? span : value => Number(value).toPrecision(4), xFormat: value => `step ${value}` })));
+  }));
+
+  // Pace: episodes and groups an hour, and what was done with each group.
+  const from = Math.min(...every.map(group => group.time)), to = Math.max(...every.map(group => group.time)) + 1;
+  const paced = count => spansOf(runs.map(run => done(run).flatMap(group => Array.from({ length: count(group) }, () => group.time))), from, to);
+  const episodeSpans = every.length ? paced(group => group.rewards.length + group.failed) : { spans: [], step: 3600 };
+  const groupSpans = every.length ? paced(() => 1) : { spans: [], step: 3600 };
+  const perHour = (spans, step) => spans.map(each => ({ ...each, values: each.values.map(value => value * 3600 / step) }));
+  const kinds = [["trained", "trained on", "var(--accent)"], ["stepping", "in a step being taken", "var(--violet)"], ["waiting", "waiting for a step", "var(--warm)"],
+    ["skipped", "nothing to train on", "var(--line-strong)"], ["failed", "no episode, or its step failed", "var(--bad)"], ["flight", "in flight", "var(--faint)"]];
+  const kindOf = group => group.time == null ? "flight" : group.trained === "committed" ? "trained" : group.trained === "failed" || !group.rewards.length ? "failed"
+    : group.trained === "stepping" ? "stepping" : group.segments ? "waiting" : "skipped";
+  const fates = h("div", { class: "fates" }, runs.map(run => {
+    const counts = new Map(kinds.map(([key]) => [key, 0]));
+    for (const group of run.groups) counts.set(kindOf(group), counts.get(kindOf(group)) + 1);
+    return h("div", { class: "fate" }, h("span", { class: "fate-name" }, h("i", { class: "swatch", style: `background:${runColor(run.run)}` }), run.run),
+      h("div", { class: "stack" }, kinds.filter(([key]) => counts.get(key)).map(([key, name, color]) => h("i", { style: `flex:${counts.get(key)};background:${color}`, title: `${name}: ${counts.get(key)}` }))),
+      h("span", { class: "fate-count" }, kinds.filter(([key]) => counts.get(key)).map(([key]) => `${counts.get(key)} ${key}`).join(" · ")));
+  }), h("div", { class: "legend" }, kinds.map(([, name, color]) => h("span", {}, h("i", { style: `background:${color}` }), name))));
+  const reasons = new Map();
+  for (const run of runs) for (const group of done(run)) if (group.skipped) reasons.set(group.skipped, (reasons.get(group.skipped) ?? 0) + 1);
+  const pace = [title("pace", "Pace", "counted when each group's result was written"),
+    h("div", { class: "cols" },
+      card("Episodes an hour", `in spans of ${tickSpan(episodeSpans.step)}`, columnChart({ spans: perHour(episodeSpans.spans, episodeSpans.step), series: runs.map(colored), width: half, label: "episodes an hour", format: value => `${figure(+value.toFixed(1))} an hour` }), legendOf(runs.map(colored))),
+      card("Groups an hour", `in spans of ${tickSpan(groupSpans.step)}`, columnChart({ spans: perHour(groupSpans.spans, groupSpans.step), series: runs.map(colored), width: half, label: "groups an hour", format: value => `${figure(+value.toFixed(2))} an hour` }), legendOf(runs.map(colored)))),
+    h("div", { class: "cols" },
+      card("What was done with each group", "every group decided, by run", fates),
+      card("Why groups gave nothing to train on", `${[...reasons.values()].reduce((sum, count) => sum + count, 0)} groups skipped`,
+        reasons.size ? table([["reason"], ["groups", "n"]], [...reasons].sort((a, b) => b[1] - a[1]).map(([reason, count]) => [reason, count])) : h("div", { class: "empty" }, "None skipped.")))];
+
+  // In flight and waiting, over time.
+  const until = run => life.get(run.run)?.state === "running" ? figures.now : run.wrote;
+  const queue = [title("queue", sectionName("queue"), "how many groups were being played, and how many waited for a step, over time"),
+    h("div", { class: "cols" },
+      card("Groups in flight", "decided, their result not written", lineChart({ series: runs.map(run => ({ ...colored(run), points: run.flight.map(point => [point[0], point[1]]), until: until(run) })), width: half, time: true, stepped: true, label: "groups in flight", format: String, dots: false }), legendOf(runs.map(colored))),
+      card("Groups waiting for a step", "recorded with something to train on, no step begun over them", lineChart({ series: runs.map(run => ({ ...colored(run), points: run.flight.map(point => [point[0], point[2]]), until: until(run) })), width: half, time: true, stepped: true, label: "groups waiting for a step", format: String, dots: false }), legendOf(runs.map(colored))))];
+
+  // Inference, from each run's feed.
+  const measured = runs.filter(run => run.inference.length);
+  const channelSeries = (place, scaleBy) => measured.flatMap(run => run.inference.map(channel => ({ name: run.inference.length > 1 ? `${run.run} · ${channel.channel}` : run.run, color: runColor(run.run),
+    points: channel.points.map(point => [point[0], scaleBy(point[place])]) })));
+  const quiet = 10 * 60 * Math.max(1, ...measured.flatMap(run => run.inference.map(channel => channel.every)));  // (engines idle that long: no line across)
+  const inference = [title("inference", "Inference", "each run's engines, as its feed has them: a measurement a minute while they are busy"),
+    measured.length ? h("div", { class: "cols" },
+      card("Tokens a second", "generated, across requests", lineChart({ series: channelSeries(1, value => value), width: half, time: true, label: "tokens a second", format: value => `${figure(value)} tok/s`, dots: false, gap: quiet }), legendOf(channelSeries(1, value => value))),
+      card("Requests at once", "on average over each minute", lineChart({ series: channelSeries(2, value => value), width: half, time: true, label: "requests at once", format: value => figure(value), dots: false, gap: quiet }), legendOf(channelSeries(2, value => value))))
+      : h("div", { class: "empty" }, "No feed of these runs has a measurement of its engines (a run's feed is read where its directory is on this machine).")];
+
+  return [head, kpis, ...outcomes, title("rows", sectionName("rows"), "every row the runs drawn have played"), rowTable, bySize,
+    title("steps", "Steps", "the trainer's statistics, a point for each step"), present.length ? multiples : h("div", { class: "empty" }, "No step has made a version yet."),
+    ...pace, ...queue, ...inference, ...machine(half)];
+}
+const stored = (key, otherwise) => { try { return localStorage.getItem(key) ?? otherwise; } catch { return otherwise; } };
+const keep = (key, value) => { try { localStorage.setItem(key, String(value)); } catch { /* (a browser that keeps nothing) */ } };
+
+// The machine this monitor is on (memory, accelerators and disk, now and over the last hours), the engines, the
+// jobs, the fences and the tables.
+function machine(half) {
+  const system = state.system, now = system.machine.now, history = system.machine.history;
+  const gib = value => value / 2 ** 30;
+  const accelerators = now.accelerators.map((each, place) => ({ name: each.name, color: `var(--series-${place + 1})`, place }));
+  const memory = card("Memory in use", now.memory.total ? `of ${bytes(now.memory.total)}` : "not measured", lineChart({ width: half, time: true, label: "memory in use", dots: false,
+    series: [{ name: "in use", color: "var(--series-1)", points: history.filter(each => each.memory.total).map(each => [each.at, gib(each.memory.total - each.memory.available)]) }],
+    rules: now.memory.total ? [{ value: gib(now.memory.total), label: "total" }] : [], yTick: value => `${tick(value)} GiB`, format: value => `${value.toFixed(1)} GiB` }));
+  const gpu = accelerators.length ? card("Accelerator memory in use", accelerators.map(each => each.name).join(", "), lineChart({ width: half, time: true, label: "accelerator memory in use", dots: false,
+    series: accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, gib(one.accelerators[each.place].used)]) })),
+    rules: [{ value: gib(now.accelerators[0].total), label: "total" }], yTick: value => `${tick(value)} GiB`, format: value => `${value.toFixed(1)} GiB` }), legendOf(accelerators)) : null;
+  const busy = accelerators.length ? card("Accelerators busy", "the share of time a kernel ran", lineChart({ width: half, time: true, label: "accelerators busy", dots: false, y: { min: 0, max: 1 }, yTick: percent, format: percent,
+    series: accelerators.map(each => ({ ...each, points: history.filter(one => one.accelerators[each.place]).map(one => [one.at, one.accelerators[each.place].busy]) })) }), legendOf(accelerators)) : null;
+  const meters = card("Machine", `where this monitor runs: ${system.host}`,
+    now.memory.total ? meter("memory", now.memory.total - now.memory.available, now.memory.total, `${bytes(now.memory.available)} available of ${bytes(now.memory.total)}`) : null,
+    now.accelerators.map(each => meter(each.name, each.used, each.total, `${bytes(each.used)} of ${bytes(each.total)} · ${Math.round(100 * each.busy)}% busy`)),
+    now.disk ? meter("disk", now.disk.total - now.disk.free, now.disk.total, `${bytes(now.disk.free)} free`) : null,
+    h("p", { class: "small muted", style: "margin:4px 0 0" }, `Measured every 15 s while this monitor runs; the newest ${history.length} cover ${span(now.at - (history[0]?.at ?? now.at))}.`));
   const channels = system.channels.map(channel => {
     const latest = channel.throughput.at(-1);
-    return card(`Channel ${channel.channel}`, channel.adapter ? `serving ${channel.adapter} since ${clock(channel.published)}` : "serving the base model",
+    return card(`Channel ${channel.channel}`, `${channel.directory.split("/").at(-1)} · ${channel.adapter ? `serving ${channel.adapter} since ${clock(channel.published)}` : "serving the base model"}`,
       latest ? [h("div", { class: "kpis", style: "margin-bottom:12px" }, kpi("tokens a second", figure(latest.tokens_per_second)),
-        kpi("requests at once", figure(latest.mean_concurrency)), kpi("each", `${figure(latest.tokens_per_second_per_stream)} tok/s`)),
-      spark(channel.throughput.map(each => each.tokens_per_second), "s-accent", width, 70, true),
-      h("div", { class: "small muted" }, `The engines' last ${channel.throughput.length} busy minutes.`)] : h("p", { class: "muted" }, "No request has been measured yet."));
+        kpi("requests at once", figure(latest.mean_concurrency)), kpi("each", `${figure(latest.tokens_per_second_per_stream)} tok/s`))]
+        : h("p", { class: "muted" }, "No request has been measured yet."));
   });
-  const jobs = system.jobs.map(job => card(`Job ${job.job}`, `${job.tickets} tickets`, h("div", { class: "kpis" },
+  const jobs = system.jobs.map(job => card(`Job ${job.job}`, `${job.directory.split("/").at(-1)} · ${job.tickets} tickets`, h("div", { class: "kpis" },
     kpi("episodes in its log", `${job.episodes}`, Object.entries(job.outcomes).map(([outcome, count]) => `${count} ${outcome}`).join(", ")),
     kpi("acknowledged", `${job.acknowledged} of ${job.last}`), kpi("tokens sampled", tokens(job.sampled)))));
-  const ledger = card("Ledger", `${bytes(system.kept.versions)} of versions and ${bytes(system.kept.episodes)} of episodes kept`,
+  const ledger = card("Ledger", `${system.ledger_at} · ${bytes(system.kept.versions)} of versions and ${bytes(system.kept.episodes)} of episodes kept`,
     table([["scope"], ["fence", "n"]], Object.entries(system.ledger.fences)), h("div", { style: "height:14px" }),
     table([["table"], ["records", "n"]], Object.entries(system.ledger.tables)));
-  return [h("div", { class: "head" }, h("h1", {}, "Machine, engines and ledger"), h("div", { class: "sub" }, system.directory)),
-    h("div", { class: "cols" }, machineCard, ...channels, ...jobs, ledger)];
+  return [h("div", { class: "section-title", id: "section-machine" }, h("h2", {}, "Machine"), h("span", {}, "the machine this monitor runs on, the engines and jobs it can read, and the ledger")),
+    h("div", { class: "cols" }, memory, gpu, busy, meters), h("div", { class: "cols" }, ...channels, ...jobs, ledger)];
 }
 
 function drawOthers() {
@@ -1049,8 +1456,9 @@ const stepCrumb = (name, number) => {
 function redraw() {
   const here = route(), system = state.system, main = document.getElementById("main");
   drawTree();
-  let crumbs = [[system?.directory?.split("/").at(-1) ?? "…", "#/"]], content;
+  let crumbs = [[PAGES.find(([page]) => page === here.page)[1], PAGES.find(([page]) => page === here.page)[2]]], content;
   if (!system) content = [h("div", { class: "empty" }, "Reading the run…")];
+  else if (here.kind === "runs") content = drawRuns();
   else if (here.kind === "run") { crumbs.push([`Run ${here.run}`, runPlace(here.run)]); content = drawRun(here.run); }
   else if (here.kind === "step") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], [`Step ${here.number}`, ""]); content = drawStep(here); }
   else if (here.kind === "group") { crumbs.push([`Run ${here.run}`, runPlace(here.run)], ...stepCrumb(here.run, here.number), [`Group #${here.number}`, ""]); content = drawGroup(here); }
@@ -1062,10 +1470,10 @@ function redraw() {
     crumbs.push([labels.episode ? `Episode ${labels.episode}` : "Episode", here.slot ? episodePlace(here.id) : ""]);
     if (here.slot) crumbs.push([`Rollout ${here.slot}`, ""]);
     content = drawEpisode(here);
-  } else if (here.kind === "policy") { crumbs.push([`Policy ${here.name}`, ""]); content = drawPolicy(here.name); }
-  else if (here.kind === "policies") { crumbs.push(["Policies", policiesPlace(false)]); if (here.sample) crumbs.push(["with the sample fixture", ""]); content = drawPolicies(here); }
-  else if (here.kind === "system") { crumbs.push(["Machine, engines and ledger", ""]); content = drawSystem(); }
-  else content = drawOthers();
+  } else if (here.kind === "outside") { crumbs.push(["Episodes outside a run", ""]); content = drawOthers(); }
+  else if (here.kind === "policy") { crumbs.push([`Policy ${here.name}`, ""]); content = drawPolicy(here.name); }
+  else if (here.kind === "policies") { if (here.sample) crumbs.push(["Sample fixture", ""]); content = drawPolicies(here); }
+  else content = drawStatistics(here);
   drawBar(crumbs);
   const scroll = main.scrollTop, across = main.querySelector(".dag-frame")?.scrollLeft;
   const kept = new Map([...main.querySelectorAll(".turn")].map(each => [each.dataset.slot, each.querySelector(".sees pre")?.scrollTop]));
@@ -1078,6 +1486,8 @@ function redraw() {
     if (pre) pre.scrollTop = showing === state.showing ? kept.get(each.dataset.slot) ?? pre.scrollHeight : pre.scrollHeight;
   }
   state.showing = showing;
+  const section = state.scrollTo && document.getElementById(`section-${state.scrollTo}`);
+  if (section) { section.scrollIntoView({ block: "start" }); state.scrollTo = null; }
 }
 
 async function read(path) {
@@ -1094,6 +1504,7 @@ async function pull() {
     state.system = system; state.runs = runs;
     const here = route();
     if (here.kind === "group") state.group = await read(`api/groups/${encodeURIComponent(here.run)}/${here.number}`);
+    if (here.kind === "statistics") state.statistics = await read("api/statistics");
     if (here.kind === "policies") { state.lineage = await read(`api/policies${here.sample ? "?sample=1" : ""}`); state.lineageSample = here.sample; }
     if (here.kind === "episode") {
       const known = state.episode?.run_id === here.id ? state.episode : null;
@@ -1102,7 +1513,7 @@ async function pull() {
       else state.episode = more;
     }
     const drawn = JSON.stringify([location.hash, system.at > (state.drawnAt ?? 0) + 10 ? system.at : state.drawnAt, system.runs, system.policies,
-      system.channels.map(channel => channel.throughput.length), here.kind === "system" ? system.machine.now : 0, state.group, state.episode?.lines.length, state.episode?.state,
+      system.channels.map(channel => channel.throughput.length), here.kind === "statistics" ? [system.machine.now, { ...state.statistics, now: 0 }] : 0, state.group, state.episode?.lines.length, state.episode?.state,
       here.kind === "policies" ? { ...state.lineage, now: 0 } : 0]);
     if (drawn !== state.drawn) { state.drawn = drawn; state.drawnAt = system.at; redraw(); }
   } catch (error) {
@@ -1115,9 +1526,11 @@ async function pull() {
 addEventListener("hashchange", () => {
   const here = route();
   if (here.kind !== "episode" || here.id !== state.episode?.run_id) state.follow = true;  // (another of the same episode's rollouts keeps its turn)
+  state.scrollTo = here.section ?? null;
   state.drawn = ""; document.body.classList.remove("open"); redraw(); pull();
 });
 addEventListener("resize", () => redraw());
 document.getElementById("menu").onclick = () => document.body.classList.toggle("open");
+state.scrollTo = route().section ?? null;
 pull();
 setInterval(pull, 2500);

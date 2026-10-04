@@ -40,7 +40,7 @@ training_gib = 4                              # and to start a step
 
 ```bash
 uv run rollout train profile.toml minecraft_team.catalog:catalog --groups 100 --directory RUN  # --groups-per-step 4
-uv run rollout monitor RUN                     # the web page over the run: http://localhost:8765
+uv run rollout monitor RUN                     # the web page over RUN's ledger and its runs: http://localhost:8765
 uv run rollout report RUN minecraft_team.catalog:catalog --watch   # charts; posted to DISCORD_WEBHOOK_URL if set
 uv run rollout imitate profile.toml --directory RUN                  # a supervised step on solved, guided episodes
 uv run rollout tools minecraft_team.worlds:tools --directory DATA --port 8700   # a tool set on a machine of its own
@@ -107,7 +107,10 @@ store and the policies; the runner; the rollout jobs. A colocated trainer is wra
 Leaving the block stops all of it in reverse, also when starting fails half way. The training loop serves the
 policy's newest version on its channel when it starts.
 
-`rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it.
+`rollout train` writes the run's directory; `rollout monitor RUN` is a separate process that serves the page over it
+and over every other run sharing its ledger (`rollout monitor` also takes the ledger itself: a database's URL or a
+ledger's directory). `rollout train --monitor http://HOST:PORT` writes where that page serves into the run's start, so
+that a monitor on another machine asks it for the run's episodes ([monitor](../libraries/rollout-train/monitor.md)).
 
 ## Stopping
 

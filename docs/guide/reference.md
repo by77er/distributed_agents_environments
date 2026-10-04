@@ -2765,7 +2765,7 @@ A step did not produce weights: the policy is as it was, and a later step may su
 *function* · `libraries/rollout-train/src/rollout_train/loop.py`
 
 ```python
-async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None) -> None
+async def train(jobs: Jobs, catalog: Catalog, trainer: Trainer, policies: Policies, *, policy: str, channel: str, directory: Path, run: str = 'train', algorithm: Algorithm | None = None, groups: int = 100, groups_per_step: int = 4, episodes_at_once: int = 6, seed: int = 0, binding: RunBinding | None = None, curriculum: Curriculum | None = None, retention: Retention | None = None, started: Mapping[str, JsonValue] | None = None) -> None
 ```
 
 Train `policy` on `catalog` until `groups` more groups have been played (those a stopped loop left unplayed
@@ -2777,7 +2777,9 @@ the blob store. `algorithm` is `Grpo()` unless given. `episodes_at_once` caps th
 whatever groups they are of. `binding` says how the program's model slots and imports are
 served (by default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is
 one that has recorded nothing: the run's results are folded into it. `retention` says which versions keep their
-files (weights and trainer state) once a newer one is served (`Retention()` unless given).
+files (weights and trainer state) once a newer one is served (`Retention()` unless given). `started` is what the
+run's `starts` record says beside what the loop knows (the policy, this host, the time): where the run's directory
+is, where the monitor on its machine serves (`address`), and what profile started it, say.
 
 ### `Trained`
 
@@ -3317,17 +3319,26 @@ class System
 
 **Methods**
 
-- `def __init__(self, directory: Path, feed: FeedReader) -> None`
-- `async def snapshot(self) -> dict[str, Any]` — Where everything stands now: the runs' groups that are not done with and the ones that are, the
-  policies' versions, the jobs, what each channel serves and how fast, the machine, and what is kept.
+- `def __init__(self, directory: Path | None = None, feed: FeedReader | None = None, *, ledger: Ledger | None = None, client: httpx.Client | None = None) -> None` — Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
+  it), or over a `ledger` alone. `feed` reads the directory's feed (by default its `feed`). `client` asks the
+  monitors on other machines for their runs' episodes.
+- `@property def ledger(self) -> str` — Where the ledger is: its directory, or its database's URL.
+- `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
+  done with and the ones that are), the policies' versions, the jobs, what each channel serves and how fast,
+  the machine, and what is kept.
 - `async def lineage(self, sample: bool = False) -> dict[str, Any]` — The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
   With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
   beside the ledger.
-- `async def group(self, run: str, number: int) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
+- `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
+  throughput from its feed, and the machine's measurements.
+- `async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
   its step and the version it made, and its outcome.
-- `async def episode(self, run_id: str, after: int = 0) -> dict[str, Any]` — One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
+- `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the
+  monitors elsewhere serve), summarised, newest first.
+- `async def episode(self, run_id: str, after: int = 0, relayed: bool = False) -> dict[str, Any]` — One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
   replies and tool calls from the events the job kept), from which its rollouts (one per model slot) are
-  drawn; what it reported when it ended; and where it sits: its job, its group and its labels.
+  drawn; what it reported when it ended; and where it sits: its job, its group and its labels. An episode of a
+  run on another machine is asked of the monitor there.
 
 ## `rollout_train.testing`
 

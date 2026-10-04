@@ -66,6 +66,9 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_its_log_and_its_feed_ha
     ]
     (run,) = system["runs"]
     assert run["run"] == "train" and run["fence"] == 1 and run["decided"] == 3 and run["open"] == []
+    # The loop wrote down where it ran; its directory is the one opened, whose logs and feed are read.
+    assert run["starts"] == 1 and run["policy"] == "words" and run["host"] and run["started"] <= system["at"]
+    assert run["episodes_at"] == "here" and run["state"] == "running" and run["job"]["episodes"] == 12
     assert [line["group"] for line in run["done"]] == [1, 2, 3]
     trained = [line for line in run["done"] if line["update"]]
     assert trained  # (the policy says yes and no in turn: some group has something to compare)

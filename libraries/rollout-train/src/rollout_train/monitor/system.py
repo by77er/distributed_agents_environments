@@ -1,16 +1,20 @@
-"""Where a run stands, read from its directory: what the monitor's system view shows.
+"""Where every run of a ledger stands: what the monitor shows.
 
-A run's directory, as an open profile lays it out (`rollout_train.layout`), holds everything the run knows: the
-ledger (what the training loop decided and what happened, the policies' versions, the fences), the jobs' logs (what
-was asked for, the episodes that ended, what was acknowledged) and the feed (what is happening now). `System` reads
-them and says where everything stands. It asks nothing of the run's process: it says the same whether that process
-is alive or not, and what it says of a group is what a loop that started now would find.
+A ledger (`rollout_train.ledger`) may be shared by many runs. It holds what each training loop decided and what
+happened (`rollout_train.record`), where and when each run was started, the policies' versions and the fences. Each
+run keeps the rest in its own directory, as an open profile lays it out (`rollout_train.layout`): the jobs' logs (what
+was asked for, the episodes that ended, what was acknowledged), the feed (what is happening now) and the episodes'
+events. A run's `starts` record says where its directory is and where the monitor on its machine serves: `System`
+reads the directory where it is on this machine, asks that monitor otherwise (`System._source` decides which), and
+else shows what the ledger alone has. It asks nothing of any run's process: it says the same whether that process is
+alive or not, and what it says of a group is what a loop that started now would find.
 """
 
 import asyncio
 import json
 import lzma
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -19,18 +23,21 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import quote
 
+import httpx
 from pydantic import JsonValue
 
 from rollout.contracts import BlobReference, Message, RunEvent, RunEventType
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.layout import BLOBS, JOBS, PROCESSES
-from rollout_train.ledger import FileLedger, of_run, present
+from rollout_train.layout import BLOBS, FEED, JOBS, PROCESSES
+from rollout_train.ledger import FileLedger, Ledger, of_run, present
 from rollout_train.monitor.feed import Appended, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
+from rollout_train.monitor.statistics import newest, statistics
 from rollout_train.policies import Manifest, Version, named, parsed, policies_in, versions_in
 from rollout_train.policies import scope as policy_scope
-from rollout_train.record import FAILURES, GROUPS, RESULTS, STEPS, Result, runs_in, table
+from rollout_train.record import FAILURES, GROUPS, RESULTS, STARTS, STEPS, Result, named_runs, table
 from rollout_train.record import scope as run_scope
 from rollout_train.rollouts.episodes import Record
 from rollout_train.rollouts.jobs import ACKNOWLEDGED, EPISODES, INTERRUPTED, TICKETS
@@ -58,63 +65,149 @@ ARCHIVED = 8
 SHOWN = 240
 """Measurements of each kind in a snapshot: the newest."""
 
+RUNNING, IDLE, GONE = "running", "idle", "ended"
+"""A run's state, by when it last wrote anything this reads (its records in the ledger, and its jobs' logs and feed
+where those can be read): within `QUIET` seconds it is running, within `SILENT` idle, and after that ended. No process
+is asked: a run may be on any machine."""
+QUIET = 20 * 60
+SILENT = 3 * 3600
+FRESH = 5.0
+"""Seconds what a monitor elsewhere said is kept before it is asked again."""
+UNANSWERED = 30.0
+"""Seconds a monitor elsewhere that did not answer is left before it is asked again."""
+RELAYED = "x-rollout-monitor-relayed"
+"""A header on what one monitor asks another: the one asked answers from its own machine only (so two monitors that
+each take a run to be the other's never ask each other in turn)."""
+
 
 class System:
-    def __init__(self, directory: Path, feed: FeedReader) -> None:
-        self.directory = directory
-        self.feed = feed
-        self.machine = Machine(directory)
-        self._ledger = of_run(directory)
-        self._jobs: dict[str, _JobLog] = {}
-        self._reading = threading.Lock()
-        """Held while the jobs' logs are read: requests are answered in threads, and two must not read at once."""
-        self._blobs = FileBlobStore(directory / BLOBS)
+    def __init__(
+        self,
+        directory: Path | None = None,
+        feed: FeedReader | None = None,
+        *,
+        ledger: Ledger | None = None,
+        client: httpx.Client | None = None,
+    ) -> None:
+        """Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
+        it), or over a `ledger` alone. `feed` reads the directory's feed (by default its `feed`). `client` asks the
+        monitors on other machines for their runs' episodes."""
+        if directory is None and ledger is None:
+            raise ValueError("a run's directory or a ledger")
+        self.directory = directory.resolve() if directory is not None else None
+        self._ledger = ledger if ledger is not None else of_run(cast(Path, self.directory))
+        self.machine = Machine(self.directory or Path.home())
+        self.host = socket.gethostname()
+        self._client = client or httpx.Client(timeout=2.0, headers={RELAYED: "1"})
+        self._places: dict[Path, _Place] = {}
+        """The runs' directories on this machine, as they are read."""
+        if self.directory is not None:
+            self._places[self.directory] = _Place(self.directory, feed)
+        self._remotes: dict[str, _Remote] = {}
+        """The monitors elsewhere that runs' starts name, by address."""
+        self._sources: dict[str, _Place | _Remote | None] = {}
+        """Where each run's episodes are, as it was last found."""
         self._archive: dict[str, list[dict[str, Any]]] = {}
         """Episodes read back from their events, the newest few."""
 
-    async def snapshot(self) -> dict[str, Any]:
-        """Where everything stands now: the runs' groups that are not done with and the ones that are, the
-        policies' versions, the jobs, what each channel serves and how fast, the machine, and what is kept."""
+    @property
+    def ledger(self) -> str:
+        """Where the ledger is: its directory, or its database's URL."""
+        if isinstance(self._ledger, FileLedger):
+            return str(self._ledger.directory)
+        return str(getattr(self._ledger, "url", type(self._ledger).__name__))
+
+    def _source(self, run: str, starts: Mapping[str, Any], relayed: bool = False) -> "_Place | _Remote | None":
+        """Where a run's episodes are (its jobs' logs, its feed, its episodes' events): the one place that decides.
+
+        - its directory, where its newest start says, if that is on this machine; for a run that says nothing, the
+          directory this was opened on, if the run is its (its job's log is there, or it is named after it);
+        - else the monitor at the address its newest start names, which serves its machine's runs (unless this was
+          asked by another monitor: then nothing more is asked of others);
+        - else nowhere this can read: what is shown of the run is what the ledger has."""
+        latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
+        if latest.get("directory"):
+            where: Path | None = Path(str(latest["directory"])).expanduser().resolve()
+        elif self.directory is not None and ((self.directory / JOBS / run).is_dir() or run == self.directory.name):
+            where = self.directory
+        else:
+            where = None
+        found: _Place | _Remote | None = None
+        if where is not None and where.is_dir():
+            found = self._places.setdefault(where, _Place(where))
+        elif latest.get("address") and not relayed:
+            address = str(latest["address"]).rstrip("/")
+            found = self._remotes.setdefault(address, _Remote(address, self._client))
+        self._sources[run] = found
+        return found
+
+    async def snapshot(self, relayed: bool = False) -> dict[str, Any]:
+        """Where everything stands now: every run (where it is and whether it is running; its groups that are not
+        done with and the ones that are), the policies' versions, the jobs, what each channel serves and how fast,
+        the machine, and what is kept."""
         tables: dict[str, dict[str, JsonValue]] = {}
         fences: dict[str, int] = {}
-        runs: list[str] = []
         policies: list[dict[str, Any]] = []
         versions: list[Version] = []
         if await asyncio.to_thread(present, self._ledger):
             fences = await self._ledger.fences()
-            tables = {name: await self._ledger.read(name) for name in await self._ledger.tables()}
-            runs = await runs_in(self._ledger)
+            tables = await self._tables()
             for policy in await policies_in(self._ledger):
                 kept = await versions_in(self._ledger, policy)
                 versions += kept
                 policies.append(_policy(policy, kept, fences.get(policy_scope(policy))))
-        return await asyncio.to_thread(self._assembled, tables, fences, runs, policies, versions)
+        return await asyncio.to_thread(self._assembled, tables, fences, policies, versions, relayed)
 
     async def lineage(self, sample: bool = False) -> dict[str, Any]:
         """The policies as a graph, with what trains, serves and evaluates them (`rollout_train.monitor.lineage`).
         With `sample`, the fixture of the tables proposed for distillation, trainers, workers and evaluations is read
         beside the ledger."""
-        tables: dict[str, dict[str, JsonValue]] = {}
-        if await asyncio.to_thread(self._ledger.directory.exists):
-            tables = {name: await self._ledger.read(name) for name in await self._ledger.tables()}
-        notes = await asyncio.to_thread(self.feed.job)
-        return await asyncio.to_thread(lineage, tables, notes, sample=sample)
+        tables = await self._tables()
+        notes = await asyncio.to_thread(self._notes, tables)
+        every = [note for each in notes.values() for note in each]
+        return await asyncio.to_thread(lineage, tables, every, sample=sample)
 
-    async def group(self, run: str, number: int) -> dict[str, Any] | None:
+    async def statistics(self) -> dict[str, Any]:
+        """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
+        throughput from its feed, and the machine's measurements."""
+        tables = await self._tables()
+        notes = await asyncio.to_thread(self._notes, tables)
+        figures = await asyncio.to_thread(statistics, tables, notes)
+        return {**figures, "machine": await asyncio.to_thread(self.machine.shown)}
+
+    async def _tables(self) -> dict[str, dict[str, JsonValue]]:
+        """Every table of the ledger, by name (none where there is no ledger: reading makes none)."""
+        if not await asyncio.to_thread(present, self._ledger):
+            return {}
+        return {name: await self._ledger.read(name) for name in await self._ledger.tables()}
+
+    def _notes(self, tables: Mapping[str, Mapping[str, JsonValue]]) -> dict[str, list[dict[str, Any]]]:
+        """What each run's job said in its feed, by run (for the runs whose directory is on this machine)."""
+        notes: dict[str, list[dict[str, Any]]] = {}
+        for run in named_runs(tables):
+            found = self._source(run, tables.get(table(run, STARTS), {}), relayed=True)
+            if isinstance(found, _Place):
+                notes[run] = found.feed.job()
+        return notes
+
+    async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
         its step and the version it made, and its outcome."""
         if not await asyncio.to_thread(present, self._ledger):
             return None
-        tables = {name: await self._ledger.read(table(run, name)) for name in RUN_TABLES}
+        tables = {name: await self._ledger.read(table(run, name)) for name in (*RUN_TABLES, STARTS)}
         record: Any = tables[GROUPS].get(str(number))
         if record is None:
             return None
+        found = await asyncio.to_thread(self._source, run, tables[STARTS], relayed)
+        if isinstance(found, _Remote) and (answer := await asyncio.to_thread(found.group, run, number)) is not None:
+            return answer | {"episodes_at": found.address}
         versions = {
             version.name: version
             for policy in await policies_in(self._ledger)
             for version in await versions_in(self._ledger, policy)
         }
-        return await asyncio.to_thread(self._group, run, str(number), record, tables, versions)
+        return await asyncio.to_thread(self._group, run, str(number), record, tables, versions, found)
 
     def _group(
         self,
@@ -123,15 +216,18 @@ class System:
         record: Mapping[str, Any],
         tables: Mapping[str, Mapping[str, JsonValue]],
         versions: Mapping[str, Version],
+        found: "_Place | _Remote | None",
     ) -> dict[str, Any]:
-        jobs = self._job_logs()
-        group = _group(number, record, tables, versions, jobs.get(run), self.feed.runs())
+        place = found if isinstance(found, _Place) else None
+        job, in_feed = (place.jobs().get(run), place.feed.runs()) if place else (None, [])
+        group = _group(number, record, tables, versions, job, in_feed)
         step: Any = group["step"]
         made = versions.get(str(step.get("makes"))) if step else None
         result: Any = tables[RESULTS].get(number)
         return {
             **group,
             "run": run,
+            "episodes_at": "here" if place else found.address if isinstance(found, _Remote) else None,
             "parameters": record.get("parameters"),
             "outcome": _done(number, result, record, step, made, group["error"])
             if group["stage"] == DONE and result
@@ -140,15 +236,28 @@ class System:
             "version": _policy(made.policy, [made], None)["versions"][0] if made else None,
         }
 
-    async def episode(self, run_id: str, after: int = 0) -> dict[str, Any]:
+    def feeds(self, relayed: bool = False) -> list[dict[str, Any]]:
+        """Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the
+        monitors elsewhere serve), summarised, newest first."""
+        found = [each for place in list(self._places.values()) for each in place.feed.runs()]
+        if not relayed:
+            found += [each for remote in list(self._remotes.values()) for each in remote.feeds()]
+        return sorted(found, key=lambda each: each["started"], reverse=True)
+
+    async def episode(self, run_id: str, after: int = 0, relayed: bool = False) -> dict[str, Any]:
         """One episode: the run's lines from index `after` on (from the feed, or, once the feed has let it go, its
         replies and tool calls from the events the job kept), from which its rollouts (one per model slot) are
-        drawn; what it reported when it ended; and where it sits: its job, its group and its labels."""
-        ended, summary = await asyncio.to_thread(self._found, run_id)
-        if summary is not None:
-            source, lines = "feed", await asyncio.to_thread(self.feed.lines, run_id, after)
-        elif ended is not None and ended.get("events"):
-            source, lines = "archive", (await self._archived(run_id, ended["events"]))[after:]
+        drawn; what it reported when it ended; and where it sits: its job, its group and its labels. An episode of a
+        run on another machine is asked of the monitor there."""
+        place, ended, summary = await asyncio.to_thread(self._found, run_id)
+        if place is None and not relayed:
+            for remote in list(self._remotes.values()):
+                if (answer := await asyncio.to_thread(remote.episode, run_id, after)) is not None:
+                    return answer
+        if place is not None and summary is not None:
+            source, lines = "feed", await asyncio.to_thread(place.feed.lines, run_id, after)
+        elif place is not None and ended is not None and ended.get("events"):
+            source, lines = "archive", (await self._archived(place, run_id, ended["events"]))[after:]
         else:
             source, lines = None, []
         labels: Any = (summary or {}).get("labels") or (ended or {}).get("labels") or {}
@@ -161,15 +270,20 @@ class System:
             "lines": lines,
         }
 
-    def _found(self, run_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """An episode in the jobs' logs (once it has ended) and in the feed (while the feed keeps it)."""
-        jobs = self._job_logs()
-        ended = next((each for job in jobs.values() for each in job.episodes if each["run_id"] == run_id), None)
-        return ended, next((run for run in self.feed.runs() if run["run_id"] == run_id), None)
+    def _found(self, run_id: str) -> tuple["_Place | None", dict[str, Any] | None, dict[str, Any] | None]:
+        """An episode in a job's log (once it has ended) and in a feed (while the feed keeps it), and the directory
+        on this machine that has it."""
+        for place in list(self._places.values()):
+            jobs = place.jobs()
+            ended = next((each for job in jobs.values() for each in job.episodes if each["run_id"] == run_id), None)
+            summary = next((run for run in place.feed.runs() if run["run_id"] == run_id), None)
+            if ended is not None or summary is not None:
+                return place, ended, summary
+        return None, None, None
 
-    async def _archived(self, run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
+    async def _archived(self, place: "_Place", run_id: str, events: Mapping[str, Any]) -> list[dict[str, Any]]:
         if run_id not in self._archive:
-            data = await self._blobs.read(BlobReference.model_validate(events))
+            data = await place.blobs.read(BlobReference.model_validate(events))
             lines = (await asyncio.to_thread(lzma.decompress, data)).decode().splitlines()
             self._archive[run_id] = _replayed([RunEvent.model_validate_json(line) for line in lines])
             while len(self._archive) > ARCHIVED:
@@ -180,62 +294,159 @@ class System:
         self,
         tables: Mapping[str, Mapping[str, JsonValue]],
         fences: Mapping[str, int],
-        runs: list[str],
         policies: list[dict[str, Any]],
         versions: list[Version],
+        relayed: bool,
     ) -> dict[str, Any]:
         made = {version.name: version for version in versions}
         blobs = {digest: size for policy in policies for digest, size in policy.pop("blobs")}  # (each kept once)
-        in_feed = self.feed.runs()
-        jobs = self._job_logs()
+        now = time.time()
+        runs: list[dict[str, Any]] = []
+        for run in named_runs(tables):
+            starts: Any = tables.get(table(run, STARTS), {})
+            found = self._source(run, starts, relayed)
+            place = found if isinstance(found, _Place) else None
+            listed = _run(
+                run,
+                {name: tables.get(table(run, name), {}) for name in RUN_TABLES},
+                fences.get(run_scope(run)),
+                made,
+                place.jobs().get(run) if place else None,
+                place.feed.runs() if place else [],
+            )
+            runs.append(listed | self._read(run, starts, found, listed["wrote"], now))
+        rank = {RUNNING: 0, IDLE: 1, GONE: 2}
+        runs.sort(key=lambda run: (rank[run["state"]], -(run["written"] or 0.0), run["run"]))
+        read = list(self._places.values())
         return {
-            "at": round(time.time(), 1),
-            "name": self.directory.name,
-            "directory": str(self.directory),
-            "written": self._written(in_feed),
-            "processes": _processes(self.directory / PROCESSES),
-            "runs": [
-                _run(
-                    run,
-                    {name: tables.get(table(run, name), {}) for name in RUN_TABLES},
-                    fences.get(run_scope(run)),
-                    made,
-                    jobs.get(run),
-                    in_feed,
-                )
-                for run in runs
-            ],
+            "at": round(now, 1),
+            "name": self.directory.name if self.directory else self.ledger,
+            "directory": str(self.directory) if self.directory else None,
+            "ledger_at": self.ledger,
+            "host": self.host,
+            "written": newest(run["written"] for run in runs),
+            "processes": _processes(self.directory / PROCESSES) if self.directory else None,
+            "runs": runs,
             "policies": policies,
-            "jobs": [job.counts() for job in jobs.values()],
-            "channels": _channels(self.feed.job()),
+            "jobs": [
+                job.counts() | {"directory": str(place.directory)} for place in read for job in place.jobs().values()
+            ],
+            "channels": [
+                channel | {"directory": str(place.directory)}
+                for place in read
+                for channel in _channels(place.feed.job())
+            ],
             "ledger": {"fences": dict(fences), "tables": {name: len(records) for name, records in tables.items()}},
             "machine": self.machine.shown(),
             "kept": {
                 "versions": sum(blobs.values()),
-                "episodes": sum(job.kept for job in jobs.values()),
+                "episodes": sum(job.kept for place in read for job in place.jobs().values()),
             },
         }
 
-    def _job_logs(self) -> dict[str, "_JobLog"]:
+    def _read(
+        self, run: str, starts: Mapping[str, Any], found: "_Place | _Remote | None", wrote: float | None, now: float
+    ) -> dict[str, Any]:
+        """What a run's start says (where it is, what started it) and what its episodes' place adds: its groups in
+        flight with their episodes, its job and its engines, when it last wrote, and so whether it is running."""
+        latest: Mapping[str, Any] = starts[max(starts, key=int)] if starts else {}
+        added: dict[str, Any] = {"channels": [], "job": None}
+        written = newest([wrote, latest.get("started")])
+        if isinstance(found, _Place):
+            jobs = found.jobs()
+            added = {"channels": _channels(found.feed.job()), "job": jobs[run].counts() if run in jobs else None}
+            written = newest([written, found.written()])
+        elif isinstance(found, _Remote) and (there := found.run(run)) is not None:
+            added = {key: there[key] for key in ("open", "done", "channels", "job") if key in there}
+            written = newest([written, there.get("written")])
+        quiet = now - written if written is not None else float("inf")
+        return {
+            **added,
+            "state": RUNNING if quiet < QUIET else IDLE if quiet < SILENT else GONE,
+            "host": latest.get("host"),
+            "address": latest.get("address"),
+            "directory": latest.get("directory") or (str(found.directory) if isinstance(found, _Place) else None),
+            "episodes_at": "here" if isinstance(found, _Place) else found.address if found else None,
+            "reached": found.reached if isinstance(found, _Remote) else None,
+            "profile": latest.get("profile"),
+            "policy": latest.get("policy"),
+            "started": latest.get("started"),
+            "starts": len(starts),
+            "written": written,
+        }
+
+
+class _Place:
+    """A run's directory on this machine, as it is read: its jobs' logs, its feed and its blobs."""
+
+    def __init__(self, directory: Path, feed: FeedReader | None = None) -> None:
+        self.directory = directory
+        self.feed = feed if feed is not None else FeedReader(directory / FEED)
+        self.blobs = FileBlobStore(directory / BLOBS)
+        self._jobs: dict[str, _JobLog] = {}
+        self._reading = threading.Lock()
+        """Held while the jobs' logs are read: requests are answered in threads, and two must not read at once."""
+
+    def jobs(self) -> dict[str, "_JobLog"]:
+        """The jobs' logs, each read up to its end, by job (a run's job is named after the run)."""
         with self._reading:
-            return self._refreshed()
+            directory = self.directory / JOBS
+            for path in sorted(directory.iterdir()) if directory.is_dir() else []:
+                if path.is_dir() and path.name not in self._jobs:
+                    self._jobs[path.name] = _JobLog(path)
+            for job in self._jobs.values():
+                job.refresh()
+            return dict(self._jobs)
 
-    def _refreshed(self) -> dict[str, "_JobLog"]:
-        directory = self.directory / JOBS
-        for path in sorted(directory.iterdir()) if directory.is_dir() else []:
-            if path.is_dir() and path.name not in self._jobs:
-                self._jobs[path.name] = _JobLog(path)
-        for job in self._jobs.values():
-            job.refresh()
-        return self._jobs
+    def written(self) -> float | None:
+        """When anything this reads here was last written: a job's log, or the feed."""
+        times: list[Any] = [job.written for job in self.jobs().values()]
+        times += [run["updated"] for run in self.feed.runs()]
+        job = self.feed.directory / "_job.jsonl"
+        times += [job.stat().st_mtime] if job.exists() else []
+        return newest(each for each in times if each)
 
-    def _written(self, in_feed: list[dict[str, Any]]) -> float | None:
-        """When the run last wrote anything this reads."""
-        files = self._ledger.directory.rglob("*.jsonl") if isinstance(self._ledger, FileLedger) else ()
-        times = [path.stat().st_mtime for path in files]  # (a ledger in a database: its jobs and feed say when)
-        times += [job.written for job in self._jobs.values()]
-        times += [run["updated"] for run in in_feed]
-        return round(max(times), 1) if times else None
+
+class _Remote:
+    """A run's episodes on another machine, as the monitor there serves them (this same page's `/api/system`,
+    `/api/groups/...`, `/api/episodes/...` and `/api/runs`), asked with the `RELAYED` header. What it says is kept for
+    `FRESH` seconds; a monitor that does not answer is taken to have nothing, and left for `UNANSWERED` seconds."""
+
+    def __init__(self, address: str, client: httpx.Client) -> None:
+        self.address = address
+        self.reached: bool | None = None
+        """Whether it answered when last asked (None: not asked yet)."""
+        self._client = client
+        self._kept: dict[str, tuple[float, Any]] = {}
+
+    def _get(self, path: str, keep: float = 0.0) -> Any:
+        kept = self._kept.get(path)
+        if kept is not None and time.time() - kept[0] < (keep if self.reached else max(keep, UNANSWERED)):
+            return kept[1]
+        try:
+            answer = self._client.get(self.address + path, headers={RELAYED: "1"})
+            found = answer.json() if answer.status_code == 200 else None
+            self.reached = True
+        except (httpx.HTTPError, ValueError):
+            found, self.reached = None, False
+        self._kept[path] = (time.time(), found)
+        return found
+
+    def run(self, name: str) -> dict[str, Any] | None:
+        """The run as the monitor there has it: its groups in flight with their episodes, its job and engines."""
+        system: Any = self._get("/api/system", FRESH)
+        return next((run for run in system["runs"] if run["run"] == name), None) if system else None
+
+    def group(self, run: str, number: int) -> dict[str, Any] | None:
+        return self._get(f"/api/groups/{quote(run, safe='')}/{number}")
+
+    def episode(self, run_id: str, after: int) -> dict[str, Any] | None:
+        """The episode, if the monitor there has it."""
+        found: Any = self._get(f"/api/episodes/{quote(run_id, safe='')}?after={after}")
+        return found if found and found.get("source") else None
+
+    def feeds(self) -> list[dict[str, Any]]:
+        return self._get("/api/runs", FRESH) or []
 
 
 def _run(
@@ -297,6 +508,12 @@ def _run(
     return {
         "run": run,
         "fence": fence,
+        "wrote": newest(
+            [group.get("decided") for group in groups.values()]
+            + [result.get("time") for result in results.values()]
+            + [step["decided"] for step in listed]
+            + [versions[step["makes"]].made for step in listed if step["makes"] in versions]
+        ),
         "decided": len(groups),
         "open": [entry for entry in entries if entry["stage"] != DONE],
         "done": done,
@@ -506,12 +723,13 @@ def _processes(record: Path) -> dict[str, Any] | None:
         owner, processes = int(noted["owner"]), dict(noted["processes"])
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    started = [{"pid": int(pid), "name": str(name), "alive": _alive(int(pid))} for pid, name in processes.items()]
+    return {"owner": owner, "alive": _alive(owner), "started": started}
 
-    def alive(pid: int) -> bool:
-        return Path(f"/proc/{pid}").exists()
 
-    started = [{"pid": int(pid), "name": str(name), "alive": alive(int(pid))} for pid, name in processes.items()]
-    return {"owner": owner, "alive": alive(owner), "started": started}
+def _alive(pid: int) -> bool:
+    """Whether a process is there, on this host."""
+    return Path(f"/proc/{pid}").exists()
 
 
 class _JobLog:

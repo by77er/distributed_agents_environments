@@ -2,13 +2,14 @@
 
 - `RunFeed`: hooks for a runner and for rollout jobs that write every run's events and model samples, and what the
   job did, to a directory.
-- `System`: a run's directory read as the run is laid out: where it stands, its steps (each with the groups that went
-  into it), each group (its episodes, its step, its outcome) and each episode (what it reported, and its rollouts: one
-  per agent, each a trajectory to train on).
-- `create_app(directory)`: a web page over a run's directory, organised the same way: the run, its steps, their
-  groups, the groups' episodes and each episode's rollouts, turn by turn, beside the policies (each alone, and all of
-  them as a graph: `rollout_train.monitor.lineage`) and the machine.
-  `rollout monitor DIRECTORY` serves it.
+- `System`: a ledger read with every run in it: where each run stands and where its episodes are read (its
+  directory on this machine, or the monitor on its own), its steps (each with the groups that went into it), each
+  group (its episodes, its step, its outcome), each episode (what it reported, and its rollouts: one per agent, each
+  a trajectory to train on), the policies as a graph (`rollout_train.monitor.lineage`) and statistics across the runs
+  (`rollout_train.monitor.statistics`).
+- `create_app(where)`: a web page over a ledger (or a run's directory and its ledger), in three pages: the runs,
+  each organised the same way, down to each episode's rollouts, turn by turn; the policies; and statistics, with the
+  machine. `rollout monitor WHERE` serves it.
 """
 
 from rollout_train.monitor.feed import FeedReader, RunFeed, plain

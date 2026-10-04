@@ -4,7 +4,7 @@ rollout train PROFILE CATALOG    the training loop: PROFILE is a TOML file (`rol
                                  environment's catalog as `module:name`
 rollout report RUN CATALOG       chart a run's progress and summarise it; post both to a Discord webhook
 rollout imitate PROFILE          a supervised step on the solved episodes of the run's log, without their guidance
-rollout monitor RUN              the web page over a run's directory: where it stands, and every episode
+rollout monitor WHERE            the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO      copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY            serve an environment's tool set over HTTP: FACTORY is `module:name`
 
@@ -172,8 +172,8 @@ def main() -> None:
     imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
     imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
     imitating.add_argument("--seed", type=int, default=0)
-    monitoring = commands.add_parser("monitor", help="serve the monitor's page over a run's directory")
-    monitoring.add_argument("directory", type=Path)
+    monitoring = commands.add_parser("monitor", help="serve the monitor's page over a ledger and every run in it")
+    monitoring.add_argument("where", help="a run's directory, a ledger's directory, or a database's URL")
     monitoring.add_argument("--host", default="127.0.0.1")
     monitoring.add_argument("--port", type=int, default=8765)
     ledgers = commands.add_parser("ledger", help="work with ledgers")
@@ -216,7 +216,7 @@ def main() -> None:
         if arguments.command == "monitor":
             from rollout_train.monitor.app import create_app
 
-            app = create_app(arguments.directory)
+            app = create_app(arguments.where)
         else:
             from rollout.harness.remote import serve
 
