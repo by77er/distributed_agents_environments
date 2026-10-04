@@ -322,7 +322,7 @@ async def test_a_run_evaluates_the_checkpoints_its_schedule_names_between_their_
             spans = [span for each in episode.trajectories.values() for part in each.segments for span in part.spans]
             assert spans and {span.version for span in spans} == {checkpoint.depth}
         who: Any = (await ledger.read(subject_table("words-v1", said["run"], "subject")))["subject"]
-        assert who["checkpoint"] == checkpoint.id and who["episodes"] == 2
+        assert (who["checkpoint"], who["episodes"], who["asked_by"]) == (checkpoint.id, 2, "by its run's schedule")
         start: Any = next(iter((await ledger.read(table(said["run"], STARTS))).values()))
         assert (start["kind"], start["by"], start["from"]) == (EVAL, "train", None)
     newest = max(int(key) for key in evaluated)

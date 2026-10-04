@@ -198,7 +198,7 @@ async def train(
             evals.catalog, checkpoints, run=eval_run, suite=evals.suite, subject=checkpoint.id, base=base,
             channel=channel, directory=directory, publish=None, episodes=evals.episodes, binding=evals.binding,
             started={"from": None, "by": run, "step": step},  # (whether its files are kept is the run's retention's)
-            asked_by=f"the run, every {evals.every} steps", hooks=hooks,
+            asked_by="by its run's schedule", hooks=hooks,
         )  # fmt: skip
         summary: dict[str, JsonValue] = {"played": said["played"], "solved": said["solved"], "reward": said["reward"]}
         record: dict[str, JsonValue] = {"suite": evals.suite.name, "checkpoint": checkpoint.id, "run": eval_run}
