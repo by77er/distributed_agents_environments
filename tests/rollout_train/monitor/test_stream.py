@@ -72,6 +72,29 @@ async def test_a_topic_is_read_once_a_beat_whoever_asks_and_its_version_changes_
     assert (await hub.read("group/train/9")).version == MISSING
 
 
+async def test_the_ledger_is_read_once_within_a_reading_whatever_topics_read_it(tmp_path: Path) -> None:
+    ledger = await a_run(tmp_path)
+    system = System(ledger=ledger)
+    reads = 0
+    read_all = ledger.read_all
+
+    async def counted(*, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]:
+        nonlocal reads
+        reads += 1
+        return await read_all(leaving_out=leaving_out)
+
+    ledger.read_all = counted  # type: ignore[method-assign]
+    async with system.one_reading():
+        await asyncio.gather(system.snapshot(), system.evals(), system.lineage(), system.statistics())
+        assert reads == 1
+        system.read_afresh()  # (the monitor changed something itself: what it shows is read again)
+        await system.snapshot()
+        assert reads == 2
+    await system.snapshot()
+    await system.snapshot()
+    assert reads == 4  # (outside a reading, each read reads the ledger)
+
+
 async def test_a_watcher_hears_each_version_at_once_and_then_each_change(tmp_path: Path) -> None:
     ledger = await a_run(tmp_path)
     hub = Hub(System(tmp_path, FeedReader(tmp_path / FEED)), beat=0.05)

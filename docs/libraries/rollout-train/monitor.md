@@ -46,7 +46,8 @@ page draws each view from what it has read, and reads again only what the monito
   `environment/MODULE:NAME`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
   `group/RUN/N`, `episode/RUN_ID`. The
   monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives each reading a **checkpoint**, a hash
-  of what it says (leaving out when it was read).
+  of what it says (leaving out when it was read). Each beat it reads the ledger once for every topic watched
+  (`System.one_reading`; a database ledger in one query, `read_all`).
 - **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the checkpoint of each topic asked for at
   once, then a `checkpoint` event each time one changes. The page watches the topics of the place shown (always
   `system` and `feeds`; the launches on Runs and New run; a group, an episode, the statistics, the machines, the

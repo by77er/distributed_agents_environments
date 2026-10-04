@@ -75,6 +75,11 @@ class Ledger(Protocol):
         """The tables that have records, by name."""
         ...
 
+    async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]:
+        """Every table that has records, by name, each as `read` reads it; but the tables whose names hold
+        `leaving_out`."""
+        ...
+
     async def fences(self) -> dict[str, int]:
         """The newest fence of every scope that has been taken."""
         ...
@@ -118,6 +123,10 @@ class FileLedger:
 
     async def tables(self) -> list[str]:
         return await asyncio.to_thread(self._under_lock, self._tables)
+
+    async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]:
+        names = [name for name in await self.tables() if leaving_out is None or leaving_out not in name]
+        return {name: await self.read(name) for name in names}
 
     async def fences(self) -> dict[str, int]:
         return await asyncio.to_thread(self._under_lock, self._fences)

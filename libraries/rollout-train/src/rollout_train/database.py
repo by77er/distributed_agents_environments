@@ -198,6 +198,23 @@ class DatabaseLedger:
 
         return [str(name) for (name,) in await asyncio.to_thread(self.database.read, names)]
 
+    async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]:
+        def rows(connection: Connection) -> list[tuple[Any, ...]]:
+            if leaving_out is None:
+                query = "SELECT name, key, record FROM ledger_records ORDER BY name, position, key"
+                return fetch_all(connection, query)
+            query = (
+                "SELECT name, key, record FROM ledger_records WHERE name NOT LIKE :pattern ESCAPE '!' "
+                "ORDER BY name, position, key"
+            )
+            escaped = leaving_out.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            return fetch_all(connection, query, {"pattern": f"%{escaped}%"})
+
+        found: dict[str, dict[str, JsonValue]] = {}
+        for name, key, record in await asyncio.to_thread(self.database.read, rows):
+            found.setdefault(str(name), {})[str(key)] = json.loads(record)
+        return found
+
     async def fences(self) -> dict[str, int]:
         def rows(connection: Connection) -> list[tuple[Any, ...]]:
             return fetch_all(connection, "SELECT scope, number FROM ledger_fences ORDER BY scope")

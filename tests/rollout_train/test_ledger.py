@@ -176,6 +176,29 @@ async def test_a_runs_directory_says_where_its_ledger_is(tmp_path: Path) -> None
     assert present(found) and await found.read("runs/a/groups") == {"1": {"task": "t1"}}
 
 
+@pytest.mark.parametrize("kind", ["files", "database"])
+async def test_every_table_is_read_at_once_in_the_order_its_records_were_appended(
+    tmp_path: Path, kind: str, database: str | None
+) -> None:
+    from rollout_train.database import DatabaseLedger
+
+    ledger: Ledger = FileLedger(tmp_path / "files")
+    if kind == "database":
+        ledger = DatabaseLedger(database or f"sqlite:///{tmp_path / 'ledger.db'}")
+    elif database is not None:
+        pytest.skip("a ledger of files has no database")
+    fence = await ledger.take("runs/a")
+    for key in ("2", "1", "3"):
+        await ledger.append("runs/a/groups", key, {"group": key}, fence)
+    await ledger.append("runs/a/turns/r_1", "1", {"turn": 1}, fence)
+    await ledger.append("runs/a/name_with%", "1", {"odd": True}, fence)
+    every = await ledger.read_all()
+    assert every == {name: await ledger.read(name) for name in await ledger.tables()}
+    assert list(every["runs/a/groups"]) == ["2", "1", "3"]
+    assert set(await ledger.read_all(leaving_out="/turns/")) == {"runs/a/groups", "runs/a/name_with%"}
+    assert set(await ledger.read_all(leaving_out="_with%")) == {"runs/a/groups", "runs/a/turns/r_1"}
+
+
 async def test_a_ledger_moves_from_files_to_sqlite_to_postgres_whole(tmp_path: Path, postgres: str) -> None:
     from rollout_train.database import DatabaseLedger, copy
 

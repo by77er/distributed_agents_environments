@@ -24,7 +24,8 @@ A topic is a thing the page shows, by name:
 `Hub.read` answers a topic with its body (JSON) and its version, read again only when the last reading is older than
 a beat; the JSON endpoints answer from it (and a request that names the version it has is told nothing changed).
 `Hub.watch` is a stream of each watched topic's version: once at once, then whenever it changes. While anyone watches,
-the hub reads the watched topics every beat; nobody watching, it reads nothing.
+the hub reads the watched topics every beat, reading the ledger once for all of them (`System.one_reading`); nobody
+watching, it reads nothing.
 """
 
 import asyncio
@@ -159,6 +160,7 @@ class Hub:
     def forget(self) -> None:
         """Read every topic afresh, at once (after the monitor itself changed something: a name)."""
         self._readings.clear()
+        self.system.read_afresh()
         self._wake.set()
 
     async def watch(self, topics: Collection[str]) -> AsyncGenerator[tuple[str, str]]:
@@ -185,17 +187,18 @@ class Hub:
                 self._wake.clear()
                 await self._wake.wait()
                 continue
-            for topic in sorted(topics):
-                try:
-                    version = (await self.read(topic)).version
-                except Exception as error:  # (a topic that cannot be read now: said so, and read again next beat)
-                    version = f"error:{type(error).__name__}"
-                if told.get(topic) != version:
-                    if topic in told:
-                        for watched, queue in list(self._watchers):
-                            if topic in watched:
-                                queue.put_nowait((topic, version))
-                    told[topic] = version
+            async with self.system.one_reading():  # (the ledger read once for every topic)
+                for topic in sorted(topics):
+                    try:
+                        version = (await self.read(topic)).version
+                    except Exception as error:  # (a topic that cannot be read now: said so, and read again next beat)
+                        version = f"error:{type(error).__name__}"
+                    if told.get(topic) != version:
+                        if topic in told:
+                            for watched, queue in list(self._watchers):
+                                if topic in watched:
+                                    queue.put_nowait((topic, version))
+                        told[topic] = version
             for topic in set(told) - topics:
                 del told[topic]
             with contextlib.suppress(TimeoutError):

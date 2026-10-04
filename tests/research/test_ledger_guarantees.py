@@ -144,6 +144,9 @@ class Hooked:
     async def tables(self) -> list[str]:
         return await self.inner.tables()
 
+    async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]:
+        return await self.inner.read_all(leaving_out=leaving_out)
+
     async def fences(self) -> dict[str, int]:
         return await self.inner.fences()
 

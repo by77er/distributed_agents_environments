@@ -12,12 +12,13 @@ find.
 """
 
 import asyncio
+import contextlib
 import json
 import lzma
 import random
 import socket
 import time
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, cast
@@ -191,6 +192,8 @@ class System:
         """Episodes' records, as the page shows them, by run and key (`GROUP/EPISODE`): a record never changes."""
         self._environments: dict[str, Environment] = {}
         """The environments the suites' forms named, loaded once each."""
+        self._reading: dict[str, asyncio.Future[Any]] | None = None
+        """What was read within a reading (`one_reading`), by what it is."""
 
     @property
     def ledger(self) -> str:
@@ -233,8 +236,8 @@ class System:
         if await asyncio.to_thread(present, self._ledger):
             fences = await self._ledger.fences()
             tables = await self._tables()
-            checkpoints = await checkpoints_in(self._ledger)
-        called = await names(registry_of(self._ledger))
+            checkpoints = await self._checkpoints()
+        called = await self._names()
         beats = await self._beats()
         snapshot = await asyncio.to_thread(self._assembled, tables, fences, checkpoints, called, beats, relayed)
         store = desired_settings_of(self._ledger)
@@ -411,7 +414,7 @@ class System:
             str(each) for beat in await self._beats() if beat.about.get("kind") == LAUNCHER and alive(beat)
             for each in cast(list[Any], beat.about.get("environments") or [])
         }  # fmt: skip
-        return Read(await self._tables(), frozenset(offered), await names(registry_of(self._ledger)))
+        return Read(await self._tables(), frozenset(offered), await self._names())
 
     async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite:
         """Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,
@@ -575,7 +578,7 @@ class System:
         found = await self._checkpoint(checkpoint)
         if found is None:
             return None
-        tables, called = await self._tables(), await names(registry_of(self._ledger))
+        tables, called = await self._tables(), await self._names()
         return {"checkpoint": found, "evals": await asyncio.to_thread(evals_of, tables, found, called)}
 
     async def path(self, checkpoint: str) -> dict[str, Any] | None:
@@ -584,8 +587,8 @@ class System:
         found = await self._checkpoint(checkpoint)
         if found is None:
             return None
-        tables, called = await self._tables(), await names(registry_of(self._ledger))
-        made = {each.id: each for each in await checkpoints_in(self._ledger)}
+        tables, called = await self._tables(), await self._names()
+        made = {each.id: each for each in await self._checkpoints()}
         return await asyncio.to_thread(path_of, tables, made, found, called)
 
     async def eval_subjects(self) -> dict[str, Any]:
@@ -607,7 +610,7 @@ class System:
         """A checkpoint's id, by the id or the start of one that no other begins with."""
         if not await asyncio.to_thread(present, self._ledger):
             return None
-        ids = [each.id for each in await checkpoints_in(self._ledger)]
+        ids = [each.id for each in await self._checkpoints()]
         if reference in ids:
             return reference
         starting = [each for each in ids if each.startswith(reference)]
@@ -624,7 +627,7 @@ class System:
         subject that played it, with the version it played and how it did at each start) and every eval (its suite, the
         version it played, its checkpoint, how far it has got), newest first (`rollout_train.evals`)."""
         tables = await self._tables()
-        called = await names(registry_of(self._ledger))
+        called = await self._names()
         suites = _Reading(tables, [], called, time.time()).evaluations()
         for each in suites:
             current = next(version for version in each["versions"] if version["id"] == each["version"])
@@ -650,7 +653,7 @@ class System:
         tables = await self._tables()
         notes = _noted(await self._beats())
         every = [note for each in notes.values() for note in each]
-        called = await names(registry_of(self._ledger))
+        called = await self._names()
         return await asyncio.to_thread(lineage, tables, every, names=called)
 
     async def statistics(self) -> dict[str, Any]:
@@ -659,7 +662,7 @@ class System:
         tables = await self._tables()
         beats = await self._beats()
         figures = await asyncio.to_thread(statistics, tables, _noted(beats))
-        called = await names(registry_of(self._ledger))
+        called = await self._names()
         return {**figures, "names": {"runs": called["runs"]}}
 
     async def machines(self) -> dict[str, Any]:
@@ -681,20 +684,58 @@ class System:
             launches=await asked.all() if asked else [], serving=serving,
         )  # fmt: skip
 
+    @contextlib.asynccontextmanager
+    async def one_reading(self) -> AsyncGenerator[None]:
+        """Within the block, the ledger's tables, the registry's names, the checkpoints and the beats are read once,
+        whatever reads them (the hub reads every topic it watches so, once a beat)."""
+        self._reading = {}
+        try:
+            yield
+        finally:
+            self._reading = None
+
+    def read_afresh(self) -> None:
+        """Read the ledger again within a reading (after the monitor itself changed something)."""
+        if self._reading is not None:
+            self._reading.clear()
+
+    async def _once(self, what: str, read: Callable[[], Awaitable[Any]]) -> Any:
+        """What `read` reads, read once within a reading (`one_reading`), however many ask at the same time."""
+        if self._reading is None:
+            return await read()
+        if what not in self._reading:
+            self._reading[what] = asyncio.ensure_future(read())
+        return await self._reading[what]
+
     async def _beats(self) -> list[Beat]:
         """Every runner's newest heartbeat (none where there is no ledger: reading makes none)."""
-        presence = presence_of(self._ledger)
-        if presence is None or not await asyncio.to_thread(present, self._ledger):
-            return []
-        return await presence.beats()
+
+        async def read() -> list[Beat]:
+            presence = presence_of(self._ledger)
+            if presence is None or not await asyncio.to_thread(present, self._ledger):
+                return []
+            return await presence.beats()
+
+        return cast(list[Beat], await self._once("beats", read))
 
     async def _tables(self) -> dict[str, dict[str, JsonValue]]:
         """Every table of the ledger, by name (none where there is no ledger: reading makes none), but the gateway's
         tables of turns (`runs/RUN/turns/RUN_ID`), a row per turn, which nothing here reads."""
-        if not await asyncio.to_thread(present, self._ledger):
-            return {}
-        names = [name for name in await self._ledger.tables() if "/turns/" not in name]
-        return {name: await self._ledger.read(name) for name in names}
+
+        async def read() -> dict[str, dict[str, JsonValue]]:
+            if not await asyncio.to_thread(present, self._ledger):
+                return {}
+            return await self._ledger.read_all(leaving_out="/turns/")
+
+        return cast(dict[str, dict[str, JsonValue]], await self._once("tables", read))
+
+    async def _names(self) -> dict[str, Any]:
+        """What the registry names (`rollout_train.registry.names`)."""
+        return cast(dict[str, Any], await self._once("names", lambda: names(registry_of(self._ledger))))
+
+    async def _checkpoints(self) -> list[Checkpoint]:
+        """Every checkpoint, oldest first."""
+        return cast(list[Checkpoint], await self._once("checkpoints", lambda: checkpoints_in(self._ledger)))
 
     async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None:
         """One group: what was decided (the row and its start), its stage, its episodes with what each reported,
@@ -708,7 +749,7 @@ class System:
         found = await asyncio.to_thread(self._source, run, tables[STARTS], relayed)
         if isinstance(found, _Remote) and (answer := await asyncio.to_thread(found.group, run, number)) is not None:
             return answer | {"episodes_at": found.address}
-        checkpoints = {checkpoint.id: checkpoint for checkpoint in await checkpoints_in(self._ledger)}
+        checkpoints = {checkpoint.id: checkpoint for checkpoint in await self._checkpoints()}
         fences = await self._ledger.fences()
         return await asyncio.to_thread(self._group, run, str(number), record, tables, fences, checkpoints, found)
 

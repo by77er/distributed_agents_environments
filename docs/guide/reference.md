@@ -3355,6 +3355,7 @@ file was replaced.
 - `async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended` — `append`, saying what the table holds under `key` too.
 - `async def read(self, table: str) -> dict[str, JsonValue]`
 - `async def tables(self) -> list[str]`
+- `async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]`
 - `async def fences(self) -> dict[str, int]`
 
 ### `Files`
@@ -3440,6 +3441,8 @@ class Ledger(Protocol)
 - `async def read(self, table: str) -> dict[str, JsonValue]` — A table's records by key, in the order they were appended: the order their appends took effect in, whichever
   scopes made them.
 - `async def tables(self) -> list[str]` — The tables that have records, by name.
+- `async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]` — Every table that has records, by name, each as `read` reads it; but the tables whose names hold
+  `leaving_out`.
 - `async def fences(self) -> dict[str, int]` — The newest fence of every scope that has been taken.
 
 ### `make_dataset`
@@ -4947,6 +4950,9 @@ class System
   (`rollout_train.monitor.machines`): the runners and the episodes their claims hold, the sandbox pools and
   their leases, the engine hosts and how far behind what their run wants each engine is, the launchers and their
   launches going, and the gateways.
+- `async def one_reading(self) -> AsyncGenerator[None]` — Within the block, the ledger's tables, the registry's names, the checkpoints and the beats are read once,
+  whatever reads them (the hub reads every topic it watches so, once a beat).
+- `def read_afresh(self) -> None` — Read the ledger again within a reading (after the monitor itself changed something).
 - `async def group(self, run: str, number: int, relayed: bool = False) -> dict[str, Any] | None` — One group: what was decided (the row and its start), its stage, its episodes with what each reported,
   its step and the checkpoint it made, and its outcome.
 - `def feeds(self, relayed: bool = False) -> list[dict[str, Any]]` — Every episode in the feeds of the runs' directories on this machine (and, unless `relayed`, those the
