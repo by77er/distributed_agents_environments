@@ -19,7 +19,6 @@ from rollout.harness import (
     Observation,
     RunContext,
     Task,
-    WaitFor,
     rollout,
     tool,
 )
@@ -141,13 +140,13 @@ async def test_teardown_runs_and_score_does_not_after_a_hook_raised(task_class: 
 class Scripted(Task):
     """Returns scripted observations from `respond`."""
 
-    def __init__(self, responses: list[Observation | WaitFor]) -> None:
+    def __init__(self, responses: list[Observation]) -> None:
         self.responses = responses
 
     async def start(self, run: RunContext) -> Observation:
         return Observation("go")
 
-    async def respond(self, run: RunContext, reply: Message) -> Observation | WaitFor:
+    async def respond(self, run: RunContext, reply: Message) -> Observation:
         return self.responses.pop(0)
 
 
@@ -163,10 +162,9 @@ UNANSWERED_RESULT = Message(role=Role.TOOL, content=[ToolResultBlock(call_id="ot
         ("hi", Observation()),
         ("hi", Observation(UNANSWERED_RESULT)),
         (tool_call_reply(ToolCall(call_id="c1", name="t", arguments={})), End()),
-        (tool_call_reply(ToolCall(call_id="c1", name="t", arguments={})), WaitFor()),
     ],
 )
-async def test_invalid_observations_are_rejected(reply: str | Message, response: Observation | WaitFor) -> None:
+async def test_invalid_observations_are_rejected(reply: str | Message, response: Observation) -> None:
     task = Scripted([response])
     run, _ = local_run(task, [reply])
     with pytest.raises(InvalidObservation):

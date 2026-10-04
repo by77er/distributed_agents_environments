@@ -18,7 +18,6 @@ class RunEventType(StrEnum):
 
     # Lifecycle
     RUN_CREATED = "run.created"
-    RUN_SUSPENDED = "run.suspended"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
     RUN_CANCEL_REQUESTED = "run.cancel_requested"
@@ -31,9 +30,6 @@ class RunEventType(StrEnum):
     # Effects
     EFFECT_REQUESTED = "effect.requested"
     EFFECT_COMPLETED = "effect.completed"
-    # Conversations and messages
-    MESSAGE_RECEIVED = "message.received"
-    TURN_INTERRUPTED = "turn.interrupted"
     # Tools and sandboxes
     TOOLS_RESOLVED = "tools.resolved"
     SANDBOXES_ACQUIRED = "sandboxes.acquired"

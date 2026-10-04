@@ -9,14 +9,10 @@ from rollout.harness.observation import Observation
 
 @dataclass(frozen=True)
 class Turn:
-    """One step of the episode: a reply and the observation that answers it.
-
-    The start observation, and observations produced by `resume`, have no reply. A reply answered by a `WaitFor`
-    has no observation until the run resumes.
-    """
+    """One step of the episode: a reply and the observation that answers it. The start observation has no reply."""
 
     reply: Message | None
-    observation: Observation | None
+    observation: Observation
 
 
 class HistoryShape(StrEnum):
@@ -66,15 +62,14 @@ class History:
         for turn in turns:
             if turn.reply is not None:
                 messages.append(turn.reply)
-            if turn.observation is not None:
-                messages.extend(turn.observation.messages)
+            messages.extend(turn.observation.messages)
         return messages
 
 
 def _from_latest_observation(turns: list[Turn]) -> list[Turn]:
     for index in range(len(turns) - 1, -1, -1):
         observation = turns[index].observation
-        if observation is not None and observation.messages:
+        if observation.messages:
             turn = turns[index]
             # Tool results are only meaningful next to the reply whose calls they answer.
             answers_calls = any(message.role is Role.TOOL for message in observation.messages)

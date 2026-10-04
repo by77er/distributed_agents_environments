@@ -1,8 +1,7 @@
-"""What task hooks return: `Observation`, `End` and `WaitFor` (docs/guide/tasks.md)."""
+"""What task hooks return: `Observation` and `End` (docs/guide/tasks.md)."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import timedelta
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -58,15 +57,6 @@ class Observation:
 def End(reward: float | None = None, *, truncated: bool = False, info: Mapping[str, Any] | None = None) -> Observation:
     """A terminal observation."""
     return Observation(reward=reward, end=Ending.TRUNCATED if truncated else Ending.TERMINATED, info=info)
-
-
-@dataclass(frozen=True)
-class WaitFor:
-    """Suspend the run until a message of `kind` arrives or `timeout` passes."""
-
-    kind: str = "message"
-    timeout: timedelta | None = None
-    on_timeout: Observation = field(default_factory=lambda: End(truncated=True))
 
 
 class InvalidObservation(Exception):

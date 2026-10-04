@@ -1,23 +1,13 @@
-"""Runners, run specifications and deployments (docs/libraries/rollout/README.md#runner)."""
+"""Runners and run specifications (docs/libraries/rollout/README.md#runner)."""
 
-from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Mapping
 from enum import StrEnum
 from typing import Protocol, Self
 
 from pydantic import Field, JsonValue, model_validator
 
-from rollout.contracts import ContractModel, ModelEndpoint, RunEvent, RunFailureClass, new_message_id
+from rollout.contracts import ContractModel, ModelEndpoint, RunEvent, RunFailureClass
 from rollout.harness.agent import Agent
-from rollout.harness.conversations import (
-    Address,
-    ConversationKey,
-    DeliveryMode,
-    DeliveryPolicy,
-    Envelope,
-    Priority,
-)
 from rollout.harness.imports import ToolBinding
 from rollout.harness.program import AgentProgram, Program
 from rollout.harness.sandboxes import PoolBinding
@@ -88,20 +78,11 @@ class RunBinding(ContractModel):
     """Import name → how the tool set is served."""
     pools: Mapping[str, PoolBinding] = Field(default_factory=dict[str, PoolBinding])
     """Sandbox kind → the pool its sandboxes are acquired from."""
-    delivery: DeliveryPolicy = DeliveryPolicy()
 
 
 class RunSpecification(ContractModel):
     program: ProgramReference
     binding: RunBinding
-
-
-class Deployment(ContractModel):
-    """A named, addressable agent: conversations addressed to it start runs of its specification."""
-
-    name: str
-    """`{namespace}/{name}`, e.g. `acme/support-bot`."""
-    specification: RunSpecification
 
 
 class RunStatus(StrEnum):
@@ -148,20 +129,8 @@ class Runner(Protocol):
         """Release what the runner holds; it cannot be used afterwards."""
         ...
 
-    def deploy(self, deployment: Deployment) -> None:
-        """Register or replace a deployment; a conversation's next run uses the current version."""
-        ...
-
     def run(self, run_id: str) -> RunHandle:
         """The handle of a run; `KeyError` if the runner does not know it."""
-        ...
-
-    def conversation_of(self, run_id: str) -> ConversationKey | None:
-        """The conversation a run serves, if any."""
-        ...
-
-    def conversation_runs(self, deployment: str, key: str) -> Sequence[RunHandle]:
-        """The conversation's runs, oldest first."""
         ...
 
     async def start(
@@ -169,7 +138,6 @@ class Runner(Protocol):
         specification: RunSpecification,
         *,
         run_id: str | None = None,
-        conversation: ConversationKey | None = None,
         labels: Mapping[str, str] | None = None,
         lease: str | None = None,
     ) -> RunHandle:
@@ -177,92 +145,7 @@ class Runner(Protocol):
         episode's claim, say, so that they end with it."""
         ...
 
-    async def send(
-        self,
-        to: Address,
-        envelope: Envelope,
-        *,
-        priority: Priority = Priority.NORMAL,
-        idempotency_key: str | None = None,
-        sender: str | None = None,
-    ) -> str:
-        """Deliver a message and return its `message_id`; a message to a conversation starts its run when none
-        is live. A message sent again with the same `idempotency_key` is delivered once."""
-        ...
-
     async def cancel(self, run_id: str, *, reason: str) -> None: ...
-
-
-class RunNotLive(Exception):
-    """A message was addressed to a run that has ended."""
-
-
-class MessageRouter(ABC):
-    """`Runner.send`, and the hand-over between a conversation's runs, over the transport a runner supplies: where
-    its runs are, how a message reaches one, and where delivered messages are remembered.
-
-    A message is claimed (remembered as delivered, under its `message_id`) only once it is delivered. A send that
-    fails before that can be retried with the same idempotency key; a retry of a delivered message is dropped.
-    """
-
-    async def send(
-        self,
-        to: Address,
-        envelope: Envelope,
-        *,
-        priority: Priority = Priority.NORMAL,
-        idempotency_key: str | None = None,
-        sender: str | None = None,
-    ) -> str:
-        if to.kind == "external":
-            raise ValueError("a runner delivers to runs and conversations, not to external addresses")
-        message_id = idempotency_key or new_message_id()
-        envelope = envelope.model_copy(update={"message_id": message_id, "sender": sender})
-        async with self._exclusive(to):
-            if self._is_claimed(message_id):
-                return message_id
-            run_id = to.value if to.kind == "run" else await self._conversation_run(to.value, envelope.reply_to)
-            policy = self._delivery_policy(run_id)
-            if policy is None:
-                raise RunNotLive(run_id)
-            await self._deliver(run_id, envelope, policy.mode(priority, sender))
-            self._claim(message_id, to)
-        return message_id
-
-    async def _hand_over(self, address: str, undelivered: Sequence[Envelope]) -> None:
-        """Give the messages a conversation's finished run never consumed to its next run, starting it unless one is
-        live. They are queued for it whatever the delivery policy says: a policy maps a sender's priority, which a
-        hand-over does not have, and the run takes them when it waits, in the order they were sent."""
-        if not undelivered:
-            return
-        async with self._exclusive(Address(kind="conversation", value=address)):
-            run_id = await self._conversation_run(address, None)
-            for envelope in undelivered:
-                await self._deliver(run_id, envelope, DeliveryMode.QUEUE)
-
-    # The transport
-
-    @abstractmethod
-    def _exclusive(self, to: Address) -> AbstractAsyncContextManager[None]:
-        """Held while a message to `to` is checked, delivered and claimed, among everything that sends to it."""
-
-    @abstractmethod
-    def _is_claimed(self, message_id: str) -> bool: ...
-
-    @abstractmethod
-    def _claim(self, message_id: str, to: Address) -> None: ...
-
-    @abstractmethod
-    async def _conversation_run(self, address: str, reply_to: Address | None) -> str:
-        """The `run_id` of the conversation's live run, started if none is live. `reply_to` is the origin of a
-        conversation that starts with this message."""
-
-    @abstractmethod
-    def _delivery_policy(self, run_id: str) -> DeliveryPolicy | None:
-        """The delivery policy of a live run; None if the run has ended or is unknown."""
-
-    @abstractmethod
-    async def _deliver(self, run_id: str, envelope: Envelope, mode: DeliveryMode) -> None: ...
 
 
 # Program references -----------------------------------------------------------------------------------------------

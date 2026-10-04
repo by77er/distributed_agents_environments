@@ -172,7 +172,7 @@ class CompactingAgent(Agent):
     async def act(self, run: RunContext, history: History, tools: list[ToolSpecification]) -> Message:
         for turn in history.turns[self._folded :]:  # each: a reply (none for the first) and the observation after it
             reply = [turn.reply] if turn.reply is not None else []
-            self.memory.remember(*reply, *(turn.observation.messages if turn.observation is not None else ()))
+            self.memory.remember(*reply, *turn.observation.messages)
         self._folded = len(history.turns)
         system = Message.system(self.system_prompt) if self.system_prompt else None
         if self.memory.crowded(run.model) and len(self.memory.turns) > 1:

@@ -1,7 +1,7 @@
 """The run context: everything task and agent code can reach (docs/guide/tasks.md#the-run-context).
 
-Runners implement `RunContext`. Its first group of members is for task and agent code; the second is used only
-by the loop.
+Runners implement `RunContext`. Its members are for task and agent code, except `record`, which only the loop
+uses.
 """
 
 import random
@@ -21,11 +21,9 @@ from rollout.contracts import (
     Usage,
 )
 from rollout.harness.blobs import Blobs
-from rollout.harness.conversations import Address, ConversationKey, Envelope
-from rollout.harness.environments import Environments
 from rollout.harness.history import ContextHints, History
 from rollout.harness.imports import Tools
-from rollout.harness.observation import Observation, WaitFor
+from rollout.harness.observation import Observation
 from rollout.harness.sandboxes import Sandbox
 
 
@@ -60,24 +58,12 @@ class Model(Protocol):
         ...
 
 
-class Interrupted(Exception):
-    """The reply in progress was cancelled by a message delivered with mode `INTERRUPT`."""
-
-    def __init__(self, envelope: Envelope, reply_effect_id: str | None) -> None:
-        super().__init__(f"interrupted by a {envelope.kind!r} message")
-        self.envelope = envelope
-        self.reply_effect_id = reply_effect_id
-        """The policy sample that was cancelled, if one was in flight."""
-
-
 class RunContext(Protocol):
     """Everything task and agent code can reach during a run. Passed to every hook as `run`."""
 
     # For task and agent code.
     @property
     def run_id(self) -> str: ...
-    @property
-    def conversation(self) -> ConversationKey | None: ...
     @property
     def turn(self) -> int:
         """Completed model turns so far."""
@@ -95,11 +81,6 @@ class RunContext(Protocol):
     @property
     def tools(self) -> Tools:
         """Imported tools; each call is a `tool.call` effect."""
-        ...
-
-    @property
-    def environments(self) -> Environments | None:
-        """Creates environments the run owns; None when the runner has no environment backend."""
         ...
 
     def sandbox(self, name: str) -> Sandbox:
@@ -136,23 +117,11 @@ class RunContext(Protocol):
         """Await concurrently, in order. Equivalent to `asyncio.gather`."""
         ...
 
-    async def emit(self, kind: str, payload: JsonValue, *, to: Address | None = None) -> None:
-        """Output of the run, such as a reply to a person; a connector or client delivers it."""
+    async def emit(self, kind: str, payload: JsonValue) -> None:
+        """Output of the run, such as its result: recorded as an `output.emit` effect and an `output.emitted` event."""
         ...
 
     # For the loop.
-    def record(self, observation: Observation | WaitFor, *, reply: Message | None = None) -> None:
-        """Append a turn to the history. A `WaitFor` records only the reply it answers."""
-        ...
-
-    async def wait_for_message(self, wait: WaitFor) -> Envelope | None:
-        """Suspend until a message of `wait.kind` arrives; `None` on timeout."""
-        ...
-
-    async def take_steering_messages(self) -> list[Envelope]:
-        """Messages delivered with mode `STEER` since the last turn boundary."""
-        ...
-
-    async def interruptible[T](self, reply: Awaitable[T]) -> T:
-        """Await an agent's reply; raises `Interrupted` if a message with mode `INTERRUPT` arrives meanwhile."""
+    def record(self, observation: Observation, *, reply: Message | None = None) -> None:
+        """Append a turn to the history."""
         ...

@@ -2,8 +2,6 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, nullcontext
-from dataclasses import dataclass, field
 
 from pydantic import JsonValue
 
@@ -16,17 +14,13 @@ from rollout.contracts import (
     new_run_id,
 )
 from rollout.harness.blobs import Blobs
-from rollout.harness.conversations import Address, ConversationKey, DeliveryMode, DeliveryPolicy, Envelope
-from rollout.harness.environments import EnvironmentService
 from rollout.harness.hooks import RunHooks, observed, publish
 from rollout.harness.imports import ToolSet
 from rollout.harness.observation import InvalidObservation
 from rollout.harness.program import Program
 from rollout.harness.remote import remote_pool, remote_tool_set
 from rollout.harness.runner import (
-    Deployment,
     DirectModel,
-    MessageRouter,
     RecordedEndpoints,
     RunBinding,
     RunOutcome,
@@ -44,16 +38,9 @@ type EndpointFactory = Callable[[DirectModel], ModelEndpoint]
 class LocalRunHandle:
     """A run started by a `LocalRunner`. Its context is available for inspection in tests and tools."""
 
-    def __init__(
-        self,
-        run_id: str,
-        specification: RunSpecification,
-        conversation: ConversationKey | None,
-        lease: str | None = None,
-    ) -> None:
+    def __init__(self, run_id: str, specification: RunSpecification, lease: str | None = None) -> None:
         self._run_id = run_id
         self.specification = specification
-        self.conversation = conversation
         self.lease = lease or run_id
         """What the run's sandboxes are acquired under."""
         self.context: LocalRunContext
@@ -117,27 +104,15 @@ class LocalRunHandle:
         signal.set()
 
 
-@dataclass
-class _Conversation:
-    key: ConversationKey
-    live: LocalRunHandle | None = None
-    runs: list[str] = field(default_factory=list[str])
-
-
-class LocalRunner(MessageRouter):
-    """Implements `Runner` in process.
-
-    Direct model bindings are served by endpoint factories registered by provider name. Conversations addressed to a
-    deployment start a run of its specification when none is live; one run consumes a conversation's messages at a
-    time, and messages a run never consumed start the conversation's next run.
-    """
+class LocalRunner:
+    """Implements `Runner` in process. Direct model bindings are served by endpoint factories registered by provider
+    name."""
 
     def __init__(
         self,
         *,
         providers: Mapping[str, EndpointFactory] | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
-        environments: EnvironmentService | None = None,
         blobs: Blobs | None = None,
         recorder: RecordedEndpoints | None = None,
         hooks: Sequence[RunHooks] = (),
@@ -150,14 +125,9 @@ class LocalRunner(MessageRouter):
         self._providers = dict(providers or {})
         self._tool_sets = dict(tool_sets or {})
         self._pools = dict(pools or {})
-        self._environment_service = environments
         self._blobs = blobs
         self._recorder = recorder
         self._runs: dict[str, LocalRunHandle] = {}
-        self._deployments: dict[str, Deployment] = {}
-        self._conversations: dict[str, _Conversation] = {}
-        self._claimed: set[str] = set()
-        self._background: set[asyncio.Task[None]] = set()
 
     def _recorded(self, handle: LocalRunHandle, event: RunEvent) -> None:
         handle.notify(event)
@@ -169,33 +139,16 @@ class LocalRunner(MessageRouter):
     async def close(self) -> None:
         """Nothing to release: nothing outlives the process."""
 
-    # Deployments and inspection
-
-    def deploy(self, deployment: Deployment) -> None:
-        """Register or replace a deployment; a conversation's next run uses the current version."""
-        self._deployments[deployment.name] = deployment
+    # Runner
 
     def run(self, run_id: str) -> LocalRunHandle:
         return self._runs[run_id]
-
-    def conversation_of(self, run_id: str) -> ConversationKey | None:
-        """The conversation a run serves, if any."""
-        handle = self._runs.get(run_id)
-        return handle.conversation if handle is not None else None
-
-    def conversation_runs(self, deployment: str, key: str) -> list[LocalRunHandle]:
-        """The conversation's runs, oldest first."""
-        conversation = self._conversations.get(ConversationKey(deployment=deployment, key=key).address)
-        return [self._runs[run_id] for run_id in conversation.runs] if conversation else []
-
-    # Runner
 
     async def start(
         self,
         specification: RunSpecification,
         *,
         run_id: str | None = None,
-        conversation: ConversationKey | None = None,
         labels: Mapping[str, str] | None = None,
         lease: str | None = None,
     ) -> LocalRunHandle:
@@ -207,22 +160,19 @@ class LocalRunner(MessageRouter):
         endpoints = observed(endpoints, self._hooks, run_id)
         tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
         pools = resolve_pools(program, specification.binding, self._pools)
-        handle = LocalRunHandle(run_id, specification, conversation, lease)
+        handle = LocalRunHandle(run_id, specification, lease)
         handle.context = LocalRunContext(
             run_id,
             endpoints,
             context_hints=program.context_hints(),
             tool_sets=tool_sets,
-            environment_service=self._environment_service,
             blobs=self._blobs,
-            conversation=conversation,
             on_event=lambda event: self._recorded(handle, event),
         )
         handle.context.record_event(
             RunEventType.RUN_CREATED,
             {
                 "specification": specification.model_dump(mode="json", exclude_none=True),
-                "conversation": conversation.model_dump(mode="json", exclude_none=True) if conversation else None,
                 "labels": dict(labels or {}),
             },
         )
@@ -244,38 +194,6 @@ class LocalRunner(MessageRouter):
         handle.context.record_event(RunEventType.RUN_CANCEL_REQUESTED, {"reason": reason, "by": "runner"})
         task.cancel()
         await asyncio.wait([task])
-
-    # The transport of `MessageRouter`. Runs share one event loop and delivering never suspends, so nothing needs
-    # holding while a message is delivered.
-
-    def _exclusive(self, to: Address) -> AbstractAsyncContextManager[None]:
-        return nullcontext()
-
-    def _is_claimed(self, message_id: str) -> bool:
-        return message_id in self._claimed
-
-    def _claim(self, message_id: str, to: Address) -> None:
-        self._claimed.add(message_id)
-
-    async def _conversation_run(self, address: str, reply_to: Address | None) -> str:
-        conversation = self._conversations.get(address)
-        if conversation is None:
-            key = ConversationKey.parse(address, origin=reply_to)
-            if key.deployment not in self._deployments:
-                raise ValueError(f"{address!r} does not name a conversation of a deployed agent")
-            conversation = self._conversations[address] = _Conversation(key)
-        if conversation.live is None or conversation.live.done:
-            deployment = self._deployments[conversation.key.deployment]
-            conversation.live = await self.start(deployment.specification, conversation=conversation.key)
-            conversation.runs.append(conversation.live.run_id)
-        return conversation.live.run_id
-
-    def _delivery_policy(self, run_id: str) -> DeliveryPolicy | None:
-        handle = self._runs.get(run_id)
-        return handle.specification.binding.delivery if handle is not None and not handle.done else None
-
-    async def _deliver(self, run_id: str, envelope: Envelope, mode: DeliveryMode) -> None:
-        self._runs[run_id].context.deliver(envelope, mode)
 
     # Internals
 
@@ -299,26 +217,8 @@ class LocalRunner(MessageRouter):
             detail = f"{type(error).__name__}: {error}"
             outcome = RunOutcome(status=RunStatus.FAILED, failure_class=RunFailureClass.TASK_ERROR, detail=detail)
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
-        if context.environments is not None:
-            await context.environments.release_all()  # environments the run still owns
         await context.release_sandboxes()
         handle.finish(outcome)
-        self._leave_conversation(handle)
-
-    def _leave_conversation(self, handle: LocalRunHandle) -> None:
-        """Messages the finished run never consumed start the conversation's next run."""
-        if handle.conversation is None:
-            return
-        address = handle.conversation.address
-        conversation = self._conversations.get(address)
-        if conversation is None or conversation.live is not handle:
-            return
-        conversation.live = None
-        undelivered = handle.context.take_undelivered()
-        if undelivered:
-            task = asyncio.create_task(self._hand_over(address, undelivered))
-            self._background.add(task)
-            task.add_done_callback(self._background.discard)
 
 
 def resolve_endpoints(

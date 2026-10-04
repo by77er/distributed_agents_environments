@@ -2,8 +2,8 @@
 
 from rollout.contracts import Message, Role, ToolResultBlock
 from rollout.harness.agent import Agent
-from rollout.harness.context import Interrupted, RunContext
-from rollout.harness.observation import End, InvalidObservation, Observation, WaitFor
+from rollout.harness.context import RunContext
+from rollout.harness.observation import End, InvalidObservation, Observation
 from rollout.harness.task import Task
 
 
@@ -14,33 +14,16 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
         observation = _checked(await task.start(run), reply=None)
         run.record(observation)
         while True:
-            if isinstance(observation, WaitFor):
-                envelope = await run.wait_for_message(observation)
-                if envelope is None:
-                    observation = observation.on_timeout
-                else:
-                    observation = _checked(await task.resume(run, envelope), reply=None)
-                run.record(observation)
-                continue
             if observation.end is not None:
                 break
             if task.max_turns is not None and run.turn >= task.max_turns:
                 observation = End(truncated=True)
                 run.record(observation)
                 break
-            try:
-                reply = await run.interruptible(agent.act(run, run.history, task.tools_for_turn(run)))
-            except Interrupted as interruption:
-                observation = _checked(await task.resume(run, interruption.envelope), reply=None)
-                run.record(observation)
-                continue
+            reply = await agent.act(run, run.history, task.tools_for_turn(run))
             if reply.role is not Role.ASSISTANT:
                 raise TypeError(f"{type(agent).__name__}.act returned a {reply.role} message, not an ASSISTANT one")
             observation = _checked(await task.respond(run, reply), reply=reply)
-            if isinstance(observation, Observation) and observation.end is None:
-                steering = await run.take_steering_messages()
-                if steering:
-                    observation = _checked(await task.steer(run, steering, observation), reply=reply)
             run.record(observation, reply=reply)
         episode_reward = await task.score(run)
         if episode_reward is not None:
@@ -49,13 +32,9 @@ async def rollout(task: Task, agent: Agent, run: RunContext) -> None:
         await task.teardown(run)
 
 
-def _checked(observation: Observation | WaitFor, *, reply: Message | None) -> Observation | WaitFor:
+def _checked(observation: Observation, *, reply: Message | None) -> Observation:
     """Enforce the validation rules of docs/guide/tasks.md#validation; violations raise `InvalidObservation`."""
     calls = {call.call_id for call in reply.tool_calls} if reply is not None else set[str]()
-    if isinstance(observation, WaitFor):
-        if calls:
-            raise InvalidObservation("a reply with tool calls must be answered by an Observation, not a WaitFor")
-        return observation
     answered: set[str] = set()
     for message in observation.messages:
         if message.role not in (Role.USER, Role.TOOL):

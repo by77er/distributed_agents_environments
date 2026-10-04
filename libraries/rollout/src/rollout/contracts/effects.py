@@ -8,8 +8,6 @@ class EffectKind(StrEnum):
 
     MODEL_SAMPLE = "model.sample"
     TOOL_CALL = "tool.call"
-    ENVIRONMENT_CALL = "environment.call"
-    ENVIRONMENT_LIFECYCLE = "environment.lifecycle"
     OUTPUT_EMIT = "output.emit"
 
 

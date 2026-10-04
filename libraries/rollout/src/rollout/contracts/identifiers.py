@@ -25,11 +25,6 @@ def new_run_id() -> str:
     return f"r_{new_ulid()}"
 
 
-def new_message_id() -> str:
-    """`m_{ulid}`: the id of a message sent without an idempotency key."""
-    return f"m_{new_ulid()}"
-
-
 @dataclass(frozen=True)
 class EffectIdentity:
     """The parts of an `effect_id`: `{run_id}:{generation}:{ordinal}`."""

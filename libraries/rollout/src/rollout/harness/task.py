@@ -1,15 +1,13 @@
 """`Task`: the environment an agent acts in, in the reinforcement-learning sense (docs/guide/tasks.md)."""
 
 import asyncio
-import json
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from rollout.contracts import Message, Role, Text, ToolResult, ToolSpecification
+from rollout.contracts import Message, ToolResult, ToolSpecification
 from rollout.harness.context import RunContext
-from rollout.harness.conversations import Envelope
 from rollout.harness.history import ContextHints
-from rollout.harness.observation import End, Observation, WaitFor
+from rollout.harness.observation import End, Observation
 from rollout.harness.sandboxes import SandboxSpec
 from rollout.harness.tools import DeclaredTool, collect_tools, error_result, execute_tool, tool_message
 
@@ -54,22 +52,13 @@ class Task:
     async def setup(self, run: RunContext) -> None:
         """Once per run, before `start`."""
 
-    async def start(self, run: RunContext) -> Observation | WaitFor:
-        """Open the episode, or wait for the first message."""
+    async def start(self, run: RunContext) -> Observation:
+        """Open the episode."""
         raise NotImplementedError(f"{type(self).__name__} must implement start")
 
-    async def respond(self, run: RunContext, reply: Message) -> Observation | WaitFor:
+    async def respond(self, run: RunContext, reply: Message) -> Observation:
         """The environment's step. Default: execute the reply's tool calls; end the episode when there are none."""
         return await self.run_tools(run, reply)
-
-    async def resume(self, run: RunContext, envelope: Envelope) -> Observation | WaitFor:
-        """Turn a message that satisfied a `WaitFor`, or interrupted a turn, into the next observation."""
-        return Observation(_as_user_message(envelope))
-
-    async def steer(self, run: RunContext, envelopes: list[Envelope], observation: Observation) -> Observation:
-        """Merge messages delivered with mode `STEER` into the next observation. Default: append as USER content."""
-        messages = observation.messages + tuple(_as_user_message(envelope) for envelope in envelopes)
-        return Observation(messages, reward=observation.reward, end=observation.end, info=observation.info)
 
     async def score(self, run: RunContext) -> float | None:
         """Episode-level reward, attached to the end of the trajectory."""
@@ -107,10 +96,3 @@ class Task:
             except Exception as error:  # a platform failure: recorded as a failed effect, shown to the model
                 return error_result(f"{name} is unavailable: {type(error).__name__}: {error}")
         return error_result(f"unknown tool {name!r}")
-
-
-def _as_user_message(envelope: Envelope) -> Message:
-    content = list(envelope.content)
-    if not content and envelope.data is not None:
-        content = [Text(text=json.dumps(envelope.data, ensure_ascii=False))]
-    return Message(role=Role.USER, content=content)

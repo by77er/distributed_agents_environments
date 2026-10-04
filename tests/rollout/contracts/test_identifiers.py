@@ -6,7 +6,6 @@ from rollout.contracts import (
     EffectIdentity,
     SessionIdentity,
     effect_id,
-    new_message_id,
     new_run_id,
     new_ulid,
     session_id,
@@ -17,11 +16,6 @@ def test_ulid_format_and_time_order() -> None:
     first = new_ulid()
     assert re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", first)
     assert new_ulid()[:10] >= first[:10]
-
-
-def test_message_ids_are_prefixed_ulids() -> None:
-    assert re.fullmatch(r"m_[0-7][0-9A-HJKMNP-TV-Z]{25}", new_message_id())
-    assert new_message_id() != new_message_id()
 
 
 def test_effect_id_round_trip() -> None:
