@@ -11,13 +11,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 postgresql://rollout@postgres.{{ .Release.Namespace }}:5432/rollout
 {{- end }}
 
-{{/* What every process of the platform is given: where the stores are, with their credentials, and the cluster
-config. The ledger's URL holds no password: PGPASSWORD does. */}}
+{{/* What every process of the platform is given: the cluster config, and the stores' endpoint and credentials. The
+ledger's URL (in the cluster config and the profiles) holds no password: PGPASSWORD does. */}}
 {{- define "rollout.env" -}}
 - name: ROLLOUT_CLUSTER
   value: /etc/rollout/cluster.toml
-- name: ROLLOUT_LEDGER_URL
-  value: {{ include "rollout.ledgerUrl" . }}
 - name: PGPASSWORD
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: POSTGRES_PASSWORD}}
 - name: AWS_ENDPOINT_URL
