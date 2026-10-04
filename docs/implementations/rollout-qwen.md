@@ -18,7 +18,7 @@ A [profile](../guide/deploying.md) names one for a channel (`renderer = "rollout
 channel's `model`. Given a checkpoint's name or path, the function loads that checkpoint's tokenizer (`tokenizer_of`).
 Given a tokenizer, it uses it as it is. Either way it returns a
 [`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer): prompts are rendered with the tokenizer's own
-chat template, and a turn ends at `<|im_end|>`.
+chat template, and a turn ends at `<|im_end|>`, or at the end of text (`<|endoftext|>`), where the models stop too.
 
 ## How thinking is delimited
 
@@ -28,8 +28,8 @@ Both families write thinking between `<think>` and `</think>`
 | | Qwen3.5 | Qwen3 |
 |---|---|---|
 | Who opens the block | The generation prompt ends inside it (`prompt_opens`) | The model |
-| A sample that never closes it | All of it is reasoning | It is text |
-| Thinking that runs out of its budget | The gateway appends `forced_close` (a newline, `</think>`, two newlines) and samples the answer | Not held apart: one phase samples with the thinking and answer room together |
+| A sample that never closes it | All of it is reasoning | All of it is reasoning if the model opened the block, else text |
+| Thinking that runs out of its budget | The gateway appends `forced_close` (a newline, `</think>`, two newlines) and samples the answer | The same, if the model opened the block within the budget |
 
 What precedes the last close becomes a `Reasoning` block of the canonical message; what follows is text and tool
 calls. How the gateway holds thinking to its budget is described under

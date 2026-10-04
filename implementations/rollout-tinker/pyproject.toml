@@ -6,7 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "rollout",
     "rollout-train",
-    "rollout-lora",  # the objective, its minibatches, and the merge (pure torch: none of its GPU code is imported)
+    "rollout-lora",  # the step's settings, objective, plan and metrics, where a model's files are, and the merge (no GPU code)
     "tinker==0.32.0",
     "torch>=2.10",
     "safetensors>=0.5",

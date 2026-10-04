@@ -2,8 +2,9 @@
 
 Code: `rollout_lora`
 
-`LoraTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol: it trains a LoRA adapter over a
-4-bit checkpoint, the same file the engines serve, and writes each step's adapter where engines load it. What the
+`LoraTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol: it trains a LoRA adapter over the
+checkpoint the engines serve (a 4-bit image-text checkpoint, the same file, or a text model in bfloat16), and writes
+each step's adapter where engines load it. What the
 [training loop](../libraries/rollout-train/training.md) asks of a trainer is defined there; this page is what this
 one does. The package is installed with `uv sync --all-extras` and needs an NVIDIA GPU.
 
@@ -19,7 +20,7 @@ segment_tokens = 8000
 ```
 
 A [profile](../guide/deploying.md) calls `LoraTrainer(model, **settings)` with the model of the channel it trains.
-Every key of `[trainer]` other than `kind`, `channel`, `policy` and `colocated` is a setting.
+Every key of `[trainer]` other than `kind`, `channel`, `start`, `bookmark` and `colocated` is a setting.
 
 ### Every weight
 
@@ -27,7 +28,7 @@ Every key of `[trainer]` other than `kind`, `channel`, `policy` and `colocated` 
 the same fresh process per step. The weights are kept in float32 and the forward pass runs in bfloat16 (autocast);
 each step leaves `weights/` in the model's own layout (float32 safetensors, with the configuration saying
 `bfloat16`, which is what vLLM loads them as, and the tokenizer) and the optimizer's state in `state/`. A step starts
-from its parent's weights and state, or from the model for the first. It refuses a multimodal or quantized model.
+from its parent's weights and state, or from the model for the first. It refuses an image-text model.
 Qwen3-0.6B's step of 4 segments of 600 tokens peaks under 14 GiB on a 16 GB card; its optimizer's state is about
 5 GB.
 
@@ -84,7 +85,7 @@ A step is told where its files go (`into`) and leaves:
 |---|---|
 | `weights/` | The adapter, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is. Weights are saved as float32: the next step starts from this file, and updates are smaller than bfloat16 resolves |
 | `state/optimizer.pt` | The optimizer's state after the step |
-| `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, KL estimate, gradient norm |
+| `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, KL estimate, learning rate, gradient norm |
 
 The trainer keeps nothing of its own between steps: a step starts from the adapter and the optimizer's state of
 the checkpoint it is given, so any `LoraTrainer` can take any step from any checkpoint. A run keeps each step's files as a
@@ -93,7 +94,7 @@ the checkpoint it is given, so any `LoraTrainer` can take any step from any chec
 ## A fresh process per step
 
 `step` runs in a spawned process (`rollout_lora.worker`). The process loads the policy onto the GPU, loads the
-previous step's adapter and the optimizer's state, makes one pass over the batch, saves both and exits.
+previous step's adapter and the optimizer's state, takes the step's passes over the batch, saves both and exits.
 
 | Why | |
 |---|---|
@@ -191,6 +192,7 @@ weight, ratio, clip, mismatch and KL metrics are zero.
 | `loss`, `clip_fraction`, `mean_ratio` | The loss (per token, or per segment), the share of tokens whose ratio was clipped, the mean ratio |
 | `gradient_norm` | Before clipping, the mean over optimizer steps |
 | `optimizer_steps` | Minibatches stepped on |
+| `passes`, `learning_rate`, `warmup_updates` | The settings the step took, with `warmup_updates` 0 for a step that went on from an optimizer's state |
 | `tokens`, `segments` | Sampled tokens and segments trained on |
 | `segments_given`, `segments_too_long`, `longest_segment_tokens` | What the batch held, how many were left out for their length, and the longest one kept |
 | `minibatches_out_of_memory`, `start_out_of_memory` | Minibatches dropped, and segments left out of the first pass |

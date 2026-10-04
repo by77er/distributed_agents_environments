@@ -9,7 +9,7 @@ things still grow with the segment's length:
   8,000 tokens). `HostStore` keeps them in (pinned) system memory between forward and backward.
 - **The MLP inside a recomputed layer.** Its intermediate activations (12,288 wide, and LoRA's float32 copies) are
   the largest part of the layer's peak. `piecewise_mlp` runs it over the sequence in pieces of `rows` tokens. In
-  backward it does so without computing anything twice more than today: a layer's output is
+  backward it does so without computing anything more often than plain checkpointing does: a layer's output is
   `residual + mlp(norm(residual))`, so when the layer is computed again for its backward pass, the MLP's output value
   is not needed (only gradients flow back through that sum). The MLP then returns zeros at once and, when the
   gradient arrives, computes each piece with gradients and takes that piece's backward step before the next piece.
