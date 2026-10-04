@@ -16,8 +16,8 @@ RUN envoy --version && step version
 
 COPY . /opt/rollout/source
 WORKDIR /opt/rollout/source
-RUN deploy/images/common/install.sh "rollout-train[http,durable]" rollout-s3 -- \
-        libraries/rollout libraries/rollout-train implementations/rollout-durable implementations/rollout-s3 \
+RUN deploy/images/common/install.sh "rollout-train[http]" rollout-s3 -- \
+        libraries/rollout libraries/rollout-train implementations/rollout-s3 \
     && mkdir -p /opt/rollout/bin /etc/envoy/sds \
     && cp deploy/images/common/pki.sh deploy/images/common/supervise.sh deploy/images/inference/entrypoint.sh \
         /opt/rollout/bin/ \

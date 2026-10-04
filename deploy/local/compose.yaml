@@ -1,9 +1,8 @@
-# Local services for several runners: Postgres (DBOS and the stores) and S3-compatible object storage (blobs).
+# Local services for several runners: Postgres (the ledger) and S3-compatible object storage (blobs).
 #
 #   docker compose -f deploy/local/compose.yaml up -d
 #   set -a; . deploy/local/services.env; set +a
 #   uv run pytest                                  # the Postgres and S3 tests use these services
-#   uv run agents serve --database "$ROLLOUT_DATABASE" --blobs "$ROLLOUT_BLOBS" --runner-id server-0 ...
 #
 # See docs/development/local-services.md.
 name: rollout-local

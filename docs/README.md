@@ -45,7 +45,6 @@ Each implements one interface a library defines.
 
 | Page | What it covers |
 |---|---|
-| [Durable runner](implementations/rollout-durable/README.md) | Runs that survive their process, on DBOS. [Evicting idle runs](implementations/rollout-durable/eviction.md); [several runners](implementations/rollout-durable/runners.md) on one Postgres, and the database stores use |
 | [vLLM engine](implementations/rollout-vllm.md) | Options (speculative decoding among them), adapters by name, sleep and wake, the engine core process, measurements |
 | [LoRA trainer](implementations/rollout-lora.md) | Settings, a fresh process per step, the memory bound, the step, metrics, measurements |
 | [Tinker trainer and engine](implementations/rollout-tinker.md) | Training and sampling at Thinking Machines: installing (the `tinker` extra), the key, the objective as Tinker's losses, what a checkpoint holds, serving its adapters here, costs |
@@ -74,7 +73,6 @@ Each implements one interface a library defines.
 |---|---|---|---|
 | `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.environment`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, conversations, and a runner in this process | |
 | `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.profile`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the gateway, profiles | |
-| `implementations/rollout-durable` | `rollout_durable` | A runner whose runs survive their process, on DBOS; a database for stores | `Runner` |
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
 | `implementations/rollout-lora` | `rollout_lora` | A trainer for 4-bit checkpoints with LoRA | `Trainer` |
 | `implementations/rollout-tinker` | `rollout_tinker` | A trainer and an engine at Thinking Machines (Tinker); the `tinker` extra | `Trainer`, `Engine` |

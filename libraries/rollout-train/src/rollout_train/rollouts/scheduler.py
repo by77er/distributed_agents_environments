@@ -12,7 +12,7 @@ A claim holds while it is its episode's latest attempt and its runner is the one
 started again takes its fence anew, and a runner beats every few seconds (`rollout_train.presence`), so one whose
 machine died stops beating; what either had claimed is claimed again by whoever has room. An episode its runner cut
 short by closing is noted (`runs/RUN/interrupted`) and claimed again too. A claim names the run that plays it. Over a
-runner whose runs survive it (a durable one), a runner started again adopts the runs it finds of its claims that are
+runner whose runs survive it, a runner started again adopts the runs it finds of its claims that are
 still their episodes' latest attempts (`runs/RUN/adopted`, under its new fence), and they play on; one whose claim
 lapsed meanwhile is cut short. An adopted run's turns survived with it: the gateway kept them, and answers a sample
 asked for again with the turn it recorded, so the episode trains like any other.
@@ -293,7 +293,7 @@ class EpisodeRunner:
 
     @property
     def resumes(self) -> bool:
-        """Whether its runner's runs survive it (`Runner.resumes`, which a durable runner has)."""
+        """Whether its runner's runs survive it (`Runner.resumes`)."""
         return bool(getattr(self.runner, "resumes", False))
 
     async def prepare(self) -> None:

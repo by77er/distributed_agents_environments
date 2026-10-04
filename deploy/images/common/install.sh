@@ -2,7 +2,7 @@
 # Installs workspace packages, with their dependencies exactly as uv.lock pins them, into /opt/rollout/venv on a Python
 # 3.13 of its own (the image's own Python, if it has one, is left as it is).
 #
-#   install.sh "rollout-train[http,durable]" rollout-s3 -- libraries/rollout libraries/rollout-train ...
+#   install.sh "rollout-train[http]" rollout-s3 -- libraries/rollout libraries/rollout-train ...
 #
 # Before `--`: the packages whose locked dependencies are installed, each with its extras. After it: the workspace
 # packages themselves, by directory. Run from the repository's root, in the image being built.

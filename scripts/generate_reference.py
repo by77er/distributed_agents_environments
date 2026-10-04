@@ -46,7 +46,6 @@ PUBLIC_MODULES = [
     ("rollout_train.validation", "One pure check of a run's settings against a cluster, with its rule table."),
     ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),
     # implementations
-    ("rollout_durable", "A runner whose runs survive their process, on DBOS."),
     ("rollout_vllm", "An engine on vLLM."),
     ("rollout_lora", "A trainer for 4-bit checkpoints with LoRA."),
     ("rollout_qwen", "Renderers for the Qwen model families."),

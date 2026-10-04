@@ -67,9 +67,6 @@ the test suite and a block tagged `py` does not. The API reference is generated 
 
 ## Implementations
 
-- [Durable runner](docs/implementations/rollout-durable/README.md): runs that survive their process;
-  [evicting idle runs](docs/implementations/rollout-durable/eviction.md),
-  [several runners](docs/implementations/rollout-durable/runners.md) on one Postgres
 - [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
   [Tinker trainer and engine](docs/implementations/rollout-tinker.md),
   [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md):

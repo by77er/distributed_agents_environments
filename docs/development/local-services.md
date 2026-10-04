@@ -2,8 +2,7 @@
 
 Code: `deploy/local`
 
-Runners that share state need two services: Postgres (DBOS's journal and the run and coordination stores) and object
-storage for blobs. `deploy/local/compose.yaml` runs both:
+Runners that share state need two services: Postgres for the ledger and object storage for blobs. `deploy/local/compose.yaml` runs both:
 
 | Service | Image | Port | Credentials |
 |---|---|---|---|
@@ -22,8 +21,7 @@ set -a; . deploy/local/services.env; set +a
 |---|---|---|
 | `ROLLOUT_TEST_POSTGRES` | `postgresql://rollout:rollout@localhost:5432/rollout` | the tests |
 | `ROLLOUT_TEST_S3` | `http://localhost:7070` | the tests |
-| `ROLLOUT_DATABASE` | `postgresql://rollout:rollout@localhost:5432/rollout` | your shell, for `--database` |
-| `ROLLOUT_BLOBS` | `s3://rollout-blobs/blobs` | your shell, for `--blobs` |
+| `ROLLOUT_LEDGER_URL` | `postgresql://rollout:rollout@localhost:5432/rollout` | a cluster config's `[ledger] url_env` |
 | `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | the storage service and its credentials | boto3 |
 
 ## Tests
@@ -36,15 +34,19 @@ server, and every S3 test a bucket of its own.
 uv run pytest
 ```
 
-## Servers
+## A cluster config
 
-```bash
-uv run agents serve --database "$ROLLOUT_DATABASE" --blobs "$ROLLOUT_BLOBS" --runner-id server-0 --state /shared
+A [cluster config](../guide/cluster.md) whose runners share these services names them so:
+
+```toml
+[ledger]
+url_env = "ROLLOUT_LEDGER_URL"
+
+[blobs]
+kind = "rollout_s3:S3BlobStore"
+bucket = "rollout-blobs"
 ```
 
-Running several such servers is described in [several runners](../implementations/rollout-durable/runners.md).
-
-`--blobs s3://bucket/prefix` keeps images in object storage through `rollout_s3.S3BlobStore`
-([content](../guide/content.md#media-and-blobs)). Each blob is one object named by its SHA-256 under the prefix. The
-endpoint and credentials come from the usual `AWS_*` variables, so the same flag works on AWS S3 and on S3-compatible
-services. Environments stay directories under `--state`.
+`rollout_s3.S3BlobStore` keeps each blob as one object named by its SHA-256 under its prefix
+([content](../guide/content.md#media-and-blobs)). The endpoint and credentials come from the usual `AWS_*` variables,
+so the same config works on AWS S3 and on S3-compatible services.

@@ -16,7 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "rollout-train[http,durable]",  # (durable: the database ledger; Ray comes with rollout-train)
+    "rollout-train[http]",  # (the database ledger and Ray come with rollout-train)
     "rollout-s3",  # (blobs in a bucket, as the K3s cluster keeps them)
     "pytest>=8.4",
     "pytest-asyncio>=1.2",
@@ -33,7 +33,6 @@ rollout-train = { path = "../../libraries/rollout-train", editable = true }
 rollout-vllm = { path = "../rollout-vllm", editable = true }
 rollout-lora = { path = "../rollout-lora", editable = true }
 rollout-qwen = { path = "../rollout-qwen", editable = true }
-rollout-durable = { path = "../rollout-durable", editable = true }
 rollout-s3 = { path = "../rollout-s3", editable = true }
 
 [tool.pytest.ini_options]

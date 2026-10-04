@@ -88,7 +88,8 @@ async def test_claims_written_before_episodes_had_fences_hold_as_their_latest_at
 
 
 class Going:
-    """A durable runner's runs as `EpisodeRunner._adopt` finds them: every run it is asked for is going."""
+    """The runs of a runner whose runs survive it, as `EpisodeRunner._adopt` finds them: every run it is asked for is
+    going."""
 
     resumes = True
 

@@ -19,9 +19,8 @@ RUN envoy --version && step version
 
 COPY . /opt/rollout/source
 WORKDIR /opt/rollout/source
-RUN deploy/images/common/install.sh "rollout-train[http,durable]" rollout-s3 rollout-lora -- \
-        libraries/rollout libraries/rollout-train implementations/rollout-durable implementations/rollout-s3 \
-        implementations/rollout-lora \
+RUN deploy/images/common/install.sh "rollout-train[http]" rollout-s3 rollout-lora -- \
+        libraries/rollout libraries/rollout-train implementations/rollout-s3 implementations/rollout-lora \
     && mkdir -p /opt/rollout/bin /etc/envoy/sds \
     && cp deploy/images/common/pki.sh deploy/images/common/supervise.sh deploy/images/trainer/entrypoint.sh \
         /opt/rollout/bin/ \

@@ -10,7 +10,6 @@ requires-python = ">=3.13"
 dependencies = [
     "rollout[http]",
     "rollout-train[http,report]",
-    "rollout-durable",
     "rollout-computers",
     "rollout-openai",
     "rollout-s3",
@@ -31,7 +30,6 @@ exclude = ["implementations/rollout-verifiers"]  # a project of its own, locked 
 [tool.uv.sources]
 rollout = { workspace = true }
 rollout-train = { workspace = true }
-rollout-durable = { workspace = true }
 rollout-vllm = { workspace = true }
 rollout-lora = { workspace = true }
 rollout-qwen = { workspace = true }
@@ -81,7 +79,6 @@ exclude = ["**/node_modules", "**/__pycache__", "**/.*"]
 extraPaths = [
     "libraries/rollout/src",
     "libraries/rollout-train/src",
-    "implementations/rollout-durable/src",
     "implementations/rollout-vllm/src",
     "implementations/rollout-lora/src",
     "implementations/rollout-qwen/src",
