@@ -4,9 +4,10 @@ An environment may guide its agents (tell them the way to a goal, say) and repor
 guidance its prompts carried, word for word and by kind (`info["guidance"]`). The episodes that succeeded under
 guidance show the policy doing the task; taking the guidance back out of their prompts makes them examples of doing
 it unguided. `examples` reads such episodes from a run's episodes in the ledger and cuts the guidance out of every
-segment; `imitate` takes a supervised step on them (the trainer's likelihood objective) and commits the checkpoint it
-makes. A dataset's examples (`rollout_train.datasets.examples`) are imitated the same way: the checkpoint the step makes
-then names the dataset, and its parents after the first are the checkpoints that sampled the examples it trained on.
+segment; `imitate` takes a step on them (the trainer's objective: a likelihood, `sft`, by default) and commits the
+checkpoint it makes. A dataset's examples (`rollout_train.datasets.examples`) are trained on the same way, and a
+dataset's pairs or labelled examples by a preference objective: the checkpoint the step makes then names the dataset,
+and its parents after the first are the checkpoints that sampled the examples it trained on.
 
 Examples whose turns were sampled with their exact tokens and behaviour logprobs are `importance` data; where some
 were not (a frontier API's turns), they are `supervised`: the trainer computes what it needs of their logprobs itself,
@@ -37,7 +38,7 @@ from rollout_train.recorder.renderers import Renderer
 from rollout_train.recorder.segments import Segment, Span
 from rollout_train.rollouts.episodes import Episode, Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
-from rollout_train.trainer import STATE, WEIGHTS, Files, Trainer, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Files, Item, Labelled, Pair, Trainer, Weighted, segments_of, weight_of
 
 GUIDANCE = "guidance"
 """The entry of an episode's result that holds the guidance its prompts carried: by kind, word for word."""
@@ -109,18 +110,20 @@ def _around(tokens: Sequence[int], text: str, renderer: Renderer) -> tuple[int, 
     return None
 
 
-def passes_for(segments: Sequence[Weighted], tokens_per_step: int) -> int:
-    """Passes over `segments` that make at least `UPDATES` optimizer updates of about `tokens_per_step` sampled tokens
+def passes_for(items: Sequence[Item], tokens_per_step: int) -> int:
+    """Passes over `items` that make at least `UPDATES` optimizer updates of about `tokens_per_step` sampled tokens
     each: one for a dataset large enough, more for a small one."""
-    per_pass = max(1, sum(weighted.segment.sampled for weighted in segments) // tokens_per_step)
+    per_pass = max(1, sum(each.sampled for item in items for each in segments_of(item)) // tokens_per_step)
     return max(1, -(-UPDATES // per_pass))
 
 
 @dataclass
 class Examples:
-    """Segments to imitate, each weighted 1, with what was left out and why."""
+    """Segments to imitate, each weighted 1, or pairs and labelled examples for a preference loss, with what was left
+    out and why."""
 
     segments: list[Weighted]
+    preferences: list[Pair | Labelled] = field(default_factory=list[Pair | Labelled])
     episodes: int = 0
     """Episodes they came from."""
     left_out: int = 0
@@ -129,11 +132,18 @@ class Examples:
     """The dataset they are of, by id, if they are a dataset's."""
     sampled_by: dict[str, str] = field(default_factory=dict[str, str])
     """The checkpoint that sampled each segment, by its source, where that is known (not the base model)."""
+    turns: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
+    """The segments each pair or labelled example holds, by their sources, by its."""
+
+    @property
+    def items(self) -> list[Item]:
+        """What a step trains on: the segments, or the pairs and labelled examples."""
+        return [*self.segments, *self.preferences]
 
     @property
     def supervision(self) -> str:
         """`importance` or `supervised` (`supervision_of` its segments)."""
-        return supervision_of([weighted.segment for weighted in self.segments])
+        return supervision_of([segment for item in self.items for segment in segments_of(item)])
 
 
 async def examples(ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str]) -> Examples:
@@ -177,7 +187,7 @@ async def imitate(
     seed: int = 0,
     resume_optimizer: bool = False,
 ) -> Checkpoint:
-    """One supervised step of `trainer` (whose objective is likelihood) on `taught`, from the newest checkpoint `run`
+    """One step of `trainer` (a likelihood or a preference objective) on `taught`, from the newest checkpoint `run`
     made (else from `start`, a checkpoint's id, or the base model, named `base`), made as the run's next: started again,
     the run trains on from it. `limit` takes that many segments at random. `directory` holds the checkpoints' files on
     this machine. `fence` is the run's. The checkpoint's parents are the one it was trained from, then the checkpoints
@@ -186,7 +196,7 @@ async def imitate(
     step starts its optimizer afresh, unless `resume_optimizer`: then from the trainer state of the checkpoint it trains
     from (moments a step of another objective left, say). Its metrics say which (`optimizer_resumed`), and its record
     says whether the segments it trained on were `importance` or `supervised` data (`supervision_of`)."""
-    chosen = list(taught.segments)
+    chosen = taught.items
     if limit is not None and len(chosen) > limit:
         chosen = random.Random(seed).sample(chosen, limit)
     head = await checkpoints.head(run) or (await checkpoints.checkpoint(start) if start else None)
@@ -202,18 +212,19 @@ async def imitate(
         parent = Files(weights, await checkpoints.files(head.state, here / STATE) if head.state and resumed else None)
     makes = new_id()
     into = directory / makes
-    trained: list[JsonValue] = [[weighted.source, weighted.advantage] for weighted in chosen]
+    trained: list[JsonValue] = [[item.source, weight_of(item)] for item in chosen]
     batch = await checkpoints.blobs.put(json.dumps(trained).encode(), "application/json")
     step = await trainer.step(chosen, seed=seed, parent=parent, into=into)
     metrics = {
         **step.metrics,
         "imitated_episodes": float(taught.episodes),
-        "imitated_segments": float(len(chosen)),
+        "imitated_segments": float(sum(len(segments_of(item)) for item in chosen)),
         "optimizer_resumed": float(parent is not None and parent.state is not None),
     }
     learned: list[Checkpoint] = []
     if head is not None:
-        for id in dict.fromkeys(taught.sampled_by[each.source] for each in chosen if each.source in taught.sampled_by):
+        sources = [source for item in chosen for source in taught.turns.get(item.source, [item.source])]
+        for id in dict.fromkeys(taught.sampled_by[each] for each in sources if each in taught.sampled_by):
             if id != head.id:
                 learned.append(await checkpoints.checkpoint(id))
     learned.sort(key=lambda checkpoint: (checkpoint.depth, checkpoint.made))
@@ -229,5 +240,5 @@ async def imitate(
         batch=batch,
         metrics=metrics,
         dataset=taught.dataset,
-        supervision=supervision_of([weighted.segment for weighted in chosen]),
+        supervision=supervision_of([segment for item in chosen for segment in segments_of(item)]),
     )

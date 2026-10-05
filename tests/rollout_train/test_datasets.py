@@ -4,7 +4,7 @@ a supervised step on one that makes a checkpoint learned from the checkpoints th
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 from pydantic import JsonValue
@@ -33,6 +33,7 @@ from rollout_train.rollouts import Episode, Outcome, Trajectory, stored
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.stores import FILES
 from rollout_train.testing import plain_renderer
+from rollout_train.trainer import Item, Labelled, Pair
 from tests.rollout_train.support import Counting
 
 WAY = "How to get there. Place the table."
@@ -89,7 +90,7 @@ async def test_each_rule_picks_its_episodes(tmp_path: Path) -> None:
     assert await picked(played, "best-of-group") == ["train/1/2", "train/2/2", "train/4/1"]
     assert await picked(played, "capped-per-task", per_task=2) == ["train/1/1", "train/1/2"]
     assert len(await picked(played, "capped-per-task")) == 3
-    with pytest.raises(ValueError, match="no episode rule"):
+    with pytest.raises(ValueError, match="there is no rule"):
         await picked(played, "best-of-everything")
 
 
@@ -216,7 +217,7 @@ class Stateful(Counting):
         super().__init__()
         self.states: list[str | None] = []
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         self.states.append((parent.state / "optimizer.bin").read_text() if parent and parent.state else None)
         return await super().step(batch, seed=seed, parent=parent, into=into)
 
@@ -242,9 +243,10 @@ async def test_a_step_starts_its_optimizer_afresh_unless_told_to_resume_it(tmp_p
 
 
 class Trains:
-    """A trainer a profile names, that trains nothing."""
+    """A trainer a profile names, that trains nothing (and keeps what each step was given)."""
 
     weights = "lora"
+    given: ClassVar[list[list[Any]]] = []
 
     def __init__(self, model: str, **settings: Any) -> None:
         from rollout_train import Budget
@@ -256,7 +258,8 @@ class Trains:
         from rollout_train import Step
         from rollout_train.trainer import WEIGHTS
 
-        assert self.settings["objective"] == "likelihood"
+        assert self.settings["objective"]["family"] in ("likelihood", "preference")  # (resolved)
+        Trains.given.append(list(batch))
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
         return Step({"segments": float(len(batch))})
@@ -336,8 +339,45 @@ def test_the_commands_make_list_and_train_on_a_dataset(
         "fixed"
     ]  # (its run settings: the profile's, with what was said over them)
     assert fixed["kind"] == "imitate" and fixed["imitation.dataset"] == "guesses" and fixed["start"] == second
-    assert fixed["imitation.passes"] == 2 and fixed["trainer.objective"] == "likelihood"
+    assert fixed["imitation.passes"] == 2 and fixed["objective.preset"] == "sft"
+    assert start["run_settings"]["objective"]["family"] == "likelihood"
     assert start["run_settings"]["preset"] is None
+
+
+def test_a_dataset_of_pairs_is_trained_on_by_the_preference_preset_a_run_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from rollout_train.cli import main
+
+    played = Played(tmp_path / "played")
+    asyncio.run(played.group(1, "t1", {"reward": 1.0}, {"reward": 0.0}, {"reward": 0.5}))
+    registry = registry_of(played.ledger)
+    assert registry is not None
+    asyncio.run(registry.create("train", "train"))
+    where = str(tmp_path / "played" / "ledger")
+    monkeypatch.setattr("sys.argv", ["rollout", "dataset", "make", "best-and-worst", "--run", "train", "--name",
+                                     "pairs", "--ledger", where])  # fmt: skip
+    main()
+    assert "1 episodes" not in capsys.readouterr().out  # (two: the best and the worst)
+    profile = tmp_path / "profile.toml"
+    profile.write_text(PROFILE.format(directory=tmp_path / "played"))
+
+    def imitate(*more: str) -> None:
+        monkeypatch.setattr("sys.argv", ["rollout", "imitate", str(profile), "--dataset", "pairs", *more])
+        main()
+
+    with pytest.raises(SystemExit, match="a dataset of pairs is trained on by a preference preset, not sft"):
+        imitate("--name", "nothing-named")
+    with pytest.raises(SystemExit, match="a likelihood or preference preset, not dapo"):
+        imitate("--name", "a-policy-gradient", "--set", "objective.preset=dapo")
+    Trains.given.clear()
+    with pytest.raises(SystemExit) as exited:
+        imitate("--name", "simpo-pairs", "--set", "objective.preset=simpo")
+    assert exited.value.code == 0 and "1 pairs of 2 episodes" in capsys.readouterr().out
+    ((pair,),) = Trains.given
+    assert isinstance(pair, Pair) and pair.source == "train/1/1>2"
 
 
 @pytest.mark.parametrize("kind", ["files", "database"])
@@ -382,3 +422,44 @@ async def test_a_dataset_of_turns_sampled_without_behaviour_logprobs_is_supervis
     assert (
         made_by.supervision == "supervised" and (await checkpoints.checkpoint(made_by.id)).supervision == "supervised"
     )
+
+
+async def test_a_dataset_of_pairs_prefers_each_groups_best_episode_to_its_worst(tmp_path: Path) -> None:
+    played = Played(tmp_path)
+    checkpoints, (_, second) = await guesses(played, tmp_path)  # (group 1: one episode, nothing to compare)
+    told = f"system: Goal.\n\n{WAY}\nuser: guess\nassistant: "
+    replies = {
+        word: [segment(told, word, 2), segment(f"{told}{word}\nuser: again\nassistant: ", word, 1)]
+        for word in ("yes", "no")
+    }
+    await played.group(
+        2, "t1",
+        {"reward": 0.5, "segments": replies["no"], "guidance": {"way": WAY}},
+        {"reward": 1.0, "segments": replies["yes"], "guidance": {"way": WAY}, "duration": 3},
+        {"reward": 0.0, "segments": [segment("user: guess\nassistant: ", "nothing", 0, sampled_with=())]},
+        {"reward": 1.0, "segments": replies["no"], "guidance": {"way": WAY}, "duration": 2},
+    )  # fmt: skip
+    await played.group(3, "t2", {"reward": 1.0}, {"reward": 1.0})  # (every reward the same: no pair)
+    made = await make_dataset(played.ledger, "best-and-worst", ["train"], into=played.blobs, at=played.at)
+    assert made.kind == "pairs" and made.counts["pairs"] == 1 and made.counts["episodes"] == 2
+    assert made.supervision == "supervised"  # (the worst was sampled without behaviour logprobs)
+    (line,) = await manifest_of(made)
+    assert line["source"] == "train/2/4>3" and line["rewards"] == [1.0, 0.0]  # (the best and the shortest)
+    taught = await examples(played.ledger, made, plain_renderer("plain"))
+    (pair,) = taught.preferences
+    assert isinstance(pair, Pair) and not taught.segments and taught.items == [pair]
+    assert len(pair.chosen) == 2 and len(pair.rejected) == 1
+    assert "".join(chr(token) for token in pair.chosen[0].tokens) == "system: Goal.\nuser: guess\nassistant: no"
+    assert taught.sampled_by["train/2/4/policy/0"] == second
+    trainer = Counting()
+    made_by = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("dpo")), run="dpo",
+                            start=None, base="qwen", directory=tmp_path / "checkpoints")  # fmt: skip
+    assert trainer.batches == [[pair]] and made_by.metrics["imitated_segments"] == 3.0
+    assert made_by.dataset == made.id and made_by.parents == ()  # (from the base model: none)
+
+    labelled = await make_dataset(played.ledger, "above-and-below", ["train"], into=played.blobs, at=played.at)
+    assert labelled.kind == "labelled" and labelled.counts["labelled"] == 4
+    examples_of = (await examples(played.ledger, labelled, plain_renderer("plain"))).preferences
+    assert [(each.source, each.desirable) for each in examples_of if isinstance(each, Labelled)] == [
+        ("train/2/1", False), ("train/2/2", True), ("train/2/3", False), ("train/2/4", True)
+    ]  # fmt: skip
