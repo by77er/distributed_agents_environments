@@ -46,11 +46,12 @@ const Reported = memo(function Reported({ info }: { info: Record<string, unknown
   const scalars = Object.entries(info).filter(([key, value]) => (value === null || typeof value !== "object") && !["reward", "turns", "duration", "ended"].includes(key));
   const nested = Object.entries(info).filter(([, value]) => value !== null && typeof value === "object") as [string, Record<string, unknown> | unknown[]][];
   const shown = (each: unknown) => (typeof each === "object" ? JSON.stringify(each) : figure(each));
+  if (!scalars.length && !nested.length) return null;  // (all it reported is in the figures above)
   return (
     <Card title="What the episode reported">
       <div className="cols" style={{ gap: 16 }}>
-        <dl className="pairs">{scalars.map(([key, value]) => [<dt key={`k${key}`}>{key.replaceAll("_", " ")}</dt>, <dd key={`v${key}`}>{figure(value)}</dd>])}</dl>
-        <div style={{ display: "grid", gap: 12 }}>
+        {scalars.length ? <dl className="pairs">{scalars.map(([key, value]) => [<dt key={`k${key}`}>{key.replaceAll("_", " ")}</dt>, <dd key={`v${key}`}>{figure(value)}</dd>])}</dl> : null}
+        {nested.length ? <div style={{ display: "grid", gap: 12 }}>
           {nested.map(([key, value]) => (
             <div key={key}>
               <div className="small muted" style={{ marginBottom: 4 }}>{key.replaceAll("_", " ")}</div>
@@ -63,7 +64,7 @@ const Reported = memo(function Reported({ info }: { info: Record<string, unknown
               )}
             </div>
           ))}
-        </div>
+        </div> : null}
       </div>
     </Card>
   );
@@ -197,7 +198,7 @@ const TurnCard = memo(function TurnCard({ slot, untrained, sample, next, beside,
     const element = pre.current?.querySelector("pre");
     if (element) element.scrollTop = element.scrollHeight;
   }, [sample, full]);
-  const header = <header><Avatar name={slot} /><b>{slot}</b><span>{untrained ? "not trained · " : ""}{sample ? `${figure(sample.seconds)} s · ${sample.finish_reason ?? ""}` : ""}</span></header>;
+  const header = <header><Avatar name={slot} /><b>{slot}</b><span className="when">{untrained ? "not trained · " : ""}{sample ? `${figure(sample.seconds)} s · ${sample.finish_reason ?? ""}` : ""}</span></header>;
   if (!sample) return <div className="turn">{header}<section><span className="none">no turn yet</span></section></div>;
   const came = cameOf(sample, next), many = sample.reply.calls.length > 1;
   return (

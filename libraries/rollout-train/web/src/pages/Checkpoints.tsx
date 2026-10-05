@@ -10,7 +10,7 @@ import type { Lineage, LineageRun, LineageCheckpoint, Trainer, Worker } from "..
 import { QueueChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
 import { Card, Empty, Head, Kpi, Kpis, Mark, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
-import { clock, span } from "../lib/format";
+import { clock, plural, span } from "../lib/format";
 import { basePlace, runPlace, checkpointPlace } from "../lib/places";
 import { useFolds } from "../lib/stored";
 
@@ -178,7 +178,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             <div key={lane.key} className="lane-label" style={{ paddingLeft: 4 + Math.min(lane.depth, 3) * 10 }} onClick={toggle} title={lane.open ? "fold the lane" : "show every checkpoint"}>
               <Twist open={lane.open} onToggle={toggle} />
               <b title={run ? `id: ${run.run}` : undefined}>{run && inLedger.has(run.run) ? <Link to={runPlace(run.run)} onClick={event => event.stopPropagation()}>{name}</Link> : name}</b>
-              <small className="says">{lane.checkpoints.length} checkpoints · {says}</small>
+              <small className="says">{plural(lane.checkpoints.length, "checkpoint")} · {says}</small>
             </div>
           );
         })}
@@ -398,7 +398,7 @@ export function Checkpoints() {
           to={moving.map(checkpoint => (inLedger.has(checkpoint.id) ? checkpointPlace(checkpoint.id) : null))}
         />
       </Card>
-      <div className="tiles">{lineage.workers.map(worker => <WorkerTile key={worker.worker} worker={worker} index={index} />)}</div>
+      {lineage.workers.length ? <div className="tiles">{lineage.workers.map(worker => <WorkerTile key={worker.worker} worker={worker} index={index} />)}</div> : null}
       <Card title="Runs">
         <Table
           heads={[["run"], ["from"], ["checkpoints"], ["latest"]]}

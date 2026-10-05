@@ -168,7 +168,7 @@ const StepsCard = memo(function StepsCard({ run }: { run: RunData }) {
   return (
     <Card title="Steps">
       <Table
-        heads={[["step"], ["made"], ["groups"], ["solved"], ["segments", "n"], ["moved", "n"], ["took", "n"]]}
+        heads={[["step"], ["made"], ["groups"], ["solved", "n"], ["segments", "n"], ["moved", "n"], ["took", "n"]]}
         keys={recent.map(step => step.step)}
         rows={recent.map(step => {
           const checkpoint = known.checkpoint(step.makes);

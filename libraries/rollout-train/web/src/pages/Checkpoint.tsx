@@ -52,12 +52,13 @@ export function Checkpoint({ id }: { id: string }) {
         <Kpi label="Depth" value={String(checkpoint.depth)} />
         <Kpi label="Moved" value={figure(checkpoint.metrics.kl_moved)} />
         <Kpi label="Loss" value={figure(checkpoint.metrics.loss)} />
-        <Kpi label="Took" value={span(checkpoint.metrics.update_seconds ?? checkpoint.metrics.seconds) || "–"} note={checkpoint.metrics.segments != null ? `${figure(checkpoint.metrics.segments)} segments` : ""} />
+        <Kpi label="Took" value={span(checkpoint.metrics.update_seconds ?? checkpoint.metrics.seconds)} note={checkpoint.metrics.segments != null ? `${figure(checkpoint.metrics.segments)} segments` : ""} />
         <Kpi label="Kept" value={checkpoint.weights ? bytes(size) : "released"} />
         <Kpi label="Grown from it" value={String(children.length)} note={children.map(each => each.short).join(", ")} />
       </Kpis>
       <Card title="Its line" note={`from ${known.base(line[0]?.base)}`}>
-        {line.length > 1 ? (
+        {line.length > 1 && line.every(each => each.metrics.kl_moved == null) ? <p className="muted">No checkpoint on it says how far it moved.</p>
+          : line.length > 1 ? (
           <Sized>{width => <BarChart values={line.map(each => each.metrics.kl_moved ?? 0)} labels={line.map(each => each.short)} width={width} height={150} onBar={index => navigate(placeOf(line[index]))} />}</Sized>
         ) : <p className="muted">It was trained from {checkpoint.base ? <BaseName base={checkpoint.base} /> : "the base model"}.</p>}
       </Card>

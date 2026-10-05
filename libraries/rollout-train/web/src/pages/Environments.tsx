@@ -47,11 +47,12 @@ export function Environments() {
       </Head>
       {importing ? <ImportForm onDone={version => navigate(environmentPlace(version.reference))} onCancel={() => setImporting(false)} /> : null}
       {known.length ? (
+        <Card>
         <Table
-          heads={[["environment"], ["offered"], ["versions"], ["source"], ["check"], ["runs", "n"], ["suites", "n"], ["last used"]]}
+          heads={[["environment"], ["offered"], ["versions"], ["source"], ["check", "nowrap"], ["runs", "n"], ["suites", "n"], ["last used", "nowrap"]]}
           keys={known.map(each => each.environment)}
           rows={known.map(each => [
-            <span><b>{each.name}</b> <small className="mono faint">{each.published ? each.published.entry_point : each.environment}</small></span>,
+            <span className="named-line"><b>{each.name}</b><small className="mono faint">{each.published ? each.published.entry_point : each.environment}</small></span>,
             each.offered ? <Mark state="running">offered</Mark> : <span className="faint">no</span>,
             each.versions.join(", ") || "–",
             each.published ? <span className="mono" title={each.published.source}>{sourceText(each.published)} <span className="faint">@ {each.published.commit.slice(0, 7)}</span></span> : <span className="faint">–</span>,
@@ -62,6 +63,7 @@ export function Environments() {
           ])}
           to={known.map(each => environmentPlace(each.environment))}
         />
+        </Card>
       ) : <Empty>No environment yet: none is offered by a launcher, trained on, played by a suite, or imported.</Empty>}
     </>
   );
@@ -150,10 +152,10 @@ function Rows({ found }: { found: EnvironmentInfo }) {
               row.groups || <span className="faint">–</span>,
               row.played || <span className="faint">–</span>,
               <Share value={solvedShare(row)} kind="good" />,
-              figure(row.reward),
+              row.reward == null ? <span className="faint">–</span> : figure(row.reward),
               row.held || <span className="faint">–</span>,
             ]),
-            [<b>every row</b>, "", totals.groups, totals.played, <Share value={solvedShare(totals)} kind="good" />, "", ""],
+            [{ text: <b>every row</b>, kind: "nowrap" }, "", totals.groups, totals.played, <Share value={solvedShare(totals)} kind="good" />, "", ""],
           ]}
         />
       ) : <p className="muted">{found.loads ? "It has no rows." : "No run played it yet."}</p>}

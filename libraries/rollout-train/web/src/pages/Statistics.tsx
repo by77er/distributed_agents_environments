@@ -49,13 +49,13 @@ export function Statistics() {
   const colored = (run: StatisticsRun) => ({ name: runName(run.run), color: colorOf(run.run) });
   const life = new Map(system.runs.map(run => [run.run, run]));
   const every = runs.flatMap(done), said = reported(every.flatMap(group => group.solved));
-  const title = (key: string, name: string) => <SectionTitle id={`section-${key}`} title={name} />;
+  const title = (key: string, name: string, note?: React.ReactNode) => <SectionTitle id={`section-${key}`} title={name} note={note} />;
   if (!runs.length) {
     return (
       <>
         <Head title="Statistics" />
         <Empty>{figures.runs.length ? "Every run is left out." : "No run yet."}</Empty>
-        {title("ledger", sectionName("ledger"))}
+        {title("ledger", sectionName("ledger"), ledgerNote(system))}
         <LedgerCard system={system} />
       </>
     );
@@ -142,8 +142,8 @@ export function Statistics() {
         </Card>
       </Halves>
 
-      {title("rows", sectionName("rows"))}
-      <Card title="Rows" note={`${byRow.length}`}>
+      {title("rows", sectionName("rows"), `${byRow.length}`)}
+      <Card>
         <Table
           heads={[["row"], ["title"], ...(runs.length > 1 ? [["runs", "n"] as [string, string]] : []), ["groups", "n"], ["episodes", "n"], ["solved"], ["mean", "n"], ["best", "n"], ["last rewards"], ["last", "n"]]}
           keys={byRow.map(row => row.task)}
@@ -210,7 +210,7 @@ export function Statistics() {
               for (const group of run.groups) counts.set(kindOf(group), counts.get(kindOf(group))! + 1);
               return (
                 <div key={run.run} className="fate">
-                  <span className="fate-name"><i className="swatch" style={{ background: colorOf(run.run) }} />{runName(run.run)}</span>
+                  <span className="fate-name"><i className="swatch" style={{ background: colorOf(run.run) }} /><span title={runName(run.run)}>{runName(run.run)}</span></span>
                   <div className="stack">{kinds.filter(([key]) => counts.get(key)).map(([key, name, color]) => <i key={key} style={{ flex: counts.get(key), background: color }} title={`${name}: ${counts.get(key)}`} />)}</div>
                   <span className="fate-count">{kinds.filter(([key]) => counts.get(key)).map(([key]) => `${counts.get(key)} ${key}`).join(" · ")}</span>
                 </div>
@@ -252,7 +252,7 @@ export function Statistics() {
 
       <ChannelCards system={system} />
 
-      {title("ledger", sectionName("ledger"))}
+      {title("ledger", sectionName("ledger"), ledgerNote(system))}
       <LedgerCard system={system} />
     </>
   );
@@ -263,7 +263,7 @@ const ChannelCards = memo(function ChannelCards({ system }: { system: System }) 
   const known = useKnown();
   if (!system.channels.length) return null;
   return (
-    <div className="cols" style={{ marginTop: 22 }}>
+    <div className="cols">
       {system.channels.map(channel => {
         const last = channel.throughput.at(-1);
         return (
@@ -272,7 +272,7 @@ const ChannelCards = memo(function ChannelCards({ system }: { system: System }) 
               <Kpis>
                 <Kpi label="tokens a second" value={figure(last.tokens_per_second)} />
                 <Kpi label="requests at once" value={figure(last.mean_concurrency)} />
-                <Kpi label="each" value={`${figure(last.tokens_per_second_per_stream)} tok/s`} />
+                <Kpi label="each" value={last.tokens_per_second_per_stream == null ? "–" : `${figure(last.tokens_per_second_per_stream)} tok/s`} />
               </Kpis>
             ) : <p className="muted">No request has been measured yet.</p>}
           </Card>
@@ -283,9 +283,12 @@ const ChannelCards = memo(function ChannelCards({ system }: { system: System }) 
 });
 
 /** The ledger: the runners that took their fences in it and the claims each made, the fences and the tables. */
+const ledgerNote = (system: System) =>
+  `${system.ledger_at} · ${bytes(system.kept.checkpoints)} of checkpoints and ${bytes(system.kept.episodes)} of episodes kept`;
+
 const LedgerCard = memo(function LedgerCard({ system }: { system: System }) {
   return (
-    <Card title="Ledger" note={`${system.ledger_at} · ${bytes(system.kept.checkpoints)} of checkpoints and ${bytes(system.kept.episodes)} of episodes kept`}>
+    <Card>
       {system.runners.length ? (
         <>
           <Table heads={[["runner"], ["fence", "n"], ["claims", "n"], ["playing", "n"], ["last claimed", "n"]]} keys={system.runners.map(runner => runner.runner)}
