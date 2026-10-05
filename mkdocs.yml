@@ -178,3 +178,4 @@ nav:
       - "Thinking Machines' API": research/thinking-machines.md
       - "Prime Intellect's verifiers": research/prime-compat.md
       - "Cleanup inventory": research/cleanup-inventory.md
+      - "Scaling models and topologies": research/scaling-models-and-topologies.md
