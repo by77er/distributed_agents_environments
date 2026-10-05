@@ -317,7 +317,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         ]  # fmt: skip
         inference.append({
             "name": name, "kind": provider.kind, "gpus": provider.gpus, "replicas": provider.replicas,
-            "shared": provider.pool is not None, "capabilities": capabilities, "models": models,
+            "capabilities": capabilities, "models": models,
         })  # fmt: skip
     pairs: list[dict[str, Any]] = []
     for trainer_name, trainer in cluster.trainers.items():

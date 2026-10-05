@@ -441,7 +441,6 @@ export interface OfferedProvider {
   kind: string;
   gpus: number;
   replicas: number;
-  shared: boolean;
   capabilities: Record<string, unknown>;
   models: OfferedModel[];
 }

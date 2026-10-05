@@ -6,7 +6,7 @@ An **inference provider** samples a channel. Its kind (`INFERENCE_KINDS`: `vllm`
 logprobs, honours sampling parameters, serves adapters by name or reloads full weights, streams, how it bills, and the
 checkpoint formats it loads. The cluster config (`rollout_train.cluster`) adds what this deployment has: its models
 (`ModelOffer`: context, the base a quantized model was made from, the highest LoRA rank, cost per token class), its
-GPUs and replicas, and, for a provider shared by several runs, its adapter slots (`SharedPool`).
+GPUs and replicas.
 
 A **trainer** makes checkpoints. Its kind (`TRAINER_KINDS`: `lora`, `full`, `tinker`, `runpod-trainer`) declares its
 `TrainerCapabilities`: what it produces (`lora` or `full`), the format its files are in (`peft`, `full`, `tinker`), the
@@ -55,7 +55,6 @@ __all__ = [
     "Routing",
     "Secret",
     "SettingSpec",
-    "SharedPool",
     "Tls",
     "TrainerCapabilities",
     "TrainerKind",
@@ -227,19 +226,6 @@ class ModelOffer:
 
 
 @dataclass(frozen=True)
-class SharedPool:
-    """A provider shared by several runs: its servers hold every bound run's live checkpoints as adapters side by
-    side. A run joins when its rank fits the model's `max_lora_rank` and the pool has free adapter slots for each
-    channel it serves there (`max_lag + 1` for the trained channel, 2 for one following it, 1 for a fixed checkpoint);
-    turns are shared among its runs by their `share`."""
-
-    adapter_slots: int | None = None
-    """Adapters its servers hold at once (none: not limited)."""
-    max_runs: int | None = None
-    """Runs bound to it at once (none: as many as slots allow)."""
-
-
-@dataclass(frozen=True)
 class Routing:
     """How a channel served by several providers shares its turns among them."""
 
@@ -266,8 +252,6 @@ class InferenceKind:
     """The secrets its table may name (`NAME_env`, `NAME_file`), beyond its auth's."""
     implementation: str | None = None
     """`module:name` of what samples it, where one module does."""
-    shared: bool = False
-    """Whether runs share its servers as a pool (`SharedPool`)."""
     remote: bool = False
     """Whether its servers are reached at addresses (and so need an auth other than `none` unless local)."""
 
@@ -311,9 +295,8 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             ),
             auths=("none", "bearer", "mtls"),
             auth=Auth("none"),
-            fields=("engine", "listen", "max_logprobs", "pool"),  # (`engine`: what makes its engines, `module:name`)
+            fields=("engine", "listen", "max_logprobs"),  # (`engine`: what makes its engines, `module:name`)
             implementation="rollout_vllm:VllmEngine",
-            shared=True,
         ),
         InferenceKind(
             "vllm-servers",
@@ -325,9 +308,8 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             ),
             auths=("none", "bearer", "mtls"),
             auth=None,
-            fields=("addresses", "via", "loader", "max_logprobs", "pool"),
+            fields=("addresses", "via", "loader", "max_logprobs"),
             implementation="rollout_train.inference:RemoteEngine",
-            shared=True,
             remote=True,
         ),
         InferenceKind(
@@ -386,11 +368,9 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
                 "secrets",
                 "step_ca",
                 "max_logprobs",
-                "pool",
             ),
             secrets=("api_key",),
             implementation="rollout_train.pods.inference:InferencePod",
-            shared=True,
             remote=True,
         ),
     )
@@ -413,8 +393,6 @@ class InferenceProvider:
     """Per replica."""
     replicas: int = 1
     """Per run channel, unless the run asks for more (`channels.NAME.replicas`)."""
-    pool: SharedPool | None = None
-    """Set for a provider whose servers runs share."""
     endpoints: tuple[str, ...] = ()
     """Where its servers are reached (addresses, a router, where local engines listen)."""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])

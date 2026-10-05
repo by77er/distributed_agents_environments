@@ -11,7 +11,7 @@ import pytest
 from pydantic import JsonValue
 
 from rollout_train.cluster import Cluster, parsed
-from rollout_train.providers import Auth, SharedPool
+from rollout_train.providers import Auth
 from rollout_train.run_settings import RunSettings
 from rollout_train.validation import (
     RULES,
@@ -19,7 +19,6 @@ from rollout_train.validation import (
     EnvironmentFacts,
     Finding,
     LedgerFacts,
-    PoolUse,
     SuiteFacts,
     check,
     estimated_spend,
@@ -80,7 +79,7 @@ ACCEPTANCE: dict[str, JsonValue] = {
     "groups": 12,
     "groups_per_step": 4,
 }
-"""The acceptance run: Tinker trains Qwen3.5-4B, the local vLLM pool serves it through the Tinker to PEFT bridge."""
+"""The acceptance run: Tinker trains Qwen3.5-4B, the local vLLM engines serve it through the Tinker to PEFT bridge."""
 ENVIRONMENT = EnvironmentFacts(GSM8K, episodes_per_group=4, turns_per_episode=1, prompt_tokens=200)
 LEDGER = LedgerFacts(
     suites={"math": SuiteFacts("math", 1, frozenset({GSM8K}))},
@@ -660,36 +659,6 @@ def test_more_gpus_than_the_cluster_has_is_refused_and_more_than_are_free_waits(
         "the run needs 1 GPUs, and 0 are free: it waits"
     ]
     assert refused("capacity", findings(LOCAL_LORA)) == []  # (colocated: the trainer shares the engines' GPU)
-
-
-# pools
-
-
-def test_a_pool_needs_slots_for_the_runs_live_checkpoints() -> None:
-    assert refused("pools", findings({"max_lag": 4})) == [
-        "the run needs 5 adapter slots on local-vllm (max_lag + 1 for the trained channel, 2 for one following it, 1 "
-        "for a fixed checkpoint), and the pool has 4"
-    ]
-    rival: dict[str, JsonValue] = {
-        "channels.rival.provider": "local-vllm", "channels.rival.model": "Qwen/Qwen3.5-4B",
-        "channels.rival.mode": "follows", "channels.rival.follows": "policy", "channels.rival.lag": 5,
-    }  # fmt: skip
-    assert refused("pools", findings(rival)) == []  # (2 for the trained channel, 2 for the one following it)
-    assert refused("pools", findings({**rival, "max_lag": 2})) == [
-        "the run needs 5 adapter slots on local-vllm (max_lag + 1 for the trained channel, 2 for one following it, 1 "
-        "for a fixed checkpoint), and the pool has 4"
-    ]
-    shared = dataclasses.replace(LEDGER, pools={"local-vllm": PoolUse(runs=1, slots=3, shares=1.0)})
-    found = findings(ledger=shared)
-    assert refused("pools", found) == []
-    assert noted("pools", found) == [
-        "local-vllm has 1 adapter slots free, and the run needs 2: it waits",
-        "with share 1 it gets 50% of local-vllm's turns while all its runs are busy",
-    ]
-    capped = with_provider(CLUSTER, "local-vllm", pool=SharedPool(adapter_slots=8, max_runs=1))
-    assert "local-vllm serves its most runs (1): the run waits" in noted(
-        "pools", findings(cluster=capped, ledger=shared)
-    )
 
 
 # spend

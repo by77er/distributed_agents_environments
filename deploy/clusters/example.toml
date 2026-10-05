@@ -1,4 +1,4 @@
-# A cluster of one machine with one 16 GB GPU (an RTX 5080): the ledger in SQLite, blobs in files, a vLLM pool on the
+# A cluster of one machine with one 16 GB GPU (an RTX 5080): the ledger in SQLite, blobs in files, vLLM engines on the
 # GPU, a LoRA trainer that shares it, Tinker for training and sampling elsewhere, the Minecraft worlds, and GSM8K in
 # rollout-verifiers' own Python. Copy it to ~/.config/rollout/cluster.toml (or name it with --cluster or
 # ROLLOUT_CLUSTER). docs/guide/cluster.md describes every field. Secrets are named here, never written: TINKER_API_KEY
@@ -34,13 +34,11 @@ places = 8
 runs_gib = 6                                  # each Minecraft episode runs a Paper server
 training_gib = 4
 
-# The GPU, as a pool of vLLM engines: runs whose channel is a LoRA over one of its models share it, each run's live
-# checkpoints loaded side by side as adapters.
+# The GPU, as vLLM engines: each run starts engines of its own on it.
 [inference.local-vllm]
 kind = "vllm"
 gpus = 1
 max_logprobs = 20
-pool = { adapter_slots = 4 }
 [inference.local-vllm.models."Qwen/Qwen3.5-4B"]
 context = 8192
 options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 64 }  # Tinker's rank 16, times 3

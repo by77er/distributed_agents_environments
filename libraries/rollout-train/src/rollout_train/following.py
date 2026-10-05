@@ -8,9 +8,9 @@ checkpoint's weights loaded first. The process may be an engine host (`rollout_t
 engines in its care), a process beside vLLM servers on their machine (over `RemoteEngine`), or a runner whose engines
 are in its own process or are clients of a service, such as a sampler that is switched to the checkpoint named.
 
-What it serves is a set of runs' channels, `(run, channel)`, which may change while it runs (`bindings`): runs bound
-to a shared pool join and leave it without the follower starting again. Each is a `Channel` of its own over engines
-that may be shared, so adapters of several runs sit side by side on one engine. Each channel keeps the adapters a turn
+What it serves is a set of runs' channels, `(run, channel)`, which may change while it runs (`bindings`), without
+the follower starting again. Each is a `Channel` of its own over the engines, so the adapters of several channels sit
+side by side on one engine. Each channel keeps the adapters a turn
 may still sample from loaded: the one served and those before it, as many as its run's serving record says (`max_lag
 + 1`), following the record as it changes. Full weights are loaded replica by replica: a follower that is replica `i`
 of several loads a channel's new full checkpoint only once the replicas before it beat that they hold it (or have

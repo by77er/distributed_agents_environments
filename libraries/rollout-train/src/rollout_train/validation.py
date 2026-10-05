@@ -5,12 +5,12 @@ rule it breaks, the key it is about and a reason a person can act on), or nothin
 connection and starts nothing: what it needs to know beyond the settings and the cluster is gathered beforehand, as
 facts: the environment's (`EnvironmentFacts`: whether it loads, the sandboxes and tool sets it needs, its slots, how
 long its episodes run) and the ledger's (`LedgerFacts`: the checkpoints the settings name and their formats, the
-suites, the names taken, the shared pools' use, the cluster's capacity).
+suites, the names taken, the cluster's capacity).
 
-A finding refuses the run unless it says it does not (`refuses`): a run that only waits (for a GPU, a pool's slots)
-is told so and not refused. `RULES` lists the rules in the order findings are reported (docs/guide/cluster.md says
+A finding refuses the run unless it says it does not (`refuses`): a run that only waits (for a GPU) is told so and
+not refused. `RULES` lists the rules in the order findings are reported (docs/guide/cluster.md says
 when each refuses): settings, providers, auth, capabilities, bridge, weights, models, rank, segment, start, objective,
-evals, distillation, environment, capacity, pools, spend, name.
+evals, distillation, environment, capacity, spend, name.
 """
 
 from collections.abc import Callable, Mapping
@@ -36,7 +36,6 @@ __all__ = [
     "EnvironmentFacts",
     "Finding",
     "LedgerFacts",
-    "PoolUse",
     "Rule",
     "SuiteFacts",
     "check",
@@ -91,7 +90,6 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule("environment", "not offered, does not load, or needs sandboxes or tool sets the cluster lacks"),
     Rule("capacity", "more GPUs than the cluster has"),
-    Rule("pools", "more adapter slots than a shared pool has"),
     Rule("spend", "a spend limit below one step's estimated cost"),
     Rule("name", "not a name, or taken"),
 )
@@ -145,17 +143,6 @@ class SuiteFacts:
 
 
 @dataclass(frozen=True)
-class PoolUse:
-    """A shared pool's use by the runs bound to it now."""
-
-    runs: int = 0
-    slots: int = 0
-    """Adapter slots they hold."""
-    shares: float = 0.0
-    """The sum of their shares."""
-
-
-@dataclass(frozen=True)
 class LedgerFacts:
     """What the ledger and the live cluster say, asked beforehand."""
 
@@ -163,8 +150,6 @@ class LedgerFacts:
     """Every checkpoint reference the settings name, looked up (one not here does not exist)."""
     suites: Mapping[str, SuiteFacts] = field(default_factory=dict[str, SuiteFacts])
     names_taken: frozenset[str] = frozenset()
-    pools: Mapping[str, PoolUse] = field(default_factory=dict[str, PoolUse])
-    """By provider."""
     gpus: float | None = None
     """GPUs the cluster has in all (none: not known)."""
     gpus_free: float | None = None
@@ -750,8 +735,8 @@ def _capacity(run: _Run) -> None:
     engines: dict[str, float] = {}
     for channel in run.settings.channels:
         for name, provider in run.providers(channel):
-            if provider.kind != "vllm" or run.ledger.pools.get(name, PoolUse()).runs > 0:
-                continue  # (a pool already serving other runs needs no more GPUs)
+            if provider.kind != "vllm":
+                continue
             replicas = run.settings[f"channels.{channel}.replicas"]
             count = replicas if isinstance(replicas, int) else provider.replicas
             engines[name] = max(engines.get(name, 0.0), count * provider.gpus)
@@ -766,52 +751,6 @@ def _capacity(run: _Run) -> None:
                    "would never start")  # fmt: skip
     elif free is not None and needs > free:
         run.note("capacity", "trainer.provider", f"the run needs {needs:g} GPUs, and {free:g} are free: it waits")
-
-
-def _slots(run: _Run, channel: str) -> int:
-    """The adapter slots a channel holds on a shared pool: `max_lag + 1` for the trained channel, 2 for one that follows
-    another (what it serves, and the next), 1 for a fixed checkpoint (an eval's subject among them), none for the base
-    model."""
-    mode = run.settings.mode(channel)
-    if mode == "trained":
-        lag = run.settings["max_lag"]
-        return (lag if isinstance(lag, int) else 1) + 1
-    if mode == "follows":
-        return 2
-    fixed = run.settings[f"channels.{channel}.checkpoint"]
-    return 1 if fixed is not None or (run.kind == "eval" and run.settings["start"] is not None) else 0
-
-
-def _pools(run: _Run) -> None:
-    needs: dict[str, int] = {}
-    for channel in run.settings.channels:
-        want = _slots(run, channel)
-        if not want:
-            continue
-        for name, provider in run.providers(channel):
-            if provider.pool is not None:
-                needs[name] = needs.get(name, 0) + want
-    for name, want in needs.items():
-        pool = run.cluster.inference[name].pool
-        assert pool is not None
-        use = run.ledger.pools.get(name, PoolUse())
-        key = "max_lag"
-        if pool.adapter_slots is not None and want > pool.adapter_slots:
-            run.refuse("pools", key, f"the run needs {want} adapter slots on {name} (max_lag + 1 for the trained "
-                       f"channel, 2 for one following it, 1 for a fixed checkpoint), and the pool has "
-                       f"{pool.adapter_slots}")  # fmt: skip
-        elif pool.adapter_slots is not None and want > pool.adapter_slots - use.slots:
-            run.note("pools", key, f"{name} has {pool.adapter_slots - use.slots} adapter slots free, and the run needs "
-                     f"{want}: it waits")  # fmt: skip
-        if pool.max_runs is not None and use.runs >= pool.max_runs:
-            run.note("pools", key, f"{name} serves its most runs ({pool.max_runs}): the run waits")
-        if run.trainer is not None and run.trainer.capabilities.produces == "full" and use.runs > 0:
-            run.note("pools", "trainer.provider", f"full weights need {name}'s servers to themselves, and it serves "
-                     f"{use.runs} runs: the run waits")  # fmt: skip
-        share = run.settings["share"]
-        if use.runs > 0 and isinstance(share, int | float):
-            run.note("pools", "share", f"with share {share:g} it gets {share / (use.shares + share):.0%} of {name}'s "
-                     "turns while all its runs are busy")  # fmt: skip
 
 
 def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None:
@@ -892,7 +831,6 @@ _RULES: Mapping[str, Callable[[_Run], None]] = {
     "distillation": _distillation,
     "environment": _environment,
     "capacity": _capacity,
-    "pools": _pools,
     "spend": _spend,
     "name": _name,
 }

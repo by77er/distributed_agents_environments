@@ -1161,7 +1161,7 @@ Where commits would collide, one owns the file:
 
 The pure parts of 3, 4, 5 and 8 are in as modules of their own, wired into nothing
 ([the cluster config and run settings](../guide/cluster.md)): `rollout_train.cluster` (the schema, `find`, `load`,
-secrets by name, `inspect`), `rollout_train.providers` (kinds, capabilities, `auth`, shared pools, routing,
+secrets by name, `inspect`), `rollout_train.providers` (kinds, capabilities, `auth`, routing,
 `settings_of`), `rollout_train.bridges` (the registry by format pair, `path`, `rank_factor`, `format_of`),
 `rollout_train.run_settings` (the schema `KEYS`, layers, `--set` and files, `recorded`, `diff`),
 `rollout_train.presets` (`FilePresets`, `DatabasePresets`, `presets_of`) and `rollout_train.validation` (`check`, its
@@ -1184,10 +1184,10 @@ What later tracks take from them:
   manifest's paths.
 - **10, 11** (engine hosts, the gateway): a channel's servers from `RunSettings.providers(channel)` and its `routing`;
   each server's client from `provider.auth.connection(cluster.tls, identity=...)`; a `follows` channel reads the
-  followed channel's serving record `lag` checkpoints back; shared pools by `SharedPool.adapter_slots` and `share`.
+  followed channel's serving record `lag` checkpoints back.
 - **13** (runs as jobs): `limits.spend` by `estimated_spend` and the trainer's and providers' `cost`.
 - **14, 17** (the launcher, the monitor): gather `EnvironmentFacts` (from the environment worker) and `LedgerFacts`
-  (checkpoints the settings name with `format_of`, suites, names taken, pools' use, capacity), then
+  (checkpoints the settings name with `format_of`, suites, names taken, capacity), then
   `check(settings, cluster, environment, ledger)`; refuse on `refusals(...)`, show notes as waiting; mark each
   finding's `key` in the form. The offers JSON is the cluster's providers with their `capabilities` and
   `path(...)` for each trainer and provider pair.
@@ -1239,9 +1239,8 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   Following the decisions after review, an `EngineHost` shares nothing with the trainer but the ledger and the blob
   store: no placement group. It asks Ray for its own fractional `num_gpus` (`host_spec`: a replica's GPUs from the
   provider, halved where the run's trainer is colocated, and `[placement.engines]`), which on Kubernetes is what makes
-  the autoscaler add a GPU worker; the placement groups of §4 are not used. The same actor is a run's replica or a
-  pool's (`detached`), and what it serves changes while it runs (`bind`, `unbind`; the follower's `bindings`), so pool
-  bindings in the ledger can feed it later. Each `(run, channel)` is a `Channel` of its own over shared engines, keeping
+  the autoscaler add a GPU worker; the placement groups of §4 are not used. What it serves changes while it runs
+  (`bind`, `unbind`; the follower's `bindings`). Each `(run, channel)` is a `Channel` of its own over the engines, keeping
   `max_lag + 1` adapters from the newest serving record (the window followed as `max_lag` changes). Beats list every
   adapter each engine holds, with its run, channel, checkpoint and depth, and a follower over vLLM servers holds its
   view to `/v1/models` (reloading what a server lost, removing strays). Full weights load replica by replica through the
@@ -1249,7 +1248,7 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   `CheckpointServer` over an actor handle, for callers in the host's Ray cluster; the gateway, outside Ray, needs the
   host reachable over HTTP, which is 11's to add (the host answering the `/v1/models` and `/v1/completions` subset
   `RemoteEngine` speaks). vLLM's `--max-loras` (adapters one batch mixes on the GPU) must cover the sum of the bound
-  runs' windows, with `--max-cpu-loras` as the cache above it: the inference image takes both from
+  channels' windows, with `--max-cpu-loras` as the cache above it: the inference image takes both from
   `VLLM_MAX_LORAS` and `VLLM_MAX_CPU_LORAS`. The session's Ray has one GPU in its accounting, so hosts' shares are
   scheduled in tests as on a GPU node.
 - **11, in part** (channels from a run's start, for judges): `rollout_train.gateway.directory.ChannelDirectory` builds

@@ -45,7 +45,7 @@ const version: SuiteVersion = {
 const suite: EvalSuite = { suite: "words-v1", version: version.id, number: 1, environments: ["games:words"], made: 1, starts: version.starts, versions: [version], subjects: [] };
 
 const provider = (name: string, models: string[], renderers: string[] = []): OfferedProvider => ({
-  name, kind: "vllm", gpus: 1, replicas: 1, shared: false, capabilities: {},
+  name, kind: "vllm", gpus: 1, replicas: 1, capabilities: {},
   models: models.map(model => ({ model, context: 4096, base: null, max_lora_rank: 32, cost: {}, renderers, families: [] })),
 });
 const preset = (name: string, provider: string, model: string): Preset => ({

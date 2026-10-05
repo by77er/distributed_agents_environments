@@ -47,7 +47,6 @@ training_gib = 4
 kind = "vllm"
 gpus = 1
 max_logprobs = 20
-pool = { adapter_slots = 4 }
 [inference.local-vllm.models."cyankiwi/Qwen3.5-9B-AWQ-4bit"]
 base = "Qwen/Qwen3.5-9B"
 context = 8192

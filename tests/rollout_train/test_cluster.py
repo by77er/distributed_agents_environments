@@ -39,7 +39,6 @@ def test_the_example_describes_this_machine() -> None:
     assert set(cluster.inference) == {"local-vllm", "tinker"}
     local = cluster.inference["local-vllm"]
     assert local.kind == "vllm" and local.gpus == 1 and local.local and local.auth.kind == "none"
-    assert local.pool is not None and local.pool.adapter_slots == 4
     assert local.models["Qwen/Qwen3.5-4B"].max_lora_rank == 64
     assert local.models["cyankiwi/Qwen3.5-9B-AWQ-4bit"].base == "Qwen/Qwen3.5-9B"
     assert cluster.inference["tinker"].auth.kind == "vendor"

@@ -47,7 +47,7 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
     )
     changeable = {each.pattern for each in KEYS if each.changeable and not each.pattern.startswith("objective.")}
     assert changeable == {
-        "groups_per_step", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend", "share",
+        "groups_per_step", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend",
     }  # fmt: skip
 
 
@@ -60,7 +60,7 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
         ("max_lag", -1, "is at least 0, not -1"),
         ("channels.policy.routing", "random", "is one of spill, weighted, not 'random'"),
         ("channels.policy.thinking_tokens", True, "is a whole number or null, not true"),
-        ("share", 0, "is above 0, not 0"),
+        ("objective.clip.dual", 1, "is above 1, not 1"),
         ("limits.spend", -2, "is at least 0, not -2"),
     ],
 )
@@ -71,7 +71,7 @@ def test_a_key_says_what_is_wrong_with_a_value(key: str, value: object, problem:
 
 
 def test_a_key_takes_what_it_says() -> None:
-    for key, value in [("groups", 3), ("groups", 3.0), ("limits.spend", 2), ("limits.spend", None), ("share", 0.5)]:
+    for key, value in [("groups", 3), ("groups", 3.0), ("limits.spend", 2), ("limits.spend", None), ("max_lag", 0)]:
         found = key_of(key)
         assert found is not None and found.problem(value) is None, key
 

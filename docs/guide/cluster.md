@@ -61,7 +61,7 @@ A file it names that is not there is an error, which says where it looked. `load
 A run's job is handed the config it was submitted with, as JSON in `ROLLOUT_CLUSTER_JSON`; `located` reads that
 first, and finds the file as above otherwise.
 
-`deploy/clusters/example.toml` is a config for one machine with one 16 GB GPU: SQLite, files, a vLLM pool, the LoRA
+`deploy/clusters/example.toml` is a config for one machine with one 16 GB GPU: SQLite, files, vLLM engines, the LoRA
 trainer, Tinker, the Minecraft worlds, the gridworld and GSM8K in its own Python. `deploy/chart/rollout/files/cluster.toml`
 is the chart's, for a Kubernetes cluster ([on Kubernetes](deploying.md#on-kubernetes)).
 
@@ -91,7 +91,6 @@ training_gib = 4
 [inference.local-vllm]
 kind = "vllm"
 gpus = 1
-pool = { adapter_slots = 4 }                  # runs share it: each run's live checkpoints are adapters side by side
 [inference.local-vllm.models."Qwen/Qwen3.5-4B"]
 context = 8192
 options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 64 }
@@ -203,7 +202,7 @@ rollout bookmark diamonds first:20 --cluster lab
 | loads | `peft`, `full` | `peft` | `tinker` | nothing | `peft` |
 | bills | nothing | nothing | tokens | tokens | hours |
 | auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (must say) | `mtls` (each pod's identity from its heartbeat) |
-| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs`, `pool` | `addresses`, `via`, `loader`, `max_logprobs`, `pool` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `pool`, `api_key_env` |
+| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `api_key_env` |
 
 Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): the SDK takes prompt
 logprobs and a top k at prompt and sampled positions, whose width Tinker's server bounds without the SDK saying how
@@ -225,12 +224,6 @@ given).
 | `bearer` | the system's CAs, or the cluster's with `trust = "cluster"` | the host name | | `token_env` / `token_file` |
 | `vendor` | the vendor's SDK | | | the SDK reads its own key |
 | `none` | only for addresses on this machine | | | |
-
-**Shared pools.** A `vllm`, `vllm-servers` or `runpod-inference` provider is a pool runs share (`SharedPool`): its
-servers hold each bound run's live checkpoints as adapters side by side. `pool = { adapter_slots = N, max_runs = M }`
-limits it. A run needs slots for each channel it serves there (`max_lag + 1` for the trained channel, 2 for one that
-follows another, 1 for a fixed checkpoint or an eval's subject, none for the base model), and its rank must fit the
-model's `max_lora_rank`. Turns are shared among a pool's runs by each run's `share`.
 
 **Several providers.** A channel may name several providers (`channels.NAME.providers`), shared by a routing rule
 (`channels.NAME.routing`): `spill` fills the first and sends the rest to the next; `weighted` shares turns by
@@ -311,7 +304,6 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `max_lag` | 1 | Changeable |
 | `evals.suite`, `evals.every`, `evals.episodes` | , 1, | Changeable |
 | `limits.spend` | | Changeable: dollars; the run ends once its estimated spend reaches it |
-| `share` | 1 | Changeable: its weight in a shared pool's fair shares |
 
 Settings are given in layers, each over the last (`layered`): the schema's defaults, a preset, a file
 (`from_file`: TOML or JSON, dotted keys or tables; JSON's `null` unsets a key), then the flags (`from_flags`:
@@ -387,7 +379,6 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `distillation` | a distillation (or a policy gradient's distillation term) with no teachers, a teacher channel without a provider, or no route for the environment the run plays (routes for some of its rows only: a note); a teacher's provider without prompt logprobs, with fewer top logprobs than `objective.distillation.top_k`, or with them only unchecked (Tinker); the trainer does not score; the teacher's renderer family differs |
 | `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served |
 | `capacity` | more GPUs than the cluster has (more than are free: a note, it waits) |
-| `pools` | more adapter slots than a shared pool has (more than are free, or the pool full of runs: a note, it waits) |
 | `spend` | `limits.spend` below one step's estimated cost (`estimated_spend`) |
 | `name` | not a name, or taken |
 

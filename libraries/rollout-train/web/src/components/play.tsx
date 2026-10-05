@@ -23,7 +23,7 @@ export const baseModelsOf = (offers: Offers): string[] => [...new Set(offers.inf
 /** The settings of a preset an eval takes: its channels' and slots', and how many episodes it plays at once (an eval
  * trains nothing, so a training run's settings are left out). */
 export const evalSettingsOf = (preset: Preset | undefined): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(preset?.settings ?? {}).filter(([key]) => /^(channels|slots)\.|^(self_judging|episodes_at_once|share)$/.test(key)));
+  Object.fromEntries(Object.entries(preset?.settings ?? {}).filter(([key]) => /^(channels|slots)\.|^(self_judging|episodes_at_once)$/.test(key)));
 
 /** The channel settings an eval of a base model plays with: the preset's, with the model; where the preset's provider
  * does not serve it, the first provider that does (and that model's renderer, where one is named). */

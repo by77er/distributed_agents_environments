@@ -39,7 +39,6 @@ from rollout_train.providers import (
     InferenceProvider,
     ModelOffer,
     Secret,
-    SharedPool,
     Tls,
     TrainerProvider,
     is_local,
@@ -519,15 +518,6 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
     if not models:
         raise ClusterError(f'{where} offers no model: add [inference.{name}.models."MODEL"] with its context')
     secrets = {each: secret for each in kind.secrets if (secret := said.secret(each)) is not None}
-    pool: SharedPool | None = None
-    if "pool" in said.table:
-        if not kind.shared:
-            raise ClusterError(f"{where}: a {kind_name} provider is not a pool runs share")
-        shape = _Table(said.take("pool"), f"{where} pool")
-        pool = SharedPool(shape.whole("adapter_slots", None, least=1), shape.whole("max_runs", None, least=1))
-        shape.done()
-    elif kind.shared:
-        pool = SharedPool()
     capabilities = kind.capabilities
     if "max_logprobs" in said.table:
         capabilities = replace(capabilities, top_logprobs=said.whole("max_logprobs", least=0))
@@ -547,9 +537,7 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         raise ClusterError(f'{where} names its endpoint (endpoint = "module:name")')
     if (problem := auth_problem(where, auth, endpoints)) is not None:
         raise ClusterError(problem)
-    return InferenceProvider(
-        name, kind_name, capabilities, models, auth, gpus, replicas, pool, endpoints, settings, secrets
-    )
+    return InferenceProvider(name, kind_name, capabilities, models, auth, gpus, replicas, endpoints, settings, secrets)
 
 
 def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:

@@ -80,7 +80,7 @@ class Key:
     choices: tuple[str, ...] = ()
     """The strings it takes, where it takes only some."""
     above: bool = False
-    """`least` itself is not taken (a share above 0)."""
+    """`least` itself is not taken."""
 
     def problem(self, value: JsonValue) -> str | None:
         """What is wrong with `value` for this key, in words; none when nothing is."""
@@ -197,7 +197,6 @@ KEYS: tuple[Key, ...] = (
         "Dollars: the run ends once its estimate reaches this",
         least=0,
     ),
-    Key("share", ("float",), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True),
     # The objective: its preset, fixed, and its components (fixed or changeable, each as `COMPONENTS` says).
     Key("objective.preset", _S, "default", False, TRAINING, "The objective's preset", choices=tuple(PRESETS)),
     *(

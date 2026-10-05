@@ -71,7 +71,6 @@ const LABELS: Record<string, string> = {
   "limits.spend": "spend limit",
   "objective.preset": "objective",
   self_judging: "self-judging",
-  share: "share",
 };
 
 /** Settings the tile says otherwise (its title, its facts) or that every launch has. */
@@ -80,7 +79,7 @@ const OWN = new Set(["kind", "name", "environment", "start", "bookmark", "groups
 /** Run settings' defaults, as the schema has them: a setting at its default is left out. */
 export const DEFAULTS: Record<string, unknown> = {
   groups: 100, groups_per_step: 4, seed: 0, episodes_at_once: 6, max_lag: 1, "evals.every": 1, "evals.episodes": null,
-  "limits.spend": null, share: 1, self_judging: false, "objective.preset": "default", "trainer.channel": "policy",
+  "limits.spend": null, self_judging: false, "objective.preset": "default", "trainer.channel": "policy",
 };
 
 /** A setting's name in words: the page's word for it, a channel's setting by its channel, else the key. */
