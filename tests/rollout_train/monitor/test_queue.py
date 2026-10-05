@@ -194,7 +194,7 @@ def test_quantities_are_numbers_of_cpus_bytes_and_gpus() -> None:
 
 
 async def test_with_kueue_the_queue_is_its_quota_its_admitted_workloads_and_its_pending_ones_in_its_order(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server = FakeKubernetes()
     system, runs = await kueue_system(tmp_path, server)
@@ -219,6 +219,7 @@ async def test_with_kueue_the_queue_is_its_quota_its_admitted_workloads_and_its_
     names = {each["name"] for each in [*shown["admitted"], *shown["pending"]]}
     assert "done" not in names and "someone-elses" not in names  # (finished; of another queue)
 
+    monkeypatch.setattr("rollout_train.monitor.system.ray_totals", lambda: None)  # (not connected to Ray)
     async with monitor_client(f"sqlite:///{tmp_path}/ledger.db", beat=0.0) as client:  # (with no cluster config)
         answer = await client.get("/api/queue")
         assert answer.status_code == 200 and answer.json()["source"] is None
