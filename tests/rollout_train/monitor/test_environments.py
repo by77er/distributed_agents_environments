@@ -190,3 +190,11 @@ def test_the_list_folds_every_sources_sightings() -> None:
         ["3"],
         None,
     )
+
+
+def test_an_environment_says_the_kinds_of_sandbox_its_program_declares() -> None:
+    from rollout.names import named
+    from rollout_train.monitor.environments import described, sandboxes_of
+
+    assert described(named("minecraft_team.environment:environment"))["sandboxes"] == ["minecraft"]
+    assert sandboxes_of(named("gridworld.environment:environment")) == []

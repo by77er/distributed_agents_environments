@@ -7,8 +7,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useEnvironment, useEvals, useKnown, useLaunch, useLaunches, useSystem } from "../api/queries";
 import type { EvalSuite, Launcher, OfferedProfile } from "../api/types";
 import { EnvironmentPicker } from "../components/environments";
+import { playsWith } from "../components/play";
 import { Card, Empty, Head, SectionTitle } from "../components/ui";
 import { Ago } from "../layout/runs";
+import { publishedParts } from "../lib/environments";
 import { nameOf } from "../lib/model";
 import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, NO_EVALS, shown, typed } from "../lib/settings";
 import { currentOf, versionTag } from "../lib/suites";
@@ -61,6 +63,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
     const byName = new Map<string, { profile: OfferedProfile; launchers: Launcher[] }>();
     for (const launcher of launchers) {
       for (const profile of launcher.profiles ?? []) {
+        if (!profile.kinds?.includes("run")) continue;  // (a profile without a trainer: evals only)
         const found = byName.get(profile.profile);
         if (found) found.launchers.push(launcher);
         else byName.set(profile.profile, { profile, launchers: [launcher] });
@@ -73,6 +76,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const chosen = offered.find(each => each.profile.profile === profileName) ?? offered[0];
   const [asked] = useSearchParams();  // (`?environment=module:name`: the form opened from an environment's page)
   const [environment, setEnvironment] = useState(asked.get("environment") ?? environments[0] ?? "");
+  const elsewhere = environments.filter(each => publishedParts(each) && !chosen?.profile.published?.includes(each));  // (not with this profile)
   const [name, setName] = useState("");
   const [start, setStart] = useState("");
   const [bookmark, setBookmark] = useState("");
@@ -88,7 +92,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
   const [episodes, setEpisodes] = useState<string | null>(null);
   const playable = (each: EvalSuite) => {  // (a suite whose every environment a launcher of the profile offers)
     const wanted = currentOf(each).environments.filter((environment): environment is string => Boolean(environment));
-    return (chosen?.launchers ?? []).some(launcher => !launcher.environments?.length || wanted.every(environment => launcher.environments.includes(environment)));
+    return chosen ? chosen.launchers.some(launcher => playsWith(launcher, chosen.profile, wanted)) : false;
   };
   const suites = (evals?.suites ?? []).filter(playable);
   const unplayed = Object.keys(described?.evals ?? {}).filter(each => !suites.some(made => made.suite === each));
@@ -154,7 +158,7 @@ function Form({ launchers }: { launchers: Launcher[] }) {
             </label>
             <label className="field">
               <span>Environment</span>
-              <EnvironmentPicker value={environment} onChange={picked => { setEnvironment(picked); setSuite(null); }} launching={environments.length > 0} also={environments} />
+              <EnvironmentPicker value={environment} onChange={picked => { setEnvironment(picked); setSuite(null); }} launching={environments.length > 0} also={environments} without={elsewhere} />
             </label>
             <label className="field">
               <span>Starts from</span>

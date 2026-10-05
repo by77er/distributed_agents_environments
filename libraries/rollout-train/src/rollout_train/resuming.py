@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from rollout_train.evals import started_version, subject_table, suite_of
-from rollout_train.launcher import LAUNCHER
+from rollout_train.launcher import LAUNCHER, launches_kind, offers_environments
 from rollout_train.launches import EVAL, OPEN, RUN, Asked, Launch, launches_of
 from rollout_train.ledger import Ledger
 from rollout_train.presence import Beat, alive, presence_of
@@ -134,8 +134,11 @@ async def relaunch(ledger: Ledger, run: str, newest: Mapping[str, Any], beats: S
     asked = replace(asked, profile=name, resumes=run, directory=str(directory))
     able = [
         each for each in offered
-        if any(found.get("profile") == name for found in _profiles(each))
-        and (not each.get("environments") or asked.plays() <= set(cast(list[str], each["environments"])))
+        if any(
+            found.get("profile") == name and launches_kind(found, asked.kind)
+            and offers_environments(each, found, asked.plays())
+            for found in _profiles(each)
+        )
     ]  # fmt: skip
     if not able:
         raise KeyError(f"no launcher alive offers the profile {name!r} and the environments {', '.join(asked.plays())}")

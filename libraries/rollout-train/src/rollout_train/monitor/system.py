@@ -48,7 +48,7 @@ from rollout_train.evals import (
 )
 from rollout_train.gateway.turns import TurnStore
 from rollout_train.inference.remote import ENGINES
-from rollout_train.launcher import LAUNCHER, offers
+from rollout_train.launcher import LAUNCHER, launches_kind, offers, offers_environments
 from rollout_train.launches import (
     ASKED,
     CLAIMED,
@@ -315,9 +315,10 @@ class System:
         environment whose eval data it is) and the checkpoint that plays it, or the base model (`model`, one a launcher
         alive offers with the profile; none: the profile's): a suite by name plays the version its name points to now,
         which the launch then names by id. A training run says the evals it makes (`_checked_evals`). Raises `Taken`
-        for what cannot be asked for (a name taken or no name, a setting the profile does not have, no word of the
-        evals, a checkpoint and a base model both), `KeyError` for what no launcher offers or a checkpoint no reference
-        says."""
+        for what cannot be asked for (a name taken or no name, a training run of a profile that names no trainer, a
+        setting the profile does not have, no word of the evals, a checkpoint and a base model both), `KeyError` for
+        what no launcher offers (a published environment is offered with the profiles that play it) or a checkpoint no
+        reference says."""
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
@@ -349,6 +350,8 @@ class System:
         ]
         if not profiles:
             raise KeyError(f"no launcher alive offers the profile {asked.profile!r}")
+        if not any(launches_kind(each, asked.kind) for each in profiles):
+            raise Taken(f"the profile {asked.profile!r} names no trainer: it launches evals only")
         checked(asked.name, "", await registry.runs())  # (a name another run has, or no name)
         unknown = [
             key for key in asked.settings
@@ -360,18 +363,19 @@ class System:
             evaluated = await self._checked_evals(asked, profiles[0]["settings"])
             asked = replace(asked, environments=sorted(set(evaluated) - {asked.environment}))
         able = [
-            each for each in offered
-            if any(profile["profile"] == asked.profile for profile in each.get("profiles", []))
-            and (not each.get("environments") or asked.plays() <= set(each["environments"]))
+            (each, profile) for each in offered for profile in each.get("profiles", [])
+            if profile["profile"] == asked.profile and launches_kind(profile, asked.kind)
+            and offers_environments(each, profile, asked.plays())
         ]  # fmt: skip
         if not able:
-            missing = sorted(asked.plays() - {name for each in offered for name in each.get("environments", [])})
+            mine = [(each, profile) for each in offered for profile in each.get("profiles", []) if profile in profiles]
+            missing = sorted(
+                environment for environment in asked.plays()
+                if not any(offers_environments(each, profile, {environment}) for each, profile in mine)
+            )  # fmt: skip
             said = ", ".join(missing) if missing else ", ".join(sorted(asked.plays()))
             raise KeyError(f"no launcher alive offers the profile {asked.profile!r} and the environments {said}")
-        if asked.model and not any(
-            offers(profile, asked.model)
-            for each in able for profile in each.get("profiles", []) if profile["profile"] == asked.profile
-        ):  # fmt: skip
+        if asked.model and not any(offers(profile, asked.model) for _, profile in able):
             raise KeyError(
                 f"no launcher alive offers the base model {asked.model!r} with the profile {asked.profile!r}"
             )

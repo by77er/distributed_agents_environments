@@ -62,7 +62,8 @@ async def test_an_import_makes_a_version_listed_read_and_shown_as_an_environment
 
         heartbeats = presence_of(ledger)
         assert heartbeats is not None
-        offer: dict[str, Any] = {"kind": LAUNCHER, "profiles": [OFFERED], "environments": [version["reference"]]}
+        offered = {**OFFERED, "published": [version["reference"]]}  # (the profile plays it)
+        offer: dict[str, Any] = {"kind": LAUNCHER, "profiles": [offered], "environments": [version["reference"]]}
         await heartbeats.beat("launcher/far", offer)
         asked = {"profile": "one-gpu", "environment": version["reference"], "name": "on words"}
         refused = await client.post("/api/launches", json={**asked, "settings": {"evals.suite": "other"}})

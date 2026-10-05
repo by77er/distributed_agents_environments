@@ -82,10 +82,11 @@ A version's id is the SHA-256 of the project's zip: the same files are the same 
 were fetched, and importing them again returns the version recorded, without checking it again. A changed file is a
 new version. The ledger keeps each version beside it (`rollout_train.published`): its name, source URL, the ref asked
 for and the commit it was, its subdirectory, entry point, the blob, its runtime environment, what it says of itself
-(its version, description, rows, eval data and curriculum, as its check found them) and the check's findings, and when
-it was imported.
+(its version, description, rows, eval data, curriculum and the kinds of sandbox its program declares, `sandboxes`, as
+its check found them) and the check's findings, and when it was imported.
 
-Every launcher on Ray offers every version the ledger keeps, by `NAME@VERSION`, and the New run form lists them; the
-profile a run on one plays with is picked there, as for any environment. A run on one is a Ray job in the version's
+Every launcher on Ray offers every version the ledger keeps, by `NAME@VERSION`, with each of its profiles that has a
+pool of every kind of sandbox the version declares (a version that declares none goes with every profile), and the New
+run form lists them with those profiles; the profile a run on one plays with is picked there, as for any environment. A run on one is a Ray job in the version's
 runtime environment, and its start records the version (`published`: its name, id, source, ref, commit,
 subdirectory and entry point).

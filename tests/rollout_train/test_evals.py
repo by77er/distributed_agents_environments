@@ -279,6 +279,44 @@ async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
         assert [each["suite"] for each in listed["suites"]] == ["words-v1"] and listed["evals"] == []
 
 
+async def test_a_profile_without_a_trainer_is_asked_for_evals_only_and_a_published_environment_with_its_profiles(
+    tmp_path: Path,
+) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
+    heartbeats = presence_of(ledger)
+    assert heartbeats is not None
+    published = f"words@{'0' * 64}"
+    serving: dict[str, Any] = {
+        **OFFERED,
+        "profile": "serving",
+        "kinds": [EVAL],
+        "settings": {"episodes_at_once": 6},
+        "published": [],
+    }
+    boxed: dict[str, Any] = {**OFFERED, "profile": "boxed", "pools": ["box"], "published": [published]}
+    about: dict[str, Any] = {
+        "kind": LAUNCHER, "profiles": [serving, boxed], "environments": [ENVIRONMENT, published], "at_once": 1,
+        "playing": 0,
+    }  # fmt: skip
+    await heartbeats.beat("launcher/far", about)
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
+        evaluating = {"kind": EVAL, "suite": "words-v1", "profile": "serving", "name": "on words"}
+        answer = await client.post("/api/launches", json=evaluating)
+        assert answer.status_code == 200, answer.text
+        training: dict[str, Any] = {"profile": "serving", "environment": ENVIRONMENT, "name": "trained"}
+        training["settings"] = {"evals.suite": None}
+        refused = await client.post("/api/launches", json=training)
+        assert refused.status_code == 409 and "launches evals only" in refused.json()["error"]
+        unplayed = await client.post("/api/launches", json=training | {"environment": published})
+        assert unplayed.status_code == 409  # (evals only, whatever it plays)
+        elsewhere = training | {"profile": "boxed", "environment": published, "name": "boxed"}
+        assert (await client.post("/api/launches", json=elsewhere)).status_code == 200
+        on_serving = evaluating | {"suite": "words-held-out", "environment": published, "name": "unplayed"}
+        missing = await client.post("/api/launches", json=on_serving)
+        assert missing.status_code == 404 and published in missing.json()["error"]  # (not with that profile)
+
+
 def test_the_command_makes_and_lists_suites(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

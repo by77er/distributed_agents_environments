@@ -23,7 +23,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from rollout.curriculum import curriculum_of
-from rollout.environment import Environment
+from rollout.environment import Environment, binding_for
 from rollout_train.check import CHECK
 from rollout_train.evals import EVAL, parsed, started_version, subject_table, suites_among, versions_in
 from rollout_train.monitor.scores import evals_in
@@ -166,8 +166,9 @@ def listed(read: Read, sources: Iterable[Source] = SOURCES) -> list[dict[str, An
 
 def described(environment: Environment) -> dict[str, Any]:
     """What an environment says of itself: its version and description, its rows (easiest first: key and title), its
-    eval data (each list's name and the row of each start), and its curriculum (its class's name, whether it is the
-    environment's own, and the rows it unlocks at first and past the hardest one solved)."""
+    eval data (each list's name and the row of each start), its curriculum (its class's name, whether it is the
+    environment's own, and the rows it unlocks at first and past the hardest one solved) and the kinds of sandbox its
+    program declares (`sandboxes`, `sandboxes_of`)."""
     curriculum = curriculum_of(environment)
     return {
         "version": environment.version,
@@ -180,7 +181,17 @@ def described(environment: Environment) -> dict[str, Any]:
             "start": getattr(curriculum, "start", None),
             "reach": getattr(curriculum, "reach", None),
         },
+        "sandboxes": sandboxes_of(environment),
     }
+
+
+def sandboxes_of(environment: Environment) -> list[str] | None:
+    """The kinds of sandbox an environment's program declares, given its first row's start (a run acquires one of
+    each from a pool of its kind); none where its program cannot be made here."""
+    try:
+        return sorted(binding_for(environment, "policy").pools)
+    except Exception:  # (an environment with no rows, or whose program does not import here)
+        return None
 
 
 def page_of(

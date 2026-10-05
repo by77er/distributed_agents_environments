@@ -9,15 +9,18 @@ import pytest
 
 from rollout_train import launcher as launching
 from rollout_train.cli import _setting  # pyright: ignore[reportPrivateUsage]
+from rollout_train.cluster import parsed
 from rollout_train.database import DatabaseLedger
-from rollout_train.launcher import LAUNCHER, OUTPUT, Launcher, offered, slug
+from rollout_train.launcher import LAUNCHER, OUTPUT, Launcher, launches_kind, offered, offers_environments, slug
 from rollout_train.launches import (
     ASKED,
     CLAIMED,
     ENDED,
+    EVAL,
     FAILED,
     MOVES,
     OPEN,
+    RUN,
     RUNNING,
     STOPPED,
     STOPPING,
@@ -27,7 +30,9 @@ from rollout_train.launches import (
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import presence_of
 from rollout_train.profile import Profile
-from tests.rollout_train.support import Process, profiles
+from rollout_train.recorder.renderers import rendered
+from tests.rollout_train.sources import a_version
+from tests.rollout_train.support import PROFILE, Process, profiles
 
 
 def ledgers(tmp_path: Path) -> list[Ledger]:
@@ -104,14 +109,99 @@ async def test_concurrent_stops_and_starts_leave_a_launch_stopping_or_stopped_ne
         assert now.state == STOPPING  # (whichever came first: a stop is never overwritten by RUNNING)
 
 
-def test_a_launcher_offers_the_profiles_that_train_with_the_settings_a_launch_may_change(tmp_path: Path) -> None:
-    (small,) = offered(profiles(tmp_path))  # (not one that is no profile, nor one that trains nothing)
+def test_a_launcher_offers_every_profile_and_one_without_a_trainer_for_evals_only(tmp_path: Path) -> None:
+    serving, small = offered(profiles(tmp_path))  # (not one that is no profile)
     assert small["profile"] == "small" and small["model"] == "a-checkpoint" and small["models"] == ["a-checkpoint"]
+    assert small["kinds"] == [RUN, EVAL] and launches_kind(small, RUN) and launches_kind(small, EVAL)
     settings = small["settings"]
     assert settings["trainer.segment_tokens"] == 900 and settings["trainer.bookmark"] == "best"
     assert settings["episodes_at_once"] == 6 and settings["channels.policy.thinking_tokens"] == 64
     assert small["weights"] is None  # (its trainer says what it makes only once made)
+    assert serving["profile"] == "serving-only" and serving["kinds"] == [EVAL] and serving["weights"] is None
+    assert not launches_kind(serving, RUN) and serving["model"] == "a-checkpoint"  # (its first channel's)
+    assert not any(key.startswith(("trainer.", "evals.")) for key in serving["settings"])
+    assert serving["settings"]["channels.judge.answer_tokens"] is None and serving["pools"] == []
     assert slug("Diamonds, unguided!") == "diamonds-unguided"
+
+
+CLUSTER = """
+name = "here"
+[ledger]
+url = "sqlite:///~/ledger.db"
+[inference.local]
+kind = "vllm"
+[inference.local.models."Qwen/Qwen3-0.6B"]
+context = 4096
+[inference.local.models."Qwen/Qwen3.5-4B"]
+context = 8192
+[inference.local.models."cyankiwi/Qwen3.5-9B-AWQ-4bit"]
+base = "Qwen/Qwen3.5-9B"
+context = 8192
+[inference.local.models."someone/a-small-model"]
+context = 4096
+[inference.tinker]
+kind = "tinker"
+[inference.tinker.models."Qwen/Qwen3.5-9B"]
+context = 65536
+"""
+RENDERED = """
+directory = "{directory}"
+
+[channels.policy]
+model = "{model}"
+renderer = "{renderer}"
+engine = "rollout_vllm:VllmEngine"
+"""
+
+
+@pytest.mark.parametrize(
+    ("model", "renderer", "models"),
+    [
+        ("Qwen/Qwen3-0.6B", "rollout_qwen:qwen3", ["Qwen/Qwen3-0.6B"]),
+        ("cyankiwi/Qwen3.5-9B-AWQ-4bit", "rollout_qwen:qwen35", ["cyankiwi/Qwen3.5-9B-AWQ-4bit", "Qwen/Qwen3.5-4B"]),
+        ("a-checkpoint", "rollout_train.testing:plain_renderer", [  # (a renderer that says nothing: every model)
+            "a-checkpoint", "Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-4B", "cyankiwi/Qwen3.5-9B-AWQ-4bit",
+            "someone/a-small-model",
+        ]),
+    ],
+)  # fmt: skip
+def test_a_profile_offers_evals_the_clusters_models_its_renderer_renders(
+    tmp_path: Path, model: str, renderer: str, models: list[str]
+) -> None:
+    import tomllib
+
+    cluster = parsed(tomllib.loads(CLUSTER))
+    directory = tmp_path / "profiles"
+    directory.mkdir()
+    (directory / "p.toml").write_text(RENDERED.format(directory=tmp_path / "run", model=model, renderer=renderer))
+    (found,) = offered(directory, cluster)
+    assert found["models"] == models  # (not the Tinker models: its engine is vLLM's)
+
+
+def test_a_renderer_says_the_models_it_renders() -> None:
+    from rollout_qwen import qwen3, qwen35
+
+    assert rendered(qwen3, "Qwen/Qwen3-0.6B") and rendered(qwen3, "Qwen/Qwen3-30B-A3B")
+    assert rendered(qwen3, "Qwen/Qwen3.5-4B") is False and rendered(qwen3, "Qwen/Qwen3-Coder-30B") is False
+    assert rendered(qwen35, "cyankiwi/Qwen3.5-9B-AWQ-4bit") and rendered(qwen35, "Qwen/Qwen3-0.6B") is False
+    assert rendered(object(), "Qwen/Qwen3-0.6B") is None  # (one that says nothing)
+
+
+def test_a_published_version_is_offered_with_the_profiles_whose_pools_serve_its_sandboxes(tmp_path: Path) -> None:
+    directory = profiles(tmp_path)
+    boxed = PROFILE.format(directory=tmp_path / "boxed") + '\n[pools]\nbox = "tests.rollout_train.support:boxes"\n'
+    (directory / "boxed.toml").write_text(boxed)
+    plain, boxes, unsaid = a_version("plain", sandboxes=[]), a_version("boxes", sandboxes=["box"]), a_version("unsaid")
+    worlds = a_version("worlds", sandboxes=["minecraft"])
+    by = {each["profile"]: each for each in offered(directory, published=[plain, boxes, unsaid, worlds])}
+    assert by["boxed"]["pools"] == ["box"] and by["small"]["pools"] == []
+    assert by["boxed"]["published"] == [plain.reference, boxes.reference]  # (a pool it does not use is fine)
+    assert by["small"]["published"] == [plain.reference, unsaid.reference]  # (one that says nothing: no pools)
+    launcher = {"environments": ["c:c", plain.reference, boxes.reference]}
+    assert offers_environments(launcher, by["boxed"], {"c:c", boxes.reference})
+    assert not offers_environments(launcher, by["small"], {"c:c", boxes.reference})
+    assert not offers_environments(launcher, by["boxed"], {"d:d"})
+    assert offers_environments({"environments": [plain.reference]}, by["small"], {"d:d", plain.reference})
 
 
 class EveryWeight:
@@ -158,6 +248,7 @@ async def test_a_launcher_starts_what_it_is_asked_for_and_notes_how_it_ends(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), ["c:c"], tmp_path / "runs", every=0.01)
     elsewhere = await launches.ask(Asked("another-profile", "c:c", "not mine"))
+    untrained = await launches.ask(Asked("serving-only", "c:c", "trains nothing"))  # (a profile of evals only)
     ended = await launches.ask(
         Asked("small", "c:c", "Ends well", start="kpqx", settings={"trainer.segment_tokens": 500})
     )
@@ -198,10 +289,39 @@ async def test_a_launcher_starts_what_it_is_asked_for_and_notes_how_it_ends(
     directory = Path(str(by[ended.id].directory))
     assert directory.parent == tmp_path / "runs" and directory.name.startswith("ends-well-")
     assert (directory / OUTPUT).exists() and by[elsewhere.id].state == ASKED  # (a profile it does not offer)
+    assert by[untrained.id].state == ASKED
     (beat,) = await heartbeats.beats()
     assert beat.runner == "launcher/here" and beat.about["kind"] == LAUNCHER and beat.about["environments"] == ["c:c"]
     listed: Any = beat.about["profiles"]
-    assert [each["profile"] for each in listed] == ["small"]
+    assert [each["profile"] for each in listed] == ["serving-only", "small"]
+
+
+async def test_a_profile_without_a_trainer_starts_evals_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    launches, heartbeats = launches_of(ledger), presence_of(ledger)
+    assert launches is not None and heartbeats is not None
+    started: list[list[str]] = []
+    process = Process(0)
+
+    async def spawn(*command: str, **_: Any) -> Process:
+        started.append(list(command))
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    training = await launches.ask(Asked("serving-only", "c:c", "trains nothing"))
+    evaluating = await launches.ask(
+        Asked("serving-only", "c:c", "on words", kind=EVAL, suite="words@1", model="a-checkpoint")
+    )
+    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [], tmp_path / "runs", at_once=2)
+    found._offered = launching.offered(found.profiles)  # pyright: ignore[reportPrivateUsage]
+    await found._step()  # pyright: ignore[reportPrivateUsage]
+    (command,) = started
+    assert command[3:5] == ["eval", str(profiles_dir(tmp_path) / "serving-only.toml")]
+    assert command[command.index("--model") + 1] == "a-checkpoint"
+    process.done.set()
+    while (await state(launches, evaluating.id)) != ENDED:  # noqa: ASYNC110
+        await asyncio.sleep(0.01)
+    assert await state(launches, training.id) == ASKED
 
 
 def profiles_dir(tmp_path: Path) -> Path:

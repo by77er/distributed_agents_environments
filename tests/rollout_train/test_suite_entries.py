@@ -245,7 +245,7 @@ async def test_the_page_makes_and_edits_a_suite_of_entries_and_lists_the_environ
     assert heartbeats is not None
     offered: JsonValue = {
         "kind": LAUNCHER,
-        "profiles": [{"profile": "small", "path": "/p/small.toml", "model": "m", "settings": {}}],
+        "profiles": [{"profile": "small", "path": "/p/small.toml", "kinds": ["eval"], "model": "m", "settings": {}}],
         "environments": [WORDS],
         "at_once": 1,
         "playing": 0,

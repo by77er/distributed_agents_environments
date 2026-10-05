@@ -8,6 +8,8 @@ import textwrap
 from collections.abc import Mapping
 from pathlib import Path
 
+from pydantic import JsonValue
+
 from rollout_train.published import EnvironmentVersion
 
 ENVIRONMENT = textwrap.dedent('''
@@ -115,13 +117,18 @@ def git(directory: Path, *arguments: str) -> str:
     return subprocess.run(["git", "-C", str(directory), *arguments], check=True, capture_output=True, text=True).stdout
 
 
-def a_version(source: str = "one", *, name: str = "words", imported: float = 1.0) -> EnvironmentVersion:
-    """A published version as an import records it, without importing anything: its id the hash of `source`."""
+def a_version(
+    source: str = "one", *, name: str = "words", imported: float = 1.0, sandboxes: list[str] | None = None
+) -> EnvironmentVersion:
+    """A published version as an import records it, without importing anything: its id the hash of `source`; its
+    environment declares the kinds of sandbox `sandboxes` (none: its description does not say)."""
     id = hashlib.sha256(source.encode()).hexdigest()
+    said: dict[str, JsonValue] = {"version": "1", "rows": [{"key": "say-yes", "title": "say yes"}]}
+    said |= {"evals": {"words-eval": []}} | ({"sandboxes": list[JsonValue](sandboxes)} if sandboxes is not None else {})
     return EnvironmentVersion(
         name=name, version=id, source="https://example.com/words.git", ref=None, commit="c0ffee" * 6 + "c0ff",
         subdirectory="", entry_point="words:environment", blob={"uri": "s3://b/k", "sha256": id, "size": 3},
         runtime_env={"working_dir": f"s3://b/{id}.zip"}, dependencies=("rollout",),
-        description={"version": "1", "rows": [{"key": "say-yes", "title": "say yes"}], "evals": {"words-eval": []}},
+        description=said,
         check=[{"check": "rows", "passed": True, "said": "1 row"}], imported=imported,
     )  # fmt: skip

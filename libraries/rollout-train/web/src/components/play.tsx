@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useKnown, useLaunch } from "../api/queries";
 import type { EvalSuite, Launcher, OfferedProfile, SuiteVersion, System } from "../api/types";
-import { readable } from "../lib/environments";
+import { publishedParts, readable } from "../lib/environments";
 import { currentOf, versionsOf, versionTag } from "../lib/suites";
 import { Card } from "./ui";
 
@@ -31,13 +31,22 @@ const BASE = "base:";
 const environmentsOf = (suite: EvalSuite | undefined, version?: SuiteVersion): string[] =>
   ((version ?? (suite ? currentOf(suite) : undefined))?.environments ?? []).filter((each): each is string => Boolean(each));
 
-/** The launchers that can play a version of a suite (its newest, unless another is given): those that offer each of its
- * environments (those that name none play whatever they are asked); and the profiles they offer, each once. */
+/** Whether a launcher plays every environment of `wanted` with one of its profiles: each built-in one among those it
+ * names (one that names none plays any), each published one among those the profile plays. */
+export function playsWith(launcher: Launcher, profile: OfferedProfile, wanted: string[]): boolean {
+  const named = (launcher.environments ?? []).filter(each => !publishedParts(each));
+  return wanted.every(each => (publishedParts(each) ? (profile.published ?? []).includes(each) : !named.length || named.includes(each)));
+}
+
+/** The profiles that can play a version of a suite (its newest, unless another is given), each once: those whose
+ * launcher plays each of its environments with them (`playsWith`). */
 export function offeredFor(suite: EvalSuite | undefined, launchers: Launcher[], version?: SuiteVersion): OfferedProfile[] {
   const wanted = environmentsOf(suite, version);
-  const able = launchers.filter(each => !each.environments?.length || (wanted.length > 0 && wanted.every(environment => each.environments.includes(environment))));
   const byName = new Map<string, OfferedProfile>();
-  for (const launcher of able) for (const profile of launcher.profiles ?? []) if (!byName.has(profile.profile)) byName.set(profile.profile, profile);
+  for (const launcher of launchers) {
+    if (launcher.environments?.length && !wanted.length) continue;
+    for (const profile of launcher.profiles ?? []) if (!byName.has(profile.profile) && playsWith(launcher, profile, wanted)) byName.set(profile.profile, profile);
+  }
   return [...byName.values()];
 }
 

@@ -189,6 +189,7 @@ def test_the_check_report_imports_the_entry_point_checks_it_and_plays_a_scripted
     assert all(each["passed"] for each in said["findings"])
     assert said["described"]["rows"] == [{"key": "say-yes", "title": "say yes"}, {"key": "say-no", "title": "say no"}]
     assert said["described"]["evals"] == {"words-eval": ["say-yes", "say-yes", "say-no", "say-no"]}
+    assert said["described"]["sandboxes"] == []  # (its program declares none: a profile with no pools plays it)
     failed = report("words:nothing")
     assert not failed["loaded"] and "AttributeError" in failed["error"]
 

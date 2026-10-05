@@ -222,12 +222,16 @@ export interface Measurement {
 export interface OfferedProfile {
   profile: string;
   path: string;
+  /** What it launches: `run` and `eval` with a trainer, `eval` alone without. */
+  kinds?: ("run" | "eval")[];
   model: string;
   /** The base models an eval may play with it: its channel's model first, then those the cluster's inference providers
    * of its engine's kind serve. */
   models?: string[];
   /** What its trainer makes: `lora` (adapters) or `full` weights; none where the launcher cannot tell. */
   weights?: string | null;
+  /** The published environments it plays: those whose every kind of sandbox it has a pool of. */
+  published?: string[];
   settings: Record<string, unknown>;
 }
 

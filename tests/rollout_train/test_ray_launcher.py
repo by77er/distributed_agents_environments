@@ -109,6 +109,7 @@ async def test_a_run_on_a_published_environment_is_a_job_in_its_versions_runtime
     versions = FileEnvironmentVersions(tmp_path / "ledger" / "environment_versions")
     version, other = await versions.record(a_version()), await versions.record(a_version("two"))
     found.versions, found.at_once = versions, 3
+    await found._offer()  # pyright: ignore[reportPrivateUsage]  (with the versions its profiles play)
     unknown = await launches.ask(Asked(profile="small", environment=f"words@{'0' * 64}", name="unknown"))
     both = [version.reference, other.reference]
     mixed = await launches.ask(Asked(profile="small", environment=both[0], name="mixed", environments=both[1:]))
@@ -129,4 +130,6 @@ async def test_a_run_on_a_published_environment_is_a_job_in_its_versions_runtime
     assert set(cast(list[str], beat.about["environments"])) == set(both)
     assert {each["environment"] for each in cast(list[dict[str, Any]], beat.about["published"])} == set(both)
     found.ray = None  # (without Ray, no published environment is offered or played)
-    assert not await found._plays(states[asked.id])  # pyright: ignore[reportPrivateUsage]
+    small = next(each for each in found._offered if each["profile"] == "small")  # pyright: ignore[reportPrivateUsage]
+    assert set(small["published"]) == set(both)
+    assert not await found._plays(states[asked.id], small)  # pyright: ignore[reportPrivateUsage]

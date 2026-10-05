@@ -1,16 +1,18 @@
 """A launcher: it starts the runs asked for (`rollout_train.launches`) that it can run.
 
 `rollout launcher --ledger WHERE --profiles DIRECTORY --environment module:name … --runs DIRECTORY` beats like a runner
-(`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that loads
-and names a trainer), with what its trainer makes (`lora` or `full` weights), the base models an eval may play with it
-(its channel's model, and with `--cluster` the models the cluster's inference providers of its engine's kind serve) and
-the settings a launch may change and their values in the profile; the environments; and whether it has room. It claims
-the oldest launch asked for one of its profiles, whose environments it offers each of (and the base model, for an eval
-that names one), while it plays fewer than `--at-once`, starts `rollout train` (or `rollout eval`) for it in
-a directory of its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said
-so, as `evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch that resumes a
-run is started in that run's own directory, which names the run: it goes on from the ledger. A launch asked to stop is
-sent an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
+(`rollout_train.presence`), saying what it offers: each profile under `--profiles` (every `*.toml` there that loads),
+with what it launches (training runs and evals for a profile that names a trainer, evals alone for one that names
+none), what its trainer makes (`lora` or `full` weights), the base models an eval may play with it (its channel's
+model, and with `--cluster` the models the cluster's inference providers of its engine's kind serve that its channel's
+renderer renders), the kinds of sandbox its pools serve and the settings a launch may change and their values in the
+profile; the environments; and whether it has room. It claims the oldest launch asked for one of its profiles that
+the profile launches, whose environments it offers each of with the profile (and the base model, for an eval that
+names one), while it plays fewer than `--at-once`, starts `rollout train` (or `rollout eval`) for it in a directory of
+its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said so, as
+`evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch that resumes a run is
+started in that run's own directory, which names the run: it goes on from the ledger. A launch asked to stop is sent
+an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
 
 Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
 cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
@@ -18,10 +20,11 @@ with room and supervises it, and the launcher follows the job until it ends (sta
 again). `rollout launcher … --ray ADDRESS --as-job` submits the launcher itself as a Ray job.
 
 A launcher on Ray offers the published environments too (`rollout_train.published`: each `NAME@VERSION` the ledger
-keeps), beside those it names. A run on one is submitted with that version's Ray runtime environment: the run's process
-starts in the version's source and imports the environment from it, in the Python Ray built for it (`python` there:
-the platform's, or a copy of it with the version's dependencies). A launch plays the published environments of one
-version at most.
+keeps), beside those it names, each with the profiles that have a pool of every kind of sandbox the version's
+environment declares (`plays_published`). A run on one is submitted with that version's Ray runtime environment: the
+run's process starts in the version's source and imports the environment from it, in the Python Ray built for it
+(`python` there: the platform's, or a copy of it with the version's dependencies). A launch plays the published
+environments of one version at most.
 """
 
 import asyncio
@@ -33,7 +36,7 @@ import shlex
 import signal
 import socket
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -45,6 +48,7 @@ from rollout_train.launches import (
     EVAL,
     FAILED,
     OPEN,
+    RUN,
     RUNNING,
     STOPPED,
     STOPPING,
@@ -68,12 +72,17 @@ TAIL = 2000
 """Characters of a failed run's output kept as why it failed."""
 
 
-def offered(directory: Path, cluster: "Cluster | None" = None) -> list[dict[str, Any]]:
+def offered(
+    directory: Path, cluster: "Cluster | None" = None, published: Sequence[EnvironmentVersion] = ()
+) -> list[dict[str, Any]]:
     """The profiles under `directory` that a launch can name: each by its name (its file's, without `.toml`), with
-    its path, what its trainer makes (`weights`: `lora`, `full`, or None where its trainer cannot be read here), the
-    base models an eval may play with it (`models`: its channel's model first, then those `cluster`'s inference
-    providers serve whose kind its channel's engine is) and the settings a launch may change, with their values in the
-    profile."""
+    its path; what it launches (`kinds`: `run` and `eval` for one that names a trainer, `eval` alone for one that names
+    none); what its trainer makes (`weights`: `lora`, `full`, or None where it has none or its trainer cannot be read
+    here); the base models an eval may play with it (`models`: its channel's model first, then those `cluster`'s
+    inference providers serve whose kind its channel's engine is and which its channel's renderer renders,
+    `rendered_models`); the kinds of sandbox its pools serve (`pools`); the versions of `published` it plays
+    (`published`: those whose every kind of sandbox it has a pool of, `plays_published`); and the settings a launch may
+    change, with their values in the profile. The channel an eval plays on is its trainer's, else its first."""
     from rollout_train.profile import Profile
 
     found: list[dict[str, Any]] = []
@@ -82,45 +91,84 @@ def offered(directory: Path, cluster: "Cluster | None" = None) -> list[dict[str,
             profile = Profile.load(path)
         except Exception:  # (a file that is not a profile, or not one this machine can load)
             continue
-        if profile.trainer is None:
-            continue
-        settings: dict[str, Any] = {f"trainer.{key}": value for key, value in profile.trainer.settings.items()}
-        settings |= {
-            "trainer.start": profile.trainer.start,
-            "trainer.bookmark": profile.trainer.bookmark,
-            "episodes_at_once": profile.episodes_at_once,
-        }
+        settings: dict[str, Any] = {}
+        if profile.trainer is not None:
+            settings |= {f"trainer.{key}": value for key, value in profile.trainer.settings.items()}
+            settings |= {"trainer.start": profile.trainer.start, "trainer.bookmark": profile.trainer.bookmark}
+        settings["episodes_at_once"] = profile.episodes_at_once
         for channel, spec in profile.channels.items():
             settings |= {f"channels.{channel}.thinking_tokens": spec.thinking_tokens}
             settings |= {f"channels.{channel}.answer_tokens": spec.answer_tokens}
-        evals = profile.evals
-        settings |= {"evals.suite": evals.suite if evals else None, "evals.every": evals.every if evals else None}
-        settings |= {"evals.episodes": evals.episodes if evals else None}
-        channel = profile.channels[profile.trainer.channel]
+        if profile.trainer is not None:
+            evals = profile.evals
+            settings |= {"evals.suite": evals.suite if evals else None, "evals.every": evals.every if evals else None}
+            settings |= {"evals.episodes": evals.episodes if evals else None}
+        channel = profile.channels[profile.trainer.channel if profile.trainer else next(iter(profile.channels))]
+        pools = sorted(profile.pools)
         found.append(
             {
                 "profile": path.stem,
                 "path": str(path),
+                "kinds": [RUN, EVAL] if profile.trainer is not None else [EVAL],
                 "model": channel.model,
-                "models": _models(channel.model, channel.engine, cluster),
-                "weights": _weights(profile.trainer.kind),
+                "models": rendered_models(channel.model, channel.renderer, channel.engine, cluster),
+                "weights": _weights(profile.trainer.kind) if profile.trainer is not None else None,
+                "pools": pools,
+                "published": [each.reference for each in published if plays_published(pools, each)],
                 "settings": settings,
             }
         )
     return found
 
 
-def _models(model: str, engine: str, cluster: "Cluster | None") -> list[str]:
+def rendered_models(model: str, renderer: str, engine: str, cluster: "Cluster | None") -> list[str]:
     """The base models a profile's channel may serve: its own, then those the cluster's inference providers serve whose
-    kind's implementation is the channel's engine (`module:name`)."""
+    kind's implementation is the channel's engine (`module:name`) and which its renderer (`module:name`) renders, by
+    the model's name or the one a quantized model was made from (`rollout_train.recorder.renderers.renders`; every
+    model, where the renderer says nothing of the models it renders or does not import here)."""
+    from rollout.names import named
     from rollout_train.providers import INFERENCE_KINDS
+    from rollout_train.recorder.renderers import rendered
 
+    try:
+        factory: object = named(renderer)
+    except Exception:  # (a renderer this machine cannot import: it says nothing)
+        factory = None
     found = [model]
     for provider in cluster.inference.values() if cluster is not None else ():
         kind = INFERENCE_KINDS.get(provider.kind)
-        if kind is not None and kind.implementation == engine:
-            found += [each for each in provider.models if each not in found]
+        if kind is None or kind.implementation != engine:
+            continue
+        for each, offer in provider.models.items():
+            said = [rendered(factory, name) for name in (each, offer.base) if name]
+            if each not in found and (None in said or any(said)):
+                found.append(each)
     return found
+
+
+def plays_published(pools: Collection[str], version: EnvironmentVersion) -> bool:
+    """Whether a profile with pools of the kinds `pools` plays a published version: one of each kind of sandbox the
+    version's environment declares, as its recorded description says (`sandboxes`). A version whose description says
+    nothing of its sandboxes is played by a profile with no pools only."""
+    declared = version.description.get("sandboxes")
+    if not isinstance(declared, list):
+        return not pools
+    return {str(each) for each in declared} <= set(pools)
+
+
+def launches_kind(profile: Mapping[str, Any], kind: str) -> bool:
+    """Whether an offered profile (`offered`) launches `kind` (`run` or `eval`)."""
+    return kind in (profile.get("kinds") or ())
+
+
+def offers_environments(launcher: Mapping[str, Any], profile: Mapping[str, Any], environments: Collection[str]) -> bool:
+    """Whether a launcher, as its beat says, plays `environments` with one of its profiles (`offered`): each built-in
+    one among those it names (one that names none plays any), and each published one among those the profile plays
+    (`published`)."""
+    named = {str(each) for each in launcher.get("environments") or () if not is_published(str(each))}
+    built = {each for each in environments if not is_published(each)}
+    published = set(environments) - built
+    return (not named or built <= named) and published <= set(profile.get("published") or ())
 
 
 def offers(profile: Mapping[str, Any], model: str) -> bool:
@@ -171,9 +219,8 @@ class Launcher:
 
     async def serve(self) -> None:
         """Beat, claim, start and watch runs until cancelled; the runs it started go on."""
-        self._offered = await asyncio.to_thread(offered, self.profiles, self.cluster)
         await self._adopt()
-        await self._beat()
+        await self._beat()  # (and reads what it offers)
         beating = asyncio.create_task(self._beats())
         try:
             while True:
@@ -195,24 +242,27 @@ class Launcher:
         waiting = [
             each for each in launches
             if each.state == ASKED and each.asked.profile in mine
+            and launches_kind(mine[each.asked.profile], each.asked.kind)
             and (not each.asked.model or offers(mine[each.asked.profile], each.asked.model))
         ]  # fmt: skip
-        asked = sorted([each for each in waiting if await self._plays(each)], key=lambda each: each.at)
+        played = [each for each in waiting if await self._plays(each, mine[each.asked.profile])]
+        asked = sorted(played, key=lambda each: each.at)
         for launch in asked[: max(0, self.at_once - len(self._playing) - len(self._jobs))]:
             claimed = await self.launches.claim(launch.id, self.name)
             if claimed is not None:
                 await self._start(claimed)
 
-    async def _plays(self, launch: Launch) -> bool:
-        """Whether it offers every environment a launch plays: each built-in one it names (one that names none offers
-        any), and each published one the ledger keeps, where its runs are Ray jobs."""
+    async def _plays(self, launch: Launch, profile: Mapping[str, Any]) -> bool:
+        """Whether it offers every environment a launch plays with its profile (offered): each built-in one it names
+        (one that names none offers any), and each published one the ledger keeps that the profile plays, where its
+        runs are Ray jobs."""
         played = launch.asked.plays()
         published = {each for each in played if is_published(each)}
         if self.environments and not played - published <= set(self.environments):
             return False
         if not published:
             return True
-        if self.ray is None or self.versions is None:
+        if self.ray is None or self.versions is None or not published <= set(profile.get("published") or ()):
             return False
         return all([await self.versions.get(each) is not None for each in published])
 
@@ -393,10 +443,16 @@ class Launcher:
             with contextlib.suppress(Exception):
                 await self._beat()
 
+    async def _offer(self) -> list[EnvironmentVersion]:
+        """Read the profiles again (a profile added or changed is offered), with the published versions, where its
+        runs are Ray jobs: those any profile plays."""
+        every = await self.versions.all() if self.versions is not None and self.ray is not None else []
+        self._offered = await asyncio.to_thread(offered, self.profiles, self.cluster, every)
+        played = {reference for each in self._offered for reference in each["published"]}
+        return [each for each in every if each.reference in played]
+
     async def _beat(self) -> None:
-        # (a profile added or changed is offered)
-        self._offered = await asyncio.to_thread(offered, self.profiles, self.cluster)
-        published = await self.versions.all() if self.versions is not None and self.ray is not None else []
+        published = await self._offer()
         about: dict[str, Any] = {
             "kind": LAUNCHER,
             "host": socket.gethostname(),

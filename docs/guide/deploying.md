@@ -426,7 +426,7 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 | Option | What it is |
 |---|---|
 | `--ledger` | the database (or a ledger's directory) the launches and heartbeats are kept beside: the profiles' own |
-| `--profiles` | a directory of profiles it offers: every `*.toml` there that loads and names a trainer, by its file's name |
+| `--profiles` | a directory of profiles it offers: every `*.toml` there that loads, by its file's name (one that names no trainer, for evals only) |
 | `--environment` | an environment it offers, as `module:name` (repeatable) |
 | `--runs` | where it makes each run's directory: the run's name in letters, digits and dashes, and the end of the launch's id |
 | `--at-once` | how many runs it plays at once: 1 on one GPU |
@@ -436,22 +436,30 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 | `--name` | what it beats as besides its host (`launcher/HOST/NAME`), where a machine has several launchers: one per project environment, say |
 | `--cluster` | the cluster config ([cluster](cluster.md)) whose inference providers' models it offers evals; alone, found as every `--cluster` is |
 
-It beats like a runner, saying what it offers: each profile, with the base model it trains, the base models an eval may
-play with it (`models`: that model, then, with `--cluster`, each model the cluster's inference providers serve whose
-kind's implementation is the profile's channel's engine, played with the profile's renderer) and the settings a launch
-may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
-`episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
-`evals.episodes`, which the monitor's **New run** form asks for as the run's evals); its environments; and how many runs
-it plays. With `--ray` it offers every environment imported from git too ([writing an environment others can
-import](publishing.md)), by `NAME@VERSION`, and submits a run on one as a Ray job in that version's runtime
-environment. A channel's budget left empty in the form, or set to `none`
+It beats like a runner, saying what it offers: each profile, with what it launches (`kinds`: `run` and `eval` for a
+profile that names a trainer, `eval` alone for one that names none, whose evals play on its first channel), the base
+model of that channel, the base models an eval may play with it (`models`: that model, then, with `--cluster`, each
+model the cluster's inference providers serve whose kind's implementation is the profile's channel's engine and which
+the channel's renderer renders, by the model's name or its `base`: `rollout_qwen:qwen3` offers no Qwen3.5 model, and a
+renderer that says nothing of its models offers every one), the kinds of sandbox its pools serve (`pools`) and the
+settings a launch may change, with their values in the file (the trainer's settings, `trainer.start`,
+`trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`,
+`evals.every` and `evals.episodes`, which the monitor's **New run** form asks for as the run's evals; a profile without
+a trainer has `episodes_at_once` and the channels' budgets only); its environments; and how many runs it plays. With
+`--ray` it offers every environment imported from git too ([writing an environment others can import](publishing.md)),
+by `NAME@VERSION`, each with the profiles that have a pool of every kind of sandbox the version's environment declares
+(its check records them in its description, `sandboxes`; a version whose description does not say goes with the
+profiles that have no pools), listed in each profile's `published`, and submits a run on one as a Ray job in that
+version's runtime environment. A profile with pools the environment does not use plays it too: a pool makes no
+sandbox until an episode asks for one. A channel's budget left empty in the form, or set to `none`
 (`--set channels.policy.thinking_tokens=none`), is no budget, whatever the profile says.
 A launch (`rollout_train.launches`) names a profile, an environment, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, one
 every training run can change, or one the profile offers). A training run's launch says the evals it makes
 (`evals.suite`: a suite, or null for none), unless its profile's `[evals]` says them; the monitor refuses one that says
-neither. The launcher claims the oldest launch asked for one of its profiles while it has room (a claim
-is one change, so two launchers never start one launch), and starts
+neither. The launcher claims the oldest launch asked for one of its profiles that the profile launches (an eval, for a
+profile without a trainer: the monitor refuses a training run of one), whose environments it plays with that profile,
+while it has room (a claim is one change, so two launchers never start one launch), and starts
 
 ```bash
 python -m rollout_train.cli train PROFILE ENVIRONMENT --directory RUNS/NAME-ID --name NAME --groups G \

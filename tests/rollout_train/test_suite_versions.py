@@ -265,6 +265,7 @@ async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_pa
 OFFERED: dict[str, Any] = {
     "profile": "small",
     "path": "/profiles/small.toml",
+    "kinds": ["run", "eval"],
     "model": "m",
     "settings": {"trainer.learning_rate": 5e-5, "evals.suite": None, "evals.every": None, "evals.episodes": None},
 }

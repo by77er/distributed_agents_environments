@@ -322,18 +322,22 @@ and its dot in the sidebar are drawn in violet. Every page open on the monitor h
 
 A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --environment module:name --runs DIR
 [--at-once N] [--ray URL]`, `rollout_train.launcher`, [launchers](../../guide/deploying.md#launchers)) beats every 15 seconds, saying what it offers: each profile under
-`--profiles` that names a trainer, with what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
+`--profiles`, with what it launches (`kinds`: training runs and evals for one that names a trainer, evals alone for one
+that names none), what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
 says, as `rollout_lora`'s do), the base models an eval may play with it (`models`: its channel's model, and with
-`--cluster` the models the cluster's inference providers of its engine's kind serve) and the settings a launch may
+`--cluster` the models the cluster's inference providers of its engine's kind serve that its channel's renderer
+renders), the kinds of sandbox its pools serve (`pools`) and the settings a launch may
 change and their values in the profile (the trainer's
 settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
 `answer_tokens`, and the `evals.` settings), the environments, and how many runs it plays of how many it may. A
 launcher with `--ray` offers the published environments too, each by `NAME@VERSION` beside those it names (and in
-`published`, with its source and commit), so the form lists them.
+`published`, with its source and commit), each with the profiles that have a pool of every kind of sandbox its
+environment declares (in the profile's `published`), so the form lists them with those profiles.
 
-**New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and an environment
+**New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile that names a trainer
+and an environment
 (picked from those the monitor knows, by name with `module:name` under it; one no launcher alive offers cannot be
-picked), the
+picked, and a published one is listed only with the profiles that play it), the
 run's name, the checkpoint it starts from (the base model, a bookmark, or any checkpoint whose weights are kept, by where it
 came from and what its weights are; a profile whose trainer trains every weight starts only from full weights, so an
 adapter is merged first), a bookmark for it to carry, its groups, groups a step and seed, the evals it makes of its
@@ -346,8 +350,9 @@ with rows for any other `trainer.KEY`. Values are read as numbers, true or false
 where they look like them, and as text otherwise. The suite is the profile's `[evals]` suite, else the environment's
 own eval data (the first it has), else chosen: the run is not launched until it says a suite or none. Launching asks
 the monitor (`POST /api/launches`, with the settings changed and the evals), which checks the ask (`System.launch`: a
-launcher alive offers the profile and every environment the run plays (its own and its evals' suite's, which the
-launch names in `environments`), the name is no other run's, every setting is the profile's, a trainer's or one every
+launcher alive offers the profile with a trainer (a training run of a profile without one is refused, 409) and plays
+every environment the run plays with it (its own and its evals' suite's, which the launch names in `environments`:
+each built-in one among those it names, each published one among those the profile plays), the name is no other run's, every setting is the profile's, a trainer's or one every
 training run can change, the checkpoint is one, and the run says the evals it makes: a suite in `evals.suite`, null for
 none, or its profile's `[evals]`; a suite in the ledger, a version the suite has, or, where the environment loads on the
 monitor's machine, its eval data of that name; for a published environment, the eval data its version recorded) and
@@ -355,8 +360,9 @@ appends it to the launches; a
 refusal (409 or 404) is said under the button. With no launcher alive, the form says so and gives the command that
 starts one.
 
-A launcher claims only a launch whose every environment it offers (one that names no environments offers any), and,
-for an eval that names a base model (`model`), whose profile it offers that model with. It
+A launcher claims only a launch its profile launches (an eval, for a profile without a trainer) whose every
+environment it plays with that profile (each built-in one it names, where it names any; each published one the profile
+plays), and, for an eval that names a base model (`model`), whose profile it offers that model with. It
 makes the run's directory under `--runs` (`NAME-ID`), and starts `rollout train` there with
 `--name` and each setting as `--set KEY=VALUE` (no evals as `--set evals.suite=""`, so that the profile's `[evals]` is
 not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job;

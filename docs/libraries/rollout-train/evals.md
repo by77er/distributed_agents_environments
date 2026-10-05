@@ -178,9 +178,12 @@ The **Run this suite** form takes who plays (a base model the launchers alive of
 or any checkpoint whose weights are kept, by where it came from and its short id), the version (the newest by default),
 the episodes a start (the version's by default), the profile (for a base model, one that offers it), and the eval's
 name. It posts a launch of kind `eval` (`POST /api/launches`, `{"kind": "eval", "suite", "profile", "name", "start",
-"model", "episodes"}`: `start` the checkpoint, or `model` the base model). A launcher offers, with each profile, the
-base models an eval may play with it (`models`: the profile's channel's model, and with `--cluster` the models the
-cluster's inference providers of its engine's kind serve, [launchers](../../guide/deploying.md#launchers)). The monitor
+"model", "episodes"}`: `start` the checkpoint, or `model` the base model). The profiles listed are every profile of a
+launcher that plays the suite's environments with it, a profile that names no trainer too (one for evals only, such as
+a profile that samples at Tinker and trains nothing). A launcher offers, with each profile, the base models an eval may
+play with it (`models`: the profile's channel's model, and with `--cluster` the models the cluster's inference
+providers of its engine's kind serve that its channel's renderer renders,
+[launchers](../../guide/deploying.md#launchers)). The monitor
 fills in the suite's environments (`environment`, the first entry's, and `environments`, the others') and names the
 version by id (a suite named by its name plays the version the name points to then; a suite not made yet is an
 environment's eval data, and the launch says the `environment`), checks the launch as it checks a run's, and refuses an

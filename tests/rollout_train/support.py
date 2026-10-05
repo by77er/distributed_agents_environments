@@ -368,6 +368,7 @@ def a_profile(tmp_path: Path, shared: str, trainer: str, start: str) -> Path:
 OFFERED: dict[str, Any] = {
     "profile": "one-gpu",
     "path": "/profiles/one-gpu.toml",
+    "kinds": ["run", "eval"],
     "model": "m",
     "settings": {"trainer.learning_rate": 5e-5, "episodes_at_once": 6, "trainer.start": None},
 }

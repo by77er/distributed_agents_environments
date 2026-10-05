@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
 import type { Checkpoint, EvalSuite, Launcher, Launches, Lineage, LineageCheckpoint, OfferedProfile, SubjectHistory, SuiteVersion, System } from "./api/types";
+import { offeredFor, playsWith } from "./components/play";
 import { basePlace, placeOf } from "./lib/places";
 import { Base } from "./pages/Base";
 import { Checkpoints } from "./pages/Checkpoints";
@@ -43,7 +44,7 @@ const version: SuiteVersion = {
 };
 const suite: EvalSuite = { suite: "words-v1", version: version.id, number: 1, environments: ["games:words"], made: 1, starts: version.starts, versions: [version], subjects: [] };
 
-const offered = (profile: string, model: string, models?: string[]): OfferedProfile => ({ profile, path: `/profiles/${profile}.toml`, model, models, settings: {} });
+const offered = (profile: string, model: string, models?: string[]): OfferedProfile => ({ profile, path: `/profiles/${profile}.toml`, kinds: ["run", "eval"], model, models, settings: {} });
 const launcher: Launcher = {
   launcher: "launcher/far", at: 99, environments: ["games:words"], at_once: 1, playing: 0,
   profiles: [offered("vllm", "org/base-a", ["org/base-a", "org/base-b"]), offered("tinker", "org/elsewhere")],
@@ -155,5 +156,26 @@ describe("a suite's eval form", () => {
     expect([...profile.options].map(option => option.value)).toEqual(["tinker"]);
     fireEvent.change(played, { target: { value: A } });
     expect([...profile.options].map(option => option.value)).toEqual(["vllm", "tinker"]);
+  });
+});
+
+describe("the eval forms' profiles", () => {
+  const evalsOnly: OfferedProfile = { ...offered("gsm8k", "org/base-a"), kinds: ["eval"] };
+  const published = `words@${"0".repeat(64)}`;
+
+  it("are those whose launcher plays every environment of the suite with them, one without a trainer too", () => {
+    const boxed: OfferedProfile = { ...offered("boxed", "org/base-a"), published: [published] };
+    const far: Launcher = { ...launcher, environments: ["games:words", published], profiles: [evalsOnly, boxed] };
+    expect(offeredFor(suite, [far]).map(each => each.profile)).toEqual(["gsm8k", "boxed"]);
+    expect(offeredFor(suite, [far], { ...version, environments: [published] }).map(each => each.profile)).toEqual(["boxed"]);
+    expect(playsWith({ ...far, environments: [] }, evalsOnly, ["games:anything"])).toBe(true);  // (one that names none plays any)
+    expect(playsWith({ ...far, environments: [] }, evalsOnly, [published])).toBe(false);
+  });
+
+  it("list a profile without a trainer on a suite's page", () => {
+    const only: Launches = { launches: [], launchers: [{ ...launcher, profiles: [evalsOnly] }] };
+    const { container } = shown(<Suite name="words-v1" />, "/evals/words-v1", client => client.setQueryData(topics.launches().key, only));
+    const [, , profile] = [...container.querySelectorAll("form select")] as HTMLSelectElement[];
+    expect([...profile.options].map(option => option.value)).toEqual(["gsm8k"]);
   });
 });
