@@ -4,7 +4,7 @@
 set -euo pipefail
 source /opt/rollout/bin/supervise.sh
 
-for name in ROLLOUT_POD_NAME ROLLOUT_RUN ROLLOUT_MODEL ROLLOUT_LEDGER ROLLOUT_BLOBS STEP_CA_URL STEP_FINGERPRINT; do
+for name in ROLLOUT_POD_NAME ROLLOUT_MODEL ROLLOUT_LEDGER ROLLOUT_BLOBS STEP_CA_URL STEP_FINGERPRINT; do
     if [ -z "${!name:-}" ]; then
         echo "$name is not set" >&2
         exit 1

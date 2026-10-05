@@ -25,12 +25,12 @@ def can_be_trained_on(kind: str) -> bool:
 
 def test_the_capability_table() -> None:
     assert {kind for kind in INFERENCE_KINDS if can_be_trained_on(kind)} == {
-        "vllm", "vllm-servers", "tinker", "runpod-inference",
+        "vllm", "vllm-servers", "tinker", "runpod-inference", "runpod-host",
     }  # fmt: skip
     loads = {kind: each.capabilities.loads for kind, each in INFERENCE_KINDS.items()}
     assert loads == {
         "vllm": {"peft", "full"}, "vllm-servers": {"peft"}, "tinker": {"tinker"}, "api": set(),
-        "runpod-inference": {"peft"},
+        "runpod-inference": {"peft"}, "runpod-host": {"peft"},
     }  # fmt: skip
     assert [kind for kind, each in INFERENCE_KINDS.items() if each.capabilities.full_reload] == ["vllm"]
     assert INFERENCE_KINDS["api"].capabilities.streaming and not INFERENCE_KINDS["api"].capabilities.adapters
@@ -42,7 +42,7 @@ def test_the_capability_table() -> None:
                INFERENCE_KINDS.items()}  # fmt: skip
     assert scoring == {
         "vllm": (True, 20), "vllm-servers": (True, 20), "tinker": (True, 20), "api": (False, 0),
-        "runpod-inference": (True, 20),
+        "runpod-inference": (True, 20), "runpod-host": (True, 20),
     }  # fmt: skip
     assert INFERENCE_KINDS["runpod-inference"].auths == ("mtls",)
     assert INFERENCE_KINDS["tinker"].auths == ("vendor",)

@@ -711,6 +711,29 @@ def _cluster_option(what: str) -> dict[str, Any]:
     }  # fmt: skip
 
 
+async def _pods(command: str, cluster: "Cluster") -> int:
+    """`rollout pods list` and `rollout pods reap`."""
+    from rollout_train.pods.leases import pod_leases_of
+    from rollout_train.pods.leasing import reap
+    from rollout_train.stores import ledger_of
+
+    ledger = ledger_of(cluster)
+    if command == "reap":
+        for each in await reap(cluster, ledger):
+            print(each, flush=True)
+        return 0
+    store = pod_leases_of(ledger)
+    if store is None:
+        raise SystemExit("this ledger keeps no pods' leases")
+    now = await store.now()
+    for lease in await store.all():
+        since = lease.released if lease.state == "idle" else lease.held
+        age = f"{(now - since) / 60:.0f} min" if since is not None else "-"
+        print(f"{lease.pod}\t{lease.provider}\t{lease.state}\t{lease.run or '-'}\t{lease.gpu}\t${lease.price:.2f}/h"
+              f"\t{age}", flush=True)  # fmt: skip
+    return 0
+
+
 def _cluster_of(given: str | None) -> "Cluster":
     """The cluster config `--cluster` says (none or `""`: the one this process was handed, else the one
     `rollout_train.cluster.find` finds), read and checked; exits saying what is wrong."""
@@ -1029,9 +1052,19 @@ def main() -> None:
         "check", help="read the cluster config, and say which of its secrets and projects do not resolve on this node"
     )
     cluster_checking.add_argument("--cluster", **_cluster_option("the cluster config"))
+    pods = commands.add_parser("pods", help="the GPU pods runs rent on RunPod: their leases, and the reaper")
+    pod_commands = pods.add_subparsers(dest="pod_command", required=True)
+    pod_listing = pod_commands.add_parser("list", help="every pod's lease: who holds it, since when, at what price")
+    pod_listing.add_argument("--cluster", **_cluster_option("the cluster config"))
+    pod_reaping = pod_commands.add_parser(
+        "reap", help="delete the pods no run holds: idle past their idle stop, stale leases', and those no lease names"
+    )
+    pod_reaping.add_argument("--cluster", **_cluster_option("the cluster config"))
     arguments = parser.parse_args()
     if arguments.command == "cluster":
         sys.exit(_check_cluster(arguments.cluster))
+    if arguments.command == "pods":
+        sys.exit(asyncio.run(_pods(arguments.pod_command, _cluster_of(arguments.cluster))))
     asking = {"train": _train, "eval": _evaluate, "imitate": _imitate}
     if arguments.command in asking:
         sys.exit(asyncio.run(until_signalled(asking[arguments.command](arguments))))

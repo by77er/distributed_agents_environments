@@ -2,7 +2,9 @@
 pod's public address.
 
 The API key is read from an environment variable (`RUNPOD_API_KEY`) when a request is made, sent as a bearer token,
-and never kept on the client, written down, logged or put in an error. A pod's environment is given in two parts:
+and never kept on the client, written down, logged or put in an error. Every request says who sends it
+(`User-Agent: rollout/VERSION`): RunPod's front refuses a request without a User-Agent it accepts (403). A pod's
+environment is given in two parts:
 values (`PodSpec.env`), and references to secrets kept in RunPod's console (`PodSpec.secrets`: a variable's value is
 then `{{ RUNPOD_SECRET_name }}`, which RunPod fills in on the pod). A value that must not be logged but is not a
 console secret (a one-time token minted for this pod alone, which RunPod's API cannot store as a secret) goes in
@@ -23,6 +25,19 @@ import httpx
 API = "https://rest.runpod.io/v1"
 KEY = "RUNPOD_API_KEY"
 """The environment variable the API key is read from, unless the client is told another."""
+
+
+def _version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("rollout-runpod")
+    except PackageNotFoundError:
+        return "0"
+
+
+USER_AGENT = f"rollout/{_version()}"
+"""What every request says sent it."""
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +104,8 @@ class Pod:
     ports: Mapping[int, int] = field(default_factory=dict[int, int])
     """Each exposed port of the pod, and the public port it is reached at."""
     cost_per_hour: float | None = None
+    gpu: str | None = None
+    """The GPU type RunPod gave it, by its id (`NVIDIA H100 80GB HBM3`), where it says."""
 
     def address(self, port: int = 8443) -> str | None:
         """Where `port` is reached from outside, `https://IP:PORT`; None until RunPod has said."""
@@ -103,7 +120,7 @@ class Pod:
         return cls(
             id=str(said["id"]), name=str(said.get("name") or ""), status=str(said.get("desiredStatus") or ""),
             image=str(said.get("image") or said.get("imageName") or ""), public_ip=said.get("publicIp") or None,
-            ports=ports, cost_per_hour=float(cost) if cost is not None else None,
+            ports=ports, cost_per_hour=float(cost) if cost is not None else None, gpu=_gpu_of(said),
         )  # fmt: skip
 
 
@@ -159,8 +176,9 @@ class RunPod:
             raise RunPodError(f"{self.key_env} is not set: RunPod's API needs a key")
         try:
             response = await self._http.request(
-                method, self.url + path, json=body, params=params, headers={"Authorization": f"Bearer {key}"}
-            )
+                method, self.url + path, json=body, params=params,
+                headers={"Authorization": f"Bearer {key}", "User-Agent": USER_AGENT},
+            )  # fmt: skip
         except httpx.TransportError as error:
             raise RunPodError(f"{method} {path}: RunPod did not answer: {type(error).__name__}") from None
         if response.status_code >= 400:
@@ -172,6 +190,17 @@ class RunPod:
             return response.json()
         except ValueError:
             raise RunPodError(f"{method} {path}: RunPod's answer is not JSON", response.status_code) from None
+
+
+def _gpu_of(said: Mapping[str, Any]) -> str | None:
+    """The GPU type a pod's description names: its `gpu`'s id, or its machine's `gpuTypeId`."""
+    gpu: Any = said.get("gpu")
+    if isinstance(gpu, dict) and (found := cast(dict[str, Any], gpu).get("id")):
+        return str(found)
+    machine: Any = said.get("machine")
+    if isinstance(machine, dict) and (found := cast(dict[str, Any], machine).get("gpuTypeId")):
+        return str(found)
+    return None
 
 
 def _message(response: httpx.Response) -> str:

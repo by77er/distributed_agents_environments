@@ -35,6 +35,8 @@ from pydantic import JsonValue
 from rollout_train.providers import (
     ALLOCATIONS,
     INFERENCE_KINDS,
+    POD_FIELDS,
+    RUNPOD,
     TRAINER_KINDS,
     Allocation,
     Auth,
@@ -44,6 +46,7 @@ from rollout_train.providers import (
     Tls,
     TrainerProvider,
     is_local,
+    pod_table,
 )
 
 __all__ = [
@@ -448,11 +451,21 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     for trainer in trainers.values():
         if trainer.colocate_with is not None:
             shared = inference.get(trainer.colocate_with)
-            if shared is None or shared.kind != "vllm":
+            if trainer.kind == "runpod-trainer" and (shared is None or shared.kind != "runpod-host"):
+                raise ClusterError(
+                    f"[trainers.{trainer.name}] colocate_with names {trainer.colocate_with!r}, which is not a "
+                    "runpod-host provider of this cluster: a runpod-trainer takes its steps on a host's pods"
+                )
+            if trainer.kind != "runpod-trainer" and (shared is None or shared.kind != "vllm"):
                 raise ClusterError(
                     f"[trainers.{trainer.name}] colocate_with names {trainer.colocate_with!r}, which is not a vllm "
                     "provider of this cluster: a trainer shares only the GPU of engines this cluster starts"
                 )
+    for where, provider in [*(("inference", each) for each in inference.values()),
+                            *(("trainers", each) for each in trainers.values())]:  # fmt: skip
+        store = provider.settings.get("store")
+        if isinstance(store, str) and store not in stores:
+            raise ClusterError(f"[{where}.{provider.name}] store names {store!r}, which is no [stores.NAME] here")
     sandboxes = {kind: _sandboxes(kind, each) for kind, each in table.tables("sandboxes").items()}
     tools = {name: _tool(name, each) for name, each in table.tables("tools").items()}
     environments: dict[str, EnvironmentSection] = {}
@@ -585,6 +598,8 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         endpoints = tuple(str(each) for each in addresses) + ((str(settings["via"]),) if "via" in settings else ())
     elif kind_name == "api" and "endpoint" not in settings:
         raise ClusterError(f'{where} names its endpoint (endpoint = "module:name")')
+    elif kind_name in RUNPOD:
+        _pods(where, kind_name, settings, secrets)
     if (problem := auth_problem(where, auth, endpoints)) is not None:
         raise ClusterError(problem)
     return InferenceProvider(
@@ -672,9 +687,24 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
         runs = settings.get("trainer", "lora")
         if runs not in ("lora", "full"):
             raise ClusterError(f"{where} trainer is lora or full, the trainer its pods run (not {runs!r})")
+        if provider.colocate_with is None:
+            _pods(where, kind_name, settings, secrets)
+            provider = replace(provider, secrets=secrets)
+        elif said_pods := sorted(set(settings) & set(POD_FIELDS)):
+            raise ClusterError(f"{where} takes its steps on {provider.colocate_with}'s pods, which say what they are: "
+                               f"it says no {', '.join(said_pods)}")  # fmt: skip
 
     provider = replace(provider, settings=settings)
     return replace(provider, capabilities=provider.runs.capabilities)
+
+
+def _pods(where: str, kind: str, settings: Mapping[str, JsonValue], secrets: dict[str, Secret]) -> None:
+    """A RunPod kind's table, checked (`pod_table`); its API key is `RUNPOD_API_KEY`'s unless it names another."""
+    try:
+        pod_table(kind, settings)
+    except ValueError as error:
+        raise ClusterError(f"{where} {error}") from None
+    secrets.setdefault("api_key", Secret(env="RUNPOD_API_KEY"))
 
 
 CREDENTIALS = ("access_key_id_env", "secret_access_key_env")

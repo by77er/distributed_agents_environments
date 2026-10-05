@@ -18,7 +18,9 @@ dataset's name and id) and `suite_names` (each suite's name and the version it p
 ledger's is its `launches`. `DatabaseDesiredSettings` holds what is wanted of each run's settings
 (`rollout_train.settings`) in another, `run_settings`: a row per run, changed in place; a database ledger's is its
 `desired_settings`. `DatabaseLeases` holds the sandbox pools' leases (`rollout_train.sandboxes`) in another,
-`sandboxes`: a row per lease; a database ledger's is its `sandboxes`. A table whose rows are found by one key and
+`sandboxes`: a row per lease; a database ledger's is its `sandboxes`. `DatabasePodLeases`
+(`rollout_train.pods.leases`) holds the leases of the pods runs rent, and the time each run held one, in two more,
+`pod_leases` and `pod_time`; a database ledger's is its `pods`. A table whose rows are found by one key and
 changed in place (bookmarks, dataset names, suite names, desired settings, leases) is a `KeyedTable`.
 """
 
@@ -28,7 +30,7 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import asdict, astuple
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from pydantic import JsonValue
@@ -52,6 +54,9 @@ from rollout_train.registry import (
 )
 from rollout_train.settings import Desired, desired_settings_of
 from rollout_train.sql import Connection, Database, fetch_all, fetch_one, sql
+
+if TYPE_CHECKING:
+    from rollout_train.pods.leases import DatabasePodLeases
 
 METADATA = sa.MetaData()
 RECORDS = sa.Table(
@@ -126,6 +131,25 @@ RUN_SETTINGS = sa.Table(
     sa.Column("run", sa.Text, primary_key=True),
     sa.Column("settings", sa.Text, nullable=False),
     sa.Column("changed", sa.Float(), nullable=False),
+)
+
+
+POD_LEASES = sa.Table(
+    "pod_leases",
+    METADATA,
+    sa.Column("pod", sa.Text, primary_key=True),
+    sa.Column("provider", sa.Text, nullable=False),
+    sa.Column("slot", sa.Integer, nullable=False),
+    sa.Column("version", sa.BigInteger, nullable=False),
+    sa.Column("lease", sa.Text, nullable=False),
+    sa.UniqueConstraint("provider", "slot", name="pod_leases_slot"),
+)
+POD_TIME = sa.Table(
+    "pod_time",
+    METADATA,
+    sa.Column("key", sa.Text, primary_key=True),
+    sa.Column("run", sa.Text, nullable=False),
+    sa.Column("entry", sa.Text, nullable=False),
 )
 
 
@@ -265,6 +289,13 @@ class DatabaseLedger:
     def sandboxes(self) -> "DatabaseLeases":
         """The sandbox pools' leases, in this ledger's database."""
         return DatabaseLeases(self.database)
+
+    @property
+    def pods(self) -> "DatabasePodLeases":
+        """The leases of the pods runs rent, and the time each run held one, in this ledger's database."""
+        from rollout_train.pods.leases import DatabasePodLeases
+
+        return DatabasePodLeases(self.database)
 
     def close(self) -> None:
         self.database.close()

@@ -1,0 +1,34 @@
+# The reaper of RunPod's pods (`rollout pods reap`): every minute, it deletes the pods no run holds (idle past their
+# provider's idle_stop, stale leases', and those RunPod lists with the cluster's tag that no lease names), revoking
+# their certificates. With it, no runs means no pods.
+{{- if .Values.runpod.reaper }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pods-reaper
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.runpod.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata: {labels: {app: pods-reaper}}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: reaper
+              image: {{ include "rollout.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: [rollout, pods, reap, --cluster]
+              env:
+                {{- include "rollout.env" . | nindent 16 }}
+                {{- include "rollout.podEnv" . | nindent 16 }}
+              volumeMounts: {{- include "rollout.volumeMounts" . | nindent 16 }}
+              resources: {{- toYaml .Values.runpod.resources | nindent 16 }}
+          volumes: {{- include "rollout.volumes" . | nindent 12 }}
+{{- end }}

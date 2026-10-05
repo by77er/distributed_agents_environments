@@ -50,9 +50,10 @@ and a `step ca renew --daemon` beside the gateway.
 | Variable | Says |
 |---|---|
 | `ROLLOUT_POD_NAME` | The pod's name, as its starter gave it (lowercase letters, digits, hyphens): its identity is `spiffe://rollout/pod/NAME` |
-| `ROLLOUT_LEDGER` | Where the ledger is, as JSON: `{"kind": "rollout_train.database:DatabaseLedger", "url": "postgresql://…"}` |
-| `ROLLOUT_BLOBS` | Where the blob store is, as JSON: `{"kind": "rollout_s3:S3BlobStore", "bucket": "…", "endpoint_url": "…"}` |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3` | The blob store's credentials and endpoint (an R2 or S3 bucket), as RunPod secrets |
+| `ROLLOUT_ROLE` | What the pod does: `inference`, `trainer`, or `host` (both) |
+| `ROLLOUT_LEDGER` | Where the ledger is, as JSON: the ledger service, `{"kind": "rollout_train.ledger_service:HttpLedger", "url": "https://…", "token_env": "ROLLOUT_LEDGER_TOKEN"}` |
+| `ROLLOUT_LEDGER_TOKEN` | The pod's token for the ledger service: it reads its run's serving records, starts and checkpoints, and writes the pod's beats and reads its lease, nothing else. A run that takes the pod later gives a token for itself in the lease |
+| `ROLLOUT_BLOBS` | Where the blob store is, as JSON: `{"kind": "rollout_s3:S3BlobStore", "bucket": "…", "endpoint_url": "…", "access_key_id_env": "…", "secret_access_key_env": "…"}`, the store's key in the two variables it names: a read-only key for an inference pod, a key that writes for a trainer or host pod |
 | `STEP_CA_URL` | The cluster's step-ca (`https://ca.example.com`) |
 | `STEP_FINGERPRINT` | The SHA-256 fingerprint of step-ca's root certificate (`rollout_runpod.fingerprint`, or `step certificate fingerprint root_ca.crt`) |
 | `STEP_TOKEN` | The one-time token for the pod's first certificate; unset before any other process starts |

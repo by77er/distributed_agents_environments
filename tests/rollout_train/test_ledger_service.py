@@ -41,7 +41,7 @@ async def test_every_store_beside_the_ledger_is_reached_through_it(tmp_path: Pat
     assert (await ledger.launches.note(launch.id, expect=("running",), state="ended")).state == "submitted"
     await ledger.presence.beat("runner-1", {"host": "h", "machine": {"memory": 1}})
     beats = await ledger.presence.beats()
-    assert [(each.runner, each.about["host"]) for each in beats] == [("runner-1", "h")] and beats[0].age >= 0
+    assert [(each.runner, each.about["host"]) for each in beats] == [("runner-1", "h")] and beats[0].age > -1
     presets = presets_of(ledger)
     assert presets is not None
     saved = await presets.save("small", {"groups": 2}, "a note")

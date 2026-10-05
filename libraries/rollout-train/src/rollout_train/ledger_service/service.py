@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
     from rollout_train.cluster import Cluster
 
-__all__ = ["KEPT", "Handler", "app", "for_cluster", "operations"]
+__all__ = ["KEPT", "Handler", "app", "for_cluster", "held_by_run", "operations"]
 
 KEPT = 4096
 """Answers kept for operations retried with the same request id, newest first."""
@@ -224,6 +224,48 @@ def _versions(method: str) -> Handler:
     return handled
 
 
+def _pods(method: str) -> Handler:
+    async def handled(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> Any:
+        from rollout_train.pods.leases import PodLease, PodTime, pod_leases_of
+
+        store = _store(pod_leases_of(ledger), "pods' leases")
+        if method == "all":
+            return [each.to_json() for each in await store.all()]
+        if method == "get":
+            found = await store.get(str(args["pod"]))
+            return found.to_json() if found is not None else None
+        if method == "put":
+            expect = args.get("expect")
+            made = await store.put(
+                PodLease.from_json(args["lease"]), expect=int(expect) if expect is not None else None
+            )
+            return made.to_json()
+        if method == "delete":
+            return await store.delete(str(args["pod"]), expect=int(args["expect"]))
+        if method == "times":
+            run = args.get("run")
+            return [each.to_json() for each in await store.times(str(run) if run is not None else None)]
+        return await store.charge(PodTime.from_json(args["entry"]))
+
+    return handled
+
+
+async def _own_lease(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> None:
+    if args.get("pod") != scope.pod:
+        raise Forbidden(f"a pod's token reads its pod's ({scope.pod}) lease alone")
+
+
+async def held_by_run(ledger: Ledger, scope: Scope) -> bool:
+    """Whether a pod's token is honoured now: its pod's lease names its run."""
+    from rollout_train.pods.leases import pod_leases_of
+
+    store = pod_leases_of(ledger)
+    if store is None:
+        return False
+    lease = await store.get(str(scope.pod))
+    return lease is not None and lease.run == scope.run
+
+
 async def _own_beat(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> None:
     if args.get("runner") != scope.pod:
         raise Forbidden(f"a pod's token beats as its pod ({scope.pod}) alone")
@@ -273,6 +315,12 @@ def operations() -> dict[str, tuple[Handler, Handler | None]]:
         "environments/all": (_versions("all"), None),
         "environments/get": (_versions("get"), None),
         "environments/record": (_versions("record"), None),
+        "pods/all": (_pods("all"), None),
+        "pods/get": (_pods("get"), _own_lease),
+        "pods/put": (_pods("put"), None),
+        "pods/delete": (_pods("delete"), None),
+        "pods/times": (_pods("times"), None),
+        "pods/charge": (_pods("charge"), None),
     }
 
 
@@ -374,4 +422,4 @@ def for_cluster(cluster: "Cluster") -> "Starlette":
     token = cluster.ledger.token
     if token is None:
         raise ClusterError("the ledger service checks tokens against the platform's: name it in [ledger] token_env")
-    return app(DatabaseLedger(url), token.resolve)
+    return app(DatabaseLedger(url), token.resolve, honoured=held_by_run)

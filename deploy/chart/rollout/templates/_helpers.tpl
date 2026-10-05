@@ -40,6 +40,12 @@ ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
 
 {{/* The hosted APIs' keys, for what samples them (the gateway, each run's job): from the Secret `secrets.providers`,
 each key optional, so a provider whose key is missing is refused when it is asked, and the rest go on. */}}
+{{/* What reaches RunPod: its API key (runs' drivers, which lease pods, and the reaper). */}}
+{{- define "rollout.podEnv" -}}
+- name: RUNPOD_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.runpod }}, key: RUNPOD_API_KEY, optional: true}}
+{{- end }}
+
 {{- define "rollout.providerEnv" -}}
 - name: OPENAI_API_KEY
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: OPENAI_API_KEY, optional: true}}
@@ -61,6 +67,8 @@ after the cluster, and gives it to Ray's own pods itself). */}}
 - {name: config, mountPath: /etc/rollout, readOnly: true}
 - {name: gateway-keys, mountPath: /etc/rollout-secrets/gateway, readOnly: true}
 - {name: tinker, mountPath: /root/.tinker, readOnly: true}
+- {name: step-ca, mountPath: /etc/rollout-secrets/step-ca, readOnly: true}
+- {name: gateway-tls, mountPath: /etc/rollout-secrets/tls, readOnly: true}
 {{- end }}
 
 {{- define "rollout.volumes" -}}
@@ -79,4 +87,8 @@ after the cluster, and gives it to Ray's own pods itself). */}}
   secret: {secretName: {{ .Values.secrets.gatewayKeys }}, optional: true, defaultMode: 0400}
 - name: tinker
   secret: {secretName: {{ .Values.secrets.tinker }}, optional: true, defaultMode: 0400}
+- name: step-ca
+  secret: {secretName: {{ .Values.secrets.stepCa }}, optional: true, defaultMode: 0400}
+- name: gateway-tls
+  secret: {secretName: {{ .Values.secrets.gatewayTls }}, optional: true, defaultMode: 0400}
 {{- end }}

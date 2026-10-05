@@ -7,11 +7,10 @@ from typing import Any
 
 import pytest
 from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
 
 from rollout_runpod import Pod, PodSpec, RunPod, RunPodError
+from rollout_runpod.api import USER_AGENT
+from tests.rollout_runpod.fake import FakeRunPod
 from tests.rollout_train.pods.authority import served_tls
 
 KEY = "rpa_TESTKEY0123456789abcdefABCDEF"
@@ -19,61 +18,10 @@ TOKEN = "eyJhbGciOiJFUzI1NiJ9.one-time.signature"
 
 
 def fake_runpod() -> tuple[Starlette, list[tuple[str, str, Any]]]:
-    """A fake of RunPod's pods API: pods kept in memory; a request without the key is refused (401)."""
-    pods: dict[str, dict[str, Any]] = {}
-    asked: list[tuple[str, str, Any]] = []
-
-    def refused(request: Request) -> Response | None:
-        if request.headers.get("authorization") != f"Bearer {KEY}":
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return None
-
-    async def collection(request: Request) -> Response:
-        if (refusal := refused(request)) is not None:
-            return refusal
-        if request.method == "GET":
-            asked.append(("GET", "/pods", dict(request.query_params)))
-            name = request.query_params.get("name")
-            return JSONResponse([pod for pod in pods.values() if name is None or pod["name"] == name])
-        body = await request.json()
-        asked.append(("POST", "/pods", body))
-        id = f"pod{len(pods) + 1:011d}"
-        pods[id] = {
-            "id": id, "name": body["name"], "image": body["imageName"], "desiredStatus": "RUNNING",
-            "publicIp": "203.0.113.7", "portMappings": {"8443": 40123}, "costPerHr": 0.69, "env": body["env"],
-        }  # fmt: skip
-        return JSONResponse(pods[id], status_code=201)
-
-    async def one(request: Request) -> Response:
-        if (refusal := refused(request)) is not None:
-            return refusal
-        id = request.path_params["id"]
-        asked.append((request.method, f"/pods/{id}", None))
-        if id not in pods:
-            return JSONResponse({"error": "pod not found"}, status_code=400)
-        if request.method == "DELETE":
-            del pods[id]
-            return Response(status_code=204)
-        return JSONResponse(pods[id])
-
-    async def action(request: Request) -> Response:
-        if (refusal := refused(request)) is not None:
-            return refusal
-        id, verb = request.path_params["id"], request.path_params["verb"]
-        asked.append(("POST", f"/pods/{id}/{verb}", None))
-        pods[id]["desiredStatus"] = {"start": "RUNNING", "stop": "EXITED"}[verb]
-        if verb == "stop":
-            pods[id]["publicIp"], pods[id]["portMappings"] = "", {}
-        return JSONResponse(pods[id])
-
-    app = Starlette(
-        routes=[
-            Route("/v1/pods", collection, methods=["GET", "POST"]),
-            Route("/v1/pods/{id}", one, methods=["GET", "DELETE"]),
-            Route("/v1/pods/{id}/{verb}", action, methods=["POST"]),
-        ]
-    )
-    return app, asked
+    """A fake of RunPod's pods API (`tests.rollout_runpod.fake`): pods kept in memory; a request without the key is
+    refused (401), one without a User-Agent RunPod's front accepts too (403)."""
+    fake = FakeRunPod(key=KEY, cost=0.69)
+    return fake.app, fake.asked
 
 
 SPEC = PodSpec(
@@ -153,3 +101,19 @@ def test_a_pod_is_read_from_what_runpod_says() -> None:
         0.5,
         None,
     )
+
+
+async def test_every_request_says_who_sends_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    monkeypatch.setenv("RUNPOD_API_KEY", KEY)
+    fake = FakeRunPod(key=KEY)
+    runpod = fake.client()
+    pod = await runpod.create(SPEC)
+    await runpod.pods()
+    await runpod.terminate(pod.id)
+    assert USER_AGENT.startswith("rollout/") and fake.agents == [USER_AGENT] * 3
+    assert pod.gpu == "NVIDIA GeForce RTX 4090" and Pod.of({"id": "p", "machine": {"gpuTypeId": "H100"}}).gpu == "H100"
+    bare = httpx.AsyncClient(transport=httpx.ASGITransport(app=fake.app))  # (what a client without one sends)
+    refused = await bare.get("http://runpod.test/v1/pods", headers={"Authorization": f"Bearer {KEY}"})
+    assert refused.status_code == 403

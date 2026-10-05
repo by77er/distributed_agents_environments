@@ -9,7 +9,8 @@ nothing but the secret and keeps no list of tokens. A pod's token may:
   `checkpoints` and `checkpoints/released`) that the run made, that its serving records name, that its channels are
   fixed on, and the checkpoints each of those was trained over;
 - write the pod's own beat (`presence.beat` under the pod's name);
-- read the pod's own lease (`pods.get` of its name), which says which run holds the pod now.
+- read the pod's own lease (`pods.get` of its name), which says which run holds the pod now, and the token for that
+  run (a pod taken by another run reads its new token there).
 
 While a lease names the pod, its token is honoured for reads only if the lease names the token's run: a pod released by
 one run and taken by another reads nothing more of the first. Everything else is refused (`Forbidden`).

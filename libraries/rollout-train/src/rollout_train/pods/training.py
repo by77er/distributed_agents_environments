@@ -23,12 +23,19 @@ meanwhile is refused (409), and the asker tries it again later.
 
 - `ROLLOUT_TRAINER`: the trainer, by `module:name` (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`).
 - `ROLLOUT_TRAINER_MODEL`: the model it trains.
-- `ROLLOUT_TRAINER_SETTINGS`: its settings, as a JSON object (default `{}`).
+- `ROLLOUT_TRAINER_SETTINGS`: its settings, as a JSON object (default `{}`), until a run that holds the pod says its
+  own.
+- `ROLLOUT_SLEEP_VLLM`: on a pod that serves too (`runpod-host`), `1` to have the pod's vLLM sleep while a step is
+  taken (`rollout_train.colocated`).
 - `ROLLOUT_WORK`: where steps' files and the answers of the steps made are kept (default `/workspace/rollout`).
 - `ROLLOUT_LISTEN`: where the service listens (default `127.0.0.1:8001`);
 
 and those every pod reads (`rollout_train.pods.environment`). It beats every 15 seconds with the pod's name, identity,
-address and whether a step is running.
+address, the run it takes steps for, whether it is ready for that run, and whether a step is running.
+
+Which run it takes steps for is its lease's (`rollout_train.pods.leases`): when a run takes the pod, the service makes
+its trainer anew with the run's settings (the trainer's implementation, model and settings the lease says), and reads
+the ledger with the token the lease gives for that run, once no step runs. It is then ready for that run.
 """
 
 import asyncio
@@ -39,10 +46,10 @@ import os
 import re
 import shutil
 import socket
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
@@ -149,6 +156,8 @@ class TrainerService:
         self.states: dict[str, StepState] = {}
         """The steps asked for since the service started, by `into` (steps made before are on disk)."""
         self._running: tuple[str, asyncio.Task[None]] | None = None
+        self.run: str | None = None
+        """The run whose trainer it holds (as its lease said), if it follows a lease."""
 
     @property
     def running(self) -> str | None:
@@ -280,26 +289,109 @@ def _written(path: Path, data: bytes) -> None:
     os.replace(staging, path)
 
 
+def made(implementation: str, model: str, settings: Mapping[str, Any]) -> Trainer:
+    """A trainer: `implementation` (`module:name`) called with the model and those of `settings` it takes (each one,
+    where it takes any keyword)."""
+    import inspect
+
+    making = named(implementation)
+    try:
+        parameters = inspect.signature(making).parameters.values()
+    except (TypeError, ValueError):
+        return making(model, **settings)
+    if not any(each.kind is inspect.Parameter.VAR_KEYWORD for each in parameters):
+        names = {each.name for each in parameters}
+        settings = {key: value for key, value in settings.items() if key in names}
+    return making(model, **settings)
+
+
+class _LocalServer:
+    """The pod's own vLLM server as what a colocated trainer pauses (`rollout_train.colocated.Pausable`): it sleeps
+    while a step is taken. Requests to it are not held back here: the gateway's to a sleeping server fail, and are
+    sampled again on its next look."""
+
+    def __init__(self, address: str) -> None:
+        from rollout_train.inference import RemoteEngine
+
+        self.engine = RemoteEngine("", address=address)
+
+    async def pause(self) -> None:
+        return None
+
+    def resume(self) -> None:
+        return None
+
+    async def sleep(self) -> None:
+        await self.engine.sleep()
+
+    async def wake(self) -> None:
+        await self.engine.wake()
+
+
+async def following(
+    service: TrainerService,
+    name: str,
+    make: Callable[[Mapping[str, JsonValue]], Trainer],
+    *,
+    every: float = 2.0,
+) -> None:
+    """Keep `service`'s trainer the one the run that holds pod `name` asks for (its lease's settings, made by `make`),
+    and its ledger token that run's, from when no step runs; until cancelled."""
+    from rollout_train.pods.leases import IDLE, pod_leases_of
+
+    leases = pod_leases_of(service.checkpoints.ledger)
+    if leases is None:
+        raise ValueError("this ledger keeps no pods' leases")
+    while True:
+        with contextlib.suppress(Exception):  # (looked at again at the next look)
+            lease = await leases.get(name)
+            run = lease.run if lease is not None and lease.state != IDLE else None
+            if lease is not None and run is not None and run != service.run and service.running is None:
+                if lease.token and callable(use := getattr(service.checkpoints.ledger, "use", None)):
+                    use(lease.token)
+                service.trainer = await asyncio.to_thread(make, lease.settings)
+                service.run = run
+            elif run is None and service.running is None:
+                service.run = None
+        await asyncio.sleep(every)
+
+
 async def main(environ: Mapping[str, str]) -> None:
-    """Serve the trainer the environment names, and beat, until cancelled."""
+    """Serve the trainer the environment names (and then the one the run that holds the pod asks for), and beat,
+    until cancelled."""
     ledger, blobs = stores(environ)
     settings: Any = json.loads(environ.get("ROLLOUT_TRAINER_SETTINGS") or "{}")
     model = required(environ, "ROLLOUT_TRAINER_MODEL")
-    trainer: Trainer = named(required(environ, "ROLLOUT_TRAINER"))(model, **settings)
+    implementation = required(environ, "ROLLOUT_TRAINER")
+    sleeps = environ.get("ROLLOUT_SLEEP_VLLM", "") in ("1", "true")
+
+    def make(said: Mapping[str, JsonValue]) -> Trainer:
+        given: Any = said.get("trainer")
+        chosen = cast(dict[str, Any], given) if isinstance(given, dict) else cast(dict[str, Any], settings)
+        trainer = made(str(said.get("implementation") or implementation), str(said.get("model") or model), chosen)
+        if sleeps:
+            from rollout_train.colocated import Colocated
+
+            local = _LocalServer(environ.get("ROLLOUT_VLLM", "http://127.0.0.1:8000"))
+            return cast(Trainer, Colocated(trainer, [local]))
+        return trainer
+
     work = Path(environ.get("ROLLOUT_WORK", "/workspace/rollout"))
-    service = TrainerService(trainer, Checkpoints(ledger, blobs), work, model=model)
+    service = TrainerService(make({}), Checkpoints(ledger, blobs), work, model=model)
     name = required(environ, "ROLLOUT_POD_NAME")
     address, serials = public_address(environ), serial_file(environ)
     identity = pod_identity(name)
+    role = environ.get("ROLLOUT_ROLE") or TRAINER
 
     def about() -> Mapping[str, JsonValue]:
         pod: dict[str, JsonValue] = {"name": name, "identity": identity, "address": address, "role": TRAINER,
-                                     "ready": True, "running": service.running, "serial": serial(serials)}  # fmt: skip
+                                     "ready": service.run is not None, "run": service.run, "running": service.running,
+                                     "serial": serial(serials), "steps": True}  # fmt: skip
         return {"host": socket.gethostname(), "kind": TRAINER, POD: pod}
 
     host, port = listening(environ, "ROLLOUT_LISTEN", "127.0.0.1:8001")
-    waits = [served(app(service), host, port)]
-    if (presence := presence_of(ledger)) is not None:
+    waits = [served(app(service), host, port), following(service, name, make)]
+    if (presence := presence_of(ledger)) is not None and role == TRAINER:  # (a host's follower beats for the pod)
         waits.append(beating(presence, name, about))
     await asyncio.gather(*waits)
 

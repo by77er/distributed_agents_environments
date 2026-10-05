@@ -1,9 +1,9 @@
 """`HttpLedger`: the ledger and the stores beside it, reached through the ledger service.
 
-It is a `Ledger`, and has beside it what a database ledger has (`registry`, `launches`, `presence`,
-`desired_settings`, `sandboxes`, `presets`, `environment_versions`), each a client of the service. Every role can use
-it by its URL and a token: in a cluster config, `[ledger] url = "https://…"` with `token_env` or `token_file`; for a
-pod, `ROLLOUT_LEDGER` naming `rollout_train.ledger_service:HttpLedger` with its `url` and `token_env`.
+It is a `Ledger`, and has beside it what a database ledger has (`registry`, `launches`, `presence`, `desired_settings`,
+`sandboxes`, `presets`, `environment_versions`, `pods`), each a client of the service. Every role can use it by its URL
+and a token: in a cluster config, `[ledger] url = "https://…"` with `token_env` or `token_file`; for a pod,
+`ROLLOUT_LEDGER` naming `rollout_train.ledger_service:HttpLedger` with its `url` and `token_env`.
 
 What the client does, as the service's guarantees ask (docs/research/ledger-guarantees.md#10-the-http-ledger-service):
 
@@ -23,7 +23,7 @@ import time
 import uuid
 from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from pydantic import JsonValue
@@ -37,6 +37,9 @@ from rollout_train.presets import Preset
 from rollout_train.published import EnvironmentVersion
 from rollout_train.registry import Bookmark, Entry, Named, SuiteName
 from rollout_train.settings import Desired
+
+if TYPE_CHECKING:
+    from rollout_train.pods.leases import HttpPodLeases
 
 __all__ = ["ATTEMPT", "DEADLINE", "HttpLedger", "LedgerUnreachable"]
 
@@ -76,6 +79,10 @@ class HttpLedger:
 
     def __repr__(self) -> str:
         return f"HttpLedger({self.url!r})"
+
+    def use(self, token: str) -> None:
+        """Send `token` from now on (a pod given a token for the run that took it)."""
+        self._token = token
 
     def token(self) -> str | None:
         if self._token is not None:
@@ -169,6 +176,12 @@ class HttpLedger:
     @property
     def environment_versions(self) -> "HttpEnvironmentVersions":
         return HttpEnvironmentVersions(self)
+
+    @property
+    def pods(self) -> "HttpPodLeases":
+        from rollout_train.pods.leases import HttpPodLeases
+
+        return HttpPodLeases(self)
 
     async def aclose(self) -> None:
         if self._owned:

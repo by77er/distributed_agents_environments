@@ -2,11 +2,11 @@
 deployment of it offers.
 
 An **inference provider** samples a channel. Its kind (`INFERENCE_KINDS`: `vllm`, `vllm-servers`, `tinker`, `api`,
-`runpod-inference`) declares its `Capabilities`: whether it is token-exact, returns sampled-token, prompt and top-k
-logprobs, honours sampling parameters, serves adapters by name or reloads full weights, streams, how it bills, and the
-checkpoint formats it loads. The cluster config (`rollout_train.cluster`) adds what this deployment has: its models
-(`ModelOffer`: context, the base a quantized model was made from, the highest LoRA rank, cost per token class), its
-GPUs and replicas.
+`runpod-inference`, `runpod-host`) declares its `Capabilities`: whether it is token-exact, returns sampled-token, prompt
+and top-k logprobs, honours sampling parameters, serves adapters by name or reloads full weights, streams, how it bills,
+and the checkpoint formats it loads. The cluster config (`rollout_train.cluster`) adds what this deployment has: its
+models (`ModelOffer`: context, the base a quantized model was made from, the highest LoRA rank, cost per token class),
+its GPUs and replicas.
 
 A **trainer** makes checkpoints. Its kind (`TRAINER_KINDS`: `lora`, `full`, `tinker`, `runpod-trainer`) declares its
 `TrainerCapabilities`: what it produces (`lora` or `full`), the format its files are in (`peft`, `full`, `tinker`), the
@@ -34,6 +34,12 @@ names, at its `base_url` where it says one; its models' catalog entries say thei
 takes (`options`). It is metered, and not token-exact: what it samples is never trained on
 (`rollout_train.inference.api`).
 
+GPU pods on RunPod are leased by the runs that use them (`rollout_train.pods.leasing`): a `runpod-inference` pod serves
+a run's channel, a `runpod-trainer` pod takes its steps, and a `runpod-host` pod does both on one GPU (a
+`runpod-trainer` whose `colocate_with` names it takes its steps there). What each kind's table says of its pods (the
+image, the GPU types, the most pods at once, how long a released pod stays warm, the price) is a `PodTable`
+(`pod_table`).
+
 A channel may be served by several providers at once (`Routing`): `spill` fills the first and sends the rest to the
 next; `weighted` shares turns by weight.
 
@@ -58,13 +64,16 @@ __all__ = [
     "ALLOCATIONS",
     "AUTHS",
     "INFERENCE_KINDS",
+    "POD_FIELDS",
     "ROUTING",
+    "RUNPOD",
     "TRAINER_KINDS",
     "Auth",
     "Capabilities",
     "InferenceKind",
     "InferenceProvider",
     "ModelOffer",
+    "PodTable",
     "Routing",
     "Secret",
     "SettingSpec",
@@ -73,6 +82,7 @@ __all__ = [
     "TrainerKind",
     "TrainerProvider",
     "is_local",
+    "pod_table",
     "settings_of",
 ]
 
@@ -85,6 +95,13 @@ AUTHS: tuple[AuthKind, ...] = ("mtls", "bearer", "vendor", "none")
 this machine)."""
 BEATS = "beats"
 """An `Auth.identity` that says each server's SPIFFE identity is the one its heartbeat names (a RunPod pod's)."""
+RUNPOD = ("runpod-inference", "runpod-host", "runpod-trainer")
+"""The kinds whose servers are RunPod's pods, leased by the runs that use them."""
+POD_FIELDS = (
+    "image", "gpu_types", "gpu_count", "max_pods", "idle_stop", "start_timeout", "cloud", "regions", "price",
+    "volume_gb", "container_disk_gb", "secrets", "step_ca", "store",
+)  # fmt: skip
+"""The settings of a RunPod kind's table that say what its pods are (`PodTable`)."""
 ROUTING = ("spill", "weighted")
 """How turns are shared among a channel's providers: fill the first and spill the rest over to the next, or by
 weight."""
@@ -381,16 +398,23 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             ),
             auths=("mtls",),
             auth=Auth("mtls", identity=BEATS),
-            fields=(
-                "image",
-                "gpu_types",
-                "pods",
-                "idle_stop",
-                "volume_gb",
-                "secrets",
-                "step_ca",
-                "max_logprobs",
+            fields=(*POD_FIELDS, "max_logprobs", "memory_fraction"),
+            secrets=("api_key",),
+            implementation="rollout_train.pods.inference:InferencePod",
+            remote=True,
+        ),
+        InferenceKind(
+            "runpod-host",
+            _token_level(
+                prompt_logprobs=True,
+                top_logprobs=20,
+                full_reload=False,
+                loads=frozenset({"peft"}),
+                bills="hours",
             ),
+            auths=("mtls",),
+            auth=Auth("mtls", identity=BEATS),
+            fields=(*POD_FIELDS, "max_logprobs", "memory_fraction", "sleep"),
             secrets=("api_key",),
             implementation="rollout_train.pods.inference:InferencePod",
             remote=True,
@@ -536,7 +560,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("mtls",),
             auth=Auth("mtls", identity=BEATS),
-            fields=("trainer", "image", "gpu_types", "pods", "idle_stop", "volume_gb", "secrets", "step_ca"),
+            fields=("trainer", *POD_FIELDS),
             secrets=("api_key",),
             not_settings=_OBJECTIVE,
         ),
@@ -559,7 +583,8 @@ class TrainerProvider:
     """The longest segment this hardware trains on (none: any)."""
     gpus: float = 0
     colocate_with: str | None = None
-    """A `vllm` provider whose GPU it shares: that provider's engines sleep while it steps."""
+    """A `vllm` provider whose GPU it shares (that provider's engines sleep while it steps), or, for a
+    `runpod-trainer`, a `runpod-host` provider whose pods take its steps beside their vLLM."""
     cost: Mapping[str, float] = field(default_factory=dict[str, float])
     """Dollars per million tokens trained (`train`), or per hour (`hour`), for a model `costs` does not name."""
     costs: Mapping[str, Mapping[str, float]] = field(default_factory=dict[str, Mapping[str, float]])
@@ -645,3 +670,104 @@ def settings_of(kind: TrainerKind) -> tuple[SettingSpec, ...]:
             )
         )
     return tuple(found)
+
+
+@dataclass(frozen=True)
+class PodTable:
+    """What a RunPod kind's table says of its pods (`pod_table`)."""
+
+    image: str
+    """The image its pods run (a digest from the images workflow's summary)."""
+    gpu_types: tuple[str, ...]
+    """RunPod's GPU type ids, in order of preference (`NVIDIA H100 80GB HBM3`)."""
+    gpu_count: int = 1
+    max_pods: int = 1
+    """The most pods of the provider at once, across runs: a cap on what it spends."""
+    idle_stop: float = 600.0
+    """Seconds a pod no run holds stays warm, for the next run with the same image, model and GPU, before it is
+    deleted."""
+    start_timeout: float = 1200.0
+    """Seconds a pod may take to say it is ready for the run that holds it before it is deleted and the run fails."""
+    cloud: str = "SECURE"
+    """RunPod's cloud tier: `SECURE` or `COMMUNITY`."""
+    regions: tuple[str, ...] = ()
+    """RunPod's data centers its pods may be in (none: any)."""
+    price: float | None = None
+    """Dollars an hour a pod is reckoned at before RunPod says its own (`costPerHr`): what estimates use."""
+    volume_gb: int = 50
+    container_disk_gb: int = 50
+    secrets: Mapping[str, str] = field(default_factory=dict[str, str])
+    """Variables whose values are RunPod console secrets, by the secret's name (`HF_TOKEN = "hf_token"`)."""
+    step_ca: Mapping[str, str] = field(default_factory=dict[str, str])
+    """step-ca, for the pods' certificates: `url`, `provisioner`, `key_file` (the provisioner's key), `root`."""
+    store: str | None = None
+    """The blob store its pods read and write (`[stores.NAME]`; none: `[blobs]`)."""
+    memory_fraction: float | None = None
+    """The share of the GPU's memory vLLM takes (`--gpu-memory-utilization`); on a `runpod-host` pod the trainer
+    has the rest (0.42 unless said)."""
+    sleep: bool = False
+    """On a `runpod-host` pod: whether vLLM sleeps while a step is taken (`rollout_train.colocated`), for a GPU
+    too small to hold both."""
+
+
+CLOUDS = ("SECURE", "COMMUNITY")
+STEP_CA = ("url", "provisioner", "key_file", "root")
+
+
+def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
+    """What a RunPod kind's table says of its pods, checked. Raises `ValueError` saying what is wrong."""
+
+    def number(key: str, default: float | None, *, least: float = 0.0) -> float | None:
+        value = settings.get(key, default)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int | float) or value < least:
+            raise ValueError(f"{key} is a number, {least:g} at least (not {value!r})")
+        return float(value)
+
+    def whole(key: str, default: int, *, least: int = 1) -> int:
+        value = settings.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < least:
+            raise ValueError(f"{key} is a whole number, {least} at least (not {value!r})")
+        return value
+
+    def texts(key: str) -> tuple[str, ...]:
+        value = settings.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(each, str) for each in value):
+            raise ValueError(f"{key} is a list of names")
+        return tuple(str(each) for each in value)
+
+    def table(key: str) -> dict[str, str]:
+        value = settings.get(key, {})
+        if not isinstance(value, dict) or not all(isinstance(each, str) for each in value.values()):
+            raise ValueError(f"{key} is a table of names")
+        return {str(name): str(each) for name, each in value.items()}
+
+    image = settings.get("image")
+    if not isinstance(image, str) or not image:
+        raise ValueError("image names the image its pods run")
+    gpu_types = texts("gpu_types")
+    if not gpu_types:
+        raise ValueError("gpu_types lists RunPod's GPU types its pods may have, in order of preference")
+    cloud = str(settings.get("cloud", "secure")).upper()
+    if cloud not in CLOUDS:
+        raise ValueError(f"cloud is secure or community (not {settings.get('cloud')!r})")
+    step_ca = table("step_ca")
+    if step_ca and set(step_ca) != set(STEP_CA):
+        raise ValueError(f"step_ca says {', '.join(STEP_CA)}")
+    store = settings.get("store")
+    if store is not None and not isinstance(store, str):
+        raise ValueError("store names a blob store of the cluster's ([stores.NAME])")
+    fraction = number("memory_fraction", 0.42 if kind == "runpod-host" else None, least=0.05)
+    if fraction is not None and fraction > 0.95:
+        raise ValueError(f"memory_fraction is a share of the GPU's memory, 0.95 at most (not {fraction:g})")
+    sleep = settings.get("sleep", False)
+    if not isinstance(sleep, bool):
+        raise ValueError("sleep is true or false")
+    return PodTable(
+        image=image, gpu_types=gpu_types, gpu_count=whole("gpu_count", 1), max_pods=whole("max_pods", 1),
+        idle_stop=number("idle_stop", 600.0) or 0.0, start_timeout=number("start_timeout", 1200.0, least=1.0) or 1200.0,
+        cloud=cloud, regions=texts("regions"), price=number("price", None), volume_gb=whole("volume_gb", 50),
+        container_disk_gb=whole("container_disk_gb", 50), secrets=table("secrets"), step_ca=step_ca, store=store,
+        memory_fraction=fraction, sleep=sleep,
+    )  # fmt: skip

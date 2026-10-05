@@ -1,6 +1,6 @@
 # The trainer image
 
-`ghcr.io/by77er/rollout-trainer`: a pod that takes a run's training steps.
+`ghcr.io/by77er/rollout-trainer`: a pod that takes the training steps of the run that holds it.
 
 | Process | Listens on | Does |
 |---|---|---|
@@ -10,6 +10,9 @@
 
 The trainers (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`) run each step in a fresh process on the GPU, which
 frees the GPU and the memory when it ends. A run's trainer reaches the pod with `rollout_train.pods.RemoteTrainer`.
+The service reads its lease: when a run takes the pod, it makes its trainer anew with the run's settings (the lease's)
+and reads the ledger with the token the lease gives for that run, once no step runs; its beats then say it is ready for
+that run.
 
 ## Variables
 
@@ -19,7 +22,9 @@ Beside those every pod reads ([deploy/images](../README.md#the-variables-both-po
 |---|---|
 | `ROLLOUT_TRAINER` | The trainer, by `module:name`: `rollout_lora:LoraTrainer` or `rollout_lora:FullTrainer` |
 | `ROLLOUT_TRAINER_MODEL` | The model it trains (a Hugging Face id) |
-| `ROLLOUT_TRAINER_SETTINGS` | Its settings, as a JSON object of `LoraSettings`' fields (default `{}`) |
+| `ROLLOUT_TRAINER_SETTINGS` | Its settings, as a JSON object of `LoraSettings`' fields (default `{}`), until a run that holds the pod says its own |
+| `ROLLOUT_SLEEP_VLLM` | On a pod that also serves (`runpod-host`): `1` to have the pod's vLLM sleep while a step is taken |
+| `ROLLOUT_VLLM` | Where that vLLM listens (default `http://127.0.0.1:8000`) |
 | `ROLLOUT_WORK` | Where steps' files and the answers of the steps made are kept (default `/workspace/rollout`, on the volume, so a step made before the pod started again is answered from it) |
 | `ROLLOUT_LISTEN` | Where the training service listens (default `127.0.0.1:8001`) |
 

@@ -35,6 +35,7 @@ spec:
               env:
                 {{- include "rollout.env" . | nindent 16 }}
                 {{- include "rollout.providerEnv" . | nindent 16 }}
+                {{- include "rollout.podEnv" . | nindent 16 }}
                 - {name: RAY_ENABLE_UV_RUN_RUNTIME_ENV, value: "0"}
               volumeMounts:
                 {{- include "rollout.volumeMounts" . | nindent 16 }}

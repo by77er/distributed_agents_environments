@@ -262,7 +262,7 @@ def test_mutual_tls_needs_the_clusters_ca_and_certificate() -> None:
 kind = "runpod-inference"
 image = "ghcr.io/by77er/rollout-inference@sha256:0"
 gpu_types = ["NVIDIA GeForce RTX 4090"]
-pods = 2
+max_pods = 2
 api_key_env = "RUNPOD_API_KEY"
 secrets = { AWS_ACCESS_KEY_ID = "r2_key_id" }
 [inference.pods.models."m"]
@@ -279,18 +279,67 @@ options = { max_lora_rank = 96 }
     assert provider.secrets == {"api_key": Secret(env="RUNPOD_API_KEY")}
     assert provider.settings["secrets"] == {"AWS_ACCESS_KEY_ID": "r2_key_id"}  # (console secrets, by name)
     with pytest.raises(ClusterError, match="auth is one of mtls"):
-        cluster_of(SMALL + tls + pods.replace("pods = 2", 'pods = 2\nauth = "none"'))
+        cluster_of(SMALL + tls + pods.replace("max_pods = 2", 'max_pods = 2\nauth = "none"'))
 
 
 def test_a_runpod_trainer_takes_the_capabilities_of_the_trainer_it_runs() -> None:
     tls = '\n[tls]\nca = "~/ca.pem"\ncertificate = "~/gateway.crt"\nkey = "~/gateway.key"\n'
-    trainer = '\n[trainers.pods]\nkind = "runpod-trainer"\ntrainer = "{runs}"\nmodels = ["m"]\nsegment_tokens = 16000\n'
+    trainer = (
+        '\n[trainers.pods]\nkind = "runpod-trainer"\ntrainer = "{runs}"\nmodels = ["m"]\nsegment_tokens = 16000\n'
+        'image = "ghcr.io/by77er/rollout-trainer@sha256:0"\ngpu_types = ["NVIDIA H100 80GB HBM3"]\n'
+    )
     lora = cluster_of(SMALL + tls + trainer.format(runs="lora")).trainers["pods"]
     full = cluster_of(SMALL + tls + trainer.format(runs="full")).trainers["pods"]
     assert (lora.capabilities.produces, lora.capabilities.format) == ("lora", "peft")
     assert (full.capabilities.produces, full.capabilities.format) == ("full", "full")
     with pytest.raises(ClusterError, match="trainer is lora or full"):
         cluster_of(SMALL + tls + trainer.format(runs="tinker"))
+
+
+TLS = '\n[tls]\nca = "~/ca.pem"\ncertificate = "~/gateway.crt"\nkey = "~/gateway.key"\n'
+HOST = """
+[inference.h100]
+kind = "runpod-host"
+image = "ghcr.io/by77er/rollout-host@sha256:0"
+gpu_types = ["NVIDIA H100 80GB HBM3"]
+cloud = "community"
+regions = ["US-KS-2"]
+price = 2.69
+idle_stop = 300
+step_ca = { url = "https://ca.example.com", provisioner = "launcher", key_file = "~/p.jwk", root = "~/root.crt" }
+[inference.h100.models."m"]
+context = 8192
+[trainers.h100-lora]
+kind = "runpod-trainer"
+colocate_with = "h100"
+models = ["m"]
+"""
+
+
+def test_a_runpod_providers_table_says_what_its_pods_are() -> None:
+    from rollout_train.providers import pod_table
+
+    cluster = cluster_of(SMALL + TLS + HOST)
+    host = cluster.inference["h100"]
+    said = pod_table(host.kind, host.settings)
+    assert (said.cloud, said.regions, said.price, said.idle_stop, said.max_pods) == ("COMMUNITY", ("US-KS-2",), 2.69,
+                                                                                    300.0, 1)  # fmt: skip
+    assert said.memory_fraction == 0.42 and not said.sleep and said.start_timeout == 1200.0
+    assert host.secrets["api_key"] == Secret(env="RUNPOD_API_KEY")
+    assert cluster.trainers["h100-lora"].colocate_with == "h100"
+    for change, says in (
+        (('cloud = "community"', 'cloud = "cheap"'), "cloud is secure or community"),
+        (('image = "ghcr.io/by77er/rollout-host@sha256:0"\n', ""), "image names the image"),
+        (("price = 2.69", "price = -1"), "price is a number"),
+        (("idle_stop = 300", "idle_stop = 300\nmax_pods = 0"), "max_pods is a whole number"),
+        (('provisioner = "launcher", ', ""), "step_ca says url, provisioner"),
+        (("idle_stop = 300", "idle_stop = 300\nmemory_fraction = 0.99"), "memory_fraction is a share"),
+        (('colocate_with = "h100"', 'colocate_with = "local"'), "not a runpod-host provider"),
+        (('colocate_with = "h100"', 'colocate_with = "h100"\nmax_pods = 2'), "takes its steps on h100's pods"),
+        (("idle_stop = 300", 'idle_stop = 300\nstore = "r2"'), "store names 'r2', which is no"),
+    ):
+        with pytest.raises(ClusterError, match=says):
+            cluster_of(SMALL + TLS + HOST.replace(*change))
 
 
 def test_each_provider_and_trainer_is_metered_or_scheduled_by_its_kind_unless_it_says() -> None:

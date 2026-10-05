@@ -1,5 +1,5 @@
-"""What runs beside a stock vLLM server on an inference pod: a follower that keeps the server serving what one run's
-channel should, beats, and says whether the pod is ready.
+"""What runs beside a stock vLLM server on an inference pod: a follower that keeps the server serving what the run
+that holds the pod says its channel should, beats, and says whether the pod is ready.
 
 The pod's vLLM server listens on the pod's loopback interface, with adapters loaded and unloaded while it runs
 (`VLLM_ALLOW_RUNTIME_LORA_UPDATING`). `InferencePod` is the follower every engine host runs (`rollout_train.following`),
@@ -7,15 +7,21 @@ over one channel whose one engine is that server: it reads what the run says the
 checkpoint's files from the blob store into the pod's volume, and loads them as an adapter named by the checkpoint's id.
 After each look it asks the server what it has: the pod is ready once the server answers and has what the channel should
 serve now (its base model, while the run says nothing else). Its beats say, beside what every follower says, the pod's
-name, identity, public address, readiness and certificate serial (`rollout_train.pods.identity`).
+name, identity, public address, readiness, certificate serial, and the run and channel it serves
+(`rollout_train.pods.identity`).
+
+Which run and channel it serves is its lease's (`rollout_train.pods.leases`): it reads its lease at each look, and
+serves the channel of the run that holds the pod, with the ledger token the lease gives for that run. A pod released by
+one run and taken by another drops the first's adapters and follows the second's; a pod no run holds serves nothing,
+and says so. Given `ROLLOUT_RUN`, it serves that run's channel instead, whatever its lease says.
 
 `/healthz` and `/readyz` are served on the pod's loopback interface (by default `127.0.0.1:8081`), for the pod's own
 checks; the proxy in front of the pod passes neither on.
 
     python -m rollout_train.pods.inference
 
-- `ROLLOUT_RUN`: the run whose channel the pod serves, by id.
-- `ROLLOUT_CHANNEL`: the channel, by its name within the run (default `policy`).
+- `ROLLOUT_RUN`: the run whose channel the pod serves, by id (by default the run its lease names).
+- `ROLLOUT_CHANNEL`: the channel, by its name within the run (default `policy`; with no `ROLLOUT_RUN`, its lease's).
 - `ROLLOUT_MODEL`: the model the vLLM server was started with, by the name it serves it under.
 - `ROLLOUT_VLLM`: the server's address (default `http://127.0.0.1:8000`).
 - `ROLLOUT_CHECKPOINTS`: where checkpoints' files are kept while they are served (default `/workspace/checkpoints`).
@@ -35,10 +41,11 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoints
-from rollout_train.following import Follower
+from rollout_train.following import Binding, Follower
 from rollout_train.inference import Channel, RemoteEngine
 from rollout_train.pods.environment import listening, public_address, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
+from rollout_train.pods.leases import IDLE, pod_leases_of
 from rollout_train.presence import Presence, presence_of
 from rollout_train.serving import qualified, wanted
 
@@ -55,16 +62,17 @@ STALE = 60.0
 
 
 class InferencePod(Follower):
-    """Keeps the vLLM server at `vllm` (serving `model`) serving what `run` says its channel `channel` should, with
-    the checkpoints' files under `directory`, as pod `name` reached at `address`. `ready` says whether the server has
-    what the channel should serve now, and `why` what it lacks when it does not."""
+    """Keeps the vLLM server at `vllm` (serving `model`) serving what `run` says its channel `channel` should (none:
+    the run and channel its lease names now), with the checkpoints' files under `directory`, as pod `name` reached at
+    `address`. `ready` says whether the server has what the channel should serve now, and `why` what it lacks when it
+    does not."""
 
     def __init__(
         self,
         name: str,
         checkpoints: Checkpoints,
-        run: str,
-        channel: str,
+        run: str | None,
+        channel: str | None,
         model: str,
         directory: Path,
         *,
@@ -76,12 +84,16 @@ class InferencePod(Follower):
         beating: float = 15.0,
     ) -> None:
         self.engine = RemoteEngine(model, address=vllm)
-        # (the follower publishes to this channel, and nothing samples through it here: it needs no renderer)
-        served = Channel(channel, [self.engine], cast("Renderer", None))
-        super().__init__(name, checkpoints, run, {channel: served}, directory, presence=presence, about=self.about_pod,
-                         every=every, beating=beating)  # fmt: skip
-        self.channel = served
-        self.followed = run
+        self.leases = pod_leases_of(checkpoints.ledger) if run is None else None
+        if run is not None:
+            served = self._opened(run, channel or "policy")
+            super().__init__(name, checkpoints, run, {served.name: served}, directory, presence=presence,
+                             about=self.about_pod, every=every, beating=beating)  # fmt: skip
+        else:
+            super().__init__(name, checkpoints, None, {}, directory, bindings=self._leased, opened=self._opened,
+                             presence=presence, about=self.about_pod, every=every, beating=beating)  # fmt: skip
+        self.held: Binding | None = (run, channel or "policy") if run is not None else None
+        """The run and channel it serves now."""
         self.model = model
         self.identity = pod_identity(name)
         self.address = address
@@ -92,6 +104,28 @@ class InferencePod(Follower):
         """When it last looked (`time.monotonic()`), whether or not it found the pod ready."""
         self.started = time.monotonic()
 
+    def _opened(self, run: str, channel: str) -> Channel:
+        # (the follower publishes to this channel, and nothing samples through it here: it needs no renderer)
+        return Channel(channel, [self.engine], cast("Renderer", None))
+
+    async def _leased(self) -> list[Binding]:
+        """The run and channel its lease names now (none while no run holds it), its ledger token switched to the
+        one the lease gives for that run."""
+        assert self.leases is not None
+        lease = await self.leases.get(self.name)
+        if lease is None or lease.run is None or lease.channel is None or lease.state == IDLE:
+            self.held = None
+            return []
+        if lease.token and callable(use := getattr(self.checkpoints.ledger, "use", None)):
+            use(lease.token)
+        self.held = (lease.run, lease.channel)
+        return [self.held]
+
+    @property
+    def channel(self) -> Channel | None:
+        """The channel it serves now."""
+        return self.bound.get(self.held) if self.held is not None else None
+
     async def follow(self) -> bool:
         changed = await super().follow()
         await self.look()
@@ -99,16 +133,22 @@ class InferencePod(Follower):
 
     async def look(self) -> None:
         """Whether the server answers and has what the channel should serve now."""
+        channel = self.channel
+        if self.held is None or channel is None:
+            self.ready, self.why = False, self.errors.get("bindings") or "no run holds it"
+            self.looked = time.monotonic()
+            return
+        run, name = self.held
         try:
             has = await self.engine.models()
-            said = await wanted(self.checkpoints.ledger, self.followed, self.channel.name)
+            said = await wanted(self.checkpoints.ledger, run, name)
         except Exception as error:  # (looked at again at the next look)
             self.ready, self.why = False, f"{type(error).__name__}: {error}"
         else:
-            name = said.checkpoint if said is not None and said.checkpoint is not None else self.model
-            self.ready = name in has and (name == self.model or name == self.channel.serving)
-            error = self.errors.get(qualified(self.followed, self.channel.name))
-            self.why = "" if self.ready else error or f"{name} is not served yet"
+            serves = said.checkpoint if said is not None and said.checkpoint is not None else self.model
+            self.ready = serves in has and (serves == self.model or serves == channel.serving)
+            error = self.errors.get(qualified(run, name))
+            self.why = "" if self.ready else error or f"{serves} is not served yet"
         self.looked = time.monotonic()
 
     def healthy(self, stale: float = STALE) -> bool:
@@ -117,9 +157,11 @@ class InferencePod(Follower):
 
     def about_pod(self) -> Mapping[str, JsonValue]:
         """What its beats say of the pod, beside what every follower says."""
+        run, channel = self.held if self.held is not None else (None, None)
         pod: dict[str, JsonValue] = {
             "name": self.name, "identity": self.identity, "address": self.address, "role": INFERENCE,
             "ready": self.ready, "why": self.why, "model": self.model, "serial": serial(self.serial_file),
+            "run": run, "channel": channel,
         }  # fmt: skip
         return {"host": socket.gethostname(), POD: pod}
 
@@ -136,7 +178,8 @@ def health(pod: InferencePod, *, stale: float = STALE) -> "Starlette":
         return JSONResponse({"healthy": healthy}, status_code=200 if healthy else 503)
 
     async def readyz(request: Request) -> JSONResponse:
-        said: dict[str, Any] = {"ready": pod.ready, "serving": pod.channel.serving, "why": pod.why}
+        serving = pod.channel.serving if pod.channel is not None else None
+        said: dict[str, Any] = {"ready": pod.ready, "serving": serving, "why": pod.why}
         return JSONResponse(said, status_code=200 if pod.ready else 503)
 
     return Starlette(routes=[Route("/healthz", healthz), Route("/readyz", readyz)])
@@ -146,8 +189,8 @@ async def main(environ: Mapping[str, str]) -> None:
     """Follow, beat and serve the pod's health, as the environment says, until cancelled."""
     ledger, blobs = stores(environ)
     pod = InferencePod(
-        required(environ, "ROLLOUT_POD_NAME"), Checkpoints(ledger, blobs), required(environ, "ROLLOUT_RUN"),
-        environ.get("ROLLOUT_CHANNEL", "policy"), required(environ, "ROLLOUT_MODEL"),
+        required(environ, "ROLLOUT_POD_NAME"), Checkpoints(ledger, blobs), environ.get("ROLLOUT_RUN") or None,
+        environ.get("ROLLOUT_CHANNEL") or None, required(environ, "ROLLOUT_MODEL"),
         Path(environ.get("ROLLOUT_CHECKPOINTS", "/workspace/checkpoints")), vllm=environ.get("ROLLOUT_VLLM", VLLM),
         address=public_address(environ), presence=presence_of(ledger), serial_file=serial_file(environ),
     )  # fmt: skip

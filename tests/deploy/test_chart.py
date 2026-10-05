@@ -271,7 +271,7 @@ def test_with_kueue_the_monitors_may_read_the_queue_and_its_pending_order(render
 def provider_keys(env: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """The hosted APIs' keys among a container's environment, each by the Secret it is read from."""
     return {each["name"]: each["valueFrom"]["secretKeyRef"] for each in env if each["name"].endswith("_API_KEY")
-            and each["name"] != "TINKER_API_KEY"}  # fmt: skip
+            and each["name"] not in ("TINKER_API_KEY", "RUNPOD_API_KEY")}  # fmt: skip
 
 
 def test_the_hosted_apis_keys_come_from_a_secret_in_the_gateway_and_runs_and_never_the_config(
@@ -298,3 +298,17 @@ def test_the_hosted_apis_keys_come_from_a_secret_in_the_gateway_and_runs_and_nev
     renamed = render("--set", "secrets.providers=api-keys")
     (gateway,) = containers_of(renamed, "gateway")
     assert {each["name"] for each in provider_keys(gateway["env"]).values()} == {"api-keys"}
+
+
+def test_the_pods_reaper_runs_every_minute_when_asked_with_runpods_key(rendered: list[dict[str, Any]]) -> None:
+    assert not [each for each in rendered if each["kind"] == "CronJob"]  # (off by default)
+    (reaper,) = [each for each in render("--set", "runpod.reaper=true") if each["kind"] == "CronJob"]
+    assert reaper["spec"]["schedule"] == "* * * * *" and reaper["spec"]["concurrencyPolicy"] == "Forbid"
+    (container,) = reaper["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"]
+    assert container["command"] == ["rollout", "pods", "reap", "--cluster"]
+    assert {"RUNPOD_API_KEY", "ROLLOUT_CLUSTER", "PGPASSWORD"} <= {each["name"] for each in container["env"]}
+    template = yaml.safe_load(config_of(rendered)["rayjob.yaml"])
+    (head,) = template["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["containers"]
+    assert "RUNPOD_API_KEY" in {each["name"] for each in head["env"]}  # (a run's driver leases its pods)
+    mounted = {each["mountPath"] for each in head["volumeMounts"]}
+    assert {"/etc/rollout-secrets/step-ca", "/etc/rollout-secrets/tls"} <= mounted

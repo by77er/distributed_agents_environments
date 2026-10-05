@@ -27,6 +27,11 @@ secrets:
   tinker: tinker              # TINKER_API_KEY, or credentials.json (what `tinker auth login` writes); optional
   providers: providers        # OPENAI_API_KEY, ANTHROPIC_API_KEY: the hosted APIs' keys, for the gateway and runs; optional
   ledger: ledger              # ROLLOUT_LEDGER_TOKEN: the platform's token for the ledger service; optional
+  runpod: runpod              # RUNPOD_API_KEY: RunPod's API key, for runs' drivers and the pods' reaper; optional
+  stepCa: step-ca             # root_ca.crt and provisioner.jwk: step-ca's root and the key pods' one-time tokens are
+                              # signed with; optional
+  gatewayTls: gateway-tls     # tls.crt, tls.key, ca.crt: the client certificate (spiffe://rollout/gateway) the gateway
+                              # and runs' drivers reach pods with, as cert-manager's step-issuer makes it; optional
   r2: r2                      # a second blob store's two keys, for [stores.r2]; optional: WRITER_ACCESS_KEY_ID,
                               # WRITER_SECRET_ACCESS_KEY (read and write: the platform, trainer pods), READER_ACCESS_KEY_ID,
                               # READER_SECRET_ACCESS_KEY (read only: inference pods)
@@ -101,6 +106,14 @@ ledger:
     host: ledger.example.com
     tlsSecret: ""
   resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+
+# GPU pods on RunPod: the reaper, a CronJob that deletes the pods no run holds (idle past their provider's idle_stop,
+# stale leases', and those RunPod lists with the cluster's tag that no lease names), so no runs means no pods. On when
+# the cluster config offers RunPod providers (files/cluster.toml has a commented example).
+runpod:
+  reaper: false
+  schedule: "* * * * *"
+  resources: {requests: {cpu: 50m, memory: 256Mi}, limits: {memory: 512Mi}}
 
 gateway:
   replicas: 1

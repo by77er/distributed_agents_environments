@@ -60,10 +60,11 @@ async def test_a_pod_is_ready_once_its_server_has_what_the_channel_should_serve(
     fence = await checkpoints.ledger.take(scope("r"))
     async with pod(checkpoints, tmp_path) as following:
         assert not following.ready and not await following.follow()  # (the run says nothing: the base model)
-        assert following.ready and following.channel.serving is None
+        channel = following.channel
+        assert following.ready and channel is not None and channel.serving is None
         first = await made(checkpoints, fence, tmp_path)
         await serve(checkpoints, fence, first)
-        assert await following.follow() and following.ready and following.channel.serving == first.id
+        assert await following.follow() and following.ready and channel.serving == first.id
         loaded = tmp_path / "checkpoints" / first.id / "weights" / "adapter_model.safetensors"
         assert loaded.read_text() == first.id  # (fetched from the blob store into the pod's volume)
         second = await made(checkpoints, fence, tmp_path, first)
