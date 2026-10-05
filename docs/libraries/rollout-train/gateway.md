@@ -36,7 +36,7 @@ app = create_app(gateway)               # serve with uvicorn, as many replicas a
 | `POST /v1/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer; nothing is recorded |
 | `POST /v1/samples` | a [`SampleRequest`](../../guide/reference.md#samplerequest), answered with a `SampleResult`, for programs in a runner |
 | `POST /v1/scores` | a [`ScoreRequest`](../../guide/reference.md#scorerequest): the logprobs the channel gives tokens it is handed ([scoring tokens](#scoring-tokens)) |
-| `GET /v1/models` | the channels, as models; each whose engines are in the replica's process with its `contract` (`context_limit`, `max_output_tokens`) |
+| `GET /v1/models` | the channels, as models; each whose engines are in the replica's process with its `contract` (`context_limit`, `max_output_tokens`). With `?run=RUN`, the channels that run's start names, as `RUN/NAME`, each with its contract |
 | `GET /healthz` | 200 while the process serves |
 | `GET /readyz` | 200 when the ledger and the blob store answer; 503, saying which does not, otherwise |
 
@@ -237,6 +237,17 @@ source of a `compaction`. Its tokens are kept as context either way. By default 
 
 The gateway samples a channel through its `Sampler` ([channels](channels.md)):
 
+- **A channel a run's start names** with a provider the gateway's
+  [`ChannelDirectory`](../../guide/reference.md#channeldirectory) knows is built the first time a key of that run is
+  shown (or the runner asks whether the run's channels can be sampled): from the run settings its newest start
+  records, the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers'
+  servers. Nothing registers it, and it serves what its mode says ([what a channel should
+  serve](channels.md#what-a-channel-should-serve)): the trained channel what the run trains, a `follows` channel the
+  followed channel's checkpoint `lag` records back, a `fixed` one its pinned checkpoint or the base model. The
+  directory knows providers by name with the servers each is reached at (`Provided`): `ChannelDirectory.of(cluster,
+  ledger)` takes every provider of the [cluster config](../../guide/cluster.md) whose servers answer vLLM's API at its
+  endpoints (`vllm`, `vllm-servers`, `runpod-inference`). A run's channel takes precedence over a channel of the same
+  name in the gateway's own process.
 - **A channel whose engines serve elsewhere** (`RemoteEngine`: vLLM servers, or a router in front of them) is
   sampled per run, as a `RemoteChannel`. It reads what the run says its channel should serve
   ([what a channel should serve](channels.md#what-a-channel-should-serve)), and asks the servers for that checkpoint
@@ -395,7 +406,13 @@ endpoints = GatewayEndpoints("https://models.example/gw", keyring, TurnStore(led
 - `sessions(run, run_id)` reads what each slot recorded, when the run ends.
 
 What a channel guarantees a session (its capability contract) is its channel's: in this process, for a routed
-channel as the runner sees its servers, and for a channel the gateway elsewhere hosts, as that gateway says.
+channel as the runner sees its servers, and for a channel the gateway elsewhere hosts, as that gateway says. A channel
+a run's start names, sampled by a gateway elsewhere, is learned from that gateway's `/v1/models?run=RUN`, which lists
+the run's channels as `RUN/NAME`, each with its contract.
+
+Each slot of a run's binding names its channel (`RecordedModel.channel`), so each slot's key routes to the channel the
+run binds the slot to: `bind(program, channel, slots={"judge": "judge"})` serves `judge` from the channel `judge` and
+every other slot from `channel`.
 
 ### A gateway elsewhere that hosts channels
 

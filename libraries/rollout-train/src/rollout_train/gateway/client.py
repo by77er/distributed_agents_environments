@@ -39,7 +39,7 @@ from rollout_train.inference.channel import Sampler
 from rollout_train.ledger import Fence
 from rollout_train.recorder.compat import SERVED_UNDER
 from rollout_train.recorder.segments import Segment
-from rollout_train.serving import parts
+from rollout_train.serving import parts, qualified
 
 LIFETIME = 6 * 3600.0
 """Seconds a key minted for a run's slot is good for."""
@@ -148,7 +148,9 @@ class GatewayEndpoints:
         self._attempts.pop(run_id, None)
 
     def endpoint(self, binding: RecordedModel) -> "GatewayEndpoint":
-        if parts(binding.channel)[1] not in self.channels:
+        name = parts(binding.channel)[1]
+        named = self.gateway is not None and self.gateway.directory is not None  # (any channel a run's start names)
+        if name not in self.channels and not named and not any(key.endswith(f"/{name}") for key in self.contracts):
             raise ValueError(f"no recorded channel {binding.channel!r}")
         return GatewayEndpoint(self, binding)
 
@@ -184,26 +186,34 @@ class GatewayEndpoints:
         """What a binding's channel guarantees a session, with the thinking and answer room the binding gives in place
         of the channel's: a routed channel, as its run's servers say (the run is admitted)."""
         channel, said = binding.channel, binding.sampling
-        run, name = parts(channel)
+        named, name = parts(channel)
+
+        def run() -> str:
+            return named or self.attempt(SessionIdentity.parse(session_id).owner).run
+
         sampler: Sampler | None = None
-        if self.gateway is not None and name in self.gateway.channels:
+        if self.gateway is not None and self.gateway.directory is not None:
+            sampler = self.gateway.directory.channel(run(), name)
+        if sampler is None and self.gateway is not None and name in self.gateway.channels:
             sampler = self.gateway.channels[name]
-        elif self.routes is not None and self.routes.routed(name):
-            run = run or self.attempt(SessionIdentity.parse(session_id).owner).run
-            sampler = self.routes.channel(run, name)
+        elif sampler is None and self.routes is not None and self.routes.routed(name):
+            sampler = self.routes.channel(run(), name)
         if sampler is not None:
             return contract_of(sampler, limits_of(sampler.limits, said.thinking_tokens, said.answer_tokens))
-        if name not in self.contracts:
+        given = self.contracts.get(name)
+        if given is None and self.url is not None:
+            given = self.contracts.get(qualified(run(), name))
+        if given is None:
             raise ModelEndpointError(f"no recorded channel {channel!r}")
-        given = self.contracts[name]
         if said.thinking_tokens is None or said.answer_tokens is None:
             return given
         return given.model_copy(update={"max_output_tokens": said.thinking_tokens + said.answer_tokens})
 
     async def reaches(self, run: str, binding: RunBinding) -> bool:
         """Whether every recorded model of a run's binding can be sampled now: a channel the gateway in this process
-        samples (a routed one only once its servers have a checkpoint close enough to what the run says it should
-        serve), or one the gateway elsewhere serves (a routed one likewise, as this process sees its servers)."""
+        samples (one the run's start names, or a routed one, only once its servers have a checkpoint close enough to
+        what the run says it should serve), or one the gateway elsewhere serves (a routed one likewise, as this
+        process sees its servers; one the run's start names, as that gateway lists the run's channels)."""
         for model in binding.models.values():
             recorded = model.recorded
             if recorded is None:
@@ -212,13 +222,31 @@ class GatewayEndpoints:
                 if not await self.gateway.reaches(run, recorded.channel):
                     return False
                 continue
-            _, name = parts(recorded.channel)
+            named, name = parts(recorded.channel)
             if self.routes is not None and self.routes.routed(name):
                 if not await self.routes.reaches(run, name):
                     return False
-            elif name not in self.contracts:
+            elif name not in self.contracts and not await self._started(named or run, name):
                 return False
         return True
+
+    async def _started(self, run: str, name: str) -> bool:
+        """Whether the gateway at the URL serves a channel of the run's start by that name (its `/v1/models?run=RUN`),
+        learning what it guarantees."""
+        key = qualified(run, name)
+        if key not in self.contracts and self.url is not None:
+            try:
+                response = await self.http.get(f"{self.url}{SERVED_UNDER}/models", params={"run": run})
+            except httpx.TransportError:
+                return False
+            said: Any = response.json() if response.status_code == 200 else {}
+            listed = cast(
+                list[dict[str, Any]], cast(dict[str, Any], said).get("data", []) if isinstance(said, dict) else []
+            )
+            for each in listed:
+                if isinstance(each.get("contract"), dict):
+                    self.contracts[str(each["id"])] = CapabilityContract.model_validate(each["contract"])
+        return key in self.contracts
 
     async def sessions(self, run: str, run_id: str) -> dict[str, list[Segment]]:
         """What each slot of a program's run recorded, by slot."""
@@ -253,7 +281,7 @@ class GatewayEndpoint:
         key = endpoints.key(request.session_id, self._binding)
         if endpoints.gateway is not None:
             try:
-                grant = endpoints.gateway.granted(key)
+                grant = await endpoints.gateway.granted(key)
                 return (await endpoints.gateway.sample(grant, request)).result
             except Refused as error:
                 raise ModelEndpointError(f"the gateway refused the sample: {error}") from None

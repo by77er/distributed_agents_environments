@@ -7,6 +7,7 @@ policy (docs/libraries/rollout-train/gateway.md).
 - `keys`: `Grant`, what a signed key lets its holder do, and `Keyring`, the secrets that sign and verify keys.
 - `turns`: `TurnStore`, every turn in the ledger and the blob store, and the segments a program's run recorded.
 - `client`: `GatewayEndpoints`, what a runner needs to have its recorded slots served by the gateway.
+- `directory`: `ChannelDirectory`, every channel a run's start names, built over its providers' servers.
 
 `deployed` makes a replica from a profile's `[gateway]` table.
 """
@@ -16,6 +17,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from rollout_train.gateway.client import Attempt, GatewayEndpoint, GatewayEndpoints
+from rollout_train.gateway.directory import ChannelDirectory, Provided
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
 from rollout_train.gateway.service import Gateway, Refused, ScoreRequest, create_app
 from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore, turns_table, unaccepted
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Attempt",
+    "ChannelDirectory",
     "Gateway",
     "GatewayEndpoint",
     "GatewayEndpoints",
@@ -32,6 +35,7 @@ __all__ = [
     "KeyRefused",
     "Keyring",
     "Link",
+    "Provided",
     "Refused",
     "Reply",
     "ScoreRequest",

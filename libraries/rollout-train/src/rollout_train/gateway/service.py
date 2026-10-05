@@ -19,7 +19,8 @@ session: any replica answers any request, and a replica can die at any moment.
     POST {base}/v1/messages/count_tokens a Messages request's prompt, counted with the channel's renderer
     POST {base}/v1/samples               a `SampleRequest`, answered with a `SampleResult` (for programs in a runner)
     POST {base}/v1/scores                a `ScoreRequest`: the logprobs the channel gives the tokens it is handed
-    GET  {base}/v1/models                the channels, as models (each this process hosts with its `contract`)
+    GET  {base}/v1/models                the channels, as models (each this process hosts with its `contract`); with
+                                         `?run=RUN`, the channels that run's start names (`RUN/NAME`), with theirs
     GET  {base}/healthz                  alive
     GET  {base}/readyz                   ready: the ledger and the blob store answer
 
@@ -60,6 +61,7 @@ from rollout.contracts import (
     Usage,
 )
 from rollout.harness.hooks import ModelSample, RunHooks
+from rollout_train.gateway.directory import ChannelDirectory
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
 from rollout_train.gateway.turns import SCORE, Link, Reply, TurnRecord, TurnStore
 from rollout_train.inference import Channel, Generation, Limits, Routes, Scores
@@ -70,7 +72,7 @@ from rollout_train.recorder.compat import SERVED_UNDER, chat, key, messages, ref
 from rollout_train.recorder.compat.wire import Failure, Format, Prompt
 from rollout_train.recorder.sampling import sample_turn
 from rollout_train.recorder.segments import TOKEN_LEVEL
-from rollout_train.serving import BASE, parts
+from rollout_train.serving import BASE, parts, qualified
 
 LINKS = "x-rollout-links"
 """The header a request declares its links to earlier requests in."""
@@ -107,9 +109,10 @@ class Refused(Exception):
 
 @dataclass
 class Gateway:
-    """What a replica serves: where it records, the keys it takes, and the channels it samples: those whose engines this
-    process publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve
-    elsewhere (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
+    """What a replica serves: where it records, the keys it takes, and the channels it samples: every channel a run's
+    start names with a provider `directory` knows (`rollout_train.gateway.directory`), those whose engines this process
+    publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve elsewhere
+    (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
     harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
     its endpoints). Each turn records what its sampler samples with: the sampler's `sampled_with` where it says, else
     `TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs)."""
@@ -120,25 +123,37 @@ class Gateway:
     routes: Routes | None = None
     models: Mapping[str, str] = field(default_factory=dict[str, str])
     hooks: Sequence[RunHooks] = ()
+    directory: ChannelDirectory | None = None
 
-    def granted(self, key: str) -> Grant:
-        """The grant a key carries; `Refused` if it is not one this gateway takes."""
+    async def granted(self, key: str) -> Grant:
+        """The grant a key carries, its run's channels loaded from its start (where there is a directory); `Refused`
+        if it is not one this gateway takes."""
         try:
             grant = self.keyring.verify(key)
         except KeyRefused as error:
             raise Refused(Failure.KEY, str(error)) from None
+        await self.load(grant.run, grant.channel)
         self.sampler(grant)
         return grant
+
+    async def load(self, run: str, channel: str) -> None:
+        """Build a run's channels from its start, if there is a directory and they are not built yet (a channel named
+        within its run, `RUN/NAME`, is that run's)."""
+        if self.directory is not None:
+            await self.directory.load(parts(channel)[0] or run)
 
     def sampler(self, grant: Grant) -> Sampler:
         """What a grant's turns sample from (`sampler_of` its run and channel)."""
         return self.sampler_of(grant.run, grant.channel)
 
     def sampler_of(self, run: str, channel: str) -> Sampler:
-        """What a run's channel samples from: the channel of this process it names, else the run's routed channel of
-        that name. A channel named within its run (`RUN/NAME`) is that run's."""
+        """What a run's channel samples from: the channel its start names, built by the directory (once the run is
+        loaded: `load`); else the channel of this process it names; else the run's routed channel of that name. A
+        channel named within its run (`RUN/NAME`) is that run's."""
         named, name = parts(channel)
         run = named or run
+        if self.directory is not None and (built := self.directory.channel(run, name)) is not None:
+            return built
         if name in self.channels:
             return self.channels[name]
         if self.routes is not None and self.routes.routed(name):
@@ -146,9 +161,12 @@ class Gateway:
         raise Refused(Failure.KEY, f"this gateway serves no channel {channel!r}")
 
     async def reaches(self, run: str, channel: str) -> bool:
-        """Whether a run's channel can be sampled now: one of this process, or a routed one whose servers have a
-        checkpoint close enough to what the run says it should serve."""
-        _, name = parts(channel)
+        """Whether a run's channel can be sampled now: one its start names or a routed one, whose servers have a
+        checkpoint close enough to what the run says it should serve; or one of this process."""
+        await self.load(run, channel)
+        named, name = parts(channel)
+        if self.directory is not None and (built := self.directory.channel(named or run, name)) is not None:
+            return await built.reaches()
         if name in self.channels:
             return True
         return self.routes is not None and self.routes.routed(name) and await self.routes.reaches(run, name)
@@ -374,11 +392,18 @@ def create_app(gateway: Gateway) -> Starlette:
         return {"contract": contract_of(channel).model_dump(mode="json")} if channel is not None else {}
 
     async def models(request: Request) -> Response:
-        names = gateway.names
+        run = request.query_params.get("run")
+        if run is not None:  # (a run's channels, as its start names them, each with what it guarantees)
+            built = await gateway.directory.load(run) if gateway.directory is not None else {}
+            await asyncio.gather(*(channel.refresh() for channel in built.values()), return_exceptions=True)
+            names = [qualified(run, name) for name in built]
+            contracts = [{"contract": contract_of(channel).model_dump(mode="json")} for channel in built.values()]
+        else:
+            names, contracts = gateway.names, [hosted(name) for name in gateway.names]
         listed = [
             {"id": name, "object": "model", "type": "model", "display_name": name, "created": 0, "owned_by": "rollout"}
-            | hosted(name)
-            for name in names
+            | contract
+            for name, contract in zip(names, contracts, strict=True)
         ]
         page = {"has_more": False, "first_id": names[0] if names else None, "last_id": names[-1] if names else None}
         return JSONResponse({"object": "list", "data": listed} | page)
@@ -386,7 +411,7 @@ def create_app(gateway: Gateway) -> Starlette:
     def answering(format: Format) -> Callable[[Request], Awaitable[Response]]:
         async def answer(request: Request) -> Response:
             try:
-                grant = gateway.granted(key(request))
+                grant = await gateway.granted(key(request))
                 allowed = gateway.describe(grant).max_output_tokens
                 fallback = f"{grant.session_id}:harness:{uuid.uuid4().hex}"
                 try:
@@ -407,7 +432,7 @@ def create_app(gateway: Gateway) -> Starlette:
 
     async def count_tokens(request: Request) -> Response:
         try:
-            grant = gateway.granted(key(request))
+            grant = await gateway.granted(key(request))
             try:
                 body = await request.json()
                 if not isinstance(body, dict):
@@ -422,7 +447,7 @@ def create_app(gateway: Gateway) -> Starlette:
 
     async def samples(request: Request) -> Response:
         try:
-            grant = gateway.granted(key(request))
+            grant = await gateway.granted(key(request))
             try:
                 sample = SampleRequest.model_validate(await request.json())
                 links = linked(request)
@@ -437,7 +462,7 @@ def create_app(gateway: Gateway) -> Starlette:
 
     async def scores(request: Request) -> Response:
         try:
-            grant = gateway.granted(key(request))
+            grant = await gateway.granted(key(request))
             try:
                 asked = ScoreRequest.model_validate(await request.json())
             except (ValidationError, ValueError, TypeError) as error:

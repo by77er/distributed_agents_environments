@@ -18,7 +18,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
-- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
+- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
@@ -3515,8 +3515,8 @@ where its files go, so any trainer can take any step of any policy.
 async def wanted(ledger: Ledger, run: str, channel: str) -> Serving | None
 ```
 
-What a run's channel should serve now: its record of the greatest depth (the newest among equals); None if the
-run has said nothing of it.
+What a run's channel should serve now: the record of the greatest depth it serves (`serving_of`; the newest
+among equals); None if there is none (the base model).
 
 ### `Weighted`
 
@@ -4263,6 +4263,31 @@ What a program's run plays, as the keys of its slots say.
 | `episode` | `str` | `''` | `GROUP/EPISODE`. |
 | `attempt` | `int` | `0` |  |
 
+### `ChannelDirectory`
+
+*class* · `libraries/rollout-train/src/rollout_train/gateway/directory.py`
+
+```python
+class ChannelDirectory
+```
+
+Every run's channels, built from its start when the run is first asked for (`load`), over the servers of the
+providers in `providers`, rendered with the renderer each channel names (`renderers`, given its `module:name` and
+the model; by default the renderer itself, called with the model). What each channel should serve and what its
+servers have are asked again every `every` seconds; a turn waits up to `patience` seconds for a server with a
+checkpoint close enough.
+
+**Methods**
+
+- `def __init__(self, ledger: Ledger, providers: Mapping[str, Provided], *, renderers: Callable[[str, str], 'Renderer'] = _renderer, every: float | None = None, patience: float = 300.0) -> None`
+- `@classmethod def of(cls, cluster: 'Cluster', ledger: Ledger, **options: Any) -> 'ChannelDirectory'` — A directory over the cluster config's providers whose servers answer vLLM's API at their endpoints
+  (`SERVED_AT_ENDPOINTS`), each reached as its auth says.
+- `async def load(self, run: str) -> dict[str, RemoteChannel]` — A run's channels, by name, built from its newest start the first time (a run whose start names no
+  provider this directory knows has none; one with no start yet is asked again next time).
+- `def channel(self, run: str, name: str) -> RemoteChannel | None` — A run's channel, once the run is loaded.
+- `def channels(self) -> dict[str, RemoteChannel]` — Every channel built so far, by its name within its run (`RUN/NAME`).
+- `def close(self) -> None`
+
 ### `create_app`
 
 *function* · `libraries/rollout-train/src/rollout_train/gateway/service.py`
@@ -4293,9 +4318,10 @@ from what it says its channel serves), and any other with its engines started he
 class Gateway
 ```
 
-What a replica serves: where it records, the keys it takes, and the channels it samples: those whose engines this
-process publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve
-elsewhere (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
+What a replica serves: where it records, the keys it takes, and the channels it samples: every channel a run's
+start names with a provider `directory` knows (`rollout_train.gateway.directory`), those whose engines this process
+publishes to (`channels`, by name; `models` names each one's base model), and those whose engines serve elsewhere
+(`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
 harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
 its endpoints). Each turn records what its sampler samples with: the sampler's `sampled_with` where it says, else
 `TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs).
@@ -4308,15 +4334,20 @@ its endpoints). Each turn records what its sampler samples with: the sampler's `
 | `routes` | `Routes \| None` | `None` |  |
 | `models` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` |  |
 | `hooks` | `Sequence[RunHooks]` | `()` |  |
+| `directory` | `ChannelDirectory \| None` | `None` |  |
 
 **Methods**
 
-- `def granted(self, key: str) -> Grant` — The grant a key carries; `Refused` if it is not one this gateway takes.
+- `async def granted(self, key: str) -> Grant` — The grant a key carries, its run's channels loaded from its start (where there is a directory); `Refused`
+  if it is not one this gateway takes.
+- `async def load(self, run: str, channel: str) -> None` — Build a run's channels from its start, if there is a directory and they are not built yet (a channel named
+  within its run, `RUN/NAME`, is that run's).
 - `def sampler(self, grant: Grant) -> Sampler` — What a grant's turns sample from (`sampler_of` its run and channel).
-- `def sampler_of(self, run: str, channel: str) -> Sampler` — What a run's channel samples from: the channel of this process it names, else the run's routed channel of
-  that name. A channel named within its run (`RUN/NAME`) is that run's.
-- `async def reaches(self, run: str, channel: str) -> bool` — Whether a run's channel can be sampled now: one of this process, or a routed one whose servers have a
-  checkpoint close enough to what the run says it should serve.
+- `def sampler_of(self, run: str, channel: str) -> Sampler` — What a run's channel samples from: the channel its start names, built by the directory (once the run is
+  loaded: `load`); else the channel of this process it names; else the run's routed channel of that name. A
+  channel named within its run (`RUN/NAME`) is that run's.
+- `async def reaches(self, run: str, channel: str) -> bool` — Whether a run's channel can be sampled now: one its start names or a routed one, whose servers have a
+  checkpoint close enough to what the run says it should serve; or one of this process.
 - `@property def names(self) -> list[str]` — The channels it samples, by name.
 - `def describe(self, grant: Grant) -> CapabilityContract`
 - `async def sample(self, grant: Grant, request: SampleRequest, links: Sequence[Link] = ()) -> Reply` — One reply, recorded before it is returned: the one recorded under the request's effect id, if there is one.
@@ -4382,8 +4413,9 @@ without one, a run cannot give a harness an address.
 - `def contract(self, session_id: str, binding: RecordedModel) -> CapabilityContract` — What a binding's channel guarantees a session, with the thinking and answer room the binding gives in place
   of the channel's: a routed channel, as its run's servers say (the run is admitted).
 - `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled now: a channel the gateway in this process
-  samples (a routed one only once its servers have a checkpoint close enough to what the run says it should
-  serve), or one the gateway elsewhere serves (a routed one likewise, as this process sees its servers).
+  samples (one the run's start names, or a routed one, only once its servers have a checkpoint close enough to
+  what the run says it should serve), or one the gateway elsewhere serves (a routed one likewise, as this
+  process sees its servers; one the run's start names, as that gateway lists the run's channels).
 - `async def sessions(self, run: str, run_id: str) -> dict[str, list[Segment]]` — What each slot of a program's run recorded, by slot.
 
 ### `Grant`
@@ -4469,6 +4501,22 @@ label, which is kept as it is).
 |---|---|---|---|
 | `type` | `str` | required |  |
 | `source` | `str` | required |  |
+
+### `Provided`
+
+*class* · `libraries/rollout-train/src/rollout_train/gateway/directory.py`
+
+```python
+class Provided
+```
+
+How a provider's servers are reached: each a URL (a vLLM server, a router in front of several) or any
+`CheckpointServer`, and the connection URLs are reached with.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `servers` | `tuple['str \| CheckpointServer', ...]` | required |  |
+| `connection` | `Connection` | `field(default_factory=Connection)` |  |
 
 ### `Refused` {#rollout_traingatewayrefused}
 
