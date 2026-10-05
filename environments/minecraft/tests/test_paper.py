@@ -1,10 +1,13 @@
 """Paper servers from templates, and the ground-truth plugin's tick control (live: needs Java and the network once)."""
 
 import asyncio
+import json
 import shutil
+from pathlib import Path
 
 import pytest
 
+from minecraft_team import paper
 from minecraft_team.control import Control
 from minecraft_team.paper import (
     PAPER_VERSION,
@@ -35,6 +38,25 @@ def test_operators_are_listed_by_their_offline_ids() -> None:
     assert operator_entries(["By73"]) == [
         {"uuid": "73bc9dd2-78aa-3946-ba5b-5b7c56e2b546", "name": "By73", "level": 4, "bypassesPlayerLimit": True}
     ]
+
+
+@pytest.mark.skipif(shutil.which("npm") is None, reason="npm is needed")
+def test_without_its_own_packages_the_harness_takes_them_installed_once_per_lock_under_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = tmp_path / "harness"  # (a version imported from git: its sources, and no node_modules)
+    harness.mkdir()
+    (harness / "package.json").write_text(json.dumps({"name": "h", "version": "1.0.0", "private": True}))
+    lock = {"name": "h", "version": "1.0.0", "lockfileVersion": 3, "requires": True,
+            "packages": {"": {"name": "h", "version": "1.0.0"}}}  # fmt: skip
+    (harness / "package-lock.json").write_text(json.dumps(lock))
+    monkeypatch.setattr(paper, "HARNESS", harness)
+    installation = Installation(root=tmp_path / "cache")
+    packages = installation.harness_packages()
+    assert packages.parent.parent == tmp_path / "cache" / "harness" and (packages.parent / "ready").exists()
+    assert installation.harness_packages() == packages  # (installed once)
+    (harness / "node_modules").mkdir()
+    assert installation.harness_packages() == harness / "node_modules"  # (its own, where they are installed)
 
 
 @pytest.fixture(scope="module")

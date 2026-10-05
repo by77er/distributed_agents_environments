@@ -103,7 +103,8 @@ class MinecraftWorlds:
         control = Control(server.control_url)
         harness: Harness | None = None
         try:
-            harness = await Harness.start(log=self.logs / f"{handle}.harness.log" if self.logs else None)
+            log = self.logs / f"{handle}.harness.log" if self.logs else None
+            harness = await Harness.start(log=log, installation=self.installation)
             await harness.connect("127.0.0.1", server.port, team, version=self.installation.version)
             await control.freeze()
             built = await build(task, control, team, random.Random(int(parameters["layout_seed"])))

@@ -1,11 +1,14 @@
 """Paper servers for episodes: a verified server jar, the ground-truth plugin built from `plugin/`, a template server
-per world seed configured from `config/`, and temporary servers started from a template.
+per world seed configured from `config/`, and temporary servers started from a template; and the Node harness's
+packages.
 
 Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may be memory-backed):
 
 - `paper/`: the Paper jar, checked against its published SHA-256;
 - `bootstrap/`: one server started once, for the libraries and the patched jar every server shares;
 - `plugin/`: the plugin jar, rebuilt when its sources change;
+- `harness/`: the Node harness's packages, installed once per `package-lock.json` where the harness has none of its
+  own beside its sources (a version imported from git);
 - `templates/seed-N-KEY/`: a configured server whose world was generated from seed N, the overworld around the
   origin included (`GENERATED_CHUNKS`): servers copied from it hold the same chunks, where servers that each
   generate their own differ in details (a tree here, two ores there). KEY covers config/, the Paper build and the
@@ -54,6 +57,8 @@ ENVIRONMENT = Path(__file__).resolve().parents[1]
 """environments/minecraft: the plugin's sources, the server configuration and this package."""
 PLUGIN_SOURCES = ENVIRONMENT / "plugin"
 CONFIG = ENVIRONMENT / "config"
+HARNESS = ENVIRONMENT / "harness"
+"""The Node harness's sources (`minecraft_team.harness` runs it)."""
 GENERATED_CHUNKS = 19
 """A template's overworld is generated this many chunks out from the origin (304 blocks): staged tasks are built
 within 240 blocks of it and reach 40 further."""
@@ -177,6 +182,37 @@ class Installation:
         temporary.replace(jar)
         shutil.rmtree(classes)
         return jar
+
+    # The harness's packages
+
+    def harness_packages(self) -> Path:
+        """The `node_modules` the harness requires its packages from: the harness's own where they are installed
+        beside its sources (a checkout after `npm ci`, the platform's image), else a copy installed with `npm ci` once
+        per `package-lock.json` under `harness/`, which a version imported from git uses."""
+        own = HARNESS / "node_modules"
+        if own.is_dir():
+            return own
+        with self._lock("harness"):
+            return self._harness_packages()
+
+    def _harness_packages(self) -> Path:
+        manifests = [HARNESS / "package.json", HARNESS / "package-lock.json"]
+        digest = hashlib.sha256(b"".join(path.read_bytes() for path in manifests)).hexdigest()[:16]
+        directory = self.root / "harness" / digest
+        if (directory / "ready").exists():
+            return directory / "node_modules"
+        shutil.rmtree(directory, ignore_errors=True)
+        directory.mkdir(parents=True)
+        for path in manifests:
+            shutil.copy2(path, directory / path.name)
+        installed = subprocess.run(
+            ["npm", "ci", "--omit=dev", "--no-audit", "--no-fund"], cwd=directory, capture_output=True, text=True,
+            check=False,
+        )  # fmt: skip
+        if installed.returncode != 0:
+            raise RuntimeError(f"npm ci failed for the harness:\n{installed.stderr[-4000:]}")
+        (directory / "ready").write_text("")
+        return directory / "node_modules"
 
     # Templates
 

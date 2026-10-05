@@ -5,12 +5,13 @@ import asyncio
 import contextlib
 import itertools
 import json
+import os
 from pathlib import Path
 from typing import Any, Self
 
-from minecraft_team.paper import PAPER_VERSION
+from minecraft_team.paper import HARNESS, PAPER_VERSION, Installation
 
-HARNESS = Path(__file__).resolve().parents[1] / "harness"
+__all__ = ["HARNESS", "Harness", "HarnessError"]
 
 
 class HarnessError(RuntimeError):
@@ -25,21 +26,18 @@ class Harness:
         self._reader = asyncio.create_task(self._read())
 
     @classmethod
-    async def start(cls, *, log: Path | None = None) -> Self:
-        """Start the harness, installing its packages the first time; its standard error goes to `log`."""
-        if not (HARNESS / "node_modules").is_dir():
-            installed = await asyncio.create_subprocess_exec(
-                "npm", "ci", "--no-audit", "--no-fund", cwd=HARNESS,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
-            )  # fmt: skip
-            _, error = await installed.communicate()
-            if installed.returncode != 0:
-                raise HarnessError(f"npm ci failed: {error.decode(errors='replace')}")
+    async def start(cls, *, log: Path | None = None, installation: Installation | None = None) -> Self:
+        """Start the harness with its packages from `installation` (`Installation.harness_packages`: installed
+        the first time); its standard error goes to `log`."""
+        try:
+            packages = await asyncio.to_thread((installation or Installation()).harness_packages)
+        except RuntimeError as error:
+            raise HarnessError(str(error)) from error
         stderr = log.open("a") if log is not None else asyncio.subprocess.DEVNULL
         process = await asyncio.create_subprocess_exec(
             "node", str(HARNESS / "harness.js"), cwd=HARNESS,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr,
-            limit=16 * 1024 * 1024,
+            limit=16 * 1024 * 1024, env={**os.environ, "NODE_PATH": str(packages)},
         )  # fmt: skip
         assert process.stdout is not None
         async with asyncio.timeout(30):
