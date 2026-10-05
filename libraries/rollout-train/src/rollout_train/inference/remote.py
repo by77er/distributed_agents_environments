@@ -405,7 +405,8 @@ class RemoteChannel:
     one of those that answer and have a checkpoint close enough, worked out from the session's id alone, so that nothing
     is kept per session. A server is a URL (a vLLM server, reached as `connection` says) or any `CheckpointServer` (an
     engine host's, say), which stays the caller's to close. What the run says and what each server has are asked again
-    every `every` seconds."""
+    every `every` seconds. With `discover`, the servers themselves are asked for again at each look (pods that come and
+    go: `rollout_train.pods.routing.LeasedServers`), beside those given."""
 
     def __init__(
         self,
@@ -420,8 +421,9 @@ class RemoteChannel:
         connection: Connection | None = None,
         every: float | None = None,
         patience: float = 300.0,
+        discover: Callable[[], Awaitable[Sequence["CheckpointServer"]]] | None = None,
     ) -> None:
-        if not servers:
+        if not servers and discover is None:
             raise ValueError(f"channel {name!r} has no server")
         self.name = name
         self.renderer = renderer
@@ -439,6 +441,8 @@ class RemoteChannel:
                 for server in servers
             )
         }
+        self._given = dict(self._engines)
+        self._discover = discover
         self._said: list[Serving] = []
         """What the run said the channel should serve, each checkpoint once, deepest first."""
         self._has: dict[str, set[str]] = {}
@@ -501,6 +505,10 @@ class RemoteChannel:
             if not now and time.monotonic() - self._refreshed < self._every:
                 return
             self._said = sorted(await self._wanted_now(), key=lambda each: -each.depth)
+            if self._discover is not None:
+                with contextlib.suppress(Exception):  # (the servers it had stay until it can ask again)
+                    found = {each.address: each for each in await self._discover()}
+                    self._engines = {**self._given, **found}
             listed = await asyncio.gather(*(each.models() for each in self._engines.values()), return_exceptions=True)
             self._has = {
                 address: set(models)
@@ -624,6 +632,8 @@ class RemoteChannel:
 
     def close(self) -> None:
         _closing(self._http)
+        if callable(close := getattr(self._discover, "close", None)):  # (the servers it found, theirs to close)
+            close()
 
 
 @dataclass(frozen=True)
@@ -638,6 +648,8 @@ class Route:
     limits: Limits = field(default_factory=Limits)
     max_lag: int = MAX_LAG
     connection: Connection = field(default_factory=Connection)
+    discover: Callable[[str], Callable[[], Awaitable[Sequence["CheckpointServer"]]]] | None = None
+    """Given a run, what its channel asks at each look for servers that come and go (RunPod's pods)."""
 
 
 class Routes:
@@ -667,6 +679,7 @@ class Routes:
             self._channels[key] = RemoteChannel(
                 channel, route.renderer, route.limits, model=route.model, servers=route.servers, wanted=wanted,
                 max_lag=route.max_lag, connection=route.connection, every=self._every, patience=self._patience,
+                discover=route.discover(run) if route.discover is not None else None,
             )  # fmt: skip
         return self._channels[key]
 

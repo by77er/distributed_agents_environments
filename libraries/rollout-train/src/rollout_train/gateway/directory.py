@@ -14,9 +14,13 @@ A channel on a hosted API (a provider of the kind `api`) is an `ApiChannel` inst
 through the endpoint its provider names, at most the provider's `concurrency` requests at once across every run's
 channels on it in this process, and needs no renderer.
 
+A channel on RunPod's pods (`runpod-inference`, `runpod-host`) is a `RemoteChannel` whose servers are found at each
+look: the pods the run's leases name for the channel that beat ready, each reached over mutual TLS with the gateway's
+certificate and checked by its own identity (`rollout_train.pods.routing.LeasedServers`).
+
 Providers are known by name with the servers each is reached at (`Provided`): from the cluster config (`of`: every
-provider whose servers answer vLLM's API at its endpoints, and every `api` provider, `Hosted`), or given (a test's
-scripted servers).
+provider whose servers answer vLLM's API at its endpoints, every `api` provider, `Hosted`, and every provider on pods),
+or given (a test's scripted servers).
 """
 
 import asyncio
@@ -35,15 +39,19 @@ from rollout_train.serving import Serving, qualified, serving_of
 
 if TYPE_CHECKING:
     from rollout_train.cluster import Cluster
+    from rollout_train.providers import Auth, Tls
     from rollout_train.recorder.renderers import Renderer
 
-__all__ = ["SERVED_AT_ENDPOINTS", "ChannelDirectory", "Provided", "started_settings"]
+__all__ = ["ON_PODS", "SERVED_AT_ENDPOINTS", "ChannelDirectory", "Provided", "started_settings"]
 
 type Built = RemoteChannel | ApiChannel
 """A run's channel as the directory builds it: on servers elsewhere, or on a hosted API."""
 
-SERVED_AT_ENDPOINTS = ("vllm", "vllm-servers", "runpod-inference")
+SERVED_AT_ENDPOINTS = ("vllm", "vllm-servers")
 """The kinds of inference provider whose servers answer vLLM's API at the endpoints the cluster config names."""
+ON_PODS = ("runpod-inference", "runpod-host")
+"""The kinds whose servers are RunPod's pods: a run's channel on one is served by the pods the run's leases name, found
+by their beats (`rollout_train.pods.routing.LeasedServers`)."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +86,8 @@ class ChannelDirectory:
         providers: Mapping[str, Provided],
         *,
         hosted: Mapping[str, Hosted] | None = None,
+        pods: Mapping[str, "Auth"] | None = None,
+        tls: "Tls | None" = None,
         renderers: Callable[[str, str], "Renderer"] = _renderer,
         every: float | None = None,
         patience: float = 300.0,
@@ -85,6 +95,9 @@ class ChannelDirectory:
         self.ledger = ledger
         self.providers = dict(providers)
         self.hosted = dict(hosted or {})
+        self.pods = dict(pods or {})
+        """The providers whose servers are RunPod's pods, each with how its pods are reached (with `tls`)."""
+        self.tls = tls
         self.renderers = renderers
         self._every = every
         self._patience = patience
@@ -101,7 +114,8 @@ class ChannelDirectory:
             if provider.kind in SERVED_AT_ENDPOINTS and provider.endpoints
         }
         hosted = {name: Hosted.of(provider) for name, provider in cluster.inference.items() if provider.kind == "api"}
-        return cls(ledger, providers, hosted=hosted, **options)
+        pods = {name: provider.auth for name, provider in cluster.inference.items() if provider.kind in ON_PODS}
+        return cls(ledger, providers, hosted=hosted, pods=pods, tls=cluster.tls, **options)
 
     async def load(self, run: str) -> dict[str, Built]:
         """A run's channels, by name, built from its newest start the first time (a run whose start names no
@@ -142,11 +156,19 @@ class ChannelDirectory:
             if model is None or str(model) not in hosted.models:
                 return None
             return ApiChannel(name, hosted, str(model), limits)
-        if not providers or any(each not in self.providers for each in providers) or model is None or renderer is None:
+        known = {*self.providers, *self.pods}
+        if not providers or any(each not in known for each in providers) or model is None or renderer is None:
             return None
         servers: list[str | CheckpointServer] = [
-            server for each in providers for server in self.providers[each].servers
+            server for each in providers if each in self.providers for server in self.providers[each].servers
         ]
+        leased = [each for each in providers if each in self.pods]
+        discover = None
+        if leased:
+            from rollout_train.pods.routing import LeasedServers
+
+            discover = LeasedServers(self.ledger, run, name, leased, str(model), self.pods[leased[0]], self.tls)
+        connection = next((self.providers[each].connection for each in providers if each in self.providers), None)
         lag = settings.get("max_lag") if settings.mode(name) == "trained" else None
 
         async def wanted() -> Sequence[Serving]:
@@ -160,9 +182,10 @@ class ChannelDirectory:
             servers=servers,
             wanted=wanted,
             max_lag=lag if isinstance(lag, int) else MAX_LAG,
-            connection=self.providers[providers[0]].connection,
+            connection=connection,
             every=self._every,
             patience=self._patience,
+            discover=discover,
         )
 
     def close(self) -> None:
