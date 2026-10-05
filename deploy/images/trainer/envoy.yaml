@@ -91,7 +91,7 @@ static_resources:
                             timeout: 60s
                         - name: steps
                           match:
-                            safe_regex: { regex: "/v1/steps/[A-Za-z0-9_@-]{1,128}" }
+                            safe_regex: { regex: "/v1/steps/[A-Za-z0-9_@-]+" }
                             headers:
                               - name: ":method"
                                 string_match: { exact: GET }
