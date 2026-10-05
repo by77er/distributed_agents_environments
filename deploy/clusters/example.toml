@@ -123,11 +123,9 @@ models = ["Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-9B"]
 segment_tokens = 32768
 costs = { "Qwen/Qwen3.5-4B" = { train = 0.737 }, "Qwen/Qwen3.5-9B" = { train = 1.463 } }   # dollars per million tokens trained
 
-[sandboxes.minecraft]
+[sandboxes.minecraft]                         # made in each run's driver; `url = ...` reaches a pool served elsewhere
 provider = "minecraft_team.worlds:worlds"
-size = 6                                      # no more worlds at once than this machine's memory holds
-cpus = 2
-memory_gib = 1.75                             # a server and its bots: 1.1 GiB on a staged task, 1.75 walking apart
+size = 6                                      # no more worlds at once than this machine's memory holds: 1.1 to 1.85 GiB each
 
 [environments."minecraft_team.environment:environment"]
 python = "platform"

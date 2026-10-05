@@ -94,7 +94,7 @@ pool --kind minecraft`, with `[scratch]/sandboxes/minecraft`), keeping the bots'
 
 A world takes 1.1 GiB on a staged task, 1.25 to 1.45 GiB in the nether and 1.75 to 1.85 GiB with four bots walking
 apart on the surface; bots that roam for long through terrain the template does not hold take up to 2.4 GiB (the
-server's live set grows to 1 GiB). The cluster config counts `memory_gib = 1.75` a world.
+server's live set grows to 1 GiB). The chart's pool asks for 1.75 GiB a world, and holds each to about 2.4 GiB.
 [Minecraft memory](../research/minecraft-memory.md) has the measurements, and why the worlds are servers of their own
 rather than worlds of one server.
 

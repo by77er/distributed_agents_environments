@@ -575,15 +575,10 @@ async def ask(
     return await launches.ask(Asked(settings.kind, name, given, preset, resumes), run)
 
 
-async def demand_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> Demand:
-    """What a launch's run needs (`rollout_train.demand`), with the sandboxes its environment declares where they are
-    known here (an environment in a project's Python of its own is not imported here: none)."""
-    from rollout_train.launching import environment_facts
-
+def demand_of(launch: Launch, cluster: Cluster) -> Demand:
+    """What a launch's run needs (`rollout_train.demand`)."""
     asked = launch.asked
-    settings = RunSettings({**asked.settings, "kind": asked.kind, "name": asked.name})
-    facts = await environment_facts(asked.environment, cluster, ledger)
-    return demand(settings, cluster, sandboxes=facts.sandboxes if facts is not None else ())
+    return demand(RunSettings({**asked.settings, "kind": asked.kind, "name": asked.name}), cluster)
 
 
 async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backend | None = None) -> Launch:
@@ -593,7 +588,7 @@ async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backe
     backend = backend or backend_of(cluster)
     try:
         runtime_env = await runtime_env_of(launch, cluster, ledger)
-        asked = await demand_of(launch, cluster, ledger)
+        asked = demand_of(launch, cluster)
         job = await backend.start(launch, entrypoint_of(launch, cluster), runtime_env, asked)
     except Exception as error:  # (a job that cannot be made is a failed launch)
         return await launches.note(launch.id, expect=(ASKED,), state=FAILED, detail=f"{type(error).__name__}: {error}")

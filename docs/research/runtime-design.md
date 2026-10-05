@@ -572,7 +572,7 @@ rollout env check ENVIRONMENT --model Qwen/Qwen3.5-4B --provider local-vllm --re
 | Launcher | detached actor | `launcher` | 0.1 CPU, on the head (`node:__internal_head__`) | cluster | platform |
 | Gateway | Ray Serve application, `replicas` replicas | Serve app `gateway`, route `/gateway` | 1 CPU per replica | cluster | platform |
 | Monitor | Ray Serve application, 1 replica | Serve app `monitor`, route `/` | 0.5 CPU, on the head | cluster | platform |
-| Sandbox pool | detached actor per kind (or `pools = N`) | `pool/KIND/N` | `size × cpus` CPUs, `size × memory_gib` memory | cluster | `[sandboxes.KIND] python` |
+| Sandbox pool | detached actor per kind (or `pools = N`) | `pool/KIND/N` | its own, outside any run's demand ([Where sandboxes run](sandbox-placement.md)) | cluster | `[sandboxes.KIND] python` |
 | Environment worker | detached actor per environment build | `environment/BUILD` | 0.5 CPU | until idle 30 minutes with no run open in it | the environment's |
 | Training loop (and eval, imitation, check) | Ray job: its entrypoint process | job `run-LAUNCH` | 1 CPU | the run | platform |
 | Trainer | actor of the job | `run/RUN/trainer` | the trainer's `gpus` and 1 CPU, in the run's placement group (a metered trainer: nothing, beside the driver) | the run | platform |
@@ -1309,8 +1309,8 @@ cluster config's `[environments]` entry gives).
 Following the decisions after review (resources are metered or scheduled; a run's engines are its own; no launcher):
 
 - **The demand.** `rollout_train.demand.demand(settings, cluster)` says what a run's scheduled parts need, from its
-  settings and the cluster config alone: the driver (1 CPU, 1 CPU for each runner of `[runners] places` episodes, each
-  sandbox pool its environment declares; 2 GiB and the pools' memory), the trainer when its `allocation` is scheduled
+  settings and the cluster config alone: the driver (0.5 CPU and 2 GiB, measured; nothing for its sandboxes, which
+  are their pool's: [Where sandboxes run](sandbox-placement.md)), the trainer when its `allocation` is scheduled
   (1 CPU and its GPUs, half of them where it shares the engines' card), each engine host of a scheduled `vllm`
   provider (1 CPU, a replica's GPUs, `[placement.engines]`), and the largest bridge of the chain the run may run
   (bridges run one at a time). Metered parts (Tinker, hosted APIs) add nothing; a metered trainer's actor asks for

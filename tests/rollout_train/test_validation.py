@@ -759,17 +759,17 @@ def test_more_gpus_than_the_cluster_has_is_refused_and_more_than_are_free_waits(
     busy = dataclasses.replace(LEDGER, free=Resources(cpus=3, memory_gib=32, gpus=0))
     found = findings(ledger=busy)
     assert refused("capacity", found) == [] and noted("capacity", found) == [
-        "the run needs 1 GPUs, and 0 are free; 5 CPUs, and 3 are free: it waits"
+        "the run needs 1 GPUs, and 0 are free; 3.5 CPUs, and 3 are free: it waits"
     ]
     assert refused("capacity", findings(LOCAL_LORA)) == []  # (colocated: the trainer shares the engines' GPU)
 
 
 def test_a_run_that_asks_for_more_than_the_cluster_schedules_for_one_run_is_refused_with_the_numbers() -> None:
-    quota = dataclasses.replace(CLUSTER, capacity=CapacitySection(cpus=4, memory_gib=16, gpus=1))
+    quota = dataclasses.replace(CLUSTER, capacity=CapacitySection(cpus=3, memory_gib=16, gpus=1))
     assert refused("capacity", findings(cluster=quota)) == [
-        "the run needs 1 GPU, 6 CPUs, 5 GiB (its driver (2 CPUs, 2 GiB), engine/policy/0 (1 GPU, 1 CPU), bridge "
-        "(2 CPUs, 1 GiB), and room for Ray's own processes, 1 CPU, 2 GiB); the cluster schedules at most 1 GPU, "
-        "4 CPUs, 16 GiB for one run ([capacity]): it asks for more CPUs (6 for 4), and would never start"
+        "the run needs 1 GPU, 3.75 CPUs, 5 GiB (its driver (0.5 CPUs, 2 GiB), engine/policy/0 (1 GPU, 1 CPU), bridge "
+        "(2 CPUs, 1 GiB), and room for Ray's own processes, 0.25 CPUs, 2 GiB); the cluster schedules at most 1 GPU, "
+        "3 CPUs, 16 GiB for one run ([capacity]): it asks for more CPUs (3.75 for 3), and would never start"
     ]
     roomy = dataclasses.replace(CLUSTER, capacity=CapacitySection(cpus=12, memory_gib=16, gpus=1))
     assert refused("capacity", findings(cluster=roomy)) == []

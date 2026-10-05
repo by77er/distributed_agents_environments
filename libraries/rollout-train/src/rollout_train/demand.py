@@ -9,9 +9,8 @@ capacity the run must be given: its trainer, its engine hosts, the bridge that t
 engines load, and its driver. `demand(settings, cluster)` says what they need, from the run's settings and the cluster
 config alone:
 
-- **The driver** (the job's entrypoint): 1 CPU for the loop and its gateway, 1 CPU for each runner of `[runners]
-  places` episodes (`episodes_at_once`), and each sandbox pool it makes (none served elsewhere, `url`) `size` times
-  its `cpus`; 2 GiB of memory, and each such pool's `size` times its `memory_gib`.
+- **The driver** (the job's entrypoint): half a CPU for its loop, its gateway and its runner, however many episodes it
+  plays at once (they wait on the model, the ledger and their sandboxes), and 2 GiB of memory.
 - **The trainer** (training and imitate runs on a scheduled trainer), in a bundle on the driver's node: 1 CPU and the
   trainer's `gpus` (half of them where it shares the trained channel's card, `colocate_with`).
 - **Each engine host** (per replica of a channel on a scheduled `vllm` provider), in a bundle of its own, or in the
@@ -19,10 +18,19 @@ config alone:
 - **The bridge** (training runs, and evals of a checkpoint), in a bundle of its own: the largest bridge of the chain
   the run may run, its `cpus` and `memory_gib` or what `[bridges."NAME"]` says.
 
+Each figure is measured, with room above it: a gridworld run of Qwen3-0.6B on one card, with 8 and with 32 episodes at
+once, used 0.12 of a CPU in its driver on average (0.27 at the 95th percentile) and 1.4 GiB; its engine host one CPU
+(vLLM's engine loop); its trainer one CPU while it stepped and nearly none between steps. These are what Ray schedules;
+Ray limits no process to them.
+
 Bridges run one at a time (a checkpoint is bridged before the next is served, and a chain's bridges in turn), so one
 bundle the size of the largest holds every bridge the run runs. Channels on servers elsewhere (`vllm-servers`, RunPod
 pods, which are scheduled where they run) and on Tinker ask the run's Ray cluster for nothing, nor does a trainer on
 RunPod's pods (`runpod-trainer`): the run leases its pods (`rollout_train.pods.leasing`), outside Kueue's quota.
+
+A run's sandboxes are not its parts. A run reaches them only through the claiming interface (`rollout.harness.
+sandboxes`): what a pool's sandboxes run and hold is the pool's business, scheduled and accounted by whatever runs it
+(on Kubernetes, the pool's own pod: docs/research/sandbox-placement.md), and a run's demand counts none of it.
 
 The driver reserves its parts as one placement group (`reserve`) before it starts any of them, so a run starts only
 with all of it reserved and never waits half-placed. The group is `PACK`: Ray puts its bundles on as few nodes as hold
@@ -31,13 +39,14 @@ The trainer's bundle is pinned to the driver's node (a step's files are handed t
 its engines' card shares their bundle. Each actor and task asks for exactly what its part counted, in its bundle.
 
 On Kubernetes the run's Ray cluster is sized from the same demand (`rollout_train.submitting.rendered`): its pods ask
-for `Demand.total` and room for Ray's own processes (`HEADROOM`); and Kueue admits the RayJob only when its whole
-request fits the queue's quota.
+for `Demand.total` (whole GPUs) and room for Ray's own processes (`HEADROOM`), and Ray starts each with its CPUs rounded
+up to whole ones; Kueue admits the RayJob only when its whole request, and that of the pod that submits its job
+(`SUBMITTER`), fits the queue's quota.
 """
 
 import math
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
@@ -68,12 +77,13 @@ __all__ = [
     "reserve",
 ]
 
-DRIVER_CPUS = 1.0
-"""The driver's own: the loop and the gateway in its process."""
+DRIVER_CPUS = 0.5
+"""The driver's: its loop, its gateway and its runner, waiting on the model and the ledger (measured with 8 and with 32
+episodes at once: 0.12 of a CPU on average, 0.27 at the 95th percentile)."""
 DRIVER_MEMORY_GIB = 2.0
-RUNNER_CPUS = 1.0
-"""Each runner of `[runners] places` episodes, in the driver's process."""
+"""Measured: 1.4 GiB at most, with 8 and with 32 episodes at once."""
 TRAINER_CPUS = 1.0
+"""Measured: one CPU while it steps (the GPU does the rest), nearly none between steps."""
 TRAINER = "trainer"
 """The trainer's part, by name (an engine host's is `engine/CHANNEL/N`)."""
 BRIDGE = "bridge"
@@ -215,26 +225,34 @@ class Demand:
                 "total": self.total.to_json()}  # fmt: skip
 
 
-HEADROOM = Resources(cpus=1.0, memory_gib=2.0)
+HEADROOM = Resources(cpus=0.25, memory_gib=2.0)
 """Room a pod of a run's Ray cluster keeps beyond what Ray schedules: Ray's own processes (its GCS, raylet, dashboard
-and object store) and the memory its GPU processes hold outside Ray's count."""
-SUBMITTER = Resources(cpus=0.5, memory_gib=0.2)
-"""The pod KubeRay starts to submit a RayJob's job (its default requests), which Kueue counts with the job's."""
+and object store: measured 0.08 of a CPU at the 95th percentile, and 0.5 GiB), and some of the memory its GPU
+processes hold outside Ray's count. They hold more than this (an engine host of Qwen3-0.6B 4 to 4.9 GiB, its trainer
+2.2 GiB while it steps): the pod's memory limit, not its request, bounds them."""
+SUBMITTER = Resources(cpus=0.1, memory_gib=0.25)
+"""The pod KubeRay starts to submit a RayJob's job (the requests of the chart's `submitterPodTemplate`; measured: 0.06
+of a CPU over a job, 130 MiB), which Kueue counts with the job's."""
 
 
 @dataclass(frozen=True)
 class Pod:
-    """One kind of pod of a run's Ray cluster on Kubernetes: the head (`head`) or a worker group (`engines-N`), what
-    Ray schedules on each (whole CPUs and GPUs, as Ray starts a node with), and how many there are."""
+    """One kind of pod of a run's Ray cluster on Kubernetes: the head (`head`) or a worker group (`engines-N`), what its
+    parts ask for (`asked`), and how many there are."""
 
     group: str
-    ray: Resources
+    asked: Resources
     replicas: int = 1
 
     @property
+    def ray(self) -> Resources:
+        """What Ray schedules on each: whole CPUs and GPUs, as Ray starts a node with."""
+        return _whole(self.asked)
+
+    @property
     def requests(self) -> Resources:
-        """What each pod asks Kubernetes for: what Ray schedules on it, and `HEADROOM`."""
-        return self.ray + HEADROOM
+        """What each pod asks Kubernetes for: what its parts ask for (its GPUs whole), and `HEADROOM`."""
+        return replace(self.asked, gpus=self.ray.gpus) + HEADROOM
 
 
 def _whole(resources: Resources) -> Resources:
@@ -247,7 +265,7 @@ def pods(asked: Demand, most: Resources | None = None, *, known: Collection[str]
     in the resources `known`: the template's limits, one node's worth); else the head holds the driver, the trainer's
     bundle and the bundles with no GPU (the bridge's), and each other bundle (an engine host's) is a worker pod,
     grouped by size (`engines-0`, `engines-1`, ...)."""
-    one = Pod("head", _whole(asked.total))
+    one = Pod("head", asked.total)
     if most is None or not one.requests.beyond(most, known=known):
         return (one,)
     head = asked.driver
@@ -257,7 +275,7 @@ def pods(asked: Demand, most: Resources | None = None, *, known: Collection[str]
         if each.on_driver or not each.resources.gpus:
             head = head + each.resources
             continue
-        sized = _whole(each.resources)
+        sized = each.resources
         if sized in sizes:
             counts[sizes.index(sized)] += 1
         else:
@@ -265,7 +283,7 @@ def pods(asked: Demand, most: Resources | None = None, *, known: Collection[str]
             counts.append(1)
     workers = [Pod(f"engines-{index}", size, count) for index, (size, count) in
                enumerate(zip(sizes, counts, strict=True))]  # fmt: skip
-    return (Pod("head", _whole(head)), *workers)
+    return (Pod("head", head), *workers)
 
 
 def requested(asked: Demand, *, kubernetes: bool = False, most: Resources | None = None,
@@ -303,13 +321,12 @@ def bridge_asks(bridge: Bridge, cluster: Cluster) -> Resources:
     return Resources(cpus=cpus, memory_gib=memory)
 
 
-def demand(settings: "RunSettings", cluster: Cluster, *, sandboxes: Collection[str] = ()) -> Demand:
-    """What a run with these settings needs on this cluster (the module's docstring); `sandboxes` are the kinds of
-    sandbox its environment's programs declare. Parts the cluster does not offer are left out (validation refuses
-    them)."""
+def demand(settings: "RunSettings", cluster: Cluster) -> Demand:
+    """What a run with these settings needs on this cluster (the module's docstring). Parts the cluster does not offer
+    are left out (validation refuses them)."""
     from rollout_train.run_settings import KINDS
 
-    train, evaluate, imitate, check = KINDS
+    train, evaluate, imitate, _ = KINDS
     kind = settings.kind
     provider = cluster.trainers.get(str(settings["trainer.provider"])) if kind in (train, imitate) else None
     hosts = _hosts(settings, cluster)
@@ -325,16 +342,7 @@ def demand(settings: "RunSettings", cluster: Cluster, *, sandboxes: Collection[s
     bridge = _bridge(settings, cluster) if kind in (train, evaluate) else None
     if bridge is not None:
         bundles.append(Bundle((Part(BRIDGE, bridge),)))
-    driver = Resources(cpus=DRIVER_CPUS, memory_gib=DRIVER_MEMORY_GIB)
-    if kind in (train, evaluate, check):
-        at_once = settings["episodes_at_once"]
-        runners = math.ceil(int(at_once) / cluster.runners.places) if isinstance(at_once, int) else 1
-        driver = driver + Resources(cpus=runners * RUNNER_CPUS)
-        for each in sorted(set(sandboxes)):
-            pool = cluster.sandboxes.get(each)
-            if pool is not None and pool.url is None:  # (one served elsewhere is not the run's)
-                driver = driver + Resources(cpus=pool.size * pool.cpus, memory_gib=pool.size * pool.memory_gib)
-    return Demand(driver, tuple(bundles))
+    return Demand(Resources(cpus=DRIVER_CPUS, memory_gib=DRIVER_MEMORY_GIB), tuple(bundles))
 
 
 def _hosts(settings: "RunSettings", cluster: Cluster) -> list[tuple[str, str, Part]]:

@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from rollout_train.cluster import parsed
+from rollout_train.demand import SUBMITTER
 from rollout_train.launches import TRAIN, Asked, new_launch
 from rollout_train.run_settings import RunSettings, flattened
 from rollout_train.submitting import rendered as made_from
@@ -86,6 +87,14 @@ def test_a_runs_rayjob_is_made_from_the_charts_template(rendered: list[dict[str,
     assert {"ROLLOUT_CLUSTER", "PGPASSWORD", "AWS_ACCESS_KEY_ID"} <= {each["name"] for each in container["env"]}
     assert container["resources"]["limits"]["nvidia.com/gpu"] == 1
     assert {each["mountPath"] for each in container["volumeMounts"]} >= {"/etc/rollout", "/root/.cache/rollout"}
+    submitter = spec["submitterPodTemplate"]["spec"]
+    (submits,) = submitter["containers"]
+    assert submitter["restartPolicy"] == "Never" and "command" not in submits  # (KubeRay gives it `ray job submit`)
+    requests = submits["resources"]["requests"]
+    assert (float(requests["cpu"].removesuffix("m")) / 1000, int(requests["memory"].removesuffix("Mi")) / 1024) == (
+        SUBMITTER.cpus,
+        SUBMITTER.memory_gib,
+    )  # (what Kueue counts of it, as a run's demand says)
 
 
 def test_every_preset_is_run_settings_the_cluster_takes(rendered: list[dict[str, Any]]) -> None:
@@ -251,7 +260,7 @@ def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rend
     assert flavor["name"] == kinds["ResourceFlavor"]["metadata"]["name"]
     assert {each["name"]: each["nominalQuota"] for each in flavor["resources"]} == {
         "cpu": "12",
-        "memory": "16Gi",
+        "memory": "9Gi",
         "nvidia.com/gpu": "1",
     }
     local = kinds["LocalQueue"]
@@ -260,7 +269,7 @@ def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rend
     cluster = parsed(tomllib.loads(config_of(on)["cluster.toml"]))
     assert cluster.kubernetes is not None and cluster.kubernetes.queue == local["metadata"]["name"]
     assert cluster.capacity is not None
-    assert (cluster.capacity.cpus, cluster.capacity.memory_gib, cluster.capacity.gpus) == (12, 16, 1)
+    assert (cluster.capacity.cpus, cluster.capacity.memory_gib, cluster.capacity.gpus) == (12, 9, 1)
     (role,) = [each for each in on if each["kind"] == "Role" and each["metadata"]["name"] == "monitor"]
     (workloads,) = [rule for rule in role["rules"] if rule["resources"] == ["workloads"]]
     assert workloads["apiGroups"] == ["kueue.x-k8s.io"] and "list" in workloads["verbs"]

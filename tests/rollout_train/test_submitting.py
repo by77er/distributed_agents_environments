@@ -127,7 +127,7 @@ async def test_a_run_is_submitted_as_a_ray_job_handed_the_cluster_config(tmp_pat
     assert (run.id, run.name) == (launch.run, "words-1")  # (registered when it was asked for)
     (given,) = jobs.submitted
     assert given["entrypoint"] == f"python -m rollout_train.jobs {launch.id}"
-    assert given["entrypoint_num_cpus"] == 2  # (its driver's: the loop, and one runner)
+    assert given["entrypoint_num_cpus"] == 0.5  # (its driver's: its loop, gateway and runner)
     assert json.loads(given["runtime_env"]["env_vars"][HANDED]) == dict(cluster.described)
     assert given["submission_id"] == launch.job and given["metadata"]["launch"] == launch.id
     gsm8k = await submit(settings(environment="rollout_verifiers.environments:gsm8k", name="gsm8k"), cluster,
@@ -224,19 +224,19 @@ def test_a_rayjob_is_sized_from_the_runs_demand_and_suspended_in_kueues_queue() 
     made = rendered(template, launch, "python -m rollout_train.jobs L", {}, "rollout", asked=asked, queue="runs")
     assert made["metadata"]["labels"]["kueue.x-k8s.io/queue-name"] == "runs" and made["spec"]["suspend"] is True
     spec = made["spec"]
-    assert spec["entrypointNumCpus"] == 2  # (the driver: the loop and one runner)
+    assert spec["entrypointNumCpus"] == 0.5  # (the driver: its loop, gateway and runner)
     head = spec["rayClusterSpec"]["headGroupSpec"]
-    assert head["rayStartParams"]["num-cpus"] == "5" and head["rayStartParams"]["num-gpus"] == "1"
+    assert head["rayStartParams"]["num-cpus"] == "4" and head["rayStartParams"]["num-gpus"] == "1"
     (sized,) = head["template"]["spec"]["containers"]
-    assert sized["resources"] == {  # (Ray's 5 CPUs and 3 GiB, and room for Ray's own processes)
-        "requests": {"cpu": "6", "memory": "5120Mi", "nvidia.com/gpu": 1},
+    assert sized["resources"] == {  # (its parts' 3.5 CPUs and 3 GiB, Ray starting with 4, and room for Ray's own)
+        "requests": {"cpu": "3.75", "memory": "5120Mi", "nvidia.com/gpu": 1},
         "limits": {"memory": "14Gi", "nvidia.com/gpu": 1},
     }
     assert "workerGroupSpecs" not in spec["rayClusterSpec"]
     alone = rendered(template, launch, "x", {}, "rollout", asked=demand(RunSettings({**ACCEPTANCE,
                      "channels.policy.provider": "tinker"}), EXAMPLE))  # fmt: skip
     (tinker,) = alone["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["containers"]
-    assert tinker["resources"] == {"requests": {"cpu": "3", "memory": "4096Mi"}, "limits": {"memory": "14Gi"}}
+    assert tinker["resources"] == {"requests": {"cpu": "0.75", "memory": "4096Mi"}, "limits": {"memory": "14Gi"}}
     assert "suspend" not in alone["spec"] and "kueue.x-k8s.io/queue-name" not in alone["metadata"]["labels"]
     two = rendered(template, launch, "x", {}, "rollout", asked=demand(RunSettings({**ACCEPTANCE,
                    "channels.policy.replicas": 2}), EXAMPLE))  # fmt: skip

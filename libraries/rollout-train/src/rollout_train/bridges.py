@@ -125,13 +125,17 @@ BRIDGES: tuple[Bridge, ...] = (
         network=True,
         rank_factors=(("Qwen/Qwen3.5-*", 3),),
     ),
-    Bridge("verbatim", "peft", "peft", VERBATIM, "the adapter's files, linked as they are"),
+    Bridge(
+        "verbatim", "peft", "peft", VERBATIM, "the adapter's files, linked as they are", cpus=0.5, memory_gib=1
+    ),  # (measured: a CPU for under a second and 0.57 GiB in a fresh worker, then nearly nothing)
     Bridge(
         "full-reload",
         "full",
         "full",
         VERBATIM,
         "the full weights' files, linked as they are and loaded under the checkpoint's name, replica by replica",
+        cpus=0.5,
+        memory_gib=1,
     ),
     Bridge(
         MERGE_QUANTIZE,

@@ -88,7 +88,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `ray.gpu.resources` | 4 CPUs, 8 GiB requested, 14 GiB and one `nvidia.com/gpu` as limits | One GPU worker pod |
 | `rayjob.resources` | 1 CPU, 4 GiB requested; 14 GiB and one `nvidia.com/gpu` as limits | The most one pod of a run's Ray cluster may have (its limits, one node's worth); its requests apply only where a run's demand is not given |
 | `rayjob.ttlSeconds` | `30` | How long a finished run's Ray cluster stays (and holds what it asked for) |
-| `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 16 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
+| `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 9 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
 | `sandboxes.minecraft.enabled`, `.size`, `.resources` | `true`, `4`, 4 CPUs and 7.5 GiB requested, 10 GiB as the limit | The Minecraft worlds' pool: at most `size` worlds at once, each asking for 1.75 GiB and a CPU |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
 | `monitors.NAME.host` | `monitor.localhost` | Each monitor's Ingress host |
@@ -124,14 +124,15 @@ With `kueue.enabled`, Kueue admits each run's RayJob whole. Kueue itself is inst
 The cluster config then names the queue (`[kubernetes] queue`) and states the quota as its `[capacity]`. A run's
 RayJob is made suspended, and Kueue starts it once the quota has room for its head pod, its worker pods and the pod
 KubeRay starts to submit its job; until then the monitor's launch tile says it waits for admission, with Kueue's
-reason. A run whose pods would ask for more than the quota is refused when it is asked for. The default quota is for
-one node with one GPU, with room beside it for the platform's own pods (the stores, the Ray cluster, the gateway and
-the monitor are outside the queue); set it to what your nodes give runs:
+reason. A run whose pods would ask for more than the quota is refused when it is asked for. The default quota is what
+one node of 20 CPUs and 23 GiB with one GPU has beside the platform's own pods (the stores, the Ray cluster, the
+gateway and the monitor, about 4 CPUs and 6.5 GiB) and the Minecraft pool's (4 CPUs, 7.5 GiB), which are outside the
+queue; set it to what your nodes give runs:
 
 ```yaml title="rollout-values.yaml"
 kueue:
   enabled: true
-  quota: {cpus: 12, memoryGib: 16, gpus: 1}
+  quota: {cpus: 12, memoryGib: 9, gpus: 1}
 ```
 
 The long-lived RayCluster `ray` is not in the queue: its GPU worker, when the autoscaler starts it, holds a card Kueue

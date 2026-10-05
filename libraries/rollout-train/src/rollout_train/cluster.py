@@ -185,7 +185,8 @@ class GuardsSection:
 @dataclass(frozen=True)
 class SandboxesSection:
     """A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
-    driver from its provider, or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it."""
+    driver from its provider, or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it. What
+    its sandboxes run and hold is the pool's business: a run's demand counts none of it."""
 
     kind: str
     provider: str | None = None
@@ -193,8 +194,6 @@ class SandboxesSection:
     python: str = "platform"
     """`platform`, or the name of an environment whose Python the provider is in."""
     size: int = 1
-    cpus: float = 1
-    memory_gib: float = 1
     url: str | None = None
     """Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there."""
     pools: int = 1
@@ -747,8 +746,6 @@ def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:
         provider=provider,
         python=said.text("python", "platform"),
         size=said.whole("size", 1, least=1),
-        cpus=said.number("cpus", 1.0),
-        memory_gib=said.number("memory_gib", 1.0),
         url=url,
         pools=said.whole("pools", 1, least=1),
         settings=said.rest(),

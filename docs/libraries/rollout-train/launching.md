@@ -66,12 +66,16 @@ template's. It is created through the API server
 (`KubernetesApi`: `[kubernetes] api`, with the pod's service account token and CA), which the account must allow:
 create, get, list, watch and delete on `rayjobs` in `ray.io`. KubeRay starts a Ray cluster for it, runs the driver
 there, and removes the cluster when the job ends; when the driver or its pod is lost, the template's `backoffLimit`
-submits it again, and the run goes on from the ledger. The chart's template is `deploy/chart/rollout/files/rayjob.yaml`
-([Deploying](../../guide/deploying.md#on-kubernetes)).
+submits it again, and the run goes on from the ledger. A job submitted again for a launch that has failed fails too
+(it exits 1 without running), so a run that fails leaves its RayJob `FAILED`; one whose launch ended or stopped
+exits 0. The chart's template is `deploy/chart/rollout/files/rayjob.yaml`
+([Deploying](../../guide/deploying.md#on-kubernetes)); its `submitterPodTemplate` asks for what the pod that submits
+the job uses (`SUBMITTER`: 0.1 CPU, 256 MiB).
 
-`sized` sizes the Ray cluster from the run's demand. Its head pod asks Kubernetes for what Ray schedules on it and
-room for Ray's own processes (`HEADROOM`: 1 CPU, 2 GiB), and Ray starts with its CPUs and GPUs (`rayStartParams`
-`num-cpus`, `num-gpus`, and `resources` for custom ones); a pod that holds no GPU asks for none. The template's limits
+`sized` sizes the Ray cluster from the run's demand. Its head pod asks Kubernetes for what its parts ask for (whole
+GPUs) and room for Ray's own processes (`HEADROOM`: 0.25 CPU, 2 GiB), and Ray starts with its CPUs (rounded up to
+whole ones) and GPUs (`rayStartParams` `num-cpus`, `num-gpus`, and `resources` for custom ones); a pod that holds no
+GPU asks for none. Ray's CPUs are a budget it schedules by, not a limit: the template sets no CPU limit. The template's limits
 are the most one pod may have: a memory or CPU limit below the request is raised to it, and a GPU limit is the pod's
 whole GPUs. Where the whole run is more than one pod's worth, the head holds the driver, the trainer's bundle and the
 bridge's, and each engine host's bundle is a worker pod (`workerGroupSpecs`, `engines-0`, …, made from the head's
@@ -174,9 +178,10 @@ runs, which a test calls on a `Run` built directly:
    (`trainer.segment_tokens`, else the trainer's in the config).
 5. **The runner.** An episode runner in the driver's process (`run/RUN`), with `episodes_at_once` places, over a
    runner whose harnesses reach the gateway on this node (a free port on `127.0.0.1`); a pool of each kind of sandbox
-   the environment's programs declare, from the cluster's `[sandboxes.KIND]` (its provider made with the run's
-   directory, `size` and its settings; named `KIND@RUN`; its leases beside the ledger, with a keeper); the tool sets of
-   the cluster's `[tools]`; the memory guards of `[guards]`; the monitor's feed in the run's directory.
+   the environment's programs declare, from the cluster's `[sandboxes.KIND]`: one with a `url` is reached there, and
+   any other is made here (its provider made with the run's directory, `size` and its settings; named `KIND@RUN`; its
+   leases beside the ledger, with a keeper); the tool sets of the cluster's `[tools]`; the memory guards of `[guards]`;
+   the monitor's feed in the run's directory.
 6. **The loop of its kind**: `train`, `evaluate`, `imitate` or `check` ([training](training.md), [evals](evals.md),
    [datasets](datasets.md#a-step-on-a-dataset), [checking an environment](rollouts.md#checking-an-environment)), given
    what was built. The trained channel's files are made by the bridges from the trainer's format to what the channel's
@@ -205,7 +210,7 @@ demand; a metered trainer's actor asks Ray for nothing and runs on the driver's 
 
 | Part | Asks for | Where |
 |---|---|---|
-| The driver | 1 CPU for the loop and its gateway, 1 CPU for each runner of `[runners] places` episodes (`episodes_at_once`), each sandbox pool's `size × cpus`; 2 GiB and each pool's `size × memory_gib` | the job's entrypoint (its CPUs as `entrypoint_num_cpus`) |
+| The driver | 0.5 CPU for its loop, its gateway and its runner, however many episodes it plays at once; 2 GiB | the job's entrypoint (its CPUs as `entrypoint_num_cpus`) |
 | The trainer (a scheduled one) | 1 CPU and its `gpus` (half where it shares the trained channel's card) | a bundle on the driver's node |
 | Each engine host (a scheduled `vllm` provider, per replica) | 1 CPU, a replica's GPUs, `[placement.engines]` | a bundle of its own, or the trainer's where they share a card |
 | The bridge (a training run, an eval of a checkpoint) | the largest bridge of the chain the run may run: its `cpus` and `memory_gib`, or `[bridges."NAME"]`'s | a bundle of its own |
@@ -214,6 +219,28 @@ Bridges run one at a time (a checkpoint is bridged before the next is served, an
 bundle the size of the largest holds them all. Channels on servers elsewhere (`vllm-servers`, RunPod pods) and on
 Tinker ask the run's Ray cluster for nothing, nor does a trainer on RunPod's pods: the run leases those, outside
 Kueue's quota.
+
+A run's sandboxes are not among its parts. It reaches them only through the claiming interface: what a pool's
+sandboxes run and hold is the pool's, scheduled and accounted by whatever runs it (on Kubernetes, the pool's own pod:
+[Where sandboxes run](../../research/sandbox-placement.md)).
+
+Each part's figure is measured, with room above it, on gridworld runs of Qwen3-0.6B on one card (a LoRA trainer
+sharing it with one engine host), with 8 episodes at once (18 minutes, sampled every 2 seconds) and with 32 (13
+minutes, every half second):
+
+| Part | CPU: mean, 95th percentile, most (8; 32 at once) | Memory (RSS, most) | Asks for |
+|---|---|---|---|
+| The driver (loop, gateway, runner) | 0.11, 0.22, 0.48; 0.12, 0.27, 0.99 | 1.4 GiB; 1.4 GiB | 0.5 CPU, 2 GiB |
+| The engine host (with vLLM's engine core) | 1.07, 1.18, 1.31; 1.07, 1.20, 2.92 | 4.0 GiB; 4.9 GiB | 1 CPU |
+| The trainer | 1.0 while it steps, 0.01 between steps | 2.2 GiB while it steps | 1 CPU |
+| The `verbatim` bridge | about 1 for under a second in a fresh worker | 0.57 GiB | 0.5 CPU, 1 GiB |
+| Ray's own processes | 0.04, 0.06; 0.04, 0.08 | 0.5 GiB | `HEADROOM`: 0.25 CPU, 2 GiB |
+| The pod that submits a RayJob's job | 0.06 over the job | 130 MiB | `SUBMITTER`: 0.1 CPU, 256 MiB |
+
+The driver's starting (imports, the tokenizer) takes up to 3.7 CPUs for a few seconds, and is not counted.
+
+These are what Ray schedules by, and what Kubernetes and Kueue count; neither limits a process's CPU to them. The
+memory an engine host and a trainer hold is not asked of Ray: on Kubernetes the pod's memory limit bounds it.
 
 The driver reserves the bundles as one placement group (`reserve`, named `run/RUN`) before it starts any part, so a
 run starts only with all of it reserved and never waits half-placed for a task Ray cannot place. The group is `PACK`:
@@ -225,14 +252,14 @@ Ray takes fractions of one GPU only. On one machine, the same group is reserved 
 when the run ends.
 
 For the acceptance run's shape (a Tinker trainer, one engine host of `local-vllm` with one GPU, the
-`peft-from-tinker` bridge, `episodes_at_once` 6 with 8 places a runner):
+`peft-from-tinker` bridge):
 
 | Part | Asks for |
 |---|---|
-| The driver | 2 CPUs, 2 GiB |
+| The driver | 0.5 CPU, 2 GiB |
 | `engine/policy/0` | 1 GPU, 1 CPU |
 | `bridge` | 2 CPUs, 1 GiB |
-| The run's Ray cluster | 5 CPUs, 3 GiB, 1 GPU (its pod asks Kubernetes for 6 CPUs, 5 GiB, 1 GPU) |
+| The run's Ray cluster | 3.5 CPUs, 3 GiB, 1 GPU (Ray starts with 4 CPUs; its pod asks Kubernetes for 3.75 CPUs, 5 GiB, 1 GPU) |
 
 Validation (`capacity`, [validation](../../guide/cluster.md#validation)) refuses a run whose Ray cluster would ask for
 more than the cluster config's `[capacity]` (on Kubernetes with Kueue, the queue's quota, which the chart writes

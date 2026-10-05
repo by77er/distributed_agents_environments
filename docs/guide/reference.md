@@ -4966,11 +4966,13 @@ A run's job: built from its settings and the cluster config, claiming what it ne
 *function* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
-async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) -> None
+async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) -> int
 ```
 
 Run a launch's run, noting on the launch that it runs, what it waits for, and how it ended: ended, failed (with
-why: its settings' refusals among them) or stopped (cancelled).
+why: its settings' refusals among them) or stopped (cancelled); a run that fails raises. A launch that finished
+already is not run again: a job submitted again after its run failed (its RayJob's `backoffLimit`) returns 1, so
+that the job fails too, and otherwise 0.
 
 ### `HoursReached`
 
@@ -5246,23 +5248,24 @@ What a run's scheduled parts need: its driver's (the job's entrypoint), and its 
 *function* · `libraries/rollout-train/src/rollout_train/demand.py`
 
 ```python
-def demand(settings: 'RunSettings', cluster: Cluster, *, sandboxes: Collection[str] = ()) -> Demand
+def demand(settings: 'RunSettings', cluster: Cluster) -> Demand
 ```
 
-What a run with these settings needs on this cluster (the module's docstring); `sandboxes` are the kinds of
-sandbox its environment's programs declare. Parts the cluster does not offer are left out (validation refuses
-them).
+What a run with these settings needs on this cluster (the module's docstring). Parts the cluster does not offer
+are left out (validation refuses them).
 
 ### `HEADROOM`
 
 *constant* · `libraries/rollout-train/src/rollout_train/demand.py`
 
 ```python
-HEADROOM = Resources(cpus=1.0, memory_gib=2.0)
+HEADROOM = Resources(cpus=0.25, memory_gib=2.0)
 ```
 
 Room a pod of a run's Ray cluster keeps beyond what Ray schedules: Ray's own processes (its GCS, raylet, dashboard
-and object store) and the memory its GPU processes hold outside Ray's count.
+and object store: measured 0.08 of a CPU at the 95th percentile, and 0.5 GiB), and some of the memory its GPU
+processes hold outside Ray's count. They hold more than this (an engine host of Qwen3-0.6B 4 to 4.9 GiB, its trainer
+2.2 GiB while it steps): the pod's memory limit, not its request, bounds them.
 
 ### `Part`
 
@@ -5308,18 +5311,19 @@ The channel a run trains or plays: the trained one, else the first its settings 
 class Pod
 ```
 
-One kind of pod of a run's Ray cluster on Kubernetes: the head (`head`) or a worker group (`engines-N`), what
-Ray schedules on each (whole CPUs and GPUs, as Ray starts a node with), and how many there are.
+One kind of pod of a run's Ray cluster on Kubernetes: the head (`head`) or a worker group (`engines-N`), what its
+parts ask for (`asked`), and how many there are.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `group` | `str` | required |  |
-| `ray` | `Resources` | required |  |
+| `asked` | `Resources` | required |  |
 | `replicas` | `int` | `1` |  |
 
 **Methods**
 
-- `@property def requests(self) -> Resources` — What each pod asks Kubernetes for: what Ray schedules on it, and `HEADROOM`.
+- `@property def ray(self) -> Resources` — What Ray schedules on each: whole CPUs and GPUs, as Ray starts a node with.
+- `@property def requests(self) -> Resources` — What each pod asks Kubernetes for: what its parts ask for (its GPUs whole), and `HEADROOM`.
 
 ### `pods`
 
@@ -5389,10 +5393,11 @@ CPUs, memory, GPUs and custom resources (`[placement.ROLE]`), as Ray counts them
 *constant* · `libraries/rollout-train/src/rollout_train/demand.py`
 
 ```python
-SUBMITTER = Resources(cpus=0.5, memory_gib=0.2)
+SUBMITTER = Resources(cpus=0.1, memory_gib=0.25)
 ```
 
-The pod KubeRay starts to submit a RayJob's job (its default requests), which Kueue counts with the job's.
+The pod KubeRay starts to submit a RayJob's job (the requests of the chart's `submitterPodTemplate`; measured: 0.06
+of a CPU over a job, 130 MiB), which Kueue counts with the job's.
 
 ### `TRAINER`
 
@@ -5605,11 +5610,10 @@ jobs`.
 *function* · `libraries/rollout-train/src/rollout_train/submitting.py`
 
 ```python
-async def demand_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> Demand
+def demand_of(launch: Launch, cluster: Cluster) -> Demand
 ```
 
-What a launch's run needs (`rollout_train.demand`), with the sandboxes its environment declares where they are
-known here (an environment in a project's Python of its own is not imported here: none).
+What a launch's run needs (`rollout_train.demand`).
 
 ### `entrypoint_of`
 
@@ -6804,16 +6808,17 @@ class RunnersSection
 class SandboxesSection
 ```
 
-A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`).
+A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
+driver from its provider, or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it. What
+its sandboxes run and hold is the pool's business: a run's demand counts none of it.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `kind` | `str` | required |  |
-| `provider` | `str` | required | `module:name` of what makes them. |
+| `provider` | `str \| None` | `None` | `module:name` of what makes them. |
 | `python` | `str` | `'platform'` | `platform`, or the name of an environment whose Python the provider is in. |
 | `size` | `int` | `1` |  |
-| `cpus` | `float` | `1` |  |
-| `memory_gib` | `float` | `1` |  |
+| `url` | `str \| None` | `None` | Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there. |
 | `pools` | `int` | `1` |  |
 | `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's own settings. |
 
@@ -7316,7 +7321,7 @@ bridge's own, by its name.
 *constant* · `libraries/rollout-train/src/rollout_train/bridges.py`
 
 ```python
-BRIDGES: tuple[Bridge, ...] = (Bridge('none', 'tinker', 'tinker', None, "served as it is: Tinker's sampler reads the checkpoint's pointer", cost=0), Bridge('peft-from-tinker', 'tinker', 'peft', 'rollout_tinker.bridges:peft', "Tinker's adapter downloaded and written in PEFT's layout", cpus=2, network=True, rank_factors=(('Qwen/Qwen3.5-*', 3),)), Bridge('verbatim', 'peft', 'peft', VERBATIM, "the adapter's files, linked as they are"), Bridge('full-reload', 'full', 'full', VERBATIM, "the full weights' files, linked as they are and loaded under the checkpoint's name, replica by replica"), Bridge(MERGE_QUANTIZE, 'peft', 'full', 'rollout_lora.bridges:merge_quantize', 'the adapter merged into its base, as full weights a provider quantizes as it loads them', cpus=8, memory_gib=48, explicit=True, cost=10))
+BRIDGES: tuple[Bridge, ...] = (Bridge('none', 'tinker', 'tinker', None, "served as it is: Tinker's sampler reads the checkpoint's pointer", cost=0), Bridge('peft-from-tinker', 'tinker', 'peft', 'rollout_tinker.bridges:peft', "Tinker's adapter downloaded and written in PEFT's layout", cpus=2, network=True, rank_factors=(('Qwen/Qwen3.5-*', 3),)), Bridge('verbatim', 'peft', 'peft', VERBATIM, "the adapter's files, linked as they are", cpus=0.5, memory_gib=1), Bridge('full-reload', 'full', 'full', VERBATIM, "the full weights' files, linked as they are and loaded under the checkpoint's name, replica by replica", cpus=0.5, memory_gib=1), Bridge(MERGE_QUANTIZE, 'peft', 'full', 'rollout_lora.bridges:merge_quantize', 'the adapter merged into its base, as full weights a provider quantizes as it loads them', cpus=8, memory_gib=48, explicit=True, cost=10))
 ```
 
 Every bridge, by its pair of formats.
@@ -8971,7 +8976,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, needs sandboxes or tool sets the cluster lacks, or, on Kubernetes, sandboxes whose pool is not served from pods of its own'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.

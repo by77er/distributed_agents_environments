@@ -69,7 +69,9 @@ Raise them for bigger models or more episodes at once.
 | Ray autoscaler | 0.1 | 256 MiB / 1 GiB | none | none |
 | Ray GPU worker (one per run that asks for a GPU) | 4 | 8 GiB / 14 GiB | 1 | the state volume |
 | Ray CPU worker (runs that use no local GPU) | 1, advertising 4 to Ray | 2 GiB / 4 GiB | none | the state volume |
-| A run's Ray cluster (one head pod, sized from the run) | the run's demand and 1 more (6 for the acceptance run) | its demand and 2 GiB (5 GiB for the acceptance run) / 14 GiB | the whole cards its engine hosts and trainer take | the state volume |
+| A run's Ray cluster (one head pod, sized from the run) | the run's demand and 0.25 more (3.75 for the acceptance run) | its demand and 2 GiB (5 GiB for the acceptance run) / 14 GiB | the whole cards its engine hosts and trainer take | the state volume |
+| The pod that submits a run's job | 0.1 | 256 MiB / 512 MiB | none | none |
+| The Minecraft worlds' pool (`sandboxes-minecraft`, four worlds) | 4 | 7.5 GiB / 10 GiB | none | the state volume |
 | Gateway, per replica | 0.25 | 512 MiB / 2 GiB | none | none |
 | Monitor | 0.25 | 512 MiB / 3 GiB | none | none |
 | State volume, shared by every pod | | | | 200 GiB |
@@ -81,10 +83,13 @@ What drives the numbers:
   vLLM serves it: the engines sleep while the trainer steps ([the LoRA trainer's
   measurements](../implementations/rollout-lora.md#measurements),
   [vLLM's](../implementations/rollout-vllm.md#measurements)). A run trained and sampled on Tinker needs no GPU.
-- **Episodes.** Each Minecraft episode runs a Paper server and its bots' Node process: about 1 to 2 CPUs, and 1.1 to
-  1.75 GiB ([measured](../research/minecraft-memory.md)). The cluster config's `[guards]` (`runs_gib`,
-  `training_gib`) say how much system memory must be free before a runner claims another episode, and before a step of
-  a trainer that shares the engines' GPU.
+- **Episodes.** Each Minecraft episode's world runs a Paper server and its bots' Node process: about 1 to 2 CPUs, and
+  1.1 to 1.75 GiB ([measured](../research/minecraft-memory.md)), in the worlds' pool, not in the run's pods
+  ([Where sandboxes run](../research/sandbox-placement.md)). A run's own parts wait on the model and the ledger: its
+  driver uses a tenth of a CPU, however many episodes it plays
+  ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)). The cluster config's `[guards]`
+  (`runs_gib`, `training_gib`) say how much system memory must be free before a runner claims another episode, and
+  before a step of a trainer that shares the engines' GPU.
 - **Storage.** The blob store grows with every checkpoint's weights and optimizer state, and with every episode's
   trajectory; checkpoints' saves thin out with age
   ([checkpoints](../libraries/rollout-train/checkpoints.md#checkpoints)). The Hugging Face cache on the state volume

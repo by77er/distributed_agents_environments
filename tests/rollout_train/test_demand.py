@@ -15,7 +15,7 @@ from rollout.names import named
 from rollout_train.cluster import parsed
 from rollout_train.demand import BRIDGE, HEADROOM, SUBMITTER, TRAINER, Resources, demand, pods, requested
 from rollout_train.jobs import Run, started
-from rollout_train.run_settings import RunSettings
+from rollout_train.run_settings import RunSettings, flattened
 from rollout_train.stores import Stores
 from tests.local_ray import LocalRay
 from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
@@ -42,17 +42,17 @@ def parts(settings: dict[str, JsonValue], **given: Any) -> list[dict[str, Resour
 def test_local_lora_beside_local_vllm_shares_one_bundle_on_the_drivers_node() -> None:
     asked = demand(RunSettings(LOCAL_LORA), CLUSTER)
     half = Resources(cpus=1, gpus=0.5)
-    assert parts(LOCAL_LORA) == [{TRAINER: half, "engine/policy/0": half}, {BRIDGE: Resources(1, 1)}]  # (verbatim)
+    assert parts(LOCAL_LORA) == [{TRAINER: half, "engine/policy/0": half}, {BRIDGE: Resources(0.5, 1)}]  # (verbatim)
     assert asked.bundles[0].on_driver and not asked.bundles[1].on_driver
-    assert asked.driver == Resources(cpus=2, memory_gib=2)  # (the loop, and one runner of 8 places for 6 at once)
-    assert asked.total == Resources(cpus=5, memory_gib=3, gpus=1) and asked.strategy == "PACK"
+    assert asked.driver == Resources(cpus=0.5, memory_gib=2)  # (measured: 0.1 of a CPU, 1.3 GiB)
+    assert asked.total == Resources(cpus=3, memory_gib=3, gpus=1) and asked.strategy == "PACK"
 
 
 def test_the_acceptance_runs_tinker_trainer_is_metered_and_its_engine_host_and_bridge_are_scheduled() -> None:
     asked = demand(RunSettings(ACCEPTANCE), CLUSTER)
     assert parts(ACCEPTANCE) == [{"engine/policy/0": Resources(cpus=1, gpus=1)}, {BRIDGE: Resources(2, 1)}]
     assert asked.asks(TRAINER) is None  # (Tinker's: bounded by spend, not placed)
-    assert asked.total == Resources(cpus=5, memory_gib=3, gpus=1)
+    assert asked.total == Resources(cpus=3.5, memory_gib=3, gpus=1)
     assert asked.bundles[0].resources.bundle() == {"CPU": 1, "GPU": 1}
     assert asked.bundles[1].resources.bundle() == {"CPU": 2, "memory": 2**30}
     assert requested(asked, kubernetes=True) == asked.total + HEADROOM + SUBMITTER
@@ -60,12 +60,19 @@ def test_the_acceptance_runs_tinker_trainer_is_metered_and_its_engine_host_and_b
 
 def test_tinker_alone_asks_ray_for_its_driver_only() -> None:
     asked = demand(RunSettings(TINKER), CLUSTER)
-    assert asked.bundles == () and asked.total == Resources(cpus=2, memory_gib=2)
+    assert asked.bundles == () and asked.total == Resources(cpus=0.5, memory_gib=2)
 
 
-def test_the_driver_counts_its_runners_and_the_sandbox_pools_its_environment_declares() -> None:
-    many = demand(RunSettings({**TINKER, "episodes_at_once": 20}), CLUSTER, sandboxes={"minecraft", "unknown"})
-    assert many.driver == Resources(cpus=1 + 3 + 6 * 2, memory_gib=2 + 6 * 1.75)  # (3 runners; 6 worlds of 2 CPUs)
+def test_the_driver_asks_the_same_however_many_episodes_it_plays_and_nothing_for_their_sandboxes() -> None:
+    few = demand(RunSettings({**TINKER, "episodes_at_once": 2}), CLUSTER)
+    many = demand(RunSettings({**TINKER, "episodes_at_once": 64}), CLUSTER)
+    assert few == many and many.driver == Resources(cpus=0.5, memory_gib=2)  # (its episodes wait on the model)
+    preset = tomllib.loads((ROOT / "deploy" / "chart" / "rollout" / "files" / "presets" / "minecraft-one-gpu.toml")
+                           .read_text())  # fmt: skip
+    minecraft = demand(RunSettings({**flattened(preset), "kind": "train"}), CLUSTER)
+    assert minecraft.driver == Resources(cpus=0.5, memory_gib=2)  # (its six worlds are the pool's: none of them here)
+    assert minecraft.total == Resources(cpus=3, memory_gib=3, gpus=1)
+    assert requested(minecraft, kubernetes=True) == Resources(cpus=3.35, memory_gib=5.25, gpus=1)
 
 
 def test_an_eval_of_a_checkpoint_has_a_bridge_bundle_and_a_check_none() -> None:
@@ -90,9 +97,10 @@ def test_replicas_are_bundles_of_their_own_and_a_bridge_asks_what_the_cluster_sa
 def test_a_run_too_big_for_one_pod_gets_a_worker_pod_for_each_engine_host() -> None:
     asked = demand(RunSettings({**ACCEPTANCE, "channels.policy.replicas": 2}), CLUSTER)
     (one,) = pods(asked)
-    assert one.ray == Resources(cpus=6, memory_gib=3, gpus=2) and one.requests == one.ray + HEADROOM
+    assert one.ray == Resources(cpus=5, memory_gib=3, gpus=2)  # (Ray starts with whole CPUs)
+    assert one.requests == Resources(cpus=4.5, memory_gib=3, gpus=2) + HEADROOM  # (Kubernetes is asked what is asked)
     head, engines = pods(asked, Resources(memory_gib=14, gpus=1), known=("memory_gib", "gpus"))
-    assert (head.group, head.ray) == ("head", Resources(cpus=4, memory_gib=3))  # (the driver and the bridge)
+    assert (head.group, head.asked, head.ray.cpus) == ("head", Resources(cpus=2.5, memory_gib=3), 3)  # (driver, bridge)
     assert (engines.group, engines.replicas, engines.ray) == ("engines-0", 2, Resources(cpus=1, gpus=1))
 
 

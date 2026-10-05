@@ -84,14 +84,15 @@ rayjob:
 # Kueue, installed outside the chart (deploy/k3s/README.md), admits each run's RayJob whole: the RayJob is made
 # suspended in the LocalQueue `queue`, and starts once the ClusterQueue's quota holds every pod it asks for, so two runs
 # never hold half of what each needs. The chart makes a ResourceFlavor, the ClusterQueue with `quota` for the runs'
-# pods (sized for one node with one GPU; the platform's own pods are outside it), and the LocalQueue; the cluster
-# config names the queue and states the quota as its [capacity], so a run that asks for more is refused.
+# pods, and the LocalQueue; the cluster config names the queue and states the quota as its [capacity], so a run that
+# asks for more is refused. The quota is what one node of 20 CPUs and 23 GiB with one GPU has beside the platform's own
+# pods (about 4 CPUs and 6.5 GiB) and the Minecraft pool's (4 CPUs, 7.5 GiB), which are outside it.
 kueue:
   enabled: false
   queue: runs                 # the LocalQueue, in the release's namespace
   clusterQueue: rollout
   flavor: rollout
-  quota: {cpus: 12, memoryGib: 16, gpus: 1}
+  quota: {cpus: 12, memoryGib: 9, gpus: 1}
 
 # The ledger service (`rollout ledger serve`): the ledger over HTTP for pods outside the cluster (RunPod's), each with a
 # token of its own; it checks tokens against ROLLOUT_LEDGER_TOKEN (the Secret `secrets.ledger`). `public` is where those

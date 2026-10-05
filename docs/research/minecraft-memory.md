@@ -10,9 +10,9 @@ Code: `minecraft_team.paper` (`HEAP`, `JVM`, `JAVA_ENVIRONMENT`), `minecraft_tea
 config](../guide/cluster.md)
 
 A world is a Paper server of its own and a Node process with one mineflayer bot per agent; the Python side is the
-episode and the bridge to both. A pool of worlds (`[sandboxes.minecraft]`) runs `size` of them at once, and a run's
-demand counts each pool's `size` times its `memory_gib`
-([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)).
+episode and the bridge to both. A pool of worlds (`[sandboxes.minecraft]`) runs `size` of them at once. A run's demand
+counts none of it: on Kubernetes the pool's own pod asks for its worlds' memory
+([Where sandboxes run](sandbox-placement.md)).
 
 ## How it was measured
 
@@ -96,15 +96,15 @@ Each world is a JVM and a Node process of its own: what they share is the JDK's 
 server's RSS is file pages, and its PSS is within 20 MiB of its RSS), so a pool's memory is its `size` times a world's,
 and the driver's Python 15 to 20 MiB more for each episode.
 
-| Pool of 6 (the chart's `size`) | Before | After |
+| Pool of 6 | Before | After |
 |---|---|---|
 | Staged tasks | 9.9 GiB | 6.6 GiB |
 | Survival, 15 turns | 12.6 to 15.6 GiB | 7.5 to 11 GiB |
-| The cluster config's `memory_gib` | 1.5 a world, 9 GiB | 1.75 a world, 10.5 GiB |
 
-`memory_gib = 1.75` is about the peak of four bots walking apart on the surface: above every staged task and the
-nether, below bots that roam for long. The cluster config's `[guards] runs_gib` keeps a runner from claiming another
-episode while less than that is free, which covers the peaks a pool's count does not.
+1.75 GiB a world is about the peak of four bots walking apart on the surface: above every staged task and the nether,
+below bots that roam for long. The chart's pool pod asks for that for each of its worlds and is held to about 2.4 GiB
+each (`sandboxes.minecraft` in its values). On one machine, where the pool is in the run's driver, the cluster config's
+`[guards] runs_gib` keeps a runner from claiming another episode while less than that is free.
 
 ## What was considered and not done
 

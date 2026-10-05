@@ -14,6 +14,16 @@ spec:
   shutdownAfterJobFinishes: true
   ttlSecondsAfterFinished: {{ .Values.rayjob.ttlSeconds }}
   backoffLimit: {{ .Values.rayjob.backoffLimit }}
+  # The pod that submits the job and follows it (KubeRay gives it the `ray job submit` command): it uses 0.06 of a CPU
+  # and 130 MiB, measured, and Kueue counts its requests with the run's (rollout_train.demand.SUBMITTER).
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ray-job-submitter
+          image: {{ include "rollout.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 512Mi}}
   rayClusterSpec:
     rayVersion: {{ .Values.ray.version | quote }}
     headGroupSpec:

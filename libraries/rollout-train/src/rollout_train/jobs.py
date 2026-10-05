@@ -395,7 +395,7 @@ class Run:
         """The run's placement group (`rollout_train.demand.reserve`), waited for until Ray has reserved all of it."""
         import ray
 
-        asked = self.demand = demand(self.settings, self.cluster, sandboxes=self.sandboxes)
+        asked = self.demand = demand(self.settings, self.cluster)
         self.asked_at = time.time()
         self.group = reserve(asked, f"run/{self.run.id}")
         if self.group is None:
@@ -922,8 +922,7 @@ async def ran(run: Run) -> None:
             run.started["published"] = published
     free = ray_free()
     if free is not None:  # (the driver holds its own share already: as its job's entrypoint, or as this process)
-        kinds = (await asyncio.to_thread(declared, loaded))[0] if loaded is not None else frozenset[str]()
-        free = free + demand(run.settings, run.cluster, sandboxes=kinds).driver
+        free = free + demand(run.settings, run.cluster).driver
     findings = await checked(run.settings, run.cluster, run.ledger, loaded=loaded, own=run.run.id, free=free)
     refusing = [each for each in findings if each.refuses]
     if refusing:
