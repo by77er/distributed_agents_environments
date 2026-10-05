@@ -163,8 +163,6 @@ KEYS: tuple[Key, ...] = (
     Key("channels.*.lag", _I, 0, False, SAMPLING, "How many checkpoints behind it follows", least=0),
     Key("slots.*", _S, None, False, SAMPLING, "The channel a program's slot samples"),
     Key("self_judging", _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"),
-    Key("distill.channel", _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"),
-    Key("distill.k", _I + _N, None, False, TRAINED, "Top-k logprobs matched; none: the teacher scores", least=1),
     Key("eval.suite", _S + _N, None, False, frozenset({"eval"}), "The suite an eval plays, by name or `NAME@N`"),
     Key("eval.episodes", _I + _N, None, False, frozenset({"eval"}), "Episodes of each start", least=1),
     Key("check.episodes", _I, 1, False, frozenset({"check"}), "Scripted episodes a check plays", least=1),

@@ -15,13 +15,14 @@ from rollout_train.objectives import (
     PRESETS,
     Objective,
     component,
+    composed,
     from_trainer_settings,
     objective_of,
     problems,
     resolved,
 )
 from rollout_train.record import STARTS, scope, table, trained_objective
-from rollout_train.run_settings import KEYS, RunSettings, key_of, layered, objective_in
+from rollout_train.run_settings import KEYS, RunSettings, flattened, key_of, layered, objective_in
 
 
 def test_a_preset_and_overrides_resolve_to_a_full_objective() -> None:
@@ -46,7 +47,7 @@ def test_a_preset_and_overrides_resolve_to_a_full_objective() -> None:
 
 
 def test_a_family_accepts_its_components_and_refuses_the_rest() -> None:
-    assert FAMILIES == ("policy_gradient", "preference", "likelihood")
+    assert FAMILIES == ("policy_gradient", "preference", "likelihood", "distillation")
     accepted = {family: {each.key for each in COMPONENTS if family in each.families} for family in FAMILIES}
     assert "clip.low" in accepted["policy_gradient"] and "clip.low" not in accepted["preference"]
     assert "preference.beta" in accepted["preference"] and "advantage.baseline" in accepted["likelihood"]
@@ -65,7 +66,8 @@ def test_what_changes_between_steps_is_a_number() -> None:
     assert changeable == {
         "clip.low", "clip.high", "clip.dual", "importance.cap", "importance.floor", "kl.coefficient",
         "entropy.coefficient", "preference.beta", "preference.margin", "preference.desirable",
-        "preference.undesirable", "likelihood.coefficient",
+        "preference.undesirable", "likelihood.coefficient", "distillation.temperature", "distillation.advantage_clip",
+        "distillation.beta", "distillation.coefficient",
     }  # fmt: skip
     assert DEFAULT.changed({"clip.high": 0.3}).clip.high == 0.3
     with pytest.raises(ValueError, match=r"objective.ratio cannot change between steps"):
@@ -135,3 +137,62 @@ def test_a_run_started_again_trains_with_the_objective_its_start_recorded(tmp_pa
     found = asyncio.run(recorded())
     assert found is not None and objective_of(found) == PRESETS["dapo"].objective
     assert component("kl.coefficient") is not None and component("kl") is None
+
+
+def test_a_distillation_accepts_its_components_and_a_policy_gradient_a_distillation_term() -> None:
+    accepted = {each.key for each in COMPONENTS if "distillation" in each.families}
+    assert accepted == {
+        "importance.correction", "importance.level", "importance.cap", "importance.floor", "kl.target",
+        "kl.estimator", "kl.placement", "kl.coefficient", "aggregate", "constant_tokens", "reference",
+        "distillation.divergence", "distillation.form", "distillation.top_k", "distillation.temperature",
+        "distillation.advantage_clip", "distillation.beta", "distillation.teachers",
+    }  # fmt: skip
+    mixed = resolved("dapo", {"distillation.coefficient": 0.2, "distillation.form": "top_k", "distillation.top_k": 8})
+    assert mixed.distills and mixed.needs_top == 8 and mixed.needs_distribution
+    assert not PRESETS["dapo"].objective.distills
+    with pytest.raises(ValueError, match=r"distillation\.coefficient is 0"):
+        resolved("dapo", {"distillation.top_k": 8})
+    with pytest.raises(ValueError, match="not a component of a distillation objective"):
+        resolved("mopd", {"distillation.coefficient": 0.5})
+    with pytest.raises(ValueError, match="not to or from 0"):
+        PRESETS["dapo"].objective.changed({"distillation.coefficient": 0.5})
+    assert mixed.changed({"distillation.coefficient": 0.5}).distillation.coefficient == 0.5
+    assert resolved("mopd", {"kl.target": "reference"}).reference == "base"  # (the reference follows the KL's target)
+
+
+@pytest.mark.parametrize(
+    ("preset", "overrides", "keys"),
+    [
+        ("mopd", {"distillation.divergence": "forward_kl"}, {"distillation.divergence"}),
+        ("mopd", {"distillation.form": "top_k"}, {"distillation.top_k", "distillation.advantage_clip"}),
+        ("mopd", {"distillation.temperature": 2.0}, {"distillation.temperature"}),
+        ("mopd_top_k", {"distillation.temperature": 2.0}, {"distillation.temperature"}),
+        ("distillation", {"distillation.divergence": "jsd", "distillation.beta": 1.0}, {"distillation.beta"}),
+        ("mopd_top_k", {"kl.target": "old", "kl.coefficient": 0.1, "kl.placement": "reward"}, {"kl.placement"}),
+    ],
+)
+def test_a_distillation_that_means_nothing_is_refused(
+    preset: str, overrides: dict[str, JsonValue], keys: set[str]
+) -> None:
+    _, said = composed(preset, overrides)
+    assert {key for key, _ in said} == keys, said
+
+
+def test_teachers_are_a_table_of_channels_by_route_and_record_themselves() -> None:
+    made = resolved("mopd", {"distillation.teachers": {"gsm8k:env": "math", "*": "general"}})
+    said = made.to_json()
+    assert said["distillation.teachers"] == {"gsm8k:env": "math", "*": "general"}
+    assert Objective.from_json(said) == made and hash(made) == hash(Objective.from_json(said))
+    assert objective_of({"preset": "mopd", "distillation": {"teachers": {"*": "t"}}}).distillation.teachers == {
+        "*": "t"
+    }
+    with pytest.raises(ValueError, match="a table of text by text"):
+        resolved("mopd", {"distillation.teachers": {"*": 3}})
+    with pytest.raises(ValueError, match="a table of text by text"):
+        resolved("mopd", {"distillation.teachers": "teacher"})
+    keys = {each.pattern: each for each in KEYS}
+    assert keys["objective.distillation.teachers"].types == ("table", "null")
+    settings = layered(
+        {"objective.preset": "mopd"}, flattened({"objective": {"distillation": {"teachers": {"*": "t"}}}})
+    )
+    assert objective_in(settings).distillation.teachers == {"*": "t"}

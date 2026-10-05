@@ -2,7 +2,8 @@
 
 An algorithm decides what to train on: segments, and how much each should count (`Weighted`), for a policy gradient
 or a likelihood; pairs of episodes' segments, one preferred to the other (`Pair`), or episodes' segments labelled
-desirable or undesirable (`Labelled`), for a preference loss. Which the trainer's objective takes is its family's
+desirable or undesirable (`Labelled`), for a preference loss; segments with a teacher's scores of their sampled tokens
+(`Distilled`), for distillation. Which the trainer's objective takes is its family's
 (`rollout_train.objectives`), which a trainer says (`objective`; the `default` preset if it says none). A trainer takes
 a batch, moves the policy, and says where the new weights are (`Step`). It also says what it can take (`Budget`): the
 longest segment, and how many a step can afford. Those come from its hardware, and nothing above it chooses them. A
@@ -18,7 +19,7 @@ from typing import Protocol, runtime_checkable
 from pydantic import JsonValue
 
 from rollout_train.objectives import DEFAULT, Objective
-from rollout_train.recorder import Segment
+from rollout_train.recorder import Segment, TeacherScores
 
 
 @dataclass(frozen=True)
@@ -61,18 +62,32 @@ class Labelled:
         return self.side
 
 
-type Item = Weighted | Pair | Labelled
-"""What a batch holds: weighted segments, pairs or labelled examples (never a mixture)."""
+@dataclass(frozen=True)
+class Distilled:
+    """A segment and a teacher's scores of its sampled tokens (for the distillation family), and its episode's
+    advantage (for a policy gradient with a distillation term; 0 for a distillation alone)."""
+
+    segment: Segment
+    scores: TeacherScores
+    """One for each sampled token, in the order of the segment's spans, and which teacher gave them."""
+    advantage: float = 0.0
+    source: str = ""
+    """`RUN/GROUP/EPISODE/SLOT/INDEX`."""
+
+
+type Item = Weighted | Pair | Labelled | Distilled
+"""What a batch holds: weighted segments, pairs, labelled examples or distilled segments (never a mixture)."""
 
 
 def segments_of(item: Item) -> tuple[Segment, ...]:
     """The segments an item holds."""
-    return (item.segment,) if isinstance(item, Weighted) else item.segments
+    return (item.segment,) if isinstance(item, Weighted | Distilled) else item.segments
 
 
 def weight_of(item: Item) -> float:
-    """What the record of a step says an item counted for: a segment's advantage, a pair's 1, an example's 1 or -1."""
-    if isinstance(item, Weighted):
+    """What the record of a step says an item counted for: a segment's advantage (a distilled segment's 0 without a
+    policy gradient), a pair's 1, an example's 1 or -1."""
+    if isinstance(item, Weighted | Distilled):
         return item.advantage
     if isinstance(item, Labelled):
         return 1.0 if item.desirable else -1.0

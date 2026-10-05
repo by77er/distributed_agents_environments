@@ -10,14 +10,15 @@ earlier prompt exactly (a client's retry) replaces it.
 A segment also says what its turns were sampled with (`sampled_with`: the capabilities every one of them had, of
 `TOKEN_LEVEL`). A segment is trained on with an importance weight only if its tokens are the exact ones sampled and
 their behaviour logprobs are known (`BEHAVIOUR`), and only if its slot is trained (`trained`: a judge's segments are
-kept and never trained on).
+kept and never trained on). A segment a teacher has scored carries its scores (`teacher`, `TeacherScores`), for
+distillation.
 
 `segments_of` applies the rule to turns in the order they were sampled. It is a pure function of the turns: the
 gateway's turn store reads a session's turns back and exports them with it.
 """
 
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 TOKEN_LEVEL = ("token_exact", "sampled_logprobs", "honours_sampling")
@@ -41,6 +42,29 @@ class Span:
 
 
 @dataclass(frozen=True)
+class TeacherScores:
+    """A teacher's scores of a segment's sampled tokens, one for each, in the order of its spans (as
+    `Segment.logprobs`): its logprob of the token, and the teacher's most likely tokens there with their logprobs,
+    most likely first (`rollout_train.distillation.teacher_scores` makes them from a teacher's `Scores`)."""
+
+    teacher: str
+    """The channel that scored them."""
+    logprobs: list[float | None]
+    """Of each sampled token, given the tokens before it: none for one the teacher did not score (beyond its
+    context)."""
+    top_tokens: list[list[int]] = field(default_factory=list[list[int]])
+    """At each sampled token, the teacher's most likely tokens (at most the top-k asked for; fewer where it gave fewer,
+    none where it did not score the token), or empty where no top-k was asked for."""
+    top_logprobs: list[list[float]] = field(default_factory=list[list[float]])
+    """Their logprobs, beside `top_tokens`."""
+
+    @property
+    def top(self) -> int:
+        """The most tokens any position carries (0: no top-k)."""
+        return max((len(each) for each in self.top_tokens), default=0)
+
+
+@dataclass(frozen=True)
 class Segment:
     """A piece of a session's trajectory: tokens that only grew, as the policy saw and continued them."""
 
@@ -55,6 +79,8 @@ class Segment:
     trained: bool = True
     """Whether it may be trained on: false for a segment of a slot that is not trained (a judge's, a fixed
     opponent's), which is kept for what it shows and what it cost, and never trained on."""
+    teacher: TeacherScores | None = None
+    """A teacher's scores of its sampled tokens, where a teacher scored them (for distillation); none otherwise."""
 
     @property
     def sampled(self) -> int:

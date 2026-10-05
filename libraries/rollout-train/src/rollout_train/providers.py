@@ -447,6 +447,9 @@ class TrainerCapabilities:
     the model beside the policy), `no`."""
     entropy: bool = True
     """Whether it gives each position's entropy (an entropy bonus reads it)."""
+    distribution: bool = True
+    """Whether it gives the policy's logprobs of tokens other than the sampled ones (the top-k form of distillation
+    reads them at the teacher's top-k tokens)."""
 
 
 @dataclass(frozen=True)
@@ -500,7 +503,14 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
         TrainerKind(
             "tinker",
             TrainerCapabilities(
-                "lora", "tinker", _EVERY_FAMILY, True, frozenset({"tinker"}), reference="no", entropy=False
+                "lora",
+                "tinker",
+                _EVERY_FAMILY,
+                True,
+                frozenset({"tinker"}),
+                reference="no",
+                entropy=False,
+                distribution=False,
             ),
             "rollout_tinker:TinkerTrainer",
             "rollout_tinker.settings:TinkerSettings",

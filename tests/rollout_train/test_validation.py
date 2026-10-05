@@ -181,7 +181,6 @@ def test_the_rules_are_reported_in_their_order() -> None:
         ({"channels.rival.provider": "local-vllm", "channels.rival.mode": "follows"}, "follows another channel of"),
         ({"channels.rival.provider": "local-vllm", "channels.rival.lag": 2}, "follows and lag are for mode = follows"),
         ({"slots.agent-1": "nobody"}, "slot agent-1 samples channel nobody, which the settings do not describe"),
-        ({"distill.k": 20}, "name its channel, distill.channel"),
         ({"kind": "deploy"}, "kind is one of train, eval, imitate, check"),
     ],
 )
@@ -481,7 +480,7 @@ def test_a_component_the_family_does_not_accept_and_a_combination_that_means_not
     assert refused("objective", findings(simpo)) == ["the margin loss compares likelihoods alone: reference = none"]
     assert refused("settings", findings({**LOCAL_LORA, "objective.preset": "nothing"})) == [
         "objective.preset is one of default, reinforce, rloo, ppo_clip, grpo, dr_grpo, dapo, gspo, cispo, sft, dpo, "
-        "ipo, simpo, kto, orpo, not 'nothing'"
+        "ipo, simpo, kto, orpo, on_policy_distillation, distillation, mopd, mopd_top_k, not 'nothing'"
     ]
     assert refused("settings", findings({**LOCAL_LORA, "objective.clip.kind": "tight"})) == [
         "objective.clip.kind is one of none, ratio, weight, dual, not 'tight'"
@@ -562,27 +561,57 @@ def test_evals_name_suites_that_exist() -> None:
 # distillation
 
 
-def teacher(provider: str, model: str, renderer: str = "rollout_qwen:qwen35") -> dict[str, JsonValue]:
+def teacher(
+    provider: str, model: str, renderer: str = "rollout_qwen:qwen35", *, preset: str = "mopd", channel: str = "teacher"
+) -> dict[str, JsonValue]:
+    """A distillation by `preset` whose every route goes to `channel`, served by `provider`."""
     return {
-        "distill.channel": "teacher", "channels.teacher.provider": provider, "channels.teacher.model": model,
-        "channels.teacher.renderer": renderer,
+        "objective.preset": preset, "objective.distillation.teachers": {"*": channel},
+        f"channels.{channel}.provider": provider, f"channels.{channel}.model": model,
+        f"channels.{channel}.renderer": renderer,
     }  # fmt: skip
 
 
 def test_a_teacher_needs_the_logprobs_distillation_reads() -> None:
     assert refused("distillation", findings(teacher("tinker", "Qwen/Qwen3.5-9B"))) == [
-        "provider tinker's prompt logprobs are declared by its SDK but not yet confirmed by a live test"
+        "provider tinker's prompt logprobs and top logprobs are declared by its SDK but not yet confirmed by a live "
+        "test: it cannot teach until they are"
     ]
     assert refused("distillation", findings(teacher("openai", "gpt-5", "rollout_openai:text"))) == [
         "the teacher's provider openai (api) does not return prompt logprobs, to score the student's tokens",
         "the teacher renders as rollout_openai:text, of another family than the student's rollout_qwen:qwen35: their "
         "tokens do not compare",
     ]
-    assert refused("distillation", findings({**teacher("local-vllm", "Qwen/Qwen3.5-4B"), "distill.k": 50})) == [
-        "the teacher's provider local-vllm (vllm) does not return top-50 logprobs"
+    top = {**teacher("local-vllm", "Qwen/Qwen3.5-4B", preset="mopd_top_k"), "trainer.provider": "local-lora"}
+    assert refused("distillation", findings(top)) == [
+        "the teacher's provider local-vllm (vllm) returns at most 20 top logprobs a position, and the objective reads "
+        "64 (its max_logprobs)"
     ]
-    assert refused("distillation", findings({**teacher("local-vllm", "Qwen/Qwen3.5-4B"), "distill.k": 20})) == []
+    assert refused("distillation", findings({**top, "objective.distillation.top_k": 20})) == []
+    assert refused("distillation", findings(teacher("local-vllm", "Qwen/Qwen3.5-4B"))) == []
     assert refused("distillation", findings(teacher("local-vllm", "Qwen/Qwen3.5-4B", "rollout_qwen:qwen3"))) == []
+    mixed = {**teacher("local-vllm", "Qwen/Qwen3.5-4B", preset="dapo"), "objective.distillation.coefficient": 0.1}
+    assert refused("distillation", findings(mixed)) == [] and refused("objective", findings(mixed)) == []
+
+
+def test_a_distillation_needs_a_teacher_for_every_route_and_for_the_environment_it_plays() -> None:
+    assert refused("distillation", findings({"objective.preset": "mopd"})) == [
+        'a distillation needs a teacher channel for each route it plays: objective.distillation.teachers = {"*" = '
+        '"teacher"}, say'
+    ]
+    routes: dict[str, JsonValue] = {"objective.distillation.teachers": {GSM8K: "teacher", "other:env": "elsewhere"}}
+    assert refused("distillation", findings({**teacher("local-vllm", "Qwen/Qwen3.5-4B"), **routes})) == [
+        "the teacher's channel elsewhere has no provider"
+    ]
+    away: dict[str, JsonValue] = {"objective.distillation.teachers": {"other:env": "teacher"}}
+    assert refused("distillation", findings({**teacher("local-vllm", "Qwen/Qwen3.5-4B"), **away})) == [
+        f"no route names {GSM8K}, which the run plays: route it, or every environment (`*`)"
+    ]
+    rows: dict[str, JsonValue] = {"objective.distillation.teachers": {f"{GSM8K}/hard": "teacher"}}
+    said = findings({**teacher("local-vllm", "Qwen/Qwen3.5-4B"), **rows})
+    assert refused("distillation", said) == [] and noted("distillation", said) == [
+        f"only some rows of {GSM8K} are routed: an episode of another row is not scored, and trains nothing"
+    ]
 
 
 def test_a_teacher_needs_a_trainer_that_scores() -> None:
@@ -590,6 +619,16 @@ def test_a_teacher_needs_a_trainer_that_scores() -> None:
     cluster = with_trainer(CLUSTER, "tinker-lora", capabilities=capabilities)
     reasons = refused("distillation", findings(teacher("local-vllm", "Qwen/Qwen3.5-4B"), cluster=cluster))
     assert reasons == ["the tinker-lora trainer does not score tokens, which distillation needs"]
+
+
+def test_tinker_trains_the_policy_gradient_form_of_distillation_and_not_the_top_k_form() -> None:
+    assert refused("objective", findings(teacher("local-vllm", "Qwen/Qwen3.5-4B"))) == []
+    assert refused("objective", findings(teacher("local-vllm", "Qwen/Qwen3.5-4B", preset="mopd_top_k"))) == [
+        "the tinker-lora trainer gives the logprobs of the sampled tokens only, and the top_k form reads the "
+        "student's logprobs of the teacher's top-k tokens: distillation.form = policy_gradient"
+    ]
+    local = {**teacher("local-vllm", "Qwen/Qwen3.5-4B", preset="mopd_top_k"), "trainer.provider": "local-lora"}
+    assert refused("objective", findings(local)) == []
 
 
 # environment

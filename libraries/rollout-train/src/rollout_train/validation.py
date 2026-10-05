@@ -21,6 +21,7 @@ from pydantic import JsonValue
 from rollout_train.algorithm import needs_of
 from rollout_train.bridges import AUTO, Bridge, NoBridge, path, rank_factor
 from rollout_train.cluster import Cluster, auth_problem
+from rollout_train.distillation import routes_of
 from rollout_train.objectives import DEFAULT, POLICY_GRADIENT, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
 from rollout_train.registry import Taken, valid
@@ -79,10 +80,14 @@ RULES: tuple[Rule, ...] = (
     Rule(
         "objective",
         "a component its family does not accept, a combination that means nothing, a family the trainer or the kind of "
-        "run does not take, a reference or an entropy the trainer cannot give",
+        "run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give",
     ),
     Rule("evals", "a suite that does not exist, or whose environment is not offered"),
-    Rule("distillation", "a teacher without the logprobs distillation needs, or of another renderer family"),
+    Rule(
+        "distillation",
+        "no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or "
+        "whose logprobs are unchecked, or of another renderer family",
+    ),
     Rule("environment", "not offered, does not load, or needs sandboxes or tool sets the cluster lacks"),
     Rule("capacity", "more GPUs than the cluster has"),
     Rule("pools", "more adapter slots than a shared pool has"),
@@ -309,10 +314,6 @@ def _settings(run: _Run) -> None:
         declared = Declared(run.environment.slots, run.environment.untrained, run.environment.judges)
         for key, reason in slot_problems(settings, declared, run.serving()):
             run.refuse("settings", key, reason)
-    if settings["distill.k"] is not None and settings["distill.channel"] is None:
-        run.refuse(
-            "settings", "distill.k", "distill.k says how a teacher is matched: name its channel, distill.channel"
-        )
 
 
 def _channel(run: _Run, channel: str) -> None:
@@ -632,6 +633,10 @@ def _objective(run: _Run) -> None:
     if objective.needs_entropy and not offered.entropy:
         run.refuse("objective", "objective.entropy.coefficient", f"the {trainer.name} trainer gives no entropies, and "
                    "an entropy bonus reads them")  # fmt: skip
+    if objective.needs_distribution and not offered.distribution:
+        run.refuse("objective", "objective.distillation.form", f"the {trainer.name} trainer gives the logprobs of the "
+                   "sampled tokens only, and the top_k form reads the student's logprobs of the teacher's top-k "
+                   "tokens: distillation.form = policy_gradient")  # fmt: skip
 
 
 def _reads(objective: Objective) -> str:
@@ -656,32 +661,55 @@ def _evals(run: _Run) -> None:
 
 
 def _distillation(run: _Run) -> None:
-    teacher = run.settings["distill.channel"]
-    if not isinstance(teacher, str) or run.kind != "train":
+    """A training run whose objective distills: a teacher channel for each route, covering the environment it plays,
+    each served by providers that return the logprobs it reads, in the student's renderer family. (A step on a dataset
+    of teacher samples reads the scores its segments carry, and asks no teacher.)"""
+    objective = _objective_of(run)
+    if run.kind != "train" or objective is None or not objective.distills:
         return
-    if teacher not in run.settings.channels or not run.settings.providers(teacher):
-        run.refuse("distillation", "distill.channel", f"the teacher's channel {teacher} has no provider")
+    key = "objective.distillation.teachers"
+    teachers = objective.distillation.teachers
+    if not teachers:
+        run.refuse("distillation", key, "a distillation needs a teacher channel for each route it plays: "
+                   'objective.distillation.teachers = {"*" = "teacher"}, say')  # fmt: skip
         return
+    environment = run.settings["environment"]
+    if isinstance(environment, str):
+        covered = routes_of(teachers, environment)
+        if covered == "none":
+            run.refuse("distillation", key, f"no route names {environment}, which the run plays: route it, or every "
+                       "environment (`*`)")  # fmt: skip
+        elif covered == "some":
+            run.note("distillation", key, f"only some rows of {environment} are routed: an episode of another row is "
+                     "not scored, and trains nothing")  # fmt: skip
     if run.trainer is not None and not run.trainer.capabilities.scores:
-        run.refuse("distillation", "distill.channel", f"the {run.trainer.name} trainer does not score tokens, which "
-                   "distillation needs")  # fmt: skip
-    k = run.settings["distill.k"]
-    for name, provider in run.providers(teacher):
-        offered = provider.capabilities
-        need, has = ("prompt_logprobs", offered.prompt_logprobs) if k is None else (
-            "top_logprobs", isinstance(k, int) and offered.top_logprobs >= k)  # fmt: skip
-        if need in offered.unchecked:
-            run.refuse("distillation", "distill.channel", f"provider {name}'s {need.replace('_', ' ')} are declared "
-                       "by its SDK but not yet confirmed by a live test")  # fmt: skip
-        elif not has:
-            wanted = "prompt logprobs, to score the student's tokens" if k is None else f"top-{k} logprobs"
-            run.refuse("distillation", "distill.channel", f"the teacher's provider {name} ({provider.kind}) does not "
-                       f"return {wanted}")  # fmt: skip
+        run.refuse("distillation", key, f"the {run.trainer.name} trainer does not score tokens, which distillation "
+                   "needs")  # fmt: skip
+    top_k = objective.needs_top
     student = run.settings.get(f"channels.{run.settings.trained}.renderer")
-    renderer = run.settings.get(f"channels.{teacher}.renderer")
-    if isinstance(student, str) and isinstance(renderer, str) and _family(student) != _family(renderer):
-        run.refuse("distillation", f"channels.{teacher}.renderer", f"the teacher renders as {renderer}, of another "
-                   f"family than the student's {student}: their tokens do not compare")  # fmt: skip
+    for teacher in sorted(set(teachers.values())):
+        if teacher not in run.settings.channels or not run.settings.providers(teacher):
+            run.refuse("distillation", key, f"the teacher's channel {teacher} has no provider")
+            continue
+        for name, provider in run.providers(teacher):
+            offered = provider.capabilities
+            unchecked = sorted(offered.unchecked & {"prompt_logprobs", "top_logprobs"})
+            if unchecked:
+                which = " and ".join(each.replace("_", " ") for each in unchecked)
+                run.refuse("distillation", key, f"provider {name}'s {which} are declared by its SDK but not yet "
+                           "confirmed by a live test: it cannot teach until they are")  # fmt: skip
+                continue
+            if not offered.prompt_logprobs:
+                run.refuse("distillation", key, f"the teacher's provider {name} ({provider.kind}) does not return "
+                           "prompt logprobs, to score the student's tokens")  # fmt: skip
+            elif top_k and offered.top_logprobs < top_k:
+                run.refuse("distillation", key, f"the teacher's provider {name} ({provider.kind}) returns at most "
+                           f"{offered.top_logprobs} top logprobs a position, and the objective reads {top_k} (its "
+                           "max_logprobs)")  # fmt: skip
+        renderer = run.settings.get(f"channels.{teacher}.renderer")
+        if isinstance(student, str) and isinstance(renderer, str) and _family(student) != _family(renderer):
+            run.refuse("distillation", f"channels.{teacher}.renderer", f"the teacher renders as {renderer}, of another "
+                       f"family than the student's {student}: their tokens do not compare")  # fmt: skip
 
 
 def _family(renderer: str) -> str:

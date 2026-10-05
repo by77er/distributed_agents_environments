@@ -10,7 +10,10 @@ A **family** fixes what a batch item is and the core term of the loss (`FAMILIES
   labelled desirable or undesirable (`rollout_train.trainer.Labelled`), a function of each side's log-likelihood
   ratio to the reference (or of its likelihood alone, for a loss without one);
 - `likelihood`: a segment with a weight, the weighted log-likelihood of its sampled tokens (supervised fine-tuning,
-  imitation).
+  imitation);
+- `distillation`: a segment with a teacher's logprobs of its sampled tokens, and optionally the teacher's top-k tokens
+  and logprobs at each (`rollout_train.trainer.Distilled`), a divergence between the teacher's next-token distribution
+  and the policy's (`Distillation`).
 
 A **component** (`COMPONENTS`) has a dotted key under `objective.` in a run's settings (`objective.clip.low`), the
 values it takes, the families that accept it, and whether it may change between steps (the numbers may; what decides
@@ -24,6 +27,9 @@ resolved objective, so what a run trains with never depends on what a preset mea
 Where a component that follows from another is not given, it follows: a KL to the reference reads the base model
 (`reference = base`), a preference loss with a reference reads it and one without does not, and an odds ratio is of
 length-normalized likelihoods.
+
+A policy gradient can add a distillation term with a coefficient (`distillation.coefficient`), as a preference loss can
+add a likelihood term: its batch items are then distilled segments, each with its episode's advantage.
 
 A trainer's own settings can name an objective too (`from_trainer_settings`): `objective = "policy_gradient"` is the
 `default` preset and `"likelihood"` is `sft`, and `ratio`, `clip_low`, `clip_high`, `segment_clip_low`,
@@ -46,6 +52,7 @@ __all__ = [
     "Advantage",
     "Clip",
     "Component",
+    "Distillation",
     "Entropy",
     "Importance",
     "Kl",
@@ -62,7 +69,8 @@ __all__ = [
 ]
 
 POLICY_GRADIENT, PREFERENCE, LIKELIHOOD = "policy_gradient", "preference", "likelihood"
-FAMILIES = (POLICY_GRADIENT, PREFERENCE, LIKELIHOOD)
+DISTILLATION = "distillation"
+FAMILIES = (POLICY_GRADIENT, PREFERENCE, LIKELIHOOD, DISTILLATION)
 """Every family, the primary selector of an objective."""
 
 
@@ -157,6 +165,40 @@ class Likelihood:
 
 
 @dataclass(frozen=True)
+class Distillation:
+    """A divergence between a teacher's next-token distribution and the policy's at each sampled token
+    (`rollout_objectives.distillation`)."""
+
+    divergence: str = "reverse_kl"
+    """`reverse_kl`, KL(policy || teacher); `forward_kl`, KL(teacher || policy); `jsd`, GKD's generalized
+    Jensen-Shannon divergence, `beta·KL(teacher || m) + (1 - beta)·KL(policy || m)` with `m = beta·teacher + (1 -
+    beta)·policy`."""
+    form: str = "policy_gradient"
+    """`policy_gradient`: each sampled token's advantage is the teacher's logprob less the policy's at the step's start
+    (no gradient), clipped to `advantage_clip`, and its loss the advantage times the policy's logprob (the reverse KL's
+    gradient, estimated from the sampled tokens alone). `top_k`: the divergence over the teacher's top-k tokens at each
+    sampled position: for `reverse_kl`, of the probabilities as they are there (MOPD's top-k form); for `forward_kl`
+    and `jsd`, of both distributions renormalized over those tokens, at `temperature` (the rest of the vocabulary is
+    dropped)."""
+    top_k: int = 0
+    """How many of the teacher's most likely tokens each sampled position carries (0: its logprob of the sampled token
+    alone)."""
+    temperature: float = 1.0
+    """For a renormalized top-k divergence: both sides' logprobs are divided by it before renormalizing, and the
+    divergence is multiplied by its square (Hinton et al., 2015)."""
+    advantage_clip: float = 0.0
+    """For the `policy_gradient` form: the advantage is clipped to -this .. this (0: not clipped)."""
+    beta: float = 0.5
+    """For `jsd`: the teacher's weight in the mixture, between 0 and 1."""
+    teachers: Mapping[str, str] = field(default_factory=dict[str, str], hash=False)
+    """The teacher channel that scores each episode, by route: an environment (`module:name`), one of its rows
+    (`module:name/ROW`), or `*` for any other (`rollout_train.distillation.teacher_for`). One teacher scores each
+    segment; teachers are never combined."""
+    coefficient: float = 0.0
+    """For a policy gradient: a distillation term beside it, times this (0: none)."""
+
+
+@dataclass(frozen=True)
 class Objective:
     """An objective, every component of it (those its family does not accept keep their defaults and mean nothing)."""
 
@@ -181,6 +223,7 @@ class Objective:
     adapter switched off; a frozen copy for a full-weight trainer); `none`."""
     preference: Preference = field(default_factory=Preference)
     likelihood: Likelihood = field(default_factory=Likelihood)
+    distillation: Distillation = field(default_factory=Distillation)
     preset: str = "default"
     """The preset it was resolved from (what it says, not what it is: the components are)."""
 
@@ -193,7 +236,7 @@ class Objective:
         value: Any = self
         for part in key.split("."):
             value = getattr(value, part)
-        return cast(JsonValue, value)
+        return cast(JsonValue, dict(cast(Mapping[str, str], value)) if isinstance(value, Mapping) else value)
 
     def to_json(self) -> dict[str, JsonValue]:
         """What a run's start records: the preset, the family and the family's components."""
@@ -214,6 +257,8 @@ class Objective:
             if found is None or not found.changeable:
                 raise ValueError(f"objective.{key} cannot change between steps")
         made = _with(self, changes)
+        if made.distills != self.distills:  # (what a batch item is would change)
+            raise ValueError("objective.distillation.coefficient can change between steps, but not to or from 0")
         if said := problems(made, changes):
             raise ValueError("; ".join(reason for _, reason in said))
         return made
@@ -226,7 +271,24 @@ class Objective:
     @property
     def needs_behaviour(self) -> bool:
         """Whether its loss reads the logprobs the engine recorded (an importance correction)."""
-        return self.family == POLICY_GRADIENT and self.importance.correction != "none"
+        return self.family in (POLICY_GRADIENT, DISTILLATION) and self.importance.correction != "none"
+
+    @property
+    def distills(self) -> bool:
+        """Whether its loss reads a teacher's logprobs: a distillation, or a policy gradient with a distillation term
+        (its batch items are `rollout_train.trainer.Distilled`)."""
+        return self.family == DISTILLATION or (self.family == POLICY_GRADIENT and self.distillation.coefficient != 0)
+
+    @property
+    def needs_top(self) -> int:
+        """How many of the teacher's most likely tokens each sampled position must carry (0: none)."""
+        return self.distillation.top_k if self.distills else 0
+
+    @property
+    def needs_distribution(self) -> bool:
+        """Whether its loss reads the policy's logprobs of tokens other than the sampled ones: those of the teacher's
+        top-k (the `top_k` form of distillation)."""
+        return self.distills and self.distillation.form == "top_k"
 
     @property
     def needs_entropy(self) -> bool:
@@ -257,7 +319,9 @@ class Component:
 _PG = frozenset({POLICY_GRADIENT})
 _ADVANTAGED = frozenset({POLICY_GRADIENT, LIKELIHOOD})
 _PREFERENCE = frozenset({PREFERENCE})
-_S, _F, _I, _B = ("str",), ("float",), ("int",), ("bool",)
+_DISTILLED = frozenset({POLICY_GRADIENT, DISTILLATION})
+_AGGREGATED = frozenset({POLICY_GRADIENT, LIKELIHOOD, DISTILLATION})
+_S, _F, _I, _B, _T = ("str",), ("float",), ("int",), ("bool",), ("table",)
 COMPONENTS: tuple[Component, ...] = (
     Component("advantage.baseline", _S, _ADVANTAGED, False, "What a score is measured against",
               ("group_mean", "leave_one_out", "none")),
@@ -268,20 +332,20 @@ COMPONENTS: tuple[Component, ...] = (
     Component("clip.low", _F, _PG, True, "The ratio's lower bound, below 1", least=0),
     Component("clip.high", _F, _PG, True, "The ratio's upper bound, above 1", least=0),
     Component("clip.dual", _F, _PG, True, "Dual clipping's bound, in times a negative advantage", least=1, above=True),
-    Component("importance.correction", _S, _PG, False, "The correction for where tokens were sampled",
+    Component("importance.correction", _S, _DISTILLED, False, "The correction for where tokens were sampled",
               ("none", "untruncated", "truncate", "mask")),
-    Component("importance.level", _S, _PG, False, "A weight per token or per segment", ("token", "segment")),
-    Component("importance.cap", _F, _PG, True, "The largest weight", least=0, above=True),
-    Component("importance.floor", _F, _PG, True, "The smallest weight a mask keeps", least=0),
-    Component("kl.target", _S, _PG, False, "What the KL penalty measures against", ("none", "reference", "old")),
-    Component("kl.estimator", _S, _PG, False, "How the KL is estimated", ("k1", "k2", "k3")),
-    Component("kl.placement", _S, _PG, False, "Where the KL penalty goes", ("loss", "reward")),
-    Component("kl.coefficient", _F, _PG, True, "The KL penalty's weight", least=0),
+    Component("importance.level", _S, _DISTILLED, False, "A weight per token or per segment", ("token", "segment")),
+    Component("importance.cap", _F, _DISTILLED, True, "The largest weight", least=0, above=True),
+    Component("importance.floor", _F, _DISTILLED, True, "The smallest weight a mask keeps", least=0),
+    Component("kl.target", _S, _DISTILLED, False, "What the KL penalty measures against", ("none", "reference", "old")),
+    Component("kl.estimator", _S, _DISTILLED, False, "How the KL is estimated", ("k1", "k2", "k3")),
+    Component("kl.placement", _S, _DISTILLED, False, "Where the KL penalty goes", ("loss", "reward")),
+    Component("kl.coefficient", _F, _DISTILLED, True, "The KL penalty's weight", least=0),
     Component("entropy.coefficient", _F, _PG, True, "The entropy bonus's weight"),
-    Component("aggregate", _S, _ADVANTAGED, False, "How per-token losses become one",
+    Component("aggregate", _S, _AGGREGATED, False, "How per-token losses become one",
               ("token_mean", "segment_mean", "segment_sum", "constant")),
-    Component("constant_tokens", _I, _ADVANTAGED, False, "The token count `constant` divides by", least=1),
-    Component("reference", _S, frozenset({POLICY_GRADIENT, PREFERENCE}), False, "The reference model",
+    Component("constant_tokens", _I, _AGGREGATED, False, "The token count `constant` divides by", least=1),
+    Component("reference", _S, frozenset({POLICY_GRADIENT, PREFERENCE, DISTILLATION}), False, "The reference model",
               ("none", "base")),
     Component("preference.loss", _S, _PREFERENCE, False, "The preference loss",
               ("sigmoid", "hinge", "square", "margin", "odds_ratio", "kto")),
@@ -291,6 +355,20 @@ COMPONENTS: tuple[Component, ...] = (
     Component("preference.desirable", _F, _PREFERENCE, True, "KTO's weight of desirable examples", least=0),
     Component("preference.undesirable", _F, _PREFERENCE, True, "KTO's weight of undesirable examples", least=0),
     Component("likelihood.coefficient", _F, _PREFERENCE, True, "A likelihood term beside the preference loss", least=0),
+    Component("distillation.divergence", _S, _DISTILLED, False, "The divergence from the teacher",
+              ("reverse_kl", "forward_kl", "jsd")),
+    Component("distillation.form", _S, _DISTILLED, False, "From the sampled tokens, or over the teacher's top-k",
+              ("policy_gradient", "top_k")),
+    Component("distillation.top_k", _I, _DISTILLED, False, "The teacher's most likely tokens at each position",
+              least=0),
+    Component("distillation.temperature", _F, _DISTILLED, True, "A renormalized top-k divergence's temperature",
+              least=0, above=True),
+    Component("distillation.advantage_clip", _F, _DISTILLED, True, "The advantage's bound either side; 0: none",
+              least=0),
+    Component("distillation.beta", _F, _DISTILLED, True, "The teacher's weight in the JSD's mixture", least=0,
+              above=True),
+    Component("distillation.teachers", _T, _DISTILLED, False, "The teacher channel of each route"),
+    Component("distillation.coefficient", _F, _PG, True, "A distillation term beside the policy gradient", least=0),
 )  # fmt: skip
 """Every component, by dotted key under `objective.`."""
 _BY_KEY = {each.key: each for each in COMPONENTS}
@@ -450,6 +528,42 @@ PRESETS: Mapping[str, Preset] = {
             preference=Preference(loss="odds_ratio", beta=0.1, length_normalized=True),
             likelihood=Likelihood(coefficient=1.0),
         ),
+        _preset(
+            "on_policy_distillation",
+            "Agarwal et al., 2024 (GKD); Thinking Machines, 2025 (On-Policy Distillation)",
+            "the reverse KL on the student's own samples, from the teacher's logprob of each sampled token: its "
+            "advantage the teacher's logprob less the student's",
+            family=DISTILLATION,
+            importance=_NO_IMPORTANCE,
+            distillation=Distillation(divergence="reverse_kl", form="policy_gradient"),
+        ),
+        _preset(
+            "distillation",
+            "Hinton et al., 2015; Kim and Rush, 2016",
+            "the forward KL to the teacher's top-20 logprobs, renormalized over them, on the teacher's samples",
+            family=DISTILLATION,
+            importance=_NO_IMPORTANCE,
+            distillation=Distillation(divergence="forward_kl", form="top_k", top_k=20),
+        ),
+        _preset(
+            "mopd",
+            "Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo)",
+            "each sampled token's advantage the teacher's logprob less the student's, clipped at 5; a mean over each "
+            "segment's tokens; one teacher for each domain",
+            family=DISTILLATION,
+            importance=_NO_IMPORTANCE,
+            distillation=Distillation(divergence="reverse_kl", form="policy_gradient", advantage_clip=5.0),
+            aggregate="segment_mean",
+        ),
+        _preset(
+            "mopd_top_k",
+            "Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo)",
+            "MOPD's top-k form: the reverse KL over the teacher's top-64 tokens; a mean over each segment's tokens",
+            family=DISTILLATION,
+            importance=_NO_IMPORTANCE,
+            distillation=Distillation(divergence="reverse_kl", form="top_k", top_k=64),
+            aggregate="segment_mean",
+        ),
     )
 }
 """Every preset, by name."""
@@ -467,6 +581,8 @@ def _with(objective: Objective, overrides: Mapping[str, JsonValue]) -> Objective
         if (problem := _problem(found, value)) is not None:
             raise ValueError(f"objective.{key} {problem}")
         typed: Any = float(value) if "float" in found.types and isinstance(value, int | float) else value
+        if isinstance(value, dict):
+            typed = dict(value)
         made = _replaced(made, key.split("."), typed)
     return made
 
@@ -478,6 +594,11 @@ def _replaced(at: Any, parts: Sequence[str], value: Any) -> Any:
 
 
 def _problem(found: Component, value: JsonValue) -> str | None:
+    if "table" in found.types:  # (a table of text by text: the only table a component takes)
+        entries = cast(dict[Any, Any], value).items() if isinstance(value, dict) else None
+        if entries is None or not all(isinstance(key, str) and isinstance(each, str) for key, each in entries):
+            return f"is a table of text by text, not {json.dumps(value)}"
+        return None
     if isinstance(value, bool):
         ok = "bool" in found.types
     elif isinstance(value, int):
@@ -516,6 +637,13 @@ def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = N
             found.append(("clip.kind", f"clip.kind {objective.clip.kind} clips a ratio, and ratio is none"))
         if objective.clip.kind in ("ratio", "dual") and objective.clip.low >= 1:
             found.append(("clip.low", "clip.low is below 1: the ratio's lower bound is 1 - clip.low, above 0"))
+        if objective.distillation.coefficient == 0:
+            for key in overrides or {}:
+                if key.startswith("distillation.") and key != "distillation.coefficient":
+                    found.append(
+                        (key, f"objective.{key} shapes a distillation term, and distillation.coefficient is 0")
+                    )
+    if family in (POLICY_GRADIENT, DISTILLATION):
         if objective.importance.correction == "mask" and objective.importance.floor >= objective.importance.cap:
             found.append(("importance.floor", "importance.floor is below importance.cap: a mask keeps what is between"))
         if objective.kl.target == "reference" and objective.reference == "none":
@@ -523,7 +651,9 @@ def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = N
         if objective.kl.target == "none" and objective.kl.coefficient != 0:
             found.append(("kl.coefficient", "kl.coefficient weighs a KL penalty, and kl.target is none"))
         if objective.kl.target != "reference" and objective.reference != "none":
-            found.append(("reference", "a policy gradient reads the reference only for kl.target = reference"))
+            found.append(("reference", f"a {family} objective reads the reference only for kl.target = reference"))
+    if objective.distills:
+        found += _distillation_problems(objective)
     if family == PREFERENCE:
         loss = objective.preference.loss
         free = loss in ("margin", "odds_ratio")
@@ -535,6 +665,31 @@ def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = N
             found.append(("preference.length_normalized", "an odds ratio is of length-normalized likelihoods"))
         if loss == "kto" and objective.likelihood.coefficient != 0:
             found.append(("likelihood.coefficient", "a labelled example has no chosen side for a likelihood term"))
+    return found
+
+
+def _distillation_problems(objective: Objective) -> list[tuple[str, str]]:
+    """What is wrong with a distillation, or a policy gradient's distillation term."""
+    said = objective.distillation
+    found: list[tuple[str, str]] = []
+    renormalized = said.form == "top_k" and said.divergence != "reverse_kl"
+    if said.form == "policy_gradient" and said.divergence != "reverse_kl":
+        found.append(("distillation.divergence", "the policy_gradient form estimates the reverse KL from the sampled "
+                      "tokens alone: distillation.divergence = reverse_kl, or distillation.form = top_k"))  # fmt: skip
+    if said.form == "top_k" and said.top_k < 1:
+        found.append(("distillation.top_k", "the top_k form is over the teacher's top-k tokens: distillation.top_k is "
+                      "at least 1"))  # fmt: skip
+    if said.form == "top_k" and said.advantage_clip != 0:
+        found.append(("distillation.advantage_clip", "distillation.advantage_clip bounds the policy_gradient form's "
+                      "advantage, and the form is top_k: 0"))  # fmt: skip
+    if said.temperature != 1 and not renormalized:
+        found.append(("distillation.temperature", "distillation.temperature softens the renormalized top-k "
+                      "distributions of forward_kl and jsd in the top_k form: 1 otherwise"))  # fmt: skip
+    if said.divergence == "jsd" and said.beta >= 1:
+        found.append(("distillation.beta", "distillation.beta is the teacher's weight in the mixture, below 1"))
+    top_k_alone = objective.family == DISTILLATION and said.form == "top_k"
+    if top_k_alone and objective.kl.placement == "reward" and objective.kl.target != "none":
+        found.append(("kl.placement", "the top_k form has no advantage to take a KL penalty from: kl.placement = loss"))
     return found
 
 
@@ -563,7 +718,7 @@ def _followed(objective: Objective, given: Mapping[str, JsonValue]) -> Objective
     preference loss; an odds ratio's length normalization."""
     made = objective
     if "reference" not in given and ("kl.target" in given or "preference.loss" in given):
-        if made.family == POLICY_GRADIENT:
+        if made.family in (POLICY_GRADIENT, DISTILLATION):
             made = replace(made, reference="base" if made.kl.target == "reference" else "none")
         elif made.family == PREFERENCE:
             made = replace(made, reference="none" if made.preference.loss in ("margin", "odds_ratio") else "base")
@@ -637,10 +792,11 @@ def objective_of(given: Any = None, legacy: Mapping[str, Any] | None = None) -> 
 def _flat(table: Mapping[str, Any], prefix: str = "") -> dict[str, JsonValue]:
     flat: dict[str, JsonValue] = {}
     for key, value in table.items():
-        if isinstance(value, Mapping):
+        found = component(f"{prefix}{key}")
+        if isinstance(value, Mapping) and not (found is not None and "table" in found.types):
             flat |= _flat(cast(Mapping[str, Any], value), f"{prefix}{key}.")
         else:
-            flat[f"{prefix}{key}"] = value
+            flat[f"{prefix}{key}"] = cast(JsonValue, value)
     return flat
 
 

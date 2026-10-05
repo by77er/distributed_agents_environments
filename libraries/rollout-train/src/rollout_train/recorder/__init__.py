@@ -22,7 +22,7 @@ from rollout_train.recorder.renderers import (
     tokenizer_of,
 )
 from rollout_train.recorder.sampling import sample_turn
-from rollout_train.recorder.segments import BEHAVIOUR, TOKEN_LEVEL, Segment, Span, segments_of
+from rollout_train.recorder.segments import BEHAVIOUR, TOKEN_LEVEL, Segment, Span, TeacherScores, segments_of
 
 __all__ = [
     "BEHAVIOUR",
@@ -32,6 +32,7 @@ __all__ = [
     "Renderer",
     "Segment",
     "Span",
+    "TeacherScores",
     "ThinkingFormat",
     "ToolCallFormat",
     "XmlFunctionCalls",
