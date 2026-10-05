@@ -9,7 +9,7 @@ model](../train/README.md).
 An environment in a git repository can be imported into a cluster from the monitor (**Import from git** on its
 Environments page, [importing from git](../libraries/rollout-train/monitor.md#importing-from-git)), with nothing
 redeployed: the platform fetches its source at a commit, keeps it in the blob store, checks it in the Python
-environment it will run in, and records a version that launchers then offer. This page says what such a repository
+environment it will run in, and records a version the cluster then offers. This page says what such a repository
 holds, what its project may depend on, and what the import checks (`rollout_train.publishing`).
 
 ## What the repository holds
@@ -99,8 +99,8 @@ point, the blob, its runtime environment, what it says of itself (its version, d
 and the kinds of sandbox its program declares, `sandboxes`, as its check found them) and the check's findings, and when
 it was imported.
 
-Every launcher on Ray offers every version the ledger keeps, by `NAME@VERSION`, with each of its profiles that has a
-pool of every kind of sandbox the version declares (a version that declares none goes with every profile), and the New
-run form lists them with those profiles; the profile a run on one plays with is picked there, as for any environment. A run on one is a Ray job in the version's
-runtime environment, and its start records the version (`published`: its name, id, source, ref, commit,
+A cluster offers every version the ledger keeps, by `NAME@VERSION`, beside the environments its config names
+(`GET /api/offers`), and the New run form lists them; a run on one is asked for as on any environment, and is refused
+where the version declares a kind of sandbox the cluster has no pool of. A run on one is a Ray job in the version's
+runtime environment ([launching runs](../libraries/rollout-train/launching.md#the-job)), and its start records the version (`published`: its name, id, source, ref, commit,
 subdirectory and entry point).

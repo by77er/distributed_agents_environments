@@ -257,8 +257,8 @@ set served over HTTP reports the attribute of the one behind it
 
 `rollout tools FACTORY [--directory DIRECTORY] [--host 127.0.0.1] [--port 8700]` serves the tool set that
 `FACTORY` (`module:function`, called with the directory) returns. A run reaches it with `ToolBinding(url=...)`;
-task code calls `run.tools` the same way in both cases. A deployment profile names each tool set once
-([deploying](deploying.md)).
+task code calls `run.tools` the same way in both cases. A cluster config names each tool set served elsewhere once
+(`[tools.NAME] url`, [the cluster config](cluster.md)), and a run binds its programs' imports of that name to it.
 
 ## What tools are not
 

@@ -23,10 +23,10 @@ Read against main `0f90a2b`. Names in `code` that do not exist yet are what this
 | How formats meet | Trainers declare a checkpoint format (`peft`, `full`, `tinker`); inference providers declare the formats they load. A bridge (today's resharding layouts, generalised) turns one into the other as a Ray task on a CPU worker, chosen from the pair; a pair with no bridge is refused |
 | What capabilities are checked | Inference providers declare token-exactness, sampled, prompt and top-k logprobs, whether they honour sampling parameters, adapters by name, full-weight reload, context, streaming and cost. Trainers declare what they produce, their models, longest segment, objectives and whether they score. The trained channel needs a token-exact provider with sampled logprobs; turns record what they were sampled with |
 | How code reaches an environment | Only through an environment worker: one Ray actor per environment build, in that environment's own Python environment (a cached uv virtualenv, which Ray starts the actor in), answering a small protocol. The training loop, evals, `env check`, validation and the monitor ask it; runners that play its programs run in the same Python environment. The gateway, engine hosts, trainers and bridges stay in the platform's |
-| What runs on Ray | Everything. A run is a Ray job; engine hosts, trainers, runners, environment workers, sandbox pools and the launcher are actors; the gateway and the monitor are Ray Serve applications; bridges, merges, dataset builds and venv builds are tasks. A single machine is a local Ray head (`rollout cluster up`); Kubernetes is KubeRay |
+| What runs on Ray | Every run. A run is a Ray job (a RayJob on KubeRay); its engine hosts and trainer are actors; bridges, merges, dataset builds and venv builds are tasks. The gateway and the monitor are stateless HTTP services (the decisions after review) |
 | What replaces `Platform.open()` | `RunActors`: a run job's assembly of its placement group, trainer actor, engine hosts and runners, closed when the job ends. The loop no longer publishes to engines: it writes what each channel serves, and whatever serves follows |
-| The gateway | One Ray Serve application for the cluster. It builds each run's channels from the run's start (provider, model, renderer, limits) and samples them through one interface: engine host actors, vLLM servers elsewhere, Tinker's sampler (all asked for a checkpoint by name), or a frontier API |
-| Launchers | One detached launcher actor per cluster. It offers capacity, inference providers and trainers with their capabilities and the pairs that bridge, environments and sandbox pools; it validates and submits Ray jobs, and nothing else |
+| The gateway | Each run's driver serves one over the run's channels; the cluster's, a stateless HTTP service, builds each run's channels from the run's start (provider, model, renderer, limits) for clients elsewhere. Both sample through one interface: engine hosts, vLLM servers elsewhere, Tinker's sampler (all asked for a checkpoint by name) |
+| Launchers | None: the monitor and the CLI submit each run's job through one function, and the run's driver claims what it needs ([as built](#as-built-runs-claim-what-they-need)). What a cluster offers is read from the cluster config and heartbeats |
 | The acceptance test | A GSM8K run trained on Tinker (LoRA (low-rank adaptation), Qwen/Qwen3.5-4B) and served on the local vLLM pool through the Tinker → PEFT (parameter-efficient fine-tuning) bridge, launched from the New run form, with the `math` suite on a schedule, spend capped near $2 |
 
 ## What profiles hold today, and where each part goes
@@ -1259,6 +1259,38 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   their endpoints), not by Serve or actor handles. A channel's mode is read where its serving records are
   (`rollout_train.serving.serving_of`), so a `follows` channel and a pinned one are served by every follower and
   sampler unchanged. Tinker's and an API's samplers are still to come.
+
+### As built: runs claim what they need
+
+Commits 13, 14, 16 and 19 were carried out after the last decision after review (no launcher service), so they differ
+from the table above:
+
+- **No launcher.** The monitor's API (`POST /api/launches`, `/api/runs/RUN/resume`) and the CLI (`rollout train`,
+  `eval`, `imitate`, `env check`, `resume`) call one function, `rollout_train.submitting.submit`: it records the launch
+  (asked, with the settings as given and the preset they came from), registers the run, and starts the run's job
+  directly: a Ray job through `[ray] jobs` (`RayJobs`), or a RayJob custom resource made from `[kubernetes] rayjob`
+  (`RayJobResources`, under the monitor's service account). The launches table records each launch's state (asked,
+  submitted, running, stopping, stopped, ended, failed) and the job it became; there is no claim and no launcher beat.
+  `rollout cluster` has `check` alone ([launching runs](../libraries/rollout-train/launching.md)).
+- **The driver claims.** The job (`python -m rollout_train.jobs LAUNCH`, the cluster config in `ROLLOUT_CLUSTER_JSON`)
+  checks the settings again (`launching.checked`) and builds the run (`rollout_train.jobs.Run`): engine hosts of the
+  run's own for each channel on a `vllm` provider (`run/RUN/engine/CHANNEL/N`, each asking Ray for its share of a
+  GPU), the trainer actor (`run/RUN/trainer`) pinned to the driver's node, and, while Ray has yet to give them, beats
+  of kind `run` saying what it waits for. A refusal fails the launch with its reasons. There are no placement groups
+  and no `RunActors`: `Run` closes what it made when the job ends.
+- **Each run has its own gateway.** The driver serves a gateway in its process on a free local port, with a secret of
+  its own, over the run's channels: engine hosts through their actor handles, servers elsewhere at their addresses,
+  Tinker's sampler in the process. Runners, sandbox pools and the feed run in the driver too; bridges are Ray tasks.
+  The cluster's gateway (`rollout gateway --cluster`) is a stateless HTTP service that samples channels from runs'
+  starts for clients elsewhere.
+- **Resume is by run id.** `rollout resume RUN` and the monitor's Resume submit the run again from its start's
+  settings; a profile-era start needs a preset (`--preset`) that matches it key by key.
+- **Profiles are deleted, and presets are files.** The presets ship in `deploy/chart/rollout/files/presets`, one TOML
+  file a preset, saved beside the ledger by `rollout preset load DIR` and by the chart's hook at every install and
+  upgrade.
+
+What is left of the design: the New run form of §3 over the offers, and the environment worker (§4; runs import their environment in their own Python, which
+the cluster config's `[environments]` entry gives).
 
 ### What the acceptance run needs from each step
 

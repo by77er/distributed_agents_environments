@@ -1,8 +1,10 @@
 # K3s on WSL2
 
-A one-node Kubernetes cluster on the WSL2 machine, with KubeRay and the NVIDIA GPU reachable from pods, and the
+A one-node Kubernetes cluster on a WSL2 machine, with KubeRay and the NVIDIA GPU reachable from pods, and the
 platform in it: the chart `deploy/chart/rollout`. Nothing here locks the card: Kubernetes only accounts for it, and
-processes outside the cluster keep using it.
+processes outside the cluster keep using it. The deployment guide in [docs/deploy/](../../docs/deploy/README.md)
+describes each step for any cluster: [preparing it](../../docs/deploy/kubernetes.md), the
+[image](../../docs/deploy/image.md), the [chart](../../docs/deploy/helm.md) and [starting runs](../../docs/deploy/runs.md).
 
 | File | Does |
 |---|---|
@@ -46,24 +48,27 @@ The chart installs into the namespace `rollout`, by role:
 | Role | What runs | Reached at |
 |---|---|---|
 | Stores | StatefulSets `postgres` (the ledger) and `s3` (versitygw, the bucket `rollout-blobs`), each on its own volume | `postgresql://rollout@postgres.rollout:5432/rollout` (the password: `PGPASSWORD`), `http://s3.rollout:7070` |
-| Ray cluster | RayCluster `ray`: a head that runs no tasks, a GPU group (`runtimeClassName: nvidia`, one GPU, 14 GiB) and a CPU group (4 GiB), each from zero to one pod by the autoscaler, with token auth | `http://ray-head-svc.rollout:8265`, `http://ray.localhost` |
-| Launchers | Deployments `launcher-minecraft` and `launcher-gridworld` (the workspace's Python, the GPU) and `launcher-gsm8k` (rollout-verifiers' Python, no GPU): each submits the runs it claims to the Ray cluster, and each offers the environments imported from git besides its own | their beats, in the monitor's Machines tab |
-| Gateway | Deployment `gateway`, over the profile `gsm8k/gsm8k_tinker.toml` | `http://gateway.rollout:8900`, `http://gateway.localhost` |
-| Monitor | Deployments `monitor-main` (over curriculum-9's directory, so its ledger and every run in it) and `monitor-astra` (over `evaluations/astra-t054u`), each importing environments from git with the cluster config's blob store and Ray cluster (`--cluster`, with the cluster's token) | `http://monitor.localhost`, `http://astra.monitor.localhost` |
+| Ray cluster | RayCluster `ray`, where the monitors check environments imported from git: a head that runs no tasks, a GPU group (`runtimeClassName: nvidia`, one GPU, 14 GiB) and a CPU group (4 GiB), each from zero to one pod by the autoscaler, with token auth | `http://ray-head-svc.rollout:8265`, `http://ray.localhost` |
+| Runs | A RayJob for each run asked for, made from `files/rayjob.yaml`: a Ray cluster of its own, one head pod with `rayjob.gpus` of the card, where the run's driver, trainer and engine hosts run; submitted again up to `rayjob.backoffLimit` times when its driver is lost, and removed `rayjob.ttlSeconds` after it ends | the monitor's Runs and Machines tabs |
+| Gateway | Deployment `gateway`: `rollout gateway --cluster` | `http://gateway.rollout:8900`, `http://gateway.localhost` |
+| Monitor | A Deployment `monitor-NAME` for each of `monitors` (`main`): `rollout monitor --cluster` over the cluster config's ledger, or over `monitors.NAME.where` where it names one (a run's directory on the state volume, or a ledger's URL), importing environments from git with the cluster config's blob store and Ray cluster | `http://monitor.localhost` |
+| Presets | The Job `presets`, a hook at every install and upgrade: `rollout preset load /etc/rollout/presets --cluster` saves each of `files/presets` as a preset, a new version only where its newest one holds other settings | |
 
-Every pod of the platform mounts the same things:
+A monitor asks for each run from its page as a RayJob, under the ServiceAccount `monitor` (`templates/rbac.yaml`: create,
+get, list, watch and delete on `rayjobs` in the release's namespace), reads its status, and deletes it to stop the run.
+
+Every pod of the platform, a run's head pod among them, mounts the same things:
 
 - the volume `state` at `/root/.cache/rollout` (the code's `~/.cache/rollout`; the containers run as root): run
   directories, Minecraft's servers and worlds, the Hugging Face cache (`HF_HOME`), node-local scratch;
 - the ConfigMap `rollout` at `/etc/rollout`: `cluster.toml` (the cluster config, [docs/guide/cluster.md](../../docs/guide/cluster.md);
-  `ROLLOUT_CLUSTER` names it) and the profiles the commands take, under `profiles/LAUNCHER/`, each naming the
+  `ROLLOUT_CLUSTER` names it), `rayjob.yaml` (what its `[kubernetes] rayjob` names) and `presets/`, each naming the
   stores above. The chart's `files/` holds them;
 - the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`.
 
 Each process gets the stores' credentials from the Secret `stores` (`PGPASSWORD`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`), `AWS_ENDPOINT_URL`, and `TINKER_API_KEY` where the Secret `tinker` has one. Every container
-has requests and a memory limit (`values.yaml`), which keep the machine's 23 GB from running out. The launchers run
-under the ServiceAccount `launcher`, which may manage RayJobs and RayClusters.
+has requests and a memory limit (`values.yaml`), which keep the node's memory from running out.
 
 ### Install
 
@@ -73,7 +78,7 @@ The Secrets are made outside the chart, once:
 kubectl create namespace rollout
 kubectl -n rollout create secret generic stores --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
   --from-literal=ROOT_ACCESS_KEY_ID=rollout --from-literal=ROOT_SECRET_ACCESS_KEY="$(openssl rand -hex 24)"
-kubectl -n rollout create secret generic gateway-keys --from-file=gateway.keys=$HOME/.config/rollout/gsm8k-tinker.keys
+kubectl -n rollout create secret generic gateway-keys --from-literal=gateway.keys="k1 $(openssl rand -hex 32)"
 kubectl -n rollout create secret generic tinker --from-file=credentials.json=$HOME/.tinker/credentials.json \
   --from-literal=TINKER_API_KEY="$(python3 -c 'import json, os; d = json.load(open(os.path.expanduser("~/.tinker/credentials.json"))); print(d["keys"][d["default"]]["key"], end="")')"
 helm upgrade --install rollout deploy/chart/rollout -n rollout
@@ -94,8 +99,8 @@ names the latter, at install and at every upgrade after it, since a claim's clas
 helm upgrade --install rollout deploy/chart/rollout -n rollout --set storageClass=local-path-retain
 ```
 
-The install on this machine was made with `local-path`, so its volumes are set to Retain by hand, once, after any
-install that makes a new one:
+An install made with `local-path` keeps its volumes once they are set to Retain by hand, after any install that makes
+a new one:
 
 ```sh
 for pv in $(kubectl get pv -o name); do kubectl patch $pv -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'; done

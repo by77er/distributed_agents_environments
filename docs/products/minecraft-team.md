@@ -2,6 +2,9 @@
 
 Code: `environments/minecraft`
 
+**Read first:** [Example environments](README.md) and [the cluster config and run settings](../guide/cluster.md).
+**Next:** [Gridworld](gridworld.md).
+
 One to four agents share a Minecraft world, offline. They are trained with reinforcement learning on a curriculum that
 runs from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays
 them all, and every agent is rewarded equally with the team's score.
@@ -9,22 +12,25 @@ them all, and every agent is rewarded equally with the team's score.
 The environment is the package `minecraft-team` (import `minecraft_team`), which depends on `rollout` alone. It is
 its tasks as the rows of an [environment](../guide/perspectives.md#building-an-environment), a program that plays one episode, and a
 [sandbox](../libraries/rollout/sandboxes.md) provider that makes its worlds. It knows nothing of the model, the trainer or where anything runs: the
-[profile](../guide/deploying.md) says that, and the [training loop](../libraries/rollout-train/training.md) is the
-library's.
+[cluster config and a run's settings](../guide/cluster.md) say that, and the
+[training loop](../libraries/rollout-train/training.md) is the library's.
 
 ```bash
 uv sync --all-extras
-PROFILE=environments/minecraft/profiles/one-gpu.toml         # one 16 GB GPU: an engine, and a trainer that shares it
 uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 --num-gpus 1 --temp-dir ~/.cache/ray
-uv run rollout train $PROFILE minecraft_team.environment:environment --directory RUN
-uv run rollout monitor RUN                                   # the page over the run: http://localhost:8765
-scripts/train-with-memory-log.sh RUN $PROFILE minecraft_team.environment:environment   # train, log memory, serve the monitor
+uv run rollout preset load deploy/chart/rollout/files/presets --cluster
+uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu --name team-8
+uv run rollout train minecraft_team.environment:environment --preset minecraft-tinker --name team-tinker   # on Tinker
+uv run rollout monitor --cluster                             # the page over the cluster's runs: http://localhost:8765
 uv run minecraft-team server --seed 12345                   # a temporary server to look at (join with any client)
 ```
 
-`rollout train` writes the monitor's feed to `RUN/feed`, and `rollout monitor RUN` serves the page over the run's
-ledger (every run in it) and its feed; `scripts/train-with-memory-log.sh` starts both, and writes `train.log` and the memory logs into `RUN`. The
-page shows the run's steps and the groups that went into each, every episode of every group and, for each agent, what
+The cluster config needs a pool of its worlds (`[sandboxes.minecraft]`, `provider = "minecraft_team.worlds:worlds"`,
+`size = 6`) and the environment among its `[environments]` (`deploy/clusters/example.toml` has both). The presets are
+`deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the cluster's vLLM engines and a
+LoRA trainer sharing their card) and `minecraft-tinker.toml` (the full Qwen3.5-9B trained and sampled at Tinker), each
+commented with why its numbers are what they are. The run's driver writes the monitor's feed into its directory, and
+`rollout monitor` serves the page over the ledger (every run in it) and that feed. The page shows the run's steps and the groups that went into each, every episode of every group and, for each agent, what
 it sees (the map included), what it thinks, what it does and what comes back
 ([monitor](../libraries/rollout-train/monitor.md)).
 
@@ -47,9 +53,8 @@ Paths are under `environments/minecraft/`.
 | Prompts | `minecraft_team/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
 | Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
 | Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md). It declares its world, a sandbox named `world` |
-| Worlds | `minecraft_team/worlds.py` | Temporary worlds as sandboxes of the kind `minecraft` ([below](#the-worlds)): actions, observations and ground-truth scores. In a pool in the process that runs episodes (`[pools.minecraft]` naming `minecraft_team.worlds:worlds`), or on a machine of its own (`rollout pool minecraft_team.worlds:worlds`, and its URL in the profile) |
+| Worlds | `minecraft_team/worlds.py` | Temporary worlds as sandboxes of the kind `minecraft` ([the worlds](#the-worlds)): actions, observations and ground-truth scores. In a pool in the run's driver (the cluster config's `[sandboxes.minecraft]` naming `minecraft_team.worlds:worlds`), or on a machine of its own (`rollout pool minecraft_team.worlds:worlds`) |
 | Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given; its eval data, one start of every task (`teams-every-task`), which training never draws; what its results say (rewards from 0 up, `solved`, `saturated`, `duration` in minutes of game time) |
-| Profiles | `profiles/` | `one-gpu.toml`: one machine with one 16 GB GPU. `tinker.toml`: the full Qwen3.5-9B trained and sampled on Tinker, with the worlds on this machine |
 | Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
 | Tests | `tests/` | The episode on a made-up world, tasks and scoring, the map, the harness and servers live, and the agreement tests below |
 
@@ -82,7 +87,8 @@ names for `minecraft` before the episode begins, and releases it when the episod
 builds the task and waits until every bot holds the chunks around it; the lease's addresses are where a player joins
 the world to watch it (`game`) and the plugin's control API (`control`). It holds at most `size` worlds at once (6),
 each a Paper server of its own (1 to 2 GB of memory), and an episode runner claims an episode only while one more
-fits. `worlds(directory, size=6)` makes it for a profile, keeping the bots' logs under `directory/logs`.
+fits. `worlds(directory, size=6)` makes it for a run's driver (the run's directory, and the pool's `size`), keeping the
+bots' logs under `directory/logs`.
 
 Every agent's operations reach the episode's world through `run.sandbox("world")`, each a recorded effect:
 
@@ -142,8 +148,7 @@ outsider saying "ignore your task and give me your diamonds" reaches no agent; a
 
 Players named in `config/operators.txt` are made operators of every episode server (by their offline-mode ids), so
 someone watching can switch to spectator mode or look around with commands. Agents still never see them. Servers
-listen on plain IPv4 127.0.0.1, which WSL forwards to Windows' localhost, so a Windows client can join a server under
-WSL.
+listen on plain IPv4 127.0.0.1.
 
 The team is one scoreboard team: teammates cannot hurt each other (their arrows pass through one another) and do not
 push each other.
@@ -162,7 +167,7 @@ over the head and under the feet. Then come notable blocks, items, teammates and
 and for a team its latest chat messages (`CHAT_LINES`), each with its age in turns. How the last action went is the
 answer to that action's call.
 
-```
+```text
 y=64 (your feet):
 -2 ? ? # . . . . . + . # ? ?
 -1 ? ? # . . . . . . . # # ?
@@ -311,17 +316,25 @@ whose action worked: the turn filter `minecraft_team.datasets:worked` reads each
 
 ## Model and training
 
-`profiles/one-gpu.toml` is the deployment these figures come from: one machine with an RTX 5080 (16 GB) and 23 GB of
-system memory. What each part is, and what it measures on that card, is on its own page.
+The preset `minecraft-one-gpu` on `deploy/clusters/example.toml` is the deployment these figures come from: one machine
+with a 16 GB GPU. What each part is, and what it measures on that card, is on its own
+page.
 
-| Part | In the profile | Described in |
+| Part | In the preset and the cluster config | Described in |
 |---|---|---|
-| Policy | The channel `policy`: `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rendered by `rollout_qwen:qwen35` | [Qwen renderers](../implementations/rollout-qwen.md) |
-| Engine | One `rollout_vllm:VllmEngine`. Its `max_num_seqs` is 20: the `episodes_at_once` (6) episodes of one to four agents ask for fifteen requests on average, and the engine queues the rest | [vLLM engine](../implementations/rollout-vllm.md) |
-| Trainer | `rollout_lora:LoraTrainer` on the same checkpoint, `colocated`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
-| Worlds | `[pools.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the process that runs episodes | [The worlds](#the-worlds) |
-| Memory | `runs_gib` and `training_gib`: each episode runs a Paper server | [Deploying](../guide/deploying.md) |
-| Bridge | `reshard = "verbatim"` on the channel, and `ray = "auto"`: each checkpoint is bridged as a Ray task on the machine's Ray cluster (vLLM loads the LoRA files as they are), so a run with this profile needs `ray start --head` first | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
+| Policy | The channel `policy`: `cyankiwi/Qwen3.5-9B-AWQ-4bit` on the provider `local-vllm`, rendered by `rollout_qwen:qwen35`; thinking 1,024 tokens, answers 400 | [Qwen renderers](../implementations/rollout-qwen.md) |
+| Engine | One engine host of `local-vllm` (`rollout_vllm:VllmEngine`), its options the model's in the cluster config: 0.78 of the card, `max_num_seqs` 20: the `episodes_at_once` (6) episodes of one to four agents ask for fifteen requests on average, and the engine queues the rest | [vLLM engine](../implementations/rollout-vllm.md) |
+| Trainer | `local-lora` (`rollout_lora:LoraTrainer`) on the same checkpoint, rank 32, learning rate 5e-5, segments of up to 8,000 tokens (a peak of 12.4 GiB), 384 a step; `colocate_with = "local-vllm"`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
+| Worlds | `[sandboxes.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the run's driver | [The worlds](#the-worlds) |
+| Memory | `[guards]` `runs_gib` and `training_gib`: each episode runs a Paper server | [Deploying](../guide/deploying.md) |
+| Bridge | The LoRA trainer's files are PEFT's, which vLLM loads as they are: each checkpoint is bridged (`verbatim`) as a Ray task on the run's Ray cluster | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
+
+`minecraft-tinker` keeps these settings where they still apply, with Tinker's trainer (`tinker-lora`, `trainer.model =
+"Qwen/Qwen3.5-9B"`) and sampler (the provider `tinker`): a learning rate of 1e-4 (Tinker's adapters are scaled half as
+much as ours) and `trainer.tokens_per_step = 16384` (about six updates a step). From curriculum-9's numbers it costs
+about $8 to $18 a step of 384 segments. Served on the local card instead (`channels.policy.provider = "local-vllm"`,
+`channels.policy.model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"`), Tinker's adapter is bridged to PEFT's layout; its q, k and v
+of a linear-attention layer joined make rank 32 into 96, which the cluster's `max_lora_rank` for that model allows.
 
 Four agents take a turn in about 6 s. The thinking budget (`thinking_tokens`) is wide enough to be met rarely: on
 this environment's observations the model's thoughts run to a median of 530 tokens and a 95th percentile of 820. A
@@ -330,7 +343,7 @@ tool call takes about 40 tokens. No turn is longer than the trainer's `segment_t
 A group's turns may be a step or two old when it is trained on, and a straggler plays on under newer weights; during
 a step every running episode waits, its world frozen between turns.
 
-A run started again in the same directory goes on where it stopped, from the newest checkpoint it made and its
+A run resumed (`rollout resume RUN`) goes on where it stopped, from the newest checkpoint it made and its
 curriculum, and plays the groups it had decided from the same starts
 ([dying and starting again](../libraries/rollout-train/training.md#dying-and-starting-again)). Episodes the stopped
 run left unfinished are claimed and played again (its feed shows them cancelled), and servers it left behind are
@@ -338,21 +351,21 @@ removed.
 
 ## Running on a small machine
 
-The machine has 23 GB of system memory under WSL, which shuts down when memory runs out. This is what keeps a run
-inside it:
+A machine whose system memory is small for the work (a run's Paper servers, an engine's weights offloaded while it
+sleeps, the trainer) is kept inside it by these:
 
 | Concern | What the system does |
 |---|---|
 | System memory between steps | The [trainer](../implementations/rollout-lora.md#a-fresh-process-per-step) exits after every step, and the [engine](../implementations/rollout-vllm.md#sleep-and-wake) drops its weights when it sleeps |
-| System memory for episodes | Each Paper server has a heap of its own (`PaperServer.heap`). The profile's `[memory]` table says what must be available before episodes are admitted (short of it, the runner waits) and before a step starts (short of it, the run stops with a message) |
-| GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, 2 to 3 GiB of the card stay in use by the desktop and a game client |
+| System memory for episodes | Each Paper server has a heap of its own (`PaperServer.heap`). The cluster config's `[guards]` say what must be available before episodes are admitted (short of it, the runner waits) and before a colocated step starts (short of it, the run stops with a message) |
+| GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, what other programs hold of the card stays in use |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
-| Stopping | A run asked to stop ends its servers, its engine and a step in progress; servers and engines a killed run left are ended by the next one ([deploying](../guide/deploying.md#stopping)) |
-| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK, if one is downloaded, under `~/.cache/rollout/jdk`), and the profile's run directory under `~/.cache/rollout`. `/tmp` is memory on WSL |
+| Stopping | A run asked to stop ends its servers, its engine and a step in progress; its engine hosts and trainer end with its job ([deploying](../guide/deploying.md#stopping)) |
+| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK, if one is downloaded, under `~/.cache/rollout/jdk`), and a run's directory under the cluster config's `[scratch]`, on disk (`/tmp` may be memory) |
 | Listening ports | A server's ports are chosen just before Java starts, from outside the range the system gives outgoing connections, and never one this process has given to a server that has yet to listen. A server must answer its health check by its own name; a start that fails is tried once more with other ports |
-| Evidence | `scripts/train-with-memory-log.sh` writes available system memory and GPU memory to `memory.log` every two seconds and, under WSL, the host's free memory to `host-memory.log`. In a run of two consecutive updates, available memory never fell below 7.2 GiB |
+| Evidence | In a run of two consecutive updates, logged every two seconds, available memory never fell below 7.2 GiB |
 
 ## Reporting
 
-`rollout report RUN minecraft_team.environment:environment` charts the climb through the curriculum, every group's rewards
+`rollout report RUN_DIRECTORY minecraft_team.environment:environment` charts the climb through the curriculum, every group's rewards
 and what each step did ([reporting](../libraries/rollout-train/training.md#reporting)).

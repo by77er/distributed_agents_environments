@@ -50,7 +50,7 @@ leaks.
 | 3 | Safety | Retention can delete a blob that a checkpoint added at the same moment names (content addressing finds it stored and does not write it again) | fixed: a grace period, and a put that finds a blob sets its time ([6](#6-retention-and-blobs)) | `test_thin_never_deletes_a_blob_a_concurrent_add_names` |
 | 4 | Safety | `FileLedger`: after a writer dies mid-line, the next acknowledged append is lost, and its key then accepts a second, different record | fixed: the next append removes the unfinished line first, and appends are on disk before they are acknowledged | `test_an_append_after_a_torn_line_is_kept` |
 | 5 | Safety | Staleness and wall-time limits compare wall clocks. A runner whose clock is 90 s behind looks dead while it plays (finding 1, everywhere at once), and a clock stepped forward ends sandbox leases early | fixed: beats stamped and aged by the store's clock, time limits on the pool's monotonic clock ([3](#3-clocks)) | `test_a_live_runner_whose_clock_is_behind_keeps_its_claims`, `test_a_clock_stepped_forward_does_not_end_a_lease_early` |
-| 7 | Safety | Launch states are overwritten unconditionally: a stop asked for while a run starts is lost, and a stop racing a claim marks a running launch `stopped` | fixed: every state change compares and sets ([7](#7-launches-and-settings)) | `test_a_stop_asked_for_while_a_run_starts_stops_it`, `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` |
+| 7 | Safety | Launch states are overwritten unconditionally: a stop asked for while a run starts is lost, and a stop racing a claim marks a running launch `stopped` | fixed: every state change compares and sets ([7](#7-launches-and-settings)) | `test_a_stop_asked_for_while_a_job_is_made_stops_the_job`, `test_a_stop_racing_a_jobs_start_never_leaves_a_running_launch_stopped` |
 | 8 | Safety | Two makers of one suite leave a suite that neither made | fixed: a suite is one record ([8](#8-suites-finding-8)) | `test_two_makers_of_one_suite_leave_one_of_their_suites` |
 | 9 | Safety | Two loops of one run (a replaced one that has not noticed yet) share unfenced side effects: the run's directory, the trainer, the bookmark | fixed in part: the loop looks at its fence before acting outside the ledger, and trains in a directory of its own ([5](#5-the-training-loop)) | `test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes_and_bookmarks_nothing` |
 | 10 | Liveness | A runner that dies between taking its fence and adopting (or whose take is applied twice) loses all the runs it would adopt on its next start | fixed: adoption under any earlier fence ([2](#adoption-adopts-under-any-earlier-fence-finding-10)) | `test_a_runner_that_died_while_preparing_adopts_its_runs_when_started_again` |
@@ -318,7 +318,7 @@ At `6ec3721` every timestamp below was `time.time()` on the machine that wrote i
 | A runner is alive: beat `at` ≥ now − 90 s | runner (`presence.py:84`, `database.py:342`) | whoever judges: other runners, every pool's `admits` and keeper (`presence.py:55-57`) | Writer 90 s behind, or reader stepped 90 s ahead: a live runner's claims lapse. Others play them again, keepers delete its sandboxes, and finding 1 follows for every episode it plays. Writer ahead: a dead runner's claims hold longer | **Safety** (two holders, wrong outcomes). **Fixed**: the store's clock |
 | "Two sweeps in a row" | keeper (`sandboxes.py:212-221`) | keeper | none: two looks, counted, with no times compared | — |
 | Sandbox wall-time limit: `Lease.ends` ≤ now | pool, at acquire (`harness/sandboxes.py:336,345`) | same pool, at sweep (`harness/sandboxes.py:387,392`) | A step forward ends leases early and deletes sandboxes in use. A step back lets sandboxes overstay | **Safety** (a sandbox deleted under its run). **Fixed**: a duration on the pool's monotonic clock |
-| Launch `at` (ordering of launches asked for) | whoever asked | launcher | Launches started out of order | Liveness |
+| Launch `at` (ordering of launches asked for) | whoever asked | the monitor | Launches listed out of order | Liveness |
 | Run state shown by the monitor (beat ages) | runner | monitor | Wrong display | Display. **Fixed**: the store's clock |
 
 WSL2 is prone to both problems: its clock drifts while the host sleeps, and is stepped when it resyncs.
@@ -555,38 +555,33 @@ fix needs `thin` to read what keeps checkpoints after appending its releases, an
 
 ## 7. Launches and settings
 
-**Claims.**
-
-- A launcher claims a launch asked for. The claim is atomic in both stores: `FileLaunches.claim` under the directory
-  lock, and `DatabaseLaunches.claim` with `WHERE state = 'asked'` under an exclusive lock (`launches.py:154-164`,
-  `database.py:306-316`). **This holds.**
-- "A launch asked to stop is stopped by its launcher", and `stop` on one not started yet stops it at once. **This
-  holds (finding 7, fixed).**
-
 **Mechanism.** `note(id, expect=STATES, **changes)` compares and sets in one step of the store: under the directory
 lock for `FileLaunches`, and in one transaction under the `launches` lock for `DatabaseLaunches`, whose `UPDATE` also
 says `WHERE state = <the state read>`. The changes are written only if the launch is in a state of `expect` (any, if
 none is given) and may go to the state they name. Either way it returns the launch as it then is, and the writer
 compares the state it gets with the state it asked for. The moves are written down once (`launches.MOVES`):
 
-- `asked → claimed | stopped`;
-- `claimed → running | stopping | stopped | ended | failed`;
+- `asked → submitted | running | failed | stopped`;
+- `submitted → running | stopping | stopped | ended | failed`;
 - `running → stopping | stopped | ended | failed`;
 - `stopping → stopped | ended | failed`.
 
-A finished launch goes nowhere, and nothing goes back. `claimed → ended | stopped` and `running → stopped` are a Ray
-job that succeeded, or was stopped from outside, before its launcher saw it run.
+A finished launch goes nowhere, and nothing goes back. `asked → running` is a job's driver that starts before its
+submitter has noted the job; `submitted → ended | stopped` and `running → stopped` are a job that ended, or was stopped
+from outside, before its driver said so.
 
-- **The launcher.** It notes `running` expecting `claimed`. Refused (a stop came while the process started), it notes
-  the process's directory and pid without changing the state, and its next step interrupts the process, as it does
-  every launch it plays that is `stopping`. The Ray path notes `running` expecting `claimed` the same way. A process
-  that ends is noted `stopped` expecting `stopping`, else `ended` or `failed`.
-- **The monitor.** `stop` of a launch it read as `asked` notes `stopped` expecting `asked`. Refused (a launcher claimed
-  it meanwhile), it notes `stopping` expecting `claimed`, `running` or `stopping`, as for a run going, using the
-  answer of the refused note rather than reading again.
-- Tests: `test_a_stop_asked_for_while_a_run_starts_stops_it` and
-  `test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped` run the races with the real launcher and monitor;
-  `tests/rollout_train/test_launches.py` checks the moves on both stores, and concurrent stops and starts.
+- **The submitter** (`submitting.start`). It notes `submitted` and the job expecting `asked`. Refused because a stop
+  came while the job was made, it stops the job and notes the job without changing the state; refused because the
+  driver already noted `running`, it notes the job alone.
+- **The driver** (`jobs.driven`). It notes `running` expecting `asked` or `submitted`; refused because the launch is
+  `stopping`, it notes `stopped` and runs nothing. On the way out it notes `ended`, `failed` or `stopped` expecting a
+  launch that is going.
+- **The monitor and the command line** (`submitting.stopped`). A stop of a launch read as `asked` notes `stopped`
+  expecting `asked`; refused (its job was made meanwhile), it notes `stopping` expecting `submitted`, `running` or
+  `stopping`, and stops the job.
+- Tests: `test_a_stop_asked_for_while_a_job_is_made_stops_the_job` and
+  `test_a_stop_racing_a_jobs_start_never_leaves_a_running_launch_stopped` run the races with the real submitter and
+  stop; `tests/rollout_train/test_launches.py` checks the moves on both stores, and concurrent stops and starts.
 
 **Run settings: hold.** `want` merges under a lock (`database.py:380-392`). The loop reads the settings between steps
 only, and records what each step used. A change written mid-step applies to the next step, as documented.

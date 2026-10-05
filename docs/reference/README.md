@@ -19,7 +19,9 @@ settings and cluster config, the objective presets, and the glossary.
 The `rollout` command is installed with the workspace (`uv sync`). `uv run rollout --help` lists its commands, and
 `uv run rollout COMMAND --help` lists each command's options. These pages describe them:
 
-<!-- Follow-up: once the command line has a page of its own, link it here and keep this list to that link. -->
+Every command that asks for a run (`train`, `eval`, `imitate`, `env check`, `resume`) and its flags are on
+[the command line](../guide/deploying.md#asking-for-a-run); how a run asked for becomes a job is in
+[launching runs](../libraries/rollout-train/launching.md).
 
 | Commands | Described in |
 |---|---|
@@ -33,7 +35,7 @@ The `rollout` command is installed with the workspace (`uv sync`). `uv run rollo
 | `rollout pool`, `rollout tools` | [sandboxes over HTTP](../libraries/rollout/sandboxes.md#over-http), [serving a tool set over HTTP](../guide/tools.md#serving-a-tool-set-over-http) |
 | `rollout cluster check`, `rollout preset` | [the cluster config](../guide/cluster.md) |
 | `rollout ledger copy` | [Postgres and S3](../deploy/stores.md#move-an-existing-ledger-and-blob-store) |
-| `rollout train` and the commands that start runs | [Start runs and evals](../deploy/runs.md) |
+| `rollout train`, `rollout eval`, `rollout imitate`, `rollout resume` | [the command line](../guide/deploying.md#asking-for-a-run), [Start runs and evals](../deploy/runs.md) |
 
 ## Objective presets
 

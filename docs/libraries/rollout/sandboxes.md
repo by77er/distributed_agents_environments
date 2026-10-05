@@ -226,13 +226,13 @@ own.
   them, asking each pool's `capacity()` once a look, and counting what it claims as it goes. Runners that share a
   pool can still claim more than it holds at once; their runs then wait for room ([the runner](#the-runner)). A
   runner says in each beat how full its pools are (`pools`: each one's `size`, `leased` and `free`).
-- **Leases beside the ledger.** A pool opened by a profile keeps its leases beside the ledger, as ordinary state
+- **Leases beside the ledger.** A pool a run's driver opens keeps its leases beside the ledger, as ordinary state
   changed in place: `sandboxes.json` beside a ledger of files (`FileLeases`), the `sandboxes` table of a database
   ledger's database (`DatabaseLeases`); `leases_of(ledger)` finds them.
 - **A lapsed claim gets no sandbox.** A claim holds as the scheduler says
   ([claims](../rollout-train/rollouts.md#what-runners-write)): it lapses when a newer attempt of its episode is
   claimed, when its runner takes its fence anew without adopting it, notes the attempt cut short, or stops beating for
-  90 seconds, and its lease ends with the episode's record too. A pool opened by a profile admits a key only while its
+  90 seconds, and its lease ends with the episode's record too. A pool a run's driver opens admits a key only while its
   claim holds (`admits(ledger, presence)`), so a run recovered after its claim lapsed is refused its sandboxes, and
   the lease it had is released at once. A key of a run the ledger does not know (a run started by hand) is admitted.
 - **Expiry.** A pool's keeper (`keep(pool, ledger, presence)`) sweeps every 15 seconds, and releases a lease whose

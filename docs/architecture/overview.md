@@ -14,9 +14,33 @@ in the **ledger**; **episode runners**, on any machine that reaches the ledger, 
 record them there. A program runs against the **sandboxes** it declares (a Minecraft world, a container), which the
 runner leases from **pools** before the program starts, under the episode's claim, and releases when it ends. The loop
 takes a **step** over several groups at a time; each step's new weights are published to the channel without any task
-or agent noticing. What a channel should serve is written down in the ledger: engines in the trainer's process are
-published to directly, **engine hosts** load it into vLLM servers on other machines, and runners ask those for each
-checkpoint by name. A **profile** says which engines, trainer, runner, tool sets and pools stand behind all of it.
+or agent noticing. What a channel should serve is written down in the ledger: **engine hosts** and followers load it
+into their engines, and the gateway asks those for each checkpoint by name. A run is asked for with its **settings**
+(the environment, the trainer, each channel's provider and model, the numbers each takes) against a **cluster
+config** (the inference providers, trainers, pools and environments a cluster offers); asking records a **launch** and
+submits the run's job, whose **driver** builds the run from the two and asks for what it needs: its trainer, its engine
+hosts, its gateway and its runner. The **monitor** asks for runs from its page as the command line does.
+
+## Roles
+
+| Role | Does | Exchanges |
+|---|---|---|
+| Monitor, command line | Ask for runs: check their settings against the cluster config, record a launch, submit its job; show everything | the launches; the cluster config's offers; the ledger and heartbeats, read |
+| A run's driver | Builds the run from the cluster config and its settings, claims its trainer and engine hosts, runs the loop of its kind | the launch (its state); the ledger (decisions, groups, steps, serving records); the blob store; heartbeats (what it waits for) |
+| Trainer | Takes steps: a batch and a parent's files in, a new checkpoint's files out | with the driver only |
+| Engine hosts, followers | Serve what a run's serving records say, loading each checkpoint from the blob store | the ledger (serving records, read); the blob store; heartbeats |
+| Gateway | Samples channels for programs and harnesses holding a signed key, and records every turn | the ledger and the blob store (turns); engines, by checkpoint name |
+| Episode runners | Claim a run's episodes, play them, record them | the ledger (claims, episodes); the blob store; the gateway; sandbox pools |
+| Sandbox pools | Lease sandboxes under an episode's claim | the ledger (leases beside it) |
+| Ledger, blob store | Hold everything durable: the record of every run, checkpoints, turns, episodes | every role |
+
+### Placement is configuration
+
+Where each role runs is the cluster config's to say ([the cluster config](../guide/cluster.md)): a run's job is a Ray
+job, or a RayJob with a Ray cluster of its own on Kubernetes; its trainer and engine hosts are Ray actors placed by the
+resources they ask for (a trainer colocated with its engine hosts shares their GPU); its gateway and runner are in its
+driver's process; the monitor and the cluster's gateway replicas are services of their own
+([deploying](../guide/deploying.md)).
 
 ## Layers
 
@@ -26,7 +50,7 @@ The repository is a workspace of packages in three layers. Each package's direct
 | Layer | Packages | What it holds |
 |---|---|---|
 | Libraries | `rollout` | What environments are written against: programs, tasks, agents, tools, sandboxes and their pools, the loop, the `Runner` protocol and `LocalRunner`, contract types, hooks, memory, the environment and the curriculum |
-| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; recording (the thinking budget, segments) and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; bridges; evaluation suites and evals; heartbeats, launches and the launcher; the cluster config, providers, run settings and the check of a run; the profile, the `rollout` command and the monitor |
+| | `rollout-train` | Reinforcement learning on `rollout`: episode runners and episodes; sandboxes' leases beside the ledger, ending with their claims; the loop, the group algorithm and the `Trainer` protocol; checking an environment (`rollout env check`); channels and the `Engine` protocol; recording (the thinking budget, segments) and the `Renderer` protocol; the gateway, its signed keys and its turn store; the graph of checkpoints, the ledger and the registry; bridges; evaluation suites and evals; heartbeats and launches; the cluster config, providers, run settings and the check of a run; runs built from settings, their jobs and submitting them; the `rollout` command and the monitor |
 | Implementations | `rollout-vllm`, `rollout-lora`, `rollout-tinker`, `rollout-qwen`, `rollout-gemma`, `rollout-openai`, `rollout-s3`, `rollout-runpod`, `rollout-verifiers` | One implementation each of an interface a library defines |
 | Environments | `minecraft-team`, `gridworld`, `judging` | Environments to train on |
 
@@ -38,8 +62,8 @@ What may depend on what is checked by `tests/test_layers.py`:
 
 Code above a protocol never learns which implementation it holds. Task and agent code is the same under either
 runner; a training loop is the same with everything in one process or with runs, engines, trainer and pools elsewhere.
-A profile names engines, renderers, trainers, tool sets and sandbox providers as `module:name`, so `rollout-train`
-imports none of them.
+A cluster config and a run's settings name engines, renderers, trainers and sandbox providers by kind or as
+`module:name`, so `rollout-train` imports none of them until a run's driver does.
 
 ## Protocols and their implementations
 
@@ -57,10 +81,11 @@ imports none of them.
 | [`Leases`](../guide/reference.md#leases) | `rollout.harness` | pools → where their leases are kept | `MemoryLeases`; `FileLeases`, `DatabaseLeases` beside the ledger, where a pool's keeper ends a lease with its claim ([sandboxes](../libraries/rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)) |
 | [`Blobs`](../guide/reference.md#blobs) | `rollout.harness` | runs → stored bytes | `FileBlobStore` (`rollout.harness`), `S3BlobStore` ([`rollout_s3`](../guide/content.md#media-and-blobs)) |
 | [the ledger's `plans`, `groups`, `claims` and `episodes`](../libraries/rollout-train/rollouts.md) | `rollout_train.rollouts` | training → runs | `EpisodeRunner`, on any machine that reaches the ledger and the blob store |
-| [the ledger's `serving`](../libraries/rollout-train/channels.md#what-a-channel-should-serve) | `rollout_train.serving` | training → whatever serves and samples its channels | `Follower` (`rollout engines`, or a runner's own engines), `EngineHost` (a Ray actor: [engine hosts](../libraries/rollout-train/channels.md#engine-hosts)), `RemoteChannel` in a gateway |
-| [`Environment`](../guide/reference.md#rolloutenvironmentenvironment) | `rollout.environment` | training and evals → an environment's rows, starts, eval data, description and curriculum | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
+| [the ledger's `serving`](../libraries/rollout-train/channels.md#what-a-channel-should-serve) | `rollout_train.serving` | training → whatever serves and samples its channels | `Follower` (beside a vLLM server: `python -m rollout_train.pods.inference`), `EngineHost` (a Ray actor: [engine hosts](../libraries/rollout-train/channels.md#engine-hosts)), `RemoteChannel` in a gateway |
+| [`Environment`](../guide/reference.md#environment) | `rollout.environment` | training and evals → an environment's rows, starts, eval data, description and curriculum | one per environment ([three ways in](../guide/perspectives.md#building-an-environment)) |
 | [`RunHooks`](../libraries/rollout/hooks.md), `Hooks` | `rollout.harness`, `rollout_train.rollouts` | runners and runs → observers | `RunFeed` ([monitor](../libraries/rollout-train/monitor.md)) |
-| `Presence`, `Launches` | `rollout_train.presence`, `rollout_train.launches` | runners and launchers → whoever watches or asks for runs | `FilePresence`, `DatabasePresence`; `FileLaunches`, `DatabaseLaunches` ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats), [launchers](../guide/deploying.md#launchers)) |
+| `Presence`, `Launches` | `rollout_train.presence`, `rollout_train.launches` | runners, drivers and whoever asks for runs → whoever watches | `FilePresence`, `DatabasePresence`; `FileLaunches`, `DatabaseLaunches` ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats), [launching runs](../libraries/rollout-train/launching.md#the-launches-table)) |
+| `Backend` | `rollout_train.submitting` | whoever asks for a run → where its job runs | `RayJobs` (Ray's job API), `RayJobResources` (a RayJob through the Kubernetes API server) ([launching runs](../libraries/rollout-train/launching.md)) |
 | A bridge's task (`module:name`) | `rollout_train.bridges` | checkpoints → the files their engines load | `verbatim`, `rollout_tinker.bridges:peft`, `rollout_lora.bridges:merge_quantize`; run in the calling process or as Ray tasks (`on_ray`) ([bridges](../libraries/rollout-train/checkpoints.md#bridges)) |
 
 Types that cross these boundaries are defined once, in [contracts](../libraries/rollout/contracts/README.md).
@@ -77,13 +102,13 @@ What each part sees. A ✗ is a boundary the code keeps, not an optimization lef
 | Engine hosts | ✗ | ✗ | ✓ | their servers only |
 | Episode runners | labels and results | ✓ (in episodes) | ✓ | ✗ |
 | Training loop and trainer | labels and results | ✓ | ✓ | ✗ |
-| Profile | ✗ | ✗ | ✗ | ✓ |
+| Cluster config | ✗ | ✗ | ✗ | ✓ |
 
 ## A turn
 
 The agent samples a reply; the task responds with an observation.
 
-```
+```text
 agent.act ──▶ Model.sample ──▶ model endpoint ──▶ (gateway ──▶ channel ──▶ engine: tokens in; tokens, logprobs out
           ◀── canonical reply + usage                                ──▶ turn kept in the ledger and the blob store)
 harness ──▶ a model API + signed key ──▶ gateway ──▶ endpoint (the checkpoint, by name) ──▶ turn kept ──▶ reply

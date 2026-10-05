@@ -15,18 +15,21 @@ turns them into checkpoints, which objectives it can optimise, and how checkpoin
 3. [The training loop and objectives](../libraries/rollout-train/training.md): the loop, its steps over groups, the
    objectives and their presets, the curriculum, the trainer protocol, changing settings while a run goes, pausing
    and resuming.
-4. [Checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md): the checkpoint graph, forks, bridges
+4. [Launching runs](../libraries/rollout-train/launching.md): how a run is asked for with its settings, the job it
+   becomes (a Ray job or a RayJob), what its driver starts and claims, resuming by run id, and the `rollout` commands
+   that ask for runs.
+5. [Checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md): the checkpoint graph, forks, bridges
    between checkpoint formats, the ledger and its fences, bookmarks.
-5. [Datasets and supervised steps](../libraries/rollout-train/datasets.md): examples chosen from runs' episodes, and
+6. [Datasets and supervised steps](../libraries/rollout-train/datasets.md): examples chosen from runs' episodes, and
    supervised fine-tuning (SFT) on them.
-6. [Channels and engines](../libraries/rollout-train/channels.md): how a channel serves what a run trains, engine
+7. [Channels and engines](../libraries/rollout-train/channels.md): how a channel serves what a run trains, engine
    hosts, engines on other machines, and sharing a GPU with the trainer.
-7. [Record turns for training](../libraries/rollout-train/recorder.md): what a recorded sample keeps, the thinking
+8. [Record turns for training](../libraries/rollout-train/recorder.md): what a recorded sample keeps, the thinking
    budget, segments, renderers.
-8. [The gateway](../libraries/rollout-train/gateway.md): the service that samples channels and records every turn,
+9. [The gateway](../libraries/rollout-train/gateway.md): the service that samples channels and records every turn,
    its keys, and running Claude Code or Codex against it.
-9. [Train any harness over HTTP](../libraries/rollout-train/harness-endpoint.md): the gateway's OpenAI and Anthropic
-   APIs for a harness that brings its own loop.
+10. [Train any harness over HTTP](../libraries/rollout-train/harness-endpoint.md): the gateway's OpenAI and Anthropic
+    APIs for a harness that brings its own loop.
 
 ## Choose a trainer and an objective
 

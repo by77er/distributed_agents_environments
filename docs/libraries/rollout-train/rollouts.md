@@ -3,6 +3,10 @@
 Code: `rollout_train.rollouts` · See [episodes](episodes.md), [training](training.md),
 [API reference](../../guide/reference.md#rollout_trainrollouts)
 
+For people who design training: how a run asks for episodes in the ledger, and how runners claim, play and record them.
+
+**Read first:** [Train a model](../../train/README.md). **Next:** [Episodes](episodes.md).
+
 A run asks for episodes in the [ledger](checkpoints.md#the-ledger), and runners play them. The run decides what to play,
 how often and how to group it; a runner knows no algorithm, and the run never learns where its episodes were played.
 Several runners, on one machine or many, share the work of every run whose ledger they reach: which machine plays a
@@ -16,8 +20,8 @@ async with playing(EpisodeRunner("host/train", ledger, LocalRunner(gateway=endpo
     episodes = await episodes_of(ledger, blobs, "train", 1, 4)     # the group's four, once all have ended
 ```
 
-The [training loop](training.md) writes the plan and the groups; a [profile](../../guide/deploying.md) opens a runner
-beside it. Everything goes through the ledger, so the run and its runners may be in one process or on different
+The [training loop](training.md) writes the plan and the groups; a run's driver starts a runner beside it
+([launching runs](launching.md#the-driver)). Everything goes through the ledger, so the run and its runners may be in one process or on different
 machines.
 
 ## What a run writes
@@ -144,8 +148,7 @@ episodes of a group have records and returns them, trajectories and all.
 ### Heartbeats
 
 With `presence` (a `Presence`, `rollout_train.presence`), a runner beats when it
-starts, before it claims anything, and every `beating` seconds (15) after; `beat()` beats at once besides (an open
-profile's runner does when a channel serves a new checkpoint). A beat holds what `about()` says of its machine (called
+starts, before it claims anything, and every `beating` seconds (15) after; `beat()` beats at once besides. A beat holds what `about()` says of its machine (called
 in a thread: it may measure), with its `places`, how many episodes it is `playing`, and, when it has pools, how full
 each is (`pools`: `size`, `leased`, `free`), and, when any of the runs it serves is paused, which (`paused`: it claims
 none of their episodes, and beats at once when that changes: [pausing and resuming](training.md#pausing-and-resuming)).
@@ -164,16 +167,16 @@ and a ledger of files serve one machine, whose clock every writer and reader sha
 judges by them (whether a claim holds, whether a pool's keeper ends a lease, whether the monitor shows a run running)
 goes by the age.
 
-An open profile's runner says, in each beat: its host, the run it serves, the run's directory, its machine
-(`rollout_train.machine`: memory, each GPU's memory and how busy, the disk the directory is on), its engines'
-processes and whether each is alive, and what each channel serves (adapter and version) with what passed through it
-since the beat before (requests, tokens, tokens a second, requests at once); for a channel whose engines are on
-other machines, by its name within each run (`RUN/NAME`), what each of its servers would sample from and how far
-behind that is. The [monitor](monitor.md) shows machines, inference throughput and what is served from these
-beats. An engine host (`rollout engines`, kind `engines`) beats with the run it follows, its machine, and what each
-channel's servers serve ([what a channel should serve](channels.md#what-a-channel-should-serve)); a gateway replica
-(kind `gateway`) with where it listens, its machine and its channels ([the gateway](gateway.md#running-it)); a pool on
-a machine of its own (kind `pool`) with how full it is; a launcher (kind `launcher`) with what it offers. The
+A run's runner (`run/RUN`) says, in each beat: its host, the run it serves, the run's directory, its machine
+(`rollout_train.machine`: memory, each GPU's memory and how busy, the disk the directory is on), and what each channel
+serves (adapter and version) with what passed through it since the beat before (requests, tokens, tokens a second,
+requests at once); for a routed channel, by its name within each run (`RUN/NAME`), what each of its servers would sample
+from and how far behind that is. The [monitor](monitor.md) shows machines, inference throughput and what is served from
+these beats. Before it plays, while Ray has not given the run what it asked for, its driver beats under the same name
+(kind `run`) with what it waits for. An engine host (kind `engines`) beats with the run it follows, its machine, and
+what each channel's engines serve ([what a channel should serve](channels.md#what-a-channel-should-serve)); a gateway
+replica (kind `gateway`) with where it listens, its machine and its channels ([the gateway](gateway.md#running-it)); a
+pool on a machine of its own (kind `pool`) with how full it is. The
 monitor's [Machines page](monitor.md#the-machines) shows each by its kind.
 
 ## The record
@@ -193,7 +196,7 @@ monitor's [Machines page](monitor.md#the-machines) shows each by its kind.
 
 ## Environment
 
-What a run trains on and an eval measures is an [`Environment`](../../guide/reference.md#rolloutenvironmentenvironment):
+What a run trains on and an eval measures is an [`Environment`](../../guide/reference.md#environment):
 
 | It says | As | Read by |
 |---|---|---|
@@ -228,7 +231,7 @@ data from rows and seeds when that is enough.
 
 ```sh
 uv run rollout env check minecraft_team.environment:environment --pools minecraft=minecraft_team.worlds:worlds
-uv run rollout env check tests.rollout_train.rollouts.games:guessing --profile PROFILE --groups 4   # with a model
+uv run rollout env check tests.rollout_train.rollouts.games:guessing --preset PRESET --groups 4   # with a model
 ```
 
 `rollout env check ENVIRONMENT` says, a line for each, whether its rows build (keys and titles unique, `counts_for`
@@ -236,12 +239,13 @@ naming rows it has); whether its description and version say something; whether 
 data is the same each time; how many of the starts drawn for training were eval starts, and were drawn again; and how
 one episode went on the local runner with a scripted model (`--reply` is what it says each turn; `--row` the row; the
 tool sets its program imports from `--tools NAME=module:factory` or a URL, and the pools of the sandboxes it declares
-from `--pools KIND=module:factory` or a URL, or the profile's), with a reward in the described range and a result that
+from `--pools KIND=module:factory` or a URL), with a reward in the described range and a result that
 says what the description says it does.
 
-With `--profile P --groups N` it also plays N groups (of the algorithm's group size, or `--episodes`) of the rows the
-environment's curriculum would choose first, on the profile's channel, served by its base model with nothing trained,
-as a run of its own (start `kind: check`, in `~/.cache/rollout/checks/NAME` unless `--directory` says). A group whose
+With a model's settings (`--preset`, `--provider`, `--settings` or `--set`) it also asks for a check run on the
+cluster ([deploying](../../guide/deploying.md#asking-for-a-run)), which plays `--groups` groups (4; each of
+`--episodes` episodes, else the algorithm's group size) of the rows the environment's curriculum would choose first, on
+its channel, served by its base model with nothing trained (start `kind: check`). A group whose
 episodes all scored the same is flagged: it teaches a group-relative update nothing. When every group is so, the check
 fails: a run would take no step at all. It exits 1 when any check fails.
 

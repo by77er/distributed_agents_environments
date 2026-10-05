@@ -1,5 +1,10 @@
 # Evals
 
+For people who measure models: suites of environments, evals of any checkpoint or base model, and evals on a schedule
+during training.
+
+**Read first:** [Evaluate a model](../../evaluate/README.md). **Next:** [The monitor](monitor.md).
+
 An **eval** plays one version of a suite with one checkpoint (or the base model), trains on nothing, and records how
 each episode went. A suite may play several environments, each with settings of its own. Every checkpoint that plays the
 same version plays the same starts in the same way, so checkpoints compare start for start. The code is
@@ -78,40 +83,39 @@ one. Two editors at once make two versions, one after the other: an editor whose
 ## An eval
 
 ```bash
-uv run rollout eval profile.toml words-v1 --checkpoint diamonds --directory EVAL          # its newest version
-uv run rollout eval profile.toml words-v1@2 --checkpoint diamonds --episodes 4 --directory EVAL
-uv run rollout eval profile.toml teams-every-task --environment minecraft_team.environment:environment --directory EVAL
+uv run rollout eval words-v1 --checkpoint diamonds                         # its newest version, by a checkpoint
+uv run rollout eval words-v1@2 --checkpoint diamonds --episodes 4
+uv run rollout eval math --preset gsm8k-tinker                             # by the base model the preset's channel serves
+uv run rollout eval math --preset gridworld-qwen3-0.6b --model Qwen/Qwen3-0.6B
 ```
 
-With `--environment`, a suite not made yet is that environment's eval data of the name, frozen as the eval starts. Each
-entry's environment must load where the eval is played: one that does not stops it before it starts.
-Without `--episodes`, each start is played as many times as the version says. An eval is a run of its own, with its own
-id and name in the registry ([runs](checkpoints.md#runs)) and its own fence. Its start record says `kind: eval`, the
-suite and the version (`suite_version`, by id), the checkpoint, and the environment's version (`version`, as a
-training run's start says it) and description. A start that does not say `suite_version` is read with the version
-its subject's record says.
-`--checkpoint` takes any [reference](checkpoints.md#references): a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id.
-A bookmark is read once, when the eval starts. Without `--checkpoint`, the base model of the profile's trained channel
-(or its first channel) plays: the profile's, or the one `--model` names. The eval records it as its subject (`kind:
-model`).
+`rollout eval SUITE` asks for an eval run on the cluster ([deploying](../../guide/deploying.md#asking-for-a-run)): its
+settings say the suite (`eval.suite`), the checkpoint (`start`, `--checkpoint`), the episodes of each start
+(`eval.episodes`, `--episodes`; none: each entry's own) and the channel it plays on (`channels.policy.*`). A preset's
+settings an eval does not take (the trainer's) are left out of it. With `--checkpoint`, the channel's model, renderer,
+providers and budgets are those of the run that made the checkpoint, unless the settings say others. The suite must be
+one the ledger has: a name never becomes a suite by itself. Its environment is the suite's first entry's.
 
-`rollout eval` finds the version, and loads each entry's environment, before it opens the profile. An entry's sampling
-limits travel in its episodes' binding (`SamplingParameters.thinking_tokens` and `answer_tokens` of each recorded
-model, carried in each slot's [gateway key](gateway.md#keys)), and the gateway samples with them in place of the
-channel's own, so entries of one eval take different limits
-on one channel. It opens the profile without its trainer (`Profile.open(training=False)`): no trainer is made, and the
-engines never sleep for one. What the trainer's `start` would be is the checkpoint, so the trained channel's engines
-load what it is served over: the model; a full checkpoint's files; or, for an adapter over a full checkpoint, that
-checkpoint's files, with the adapter loaded over them. The engines keep the profile's sizes (`--set` changes them).
-Without a trainer, the channel's longest turn is what its engines accept, not the trainer's longest segment. When it
-ends, however it ends, it deletes what it fetched to serve the checkpoint (its directory's `bases/`, `checkpoints/` and
-`resharding/`): a full checkpoint's files are a whole model's.
+An eval is a run of its own, with its own id and name in the registry ([runs](checkpoints.md#runs)) and its own fence.
+Its start record says `kind: eval`, the suite and the version (`suite_version`, by id), the checkpoint, and the
+environment's version (`version`, as a training run's start says it) and description. A start that does not say
+`suite_version` is read with the version its subject's record says. `--checkpoint` takes any
+[reference](checkpoints.md#references): a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id, read once, when the eval
+starts. Without one, the base model of its channel plays, and the eval records it as its subject (`kind: model`).
+
+An entry's sampling limits travel in its episodes' binding (`SamplingParameters.thinking_tokens` and `answer_tokens`
+of each recorded model, carried in each slot's [gateway key](gateway.md#keys)), and the gateway samples with them in
+place of the channel's own, so entries of one eval take different limits on one channel. The eval's driver makes no
+trainer, and serves the checkpoint on its channel's engines: on engine hosts of its own, which load it by its id from
+what its serving records say, its files made by the bridges from the checkpoint's format to what the provider loads
+([bridges](checkpoints.md#bridges)). Without a trainer, the channel's longest turn is what its engines accept. When it
+ends, however it ends, it deletes what it fetched under its directory (`bases/`, `checkpoints/`).
 
 `evaluate(checkpoints, run=…, suite=…, subject=…, …)` does the work. It takes the entries' environments
 (`environments=`, by `module:name`; any not given are imported), how an environment's episodes are bound (`binding=`, by
 default every slot from the channel), and, for a suite of several entries, the run of each (`parts=`, by its number
-from 1; by default `RUN-NUMBER`; `rollout eval` registers each as `NAME-NUMBER` in `parts/NUMBER` of its directory, and
-adds it to the runs its runner plays).
+from 1; by default `RUN-NUMBER`; an eval's driver registers each as `ID-NUMBER`, called `NAME-NUMBER`, and adds it to
+the runs its runner plays).
 
 A version of one entry is played in the eval's own run. A version of several is played in a run for each entry (its
 **parts**), each with the entry's own plan: its program, and its binding with its tool sets, pools and limits. A runner
@@ -121,13 +125,13 @@ it holds the eval's start, its subject and its results.
 
 1. It writes each part's plan and start (`kind: eval`, the suite, `part_of`: the eval's run, `entry`: its number, the
    environment), the eval's start, and a record of who plays, the version and the parts.
-2. If a checkpoint plays, it fetches the checkpoint's files into the run's `checkpoints/` (made by the
-   channel's bridge when the profile names one, [bridges](checkpoints.md#bridges)) and publishes them on the
+2. If a checkpoint plays, it writes down that each part's channel serves it, with the files its bridges make
+   ([bridges](checkpoints.md#bridges)), fetches them into the run's `checkpoints/` and publishes them on the
    channel. A checkpoint whose weights were released cannot play. With `publish=None`, the channel serves the
    checkpoint already (a training run's newest), and nothing is fetched.
 3. It asks, in each part's `groups` table, for one group per start of its entry, `episodes` episodes each (the
    entry's, unless given). Episode runners claim and play them as they play any run's, starting with the runner the
-   eval's profile opens.
+   eval's driver starts.
 4. As each group's episodes end, it records each episode's outcome under the start's number in the version, and the
    group's result in its part's `results`. The result's `skipped` is "an evaluation trains on nothing", so a part's
    page reads like any run's.
@@ -142,15 +146,14 @@ it holds the eval's start, its subject and its results.
 | `evaluations/SUITE/EVAL/subject` | `scores` | each entry's `environment`, `played`, `solved` (none where its results do not say), `share` and `reward` |
 | `evaluations/SUITE/EVAL/results` | `START-EPISODE` | each episode (its start by number in the version): its `run_id`, reward, whether it solved the start, its duration, outcome and detail |
 
-`EVAL` is the eval's run id, so two evals of one checkpoint are kept apart. An eval started again, in the same
-directory, goes on from where it was: groups it asked for and outcomes it recorded are not done twice. It prints the
+`EVAL` is the eval's run id, so two evals of one checkpoint are kept apart. An eval resumed goes on from where it was: groups it asked for and outcomes it recorded are not done twice. It prints the
 version, how many episodes were solved of how many were played, and the mean reward.
 
 ## Made, edited and asked for from the page
 
 The monitor's **Evals** page (`#/evals`) lists every suite and every eval, and its **New suite** form makes a suite:
 its name and its entries. Each entry has its environment, picked from those the monitor knows (`GET /api/environments`:
-offered by a launcher alive, started on by a run, or played by a suite; those a launcher offers first), how its starts
+offered by the cluster, started on by a run, or played by a suite; those the cluster offers first), how its starts
 are chosen (eval data, rows and seeds, or starts, a row and a seed on each line), the episodes per start and the limits
 (thinking and answer tokens, each left empty for the channel's own). Entries are added and removed. A suite's page (`#/evals/SUITE`) shows:
 
@@ -163,7 +166,7 @@ are chosen (eval data, rows and seeds, or starts, a row and a seed on each line)
   off from the next), within a version of several environments a column group for each environment with each
   subject's total there, and a version picker that shows one version;
 - two subjects of one version compared at the starts both played;
-- a **Run this suite** form, which asks a launcher to play a version.
+- a **Run this suite** form, which asks for an eval of a version.
 
 Both forms post `POST /api/suites/NAME` with `{"entries": [...], "base"}`, each entry `{"environment", "chosen",
 "eval_data", "rows", "seeds", "starts", "episodes", "thinking_tokens", "answer_tokens"}` (`chosen` is `eval data`,
@@ -174,44 +177,27 @@ the forms; the form says "does not load here" for one it cannot), makes the vers
 and answers 409 for what they refuse, an environment that does not load on its machine, or seeds that are no whole
 numbers.
 
-The **Run this suite** form takes who plays (a base model the launchers alive offer, the first by default; a bookmark;
-or any checkpoint whose weights are kept, by where it came from and its short id), the version (the newest by default),
-the episodes a start (the version's by default), the profile (for a base model, one that offers it), and the eval's
-name. It posts a launch of kind `eval` (`POST /api/launches`, `{"kind": "eval", "suite", "profile", "name", "start",
-"model", "episodes"}`: `start` the checkpoint, or `model` the base model). The profiles listed are every profile of a
-launcher that plays the suite's environments with it, a profile that names no trainer too (one for evals only, such as
-a profile that samples at Tinker and trains nothing). A launcher offers, with each profile, the base models an eval may
-play with it (`models`: the profile's channel's model, and with `--cluster` the models the cluster's inference
-providers of its engine's kind serve that its channel's renderer renders,
-[launchers](../../guide/deploying.md#launchers)). The monitor
-fills in the suite's environments (`environment`, the first entry's, and `environments`, the others') and names the
-version by id (a suite named by its name plays the version the name points to then; a suite not made yet is an
-environment's eval data, and the launch says the `environment`), checks the launch as it checks a run's, and refuses an
-unknown suite or version (404), no launcher alive that offers the profile and every environment (404), a base model no
-launcher alive offers with the profile (404), a checkpoint and a base model both (409), or fewer than one episode a
-start (409). A launcher that offers the profile, every environment the launch plays and its base model claims it and
-starts
+The **Run this suite** form takes who plays (a base model the cluster's inference providers offer, the first by default;
+a bookmark; or any checkpoint whose weights are kept, by where it came from and its short id), the version (the newest
+by default), the episodes a start (the version's by default), a preset (by default one whose channel serves the base
+model played) and the eval's name. It asks for an eval run (`POST /api/launches`, [launching a
+run](monitor.md#launching-a-run)), with the preset's channel settings, the suite's version (`eval.suite`, by id), the
+checkpoint (`start`) or the base model (`channels.policy.model`; where the preset's provider does not serve that model,
+one that does) and the episodes. The monitor gives it the suite's first environment, checks it as it checks any run, and
+submits its job ([launching runs](launching.md)). The suite's page shows the launch and how it goes.
 
-```bash
-python -m rollout_train.cli eval PROFILE SUITE@N --directory RUNS/NAME-ID --name NAME --episodes N --environment E \
-    --checkpoint REF     # or, for a base model: --model MODEL
-```
+A checkpoint's page (`#/checkpoint/ID`) has the same form the other way round, **Run an eval**: it takes the suite, its
+version, the episodes per start, the preset and the name, and asks for the eval with the checkpoint as `start`; the
+launches of evals of it follow, with how each goes. The page lists every eval the checkpoint had, by hand or by its
+run's schedule (the suite and, for a suite with more than one version, the version played; the share solved where its
+episodes say, the mean reward, the episodes, who asked for it and when), each opening the eval's own page
+(`#/eval/RUN`: who played, the suite and version, who asked, its score, and how it did at each start of that version),
+and charts each version's score along its line from the base model ([scores along a
+line](monitor.md#scores-along-a-line)).
 
-as a process of its own, or as a Ray job with `--ray` ([launchers](../../guide/deploying.md#launchers)). The suite's
-page shows the launch and how it goes.
-
-A checkpoint's page (`#/checkpoint/ID`) has the same form the other way round, **Run an eval**: it takes the suite
-(by default the first a launcher alive can play), its version, the episodes per start, the profile and the name, and
-posts the same launch with the checkpoint as `start`; the launches of evals of it follow, with how each goes. The page
-lists every eval the checkpoint had, by hand or by its run's schedule (the suite and, for a suite with more than one
-version, the version played; the share solved where its episodes say, the mean reward, the episodes, who asked for it
-and when), each opening the eval's own page (`#/eval/RUN`: who played, the suite and version, who asked, its score,
-and how it did at each start of that version), and charts each version's score along its line from the base model
-([scores along a line](monitor.md#scores-along-a-line)).
-
-A base model's page (`#/base/NAME`, a root of the checkpoints' graph) has the same **Run an eval** form: it posts the
-launch with the base model as `model`, and offers only the profiles whose launchers offer that model (none: the form
-says no launcher alive offers it). The launches of evals of it follow, with how each goes.
+A base model's page (`#/base/NAME`, a root of the checkpoints' graph: every base model with history, and every one the
+cluster offers) has the same **Run an eval** form, with the base model as `channels.policy.model`, and a link to start a
+training run from it. The launches of evals of it follow, with how each goes.
 
 The **Evals** page lists every checkpoint and base model that has had an eval, the one evaluated last first, and each
 opens its history (`#/evals/checkpoint/ID`, `#/evals/model/NAME`; a checkpoint's page links to it): every eval it has
@@ -225,29 +211,27 @@ version does not have is struck through under its columns.
 
 ## Evals during training
 
-A training run says the evals it makes of its own checkpoints as it makes them: a suite, or none, said so. A profile's
-`[evals]` table says them ([deploying](../../guide/deploying.md#the-file)), `--set evals.suite=…` changes them, and a
-launch from the page says them in its settings:
+A training run says the evals it makes of its own checkpoints as it makes them, in its settings (a preset, the New
+run form, `--set`):
 
 ```toml
-[evals]
-suite = "words-held-out"  # the version its name points to as each step is decided; or words-held-out@1, for good
-every = 2               # the checkpoint of every second step (1 unless it says otherwise)
-episodes = 1            # episodes of each start (by default the version's)
+"evals.suite" = "words-held-out"  # the version its name points to as each step is decided; or words-held-out@1, for good
+"evals.every" = 2               # the checkpoint of every second step (1 unless it says otherwise)
+"evals.episodes" = 1            # episodes of each start (by default the version's)
 ```
 
-`suite = ""` (as `--set evals.suite=""`, or `--set evals.suite=null`) is no evals. `rollout train` finds the suite with `suite_for`: the ledger's
-version, or else the environment's eval data of that name, frozen now (a name neither has stops it before it starts),
-and loads each entry's environment (one that does not load stops it too). A suite may play other environments than the
+`evals.suite` unset (or `null`) is no evals. A suite the ledger does not have is refused when the run is asked for (a
+name never becomes a suite by itself), and so is one whose environment the cluster does not offer. The run's driver
+finds the version and loads each entry's environment. A suite may play other environments than the
 one trained on: the policy is the same, so each entry is played on the trained channel. It passes the loop a
 [`Schedule`](../../guide/reference.md#schedule): the version, how often, how many episodes, the entries' environments,
-and how an environment's program is bound to the trained channel and the profile's tool sets and pools. Each entry's
+and how an environment's program is bound to the trained channel and the run's tool sets and pools. Each entry's
 limits travel in its binding. After a step whose number is a multiple of `every` makes its checkpoint and serves it, the
 loop:
 
-1. Registers the eval's run, `NAME-eval-STEP` (its id kept in `directory/evals/RUN-eval-STEP/run.json`, so the same
-   run each time it is asked for), and for a suite of several entries a run for each, `NAME-eval-STEP-NUMBER` (kept
-   in its `parts/NUMBER`), and adds them to the runs the profile's episode runner plays.
+1. Registers the eval's run, `RUN-eval-STEP` (called `NAME-eval-STEP`: the same run each time it is asked for), and for
+   a suite of several entries a run for each, `RUN-eval-STEP-NUMBER`, and adds them to the runs the driver's episode
+   runner plays.
 2. Calls `evaluate` with that checkpoint, the version the step names, and `publish=None`: the channel already serves
    it. The eval's start record says `by` (the training run) and `step`, and `from` is empty, so whether the
    checkpoint keeps its files is the run's retention's ([saves thin out](training.md#dying-and-starting-again)), not
@@ -272,8 +256,8 @@ settings](training.md#changing-a-running-runs-settings)): set when the run is la
 every N steps and episodes per start), and changed while it runs from its page. Each step's record says the evals it was
 decided with and the version of the suite they name as its name pointed then (`suite_version`); those decide whether its
 checkpoint is evaluated and which version plays. An edit of the suite, or a change of the evals, made while a step is
-taken applies from the next. `rollout train` gives the loop `scheduled`, which resolves a suite by name or a version by
-id as the profile's is (`suite_for`). Started again, the loop folds each eval in `evals` into its curriculum, entry by
+taken applies from the next. A run's driver gives the loop `scheduled`, which resolves a suite by name or a version by
+id from the ledger (`suite_of`). Started again, the loop folds each eval in `evals` into its curriculum, entry by
 entry (reading each part's `results`), and if it died during an eval, it finishes that eval (the checkpoint is the run's
 newest, served when the loop starts, and the version is the one its step names) before it decides anything else.
 
@@ -284,11 +268,10 @@ it; a curriculum that gates rows on how a checkpoint did reads it there.
 
 ### Why in the loop, not as a launch
 
-A run could instead ask for an eval launch of each checkpoint, which a launcher would start as `rollout eval`. That
-fits a cluster: the eval runs on other engines while training goes on, and Ray places it. On one GPU, with the
-trainer colocated, it does not: a second process needs engines of its own beside the run's, in memory sized for the
-run's engines and the trainer, and a launcher must be running. The loop already serves the new checkpoint on engines
-that are awake between steps, and its runner can play the eval's episodes beside the run's, so playing the suite
-there needs no memory and no engines of its own. The cost is time: the next step waits for the eval (training groups
-are still played meanwhile, so the engines stay busy). A run whose evals should not hold up its steps asks for
-launches instead, from the page or with `rollout eval`.
+A run could instead ask for an eval run of each checkpoint. That fits a cluster: the eval runs on other engines while
+training goes on. On one GPU, with the trainer colocated, it does not: a second run needs engines of its own beside the
+run's, in memory sized for the run's engines and the trainer. The loop already serves the new checkpoint on engines that
+are awake between steps, and its runner can play the eval's episodes beside the run's, so playing the suite there needs
+no memory and no engines of its own. The cost is time: the next step waits for the eval (training groups are still
+played meanwhile, so the engines stay busy). A run whose evals should not hold up its steps asks for eval runs instead,
+from the page or with `rollout eval`.

@@ -51,8 +51,9 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
 - **A run serves its newest checkpoint** on its channel, as the adapter named by its id (a full checkpoint, in place
   of the engines' weights: [full weights](#full-weights-and-merges)); the checkpoints before it stay
   loaded while a turn may still sample from them ([publishing weights](channels.md#publishing-weights)). It writes down that its channel serves it
-  ([what a channel should serve](channels.md#what-a-channel-should-serve)), so that engines on other machines follow. Runs on other channels serve their own. When its channel names
-  a `reshard`, it serves the files its [bridge](#bridges) makes of the checkpoint's, and waits for them.
+  ([what a channel should serve](channels.md#what-a-channel-should-serve)), so that engines on other machines follow. Runs on other channels serve their own. Where the channel's
+  provider loads another format than the trainer makes, it serves the files the [bridges](#bridges) make of the
+  checkpoint's, and waits for them.
 - **Saves thin out with age.** `thin(fence, run, Retention(recent=2, every=20), keep)` deletes the files, weights
   and trainer state, of the checkpoints a run made, but the newest `recent` and every `every`-th by depth. Whatever
   retention says, a checkpoint keeps its files while it is served (and its parent, for a turn in progress), while any
@@ -155,9 +156,9 @@ each bridge once per checkpoint.
   memory the bridge declares: the worker opens the ledger and the blob store from where they are, and works on its own
   disk under `~/.cache/rollout/scratch/bridges`. A chain of `none` alone serves the checkpoint's own files.
 
-A profile names a bridge for a channel (`[channels.NAME] reshard = "verbatim"`); with `ray`, the run's bridges are Ray
-tasks, else they run in its process, with scratch under `directory/resharding`
-([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint being
+A run's driver chooses the bridges from the trainer's format to what the trained channel's first provider loads
+(`path`, with the channel's `bridge` setting), and runs each as a Ray task, asking for what the bridge declares or what
+the cluster config's `[bridges."NAME"]` says ([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint being
 bridged, and what its bridges made.
 
 ## The ledger
@@ -193,8 +194,9 @@ Two ledgers are provided:
   holds its table's lock too, while it numbers its record after the table's last: records are numbered in the order
   they commit, one number each. SQLite runs one write at a time.
 
-A profile says which (`ledger`), and an open profile writes where it is into the run's directory (`ledger.json`), so
-that the monitor, the report and imitation open the same one from the directory alone (`of_run`). Each run is kept
+The cluster config says which (`[ledger]`: `sqlite:///…` on one machine, `postgresql://…` for several). A run's
+directory from before keeps where its ledger is (`ledger.json`), so the monitor and the report open the same one from
+the directory alone (`of_run`). Each run is kept
 under its own id ([runs](#runs)), so the runs sharing a ledger keep apart, and they share one graph of checkpoints.
 
 Moving a ledger to Postgres (or from files to SQLite) is a copy and a changed URL, with nothing writing to it:
@@ -203,10 +205,10 @@ Moving a ledger to Postgres (or from files to SQLite) is a copy and a changed UR
 rollout ledger copy ~/.cache/rollout/runs/curriculum-9 postgresql://trainer@db-1/rollout --point
 ```
 
-then the profile's `[ledger]` names the same `url`. `copy` (`rollout_train.database.copy`) takes any ledger, a run's
+then the cluster config's `[ledger]` names the same `url`. `copy` (`rollout_train.database.copy`) takes any ledger, a run's
 directory, files or a database, into a database that has none of its tables yet: every record under its key, in the
 order it was appended, and every fence, so a writer from before the move is still shut out. `--point` makes the run's
-directory name the copy at once (an open profile writes the same when it starts). The runs, bookmarks and dataset
+directory name the copy at once. The runs, bookmarks and dataset
 names registered beside the source are registered beside the copy.
 
 A ledger also lists its tables and its scopes' fences: `runs_in` reads from the tables' names which runs it has, and
@@ -220,7 +222,7 @@ What runs, checkpoints, datasets and suites are called is kept beside the ledger
 `suite_names` tables in a database ledger's database (`DatabaseRegistry`). It is ordinary state, changed in place, not part of the ledger's append-only record; nothing
 the ledger keeps is under a name, so naming anything again moves nothing. More ordinary state is kept beside the
 ledger the same way: the heartbeats (`presence.json`, the `presence` table; [heartbeats](rollouts.md#heartbeats)), the
-runs asked for (`launches.json`, the `launches` table; [launchers](../../guide/deploying.md#launchers)), what is wanted
+runs asked for (`launches.json`, the `launches` table; [launching runs](launching.md#the-launches-table)), what is wanted
 of each run's settings (`settings.json`, the `run_settings` table;
 [changing a running run's settings](training.md#changing-a-running-runs-settings)) and the sandboxes' leases
 (`sandboxes.json`, the `sandboxes` table). A name says none of `/`, `@` and `:` (they
@@ -234,13 +236,13 @@ its id, so that either finds one run.
 
 | | |
 |---|---|
-| A new run | `rollout train` registers it the first time it starts in a directory, under `--name` (by default the directory's name), with a new id (`run_` and a ULID) that the directory's `run.json` keeps (`run_of`) |
-| Renaming | `rollout rename WHO NAME --ledger WHERE`, where `WHO` is the run's name or its id and `WHERE` a run's directory, a ledger's directory or a database's URL; or `Registry.rename` |
+| A new run | Asking for it registers it, under its name (`--name`, the New run form's Name), with a new id (`run_` and a ULID) that its launch keeps ([launching runs](launching.md#asking-for-a-run)) |
+| Renaming | `rollout rename WHO NAME --cluster` (or `--ledger WHERE`: a run's directory, a ledger's directory or a database's URL), where `WHO` is the run's name or its id; or `Registry.rename` |
 
 ### Bookmarks
 
 A bookmark is a name for a checkpoint. It is made, moved and taken away by hand (`rollout bookmark`), or carried by a
-run: a profile's `[trainer] bookmark` moves it to each checkpoint the run makes, once the checkpoint is served. A checkpoint
+run: its `bookmark` setting moves it to each checkpoint the run makes, once the checkpoint is served. A checkpoint
 a bookmark names keeps its files. A checkpoint needs no bookmark: it is shown by where it came from.
 
 ### Dataset names
@@ -258,7 +260,7 @@ suite never edited needs none: its name is its version 1.
 
 ## References
 
-Wherever a checkpoint is asked for (a profile's `[trainer] start`, `rollout bookmark`), it is named by a reference,
+Wherever a checkpoint is asked for (a run's `start`, `rollout bookmark`), it is named by a reference,
 read in this order (`resolved`):
 
 | Reference | The checkpoint |
@@ -279,5 +281,5 @@ rollout rename curriculum-9 "diamonds, guided" --ledger RUN   # call a run somet
 rollout merge diamonds --base Qwen/Qwen3.5-9B --bookmark diamonds-merged   # fold an adapter in: a full checkpoint
 ```
 
-A new run started from a checkpoint is a fork: its profile's `[trainer] start = "diamonds"` (any reference), and
-`rollout train … --directory NEW --name "diamonds, unguided"`.
+A new run started from a checkpoint is a fork: `rollout train ENVIRONMENT --preset NAME --set start=diamonds --name
+"diamonds, unguided"` (any reference).

@@ -3,10 +3,11 @@
 > Reinforcement learning for language-model agents, from one GPU to a cluster. A uv workspace of Python 3.13
 > packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (episode runners,
 > episodes with token trajectories, the training loop and its objectives, checkpoints and the ledger, evals, channels,
-> the gateway that records every turn, bridges, the cluster config and run settings, the `rollout` command, the
-> monitor), one package per implementation (a vLLM engine, LoRA and full-weight trainers, Tinker's trainer and engine,
-> Qwen and Gemma renderers, an OpenAI endpoint, an S3 blob store, RunPod pods) and three environments. A Helm chart
-> deploys it on Kubernetes. The documentation describes the code as built; design notes say their status at the top.
+> the gateway that records every turn, bridges, the cluster config and run settings, runs built from their settings
+> and submitted as jobs, the `rollout` command, the monitor), one package per implementation (a vLLM engine, LoRA and
+> full-weight trainers, Tinker's trainer and engine, Qwen and Gemma renderers, an OpenAI endpoint, an S3 blob store,
+> RunPod pods) and three environments. A Helm chart deploys it on Kubernetes. The documentation describes the code as
+> built; design notes say their status at the top.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
 are frozen pydantic models; type names are never abbreviated. In `docs/guide/`, a block tagged exactly `python` runs
@@ -54,6 +55,8 @@ with what it covers and who it is for, then "Read first" and "Next" links.
 - [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
 - [The training loop and objectives](docs/libraries/rollout-train/training.md): the loop, steps over groups,
   objectives and presets, the curriculum, the trainer protocol, changing settings, pausing and resuming
+- [Launch runs](docs/libraries/rollout-train/launching.md): submitting a run's job (a Ray job or a RayJob), the
+  launches table, the driver that builds a run from its settings and claims what it needs, what a cluster offers
 - [Checkpoints, runs and the ledger](docs/libraries/rollout-train/checkpoints.md): checkpoints, manifests, bridges,
   append-only tables and fences, the registry
 - [Datasets and supervised steps](docs/libraries/rollout-train/datasets.md): examples chosen from episodes, SFT steps
@@ -91,7 +94,8 @@ with what it covers and who it is for, then "Read first" and "Next" links.
 - [Start runs and evals](docs/deploy/runs.md): after deploying
 - [Troubleshooting](docs/deploy/troubleshooting.md): problems seen in real deployments, and their fixes
 - [Local Postgres and S3 for development](docs/development/local-services.md): both stores in Docker Compose
-- [Deploying with the rollout command](docs/guide/deploying.md): the processes the `rollout` command starts
+- [Deploy with the rollout command](docs/guide/deploying.md): asking for runs and evals from a shell, what a run's
+  job starts, engines elsewhere, the gateway and Ray
 
 ## Operate the platform
 

@@ -12,19 +12,21 @@ Code: `rollout_vllm`
 logprobs and a finish reason out, or the logprobs of tokens it is given ([scoring](#scoring)). A [channel](../libraries/rollout-train/channels.md) holds one or more of them and
 knows nothing else about vLLM. The package is installed with `uv sync --all-extras` and needs Linux and an NVIDIA GPU.
 
-## In a profile
+## In a cluster config
 
-A [profile](../guide/deploying.md) names the engine for a channel and gives one table of options per replica:
+A `vllm` provider of the [cluster config](../guide/cluster.md#inference-providers) runs `VllmEngine` in each engine
+host it starts for a run's channel, with the options of the model the channel serves:
 
 ```toml
-[channels.policy]
-model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
-renderer = "rollout_qwen:qwen35"
-engine = "rollout_vllm:VllmEngine"
-engines = [{ gpu_memory_utilization = 0.78, max_model_len = 8192, max_num_seqs = 20 }]
+[inference.local-vllm]
+kind = "vllm"
+gpus = 1
+[inference.local-vllm.models."cyankiwi/Qwen3.5-9B-AWQ-4bit"]
+context = 8192                    # max_model_len, unless options say one
+options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 96 }
 ```
 
-Each entry of `engines` is passed to `VllmEngine(model, **entry)`. An entry may be empty; the defaults are in the
+An engine host makes `VllmEngine(model, max_model_len=context, **options, max_logprobs=...)`. The defaults are in the
 [reference](../guide/reference.md#vllmengine).
 
 | Option | What it sets |
@@ -112,10 +114,9 @@ with `spawn`, so an entry point that makes an engine guards itself with `if __na
 
 `close()` shuts the core down. A process that is killed outright cannot call it, and a core left behind holds its GPU.
 `VllmEngine.processes` therefore lists the core's process ids: the children of this process whose name begins with
-`ENGINE_PROCESS`, found with `rollout.processes.children`. An open profile writes them to `engine.json` in the run's
-directory with `rollout.processes.note_processes`. The next process to open a profile over that directory calls
-`rollout.processes.end_orphans`: if the process that wrote the file is gone, each noted process that still runs under
-its noted name is killed.
+`ENGINE_PROCESS`, found with `rollout.processes.children`. An engine host runs in a Ray actor its run's job owns, so
+Ray ends the actor, and with it the core, when the job ends. `rollout.processes.note_processes` and `end_orphans` write
+such ids to a file and end the noted processes that still run, for a process whose engines outlive it otherwise.
 
 ## Measurements
 

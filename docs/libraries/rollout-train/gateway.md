@@ -12,8 +12,8 @@ Code: `rollout_train.gateway` · See [`Gateway`](../../guide/reference.md#gatewa
 
 The gateway stands between programs and harnesses on one side and the endpoints that sample a policy on the other.
 Programs and harnesses speak a standard model API to it, with a key per model slot. It is how every run records its
-samples: a runner's recorded slots sample through it, a gateway in the runner's own process or replicas of their own
-([a runner served by the gateway](#a-runner-served-by-the-gateway)). For each request it:
+samples: a run's runner samples its recorded slots through a gateway in the run's driver, and harnesses reach it over
+HTTP; the cluster's replicas serve the same code ([a runner served by the gateway](#a-runner-served-by-the-gateway)). For each request it:
 
 1. verifies the key;
 2. renders the request with the channel's renderer;
@@ -135,7 +135,7 @@ rk1.KID.PAYLOAD.SIGNATURE
 [`Keyring`](../../guide/reference.md#keyring) holds the secrets by id: the first signs, and every one verifies. A
 secret is rotated by putting a new one first, and removing the old once the keys it signed have expired. Secrets are
 read from `ROLLOUT_GATEWAY_KEYS` (`KID:SECRET` pairs separated by commas) or from a file named by
-`ROLLOUT_GATEWAY_KEYS_FILE` or a profile's `[gateway] keys` (one `KID SECRET` per line). They are never written to the
+`ROLLOUT_GATEWAY_KEYS_FILE` or the cluster config's `[gateway] keys_file` (one `KID SECRET` per line). They are never written to the
 ledger. A secret is 32 bytes at least. A gateway in a runner's own process given none signs with a secret it makes when
 it starts: its keys are taken only while it runs.
 
@@ -253,18 +253,18 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
   ledger)` takes every provider of the [cluster config](../../guide/cluster.md) whose servers answer vLLM's API at its
   endpoints (`vllm`, `vllm-servers`, `runpod-inference`). A run's channel takes precedence over a channel of the same
   name in the gateway's own process.
-- **A channel whose engines serve elsewhere** (`RemoteEngine`: vLLM servers, or a router in front of them) is
-  sampled per run, as a `RemoteChannel`. It reads what the run says its channel should serve
+- **A routed channel** (`Routes`: a run's channel on its engine hosts, or on servers at addresses, or a router in front
+  of them) is sampled per run, as a `RemoteChannel`. It reads what the run says its channel should serve
   ([what a channel should serve](channels.md#what-a-channel-should-serve)), and asks the servers for that checkpoint
   by its id, as the model's name. Where a server has not loaded it yet, it asks for the newest one before it that the
-  server has, no more than `max_lag` checkpoints behind (1, or what the profile's channel or the run says). With none
+  server has, no more than `max_lag` checkpoints behind (1, or what the run's settings say). With none
   close enough, a turn waits up to its patience, then fails as the endpoint failing does: 503.
-- **A channel whose engines are in the gateway's own process** (a channel the gateway hosts: vLLM on its machine, or
-  an engine that calls a hosted API, such as `TinkerEngine`) samples whatever it serves: the base model, unless
-  something in that process publishes to it.
+- **A channel whose engines are in the gateway's own process** (an engine that calls a hosted API, such as
+  `TinkerEngine`, in a run's driver) samples whatever it serves: the base model, until the run publishes a checkpoint
+  to it.
 
-One gateway samples channels of every kind at once: a `TinkerEngine` channel beside a routed one and one on this
-machine's vLLM, say, all from the workspace's environment (Tinker's SDK comes with its `tinker` extra).
+One gateway samples channels of every kind at once: a run's `TinkerEngine` channel beside a channel on its engine hosts
+and one on servers at addresses, say.
 
 A turn's weights are chosen once, when it begins: both phases of its thinking ask for the same checkpoint. The turn
 records the checkpoint that served it (by id; the base model's name before the first checkpoint) and that
@@ -274,22 +274,22 @@ attempt is recorded.
 
 ## Running it
 
-A runner whose profile names no `[gateway] url` runs a gateway in its own process, over the profile's channels and
-routes, and records through it with no HTTP in between; it serves it to harnesses at the profile's `serve`
-([deploying](../../guide/deploying.md#the-gateway)). Replicas of their own serve the same code:
+A run's driver runs a gateway in its own process, over the run's channels ([launching runs](launching.md#the-driver)):
+its routed channels (engine hosts, servers at addresses) and its channels with engines in the process (Tinker). Its
+runner records through it with no HTTP in between, and serves it to harnesses on its node, at a free port on
+`127.0.0.1`; it signs keys with a secret of its own ([deploying](../../guide/deploying.md#the-gateway)). Replicas of the
+cluster's gateway serve the same code:
 
 ```bash
-ROLLOUT_GATEWAY_KEYS_FILE=~/.config/rollout/gateway.keys \
-    uv run rollout gateway profile.toml --listen 127.0.0.1:8830     # a replica: start as many as wanted
+uv run rollout gateway --cluster --listen 0.0.0.0:8900     # a replica: start as many as wanted
 ```
 
-`rollout gateway PROFILE` serves a replica of what the profile describes (`deployed`): its channels and their
-engines, its ledger and blob store, and its `[gateway]` table ([deploying](../../guide/deploying.md#the-gateway)).
-Replicas share nothing but the ledger and the blob store.
+`rollout gateway --cluster` serves a replica over the cluster config's ledger and blob store, with the keys
+`[gateway] keys_file` or `keys_env` names (else the environment's), and a `ChannelDirectory` of its providers
+(`ChannelDirectory.of`): every channel a run's start names on a provider whose servers answer vLLM's API at its
+endpoints, a judge's channel or one that follows the trained channel among them. Replicas share nothing but the ledger
+and the blob store.
 
-- **Every channel a run's start names.** With `--cluster [PATH or NAME]`, a replica also samples every channel a run's
-  start names over the servers of the cluster config's providers (a `ChannelDirectory`): a judge's channel, or one
-  that follows the trained channel, needs no profile channel of its own.
 - **Behind a proxy.** A proxy in front of the replicas terminates TLS, checks its own credentials, and may serve them
   under a path of its own (`https://models.example/gw/v1`). The gateway builds no URL from a request. It trusts
   `X-Forwarded-*` headers only from `--proxied` addresses (127.0.0.1 unless given).
@@ -414,36 +414,13 @@ endpoints = GatewayEndpoints("https://models.example/gw", keyring, TurnStore(led
 - `sessions(run, run_id)` reads what each slot recorded, when the run ends.
 
 What a channel guarantees a session (its capability contract) is its channel's: in this process, for a routed
-channel as the runner sees its servers, and for a channel the gateway elsewhere hosts, as that gateway says. A channel
+channel as the runner sees its servers. A channel
 a run's start names, sampled by a gateway elsewhere, is learned from that gateway's `/v1/models?run=RUN`, which lists
 the run's channels as `RUN/NAME`, each with its contract.
 
 Each slot of a run's binding names its channel (`RecordedModel.channel`), so each slot's key routes to the channel the
 run binds the slot to: `bind(program, channel, slots={"judge": "judge"})` serves `judge` from the channel `judge` and
 every other slot from `channel`.
-
-### A gateway elsewhere that hosts channels
-
-A runner whose profile names `[gateway] url` starts no engine. Each channel of its profile is either routed (its
-engines are servers elsewhere, which the runner and the replicas both reach) or hosted by the replicas: their engines
-run in the replicas' own processes, which `rollout gateway PROFILE` starts from the same channel table. One profile
-serves both processes, and the two may run in different Python environments: the runner's needs the environments it
-plays, the gateway's the engine's SDK. Neither imports what only the other needs: the runner reads a hosted channel's
-`model` (what an eval of the base model names) and samples it by name.
-
-```bash
-uv run rollout gateway profile.toml                 # in the engine's environment: hosts the channel, records turns
-uv run rollout eval profile.toml SUITE --name NAME  # in the environment's: samples there, over HTTP, with signed keys
-```
-
-- **What it guarantees.** When it opens, the runner asks the gateway's `GET /v1/models` for each hosted channel's
-  `contract`, asking again for up to a minute while the gateway cannot be reached; a channel the gateway does not host
-  stops it from opening. A binding's thinking and answer room (a [suite](evals.md#suites) entry's limits) replace the
-  channel's own, as for any channel.
-- **What it samples.** The engines the gateway started, as they are: the base model. A hosted channel is not
-  trained, and an eval of a checkpoint cannot be served on one: the runner refuses both.
-- **What both need.** The same ledger and the same blob store (an explicit `[blobs]` table, since a runner's
-  `--directory` moves the default), and the same keys' secrets (`[gateway] keys`).
 
 **Hooks.** A program's samples reach the runner's hooks through its endpoints. A harness's go straight to the
 gateway: one in the runner's process tells the runner's hooks of each (`Gateway.hooks`), so the

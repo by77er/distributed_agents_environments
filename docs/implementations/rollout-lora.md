@@ -16,20 +16,28 @@ one does. Its step and its objective are [`rollout_objectives`](rollout-objectiv
 policy on the GPU, with its reference and entropies. The package is installed with `uv sync --all-extras` and needs an
 NVIDIA GPU.
 
-## In a profile
+## In a cluster config
+
+A `lora` trainer of the [cluster config](../guide/cluster.md#trainers) is `LoraTrainer`; a run's settings name it and
+give its settings:
 
 ```toml
-[trainer]
-kind = "rollout_lora:LoraTrainer"
-channel = "policy"
-colocated = true
-rank = 32
+[trainers.local-lora]                 # the cluster config
+kind = "lora"
+gpus = 1
+colocate_with = "local-vllm"          # the engines sleep while it steps
+models = ["cyankiwi/Qwen3.5-9B-AWQ-4bit", "Qwen/Qwen3-0.6B"]
 segment_tokens = 8000
 ```
 
-A [profile](../guide/deploying.md) calls `LoraTrainer(model, **settings)` with the model of the
-[channel](../libraries/rollout-train/channels.md) it trains. Every key of `[trainer]` other than `kind`, `channel`,
-`start`, `bookmark` and `colocated` is a setting. A run's `objective.*` settings
+```toml
+"trainer.provider" = "local-lora"     # a run's settings, or a preset
+"trainer.rank" = 32
+"trainer.segment_tokens" = 8000
+```
+
+A run's driver calls `LoraTrainer(model, **settings)` in its trainer actor, with the model it trains and its
+`trainer.*` settings less `provider`, `channel` and `model`. A run's `objective.*` settings
 ([objectives](../libraries/rollout-train/training.md#objectives)) reach it as its `objective`.
 
 ### Every weight
@@ -77,7 +85,7 @@ objective's components can be named by this trainer's own settings too (`ratio`,
 `segment_clip_low`, `segment_clip_high`, `truncate`, and `objective = "policy_gradient"` or `"likelihood"`), which say
 the `default` or `sft` preset and its components.
 
-`segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). An open profile
+`segment_tokens` and `segments_per_step` are the trainer's [`Budget`](../guide/reference.md#budget). A run's driver
 gives `segment_tokens` to the trained channel as its longest turn, so that every sampled turn can be trained on.
 
 ## Files

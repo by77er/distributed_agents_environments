@@ -40,8 +40,7 @@ how to point them at a gateway.
 Each answers with one reply, or with `"stream": true` the same reply as server-sent events in that API's own event
 shapes. The gateway serves them under `SERVED_UNDER` (`/v1`), and a base URL handed to a harness ends with that path
 (Anthropic's clients add `/v1` themselves). A slot has an address when its gateway is served over HTTP: the replicas
-at a [profile](../../guide/deploying.md)'s `[gateway] url`, or a gateway in the runner's own process served at the
-profile's `serve` and reached at its `address`. `Model.address()` raises `RuntimeError` otherwise.
+at a URL, or a gateway in the runner's own process served over HTTP (a run's driver serves its own on its node). `Model.address()` raises `RuntimeError` otherwise.
 
 What a harness samples reaches the runner's hooks only from a gateway in the runner's own process
 ([hooks](gateway.md#a-runner-served-by-the-gateway)).

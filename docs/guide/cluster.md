@@ -1,5 +1,14 @@
 # The cluster config and run settings
 
+Code: `rollout_train.cluster`, `rollout_train.run_settings`, `rollout_train.validation` · See
+[launching runs](../libraries/rollout-train/launching.md), [API reference](reference.md#rollout_traincluster)
+
+For whoever describes a cluster or asks for runs on one: every section of the cluster config, the kinds of provider
+and trainer, bridges, every run setting, presets, and the one check of a run.
+
+**Read first:** [Choose a setup](../deploy/setups.md). **Next:**
+[Launching runs](../libraries/rollout-train/launching.md).
+
 A cluster is described once, in a cluster config: where the ledger and the blob store are, the inference providers
 and trainers it offers, its sandbox pools, the environments it offers and the Python each runs in. A run is described
 by its settings: the environment, the trainer, the provider of each channel, and the numbers each takes. Settings can
@@ -18,16 +27,18 @@ They are declarations, but for the bridges' tasks: none of the rest starts, impo
 and reaches things from them:
 
 - `rollout_train.stores.Stores.open(cluster)` opens the ledger and the blob store the config names
-  ([below](#the-stores));
-- `rollout_train.bridges.bridged` and `on_ray` run a chain of bridges, here or as Ray tasks ([below](#bridges));
+  ([the stores](#the-stores));
+- `rollout_train.bridges.bridged` and `on_ray` run a chain of bridges, here or as Ray tasks ([bridges](#bridges));
+- `rollout_train.launching` gathers what validation reads and checks a run's settings
+  ([asking for a run](#asking-for-a-run));
+- `rollout_train.submitting.submit` records a launch and starts the run's job, and `rollout_train.jobs` is what that
+  job runs ([launching](../libraries/rollout-train/launching.md));
 - `rollout cluster check` reads the config and says what of it does not resolve on this node;
 - the commands over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`,
   `preset`) take the cluster's with `--cluster`, in place of `--ledger`;
-- `rollout preset` lists, shows, saves and deletes [presets](#presets);
-- the commands that start runs take run settings in layers over their profile ([below](#over-a-profile)).
-
-The commands that start runs still take profiles ([Deploying](deploying.md)); the
-[runtime design](../research/runtime-design.md) says how they move onto these.
+- `rollout preset` lists, shows, saves, loads and deletes [presets](#presets);
+- the commands that ask for runs (`train`, `eval`, `imitate`, `env check`) take run settings in layers and the
+  cluster config ([the command line](deploying.md#asking-for-a-run)).
 
 ## The cluster config
 
@@ -47,14 +58,19 @@ A file it names that is not there is an error, which says where it looked. `load
 - a provider reached with no auth at an address that is not this machine;
 - a provider reached over mutual TLS when the cluster has no `[tls]`.
 
+A run's job is handed the config it was submitted with, as JSON in `ROLLOUT_CLUSTER_JSON`; `located` reads that
+first, and finds the file as above otherwise.
+
 `deploy/clusters/example.toml` is a config for one machine with one 16 GB GPU: SQLite, files, a vLLM pool, the LoRA
-trainer, Tinker, the Minecraft worlds and GSM8K in its own Python.
+trainer, Tinker, the Minecraft worlds, the gridworld and GSM8K in its own Python. `deploy/chart/rollout/files/cluster.toml`
+is the chart's, for a Kubernetes cluster ([on Kubernetes](deploying.md#on-kubernetes)).
 
 ```toml title="cluster.toml"
 name = "home"                                 # Ray namespace rollout-home; what runs record as where they ran
 
 [ray]
-address = "auto"                              # the head this machine runs
+address = "auto"                              # the Ray cluster a run's driver joins (auto: the one Ray finds)
+jobs = "http://127.0.0.1:8265"                # its job server: where runs' jobs are submitted
 temp_dir = "~/.cache/ray"                     # on disk: /tmp may be memory
 
 [ledger]
@@ -112,22 +128,22 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | Section | Fields | Notes |
 |---|---|---|
 | top | `name` | Required; lowercase letters, digits and `-` |
-| `[ray]` | `address` (`auto`), `jobs`, `temp_dir`, `memory_threshold`, `python` | |
+| `[ray]` | `address` (`auto`), `jobs`, `temp_dir`, `memory_threshold`, `python` (`platform`) | `address`: the Ray cluster a run's driver joins, as its GCS's `host:port`; `auto` is the one Ray finds (in a Ray job, the cluster the job runs on). Name it where a machine runs more than one Ray cluster. `jobs`: the job server runs' jobs are submitted to. `python`: the interpreter a run's job starts in (`platform`: `python` on the job's `PATH`) |
+| `[kubernetes]` | `namespace`, `rayjob`, `api` (`https://kubernetes.default.svc`) | With it, each run's job is a RayJob made from the template `rayjob` names (relative to the config file's directory), in `namespace`, through the API server `api` with the pod's service account ([launching](../libraries/rollout-train/launching.md#a-rayjob)) |
 | `[ledger]` | `url`, or `url_env` / `url_file` | A URL holding a password is refused: name it instead |
 | `[blobs]` | `kind` (`files` or `module:name`), `directory` or the store's settings | A setting that looks like a credential is refused |
 | `[scratch]` | `directory` | Node-local |
 | `[tls]` | `ca`, `certificate`, `key`, `identity` (`spiffe://rollout/gateway`) | The cluster's CA, and the client certificate it presents; paths |
 | `[gateway]` | `url`, `listen`, `replicas`, `keys_file` / `keys_env`, `lifetime` | |
 | `[monitor]` | `listen`, `feed_episodes` | |
-| `[launcher]` | `at_once` | |
 | `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | |
 | `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `models`, and the kind's own | Below |
 | `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, and the kind's own | Below |
 | `[sandboxes.KIND]` | `provider`, `python`, `size`, `cpus`, `memory_gib`, `pools`, the provider's settings | |
 | `[tools.NAME]` | `url`, `auth` | Tool sets served elsewhere |
-| `[environments."NAME"]` | `python = "platform"` or `project = PATH` | A relative project is from the config file's directory |
-| `[placement.ROLE]` | `resources` | Roles: gateway, monitor, launcher, runners, pools, engines, trainers, workers, bridges |
+| `[environments."NAME"]` | `python = "platform"` or `project = PATH`; `interpreter` | A relative project is from the config file's directory. A run on it starts in `interpreter`, by default `PROJECT/.venv/bin/python` for a project and the platform's for `python = "platform"` |
+| `[placement.ROLE]` | `resources` | Roles: gateway, monitor, runners, pools, engines, trainers, workers, bridges |
 | `[bridges."NAME"]` | `cpus`, `memory_gib` | Overrides what a bridge declares |
 
 A model a provider offers (`models."MODEL"`) has a `context`, and optionally a `base` (the model it was quantized
@@ -187,7 +203,7 @@ rollout bookmark diamonds first:20 --cluster lab
 | loads | `peft`, `full` | `peft` | `tinker` | nothing | `peft` |
 | bills | nothing | nothing | tokens | tokens | hours |
 | auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (must say) | `mtls` (each pod's identity from its heartbeat) |
-| its own fields | `engine`, `listen`, `max_logprobs`, `pool` | `addresses`, `via`, `loader`, `max_logprobs`, `pool` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `pool`, `api_key_env` |
+| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs`, `pool` | `addresses`, `via`, `loader`, `max_logprobs`, `pool` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `pool`, `api_key_env` |
 
 Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): the SDK takes prompt
 logprobs and a top k at prompt and sampled positions, whose width Tinker's server bounds without the SDK saying how
@@ -239,6 +255,10 @@ model's `max_lora_rank`. Turns are shared among a pool's runs by each run's `sha
 is `trainer.FIELD`, with its type and default, changeable when its module's `CHANGEABLE` names it. A trainer's
 `objective` is not one of them: the run's `objective.*` settings say it.
 
+A `lora`, `full` or `tinker` trainer may name its `implementation` (`module:name`), what makes the trainer in place of
+its kind's, called as the kind's is: with the model and the settings it takes (`rollout_train.testing:ScriptedTrainer`
+in tests, or an imported environment's own). A `vllm` provider's `engine` does the same for its engines.
+
 ## Bridges
 
 | From | To | Bridge | Task |
@@ -275,7 +295,7 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `objective.COMPONENT` | the preset's | Each component ([objectives](../libraries/rollout-train/training.md#objectives)): `objective.clip.kind`, `objective.kl.target`, `objective.preference.loss`, …; its numbers (`objective.clip.low`, `objective.kl.coefficient`, `objective.preference.beta`, …) changeable. A distillation's teachers are `objective.distillation.teachers`, a table of channels by route (`{"*" = "teacher"}`), and the top-k it reads `objective.distillation.top_k` |
 | `channels.NAME.provider` or `.providers` | | What samples the channel |
 | `channels.NAME.routing`, `.weights` | `spill` | How several providers share its turns |
-| `channels.NAME.model`, `.renderer` | | |
+| `channels.NAME.model`, `.renderer` | | An imitate run renders its dataset's examples with its channel's renderer |
 | `channels.NAME.thinking_tokens`, `.answer_tokens` | | Budgets per turn |
 | `channels.NAME.replicas` | the provider's | |
 | `channels.NAME.bridge` | `auto` | Or `merge-quantize` |
@@ -285,7 +305,7 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `slots.SLOT` | the trained channel, for a trained slot | The channel a program's slot samples; a slot that is not trained (a judge, a fixed opponent) has no default |
 | `self_judging` | false | Whether a judge may be bound to a channel serving the run's own checkpoints |
 | `eval.suite`, `eval.episodes` | | An eval's suite and episodes |
-| `check.episodes` | 1 | |
+| `check.episodes` | | Episodes of each group a check plays (none: a group's size) |
 | `imitation.dataset`, `.limit`, `.passes`, `.warmup`, `.resume_optimizer`, `.without` | | Supervised steps |
 | `groups_per_step` | 4 | Changeable |
 | `max_lag` | 1 | Changeable |
@@ -305,31 +325,20 @@ trainer_settings, preset)` is what a run's start records: a full copy, fixed and
 run that trains (`objective`), and the preset version they came from. `diff(before, after)` says what changed, key by
 key.
 
-### Over a profile
+### Asking for a run
 
-`rollout train`, `eval`, `imitate` and `env check --profile` take their settings in these layers over what the profile
-gives (its trainer's settings and `start`, its channels' models, renderers and budgets, the trained channel's
-`max_lag`, `episodes_at_once`, its evals): `--preset NAME[@N]` (beside the profile's ledger), `--settings FILE`,
-`--set KEY=VALUE`, then the command's own flags (`--model`, `--renderer` and `--channel` for those that sample,
-`--groups`, `--seed`, …).
+A run is asked for with its kind, its name, its environment, its settings and a preset
+(`rollout_train.launching.settled`): the preset's settings that a run of its kind takes (so a training run's preset
+serves an eval of the same channels), then the settings given, then its kind and name. `checked(settings, cluster,
+ledger)` checks them against the cluster with the facts gathered now: the environment's (`environment_facts`: imported
+here, its programs' sandboxes and slots; a published version's sandboxes as its record says; none for an environment
+in a project's Python, which this process does not import) and the ledger's (`ledger_facts`: the checkpoints the
+settings name and their formats, the suites, the names other runs have). The monitor checks a run when it is asked
+for, the CLI before it submits it, and the run's driver again before it claims anything
+([launching](../libraries/rollout-train/launching.md)).
 
-- A run setting the profile keeps is applied to it: `start` and `bookmark` as `[trainer] start` and `bookmark`,
-  `max_lag` as the trained channel's, `evals.suite = null` as no evals, a budget of `null` (or `none`) as none.
-- The slots' bindings (`slots.SLOT`, `self_judging`) and the channels' modes (`channels.NAME.mode`, `.follows`,
-  `.lag`, `.checkpoint`) are taken as they are and recorded in the run's start. A slot names one of the profile's
-  channels; the bindings are refused as validation refuses them (`rollout_train.slots`), and so is a mode on the
-  trained channel. Each slot's key routes to its channel, and every channel of the profile but the trained one
-  follows what the start says it serves (a following channel loads the followed channel's checkpoints, a pinned one
-  its checkpoint, resolved to an id when the run starts).
-- A run setting it has no place for (`trainer.provider`, `channels.NAME.provider`, `limits.spend`, `share`,
-  routing) is refused: it needs the cluster config.
-- The objective's keys (`objective.preset`, `objective.COMPONENT`) reach the trainer as its `objective`, a table of the
-  preset and the components given; the profile's `[trainer]` can name it the same way (`objective = "dapo"`, or a
-  table).
-- A key that is no run setting is the profile's own (`memory.runs_gib`), as `--set` takes it.
-
-The run's start records the profile's settings (`settings`), and beside them its run settings as they ran
-(`run_settings`: `recorded`, with the settings its trainer declares and the preset it came from).
+The run's start records its settings as it runs (`run_settings`: `recorded`, with the settings its trainer declares
+and the preset it came from).
 
 ## Presets
 
@@ -340,6 +349,8 @@ that name them. `presets_of(ledger)` gives the store beside a ledger: `FilePrese
 `presets/` beside a ledger of files) or `DatabasePresets` (the `presets` table of a database ledger's database).
 
 ```bash
+rollout preset load deploy/chart/rollout/files/presets --cluster   # each NAME.toml as preset NAME (a new version only
+                                                             # where its newest says otherwise)
 rollout preset list --cluster                                # every preset's newest version
 rollout preset show minecraft-one-gpu@3 --cluster            # one version's settings, a key a line
 rollout preset save minecraft-one-gpu --from-run team-8 --set trainer.learning_rate=3e-5 --note "slower" --cluster
@@ -347,7 +358,10 @@ rollout preset save gsm8k-tinker --settings run.toml --cluster   # a file of set
 rollout preset delete minecraft-one-gpu --cluster            # its name points to nothing; its versions stay
 ```
 
-`--from-run RUN` copies the run settings the run's newest start records, less its name.
+`--from-run RUN` copies the run settings the run's newest start records, less its name. The presets shipped with the
+platform are files of settings in `deploy/chart/rollout/files/presets` (`minecraft-one-gpu`, `minecraft-tinker`,
+`gridworld-qwen3-0.6b`, `gsm8k-tinker`), each commented with why its numbers are what they are; the chart loads them at
+every install and upgrade, and on one machine `rollout preset load` does.
 
 ## Validation
 

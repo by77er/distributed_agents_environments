@@ -25,8 +25,20 @@ By role, in the namespace it is installed into (these pages use `rollout`):
 - **What every pod mounts.** The state volume, the ConfigMap `rollout` with the cluster config, and the Secrets for
   gateway keys and Tinker ([what every pod is given](#what-every-pod-is-given)).
 
-<!-- Follow-up: describe the values that start runs, and what the gateway and the monitors serve (`launchers`,
-`gateway.profile`, `monitors.NAME.where`), once runs are submitted from the monitor and the command line. -->
+- **Each run's job.** A RayJob made by a monitor when a run is asked for from its page (or by `rollout train
+  --cluster` with Kubernetes credentials), from `files/rayjob.yaml`: one head pod of the platform's image holding
+  `rayjob.gpus` of a card for the run's trainer and engine hosts, started again up to `rayjob.backoffLimit` times when
+  its driver is lost, and removed `rayjob.ttlSeconds` after it ends. The cluster config's `[kubernetes]` names the
+  namespace and the template ([launching runs](../libraries/rollout-train/launching.md#a-rayjob)).
+- **The monitors' account.** A ServiceAccount `monitor` with a Role that may create, get, list, watch and delete
+  `rayjobs` (`templates/rbac.yaml`).
+- **The presets.** A hook Job, `presets`, saves `files/presets/*.toml` beside the ledger after every install and
+  upgrade (`rollout preset load /etc/rollout/presets --cluster`), a new version only where a preset's newest says
+  otherwise.
+
+The gateway runs `rollout gateway --cluster`: it samples every channel a run's start names on the providers it
+reaches. Each monitor serves its page over the cluster config's ledger, or over `monitors.NAME.where` where it names
+one (a ledger's URL, or a run's directory on the state volume), and asks for runs on the cluster config.
 
 ## The chart's values
 

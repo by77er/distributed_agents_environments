@@ -29,16 +29,16 @@ uv sync --extra tinker                  # or --all-extras, with vLLM to serve Ti
 uv run pytest tests/rollout_tinker      # on a fake Tinker: no key, no network
 ```
 
-Every command of the workspace (`uv run rollout ...`) then has Tinker's SDK: one gateway hosts a Tinker channel beside
-channels on this machine's engines.
+Every command of the workspace (`uv run rollout ...`) then has Tinker's SDK: a run's gateway samples a Tinker channel beside
+channels on engine hosts.
 
 ## The key
 
 The SDK reads `TINKER_API_KEY`, else the key `tinker auth login` stores in `~/.tinker/credentials.json`
 (`uv run tinker auth login`). `TINKER_PROJECT_ID`, or the `project` setting, puts the sessions in a
 Tinker project; a project's id is not a secret. Nothing in `rollout_tinker` prints or records the key, and the text of
-an error is cleared of it before it reaches a failed step's record. Every process that opens the profile's channel or
-trainer needs the key, in its environment or its user's credentials file.
+an error is cleared of it before it reaches a failed step's record. A run's driver (which samples a Tinker
+channel) and its trainer actor need the key, in their environment or their user's credentials file.
 
 ## Billing errors are fatal
 
@@ -55,43 +55,55 @@ out, or billing is not set up) will be refused again until someone adds money, s
 No call of the SDK, documented or in its REST client, reads the balance. `RestClient.get_billing_usage` (`tinker billing usage`) gives usage by hour, each
 row with an estimated cost at list prices, up to several hours late: what has been spent, not what is left.
 
-## In a profile
+## In a cluster config
+
+A `tinker` inference provider samples with `TinkerEngine` and a `tinker` trainer is `TinkerTrainer`
+([cluster config](../guide/cluster.md#inference-providers)):
 
 ```toml
-[channels.policy]
-model = "Qwen/Qwen3.5-9B"             # Tinker's id; the renderer loads the same model's tokenizer from the Hub
-renderer = "rollout_qwen:qwen35"
-engine = "rollout_tinker:TinkerEngine"
-engines = [{ max_model_len = 8192 }]
+[inference.tinker]
+kind = "tinker"
+project_env = "TINKER_PROJECT_ID"
+[inference.tinker.models."Qwen/Qwen3.5-9B"]
+context = 65536                       # the engine's max_model_len
 
-[trainer]
-kind = "rollout_tinker:TinkerTrainer"
-channel = "policy"
-rank = 32
-learning_rate = 1e-4
-segment_tokens = 8000
-segments_per_step = 384
-tokens_per_step = 16384
+[trainers.tinker-lora]
+kind = "tinker"
+project_env = "TINKER_PROJECT_ID"
+models = ["Qwen/Qwen3.5-9B"]
+segment_tokens = 32768
 ```
 
-`environments/minecraft/profiles/tinker.toml` is the Minecraft environment's, on the full `Qwen/Qwen3.5-9B`:
+A run's settings name them; the preset `minecraft-tinker` (`deploy/chart/rollout/files/presets/minecraft-tinker.toml`)
+is the Minecraft environment's, on the full `Qwen/Qwen3.5-9B`:
 
-```bash
-uv run rollout train environments/minecraft/profiles/tinker.toml minecraft_team.environment:environment --groups 30
+```toml
+"channels.policy.provider" = "tinker"
+"channels.policy.model" = "Qwen/Qwen3.5-9B"    # Tinker's id; the renderer loads the same model's tokenizer from the Hub
+"channels.policy.renderer" = "rollout_qwen:qwen35"
+"trainer.provider" = "tinker-lora"
+"trainer.model" = "Qwen/Qwen3.5-9B"
+"trainer.rank" = 32
+"trainer.learning_rate" = 1e-4
+"trainer.segment_tokens" = 8000
+"trainer.segments_per_step" = 384
+"trainer.tokens_per_step" = 16384
 ```
 
-### Evals through a gateway
+```bash
+uv run rollout train minecraft_team.environment:environment --preset minecraft-tinker --set groups=30
+```
 
-An environment that cannot share the workspace's environment (verifiers' pins its own `openai` and `mcp`) is played
-by a runner in its own project, sampling at Tinker through a gateway served from the workspace
-([a gateway elsewhere that hosts channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels)).
-One profile serves both: `rollout gateway` starts the `TinkerEngine` channel, beside any other channel the profile
-names, and records every turn; the runner, with `[gateway] url`, starts no engine and samples there under signed keys.
-The channel serves the base model. `implementations/rollout-verifiers/examples/gsm8k_tinker.toml` is GSM8K's, on
-`Qwen/Qwen3.5-9B`:
+The run's driver makes the `TinkerEngine` channel in its own process, with the model's options and its context as
+`max_model_len`; its trainer actor asks for no GPU.
+
+### Evals of a base model
+
+The preset `gsm8k-tinker` plays GSM8K with the base `Qwen/Qwen3.5-9B` sampled at Tinker, in rollout-verifiers' own
+Python (the cluster config's `[environments]` entry for it; [GSM8K](rollout-verifiers.md#gsm8k)):
 
 ```bash
-uv run rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.toml
+uv run rollout eval math --preset gsm8k-tinker
 ```
 
 and the eval from `implementations/rollout-verifiers` ([GSM8K](rollout-verifiers.md#gsm8k)). Its first run,
@@ -109,16 +121,17 @@ answer) in four minutes, eight episodes at once:
 
 Qwen3.5-9B thinks past 1,024 tokens on most GSM8K problems, so the cap, not the problem, ends its thinking.
 
-`colocated` and `training_gib` do nothing for a remote trainer: there is nothing on this machine to share, and a step's
-files are pointers. A channel served on engines here names Tinker's bridge (`reshard = "peft-from-tinker"`, [serving
-Tinker's adapters here](#serving-tinkers-adapters-here)). An engine's options are `max_model_len` (the longest turn;
-Tinker's context for `Qwen/Qwen3.5-9B` is 64K), `project` and `service`.
+A `tinker` trainer shares no GPU (`colocate_with` and `[guards] training_gib` do not apply), and a step's files are
+pointers. A channel that serves its checkpoints on a `vllm` provider is bridged with `peft-from-tinker`
+([bridges](../guide/cluster.md#bridges), [serving Tinker's adapters here](#serving-tinkers-adapters-here)). An
+engine's options are `max_model_len` (the longest turn; Tinker's context for `Qwen/Qwen3.5-9B` is 64K), `project`
+and `service`.
 
 ### Settings
 
 `TinkerSettings` (`rollout_tinker/settings.py`) are a policy step's settings, the ones `LoraSettings` hold too
-([`StepSettings`](rollout-objectives.md#settings)), with Tinker's defaults, and a project: a profile switches trainers by
-changing `kind`.
+([`StepSettings`](rollout-objectives.md#settings)), with Tinker's defaults, and a project: a run switches trainers by
+changing `trainer.provider`.
 
 | Setting | What it sets |
 |---|---|
@@ -235,7 +248,8 @@ only the joined name: the three are joined into one adapter (A stacked and B blo
 the same rank when they share one A), which is the same update. `rollout_tinker.weights.ranks(directory)` says the
 largest rank, which an engine's `max_lora_rank` must reach. Then:
 
-- `rollout_vllm:VllmEngine` serves it, as the commented profile in `tinker.toml` shows (`reshard = "peft-from-tinker"`);
+- `rollout_vllm:VllmEngine` serves it: a run of `minecraft-tinker` with `channels.policy.provider = "local-vllm"`
+  bridges each checkpoint with `peft-from-tinker`;
 - `rollout merge CHECKPOINT --base Qwen/Qwen3.5-9B` folds the bridged adapter into the model, a full checkpoint of
   its own;
 - the blob store holds the adapter, so the policy outlives the model's retirement at Tinker.
@@ -277,7 +291,7 @@ Prices (dollars per million tokens, re-checked on 2026-10-04 against
 Storage is $0.10 per GB-month. "Train" is a forward and backward pass; a forward-only pass of a training client is
 billed at the same price.
 
-**An estimate for the Minecraft profile, from curriculum-9's records** (the ledger's checkpoints, and the inference
+**An estimate for the Minecraft preset, from curriculum-9's records** (the ledger's checkpoints, and the inference
 counters of the 14 groups its log has them for):
 
 - curriculum-9 took 31 steps over 72 groups (2.3 groups a step); 22 steps were full, 384 segments each. It trained
@@ -319,8 +333,7 @@ documentation writes them. The tests (`tests/rollout_tinker`) show, with no netw
   and as a Ray task on the session's Ray, and `rollout merge` folding the bridged adapter in exactly; and on the names and shapes of a real archive of `Qwen/Qwen3.5-4B`'s
   (`qwen35_archive.json`), the adapter `tinker_cookbook` 0.5.7's converter made of it, name for name and shape for
   shape;
-- a profile naming the trainer and the engine, the loop playing groups and stepping on the fake;
-- one gateway, started from the workspace, hosting a Tinker channel and a channel on an engine of this machine at once.
+- the loop over the trainer and the engine, playing groups and stepping on the fake.
 
 `tests/rollout_tinker/test_live.py` runs only when asked (`ROLLOUT_TINKER=1`) and is skipped without a key. On `Qwen/Qwen3.5-4B` it checks the tokenizer
 against our renderer, the sampling contract, the sampler's logprobs against a training pass's, a step's round trip to a

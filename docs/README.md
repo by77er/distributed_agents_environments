@@ -38,7 +38,7 @@ train on).
 | Directory | Import | What it is | Implements |
 |---|---|---|---|
 | `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.environment`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, conversations, and a runner in this process | |
-| `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.profile`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the gateway, the cluster config | |
+| `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.jobs`, `.submitting`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the gateway, runs built from settings and their jobs | |
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
 | `implementations/rollout-lora` | `rollout_lora` | A trainer for 4-bit checkpoints with LoRA (low-rank adaptation), and a full-weight trainer | `Trainer` |
 | `implementations/rollout-tinker` | `rollout_tinker` | A trainer and an engine at Thinking Machines (Tinker); the `tinker` extra | `Trainer`, `Engine` |

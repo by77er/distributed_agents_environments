@@ -30,8 +30,8 @@ Also in this section:
 
 - [Local Postgres and S3 for development](../development/local-services.md): both stores in Docker Compose on a
   development machine, for the tests and for a cluster config.
-- [Deploying with the rollout command](../guide/deploying.md): the processes the `rollout` command starts, and how
-  they are spread over machines.
+- [Deploy with the rollout command](../guide/deploying.md): asking for runs and evals from a shell, what a run's job
+  starts, engines elsewhere, the gateway and Ray.
 
 ## Files in the repository
 

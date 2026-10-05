@@ -1,7 +1,9 @@
-# Testing
+# Test with a scripted model
 
-Tasks and agents are tested against a scripted model: no GPU, no network, and deterministic. The helpers live in
-`rollout.testing`.
+For environment authors: how to test tasks and agents against a scripted model, with no GPU, no network, and the same
+result every time, and how to check an environment before it is imported. The helpers live in `rollout.testing`.
+
+**Read first:** [Use a hosted model](models.md). **Next:** [Import an environment from git](publishing.md).
 
 ## The scripted endpoint
 
@@ -138,8 +140,9 @@ with pytest.raises(asyncio.CancelledError):
 
 `rollout env check module:name` plays one episode of an environment on a `LocalRunner` with a scripted endpoint
 (`--reply` is what it says each turn), after checking its rows, its starts and its eval data, and holds the episode's
-reward and result to the environment's description. With `--profile P --groups N` it plays N groups with the profile's
-model and flags the groups whose episodes all scored the same, which teach nothing
+reward and result to the environment's description. With a model's settings (`--preset P --groups N`) it asks for a
+check run that plays N groups with that model and flags the groups whose episodes all scored the same, which teach
+nothing
 ([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)).
 
 ## What to assert on
@@ -167,7 +170,20 @@ once and shared by every test that asks for it, and shut down when the session e
 | `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, `RAY_AUTH_MODE=disabled` | workers run in the test's environment, and nothing asks for a token |
 
 Ray reads its environment once, when it is imported, so `tests/conftest.py` sets it before any test module loads.
-`tests.local_ray.submitted` submits a job, asking again while the node's job agent is still starting.
+`tests.local_ray.submitted` submits a job, asking again while the node's job agent is still starting. Ray's workers
+start in the test's working directory, so an actor can make what a test module names (`tests.…`).
+
+### A run built from settings
+
+`tests/rollout_train/clusters.py` writes a cluster config for one machine (`a_cluster(tmp_path)`): a SQLite ledger and
+a blob store of files under the test's directory, a `vllm` provider whose engines are `rollout_train.testing:scripted_engine`,
+a `lora` trainer whose `implementation` is `rollout_train.testing:ScriptedTrainer` (it trains nothing and writes an
+adapter's files) colocated with them, and the test games. `POLICY` is a training run's settings on it. A test builds a
+`rollout_train.jobs.Run` from the cluster, its stores and the settings and runs it (`ran(run)`), or records a launch
+(`rollout_train.submitting.ask`) and runs its driver in the test's process (`rollout_train.jobs.driven`), on the
+session's Ray: its engine hosts and its trainer are real actors, its gateway and runner are in the test's process, and
+a step takes seconds. `tests/rollout_train/test_jobs.py` does so end to end; `test_submitting.py` submits with stand-ins
+for Ray's job client and the Kubernetes API server.
 
 ## Live tests
 

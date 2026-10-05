@@ -19,7 +19,7 @@ trained on by a preference loss the same way, and a dataset of **teacher samples
 rollout dataset make best-of-group --run curriculum-9 --turns all --turns minecraft_team.datasets:worked \
     --name diamonds-worked --ledger sqlite:///~/.cache/rollout/ledger.db
 rollout dataset list --ledger sqlite:///~/.cache/rollout/ledger.db
-rollout imitate profile.toml --dataset diamonds-worked --start curriculum-9 --name diamonds-sft
+rollout imitate --dataset diamonds-worked --preset minecraft-one-gpu --start curriculum-9 --name diamonds-sft
 ```
 
 ## What a dataset is
@@ -124,18 +124,19 @@ Guidance is cut when the examples are made: each example's prompt loses the guid
 ## A step on a dataset
 
 ```bash
-rollout imitate PROFILE --dataset REF [--start REF] [--name NAME] [--directory RUN] [--limit N] [--seed N] \
+rollout imitate --dataset REF [--preset NAME] [--start REF] [--name NAME] [--limit N] [--seed N] \
     [--learning-rate R] [--warmup N] [--passes N] [--resume-optimizer]
 ```
 
-The profile's trainer takes the step: the LoRA (low-rank adaptation) trainer, or the trainer of every weight
-(`rollout_lora:FullTrainer`). A dataset of examples is trained on by a likelihood (`sft`, unless the run names another
-likelihood preset), each example weighted 1; a dataset of pairs or labelled examples by the preference preset the run
-names (`--set objective.preset=dpo`), its items the [pairs or labelled examples](training.md#objectives) the manifest
-holds. A dataset's kind and the objective's family must agree. The step is a run of its own (the profile's directory, or
-`--directory`), registered under `--name`; its start record says `kind: imitation`, the dataset, and the checkpoint it
+The run's trainer (`trainer.provider`) takes the step: the LoRA trainer, or the trainer of every weight; its examples
+are rendered with `channels.policy.renderer` over the trainer's model.
+A dataset of examples is trained on by a likelihood (`sft`, unless the run names another likelihood preset), each
+example weighted 1; a dataset of pairs or labelled examples by the preference preset the run names
+(`--set objective.preset=dpo`), its items the [pairs or labelled examples](training.md#objectives) the manifest
+holds. A dataset's kind and the objective's family must agree. The step is a run of its own, registered under
+`--name` (by default after the dataset); its start record says `kind: imitation`, the dataset, and the checkpoint it
 trains from. It trains from the newest checkpoint the run made, else `--start` (any
-[reference](checkpoints.md#references)), else the profile's `[trainer] start`, else the base model.
+[reference](checkpoints.md#references)), else the base model.
 
 - **Its parents** are the checkpoint it trained from, then the checkpoints that sampled the examples it trained on,
   by depth. The checkpoint graph shows those as learned-from edges. A step
@@ -154,8 +155,8 @@ trains from. It trains from the newest checkpoint the run made, else `--start` (
 
 ### Its schedule
 
-A supervised step has a rate, a warmup and passes of its own, whatever the profile's `[trainer]` says for training
-runs:
+A supervised step has a rate, a warmup and passes of its own, unless its settings say them (`trainer.learning_rate`,
+`imitation.warmup`, `imitation.passes`, from the flags, `--set` or a preset):
 
 | | Default | Flag |
 |---|---|---|
@@ -166,7 +167,7 @@ runs:
 Passes rather than a smaller `tokens_per_step`: each update stays the size the trainer's settings make it, over
 examples shuffled anew each pass, and a dataset large enough for its updates takes one pass as before. They are the
 trainer's settings `passes` and `warmup_updates` ([LoRA trainer](../../implementations/rollout-lora.md)); a
-training run's steps use them only if its profile sets them, and a step that goes on from an optimizer's state is
+training run's steps use them only if its settings set them, and a step that goes on from an optimizer's state is
 not warmed up.
 
 The defaults come from steps on `slqm` (12 short answers the base model gave in the guessing game, 107 sampled

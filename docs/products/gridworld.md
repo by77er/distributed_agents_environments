@@ -2,6 +2,8 @@
 
 Code: `environments/gridworld`
 
+**Read first:** [Example environments](README.md). **Next:** [Judging](judging.md).
+
 Two to four agents share a small grid level. To win they have to spread out, one agent on each final plate at the
 same time. In the harder levels they first get through doors, a gate and a lever. Every agent can reach every plate,
 so what they have to learn is to split up: they agree over chat who goes where, who holds the gate and who pulls the
@@ -13,19 +15,20 @@ episode. It needs no sandbox, no tool set and no GPU of its own.
 
 ```bash
 uv run rollout env check gridworld.environment:environment                       # without a model
-uv run rollout env check gridworld.environment:environment --profile PROFILE    # groups played by the profile's model
-uv run rollout train environments/gridworld/profiles/one-gpu.toml gridworld.environment:environment
+uv run rollout env check gridworld.environment:environment --preset gridworld-qwen3-0.6b   # groups played by its model
+uv run rollout train gridworld.environment:environment --preset gridworld-qwen3-0.6b
 ```
 
 ## Where it runs
 
-`environments/gridworld/profiles/one-gpu.toml` trains it on one 16 GB GPU: Qwen/Qwen3-0.6B on one vLLM engine, with
-the budgets its check played it with (thinking 384 tokens, answers 128, prompts within 4,096), and a LoRA trainer of
-rank 16 that shares the card. It needs no sandbox pool and no tool set.
+The preset `gridworld-qwen3-0.6b` (`deploy/chart/rollout/files/presets/gridworld-qwen3-0.6b.toml`) trains it on one
+16 GB GPU: Qwen/Qwen3-0.6B on the cluster's vLLM engines, with the budgets its check played it with (thinking 384
+tokens, answers 128, prompts within 4,096), `episodes_at_once = 8` (a group's episodes at once, each two to four agents
+sampled together every turn), and a LoRA trainer of rank 16 that shares the card (64 segments of up to 4,096 tokens a
+step). It needs no sandbox pool and no tool set; the cluster config lists it under `[environments]`, in the platform's
+Python, and serves the model (`deploy/clusters/example.toml` and the chart's config both do).
 
-In the K3s cluster (deploy/chart/rollout), the launcher `gridworld` offers it with the same profile over the cluster's
-stores (`files/profiles/gridworld/qwen3-0.6b.toml`), submitting each run as a Ray job that asks for the GPU; the
-cluster config lists it under `[environments]`, in the platform's Python. Its project declares its environment for an
+In the K3s cluster (deploy/chart/rollout), a run asked for from the monitor with this preset is a RayJob of its own. Its project declares its environment for an
 import from git (`[project.entry-points."rollout.environments"]`, [writing an environment others can
 import](../guide/publishing.md)): imported from this repository with the subdirectory `environments/gridworld`, it is
 the version `gridworld@VERSION`, which runs in the platform's Python too, since `rollout` is its only dependency.
@@ -185,5 +188,4 @@ Paths are under `environments/gridworld/`.
 | Episode | `gridworld/episode.py` | The program: a model slot for each agent (`agent-1` to `agent-4`, of which a start uses the first as many as it has agents), all agents sampled at once each turn (`run.gather`), the team's reward to each |
 | Environment | `gridworld/environment.py` | The six rows, a start of one (its parameters and a seed), the eval data `gridworld-eval`, and what its results say |
 | Scripted team | `gridworld/scripted.py` | The policy above, and `ScriptedTeam`, which serves it as a model endpoint |
-| Profile | `profiles/one-gpu.toml` | Qwen/Qwen3-0.6B on one vLLM engine and a LoRA trainer sharing its card ([where it runs](#where-it-runs)) |
 | Tests | `tests/` | Levels (same seed, same level; every level sound; each step needed; the check catches unsound levels), the game (walls, ties, swaps, doors, gates, levers, chat, winning, the budget), observations from each agent's side, replies read as actions, whole episodes through the runner, and `rollout env check` |

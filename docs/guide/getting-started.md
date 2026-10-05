@@ -1,6 +1,9 @@
-# Getting started
+# Run a first episode
 
-Write a task, run one episode against a scripted model, and read what happened.
+For environment authors starting out: install the workspace, write a task, run one episode against a scripted model,
+and read what happened.
+
+**Read first:** [Write an environment](README.md). **Next:** [Write a task](tasks.md).
 
 ## Install
 

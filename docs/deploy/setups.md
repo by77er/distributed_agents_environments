@@ -77,7 +77,13 @@ Postgres, and S3 or an S3-compatible service.
 
 `uv run ray stop` stops the Ray head and everything running on it.
 
-<!-- Follow-up: add how the gateway is started on one machine once it no longer takes a profile. -->
+A run's driver serves a gateway of its own for the run's channels, so one machine needs no gateway process. For
+programs or harnesses elsewhere that sample runs' channels on providers the cluster reaches at addresses
+(`vllm-servers`, RunPod pods), start a replica of the cluster's gateway:
+
+```bash
+uv run rollout gateway --cluster --listen 127.0.0.1:8900
+```
 
 When several machines or processes share the stores, move the ledger to Postgres and the blobs to S3 first:
 [Postgres and S3](stores.md) says how, and [local Postgres and S3](../development/local-services.md) runs both on a

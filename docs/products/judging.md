@@ -2,6 +2,9 @@
 
 Code: `environments/judging`
 
+**Read first:** [Example environments](README.md) and [more model slots](../guide/tasks.md#more-model-slots-judges-and-other-players). **Next:**
+[Suites and evals](../libraries/rollout-train/evals.md).
+
 The policy answers open-ended requests that have no exact answer: explain a concept to a ten-year-old in under 80
 words, or summarize a short passage in at most two sentences. A second model, the judge, scores each answer against a
 rubric the environment holds, and the score is the reward. The judge is a model slot of its own that is never trained:
@@ -13,7 +16,7 @@ tool set and no GPU of its own, but a run needs a channel for the judge.
 
 ```bash
 uv run rollout env check judging.environment:environment                    # without a model
-uv run rollout train PROFILE judging.environment:environment --directory RUN --set slots.judge=judge
+uv run rollout train judging.environment:environment --settings judged.toml --name judged   # (judged.toml: the settings shown next)
 ```
 
 ## The requests
@@ -100,9 +103,12 @@ renderer = "rollout_qwen:qwen35"
 mode = "fixed"                   # the base model; `checkpoint = "RUN:STEP"` pins a checkpoint instead
 ```
 
-The run's start records them, and the gateway builds the judge's channel from the start
-([the gateway](../libraries/rollout-train/gateway.md#which-checkpoint)): the runner's key for the `judge` slot routes
-to it. Validation refuses a run that leaves `judge` unbound, binds it to a channel without a provider or a model, or to
+Asked for with these settings (`--settings judged.toml`, a preset, or the New run form's rows), the run's driver serves
+the judge's channel beside the policy's: on engine hosts of its own for a `vllm` provider, at the servers of one reached
+at addresses ([launching runs](../libraries/rollout-train/launching.md#the-driver)). The run's start records them, the
+cluster's gateway builds the judge's channel from that start too ([the
+gateway](../libraries/rollout-train/gateway.md#which-checkpoint)), and the runner's key for the `judge` slot routes to
+it. Validation refuses a run that leaves `judge` unbound, binds it to a channel without a provider or a model, or to
 a provider that does not offer the model, and a run that binds it to the trained channel, or to a channel that follows
 it, unless the run says `self_judging = true`. A judge that follows the policy some checkpoints behind is a snapshot
 of the policy judging it:
@@ -118,26 +124,6 @@ mode = "follows"
 follows = "policy"
 lag = 5                          # the policy's checkpoint five serving records back
 ```
-
-### In a profile
-
-A profile describes the judge's channel beside the policy's, with engines of its own (or servers elsewhere, as any
-channel):
-
-```toml
-[channels.judge]
-model = "Qwen/Qwen3.5-9B"
-renderer = "rollout_qwen:qwen35"
-engine = "rollout_train.inference:RemoteEngine"
-engines = [{ address = "https://judge.lab.example:8000" }]
-```
-
-and the run binds the slot to it in its settings: `--set slots.judge=judge` on the command line, a settings file
-(`--settings judged.toml` holding `"slots.judge" = "judge"`), or a preset. The profile's channels serve their models
-as they are, so `channels.judge.mode` may be left out; `mode = "follows"` with `follows` and `lag` (and
-`self_judging = true`) has the judge's channel serve the policy's checkpoints that many serving records back, loaded
-by its engines in the run's process, or by `rollout engines` beside servers elsewhere. A run over
-a profile refuses the same bindings validation does, and a slot naming a channel the profile does not describe.
 
 ## Without a model
 

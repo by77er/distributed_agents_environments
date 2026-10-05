@@ -65,8 +65,8 @@ Each row is a module of one package. The [documentation home](../README.md#packa
 | `rollout_train.rollouts` | `rollout-train` | `EpisodeRunner`, `Plan`, `plan`, `episodes_of`, `playing`, `Hooks`, `Episode`, `Record` |
 | `rollout_train` | `rollout-train` | `train`, `Grpo`, `Trainer`, `Colocated`, `Checkpoints`, `FileLedger` |
 | `rollout_train.inference`, `rollout_train.recorder`, `rollout_train.gateway` | `rollout-train` | `Channel`, `Engine`, `Limits`; `Segment`, `Renderer`; `Gateway`, `GatewayEndpoints` |
-| `rollout_train.profile`, `rollout_train.monitor` | `rollout-train` | `Profile`, `Platform`; `RunFeed` |
-| `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `PlainRenderer`, `plain_channel` |
+| `rollout_train.jobs`, `rollout_train.submitting`, `rollout_train.monitor` | `rollout-train` | `Run`, `driven`; `submit`; `RunFeed` |
+| `rollout_train.testing` | `rollout-train` | `ScriptedEngine`, `ScriptedTrainer`, `PlainRenderer`, `plain_channel` |
 | `rollout_openai` | `rollout-openai` | `ResponsesEndpoint`, `codex_provider`, `ApiKey` |
 | `rollout_s3` | `rollout-s3` | `S3BlobStore` |
 | `rollout_vllm` | `rollout-vllm` | `VllmEngine` |

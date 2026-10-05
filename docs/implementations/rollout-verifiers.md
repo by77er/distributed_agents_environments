@@ -18,8 +18,8 @@ on and evals play.
 It is a uv project of its own, with its own lock, outside the workspace: verifiers ships development releases daily
 and pins what it needs (`openai<3`, `mcp==2.0.0`, a pre-release of Prime's `renderers`), so it is resolved apart from
 the platform. It pins `verifiers==0.3.2.dev185` and the Hub's `gsm8k` 0.1.4 wheel, and depends on the workspace's
-`rollout` (and, for its tests and its commands, `rollout-train`; for training here, the implementations a profile
-names) by path.
+`rollout` (and, for its tests and a run's driver, `rollout-train`; for training here, in its `spike` group, the vLLM
+engine, the LoRA trainer and the Qwen renderers) by path.
 
 ```py
 from rollout_verifiers import VerifiersEnvironment
@@ -60,38 +60,34 @@ one entry: `gsm8k-test-100`, one episode of each start, 1,024 tokens of thinking
 
 ```bash
 uv run rollout suite make math --environment rollout_verifiers.environments:gsm8k --data gsm8k-test-100 \
-    --episodes 1 --thinking-tokens 1024 --answer-tokens 512 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
+    --episodes 1 --thinking-tokens 1024 --answer-tokens 512 --cluster
 ```
 
 Its tasks load from Hugging Face's `openai/gsm8k` (the first time, over the network) once its rows, a start, its
 description or its eval data are asked for; importing it loads nothing. The root workspace's environment cannot
-import it (verifiers is not in the platform's lock): there, the monitor lists it from the runs, suites and launchers
-that name it, and its page says it does not load, with what the ledger has of it.
+import it (verifiers is not in the platform's lock): there, the monitor lists it from the cluster config, the runs
+and suites that name it, and its page says it does not load, with what the ledger has of it.
 
-`examples` has two profiles for it, both on the shared ledger `sqlite:///~/.cache/rollout/ledger.db`:
+A run of it starts in this project's Python: the cluster config's `[environments]` entry names the project, and its
+driver runs in the project's `.venv` (or the entry's `interpreter`):
 
-- **`gsm8k_tinker.toml`**: the base `Qwen/Qwen3.5-9B` sampled at Tinker, through a gateway that hosts the
-  [channel](../libraries/rollout-train/channels.md) in the workspace's environment (with its `tinker` extra), while the
-  eval's runner plays GSM8K in this one ([a gateway elsewhere that hosts
-  channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels),
-  [Tinker](rollout-tinker.md#evals-through-a-gateway)):
+```toml
+[environments."rollout_verifiers.environments:gsm8k"]
+project = "/opt/rollout/source/implementations/rollout-verifiers"   # the project's directory, on the cluster's nodes
+interpreter = "/opt/rollout/verifiers/bin/python"                   # where its Python is built there
+```
 
-  ```bash
-  (cd ../.. && uv run rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.toml) &
-  uv run rollout eval examples/gsm8k_tinker.toml math --name gsm8k-tinker-base --directory ~/.cache/rollout/runs/gsm8k-tinker-base
-  ```
+The preset `gsm8k-tinker` plays it with the base `Qwen/Qwen3.5-9B` sampled at Tinker
+([Tinker](rollout-tinker.md#evals-of-a-base-model)); a run's settings that name a `vllm` provider and the LoRA trainer
+train an adapter over Qwen3-0.6B on this machine, with the project synced with its `spike` group. From the project's
+directory (where `env check` plays an episode in this process):
 
-- **`gsm8k_vllm.toml`**: an adapter over Qwen3-0.6B trained on this machine (the `spike` group), whose runner serves
-  the gateway in its own process (`serve`) for the harness:
-
-  ```bash
-  uv run --group spike rollout env check rollout_verifiers.environments:gsm8k
-  uv run --group spike rollout train examples/gsm8k_vllm.toml rollout_verifiers.environments:gsm8k --groups 8 --groups-per-step 2
-  uv run --group spike rollout eval examples/gsm8k_vllm.toml math --directory ~/.cache/rollout/runs/gsm8k-eval
-  ```
-
-A launcher started from this project offers it by name (`--environment rollout_verifiers.environments:gsm8k`), so
-that launches can name it.
+```bash
+uv run rollout eval math --preset gsm8k-tinker --name gsm8k-tinker-base
+uv run rollout env check rollout_verifiers.environments:gsm8k
+uv run rollout train rollout_verifiers.environments:gsm8k --model Qwen/Qwen3-0.6B --provider local-vllm \
+    --renderer rollout_qwen:qwen3 --trainer local-lora --groups 8 --groups-per-step 2
+```
 
 ## The environment
 

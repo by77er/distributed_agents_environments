@@ -13,7 +13,7 @@ gets a model) and the **episode** (the labelled trajectory that comes out).
 |---|---|---|---|---|
 | Building an environment | A world and its rulebook: its situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs | `rollout` |
 | Designing training | What to run, how to group it, what each [episode](../libraries/rollout-train/episodes.md) counts for | A [ledger](../libraries/rollout-train/checkpoints.md#the-ledger) to ask for episodes in, the finished episodes back, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
-| Deploying | A profile: [channels](../libraries/rollout-train/channels.md) and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms | Nothing: a profile names implementations |
+| Deploying | A [cluster config](cluster.md): inference providers, trainers, pools, environments; and a run's settings or a [preset](cluster.md#presets) | The same protocols in process or over the network | Tasks and algorithms | Nothing: the config names implementations |
 
 ## Building an environment
 
@@ -96,14 +96,15 @@ ledger and the blob store ([rollouts](../libraries/rollout-train/rollouts.md)).
 
 ## Deploying
 
-A profile is a TOML file that names each of these: the channels (a model, its token format, what serves it, one
-entry per replica), the trainer and the channel it trains, the runner, and where each tool set lives. Engines,
-renderers and trainers are packages of their own, named in the file as `module:name`.
+A cluster config is a TOML file, written once per cluster, that names what it offers: inference providers (what samples
+a channel, and its models), trainers, sandbox pools, tool sets served elsewhere and environments
+([the cluster config](cluster.md)). A run's settings pick from it: the environment, the trainer, each channel's provider,
+model and token format, and the numbers each takes; a preset holds a set of them under a name.
 
 ```bash
-uv run rollout train profile.toml minecraft_team.environment:environment
+uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu
 ```
 
-The trainer's longest segment becomes its channel's longest turn, and the channel's limits reach environments only
-as outcomes, such as a full [memory](../libraries/rollout/memory.md). Scaling is a change to this file
-([deploying](deploying.md)).
+The run's driver builds the run from the two and asks Ray for what it needs. The trainer's longest segment becomes its
+channel's longest turn, and the channel's limits reach environments only as outcomes, such as a full
+[memory](../libraries/rollout/memory.md). Scaling is a change to the cluster config ([deploying](deploying.md)).

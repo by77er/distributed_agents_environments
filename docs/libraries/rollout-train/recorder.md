@@ -120,8 +120,8 @@ tool specifications into prompt tokens, says which tokens end a turn and how thi
 sampled tokens back into a canonical message: reasoning, text and tool calls. The gateway and trainers depend only on
 this protocol.
 
-- A model family is supported by a function that makes its renderer from a checkpoint's name. A profile names the
-  function as `module:name` ([deploying](../../guide/deploying.md)).
+- A model family is supported by a function that makes its renderer from a checkpoint's name. A run's settings name the
+  function as `module:name` (`channels.NAME.renderer`, [run settings](../../guide/cluster.md#run-settings)).
 - Most are a [`ChatTemplateRenderer`](../../guide/reference.md#chattemplaterenderer): the tokenizer's chat
   template, with the family's [`ToolCallFormat`](../../guide/reference.md#toolcallformat) (`XmlFunctionCalls`,
   `JsonToolCalls`) and [`ThinkingFormat`](../../guide/reference.md#thinkingformat).

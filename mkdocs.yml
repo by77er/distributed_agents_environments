@@ -104,6 +104,7 @@ nav:
           - "Hooks": libraries/rollout/hooks.md
           - "Memory for long episodes": libraries/rollout/memory.md
       - Example environments:
+          - products/README.md
           - "Minecraft team": products/minecraft-team.md
           - "Gridworld": products/gridworld.md
           - "Judging": products/judging.md
@@ -112,6 +113,7 @@ nav:
       - "Episode runners": libraries/rollout-train/rollouts.md
       - "Episodes": libraries/rollout-train/episodes.md
       - "The training loop and objectives": libraries/rollout-train/training.md
+      - "Launch runs": libraries/rollout-train/launching.md
       - "Checkpoints, runs and the ledger": libraries/rollout-train/checkpoints.md
       - "Datasets and supervised steps": libraries/rollout-train/datasets.md
       - "Channels and engines": libraries/rollout-train/channels.md
@@ -136,7 +138,7 @@ nav:
       - "Start runs and evals": deploy/runs.md
       - "Troubleshooting": deploy/troubleshooting.md
       - "Local Postgres and S3 for development": development/local-services.md
-      - "Deploying with the rollout command": guide/deploying.md
+      - "Deploy with the rollout command": guide/deploying.md
   - Operate the platform:
       - operate/README.md
       - "The monitor": libraries/rollout-train/monitor.md

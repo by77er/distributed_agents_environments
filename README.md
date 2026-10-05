@@ -54,8 +54,9 @@ Then check an environment, train on it, and watch:
 
 ```sh
 uv run rollout env check minecraft_team.environment:environment
-uv run rollout train environments/minecraft/profiles/one-gpu.toml minecraft_team.environment:environment
-uv run rollout monitor sqlite:///$HOME/.cache/rollout/ledger.db
+uv run rollout preset load deploy/chart/rollout/files/presets --cluster
+uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu
+uv run rollout monitor --cluster
 ```
 
 The monitor shows runs, every episode's transcript, the checkpoint tree, evals, environments and the machines doing

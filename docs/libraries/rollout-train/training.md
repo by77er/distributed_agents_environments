@@ -3,42 +3,39 @@
 Code: `rollout_train` · See [rollouts](rollouts.md), [episodes](episodes.md), [datasets](datasets.md),
 [API reference](../../guide/reference.md#rollout_train)
 
+For people who design and run training: the loop, its objectives, the curriculum, the trainer, and changing, pausing
+and resuming a run.
+
+**Read first:** [Episodes](episodes.md). **Next:** [Checkpoints, runs and the ledger](checkpoints.md).
+
 The training loop, what it asks of an algorithm and of a trainer, and the curriculum. The loop is written against
 the [ledger](checkpoints.md#the-ledger), an [`Environment`](rollouts.md#environment), `Trainer`, `Algorithm` and
 [`Checkpoints`](checkpoints.md) only: it asks for each group's episodes in the ledger, and [runners](rollouts.md) play them,
 wherever they are. The same loop runs with everything in one process and with the runners, the engines and the
 trainer on machines of their own.
 
-```python
+```py
 await train(environment, trainer, checkpoints, start=None, base="Qwen/Qwen3.5-9B", channel="policy",
-            directory=cache, publish=platform.publish, run=run.id, groups=100)
+            directory=cache, publish=publish, run=run.id, groups=100)
 ```
 
-`rollout train PROFILE ENVIRONMENT [--groups N] [--groups-per-step N]` runs this loop over what a profile describes:
-the profile opens into a trainer, the checkpoints, a way to publish checkpoints and a runner that plays the run's
-episodes, says the checkpoint a new run starts from (`[trainer] start`, by default the base model) and the channel that
-serves what it trains, and sets `episodes_at_once` ([deploying](../../guide/deploying.md)). The run is the one in its
-directory: its id is in the directory's `run.json`, and its name is chosen with `--name` and changed with
-`rollout rename` ([runs](checkpoints.md#runs)).
+`rollout train ENVIRONMENT [--groups N] [--groups-per-step N]` asks for a run of this loop on the cluster
+([deploying](../../guide/deploying.md#asking-for-a-run)): its job's driver builds, from the cluster config and the run's
+settings, the trainer, the engines that serve each channel, the gateway and a runner that plays the run's episodes,
+and runs the loop over them ([launching runs](launching.md#the-driver)). The run is named when it is asked for
+(`--name`), changed with `rollout rename`, and known by its id ([runs](checkpoints.md#runs)).
 
-A run's [settings](../../guide/cluster.md#run-settings) are given in layers over what the profile gives, each over
-the last, without editing its file: `--preset NAME[@N]` (a [preset](../../guide/cluster.md#presets) kept beside the
-profile's ledger), `--settings FILE` (TOML or JSON, dotted keys or tables), `--set KEY=VALUE` (repeatable), then
-`--model`, `--renderer` (of `--channel`, by default the trained one), `--groups`, `--groups-per-step` and `--seed`.
-A value is read as JSON, then TOML, then as the text it is: `--set trainer.learning_rate=3e-5`,
-`--set episodes_at_once=4`, `--set start=curriculum-9:20`, `--set bookmark=diamonds`, `--set max_lag=2`,
-`--set objective.preset=dapo`, `--set objective.kl.coefficient=0.01`. The run
-settings the profile keeps are applied to it (`start` and `bookmark` as `[trainer] start` and `bookmark`, `max_lag` as
-the trained channel's); one it has no place for (`trainer.provider`, a channel's `provider`, `limits.spend`) is
-refused, as it needs the cluster config. The objective's (`objective.preset` and its components,
-[objectives](#objectives)) reach the trainer as its `objective`. A key that is no run setting is the profile's own
-(`memory.runs_gib`), and a
-key the profile cannot have is an error, as in the file: when the profile is loaded, for its top level and its
-tables; for a `trainer.` key, when the trainer is made with its settings
-([`Profile.load(path, settings=...)`](../../guide/reference.md#profile)). The run's start records the profile's
-settings (`settings`) and, beside them, its run settings as they ran, with the objective they resolve to and the preset
-they came from (`run_settings`: `rollout_train.run_settings.recorded`). A run started again trains with the objective
-its newest training start recorded, so what a preset means later does not change it.
+A run's [settings](../../guide/cluster.md#run-settings) are given in layers, each over the last: `--preset NAME[@N]` (a
+[preset](../../guide/cluster.md#presets) kept beside the ledger), `--settings FILE` (TOML or JSON, dotted keys or
+tables), `--set KEY=VALUE` (repeatable), then `--model`, `--provider`, `--renderer` (of `--channel`, by default
+`policy`), `--trainer`, `--groups`, `--groups-per-step` and `--seed`. A value is read as JSON, then TOML, then as the
+text it is: `--set trainer.learning_rate=3e-5`, `--set episodes_at_once=4`, `--set start=curriculum-9:20`,
+`--set bookmark=diamonds`, `--set max_lag=2`, `--set objective.preset=dapo`, `--set objective.kl.coefficient=0.01`.
+They are checked against the cluster config before the run is asked for, each refusal said with its setting. The
+objective's (`objective.preset` and its components, [objectives](#objectives)) reach the trainer as its `objective`.
+The run's start records its settings as they ran, with the objective they resolve to and the preset they came from
+(`run_settings`: `rollout_train.run_settings.recorded`). A run started again trains with the objective its newest
+training start recorded, so what a preset means later does not change it.
 
 ## The loop
 
@@ -64,7 +61,7 @@ besides where and by what it was started, the environment (as `module:name`), it
   step leans toward one task), over every group queued by then, while play goes on; at the end of the run, over
   whatever is left. The trainer's segment budget is spread over the groups. The step starts from the newest
   checkpoint the run made (its first, from `start`); the checkpoint it makes is appended under the run's fence and served
-  on the channel, and `made` is told of it (a profile's carried bookmark moves there). Tokens sampled under an
+  on the channel, and `made` is told of it (the run's `bookmark` moves there). Tokens sampled under an
   older checkpoint are corrected for by the trainer's objective. One step is taken at a time.
 - **Evals between steps.** With `evals` (a [`Schedule`](../../guide/reference.md#schedule)), the checkpoint of every
   `every`th step is evaluated once it is served, and the next step waits until the eval has played every start
@@ -74,8 +71,8 @@ besides where and by what it was started, the environment (as `module:name`), it
 - **Serving waits for the engines' files.** With `reshard` (a function of a checkpoint and the run's fence, giving a
   manifest), the channel is given the files `reshard` makes for a checkpoint
   ([bridges](checkpoints.md#bridges)): the trainer's files made into what its engines load by a bridge, noted in
-  the ledger once per checkpoint and bridge. Without it, the engines load the trainer's files as they are. An open profile's
-  `reshard` (when its trained channel names one) runs as a Ray task when the profile names `ray`.
+  the ledger once per checkpoint and bridge. Without it, the engines load the trainer's files as they are. A run's driver gives
+  the bridges from the trainer's format to what the trained channel's provider loads, each a Ray task.
 
 ## Dying and starting again
 
@@ -158,9 +155,9 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 | `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient) | policy_gradient, distillation (`reward` in the policy-gradient form only) |
 | `kl.coefficient` | a number | policy_gradient, distillation |
 | `entropy.coefficient` | a number | policy_gradient |
-| `aggregate` | `token_mean`, `segment_mean`, `segment_sum`, `constant` (divided by `constant_tokens`, Dr. GRPO) | policy_gradient, likelihood, distillation |
+| `aggregate` | `token_mean`, `segment_mean`, `segment_sum`, `constant` (divided by `constant_tokens`, Dr. GRPO: group relative policy optimization done right) | policy_gradient, likelihood, distillation |
 | `constant_tokens` | a whole number | policy_gradient, likelihood, distillation |
-| `reference` | `base` (the model trained over), `none` | policy_gradient and distillation (with a KL to it), preference |
+| `reference` | `base` (the model trained over), `none` | policy_gradient and distillation (with a KL, Kullback-Leibler, divergence to it), preference |
 | `preference.loss` | `sigmoid` (DPO), `hinge`, `square` (IPO), `margin` (SimPO), `odds_ratio` (ORPO), `kto` | preference |
 | `preference.beta`, `preference.margin`, `preference.desirable`, `preference.undesirable` | numbers | preference |
 | `preference.length_normalized` | true or false | preference |
@@ -321,15 +318,16 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 
 ## Changing a running run's settings
 
-A run's settings are named by dotted key, as a profile's are, and are of two kinds (`rollout_train.settings`).
+A run's settings are named by dotted key ([run settings](../../guide/cluster.md#run-settings)), and are of two
+kinds.
 **Changeable** ones can change between two steps without breaking the run: `groups_per_step`, `max_lag` (written into what the channel should serve with each
 checkpoint it serves, so runners elsewhere take it with that checkpoint), the evals it makes
 (`evals.suite`: a suite by name, which follows its newest version, a version by id, or none for no evals;
 `evals.every`; `evals.episodes`, none for the suite's own), and its trainer's (`trainer.NAME` for each of its
-`changeable`, and the numbers of its objective by their own keys, `objective.kl.coefficient`). **Fixed** ones make what the run is: the model, the trainer's kind and what its weights are, the
-adapter's rank and the trainer's other settings, the channels and their engines, how many episodes it plays at once,
-and the groups and seed the loop was started with (`fixed(profile, trainer, …)`). `rollout train` writes both into the
-run's start record (`settings`: `fixed`, and `changeable` with their values as it starts).
+`changeable`, and the numbers of its objective by their own keys, `objective.kl.coefficient`). **Fixed** ones make what the run is: its trainer and model, the
+adapter's rank and the trainer's other settings, the channels and their providers, how many episodes it plays at once,
+and the groups and seed the loop was started with. The run's start records both (`run_settings`: `fixed`, and
+`changeable` with their values as it starts).
 
 What someone wants of a run's changeable settings (its **desired settings**) is ordinary state beside the ledger,
 changed in place and not appended: `settings.json` beside a ledger of files, the `run_settings` table in a database
@@ -344,19 +342,18 @@ noted as a `settings` note with what changed. The step is decided with the setti
 `steps` says them (`settings`), with the version of the suite they name as its name points then (`suite_version`); a
 step taken again after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and
 the version played is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by
-name (the version its name points to now) or of a version by id. `rollout train`'s resolves it as the profile's
-`[evals]` suite is resolved (`suite_for`): the ledger's version, or else the environment's eval data of that name,
-frozen on first use, whatever environments it plays; for a name neither has, or a suite whose environments do not all
-load where the run is, there is none, and nothing is evaluated.
+name (the version its name points to now) or of a version by id. A run's driver gives the
+ledger's version; for a name the ledger has no suite of (asking for one is refused: a name never becomes a suite by
+itself), or a suite whose environments do not all load where the run is, there is none, and nothing is evaluated.
 An edit of the suite (a new version, [versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken applies from
 the next one, and a run that is stopped takes it when it is started again.
 
 ## Pausing and resuming
 
-A run can be paused and resumed two ways (`rollout_train.resuming`): in place, while its process stays; and, once it
-is stopped, by starting it again in its own directory.
+A run can be paused and resumed two ways (`rollout_train.resuming`): in place, while its driver stays; and, once it
+is stopped, by submitting it again with the settings its start recorded.
 
-**Paused in place**, a run's process keeps beating and holding its engines and GPU, and nothing new starts:
+**Paused in place**, a run's driver keeps beating and holding its engines and GPU, and nothing new starts:
 
 - Its desired settings say `paused: true` (`rollout_train.settings.PAUSED`, beside the changeable ones, kept where
   they are: [changing a running run's settings](#changing-a-running-runs-settings)). `rollout pause RUN` and the
@@ -370,32 +367,39 @@ is stopped, by starting it again in its own directory.
   a paused eval (`part_of`): so a run's scheduled evals pause with it, and an eval launched on its own pauses the same
   way. Its beats say which of the runs it serves are paused (`paused`), and it beats at once when that changes: the
   monitor shows such a run **paused**.
-- **Resume** (`rollout resume RUN`, the monitor's **Resume**) sets `paused` false while the run's process beats, and
+- **Resume** (`rollout resume RUN`, the monitor's **Resume**) sets `paused` false while the run's driver beats, and
   the loop and runners go on within a second.
 
-**Stopped**, a run's process is gone and its machine free: a launch's **Stop** interrupts it at a group boundary and
-it ends `stopped` ([launchers](../../guide/deploying.md#launchers)). Resuming a run that stopped, failed or was lost
-asks a launcher to start it again (`rollout_train.launches`): a launch that names the run (`resumes`) and its
-directory, which the launcher starts `rollout train` (or `rollout eval`) in, with what the run's last launch asked (a
-run started by hand: its newest start's profile, environment, seed and groups a step). The directory names the run, so
-it goes on from the ledger as any run started again does ([dying and starting again](#dying-and-starting-again)): no
-step that made its checkpoint is taken again and no recorded episode is played again. A training run is asked for the
-groups it had left: those its newest start was to play, less those it has played since. A launcher alive must offer
-its profile (by the name its last launch used, else by path, else by file name) and its environments.
+**Stopped**, a run's driver is gone and its resources free: its launch's **Stop** stops its job, and the run ends
+`stopped` ([launching runs](launching.md#the-launches-table)). Resuming a run that stopped, failed or was lost
+submits it again (`relaunch`, over the cluster config: `rollout resume RUN --cluster`, or the monitor's **Resume**): a
+launch of the same run (`resumes`), with the settings its newest start recorded (`run_settings`, fixed and changeable,
+less its name) and the preset they came from. Its driver goes on from the ledger as any run started again does
+([dying and starting again](#dying-and-starting-again)): no step that made its checkpoint is taken again and no
+recorded episode is played again. A training run is asked for the groups it had left: those its newest start was to
+play, less those it has played since; an eval, the version of its suite its start and subject say. The settings are
+checked against the cluster config first, as any run's are.
 
-Resume refuses a run whose process is there (it beats and its newest start has not said how it ended) and is not
+A run whose start records no providers (one started before runs recorded them) resumes only with a preset whose
+settings match what its start recorded (`rollout resume RUN --preset NAME --cluster`, or the monitor's resume with a
+preset): every setting both say must be equal, the preset's trainer's implementation must be the start's `trainer.kind`,
+and each channel's provider's engine its `channels.NAME.engine`. A difference is refused with each setting that
+differs (`channels.policy.thinking_tokens: the run has 64, the preset 128`). The launch then carries the preset's
+settings with the run's own beside them: its environment, its seed and groups a step, and its changeable settings as
+its start recorded them. Its new start records them in full, so the next resume needs no preset.
+
+Resume refuses a run whose driver is there (it beats and its newest start has not said how it ended) and is not
 paused, one that finished, one a launch is going for already, an eval a run's schedule asked for (that run plays it),
 and a part of an eval (its eval is resumed).
 
 ## The record
 
 When the loop starts it appends to the run's `starts` table, under the number of the fence it took: the checkpoint it
-starts from (`from`), the host, when, and what `train(started=…)` adds; `rollout train` adds the run's directory, the profile and, with
-`--monitor URL`, where the monitor on that machine serves (`address`), as other machines reach it, and where the run's
-blobs are (`blobs`, [rollouts](rollouts.md#what-runners-write)). A run started
-again appends another. That is how a [monitor](monitor.md) over a shared ledger finds every run, and where each keeps
-its episodes. With `settings`, its fixed and changeable settings ([changing a running run's
-settings](#changing-a-running-runs-settings)).
+starts from (`from`), the host, when, and what `train(started=…)` adds; a run's driver adds its environment (and the
+published version it plays, `published`), the run's directory on its node, where the run's blobs are (`blobs`,
+[rollouts](rollouts.md#what-runners-write)), its run settings (`run_settings`), the cluster's name, the launch and the
+job. A run started again appends another. That is how a [monitor](monitor.md) over a shared ledger finds every run,
+and where each keeps its episodes.
 
 For each group the run appends a [`Result`](../../guide/reference.md#result) to its `results` table when its last
 episode ends: the rewards, `solved` and durations of the episodes fit to train on, how many episodes failed and why,
@@ -421,18 +425,20 @@ Discord webhook (`--webhook`, or `DISCORD_WEBHOOK_URL`) it posts both there. It 
 
 ## Trying it without a GPU
 
-`rollout_train.testing` has public test doubles, so that an environment, an algorithm or a whole profile can be tried
-with no model and no accelerator.
+`rollout_train.testing` has public test doubles, so that an environment, an algorithm or a whole run built from its
+settings can be tried with no model and no accelerator.
 
 | Double | Stands for |
 |---|---|
 | [`ScriptedEngine`](../../guide/reference.md#scriptedengine) | an engine: it answers each request from a script, and keeps what it was asked and told |
 | [`PlainRenderer`](../../guide/reference.md#plainrenderer) | a model family's token format: one token per character, readable in a failing test |
 | `plain_channel(script)` | a channel over both |
-| `scripted_engine`, `plain_renderer` | what a profile names as `engine` and `renderer`: `rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer` |
+| `scripted_engine`, `plain_renderer` | what a cluster config's `vllm` provider names as its `engine` and a run's settings as a channel's `renderer`: `rollout_train.testing:scripted_engine`, `rollout_train.testing:plain_renderer` |
+| `ScriptedTrainer` | a trainer that trains nothing, which a cluster config's trainer names as its `implementation`: each step writes an adapter's files |
 
-`tests/rollout_train/test_profile.py` opens a profile made of these, with a trainer that trains nothing, and runs
-the loop over it. For tasks and agents alone, see [guide: testing](../../guide/testing.md).
+`tests/rollout_train/test_jobs.py` builds runs from settings over a cluster config made of these
+(`tests/rollout_train/clusters.py`), on the test session's Ray, and runs the loop end to end. For tasks and agents
+alone, see [guide: testing](../../guide/testing.md).
 
 ## Imitation
 
@@ -455,17 +461,17 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
   sampled with its exact tokens and behaviour logprobs) or `supervised` (`supervision`).
 
 ```bash
-rollout imitate PROFILE [--directory RUN] [--without KIND ...] [--limit N] [--seed N]   # with the run stopped
-rollout imitate PROFILE --dataset REF [--start REF] [--name NAME]                     # a dataset's examples
-rollout imitate PROFILE … --resume-optimizer          # go on from the parent's trainer state (by default: afresh)
-rollout imitate PROFILE … --learning-rate R --warmup N --passes N   # the step's schedule
+rollout imitate --dataset REF --preset NAME [--start REF] [--name NAME] [--limit N] [--seed N]
+rollout imitate --dataset REF … --resume-optimizer   # go on from the parent's trainer state (by default: afresh)
+rollout imitate --dataset REF … --learning-rate R --warmup N --passes N   # the step's schedule
 ```
 
-It takes the run's fence, so the run must be stopped, and writes a start of `kind: imitation` that says its
-examples' `supervision`. It reads the episodes
-of the run in the directory for guidance of the kinds given (`way` by default), or, with `--dataset`, a
-[dataset's](datasets.md) examples; steps the profile's trainer with the run's objective if it is a likelihood or a
-preference preset (a preference preset for a dataset of pairs or labelled examples), else `sft`; and adds
+`rollout imitate` asks for an imitate run (a run of its own, named by `--name`, by default after the dataset): its
+settings name the trainer (`trainer.provider`), the model and the renderer the examples are rendered with
+(`channels.policy.model`, `channels.policy.renderer`), from a preset or `--set`. Its driver takes the run's fence and
+writes a start of `kind: imitation` that says its examples' `supervision`. It reads a [dataset's](datasets.md)
+examples; steps the trainer with the run's objective if it is a likelihood or a preference preset (a preference preset
+for a dataset of pairs or labelled examples), else `sft`; and adds
 `imitated_episodes`, `imitated_segments` and `optimizer_resumed` to the checkpoint's metrics. The step starts from
 the parent's weights with its optimizer afresh, unless `--resume-optimizer`, on a schedule of its own: 1e-6 for
 every weight or 1e-4 for an adapter, warmed up over 4 updates, with passes enough for 8 updates
