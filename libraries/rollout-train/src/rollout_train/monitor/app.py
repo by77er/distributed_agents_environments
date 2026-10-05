@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -19,6 +19,7 @@ from starlette.staticfiles import StaticFiles
 from rollout_train.launching import Refused as LaunchRefused
 from rollout_train.layout import LEDGER
 from rollout_train.ledger import FENCES, LOCATION, FileLedger
+from rollout_train.monitor.access import guarded, hosts_of, new_token
 from rollout_train.monitor.stream import BEAT, MISSING, Hub, Reading
 from rollout_train.monitor.system import RELAYED, System
 from rollout_train.publishing import Importer, Refused
@@ -41,22 +42,27 @@ def watched(
     importer: Importer | None = None,
     cluster: "Cluster | None" = None,
     backends: "Mapping[str, Backend] | None" = None,
+    token: str | None = None,
 ) -> System:
     """What a monitor over `where` reads: a database's URL (`sqlite:///…`, `postgresql://…`), the ledger service's
     (`https://…`, with the cluster config's token), or a ledger's directory of files, every run in it; or a run's
     directory (`rollout_train.layout`), its ledger and every run that shares it, with the directory's own logs and
     feed. `importer`: where environments imported from git go. `cluster`: the
     cluster config runs are asked for on (none: this monitor asks for none), and `backends` where their jobs go in
-    place of its own (a test's)."""
+    place of its own (a test's). `token` is what it asks other monitors with (`RELAYED`): its own."""
+    import httpx
+
+    headers = {RELAYED: "1", **({"Authorization": f"Bearer {token}"} if token else {})}
+    client = httpx.Client(timeout=2.0, headers=headers)
     if "://" in str(where):
         from rollout_train.stores import opened_ledger
 
         ledger = opened_ledger(str(where), cluster.ledger.token if cluster is not None else None)
-        return System(ledger=ledger, importer=importer, cluster=cluster, backends=backends)
+        return System(ledger=ledger, client=client, importer=importer, cluster=cluster, backends=backends)
     path = Path(where).expanduser()
     if (path / FENCES).exists() and not (path / LOCATION).exists() and not (path / LEDGER).is_dir():
-        return System(ledger=FileLedger(path), importer=importer, cluster=cluster, backends=backends)
-    return System(path, importer=importer, cluster=cluster, backends=backends)
+        return System(ledger=FileLedger(path), client=client, importer=importer, cluster=cluster, backends=backends)
+    return System(path, client=client, importer=importer, cluster=cluster, backends=backends)
 
 
 def create_app(
@@ -66,10 +72,16 @@ def create_app(
     importer: Importer | None = None,
     cluster: "Cluster | None" = None,
     backends: "Mapping[str, Backend] | None" = None,
+    token: str | None = None,
+    hosts: Sequence[str] = (),
 ) -> Starlette:
-    """Serves the page and what it asks for, over a ledger or a run's directory (`watched`):
+    """Serves the page and what it asks for, over a ledger or a run's directory (`watched`), to whoever holds `token`
+    (made up where none is given: `app.state.token`), under the names `hosts` adds to those every monitor answers
+    under (`rollout_train.monitor.access`):
 
-    - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
+    - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles, which need no token;
+    - `/login?token=TOKEN` (or `POST /login` with `{"token": TOKEN}`): signs a browser in, with a cookie that holds the
+      token, and goes on to the page;
     - `/api/system`: where every run stands (`System.snapshot`);
     - `/api/machines`: every machine that beats and the roles on it, what each holds and how full it is
       (`System.machines`);
@@ -123,12 +135,16 @@ def create_app(
       (`System.bookmark`); `DELETE /api/bookmarks/{name}` takes it away (`System.unbookmark`). Each answers 200 with
       what the registry now says, 409 for a name that cannot be one, 404 when what it names is not there.
 
+    Every `/api/` route asks for the token (401 without it), and every request that is not a GET or a HEAD for
+    `Content-Type: application/json` and, where it says its `Origin`, the monitor's own
+    (`rollout_train.monitor.access`).
     Each JSON answer carries its topic's version as its ETag: a request that names it (`If-None-Match`) is answered
     304, with nothing. A run whose directory is on another machine has its episodes asked of the monitor its start
     names (`System._source`); what one monitor asks another, the other answers from its own machine (`RELAYED`),
     directly and in full. It reads, and writes names (a run's, bookmarks, suites') and suites' versions; the runs' own
     processes write the rest."""
-    system = watched(where, importer, cluster, backends)
+    token = token or new_token()
+    system = watched(where, importer, cluster, backends, token)
     hub = Hub(system, beat)
 
     def answered(request: Request, reading: Reading) -> Response:
@@ -478,8 +494,10 @@ def create_app(
         Route("/api/bookmarks/{name}", unbookmark, methods=["DELETE"]),
         Mount("/assets", app=StaticFiles(directory=STATIC / "assets", check_dir=False), name="assets"),
     ]
-    middleware = [Middleware(GZipMiddleware, minimum_size=1024)]
-    return Starlette(routes=routes, middleware=middleware, lifespan=measuring)
+    middleware = [*guarded(token, hosts_of(hosts)), Middleware(GZipMiddleware, minimum_size=1024)]
+    app = Starlette(routes=routes, middleware=middleware, lifespan=measuring)
+    app.state.token = token
+    return app
 
 
 UNBUILT = """<!doctype html><title>Rollout</title>

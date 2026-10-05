@@ -241,10 +241,39 @@ def test_every_monitor_asks_for_runs_and_imports_with_the_cluster_config_and_rea
     monitors = containers_of(rendered, "monitor")
     assert len(monitors) == 1
     for monitor in monitors:
-        assert monitor["command"][-1] == "--cluster"
+        assert "--cluster" in monitor["command"]
         names = {each["name"] for each in monitor["env"]}
         assert {"ROLLOUT_CLUSTER", "RAY_AUTH_MODE", "RAY_AUTH_TOKEN", "AWS_ACCESS_KEY_ID"} <= names
         assert {"R2_WRITER_ACCESS_KEY_ID", "R2_READER_SECRET_ACCESS_KEY"} <= names  # (a second store's keys, optional)
+
+
+def test_the_monitors_ask_for_a_token_the_chart_makes_and_answer_only_under_their_names(
+    rendered: list[dict[str, Any]],
+) -> None:
+    (secret,) = [each for each in rendered if each["kind"] == "Secret" and each["metadata"]["name"] == "monitor-token"]
+    assert secret["metadata"]["annotations"]["helm.sh/resource-policy"] == "keep"  # (uninstalling leaves the token)
+    assert len(secret["data"]["ROLLOUT_MONITOR_TOKEN"]) >= 43 and set(secret["data"]) == {"ROLLOUT_MONITOR_TOKEN"}
+    cluster = parsed(tomllib.loads(config_of(rendered)["cluster.toml"]))
+    assert cluster.monitor.token is not None and cluster.monitor.token.env == "ROLLOUT_MONITOR_TOKEN"
+    (monitor,) = containers_of(rendered, "monitor")
+    env = {each["name"]: each for each in monitor["env"]}
+    assert env["ROLLOUT_MONITOR_TOKEN"]["valueFrom"]["secretKeyRef"] == {"name": "monitor-token",
+                                                                         "key": "ROLLOUT_MONITOR_TOKEN"}  # fmt: skip
+    command = monitor["command"]
+    allowed = [command[at + 1] for at, each in enumerate(command) if each == "--allow-host"]
+    assert allowed == ["monitor-main", "monitor-main.rollout", "monitor-main.rollout.svc",
+                       "monitor-main.rollout.svc.cluster.local"]  # fmt: skip
+    ingresses = {each["metadata"]["name"] for each in rendered if each["kind"] == "Ingress"}
+    assert "monitor-main" not in ingresses  # (off unless asked for: the page is opened through a port-forward)
+    on = render("--set", "monitors.main.ingress=true", "--set", "monitors.main.hosts={monitor.example.com}")
+    (ingress,) = [each for each in on if each["kind"] == "Ingress" and each["metadata"]["name"] == "monitor-main"]
+    assert ingress["spec"]["rules"][0]["host"] == "monitor.localhost"
+    (monitor,) = containers_of(on, "monitor")
+    command = monitor["command"]
+    allowed = [command[at + 1] for at, each in enumerate(command) if each == "--allow-host"]
+    assert allowed[-2:] == ["monitor.localhost", "monitor.example.com"]
+    named = render("--set", "secrets.monitor=page-token")
+    assert [each["metadata"]["name"] for each in named if each["kind"] == "Secret"] == ["page-token"]
 
 
 def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rendered: list[dict[str, Any]]) -> None:

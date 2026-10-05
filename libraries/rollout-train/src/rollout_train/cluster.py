@@ -166,6 +166,9 @@ class MonitorSection:
     listen: str = "127.0.0.1:8765"
     feed_episodes: int = 80
     """Episodes kept in a run's live feed."""
+    token: Secret | None = None
+    """The monitor's token (`token_env`, `token_file`), which its page and every client of its API present
+    (`rollout_train.monitor.access`); none: `ROLLOUT_MONITOR_TOKEN`."""
 
 
 @dataclass(frozen=True)
@@ -302,6 +305,7 @@ class Cluster:
                 if key in store.reader:
                     note(f"{name}.reader.{key.removesuffix('_env')}", Secret(env=store.reader[key]))
         note("gateway.keys", self.gateway.keys)
+        note("monitor.token", self.monitor.token)
         for kind, providers in (("inference", self.inference), ("trainers", self.trainers)):
             for name, provider in providers.items():
                 note(f"{kind}.{name}.auth.token", provider.auth.token)
@@ -439,8 +443,9 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     gateway.done()
     monitor = table.section("monitor")
     monitor_said = MonitorSection(
-        monitor.text("listen", MonitorSection.listen), monitor.whole("feed_episodes", 80, least=1)
-    )
+        monitor.text("listen", MonitorSection.listen), monitor.whole("feed_episodes", 80, least=1),
+        monitor.secret("token"),
+    )  # fmt: skip
     monitor.done()
     runners = table.section("runners")
     runners_said = RunnersSection(places=runners.whole("places", 8, least=1))

@@ -183,6 +183,9 @@ async def test_a_bookmark_is_made_moved_and_taken_away_and_the_page_hears_of_it(
         assert (await client.delete("/api/bookmarks/good")).status_code == 404
 
 
+TOKEN = "the-monitors-token"
+
+
 @contextlib.asynccontextmanager
 async def serving(tmp_path: Path) -> AsyncGenerator[str]:
     """The monitor over `tmp_path`, served for real (a stream is read as it comes, which needs a server)."""
@@ -190,7 +193,7 @@ async def serving(tmp_path: Path) -> AsyncGenerator[str]:
 
     port = free_port()
     server = uvicorn.Server(
-        uvicorn.Config(create_app(tmp_path, beat=0.05), host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.Config(create_app(tmp_path, beat=0.05, token=TOKEN), host="127.0.0.1", port=port, log_level="warning")
     )
     task = asyncio.create_task(server.serve())
     while not server.started:  # noqa: ASYNC110 (the server says when it is up)
@@ -204,7 +207,10 @@ async def serving(tmp_path: Path) -> AsyncGenerator[str]:
 
 async def test_the_stream_says_each_topics_version_and_then_what_changed(tmp_path: Path) -> None:
     ledger = await a_run(tmp_path)
-    async with serving(tmp_path) as address, httpx.AsyncClient(base_url=address, timeout=10) as client:
+    async with (
+        serving(tmp_path) as address,
+        httpx.AsyncClient(base_url=address, timeout=10, headers={"Authorization": f"Bearer {TOKEN}"}) as client,
+    ):
         held = (await client.get("/api/system")).headers["etag"]
         async with client.stream(
             "GET", "/api/stream", params=[("topic", "system"), ("topic", "group/train/1")]

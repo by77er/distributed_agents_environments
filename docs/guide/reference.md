@@ -6779,6 +6779,7 @@ class MonitorSection
 |---|---|---|---|
 | `listen` | `str` | `'127.0.0.1:8765'` |  |
 | `feed_episodes` | `int` | `80` | Episodes kept in a run's live feed. |
+| `token` | `Secret \| None` | `None` | The monitor's token (`token_env`, `token_file`), which its page and every client of its API present (`rollout_train.monitor.access`); none: `ROLLOUT_MONITOR_TOKEN`. |
 
 ### `parsed` {#rollout_trainclusterparsed}
 

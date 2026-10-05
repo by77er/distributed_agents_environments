@@ -29,8 +29,9 @@ rollout monitor sqlite:///~/.cache/rollout/ledger.db  # a database's runs (or po
 rollout monitor RUN                                   # a run's directory from before: its ledger, and every run in it
 ```
 
-`WHERE` is a database's URL, a ledger's directory of files, or a run's directory (its ledger, as `ledger.json` there
-says, or files under `ledger`); with `--cluster` and no `WHERE`, the cluster config's ledger. With `--cluster`, the
+It says where its page is, and how to sign in ([signing in](#signing-in)). `WHERE` is a database's URL, a ledger's
+directory of files, or a run's directory (its ledger, as `ledger.json` there says, or files under `ledger`); with
+`--cluster` and no `WHERE`, the cluster config's ledger. With `--cluster`, the
 monitor asks for runs on that cluster ([launching a run](#launching-a-run)) and imports environments from git with it;
 without, it asks for none. The monitor reads, and writes four things: names in the registry
 ([the registry](checkpoints.md#the-registry)) (a run's, when it is renamed on its page, and bookmarks, made, moved and
@@ -45,6 +46,31 @@ A run is shown by its name; its id (what everything kept of it is under) is on i
 checkpoint is shown by where it came from (the run that made it and its step: `diamonds · S3`) and the shortest start of
 its id that no other has (`zwzk`), with the bookmarks that name it; its whole id, its depth and its parents are under
 the pointer, and its page says them all.
+
+## Signing in
+
+Whoever can use the monitor can launch runs on the cluster and import code from git, so it answers only whoever holds
+its token (`rollout_train.monitor.access`):
+
+- **The token** is `ROLLOUT_MONITOR_TOKEN`, or what the cluster config's `[monitor] token_env` or `token_file` names. A
+  monitor started with neither set makes one up and prints its sign-in link (`the monitor's page:
+  http://localhost:8765/login?token=…`). On Kubernetes it is the Secret `monitor-token`, which the chart makes
+  ([opening the monitor](../../deploy/access.md#opening-the-monitor)).
+- **A browser signs in once**, by opening `/login?token=TOKEN`: the monitor sets a cookie that holds the token
+  (`HttpOnly`, `SameSite=Strict`, and `Secure` when the monitor is served over https) and goes on to the page. A page
+  that is not signed in shows a form that asks for the token instead. The page's requests are all to the monitor that
+  served it, and each carries the cookie.
+- **A program** sends the token as `Authorization: Bearer TOKEN`. A monitor asks another monitor for a run's episodes
+  this way, with its own token, so monitors that ask each other share one.
+- **It answers only under its own names.** A request whose `Host` is not `localhost`, `127.0.0.1`, `[::1]`, this
+  machine's name or a name given with `--allow-host` (repeatable; `*.example.com` for a domain) is refused (400), so a
+  site whose name points at this machine reaches nothing.
+- **What changes something is JSON from its own page.** A request that is not a GET or a HEAD must say `Content-Type:
+  application/json` (415 otherwise) and, where it says its `Origin`, come from the monitor itself (403 otherwise). A
+  page of another site can neither send such a request without the browser asking the monitor first, which it never
+  allows, nor make the browser send the cookie.
+
+`/` and the page's scripts need no token: they hold nothing until the page asks the API.
 
 ## How the page is kept current
 
@@ -84,7 +110,8 @@ npm ci
 npm run build    # type-checks, then writes rollout_train/monitor/static
 npm run check    # type-check and lint
 npm test         # the page's tests
-npm run dev      # the page with hot reloading, asking a monitor on :8765 (MONITOR=http://… names another)
+npm run dev      # the page with hot reloading, asking a monitor on :8765 (MONITOR=http://… names another);
+                 # sign in on the page with that monitor's token
 ```
 
 The built files are part of the repository, so a change to the page is a change to `web/src` and a build.

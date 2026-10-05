@@ -35,8 +35,9 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   Service `sandboxes-KIND` (`sandboxes-minecraft.rollout:8710`); the cluster config's `[sandboxes.KIND]` names it as
   its `url`, and runs acquire from it there. Its requests are its sandboxes' memory, which runs' pods do not hold
   ([Where sandboxes run](../research/sandbox-placement.md)).
-- **The monitor.** One Deployment per entry of `monitors`, each behind a Service and an Ingress, and an Ingress for
-  Ray's dashboard.
+- **The monitor.** One Deployment per entry of `monitors`, each behind a Service (and an Ingress where
+  `monitors.NAME.ingress` asks), and an Ingress for Ray's dashboard; and the Secret `monitor-token`, the token the
+  monitors ask for, made where it is missing ([opening the monitor](access.md#opening-the-monitor)).
 - **What every pod mounts.** The state volume, the ConfigMap `rollout` with the cluster config, and the Secrets for
   gateway keys, Tinker, step-ca's root and provisioner key, and the gateway's certificate ([what every pod is
   given](#what-every-pod-is-given)).
@@ -91,7 +92,8 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 9 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
 | `sandboxes.minecraft.enabled`, `.size`, `.resources` | `true`, `4`, 4 CPUs and 7.5 GiB requested, 10 GiB as the limit | The Minecraft worlds' pool: at most `size` worlds at once, each asking for 1.75 GiB and a CPU |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
-| `monitors.NAME.host` | `monitor.localhost` | Each monitor's Ingress host |
+| `monitors.NAME.ingress`, `.host`, `.hosts` | `false`, `monitor.localhost`, none | Whether a monitor has an Ingress, its host, and more names the monitor answers under (beside `localhost`, `127.0.0.1` and its Service's names) |
+| `secrets.monitor` | `monitor-token` | The monitors' token (`ROLLOUT_MONITOR_TOKEN`), which the chart makes where it is missing |
 | `ingress.className`, `ingress.rayHost` | `traefik`, `ray.localhost` | The ingress controller, and the host of Ray's dashboard |
 
 Every container has `resources` with requests and a memory limit; [what runs where](roles.md#what-each-role-needs)
@@ -166,7 +168,8 @@ kubectl get --raw /apis/visibility.kueue.x-k8s.io/v1beta2/clusterqueues/rollout/
 ## Make the Secrets
 
 The chart reads the Secrets below and makes none of them, so that uninstalling the chart never deletes a credential.
-Make them once, before the first install:
+The one it makes is the monitors' token, `monitor-token`, where it is missing, and it keeps that one when it is
+uninstalled ([opening the monitor](access.md#opening-the-monitor)). Make the others once, before the first install:
 
 1. The namespace:
 
@@ -292,8 +295,9 @@ file and the S3 endpoint (`AWS_ENDPOINT_URL`) in `templates/_helpers.tpl`: see [
 
 ## Ingresses
 
-The chart makes an Ingress for the gateway (`gateway.host`), for each monitor (`monitors.NAME.host`) and for Ray's
-dashboard (`ingress.rayHost`), all of class `ingress.className`. The default hosts end in `.localhost`, which
+The chart makes an Ingress for the gateway (`gateway.host`), for each monitor whose `monitors.NAME.ingress` is on
+(`monitors.NAME.host`) and for Ray's dashboard (`ingress.rayHost`), all of class `ingress.className`. A monitor is
+opened through a port-forward otherwise ([opening the monitor](access.md#opening-the-monitor)). The default hosts end in `.localhost`, which
 browsers send to the machine they run on. Set real host names, TLS and sign-in before anyone else reaches them:
 [Ingress, TLS and sign-in](access.md).
 

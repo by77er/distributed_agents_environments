@@ -408,6 +408,8 @@
   .action.danger { color: var(--bad); border-color: var(--bad); } .action.danger:hover { background: var(--bad-soft); }
   .run-controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .launch-form { display: grid; gap: 18px; }
+  .signin { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  .signin form { width: min(340px, 100%); padding: 24px; }
   .fields { display: grid; gap: 14px; }
   .field { display: grid; gap: 4px; min-width: 0; align-content: start; }
   .field > span { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--quiet); }

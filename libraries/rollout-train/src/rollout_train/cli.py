@@ -779,6 +779,28 @@ def _ledger_of(arguments: argparse.Namespace) -> "str | Stores":
         raise SystemExit(str(error)) from None
 
 
+def _monitor_token(cluster: "Cluster | None", host: str, port: int) -> str:
+    """The monitor's token: the one the cluster config names (`[monitor] token_env` or `token_file`), else
+    `ROLLOUT_MONITOR_TOKEN`; where neither is set, one made up now. Says where the page is, and with a token made up
+    here, its sign-in link."""
+    from rollout_train.monitor.access import TOKEN_ENV, new_token
+    from rollout_train.providers import Secret
+
+    named = cluster.monitor.token if cluster is not None else None
+    token = (named or Secret(env=TOKEN_ENV)).resolve()
+    if named is not None and token is None:
+        raise SystemExit(f"monitor: its token ({named}, the cluster config's [monitor] token) is not set here")
+    shown = "localhost" if host in ("0.0.0.0", "::") else f"[{host}]" if ":" in host else host
+    page = f"http://{shown}:{port}"
+    if token is None:
+        token = new_token()
+        print(f"the monitor's page: {page}/login?token={token}", file=sys.stderr, flush=True)
+    else:
+        print(f"the monitor's page: {page}/login?token=TOKEN, its token {named or Secret(env=TOKEN_ENV)}",
+              file=sys.stderr, flush=True)  # fmt: skip
+    return token
+
+
 def _check_cluster(given: str | None) -> int:
     """Say what the cluster config holds and, on this node, what of it does not resolve; 1 if something does not."""
     from rollout_train.cluster import ClusterError, find, inspect, load
@@ -949,6 +971,11 @@ def main() -> None:
     )  # fmt: skip
     monitoring.add_argument("--host", default="127.0.0.1")
     monitoring.add_argument("--port", type=int, default=8765)
+    monitoring.add_argument(
+        "--allow-host", action="append", default=[], metavar="NAME",
+        help="another name the page is served under, beside localhost, 127.0.0.1, [::1] and this machine's "
+        "(repeatable; *.DOMAIN for every name in a domain)",
+    )  # fmt: skip
     monitoring.add_argument(
         "--cluster", **_cluster_option("ask for runs on this cluster config, and import environments from git with it")
     )
@@ -1207,7 +1234,8 @@ def main() -> None:
 
                 where = ledger_url(cluster)
             importer = Importer.of(cluster) if cluster is not None else None
-            app = create_app(where, importer=importer, cluster=cluster)
+            token = _monitor_token(cluster, arguments.host, arguments.port)
+            app = create_app(where, importer=importer, cluster=cluster, token=token, hosts=arguments.allow_host)
         else:
             from rollout.harness.remote import serve
 

@@ -3,6 +3,7 @@
 // not (TanStack Query's structural sharing), so only the views over what changed draw again.
 
 import { keepPreviousData, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { setSignedOut, SignedOut } from "./access";
 import { readJson } from "./client";
 import type { Bookmark, Checked, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsking, Launches, Lineage, Machines, Offers, Path, Preset, Presets, PresetVersions, Queue, RunSettings, SettingFinding, Statistics, SubjectHistory, SubjectKind, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
@@ -51,7 +52,7 @@ export function newQueryClient(): QueryClient {
         staleTime: Infinity,
         refetchInterval: 30_000,
         refetchOnWindowFocus: false,
-        retry: (count, error) => error.name !== "NotFound" && count < 3,
+        retry: (count, error) => error.name !== "NotFound" && error.name !== "SignedOut" && count < 3,
       },
     },
   });
@@ -99,8 +100,14 @@ export class Refused extends Error {
   }
 }
 
-async function asked<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const answer = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+/** Ask the monitor to change something. Every such request says it is JSON, with a body or without: the monitor
+ * takes nothing else from a page, so a page of another site cannot ask it without the browser asking it first. */
+export async function asked<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const answer = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (answer.status === 401) {
+    setSignedOut(true);
+    throw new SignedOut(path);
+  }
   const said = (await answer.json()) as T & { error?: string; refusals?: SettingFinding[]; notes?: SettingFinding[] };
   if (said.refusals && answer.status === 422) throw new Refused(said.error ?? "refused", said.refusals, said.notes ?? []);
   if (!answer.ok) throw new Error(said.error ?? `the monitor answered ${answer.status}`);

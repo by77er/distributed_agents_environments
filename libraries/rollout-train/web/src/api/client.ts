@@ -1,6 +1,8 @@
 // Reading the monitor's endpoints. Each answer's version (its ETag) is kept beside it: asked again, the monitor is
 // told which version the page has, and answers 304 when nothing changed, so the page keeps what it has.
 
+import { setSignedOut, SignedOut } from "./access";
+
 export class NotFound extends Error {}
 
 interface Kept {
@@ -17,6 +19,10 @@ export async function readJson<T>(path: string, signal?: AbortSignal): Promise<T
   const held = kept.get(path);
   const answer = await fetch(path, { signal, headers: held ? { "If-None-Match": held.etag } : {} });
   if (answer.status === 304 && held) return held.data as T;
+  if (answer.status === 401) {
+    setSignedOut(true);
+    throw new SignedOut(path);
+  }
   if (answer.status === 404) throw new NotFound(path);
   if (!answer.ok) throw new Error(`${path}: ${answer.status}`);
   const data = (await answer.json()) as T;

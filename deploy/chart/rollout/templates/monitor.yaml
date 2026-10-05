@@ -1,7 +1,28 @@
 # The monitors: each serves the page over the cluster config's ledger (or a run's directory on the state volume),
-# behind a Service and an Ingress through Traefik; asks for runs on the cluster config, each a RayJob it makes with
-# its account (templates/rbac.yaml); and imports environments from git with the cluster config's blob store and the
-# long-lived Ray cluster (whose job server it reaches with the cluster's token). And an Ingress for Ray's dashboard.
+# behind a Service (and, with `ingress`, an Ingress through Traefik), to whoever holds the monitors' token; asks for
+# runs on the cluster config, each a RayJob it makes with its account (templates/rbac.yaml); and imports environments
+# from git with the cluster config's blob store and the long-lived Ray cluster (whose job server it reaches with the
+# cluster's token). And an Ingress for Ray's dashboard.
+#
+# The token is the Secret `secrets.monitor` (key ROLLOUT_MONITOR_TOKEN). The chart makes it where it is missing, with a
+# random token, and keeps it as it is at each upgrade and when the chart is uninstalled; one made by hand before the
+# first install is left to its maker. A browser signs in once at /login?token=TOKEN (docs/deploy/access.md).
+{{- $secret := .Values.secrets.monitor }}
+{{- $found := lookup "v1" "Secret" .Release.Namespace $secret }}
+{{- $ours := or (not $found) (eq (dig "metadata" "annotations" "meta.helm.sh/release-name" "" $found) .Release.Name) }}
+{{- if $ours }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secret }}
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep  # (uninstalling the chart leaves the token)
+type: Opaque
+data:
+  ROLLOUT_MONITOR_TOKEN: {{ dig "data" "ROLLOUT_MONITOR_TOKEN" (randAlphaNum 43 | b64enc) (default dict $found) }}
+{{- end }}
 {{- range $name, $monitor := .Values.monitors }}
 ---
 apiVersion: apps/v1
@@ -31,9 +52,16 @@ spec:
             - --port
             - "8765"
             - --cluster
+            {{- $service := printf "monitor-%s" $name }}
+            {{- range $host := concat (list $service (printf "%s.%s" $service $.Release.Namespace) (printf "%s.%s.svc" $service $.Release.Namespace) (printf "%s.%s.svc.cluster.local" $service $.Release.Namespace)) (ternary (list $monitor.host) (list) (and (eq true $monitor.ingress) (ne "" ($monitor.host | default "")))) ($monitor.hosts | default list) }}
+            - --allow-host
+            - {{ $host | quote }}
+            {{- end }}
           env:
             {{- include "rollout.env" $ | nindent 12 }}
             {{- include "rollout.rayClientEnv" $ | nindent 12 }}
+            - name: ROLLOUT_MONITOR_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ $.Values.secrets.monitor }}, key: ROLLOUT_MONITOR_TOKEN}}
           ports: [{containerPort: 8765, name: http}]
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
           volumeMounts: {{- include "rollout.volumeMounts" $ | nindent 12 }}
@@ -48,6 +76,7 @@ metadata:
 spec:
   selector: {app: monitor, monitor: {{ $name }}}
   ports: [{port: 8765, targetPort: http}]
+{{- if $monitor.ingress }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -61,6 +90,7 @@ spec:
       http:
         paths:
           - {path: /, pathType: Prefix, backend: {service: {name: monitor-{{ $name }}, port: {number: 8765}}}}
+{{- end }}
 {{- end }}
 ---
 apiVersion: networking.k8s.io/v1

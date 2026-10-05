@@ -1,5 +1,7 @@
 // Which view a place shows, inside the frame that stays put.
 
+import { useSignedOut } from "./api/access";
+import { SignIn } from "./components/signin";
 import { Shell } from "./layout/Shell";
 import { usePlace } from "./lib/places";
 import { Episode } from "./pages/Episode";
@@ -48,5 +50,7 @@ function View() {
 }
 
 export function App() {
+  // (a monitor that refuses the page's requests as not signed in: its sign-in form in place of everything)
+  if (useSignedOut()) return <SignIn />;
   return <Shell><View /></Shell>;
 }

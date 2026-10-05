@@ -1,7 +1,8 @@
 # Ingress, TLS and sign-in
 
-Who can reach what: the host names the chart's ingresses answer on, serving them over TLS, putting sign-in in front
-of the monitor, and keeping the stores private. This page is for whoever opens a deployment to other people.
+Who can reach what: opening the monitor, the host names the chart's ingresses answer on, serving them over TLS,
+putting more sign-in in front of the monitor, and keeping the stores private. This page is for whoever opens a
+deployment to other people.
 
 **Read first:** [Install the Helm chart](helm.md#ingresses). **Next:** [Remote providers](providers.md).
 
@@ -9,15 +10,38 @@ of the monitor, and keeping the stores private. This page is for whoever opens a
 
 | Service | Reached by | Exposed through an Ingress |
 |---|---|---|
-| The monitor | people, in a browser | yes, behind sign-in |
+| The monitor | people, in a browser, through `kubectl port-forward`; it asks for its token | only with `monitors.NAME.ingress` |
 | The gateway | runs in the cluster, at its Service; harnesses outside the cluster | yes, if harnesses outside the cluster use it |
 | Ray's dashboard | operators | optional; it asks for the Ray cluster's token |
 | Postgres (the [ledger](../libraries/rollout-train/checkpoints.md#the-ledger)) | the platform's pods only | **never** |
 | The S3 store | the platform's pods only | **never** |
 
+## Opening the monitor
+
+The monitor asks for its token on every request to its API, and signs a browser in once with a cookie
+([signing in](../libraries/rollout-train/monitor.md#signing-in)). The token is the Secret `monitor-token`
+(`secrets.monitor`, key `ROLLOUT_MONITOR_TOKEN`): the chart makes it, with a random token, where it is missing, and
+keeps it across upgrades and when the chart is uninstalled. The monitor has no Ingress unless `monitors.NAME.ingress`
+asks for one, so open it through a port-forward, which goes through the Kubernetes API with your own credentials:
+
+```bash
+kubectl -n rollout port-forward svc/monitor-main 8765:8765 &
+token=$(kubectl -n rollout get secret monitor-token -o jsonpath='{.data.ROLLOUT_MONITOR_TOKEN}' | base64 -d)
+echo "http://localhost:8765/login?token=$token"     # open this once; then http://localhost:8765
+```
+
+The browser keeps the cookie for a month. The page also asks for the token itself when it has none. The monitor
+answers at `localhost` and `127.0.0.1` (what a port-forward is reached at, from WSL's Windows side too) and at its
+Service's names; any other name is refused, so a web page whose name was pointed at your machine reaches nothing.
+
+To change the token, delete the Secret, upgrade the chart (which makes a new one) and restart the monitors
+(`kubectl -n rollout rollout restart deploy/monitor-main`): every browser signs in again. To choose the token yourself,
+make the Secret before the first install; the chart then leaves it as it is.
+
 ## Host names
 
-The chart's Ingresses answer on `gateway.host`, each `monitors.NAME.host`, and `ingress.rayHost`. The defaults end in
+The chart's Ingresses answer on `gateway.host`, each `monitors.NAME.host` whose `monitors.NAME.ingress` is on, and
+`ingress.rayHost`. The defaults end in
 `.localhost`, which a browser sends to its own machine, so they work only on the node itself. Set names your DNS
 points at the ingress controller:
 
@@ -26,6 +50,7 @@ gateway:
   host: gateway.example.com
 monitors:
   main:
+    ingress: true
     host: monitor.example.com
 ingress:
   className: traefik
@@ -54,9 +79,11 @@ so reach its pods only through the ingress controller.
 
 ## Sign-in in front of the monitor
 
-The monitor has no sign-in of its own, and whoever reaches it can import code from git and start runs on the cluster.
-Put an authenticating proxy in front of it before anyone else can reach it: the ingress controller's basic
-authentication, or a single sign-on proxy such as oauth2-proxy.
+A monitor whose Ingress is on answers at its host to whoever holds its token. Whoever holds it can import code from
+git and start runs on the cluster, so where people beyond the token's holders reach the host, put an authenticating
+proxy in front of it too: the ingress controller's basic authentication, or a single sign-on proxy such as
+oauth2-proxy. Serve it over TLS ([above](#tls)); the monitor marks its cookie `Secure` only where it sees https itself,
+so it is TLS in front of it that keeps the cookie off plain HTTP.
 
 With Traefik's basic authentication:
 

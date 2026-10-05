@@ -136,7 +136,7 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[scratch]` | `directory` | Node-local |
 | `[tls]` | `ca`, `certificate`, `key`, `identity` (`spiffe://rollout/gateway`) | The cluster's CA, and the client certificate it presents; paths |
 | `[gateway]` | `url`, `listen`, `replicas`, `keys_file` / `keys_env`, `lifetime` | |
-| `[monitor]` | `listen`, `feed_episodes` | |
+| `[monitor]` | `listen`, `feed_episodes`, `token_env` or `token_file` | The monitor's token, which its page and every client of its API present ([signing in](../libraries/rollout-train/monitor.md#signing-in)); by default `ROLLOUT_MONITOR_TOKEN` |
 | `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | |
 | `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `allocation`, `concurrency`, `models`, and the kind's own | Below |

@@ -7,7 +7,6 @@ environments it knows."""
 from pathlib import Path
 from typing import Any, cast
 
-import httpx
 import pytest
 
 from rollout.curriculum import Curriculum
@@ -39,7 +38,7 @@ from rollout_train.run_settings import RunSettings
 from rollout_train.stores import Stores
 from tests.rollout_train.clusters import POLICY, a_cluster
 from tests.rollout_train.rollouts.games import guessing, words
-from tests.rollout_train.support import Counting, answering, here, made_by
+from tests.rollout_train.support import Counting, answering, here, made_by, signed_in
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -229,10 +228,10 @@ async def test_the_page_makes_and_edits_a_suite_of_entries_and_lists_the_environ
     cluster = a_cluster(tmp_path)  # (it offers the words, and not the guessing game)
     ledger = Stores.open(cluster).ledger
     await ledger.take("suites/none")
-    transport = httpx.ASGITransport(app=create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster))
+    app = create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster)
     words_entry = {"environment": WORDS, "chosen": DRAWN, "rows": ["say-yes"], "seeds": [5], "episodes": 2}
     guesses = {"environment": GUESSING, "chosen": GIVEN, "starts": [{"task": "guess-river", "seed": 3}]}
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with signed_in(app) as client:
         answer = await client.post("/api/suites/mixed", json={"entries": [words_entry, guesses | {"answer_tokens": 9}]})
         assert answer.status_code == 200, answer.text
         kept = {"environment": WORDS, "chosen": "same", "episodes": 3}  # (an edit keeps an entry's starts)

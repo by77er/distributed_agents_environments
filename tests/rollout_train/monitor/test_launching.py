@@ -29,6 +29,7 @@ from tests.rollout_train.test_submitting import Jobs
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import signed_in
 
 
 async def a_run(ledger: Ledger, run: str, **start: JsonValue) -> None:
@@ -110,7 +111,7 @@ async def launching(tmp_path: Path, jobs: Jobs) -> tuple[Stores, httpx.AsyncClie
     await stores.presets.save("small", {**POLICY, "environment": WORDS}, "the test's")
     backends = {"ray": RayJobs("x", jobs)}
     app = create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster, backends=backends)
-    return stores, httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://monitor")
+    return stores, signed_in(app)
 
 
 async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(tmp_path: Path) -> None:
@@ -141,8 +142,7 @@ async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(t
     schema = {each["key"]: each for each in offers["schema"]}
     assert schema["groups"]["default"] == 100 and schema["max_lag"]["changeable"]
     assert schema["weights"]["choices"] == ["lora", "full"] and "eval.suite" not in schema
-    plain = httpx.ASGITransport(app=create_app(str(tmp_path / "files"), beat=0.0))
-    async with httpx.AsyncClient(transport=plain, base_url="http://monitor") as without:
+    async with signed_in(create_app(str(tmp_path / "files"), beat=0.0)) as without:
         assert (await without.get("/api/offers")).json()["cluster"] is None  # (a monitor with no cluster config)
         refused = await without.post("/api/launches", json={"kind": TRAIN, "name": "x", "preset": "small"})
         assert refused.status_code == 409 and "cluster config" in refused.json()["error"]

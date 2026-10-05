@@ -7,7 +7,6 @@ import random
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import JsonValue
 
@@ -36,7 +35,7 @@ from rollout_train.registry import Taken, registry_of
 from rollout_train.stores import Stores
 from tests.rollout_train.clusters import POLICY, a_cluster
 from tests.rollout_train.rollouts.games import guessing, words
-from tests.rollout_train.support import Counting, answering, here
+from tests.rollout_train.support import Counting, answering, here, signed_in
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -265,7 +264,7 @@ async def test_the_evals_a_training_run_asked_for_says_are_checked(tmp_path: Pat
     ledger = Stores.open(cluster).ledger
     await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[5])])
     await make_suite(ledger, "guesses", [suite_entry(GUESSING, guessing, rows=["guess-apple"], seeds=[5])])
-    transport = httpx.ASGITransport(app=create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster))
+    app = create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster)
     asked: dict[str, Any] = {"kind": "train", "name": "a run", "environment": ENVIRONMENT}
     cases: dict[str, tuple[dict[str, Any], str | None]] = {
         "none": ({}, None),
@@ -278,7 +277,7 @@ async def test_the_evals_a_training_run_asked_for_says_are_checked(tmp_path: Pat
         "a suite of an environment the cluster does not offer": ({"evals.suite": "guesses"}, "does not offer"),
         "a suite named by no name": ({"evals.suite": 3}, "is text or null"),
     }
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with signed_in(app) as client:
         for why, (settings, refused) in cases.items():
             body: dict[str, Any] = {**asked, "settings": {**POLICY, **settings}}
             said = (await client.post("/api/launches/check", json=body)).json()

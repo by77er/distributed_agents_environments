@@ -71,7 +71,9 @@ Postgres, and S3 or an S3-compatible service.
     uv run rollout monitor "sqlite:///$HOME/.cache/rollout/ledger.db" --cluster
     ```
 
-    It listens on `127.0.0.1:8765` unless `--host` and `--port` say otherwise.
+    It listens on `127.0.0.1:8765` unless `--host` and `--port` say otherwise, and prints the link that signs a
+    browser in (`ROLLOUT_MONITOR_TOKEN`, or one it makes up: [signing
+    in](../libraries/rollout-train/monitor.md#signing-in)).
 
 6. Start runs: see [Start runs and evals](runs.md).
 

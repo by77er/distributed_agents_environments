@@ -4,7 +4,8 @@
 # Every pod finds it at /etc/rollout/cluster.toml (ROLLOUT_CLUSTER). Secrets are named, never written: PGPASSWORD,
 # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY come from the Secret `stores`, TINKER_API_KEY (or credentials.json)
 # from `tinker`, OPENAI_API_KEY and ANTHROPIC_API_KEY from `providers` (the gateway's and runs' pods),
-# ROLLOUT_LEDGER_TOKEN from `ledger`, the gateway's keys from `gateway-keys`.
+# ROLLOUT_LEDGER_TOKEN from `ledger`, the gateway's keys from `gateway-keys`, ROLLOUT_MONITOR_TOKEN from
+# `monitor-token`.
 name = "k3s"
 
 [ray]
@@ -94,6 +95,7 @@ keys_file = "/etc/rollout-secrets/gateway/gateway.keys"
 [monitor]
 listen = "0.0.0.0:8765"
 feed_episodes = 80
+token_env = "ROLLOUT_MONITOR_TOKEN"            # the monitors' token (the Secret monitor-token): their page and API ask for it
 
 [runners]
 places = 8

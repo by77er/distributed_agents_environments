@@ -305,13 +305,19 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+def signed_in(app: Any) -> httpx.AsyncClient:
+    """A client of a monitor's app (`create_app`) served in this process, as its own page reaches it: at `localhost`,
+    with the monitor's token, saying it sends JSON."""
+    headers = {"Authorization": f"Bearer {app.state.token}", "Content-Type": "application/json"}
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost", headers=headers)
+
+
 @contextlib.asynccontextmanager
 async def monitor_client(where: str | Path, **options: Any) -> AsyncGenerator[httpx.AsyncClient]:
-    """A client of a monitor of `where` (as `create_app` takes it), served in this process."""
+    """A client of a monitor of `where` (as `create_app` takes it), served in this process (`signed_in`)."""
     from rollout_train.monitor.app import create_app
 
-    transport = httpx.ASGITransport(app=create_app(where, **options))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with signed_in(create_app(where, **options)) as client:
         yield client
 
 

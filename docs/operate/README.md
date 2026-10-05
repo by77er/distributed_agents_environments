@@ -9,7 +9,16 @@ monitor](../libraries/rollout-train/monitor.md).
 ## Watch runs
 
 [The monitor](../libraries/rollout-train/monitor.md) is a live page over a ledger and every run in it: steps, groups,
-every episode's transcript, checkpoints, evals, environments, statistics, and the machines doing the work.
+every episode's transcript, checkpoints, evals, environments, statistics, and the machines doing the work. It asks for
+its token ([signing in](../libraries/rollout-train/monitor.md#signing-in)). On Kubernetes, open it through a
+port-forward, and sign in once with the token in the Secret `monitor-token`
+([opening the monitor](../deploy/access.md#opening-the-monitor)):
+
+```bash
+kubectl -n rollout port-forward svc/monitor-main 8765:8765 &
+token=$(kubectl -n rollout get secret monitor-token -o jsonpath='{.data.ROLLOUT_MONITOR_TOKEN}' | base64 -d)
+echo "http://localhost:8765/login?token=$token"
+```
 
 - [The machines](../libraries/rollout-train/monitor.md#the-machines) shows every runner, engine host and gateway
   replica by its heartbeat ([heartbeats](../libraries/rollout-train/rollouts.md#heartbeats)): one silent for 90

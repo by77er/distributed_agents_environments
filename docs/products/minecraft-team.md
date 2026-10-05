@@ -21,7 +21,7 @@ uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 -
 uv run rollout preset load deploy/chart/rollout/files/presets --cluster
 uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu --name team-8
 uv run rollout train minecraft_team.environment:environment --preset minecraft-tinker --name team-tinker   # on Tinker
-uv run rollout monitor --cluster                             # the page over the cluster's runs: http://localhost:8765
+uv run rollout monitor --cluster                             # the page over the cluster's runs; it prints its sign-in link
 uv run minecraft-team server --seed 12345                   # a temporary server to look at (join with any client)
 ```
 

@@ -20,6 +20,7 @@ from tests.rollout_train.rollouts.games import guessing, words
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import signed_in
 
 GUESSING = "tests.rollout_train.rollouts.games:guessing"
 
@@ -53,8 +54,7 @@ async def an_eval_of_two(ledger: Ledger, run: str, subject: str, solved: list[bo
 
 
 async def read(tmp_path: Path, *paths: str) -> list[httpx.Response]:
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
+    async with signed_in(create_app(str(tmp_path / "ledger"), beat=0.0)) as client:
         return [await client.get(path) for path in paths]
 
 

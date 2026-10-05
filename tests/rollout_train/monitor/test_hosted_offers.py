@@ -4,7 +4,6 @@ spend."""
 
 from pathlib import Path
 
-import httpx
 import pytest
 
 from rollout.names import named
@@ -17,6 +16,7 @@ from tests.rollout_train.test_submitting import Jobs
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
+from tests.rollout_train.support import signed_in
 
 
 async def test_the_page_is_offered_hosted_apis_metered_with_their_prices_and_an_evals_spend(tmp_path: Path) -> None:
@@ -32,7 +32,7 @@ async def test_the_page_is_offered_hosted_apis_metered_with_their_prices_and_an_
             "limits.spend": 1,
         },
     }  # fmt: skip
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://monitor") as client:
+    async with signed_in(app) as client:
         offers = (await client.get("/api/offers")).json()
         checked = (await client.post("/api/launches/check", json=asked)).json()
     (hosted,) = [each for each in offers["inference"] if each["name"] == "hosted"]

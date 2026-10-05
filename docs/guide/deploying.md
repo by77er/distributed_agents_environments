@@ -23,7 +23,7 @@ cp deploy/clusters/example.toml ~/.config/rollout/cluster.toml   # then edit it 
 uv run rollout cluster check                           # what of it does not resolve here
 uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 --num-gpus 1 --temp-dir ~/.cache/ray
 uv run rollout preset load deploy/chart/rollout/files/presets --cluster   # the presets shipped with the platform
-uv run rollout monitor --cluster                       # the page over the cluster's ledger: http://localhost:8765
+uv run rollout monitor --cluster                       # the page over the cluster's ledger; it prints its sign-in link
 uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu --name team-8
 ```
 

@@ -35,6 +35,8 @@ secrets:
   r2: r2                      # a second blob store's two keys, for [stores.r2]; optional: WRITER_ACCESS_KEY_ID,
                               # WRITER_SECRET_ACCESS_KEY (read and write: the platform, trainer pods), READER_ACCESS_KEY_ID,
                               # READER_SECRET_ACCESS_KEY (read only: inference pods)
+  monitor: monitor-token      # ROLLOUT_MONITOR_TOKEN: the monitors' token, which their page and API ask for; made by the
+                              # chart where it is missing (and kept when the chart is uninstalled)
 
 # TOML appended to the cluster config (files/cluster.toml): this deployment's own tables, such as a second blob store
 # ([stores.NAME]), [tls], and RunPod providers (files/cluster.toml has a commented example of each).
@@ -169,10 +171,14 @@ gateway:
 
 # Each monitor serves the page over the cluster config's ledger (and every run in it), or over `where` (a run's
 # directory under state.path, or a ledger's URL) where it names one; asks for runs on the cluster config; and imports
-# environments from their source with its blob store and the long-lived Ray cluster.
+# environments from their source with its blob store and the long-lived Ray cluster. Its page and API ask for the
+# monitors' token (secrets.monitor); it answers under localhost, 127.0.0.1 and its Service's names (what `kubectl
+# port-forward` and other pods reach it by), and `hosts`. With `ingress`, an Ingress through Traefik at `host` too.
 monitors:
   main:
+    ingress: false
     host: monitor.localhost
+    hosts: []
     resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 3Gi}}
 
 ingress:
