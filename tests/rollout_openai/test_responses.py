@@ -15,6 +15,7 @@ from rollout.contracts import (
     FinishReason,
     Media,
     Message,
+    ModelEndpointError,
     NamedToolChoice,
     Overloaded,
     Role,
@@ -27,7 +28,8 @@ from rollout.contracts import (
     context_digests,
 )
 from rollout.harness import Blobs, SamplingParameters
-from rollout_openai import ApiKey, CodexLogin, ResponsesEndpoint
+from rollout_openai import ApiKey, CodexLogin, ResponsesEndpoint, hosted
+from tests.hosted_apis import FakeApi, Said, openai_api
 
 
 def events(*items: dict[str, Any], status: str = "completed", usage: dict[str, int] | None = None) -> str:
@@ -170,14 +172,38 @@ async def test_an_incomplete_response_finishes_with_length() -> None:
     ("status", "body", "error"),
     [
         (429, "slow down", Overloaded),
+        (503, "down for a moment", Overloaded),
         (400, '{"error": {"code": "context_length_exceeded"}}', ContextOverflow),
+        (401, '{"error": {"code": "invalid_api_key"}}', PermissionError),
+        (400, '{"error": {"code": "invalid_value"}}', ModelEndpointError),
     ],
 )
 async def test_errors_map_to_the_contract(status: int, body: str, error: type[Exception]) -> None:
-    with pytest.raises(error):
+    with pytest.raises(error) as raised:
         await endpoint(lambda _: httpx.Response(status, text=body, headers={"retry-after": "2"})).sample(
             request(CONVERSATION[:2])
         )
+    if error is ModelEndpointError:  # (a refusal asking again does not change: not an InternalError, which is retried)
+        assert type(raised.value) is ModelEndpointError
+
+
+async def test_a_hosted_endpoint_says_cached_and_reasoning_tokens_and_samples_each_request_as_asked() -> None:
+    reply = Said(text="Sunny.", input_tokens=900, cached_input_tokens=600, output_tokens=70, thinking_tokens=40)
+    with openai_api(FakeApi(replies=[reply])) as api:
+        made = hosted("gpt-test", api_key="test-key", context_limit=1000, max_output_tokens=500,
+                      options={"reasoning_effort": "medium"}, base_url=api.url)  # fmt: skip
+        sampling = SamplingParameters(temperature=0.3, thinking_tokens=200, answer_tokens=100)
+        result = await made.sample(request(CONVERSATION[:2]), sampling=sampling)
+    usage = result.usage
+    assert (usage.input_tokens, usage.cached_input_tokens, usage.output_tokens, usage.thinking_tokens) == (
+        900, 600, 70, 40,
+    )  # fmt: skip
+    (sent,) = api.requests
+    assert sent["model"] == "gpt-test" and sent["temperature"] == 0.3 and sent["max_output_tokens"] == 300
+    assert sent["reasoning"] == {"effort": "medium"}  # (the model's own, where the binding says none)
+    assert api.headers[0]["authorization"] == "Bearer test-key"
+    with pytest.raises(PermissionError, match="api_key_env"):
+        hosted("gpt-test", api_key=None, context_limit=1000, max_output_tokens=500)
 
 
 def fake_token(expires_in: float) -> str:

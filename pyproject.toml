@@ -11,6 +11,7 @@ dependencies = [
     "rollout[http]",
     "rollout-train[http,report]",
     "rollout-openai",
+    "rollout-anthropic",
     "rollout-s3",
     "rollout-runpod",
     "minecraft-team",
@@ -36,6 +37,7 @@ rollout-objectives = { workspace = true }
 rollout-qwen = { workspace = true }
 rollout-gemma = { workspace = true }
 rollout-openai = { workspace = true }
+rollout-anthropic = { workspace = true }
 rollout-s3 = { workspace = true }
 rollout-runpod = { workspace = true }
 rollout-tinker = { workspace = true }
@@ -89,6 +91,7 @@ extraPaths = [
     "implementations/rollout-qwen/src",
     "implementations/rollout-gemma/src",
     "implementations/rollout-openai/src",
+    "implementations/rollout-anthropic/src",
     "implementations/rollout-s3/src",
     "implementations/rollout-runpod/src",
     "implementations/rollout-tinker/src",

@@ -55,7 +55,10 @@ reason and usage.
 - **The finish reason** is `tool_use` when the reply calls tools, `length` when the reply was cut off, and `stop`
   otherwise.
 - **Usage** reports how much of the context is used and its limit. `input_tokens` and `output_tokens` are given by
-  endpoints that count tokens; [`Memory`](../memory.md) decides from `input_tokens` when to compact.
+  endpoints that count tokens; [`Memory`](../memory.md) decides from `input_tokens` when to compact. An endpoint of a
+  hosted API also says how many of the input tokens its provider read from its prompt cache
+  (`cached_input_tokens`) and how many of the output tokens went to thinking (`thinking_tokens`), which is what a
+  turn's spend is counted from.
 
 ## Errors
 
@@ -67,6 +70,7 @@ An endpoint raises a [`ModelEndpointError`](../../../guide/reference.md#modelend
 | `InternalError` | the endpoint failed | retries the same way, then raises it |
 | `ContextOverflow(context_limit)` | the context does not fit | raises it. An agent compacts and samples again; `Memory.sample` does. |
 | `ContractViolation` | the request exceeds the capability contract | raises it |
+| `ModelEndpointError` itself | the provider refused the request as it is (credentials it does not take, a request it rejects): asking again would not change the answer | raises it |
 
 The retries happen inside one effect, under one `effect_id`. Any other exception propagates unchanged. An exception
 that leaves the program fails the run ([failures](../README.md#failures)).

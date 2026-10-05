@@ -73,14 +73,24 @@ runner = LocalRunner(providers={
   Codex backend rejects the parameter, so `CodexLogin` leaves it out.
 - **Tool choice.** A request's `tool_choice` is sent to the provider.
 - **Results.** Text and tool calls come back as canonical blocks. The finish reason is `TOOL_USE` when the reply
-  makes tool calls and `LENGTH` when the response was cut off. Usage reports the provider's token counts.
-- **Errors.** HTTP 429 raises `Overloaded`, a context that is too long raises `ContextOverflow`, rejected
-  credentials raise `PermissionError` (after one refresh and retry on a 401), and other failures raise
-  `InternalError`. `Model.sample` [retries](agents.md#the-model-interface) `Overloaded` and `InternalError`.
+  makes tool calls and `LENGTH` when the response was cut off. Usage reports the provider's token counts, with the
+  cached input tokens and the reasoning tokens among them.
+- **Errors.** HTTP 429 and an API that is down or overloaded (500, 502, 503, 504) raise `Overloaded`, a context that
+  is too long raises `ContextOverflow`, rejected credentials raise `PermissionError` (after one refresh and retry on a
+  401), any other refusal raises `ModelEndpointError`, and a stream that fails raises `InternalError`.
+  `Model.sample` [retries](agents.md#the-model-interface) `Overloaded` and `InternalError`.
 - **Limits.** The provider does not report its limits, so the endpoint advertises them from `ResponsesContract`
   (a context of 200,000 tokens and 32,000 output tokens by default).
 - **No recording.** Direct adapters are for models you do not train: nothing about tokens or logprobs is kept, and a
   retried effect samples again.
+
+## On a cluster
+
+On a cluster, a hosted model is an inference provider of the kind `api` ([hosted APIs](cluster.md#hosted-apis)): its
+channels are sampled through the gateway, which records each turn (with no tokens, never trained on) and what it cost,
+so an eval of the model or a judge bound to it is played as any channel is. `rollout_openai:hosted` makes the
+endpoint for OpenAI's models from the provider's key and the model's catalog entry, and
+[`rollout_anthropic:hosted`](../implementations/rollout-anthropic.md) for Anthropic's.
 
 ## Try it with a hosted model
 

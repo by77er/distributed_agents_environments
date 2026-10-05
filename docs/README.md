@@ -45,6 +45,7 @@ train on).
 | `implementations/rollout-qwen` | `rollout_qwen` | The Qwen families' token formats | `Renderer` |
 | `implementations/rollout-gemma` | `rollout_gemma` | Gemma 4's token format | `Renderer` |
 | `implementations/rollout-openai` | `rollout_openai` | The OpenAI Responses API as a model endpoint | `ModelEndpoint` |
+| `implementations/rollout-anthropic` | `rollout_anthropic` | Anthropic's Messages API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
 | `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod (the pods API), and certificates for them from step-ca | |
 | `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the gateway | `Environment` |

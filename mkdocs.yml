@@ -148,6 +148,7 @@ nav:
       - "LoRA trainer": implementations/rollout-lora.md
       - "Objectives in torch": implementations/rollout-objectives.md
       - "Tinker trainer and engine": implementations/rollout-tinker.md
+      - "Anthropic Messages endpoint": implementations/rollout-anthropic.md
       - "Qwen renderers": implementations/rollout-qwen.md
       - "Gemma renderers": implementations/rollout-gemma.md
       - "verifiers environments": implementations/rollout-verifiers.md

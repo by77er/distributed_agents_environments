@@ -13,7 +13,18 @@ turns.
 Of a binding's sampling parameters, `reasoning_effort` is sent when set, and `temperature` and `top_p` only when they
 differ from the API's own default (1.0): reasoning models reject the two parameters whatever their value. A
 request's `max_output_tokens` is sent where the backend accepts it: the public API does, and counts reasoning tokens
-against it; the Codex backend rejects the parameter.
+against it; the Codex backend rejects the parameter. Where a request gives none, the sampling parameters' thinking and
+answer budgets give it (their sum), where both are said. `sample` takes the sampling parameters of one request in
+place of the endpoint's own (`sampling`), as the gateway samples one channel for many bindings.
+
+`hosted` makes the endpoint a cluster's `api` provider names (`endpoint = "rollout_openai:hosted"`), from its API key
+and its model's catalog entry. Usage says the cached input tokens and the reasoning tokens, which a turn's spend is
+counted from.
+
+Errors map to the contract: 429 and a server that is down or overloaded (500, 502, 503, 504) are `Overloaded`; a
+context too long is `ContextOverflow`; credentials refused raise `PermissionError`; any other refusal (a request the
+API rejects) is a `ModelEndpointError`, which asking again does not change; a stream that fails is an
+`InternalError`.
 """
 
 import base64
@@ -37,6 +48,7 @@ from rollout.contracts import (
     InternalError,
     Media,
     Message,
+    ModelEndpointError,
     NamedToolChoice,
     Overloaded,
     Role,
@@ -52,7 +64,15 @@ from rollout.contracts import (
 from rollout.harness.blobs import Blobs
 from rollout.harness.runner import DirectModel, SamplingParameters
 
-__all__ = ["ApiKey", "CodexLogin", "Credentials", "ResponsesContract", "ResponsesEndpoint", "codex_provider"]
+__all__ = [
+    "ApiKey",
+    "CodexLogin",
+    "Credentials",
+    "ResponsesContract",
+    "ResponsesEndpoint",
+    "codex_provider",
+    "hosted",
+]
 
 
 class Credentials(Protocol):
@@ -177,8 +197,9 @@ class ResponsesEndpoint:
     async def cancel(self, effect_id: str) -> None:
         """Nothing to do: the request stops when the task awaiting `sample` is cancelled."""
 
-    async def sample(self, request: SampleRequest) -> SampleResult:
-        body = self.request_body(request, await self._read_media(request.context.append))
+    async def sample(self, request: SampleRequest, *, sampling: SamplingParameters | None = None) -> SampleResult:
+        """One reply; `sampling` in place of the endpoint's own sampling parameters, for this request."""
+        body = self.request_body(request, await self._read_media(request.context.append), sampling=sampling)
         for attempt in (1, 2):
             headers = await self._credentials.headers(self._client, force_refresh=attempt == 2)
             headers["Accept"] = "text/event-stream"
@@ -191,9 +212,16 @@ class ResponsesEndpoint:
                 return _result(await _completed_response(response.aiter_lines()), self._contract)
         raise PermissionError("the model API rejected the credentials after a refresh")
 
-    def request_body(self, request: SampleRequest, media: Mapping[str, bytes] | None = None) -> dict[str, JsonValue]:
+    def request_body(
+        self,
+        request: SampleRequest,
+        media: Mapping[str, bytes] | None = None,
+        *,
+        sampling: SamplingParameters | None = None,
+    ) -> dict[str, JsonValue]:
         """The Responses API request for a sample request (public for tests and debugging). `media` holds the bytes
-        of the context's `Media` blocks by SHA-256."""
+        of the context's `Media` blocks by SHA-256; `sampling`, the sampling parameters in place of the endpoint's."""
+        said = sampling or self._sampling
         instructions, items = _render(request.context.append, media or {})
         body: dict[str, JsonValue] = {
             "model": self._model,
@@ -207,14 +235,18 @@ class ResponsesEndpoint:
             body["tools"] = [_tool(specification) for specification in request.tools]
         if request.tool_choice is not None:
             body["tool_choice"] = _tool_choice(request.tool_choice)
-        if request.max_output_tokens is not None and self._credentials.accepts_max_output_tokens:
-            body["max_output_tokens"] = request.max_output_tokens
-        if self._sampling.temperature != 1.0:
-            body["temperature"] = self._sampling.temperature
-        if self._sampling.top_p != 1.0:
-            body["top_p"] = self._sampling.top_p
-        if self._sampling.reasoning_effort is not None:
-            body["reasoning"] = {"effort": self._sampling.reasoning_effort}
+        room = request.max_output_tokens
+        if room is None and said.thinking_tokens is not None and said.answer_tokens is not None:
+            room = said.thinking_tokens + said.answer_tokens
+        if room is not None and self._credentials.accepts_max_output_tokens:
+            body["max_output_tokens"] = room
+        if said.temperature != 1.0:
+            body["temperature"] = said.temperature
+        if said.top_p != 1.0:
+            body["top_p"] = said.top_p
+        effort = said.reasoning_effort or self._sampling.reasoning_effort
+        if effort is not None:
+            body["reasoning"] = {"effort": effort}
         return body
 
     async def _read_media(self, messages: Sequence[Message]) -> dict[str, bytes]:
@@ -240,6 +272,30 @@ def codex_provider(
         )
 
     return factory
+
+
+def hosted(
+    model: str,
+    *,
+    api_key: str | None,
+    context_limit: int,
+    max_output_tokens: int,
+    options: Mapping[str, JsonValue] | None = None,
+    base_url: str | None = None,
+) -> ResponsesEndpoint:
+    """The endpoint of a cluster's `api` provider for one of its models: its API key, the model's context and most
+    output (its catalog entry), the model's `options` (`reasoning_effort`: the effort a request is sampled with where
+    its binding says none), and the API's base URL (none: OpenAI's own). Raises `PermissionError` without a key."""
+    if not api_key:
+        raise PermissionError("the provider has no API key: set the environment variable its api_key_env names")
+    effort = (options or {}).get("reasoning_effort")
+    credentials = ApiKey(api_key, base_url.rstrip("/") if base_url else ApiKey.base_url)
+    return ResponsesEndpoint(
+        credentials,
+        model,
+        sampling=SamplingParameters(reasoning_effort=str(effort) if effort else None),
+        contract=ResponsesContract(context_limit=context_limit, max_output_tokens=max_output_tokens),
+    )
 
 
 # Rendering canonical content to Responses API items ---------------------------------------------------------------
@@ -364,6 +420,10 @@ def _result(response: Mapping[str, Any], contract: CapabilityContract) -> Sample
     usage: Mapping[str, Any] = response.get("usage") or {}
     input_tokens = cast(int | None, usage.get("input_tokens"))
     output_tokens = cast(int | None, usage.get("output_tokens"))
+    input_details: Mapping[str, Any] = usage.get("input_tokens_details") or {}
+    output_details: Mapping[str, Any] = usage.get("output_tokens_details") or {}
+    cached = cast(int | None, input_details.get("cached_tokens"))
+    reasoning = cast(int | None, output_details.get("reasoning_tokens"))
     if response.get("status") == "incomplete":
         finish = FinishReason.LENGTH
     elif any(isinstance(block, ToolCall) for block in blocks):
@@ -378,17 +438,23 @@ def _result(response: Mapping[str, Any], contract: CapabilityContract) -> Sample
             context_limit=contract.context_limit,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_input_tokens=cached,
+            thinking_tokens=reasoning,
         ),
     )
 
 
+OVERLOADED = frozenset({429, 500, 502, 503, 504})
+"""Statuses that say the API cannot take the request now: asked again later, it may."""
+
+
 def _error(response: httpx.Response, body: str, context_limit: int) -> Exception:
     status = response.status_code
-    if status == 429:
+    if status in OVERLOADED:
         retry_after = response.headers.get("retry-after")
         return Overloaded(float(retry_after) if retry_after and retry_after.replace(".", "").isdigit() else None)
     if status == 400 and "context_length_exceeded" in body:
         return ContextOverflow(context_limit)
     if status in (401, 403):
         return PermissionError(f"the model API rejected the credentials ({status}): {body[:300]}")
-    return InternalError(f"the model API returned {status}: {body[:300]}")
+    return ModelEndpointError(f"the model API refused the request ({status}): {body[:300]}")

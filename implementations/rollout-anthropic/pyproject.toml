@@ -1,0 +1,19 @@
+[project]
+name = "rollout-anthropic"
+version = "0.0.0"
+description = "A ModelEndpoint for Anthropic's Messages API"
+requires-python = ">=3.13"
+dependencies = [
+    "rollout",
+    "anthropic>=1.8",
+]
+
+[tool.uv.sources]
+rollout = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rollout_anthropic"]

@@ -110,6 +110,7 @@ with what it covers and who it is for, then "Read first" and "Next" links.
 - [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
   [objectives in torch](docs/implementations/rollout-objectives.md),
   [Tinker trainer and engine](docs/implementations/rollout-tinker.md),
+  [Anthropic Messages endpoint](docs/implementations/rollout-anthropic.md),
   [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md)
 - [verifiers environments](docs/implementations/rollout-verifiers.md): Prime Intellect's verifiers environments,
   their harnesses reaching the gateway

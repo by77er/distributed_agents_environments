@@ -95,7 +95,13 @@ class Usage(ContractModel):
     """Drives the agent's compaction decisions."""
     context_limit: int
     input_tokens: int | None = None
+    """Every prompt token, those read from a cache among them."""
     output_tokens: int | None = None
+    """Every token the reply took, its thinking among them."""
+    cached_input_tokens: int | None = None
+    """Of `input_tokens`, those a provider read from its prompt cache (billed at its cached-input price)."""
+    thinking_tokens: int | None = None
+    """Of `output_tokens`, those spent thinking."""
 
 
 class SampleResult(ContractModel):
