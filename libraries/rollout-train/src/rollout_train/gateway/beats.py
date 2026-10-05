@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import JsonValue
 
 from rollout_train.gateway.service import Gateway
+from rollout_train.inference.api import ApiChannel
 from rollout_train.machine import measured
 
 GATEWAY = "gateway"
@@ -20,8 +21,9 @@ def name_of(listen: str) -> str:
 
 def about(gateway: Gateway, listen: str, directory: Path | None = None) -> dict[str, JsonValue]:
     """What a replica says of itself in each beat (called in a thread: it measures): its host, where it listens, the
-    machine (with the disk `directory` is on), and each channel: those of this process with what each serves, and the
-    routed ones (`RUN/NAME`) with their servers; each with what passed through it since the beat before."""
+    machine (with the disk `directory` is on), and each channel: those of this process with what each serves, the
+    routed ones (`RUN/NAME`) with their servers, and those on hosted APIs (its own and the runs' its directory built)
+    with their provider and model; each with what passed through it since the beat before."""
     channels: list[JsonValue] = [
         {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
         for name, channel in gateway.channels.items()
@@ -30,6 +32,10 @@ def about(gateway: Gateway, listen: str, directory: Path | None = None) -> dict[
     for name, channel in routed.items():
         servers: list[JsonValue] = list(channel.servers())
         channels.append({"channel": name, **channel.take(), "servers": servers})
+    built = gateway.directory.channels() if gateway.directory is not None else {}
+    hosted = {**gateway.hosted, **{name: each for name, each in built.items() if isinstance(each, ApiChannel)}}
+    for name, each in hosted.items():
+        channels.append({"channel": name, "provider": each.provider.name, "model": each.model, **each.take()})
     return {
         "kind": GATEWAY,
         "host": socket.gethostname(),

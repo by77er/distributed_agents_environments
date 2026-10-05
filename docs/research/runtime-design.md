@@ -157,11 +157,11 @@ cost = { input = 0.66, cached_input = 0.132, output = 1.995 }
 
 [inference.openai]
 kind = "api"
-endpoint = "rollout_openai:ResponsesEndpoint"
+endpoint = "rollout_openai:hosted"
 api_key_env = "OPENAI_API_KEY"
-[inference.openai.models."gpt-5"]
-context = 400000
-cost = { input = 0.0, cached_input = 0.0, output = 0.0 }
+[inference.openai.models."gpt-6-luna"]
+context = 1050000
+cost = { input = 0.10, cached_input = 0.01, output = 0.50 }
 
 [inference.lab]                               # vLLM servers this cluster does not start
 kind = "vllm-servers"
@@ -868,7 +868,7 @@ class CheckpointServer(Protocol):
 | `vllm` | `HostServer`: a handle of each engine host actor (`run/OWNER/engine/CHANNEL/N`, where OWNER is the run or its `served_by` run); calls are actor calls | Each engine host's `Follower`, into its in-process `VllmEngine`: adapters by checkpoint id, full weights under the checkpoint's id |
 | `vllm-servers` | `RemoteEngine` at each address, or one at `via` | The run's follower actor on the servers' machines (today's `rollout engines`) |
 | `tinker` | `TinkerServer` (`rollout_tinker.server`): `models()` holds every checkpoint whose files have a Tinker pointer; `generate(adapter=CHECKPOINT)` reads the pointer from the blob store (once per checkpoint) and samples Tinker's sampler checkpoint; the base model by its name | Nobody: the trainer saved the sampler checkpoint when it made the step |
-| `api` | none: an `EndpointSampler` over the `ModelEndpoint` (`rollout_openai:ResponsesEndpoint`), canonical request in, canonical reply out; recorded with `sampled_with = []` | — |
+| `api` | none: an `ApiChannel` (`rollout_train.inference.api`) over the endpoint its provider names (`rollout_openai:hosted`, `rollout_anthropic:hosted`), canonical request in, canonical reply out; recorded with `sampled_with = []` and its spend | — |
 
 So the gateway asks every token-level backend the same question (sample this prompt from the checkpoint named), and
 records what comes back with the checkpoint the answer names.
@@ -1262,7 +1262,8 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   with their servers (`Provided`; `ChannelDirectory.of(cluster, ledger)` takes those whose servers answer vLLM's API at
   their endpoints), not by Serve or actor handles. A channel's mode is read where its serving records are
   (`rollout_train.serving.serving_of`), so a `follows` channel and a pinned one are served by every follower and
-  sampler unchanged. Tinker's and an API's samplers are still to come.
+  sampler unchanged. A channel on an `api` provider is an `ApiChannel`, which the directory builds over the cluster
+  config's `api` providers (`Hosted`), and a run's driver for its own gateway; Tinker's sampler is still to come.
 
 ### As built: runs claim what they need
 

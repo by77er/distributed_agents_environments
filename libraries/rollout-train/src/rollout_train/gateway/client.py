@@ -35,6 +35,7 @@ from rollout_train.gateway.service import Gateway, Refused, contract_of, limits_
 from rollout_train.gateway.turns import TurnStore
 from rollout_train.http import error_of
 from rollout_train.inference import Routes
+from rollout_train.inference.api import ApiChannel
 from rollout_train.inference.channel import Sampler
 from rollout_train.ledger import Fence
 from rollout_train.recorder.compat import SERVED_UNDER
@@ -191,11 +192,13 @@ class GatewayEndpoints:
         def run() -> str:
             return named or self.attempt(SessionIdentity.parse(session_id).owner).run
 
-        sampler: Sampler | None = None
+        sampler: Sampler | ApiChannel | None = None
         if self.gateway is not None and self.gateway.directory is not None:
             sampler = self.gateway.directory.channel(run(), name)
         if sampler is None and self.gateway is not None and name in self.gateway.channels:
             sampler = self.gateway.channels[name]
+        elif sampler is None and self.gateway is not None and name in self.gateway.hosted:
+            sampler = self.gateway.hosted[name]
         elif sampler is None and self.routes is not None and self.routes.routed(name):
             sampler = self.routes.channel(run(), name)
         if sampler is not None:

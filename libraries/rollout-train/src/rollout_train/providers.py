@@ -22,10 +22,17 @@ cluster's nodes) is finite capacity a run is placed on.
 
 Every provider declares how it is reached (`Auth`): `mtls` (the cluster's CA, a client certificate, the server's SPIFFE
 identity checked), `bearer` (a token named by an environment variable or a file), `vendor` (the vendor's SDK reads its
-own key, as Tinker's does) or `none` (allowed only for an endpoint on this machine). `Auth.connection` turns that into
+own key, as Tinker's does, or the key the table names, as a hosted API's `api_key_env`) or `none` (allowed only for an
+endpoint on this machine). `Auth.connection` turns that into
 the connection settings a client uses (`rollout_train.inference.remote.Connection`): the system's CAs or the
 cluster's, the host name checked for a public endpoint or a SPIFFE identity for a pod reached by IP, a client
 certificate only for `mtls`.
+
+A hosted API (`api`: OpenAI's Responses, Anthropic's Messages) is sampled through the endpoint its table names
+(`endpoint = "module:name"`: `rollout_openai:hosted`, `rollout_anthropic:hosted`), with the key its `api_key_env`
+names, at its `base_url` where it says one; its models' catalog entries say their context, their prices and what each
+takes (`options`). It is metered, and not token-exact: what it samples is never trained on
+(`rollout_train.inference.api`).
 
 A channel may be served by several providers at once (`Routing`): `spill` fills the first and sends the rest to the
 next; `weighted` shares turns by weight.
@@ -229,9 +236,10 @@ class ModelOffer:
     """The highest adapter rank it loads (none: adapters are not limited here, or not served)."""
     cost: Mapping[str, float] = field(default_factory=dict[str, float])
     """Dollars per million tokens by token class (`input`, `cached_input`, `output`, `thinking`), or per hour
-    (`hour`)."""
+    (`hour`). Cached input is priced as input, and thinking as output, where the table does not say."""
     options: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """What its engines are started with (`gpu_memory_utilization`, `max_num_seqs`, …)."""
+    """What its engines are started with (`gpu_memory_utilization`, `max_num_seqs`, …); for a hosted API's model,
+    what it takes (`max_output_tokens`, and its endpoint's own: how it thinks, whether it takes sampling)."""
 
 
 @dataclass(frozen=True)
@@ -357,8 +365,9 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
                 bills="tokens",
             ),
             auths=("vendor", "bearer"),
-            auth=None,
-            fields=("endpoint",),
+            auth=Auth("vendor"),  # (the key its `api_key_env` names)
+            fields=("endpoint", "base_url"),
+            secrets=("api_key",),
             allocation="metered",
         ),
         InferenceKind(

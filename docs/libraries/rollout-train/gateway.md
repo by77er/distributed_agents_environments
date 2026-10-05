@@ -22,6 +22,9 @@ HTTP; the cluster's replicas serve the same code ([a runner served by the gatewa
 5. records the turn;
 6. replies in the request's own API.
 
+A channel on a hosted API is sampled by message instead ([hosted APIs](#hosted-apis)): the request goes to the
+provider's endpoint as it is, and the turn records the reply and what it cost, with no tokens.
+
 It keeps no session. Everything a turn needs is in the request and its key, and everything it leaves is in the
 [ledger](checkpoints.md#the-ledger) and the blob store, so any replica answers any request, and a replica can die at any
 moment. Only caches are kept in memory: the turns' blobs a replica has read, and what each run's channel should serve
@@ -38,10 +41,10 @@ app = create_app(gateway)               # serve with uvicorn, as many replicas a
 | `POST /v1/chat/completions` | OpenAI's Chat Completions |
 | `POST /v1/responses` | OpenAI's Responses |
 | `POST /v1/messages` | Anthropic's Messages |
-| `POST /v1/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer; nothing is recorded |
+| `POST /v1/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer; nothing is recorded. A hosted API's channel has no renderer: 400 |
 | `POST /v1/samples` | a [`SampleRequest`](../../guide/reference.md#samplerequest), answered with a `SampleResult`, for programs in a runner |
 | `POST /v1/scores` | a [`ScoreRequest`](../../guide/reference.md#scorerequest): the logprobs the channel gives tokens it is handed ([scoring tokens](#scoring-tokens)) |
-| `GET /v1/models` | the channels, as models; each whose engines are in the replica's process with its `contract` (`context_limit`, `max_output_tokens`). With `?run=RUN`, the channels that run's start names, as `RUN/NAME`, each with its contract |
+| `GET /v1/models` | the channels, as models; each whose engines are in the replica's process (or on a hosted API) with its `contract` (`context_limit`, `max_output_tokens`). With `?run=RUN`, the channels that run's start names, as `RUN/NAME`, each with its contract |
 | `GET /healthz` | 200 while the process serves |
 | `GET /readyz` | 200 when the ledger and the blob store answer; 503, saying which does not, otherwise |
 
@@ -158,15 +161,18 @@ Every turn is two things ([`TurnStore`](../../guide/reference.md#turnstore)):
   - what it was sampled with (`sampled_with`): of `token_exact`, `sampled_logprobs` and `honours_sampling`, what its
     sampler can do. Every engine and server a channel samples from does all three, and a turn whose blob does not
     say is read back as sampled with all three;
-  - whether its slot is trained (`trained`, from the key): false for a judge's or a fixed opponent's turn;
+  - whether its slot is trained (`trained`, from the key): false for a judge's or a fixed opponent's turn, and for
+    every turn a hosted API sampled;
   - the reply: the parsed message, how it finished, usage;
+  - what it cost (`spend`, dollars), for a turn a hosted API sampled: its usage at the model's catalog prices;
   - the links its harness declared;
   - timings: when it started, how long each generation took, and the whole turn;
   - for a scoring turn, its use (`score`) and its scores ([scoring tokens](#scoring-tokens)).
 - **A ledger record** naming the blob, appended under the request id to the table of the program's run,
   `runs/RUN/turns/RUN_ID`, under the fence the key names. Besides the blob it says the slot, the episode and
   attempt, the checkpoint and depth, how many prompt tokens and sampled tokens the turn has, when it was recorded,
-  its use where it is not a sample, and `trained: false` for a turn of a slot that is not trained.
+  its use where it is not a sample, `trained: false` for a turn of a slot that is not trained, and `spend` for a turn
+  that cost something.
 
 The ledger record is what makes a turn count: a blob that no record names is never read.
 
@@ -262,9 +268,38 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
 - **A channel whose engines are in the gateway's own process** (an engine that calls a hosted API, such as
   `TinkerEngine`, in a run's driver) samples whatever it serves: the base model, until the run publishes a checkpoint
   to it.
+- **A channel on a hosted API** serves its model, never a checkpoint ([hosted APIs](#hosted-apis)).
 
-One gateway samples channels of every kind at once: a run's `TinkerEngine` channel beside a channel on its engine hosts
-and one on servers at addresses, say.
+One gateway samples channels of every kind at once: a run's `TinkerEngine` channel beside a channel on its engine hosts,
+one on servers at addresses and a judge on a hosted API, say.
+
+## Hosted APIs
+
+A channel whose provider is of the kind `api` (OpenAI's Responses API, Anthropic's Messages API:
+[hosted APIs](../../guide/cluster.md#hosted-apis)) is an [`ApiChannel`](../../guide/reference.md#apichannel)
+(`rollout_train.inference.api`). The `ChannelDirectory` builds one for a run's channel on such a provider
+(`ChannelDirectory.of` takes every `api` provider of the cluster config, `Hosted`); a run's driver builds its own for
+its gateway. Each samples the channel's model through the endpoint the provider names (`endpoint = "module:name"`:
+`rollout_openai:hosted`, `rollout_anthropic:hosted`), made the first time it samples, with the provider's key read then.
+
+- **By message.** The request (its context, tools and tool choice) goes to the endpoint as it is, with the binding's
+  temperature and top-p and its thinking and answer budgets (else the channel's), which the endpoint maps to what its
+  model takes. Nothing is rendered, so the channel needs no renderer, and it counts and scores no tokens.
+- **Recorded with no tokens.** The turn's prompt and completion are empty and `sampled_with` is empty: no exact tokens,
+  no behaviour logprobs. It is never trained on (`trained` false, whatever the key says), and its slot exports no
+  segment. Its reply is kept (text, tool calls, usage), and so is what it cost (`spend`): the reply's usage (input,
+  cached input, output and thinking tokens) at the model's catalog prices (`priced`). Its checkpoint is the model's
+  name, at depth 0. A request id recorded before is answered with the recorded reply, as any turn is.
+- **The provider's concurrency.** At most `concurrency` requests at once go to one provider from one process, across
+  every channel on it (`Hosted.admission`).
+- **Retries.** A reply the API cannot give now (a rate limit, 429; an API overloaded or down, 500, 502, 503, 504, 529;
+  a stream or a connection that fails) is asked for again after a wait that doubles each time (from a second, at most
+  a minute, and at least the API's `retry-after`), up to six times. Credentials refused, a request rejected, or a
+  context too long fail at once: the error reaches the program, and its episode ends failed with the reason.
+- **Spend.** The gateway keeps each run's total (`Spending`): what its earlier starts recorded, read once from the
+  ledger, and each turn it records. A cap (`Spending.cap`) bounds what some runs spend together: an eval and its parts
+  under the eval's `limits.spend`. Once reached, the gateway samples no more on hosted APIs for them, and the eval's
+  driver ends it, failed with the reason ([launching runs](launching.md#the-driver)).
 
 A turn's weights are chosen once, when it begins: both phases of its thinking ask for the same checkpoint. The turn
 records the checkpoint that served it (by id; the base model's name before the first checkpoint) and that
@@ -275,7 +310,8 @@ attempt is recorded.
 ## Running it
 
 A run's driver runs a gateway in its own process, over the run's channels ([launching runs](launching.md#the-driver)):
-its routed channels (engine hosts, servers at addresses) and its channels with engines in the process (Tinker). Its
+its routed channels (engine hosts, servers at addresses), its channels with engines in the process (Tinker), and its
+channels on hosted APIs. Its
 runner records through it with no HTTP in between, and serves it to harnesses on its node, at a free port on
 `127.0.0.1`; it signs keys with a secret of its own ([deploying](../../guide/deploying.md#the-gateway)). Replicas of the
 cluster's gateway serve the same code:
@@ -287,8 +323,9 @@ uv run rollout gateway --cluster --listen 0.0.0.0:8900     # a replica: start as
 `rollout gateway --cluster` serves a replica over the cluster config's ledger and blob store, with the keys
 `[gateway] keys_file` or `keys_env` names (else the environment's), and a `ChannelDirectory` of its providers
 (`ChannelDirectory.of`): every channel a run's start names on a provider whose servers answer vLLM's API at its
-endpoints, a judge's channel or one that follows the trained channel among them. Replicas share nothing but the ledger
-and the blob store.
+endpoints or on a hosted API, a judge's channel or one that follows the trained channel among them. Replicas share
+nothing but the ledger and the blob store. A replica reads a hosted API's key from its environment (on Kubernetes,
+the Secret `providers`: [provider keys](../../deploy/helm.md#provider-keys)).
 
 - **Behind a proxy.** A proxy in front of the replicas terminates TLS, checks its own credentials, and may serve them
   under a path of its own (`https://models.example/gw/v1`). The gateway builds no URL from a request. It trusts
@@ -297,7 +334,8 @@ and the blob store.
 - **Health.** A load balancer sends traffic to replicas whose `/readyz` answers 200.
 - **Heartbeats.** A replica beats beside the ledger every 15 seconds ([heartbeats](rollouts.md#heartbeats)) as
   `gateway/HOST/LISTEN` (`rollout_train.gateway.beats`): kind `gateway`, its host, where it listens, its machine, and
-  what each channel it samples serves and how fast. The [monitor](monitor.md#the-machines) shows the replicas alive.
+  what each channel it samples serves and how fast (a hosted API's channel: its provider and model, its retries and
+  the dollars it spent). The [monitor](monitor.md#the-machines) shows the replicas alive.
 
 ## Claude Code and Codex
 

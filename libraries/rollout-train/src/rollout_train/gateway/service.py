@@ -27,6 +27,12 @@ session: any replica answers any request, and a replica can die at any moment.
 A score request is recorded as a turn of its own use (`score`): the tokens it was handed are its prompt, it samples
 nothing, and it is never trained on. Its tokens count as tokens in, as a sample's prompt does.
 
+A channel on a hosted API (`rollout_train.inference.api.ApiChannel`) is sampled by message: the request goes to its
+provider's endpoint as it is, with the binding's sampling and budgets, and its turn records the reply (text, tool calls,
+usage) with no tokens (`sampled_with` empty, never trained on) and what it cost (`spend`). What a run spends so is
+counted (`spending`), and a run whose cap is reached samples no more on hosted APIs. Such a channel scores no tokens and
+counts none.
+
 A reply says which checkpoint served it and at what depth (`X-Rollout-Checkpoint`, `X-Rollout-Depth`), the request id
 it was recorded under (`X-Rollout-Request-Id`), and whether it was recorded before (`X-Rollout-Replayed`). A request may
 say how it follows from earlier ones (`X-Rollout-Links`: a JSON list of `{"type", "source"}`, each source a request id).
@@ -63,8 +69,10 @@ from rollout.contracts import (
 from rollout.harness.hooks import ModelSample, RunHooks
 from rollout_train.gateway.directory import ChannelDirectory
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
+from rollout_train.gateway.spending import Spending
 from rollout_train.gateway.turns import SCORE, Link, Reply, TurnRecord, TurnStore
 from rollout_train.inference import Channel, Generation, Limits, Routes, Scores
+from rollout_train.inference.api import ApiChannel
 from rollout_train.inference.channel import Sampler, Unserved, scored_range
 from rollout_train.inference.remote import NoReplica
 from rollout_train.ledger import Fenced
@@ -115,7 +123,8 @@ class Gateway:
     (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
     harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
     its endpoints). Each turn records what its sampler samples with: the sampler's `sampled_with` where it says, else
-    `TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs)."""
+    `TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs). The
+    channels on hosted APIs it samples by name are `hosted`; what runs spend on them is counted in `spending`."""
 
     store: TurnStore
     keyring: Keyring
@@ -124,6 +133,12 @@ class Gateway:
     models: Mapping[str, str] = field(default_factory=dict[str, str])
     hooks: Sequence[RunHooks] = ()
     directory: ChannelDirectory | None = None
+    hosted: Mapping[str, ApiChannel] = field(default_factory=dict[str, ApiChannel])
+    spending: Spending | None = None
+
+    def __post_init__(self) -> None:
+        if self.spending is None:
+            self.spending = Spending(self.store.ledger)
 
     async def granted(self, key: str) -> Grant:
         """The grant a key carries, its run's channels loaded from its start (where there is a directory); `Refused`
@@ -142,20 +157,22 @@ class Gateway:
         if self.directory is not None:
             await self.directory.load(parts(channel)[0] or run)
 
-    def sampler(self, grant: Grant) -> Sampler:
+    def sampler(self, grant: Grant) -> "Sampler | ApiChannel":
         """What a grant's turns sample from (`sampler_of` its run and channel)."""
         return self.sampler_of(grant.run, grant.channel)
 
-    def sampler_of(self, run: str, channel: str) -> Sampler:
+    def sampler_of(self, run: str, channel: str) -> "Sampler | ApiChannel":
         """What a run's channel samples from: the channel its start names, built by the directory (once the run is
-        loaded: `load`); else the channel of this process it names; else the run's routed channel of that name. A
-        channel named within its run (`RUN/NAME`) is that run's."""
+        loaded: `load`); else the channel of this process it names (its engines here, or a hosted API); else the run's
+        routed channel of that name. A channel named within its run (`RUN/NAME`) is that run's."""
         named, name = parts(channel)
         run = named or run
         if self.directory is not None and (built := self.directory.channel(run, name)) is not None:
             return built
         if name in self.channels:
             return self.channels[name]
+        if name in self.hosted:
+            return self.hosted[name]
         if self.routes is not None and self.routes.routed(name):
             return self.routes.channel(run, name)
         raise Refused(Failure.KEY, f"this gateway serves no channel {channel!r}")
@@ -167,7 +184,7 @@ class Gateway:
         named, name = parts(channel)
         if self.directory is not None and (built := self.directory.channel(named or run, name)) is not None:
             return await built.reaches()
-        if name in self.channels:
+        if name in self.channels or name in self.hosted:
             return True
         return self.routes is not None and self.routes.routed(name) and await self.routes.reaches(run, name)
 
@@ -175,7 +192,8 @@ class Gateway:
     def names(self) -> list[str]:
         """The channels it samples, by name."""
         routed: Mapping[str, object] = self.routes.routes if self.routes is not None else {}
-        return [*self.channels, *(name for name in routed if name not in self.channels)]
+        local = [*self.channels, *(name for name in self.hosted if name not in self.channels)]
+        return [*local, *(name for name in routed if name not in local)]
 
     def describe(self, grant: Grant) -> CapabilityContract:
         return contract_of(self.sampler(grant), limits_of(self.sampler(grant).limits, grant.thinking, grant.answer))
@@ -194,12 +212,18 @@ class Gateway:
         recorded = await self.store.reply(grant.run, grant.run_id, request.effect_id, index)
         if recorded is None:
             turn = await self._sampled(grant, request, links)
+            spending = self.spending
+            assert spending is not None
+            if turn.spend is not None:
+                await spending.prepare(grant.run)  # (what earlier starts spent, read before this turn is in the ledger)
             try:
                 recorded = await self.store.record(turn, grant.fence, index)
             except Fenced:
                 raise Refused(
                     Failure.KEY, "this key's attempt was taken over: its turns are no longer recorded"
                 ) from None
+            if turn.spend is not None and not recorded.replayed:
+                await spending.counted(grant.run, turn.spend)
         if recorded.slot != grant.slot:
             raise Refused(Failure.REQUEST, f"request id {request.effect_id} was used by another slot of the run")
         return recorded
@@ -208,6 +232,8 @@ class Gateway:
         """A turn sampled from the weights its session samples from when it begins, and sampled again from the start
         when they stop being served before it ends (`Unserved`), up to `ATTEMPTS` times."""
         sampler = self.sampler(grant)
+        if isinstance(sampler, ApiChannel):
+            return await self._hosted_turn(grant, sampler, request, links)
         failure: Exception | None = None
         for attempt in range(1, ATTEMPTS + 1):
             try:
@@ -217,6 +243,40 @@ class Gateway:
             except NoReplica as error:
                 raise ModelEndpointError(str(error)) from None
         raise ModelEndpointError(f"the turn was not served in {ATTEMPTS} attempts: {failure}")
+
+    async def _hosted_turn(
+        self, grant: Grant, channel: ApiChannel, request: SampleRequest, links: Sequence[Link]
+    ) -> TurnRecord:
+        """A turn a hosted API sampled: the request as it is, with the grant's sampling and budgets; recorded with no
+        tokens, never trained on, with what it cost. A run whose spending cap is reached samples none."""
+        assert self.spending is not None
+        if (why := await self.spending.over(grant.run)) is not None:
+            raise ModelEndpointError(f"no more is sampled on {channel.provider.name}: {why}")
+        started, began = time.time(), time.monotonic()
+        result = await channel.sample(
+            request, temperature=grant.temperature, top_p=grant.top_p, thinking=grant.thinking, answer=grant.answer
+        )
+        return TurnRecord(
+            effect_id=request.effect_id,
+            run=grant.run,
+            run_id=grant.run_id,
+            slot=grant.slot,
+            channel=channel.name,
+            checkpoint=channel.held,
+            depth=0,
+            prompt=array("i"),
+            completion=[],
+            mask=[],
+            logprobs=[],
+            result=result,
+            episode=grant.episode,
+            attempt=grant.attempt,
+            links=tuple(links),
+            timings={"started": round(started, 3), "attempt": 1, "seconds": round(time.monotonic() - began, 4)},
+            sampled_with=channel.sampled_with,
+            trained=False,
+            spend=channel.dollars(result.usage),
+        )
 
     async def _turn(
         self, grant: Grant, sampler: Sampler, request: SampleRequest, links: Sequence[Link], attempt: int
@@ -299,6 +359,8 @@ class Gateway:
         """A scoring turn, scored by the weights the session samples from when it begins, and scored again when they
         stop being served before it ends (`Unserved`), up to `ATTEMPTS` times."""
         sampler = self.sampler(grant)
+        if isinstance(sampler, ApiChannel):
+            raise Refused(Failure.REQUEST, f"channel {sampler.name} is a hosted API's, which scores no tokens")
         failure: Exception | None = None
         for attempt in range(1, ATTEMPTS + 1):
             try:
@@ -363,8 +425,13 @@ class Gateway:
                 logger.exception("a hook failed on a sample of %s in run %s", grant.slot, grant.run_id)
 
     async def count(self, grant: Grant, prompt: Prompt) -> int:
-        """How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold."""
-        renderer = self.sampler(grant).renderer
+        """How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold. A hosted
+        API's channel has no renderer, and counts none (`Refused`)."""
+        sampler = self.sampler(grant)
+        if isinstance(sampler, ApiChannel):
+            raise Refused(Failure.REQUEST, f"channel {sampler.name} is a hosted API's, which renders messages itself: "
+                          "it counts no tokens here")  # fmt: skip
+        renderer = sampler.renderer
         return len(await asyncio.to_thread(renderer.render, prompt.messages, prompt.tools))
 
     async def ready(self) -> dict[str, str]:
@@ -386,9 +453,9 @@ def create_app(gateway: Gateway) -> Starlette:
     """Serve `gateway` over HTTP (behind a proxy that terminates TLS, or with uvicorn's own certificates)."""
 
     def hosted(name: str) -> dict[str, Any]:
-        """For a channel whose engines are in this process, what it guarantees a session (`contract`): what a runner
-        that records through this gateway tells its programs of the channel."""
-        channel = gateway.channels.get(name)
+        """For a channel whose engines are in this process (or on a hosted API), what it guarantees a session
+        (`contract`): what a runner that records through this gateway tells its programs of the channel."""
+        channel = gateway.channels.get(name) or gateway.hosted.get(name)
         return {"contract": contract_of(channel).model_dump(mode="json")} if channel is not None else {}
 
     async def models(request: Request) -> Response:
@@ -513,13 +580,14 @@ def limits_of(limits: Limits, thinking: int | None, answer: int | None) -> Limit
     )
 
 
-def contract_of(sampler: Sampler, limits: Limits | None = None) -> CapabilityContract:
+def contract_of(sampler: "Sampler | ApiChannel", limits: Limits | None = None) -> CapabilityContract:
     """What a channel guarantees a session: its context, and room for thinking and an answer (by `limits`, else the
-    channel's own). Where either budget is unset, a reply may take all the context its prompt leaves: the most output
-    is the context limit."""
+    channel's own). Where either budget is unset, a reply may take all the context its prompt leaves (the most output
+    is the context limit), or on a hosted API the most its model writes."""
     limits = limits or sampler.limits
     context = sampler.context_limit
-    room = context if limits.thinking is None or limits.answer is None else limits.thinking + limits.answer
+    most = sampler.max_output_tokens if isinstance(sampler, ApiChannel) else context
+    room = most if limits.thinking is None or limits.answer is None else limits.thinking + limits.answer
     return CapabilityContract(context_limit=context, max_output_tokens=room)
 
 

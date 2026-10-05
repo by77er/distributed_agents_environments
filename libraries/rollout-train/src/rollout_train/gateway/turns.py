@@ -5,8 +5,8 @@ A turn is two things:
 - **a blob** holding all of it: who sampled it (the run, the episode and attempt, the program's run, the slot, the
   channel), the checkpoint that served it and its depth, the prompt's tokens, the completion's tokens, which of them
   were sampled and which forced, the behaviour logprobs, what it was sampled with (`sampled_with`), whether its slot is
-  trained (`trained`), the reply (the parsed message, how it finished, usage), the links its harness declared to
-  earlier requests, and timings;
+  trained (`trained`), the reply (the parsed message, how it finished, usage), what it cost where its provider is
+  metered (`spend`), the links its harness declared to earlier requests, and timings;
 - **a ledger record** naming the blob, appended under the turn's effect id to the table of the program's run
   (`runs/RUN/turns/RUN_ID`) and under the fence its key names. The first append wins: a turn sampled twice (a retry
   that reached another replica while the first was still sampling) is recorded once, and both are answered with the
@@ -18,6 +18,10 @@ since its key was minted (a newer attempt of its episode, a runner started again
 A turn has a use (`use`): `sample`, a reply sampled from the policy, or `score`, the logprobs a channel gave tokens it
 was handed (a teacher scoring a student's tokens). A scoring turn samples nothing: its tokens are its prompt, it has no
 completion, and its blob holds the scores. Only samples are trained on.
+
+A turn a hosted API sampled (`sampled_with` empty) has no tokens: its prompt and completion are empty, and what it
+keeps is its reply (its text, tool calls and usage) and what it cost (`spend`, also in its ledger record). It exports
+no segment, and is never trained on.
 
 **A turn stores only the tokens it adds.** A session's prompts repeat each other: each turn's prompt begins with most
 of an earlier turn's tokens (its prompt and what it sampled), all of them where the context only grew, up to the first
@@ -129,7 +133,10 @@ class TurnRecord:
     scores: Scores | None = None
     """A scoring turn's scores."""
     trained: bool = True
-    """Whether it may be trained on: false for a turn of a slot that is not trained (a judge, a fixed opponent)."""
+    """Whether it may be trained on: false for a turn of a slot that is not trained (a judge, a fixed opponent), and
+    for a turn a hosted API sampled."""
+    spend: float | None = None
+    """Dollars it cost, from its usage at its model's catalog prices, where its provider is metered and prices it."""
 
     @property
     def version(self) -> int:
@@ -214,6 +221,7 @@ class TurnStore:
             "sampled": sum(turn.mask),
             "at": round(time.time(), 3),
             **({} if turn.trained else {"trained": False}),
+            **({"spend": round(turn.spend, 8)} if turn.spend is not None else {}),
         }
         if turn.use != SAMPLE:
             entry["use"] = turn.use
@@ -270,16 +278,20 @@ class TurnStore:
                     use=str(header.get("use", SAMPLE)),
                     scores=each.scores,
                     trained=bool(header.get("trained", True)),
+                    spend=header.get("spend"),
                 )
             )
         return turns
 
     async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]:
         """What each model slot of a program's run exports, by slot (`segments_of` its samples: scoring turns are left
-        out). The segments of a slot that is not trained are kept, marked so (`Segment.trained`). With
-        `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from it."""
+        out, and so are a hosted API's, which hold no tokens). The segments of a slot that is not trained are kept,
+        marked so (`Segment.trained`). With `accepted_only`, what a compaction attempt sampled is trained on only if
+        its harness went on from it."""
         by_slot: dict[str, list[TurnRecord]] = {}
-        turns = [turn for turn in await self.turns(run, run_id) if turn.use == SAMPLE]
+        turns = [
+            turn for turn in await self.turns(run, run_id) if turn.use == SAMPLE and (turn.prompt or turn.completion)
+        ]
         for turn in turns:
             by_slot.setdefault(turn.slot, []).append(turn)
         untrained = unaccepted(turns) if accepted_only else set[str]()
@@ -334,6 +346,8 @@ class TurnStore:
             "sampled_with": list(turn.sampled_with),
             "trained": turn.trained,
         }
+        if turn.spend is not None:
+            header["spend"] = turn.spend
         if turn.use != SAMPLE:
             header["use"] = turn.use
         scored: list[bytes] = []
