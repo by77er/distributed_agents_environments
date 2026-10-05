@@ -809,10 +809,10 @@ def _pools(run: _Run) -> None:
 
 
 def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None:
-    """Dollars one step is estimated to cost, at most: the trained channel's sampled tokens (every turn filling its
-    budgets) times the trainer's cost to train them and the dearest provider's to sample them, and the prompts' tokens
-    times that provider's. None where it cannot be estimated: budgets or the environment's numbers unknown, or a
-    provider or trainer that bills by the hour."""
+    """Dollars one step is estimated to cost, at most: every token trained (each turn's prompt and its sampled tokens,
+    every turn filling its budgets) times the trainer's cost for the model, plus the sampled tokens times the dearest
+    provider's cost to sample them and the prompts' tokens times its cost to read them, uncached. None where it cannot
+    be estimated: budgets or the environment's numbers unknown, or a provider or trainer that bills by the hour."""
     trained = settings.trained
     trainer = cluster.trainers.get(str(settings["trainer.provider"]))
     if trained is None or trainer is None or environment is None:
@@ -826,11 +826,12 @@ def estimated_spend(settings: RunSettings, cluster: Cluster, environment: Enviro
     turns = (groups if isinstance(groups, int) else 4) * environment.episodes_per_group * environment.turns_per_episode
     sampled = turns * ((thinking if isinstance(thinking, int) else 0) + (answer if isinstance(answer, int) else 0))
     prompts = turns * (environment.prompt_tokens or 0)
-    if "hour" in trainer.cost:
-        return None
-    spend = sampled * trainer.cost.get("train", 0.0) / 1e6
-    dearest = 0.0
     model = str(settings.get(f"channels.{trained}.model"))
+    priced = trainer.cost_of(str(settings.get("trainer.model") or model))
+    if "hour" in priced:
+        return None
+    spend = (sampled + prompts) * priced.get("train", 0.0) / 1e6
+    dearest = 0.0
     for name in settings.providers(trained):
         provider = cluster.inference.get(name)
         offer = provider.models.get(model) if provider is not None else None

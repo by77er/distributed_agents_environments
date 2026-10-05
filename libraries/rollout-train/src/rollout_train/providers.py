@@ -552,10 +552,16 @@ class TrainerProvider:
     colocate_with: str | None = None
     """A `vllm` provider whose GPU it shares: that provider's engines sleep while it steps."""
     cost: Mapping[str, float] = field(default_factory=dict[str, float])
-    """Dollars per million tokens trained (`train`), or per hour (`hour`)."""
+    """Dollars per million tokens trained (`train`), or per hour (`hour`), for a model `costs` does not name."""
+    costs: Mapping[str, Mapping[str, float]] = field(default_factory=dict[str, Mapping[str, float]])
+    """Its cost for each model whose price differs, by model, in the units of `cost`."""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The rest of its table: its kind's own settings, none of them a secret."""
     secrets: Mapping[str, Secret] = field(default_factory=dict[str, Secret])
+
+    def cost_of(self, model: str) -> Mapping[str, float]:
+        """What training `model` here costs: its own entry in `costs`, else `cost`."""
+        return self.costs.get(model, self.cost)
 
     @property
     def runs(self) -> TrainerKind:

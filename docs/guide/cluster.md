@@ -84,7 +84,7 @@ options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 64
 kind = "tinker"                               # auth vendor: Tinker's SDK reads TINKER_API_KEY
 [inference.tinker.models."Qwen/Qwen3.5-4B"]
 context = 65536
-cost = { input = 0.0, output = 0.0 }          # dollars per million tokens
+cost = { input = 0.33, cached_input = 0.066, output = 1.005 }   # dollars per million tokens
 
 [trainers.local-lora]
 kind = "lora"
@@ -97,7 +97,7 @@ segment_tokens = 8000
 kind = "tinker"
 models = ["Qwen/Qwen3.5-4B"]
 segment_tokens = 32768
-cost = { train = 0.0 }
+cost = { train = 0.737 }                      # dollars per million tokens trained
 
 [sandboxes.minecraft]
 provider = "minecraft_team.worlds:worlds"
@@ -123,7 +123,7 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | |
 | `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `models`, and the kind's own | Below |
-| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, and the kind's own | Below |
+| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, and the kind's own | Below |
 | `[sandboxes.KIND]` | `provider`, `python`, `size`, `cpus`, `memory_gib`, `pools`, the provider's settings | |
 | `[tools.NAME]` | `url`, `auth` | Tool sets served elsewhere |
 | `[environments."NAME"]` | `python = "platform"` or `project = PATH` | A relative project is from the config file's directory |
@@ -133,6 +133,12 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 A model a provider offers (`models."MODEL"`) has a `context`, and optionally a `base` (the model it was quantized
 from), a `cost` table (dollars per million tokens by class: `input`, `cached_input`, `output`, `thinking`; or
 `hour`) and `options` (what its engines are started with; `max_lora_rank` is the highest adapter rank it loads).
+
+A trainer's `cost` is dollars per million tokens trained (`train`, every token of each trained segment: its prompts and
+what was sampled) or per `hour`. Where the price depends on the model, `costs` gives each model its own table
+(`costs = { "Qwen/Qwen3.5-9B" = { train = 1.463 } }`), and `cost` covers the rest. One step's estimated spend
+(`limits.spend`) counts every trained token at the trainer's price for the model, and the sampled and prompt tokens
+at the dearest provider's prices, prompts uncached.
 
 ### Secrets
 

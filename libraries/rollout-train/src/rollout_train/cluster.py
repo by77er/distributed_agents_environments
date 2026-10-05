@@ -526,6 +526,15 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
     cost = _numbers(said.take("cost", {}))
     if cost is None:
         raise ClusterError(f"{where} cost is a table of dollars per million tokens trained (train) or per hour")
+    costs: dict[str, Mapping[str, float]] = {}
+    said_costs: object = said.take("costs", {})
+    if not isinstance(said_costs, dict):
+        raise ClusterError(f"{where} costs is a table of each model's cost")
+    for model, priced in cast(dict[str, object], said_costs).items():
+        numbers = _numbers(priced)
+        if numbers is None or model not in cast(list[str], models):
+            raise ClusterError(f'{where}.costs."{model}" is a model it trains, priced as cost is')
+        costs[model] = numbers
     secrets = {each: secret for each in kind.secrets if (secret := said.secret(each)) is not None}
     provider = TrainerProvider(
         name=name,
@@ -537,11 +546,12 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
         gpus=said.number("gpus", 0.0),
         colocate_with=said.text("colocate_with", None),
         cost=cost,
+        costs=costs,
         secrets=secrets,
     )
     settings = said.rest()
     if unknown := sorted(set(settings) - set(kind.fields)):
-        fields = ("kind", "auth", "models", "segment_tokens", "gpus", "colocate_with", "cost", *kind.fields)
+        fields = ("kind", "auth", "models", "segment_tokens", "gpus", "colocate_with", "cost", "costs", *kind.fields)
         raise ClusterError(f"{where} has no {', '.join(unknown)} (a {kind_name} trainer has {', '.join(fields)})")
     if kind_name == "runpod-trainer":
         runs = settings.get("trainer", "lora")

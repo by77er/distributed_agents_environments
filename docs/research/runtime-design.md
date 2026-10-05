@@ -144,10 +144,10 @@ api_key_env = "TINKER_API_KEY"                # or api_key_file = "~/.tinker/cre
 project_env = "TINKER_PROJECT_ID"
 [inference.tinker.models."Qwen/Qwen3.5-4B"]
 context = 65536
-cost = { input = 0.0, output = 0.0 }          # dollars per million tokens, from Tinker's price list
+cost = { input = 0.33, cached_input = 0.066, output = 1.005 }   # dollars per million tokens, from Tinker's price list
 [inference.tinker.models."Qwen/Qwen3.5-9B"]
 context = 65536
-cost = { input = 0.0, output = 0.0 }
+cost = { input = 0.66, cached_input = 0.132, output = 1.995 }
 
 [inference.openai]
 kind = "api"
@@ -189,7 +189,7 @@ api_key_env = "TINKER_API_KEY"
 project_env = "TINKER_PROJECT_ID"
 models = ["Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-9B"]
 segment_tokens = 32768
-cost = { train = 0.0 }                        # dollars per million tokens trained
+costs = { "Qwen/Qwen3.5-4B" = { train = 0.737 }, "Qwen/Qwen3.5-9B" = { train = 1.463 } }   # dollars per million tokens trained
 
 # Sandbox pools, by the kind of sandbox an environment declares.
 [sandboxes.minecraft]

@@ -62,10 +62,10 @@ options = { gpu_memory_utilization = 0.45, max_num_seqs = 32, max_lora_rank = 16
 kind = "tinker"                               # auth vendor: Tinker's SDK reads TINKER_API_KEY or ~/.tinker
 [inference.tinker.models."Qwen/Qwen3.5-9B"]
 context = 65536
-cost = { input = 0.0, output = 0.0 }          # dollars per million tokens, from Tinker's price list
+cost = { input = 0.66, cached_input = 0.132, output = 1.995 }   # dollars per million tokens: Tinker prefill, cached prefill, sample
 [inference.tinker.models."Qwen/Qwen3.5-4B"]
 context = 65536
-cost = { input = 0.0, output = 0.0 }
+cost = { input = 0.33, cached_input = 0.066, output = 1.005 }
 
 [trainers.local-lora]
 kind = "lora"
@@ -78,7 +78,7 @@ segment_tokens = 8000
 kind = "tinker"
 models = ["Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-9B"]
 segment_tokens = 32768
-cost = { train = 0.0 }
+costs = { "Qwen/Qwen3.5-4B" = { train = 0.737 }, "Qwen/Qwen3.5-9B" = { train = 1.463 } }   # dollars per million tokens trained
 
 [sandboxes.minecraft]
 provider = "minecraft_team.worlds:worlds"

@@ -700,15 +700,26 @@ def test_a_pool_needs_slots_for_the_runs_live_checkpoints() -> None:
 
 
 def test_a_spend_limit_below_one_step_is_refused() -> None:
-    dear = with_trainer(CLUSTER, "tinker-lora", cost={"train": 100.0})
+    dear = with_trainer(CLUSTER, "tinker-lora", cost={"train": 100.0}, costs={})
     settings = RunSettings(ACCEPTANCE)
-    assert estimated_spend(settings, dear, ENVIRONMENT) == pytest.approx(4 * 4 * 1 * 1536 * 100 / 1e6)
+    turns = 4 * 4 * 1  # groups a step, episodes a group, turns an episode
+    trained = turns * (1536 + 200)  # every turn's sampled budget and its prompt
+    assert estimated_spend(settings, dear, ENVIRONMENT) == pytest.approx(trained * 100 / 1e6)
     assert refused("spend", findings(cluster=dear)) == [
-        "one step is estimated at up to $2.46, above limits.spend $2: the run would stop before its first step"
+        "one step is estimated at up to $2.78, above limits.spend $2: the run would stop before its first step"
     ]
     assert refused("spend", findings({"limits.spend": 3}, cluster=dear)) == []
     unknown = findings(environment=None)
     assert refused("spend", unknown) == [] and "could not be estimated" in noted("spend", unknown)[0]
+
+
+def test_a_trainer_prices_each_model_it_trains_by_its_own_costs() -> None:
+    priced = with_trainer(CLUSTER, "tinker-lora", cost={"train": 1.0}, costs={"Qwen/Qwen3.5-4B": {"train": 3.0}})
+    settings = RunSettings(ACCEPTANCE)
+    trained = 4 * 4 * 1 * (1536 + 200)
+    assert estimated_spend(settings, priced, ENVIRONMENT) == pytest.approx(trained * 3.0 / 1e6)
+    other = RunSettings({**ACCEPTANCE, "trainer.model": "Qwen/Qwen3.5-9B"})
+    assert estimated_spend(other, priced, ENVIRONMENT) == pytest.approx(trained * 1.0 / 1e6)
 
 
 # name

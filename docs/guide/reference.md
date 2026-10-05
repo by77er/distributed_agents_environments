@@ -5929,12 +5929,14 @@ A trainer as a cluster deploys it (`[trainers.NAME]`).
 | `segment_tokens` | `int \| None` | `None` | The longest segment this hardware trains on (none: any). |
 | `gpus` | `float` | `0` |  |
 | `colocate_with` | `str \| None` | `None` | A `vllm` provider whose GPU it shares: that provider's engines sleep while it steps. |
-| `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens trained (`train`), or per hour (`hour`). |
+| `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens trained (`train`), or per hour (`hour`), for a model `costs` does not name. |
+| `costs` | `Mapping[str, Mapping[str, float]]` | `field(default_factory=dict[str, Mapping[str, float]])` | Its cost for each model whose price differs, by model, in the units of `cost`. |
 | `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The rest of its table: its kind's own settings, none of them a secret. |
 | `secrets` | `Mapping[str, Secret]` | `field(default_factory=dict[str, Secret])` |  |
 
 **Methods**
 
+- `def cost_of(self, model: str) -> Mapping[str, float]` — What training `model` here costs: its own entry in `costs`, else `cost`.
 - `@property def runs(self) -> TrainerKind` — The kind of trainer its steps are taken by (for `runpod-trainer`, the one it names).
 
 ## `rollout_train.bridges`
@@ -7367,10 +7369,10 @@ What the environment's worker says of it, asked beforehand.
 def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None
 ```
 
-Dollars one step is estimated to cost, at most: the trained channel's sampled tokens (every turn filling its
-budgets) times the trainer's cost to train them and the dearest provider's to sample them, and the prompts' tokens
-times that provider's. None where it cannot be estimated: budgets or the environment's numbers unknown, or a
-provider or trainer that bills by the hour.
+Dollars one step is estimated to cost, at most: every token trained (each turn's prompt and its sampled tokens,
+every turn filling its budgets) times the trainer's cost for the model, plus the sampled tokens times the dearest
+provider's cost to sample them and the prompts' tokens times its cost to read them, uncached. None where it cannot
+be estimated: budgets or the environment's numbers unknown, or a provider or trainer that bills by the hour.
 
 ### `Finding`
 
