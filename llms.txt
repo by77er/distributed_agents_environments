@@ -1,89 +1,134 @@
 # rollout
 
-> Reinforcement learning for agents, from one GPU to a cluster. A uv workspace of Python
-> 3.13 packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (episode runners,
-> episodes with token trajectories, the training loop, checkpoints and the ledger, evals, channels, the gateway that
-> records every turn, bridges, deployment profiles, the cluster config, the `rollout` command, the monitor), one
-> package per implementation (a vLLM engine, a LoRA trainer, Tinker's trainer and engine, Qwen and
-> Gemma renderers, an OpenAI endpoint, an S3 blob store, RunPod pods) and two environments.
-> The documentation describes the code as built.
+> Reinforcement learning for language-model agents, from one GPU to a cluster. A uv workspace of Python 3.13
+> packages: `rollout` (tasks, agents, programs, a loop that runs episodes), `rollout-train` (episode runners,
+> episodes with token trajectories, the training loop and its objectives, checkpoints and the ledger, evals, channels,
+> the gateway that records every turn, bridges, the cluster config and run settings, the `rollout` command, the
+> monitor), one package per implementation (a vLLM engine, LoRA and full-weight trainers, Tinker's trainer and engine,
+> Qwen and Gemma renderers, an OpenAI endpoint, an S3 blob store, RunPod pods) and three environments. A Helm chart
+> deploys it on Kubernetes. The documentation describes the code as built; design notes say their status at the top.
 
 Conventions: hooks and tools are `async`; everything leaving task or agent code goes through `run`; contract types
-are frozen pydantic models; type names are never abbreviated. In the guide, a block tagged exactly `python` runs in
-the test suite and a block tagged `py` does not. The API reference is generated from the source.
+are frozen pydantic models; type names are never abbreviated. In `docs/guide/`, a block tagged exactly `python` runs
+in the test suite and a block tagged `py` does not. The API reference is generated from the source. Every page opens
+with what it covers and who it is for, then "Read first" and "Next" links.
 
-## Guide
+## Start here
 
-- [Guide index](docs/guide/README.md): the pages, the concepts, where each name lives
-- [Three ways in](docs/guide/perspectives.md): the surface for building an environment, for designing training,
-  and for deploying
-- [Getting started](docs/guide/getting-started.md): install, a first task, one episode against a scripted model
-- [Tasks](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, more model slots
-- [Tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as observations, imported
-  tool sets
-- [Agents](docs/guide/agents.md): context selection, context hints, acting, the `Model` interface
-- [Content](docs/guide/content.md): messages, blocks, tool results, blobs (files or S3), digests
-- [Runs and events](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, the local runner
-- [Models](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
-- [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
-- [Deploying](docs/guide/deploying.md): the profile file and the `rollout` command
-- [The cluster config and run settings](docs/guide/cluster.md): providers, trainers, bridges, run settings, presets, validation
-- [Writing an environment others can import](docs/guide/publishing.md): the entry point, dependencies on the platform, what an import from git checks
-- [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
+- [Documentation home](docs/README.md): the sections by what the reader wants to do, the packages, the conventions
+- [Start here](docs/start/README.md): what rollout does, the main ideas (environment, episode, run, checkpoint,
+  channel, gateway, ledger, suite), how they work together, where to go next
+- [Three ways in](docs/guide/perspectives.md): the surface for building an environment, for designing training, and
+  for deploying
+- [Architecture](docs/architecture/overview.md): layers, protocols and their implementations, visibility, a turn
 
-## Architecture
+## Write an environment
 
-- [Overview](docs/architecture/overview.md): layers, protocols and their implementations, visibility, a turn
-- [Glossary](docs/architecture/glossary.md): every term, defined once
-
-## Libraries
-
-- [Harness](docs/libraries/rollout/README.md): the loop, programs, runners, message routing, failures
+- [Write an environment](docs/guide/README.md): the section's reading order, its ideas, where each name lives
+- [Run a first episode](docs/guide/getting-started.md): install, a first task, one episode against a scripted model
+- [Write a task](docs/guide/tasks.md): hooks, observations, endings, validation rules, rewards, more model slots
+- [Give the model tools](docs/guide/tools.md): `@tool` methods, schemas from type hints, results, errors as
+  observations, imported tool sets
+- [Choose what the model sees](docs/guide/agents.md): context selection, context hints, acting, the `Model` interface
+- [Messages, files and digests](docs/guide/content.md): messages, blocks, tool results, blobs (files or S3), digests
+- [What a run records](docs/guide/runs-and-events.md): `LocalRunContext`, effect identity, run events, the local
+  runner
+- [Use a hosted model](docs/guide/models.md): binding model slots to the Responses API adapter; Codex login or API key
+- [Test with a scripted model](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers, checking an environment
+- [Import an environment from git](docs/guide/publishing.md): the entry point, dependencies on the platform, what an
+  import from git checks, versions
+- [The harness](docs/libraries/rollout/README.md): the loop, programs, runners, message routing, failures
+- [Sandboxes](docs/libraries/rollout/sandboxes.md): declaring sandboxes, pools, leases, pools over HTTP
 - [Determinism](docs/libraries/rollout/determinism.md): time, randomness and effect identity in task code
 - [Hooks](docs/libraries/rollout/hooks.md): observers of every run's events and model samples
-- [Memory](docs/libraries/rollout/memory.md): a context that fits any model, for long episodes
+- [Memory for long episodes](docs/libraries/rollout/memory.md): a context that fits any model
+- Example environments: [Minecraft team](docs/products/minecraft-team.md) (one to four agents in a Minecraft world,
+  on a curriculum), [Gridworld](docs/products/gridworld.md) (two to four agents share out a grid's plates over chat),
+  [Judging](docs/products/judging.md) (open-ended answers scored by a judge against a versioned rubric)
+
+## Train a model
+
+- [Train a model](docs/train/README.md): the section's reading order, choosing a trainer and an objective
+- [Episode runners](docs/libraries/rollout-train/rollouts.md): what runs and runners write, claims and fences,
+  heartbeats, environments and their train and eval data
+- [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
+- [The training loop and objectives](docs/libraries/rollout-train/training.md): the loop, steps over groups,
+  objectives and presets, the curriculum, the trainer protocol, changing settings, pausing and resuming
+- [Checkpoints, runs and the ledger](docs/libraries/rollout-train/checkpoints.md): checkpoints, manifests, bridges,
+  append-only tables and fences, the registry
+- [Datasets and supervised steps](docs/libraries/rollout-train/datasets.md): examples chosen from episodes, SFT steps
+- [Channels and engines](docs/libraries/rollout-train/channels.md): engines, limits, what a channel should serve,
+  engine hosts, engines elsewhere, sharing a GPU with the trainer
+- [Record turns for training](docs/libraries/rollout-train/recorder.md): the thinking budget, segments, renderers
+- [The gateway](docs/libraries/rollout-train/gateway.md): a stateless service that samples channels with signed keys
+  and records every turn in the ledger and the blob store
+- [Train any harness over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the gateway's OpenAI and
+  Anthropic APIs for harnesses that bring their own loop
+
+## Evaluate a model
+
+- [Evaluate a model](docs/evaluate/README.md): what to read, in order
+- [Suites and evals](docs/libraries/rollout-train/evals.md): suites and their versions, evals of checkpoints, evals
+  during training
+
+## Deploy the platform
+
+- [Deploy the platform](docs/deploy/README.md): the section's reading order, and the deployment files in the
+  repository
+- [What runs where](docs/deploy/roles.md): the roles and the CPU, GPU, memory and storage each needs
+- [Choose a setup](docs/deploy/setups.md): one machine without Kubernetes, one machine with K3s, several nodes
+- [Prepare a Kubernetes cluster](docs/deploy/kubernetes.md): KubeRay, the NVIDIA device plugin and runtime, a storage
+  class, an ingress controller, K3s on one machine
+- [Build the platform image](docs/deploy/image.md): BuildKit in the cluster, or Docker and CI
+- [Install the Helm chart](docs/deploy/helm.md): values, Secrets, the cluster config, ingresses, volumes, installing
+  and upgrading (never `--reuse-values`)
+- [Share GPUs](docs/deploy/gpus.md): whole cards per Ray worker, time-slicing, memory caps per process
+- [Postgres and S3](docs/deploy/stores.md): the stores in the cluster config, and moving a ledger and a blob store
+  into them (`rollout ledger copy`, `rollout_s3.copying`, `rollout_train.relocating`)
+- [Volumes and backups](docs/deploy/backups.md): reclaim policies, backing up and restoring, uninstalling K3s
+- [Ingress, TLS and sign-in](docs/deploy/access.md): host names, TLS, sign-in in front of the monitor, private stores
+- [Remote providers](docs/deploy/providers.md): Tinker, RunPod pods over mutual TLS with step-ca, hosted APIs
+- [Start runs and evals](docs/deploy/runs.md): after deploying
+- [Troubleshooting](docs/deploy/troubleshooting.md): problems seen in real deployments, and their fixes
+- [Local Postgres and S3 for development](docs/development/local-services.md): both stores in Docker Compose
+- [Deploying with the rollout command](docs/guide/deploying.md): the processes the `rollout` command starts
+
+## Operate the platform
+
+- [Operate the platform](docs/operate/README.md): watching runs, changing them while they go, keeping checkpoints,
+  checking the configuration, backups
+- [The monitor](docs/libraries/rollout-train/monitor.md): a live page over a ledger and every run in it: steps,
+  groups, episodes and every agent's turns, checkpoints, evals, environments, statistics, machines
+
+## Extend the platform
+
+- [Extend the platform](docs/extend/README.md): how a backend plugs in, and which page covers each kind
+- [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
+  [objectives in torch](docs/implementations/rollout-objectives.md),
+  [Tinker trainer and engine](docs/implementations/rollout-tinker.md),
+  [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md)
+- [verifiers environments](docs/implementations/rollout-verifiers.md): Prime Intellect's verifiers environments,
+  their harnesses reaching the gateway
 - [Contracts](docs/libraries/rollout/contracts/README.md): the types that cross layers:
   [identifiers](docs/libraries/rollout/contracts/identifiers.md),
   [canonical content](docs/libraries/rollout/contracts/canonical-content.md),
   [run events](docs/libraries/rollout/contracts/run-events.md), [effects](docs/libraries/rollout/contracts/effects.md),
   the [model endpoint](docs/libraries/rollout/contracts/model-endpoint.md)
-- [Rollouts](docs/libraries/rollout-train/rollouts.md): what runs and runners write, claims and fences, episode runners,
-  heartbeats, environments
-- [Checkpoints, runs and the ledger](docs/libraries/rollout-train/checkpoints.md): checkpoints, manifests, bridges,
-  append-only tables and fences, the registry
-- [Evals](docs/libraries/rollout-train/evals.md) and [datasets](docs/libraries/rollout-train/datasets.md): suites and
-  their versions, evals of checkpoints; examples chosen from episodes to imitate
-- [Episodes](docs/libraries/rollout-train/episodes.md): what a finished run carries for training
-- [Training](docs/libraries/rollout-train/training.md): the loop, its steps over groups, group-relative advantages,
-  the curriculum, the trainer protocol
-- [Channels](docs/libraries/rollout-train/channels.md) and [recording](docs/libraries/rollout-train/recorder.md):
-  engines, limits, what a channel should serve, engine hosts; the thinking budget, segments, renderers
-- [Harnesses over HTTP](docs/libraries/rollout-train/harness-endpoint.md): the gateway's OpenAI and Anthropic APIs
-  for harnesses that bring their own loop
-- [The gateway](docs/libraries/rollout-train/gateway.md): a stateless service that samples channels for programs and
-  harnesses with signed keys, and records every turn in the ledger and the blob store: how every run records
-- [Monitor](docs/libraries/rollout-train/monitor.md): a live page over a ledger and every run in it: steps, groups,
-  episodes and every agent's turns, checkpoints, evals, environments, statistics, machines
 
-## Implementations
+## Reference
 
-- [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
-  [objectives in torch](docs/implementations/rollout-objectives.md),
-  [Tinker trainer and engine](docs/implementations/rollout-tinker.md),
-  [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md):
-  what a profile names
-- [verifiers environments](docs/implementations/rollout-verifiers.md): Prime Intellect's verifiers environments,
-  their harnesses reaching the gateway
+- [Reference](docs/reference/README.md): the command line and where each command is described, the objective presets,
+  configuration files in the repository
+- [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
+- [Cluster config and run settings](docs/guide/cluster.md): providers, trainers, bridges, run settings, presets,
+  validation
+- [Glossary](docs/architecture/glossary.md): every term, defined once
 
-## Environments
+## Design notes
 
-- [Minecraft team](docs/products/minecraft-team.md): one to four agents in a Minecraft world, trained on a curriculum
-- [Gridworld](docs/products/gridworld.md): two to four agents share out the plates of a grid level, talking it over
-- [Judging](docs/products/judging.md): open-ended answers scored by a judge, a slot that is not trained, against a
-  versioned rubric
-
-## Everything else
-
-- [Local services](docs/development/local-services.md): Postgres and an S3-compatible store for a development
-  machine
-- [Documentation index](docs/README.md): every page, and the table of packages
+- [Design notes](docs/research/README.md): every note with its status (built, in progress, proposed)
+- [Runtime design](docs/research/runtime-design.md), [objectives design](docs/research/objectives-design.md),
+  [RunPod pods as providers](docs/research/runpod-providers.md), [ledger guarantees](docs/research/ledger-guarantees.md),
+  [the checkpoint graph](docs/research/policy-dag.md), [curricula](docs/research/curricula.md),
+  [SFT datasets](docs/research/sft-datasets.md), [Thinking Machines' API](docs/research/thinking-machines.md),
+  [Prime Intellect's verifiers](docs/research/prime-compat.md), [cleanup inventory](docs/research/cleanup-inventory.md)
