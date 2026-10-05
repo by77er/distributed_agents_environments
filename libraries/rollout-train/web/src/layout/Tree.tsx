@@ -11,7 +11,7 @@ import { Avatar, Dots, EpisodeDots, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
 import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
-import { environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, subjectPlace, suitePlace } from "../lib/places";
+import { basePlace, environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, subjectPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
 import { RunDot, running, useRunColor } from "./runs";
@@ -191,11 +191,12 @@ function EpisodeRow({ each, place, folds, fold }: { each: GroupEpisode; place: P
   );
 }
 
-/** The checkpoints: those bookmarks name, and each run's newest. */
+/** The checkpoints: the base models they were trained from, those bookmarks name, and each run's newest. */
 function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   const known = useKnown();
   const heads = system.runs.map(run => madeBy(system.checkpoints, run.run).at(-1)).filter(each => each !== undefined);
   const bookmarked = system.checkpoints.filter(checkpoint => checkpoint.bookmarks.length);
+  const bases = [...new Set(system.checkpoints.filter(checkpoint => !checkpoint.parents.length && checkpoint.base && !known.checkpoint(checkpoint.base)).map(checkpoint => checkpoint.base!))].sort();
   const row = (id: string, tag: string, key: string) => (
     <Node key={key} to={checkpointPlace(id)} current={place.kind === "checkpoint" && place.id === id}>
       <span className="name mono" title={known.title(id)}>{known.short(id)}</span>
@@ -204,6 +205,12 @@ function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   );
   return (
     <>
+      {bases.length ? <div className="label">Base models</div> : null}
+      {bases.map(base => (
+        <Node key={`m${base}`} to={basePlace(base)} current={place.kind === "base" && place.model === base}>
+          <span className="name" title={base}>{base.split("/").at(-1)}</span>
+        </Node>
+      ))}
       {bookmarked.length ? <div className="label">Bookmarks</div> : null}
       {bookmarked.map(checkpoint => row(checkpoint.id, checkpoint.bookmarks.join(", "), `b${checkpoint.id}`))}
       {heads.length ? <div className="label">Each run's newest</div> : null}

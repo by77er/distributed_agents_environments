@@ -1,5 +1,6 @@
-// The form that asks a launcher to play a version of a suite with a checkpoint (an eval: nothing trained): on a suite's
-// page, the checkpoint is chosen; on a checkpoint's, the suite. The version is the newest unless another is chosen.
+// The form that asks a launcher to play a version of a suite with a checkpoint or a base model (an eval: nothing
+// trained): on a suite's page, who plays is chosen; on a checkpoint's or a base model's, the suite. The version is the
+// newest unless another is chosen.
 
 import { useState } from "react";
 import { useKnown, useLaunch } from "../api/queries";
@@ -15,6 +16,16 @@ export function free(wanted: string, taken: Set<string>): string {
   while (taken.has(`${wanted} (${number})`)) number += 1;
   return `${wanted} (${number})`;
 }
+
+/** The base models an eval may play with an offered profile: its channel's model, and those its launcher's cluster
+ * serves with its engine. */
+export const modelsOf = (profile: OfferedProfile): string[] => (profile.models?.length ? profile.models : [profile.model]);
+
+/** The base models the profiles offer, each once, in the order they offer them. */
+export const baseModelsOf = (profiles: OfferedProfile[]): string[] => [...new Set(profiles.flatMap(modelsOf))];
+
+/** How the Played by picker says a base model (a checkpoint or a bookmark is said by itself). */
+const BASE = "base:";
 
 /** The environments a version of a suite plays (its newest, unless another is given). */
 const environmentsOf = (suite: EvalSuite | undefined, version?: SuiteVersion): string[] =>
@@ -34,20 +45,23 @@ interface PlayProps {
   suites: EvalSuite[];
   launchers: Launcher[];
   system: System;
-  /** The suite played, where the page is a suite's: the checkpoint is chosen. */
+  /** The suite played, where the page is a suite's: who plays is chosen. */
   suite?: EvalSuite;
   /** The checkpoint that plays, where the page is a checkpoint's: the suite is chosen. */
   subject?: string;
+  /** The base model that plays, where the page is a base model's: the suite is chosen. */
+  model?: string;
   title: string;
 }
 
-/** Ask a launcher to play a version of a suite with a checkpoint (or the base model), so many episodes of each start
- * (by default the version's). */
-export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject: fixedSubject, title }: PlayProps) {
+/** Ask a launcher to play a version of a suite with a checkpoint or a base model, so many episodes of each start (by
+ * default the version's). */
+export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject: fixedSubject, model: fixedModel, title }: PlayProps) {
   const launch = useLaunch();
   const known = useKnown();
+  const plays = (suite: EvalSuite) => offeredFor(suite, launchers).some(profile => !fixedModel || modelsOf(profile).includes(fixedModel));
   // (by default the first suite a launcher alive can play)
-  const [suiteName, setSuiteName] = useState(fixedSuite?.suite ?? (suites.find(each => offeredFor(each, launchers).length) ?? suites[0])?.suite ?? "");
+  const [suiteName, setSuiteName] = useState(fixedSuite?.suite ?? (suites.find(plays) ?? suites[0])?.suite ?? "");
   const suite = fixedSuite ?? suites.find(each => each.suite === suiteName) ?? suites[0];
   const [profile, setProfile] = useState("");
   const [chosenSubject, setSubject] = useState("");
@@ -55,15 +69,20 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
   const [versions, setVersions] = useState<Record<string, string>>({});  // (the version chosen of each suite)
   const [name, setName] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
-  const subject = fixedSubject ?? chosenSubject;
   const checkpoints = [...system.checkpoints].sort((a, b) => b.made - a.made);
   const bookmarks = Object.keys(system.bookmarks ?? {}).sort();
   const taken = new Set(Object.values(system.names?.runs ?? {}).concat(system.runs.map(run => run.name ?? run.run)));
-  const said = subject ? (system.bookmarks[subject] ? subject : known.short(subject)) : "base";
   const every = suite ? [...versionsOf(suite)].reverse() : [];
   const version = (suite && every.find(each => each.id === versions[suite.suite])) ?? (suite ? currentOf(suite) : undefined);
-  const offered = offeredFor(suite, launchers, version);
+  const able = offeredFor(suite, launchers, version);
+  const bases = baseModelsOf(able);
+  // (who plays: the page's checkpoint or base model, else the one chosen, else the first base model offered)
+  const picked = chosenSubject || (bases[0] ? `${BASE}${bases[0]}` : "");
+  const model = fixedModel ?? (fixedSubject == null && picked.startsWith(BASE) ? picked.slice(BASE.length) : undefined);
+  const subject = fixedSubject ?? (model == null ? picked : "");
+  const offered = model == null ? able : able.filter(each => modelsOf(each).includes(model));
   const chosen = offered.find(each => each.profile === profile) ?? offered[0];
+  const said = model != null ? model.split("/").at(-1) : system.bookmarks[subject] ? subject : known.short(subject);
   const tag = suite && every.length > 1 && version ? ` ${versionTag(version.id)}` : "";
   const named = name.trim() || free(`${suite?.suite ?? "suite"}${tag} on ${said}`, taken);
   const own = [...new Set((version?.entries ?? []).map(entry => entry.episodes))];  // (each entry's episodes of each start)
@@ -71,17 +90,21 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
   const total = (version?.entries ?? []).reduce((sum, entry) => sum + entry.starts * (episodes.trim() ? Math.max(1, count || 1) : entry.episodes), 0);
   const playing = environmentsOf(suite, version);
   const unoffered = playing.filter(each => !launchers.some(launcher => !launcher.environments?.length || launcher.environments.includes(each)));
-  const missing = playing.length ? (unoffered.length ? unoffered : playing).map(readable).join(", ") : "its environments";
+  const missing = able.length && model != null ? model
+    : playing.length ? (unoffered.length ? unoffered : playing).map(readable).join(", ") : "its environments";
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!chosen || !suite || !version) return;
     launch.mutate(
-      { kind: "eval", suite: version.id, profile: chosen.profile, environment: playing[0] ?? "", name: named, start: subject || null, episodes: episodes.trim() ? count : null },
+      {
+        kind: "eval", suite: version.id, profile: chosen.profile, environment: playing[0] ?? "", name: named, start: subject || null,
+        model: model ?? null, episodes: episodes.trim() ? count : null,
+      },
       { onSuccess: made => { setAsked(made.asked.name); setName(""); } },
     );
   };
   if (!suite) return null;
-  if (!offered.length && fixedSuite) {
+  if (!able.length && fixedSuite) {
     return (
       <Card title={title} note={`no launcher alive offers ${missing}`}>
         <pre className="command">{`rollout launcher …${playing.length ? playing.map(each => ` --environment ${each}`).join("") : " --environment module:name"}`}</pre>
@@ -96,8 +119,12 @@ export function PlayForm({ suites, launchers, system, suite: fixedSuite, subject
             {fixedSuite ? (
               <label className="field">
                 <span>Played by</span>
-                <select value={chosenSubject} onChange={event => setSubject(event.target.value)}>
-                  <option value="">the base model{chosen ? ` (${chosen.model})` : ""}</option>
+                <select value={picked} onChange={event => setSubject(event.target.value)}>
+                  {bases.length ? (
+                    <optgroup label="Base models">
+                      {bases.map(each => <option key={`m${each}`} value={`${BASE}${each}`}>{each}</option>)}
+                    </optgroup>
+                  ) : null}
                   {bookmarks.length ? (
                     <optgroup label="Bookmarks">
                       {bookmarks.map(mark => <option key={`b${mark}`} value={mark}>{mark} · {known.origin(system.bookmarks[mark])} · {known.short(system.bookmarks[mark])}</option>)}

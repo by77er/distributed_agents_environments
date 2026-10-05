@@ -16,6 +16,7 @@ export type Place =
   | { page: "runs"; kind: "launch" }
   | { page: "checkpoints"; kind: "checkpoints" }
   | { page: "checkpoints"; kind: "checkpoint"; id: string }
+  | { page: "checkpoints"; kind: "base"; model: string }
   | { page: "evals"; kind: "evals" }
   | { page: "evals"; kind: "suite"; suite: string }
   | { page: "evals"; kind: "eval"; run: string }
@@ -35,6 +36,8 @@ export const launchPlace = "/runs/new";
 /** The new run's form, with an environment chosen. */
 export const launchOn = (environment: string) => `${launchPlace}?environment=${encodeURIComponent(environment)}`;
 export const checkpointPlace = (id: string) => `/checkpoint/${encodeURIComponent(id)}`;
+/** A base model, a root of the checkpoints' graph, by name. */
+export const basePlace = (model: string) => `/base/${encodeURIComponent(model)}`;
 export const evalsPlace = "/evals";
 export const suitePlace = (suite: string) => `/evals/${encodeURIComponent(suite)}`;
 export const evalPlace = (run: string) => `/eval/${encodeURIComponent(run)}`;
@@ -65,6 +68,7 @@ export function placeOf(pathname: string): Place {
   if (parts[0] === "runs" && parts[1] === "new") return { page: "runs", kind: "launch" };
   if (parts[0] === "checkpoints") return { page: "checkpoints", kind: "checkpoints" };
   if (parts[0] === "checkpoint" && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
+  if (parts[0] === "base" && parts[1]) return { page: "checkpoints", kind: "base", model: parts.slice(1).join("/") };
   if (parts[0] === "eval" && parts[1]) return { page: "evals", kind: "eval", run: parts[1] };
   if (parts[0] === "evals" && (parts[1] === "checkpoint" || parts[1] === "model") && parts[2]) return { page: "evals", kind: "subject", subject: parts[1], id: parts.slice(2).join("/") };
   if (parts[0] === "evals") return parts[1] ? { page: "evals", kind: "suite", suite: parts[1] } : { page: "evals", kind: "evals" };

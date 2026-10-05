@@ -1,7 +1,7 @@
 // Every checkpoint, as a graph: each base model a root, and under it a lane for each run with the checkpoints it made from
 // the left (folded to the ones that matter until it is opened); a run that starts from another's checkpoint hangs under
 // that run's lane, and the lines between lanes say what came from what. Below it each run's trainer with its queue of
-// steps, and what the runs' engines serve.
+// steps, and what the runs' engines serve. A base model or a checkpoint opens its page.
 
 import { memo, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -11,7 +11,7 @@ import { QueueChart, Sized } from "../components/charts";
 import { Marks } from "../components/checkpoints";
 import { Card, Empty, Head, Kpi, Kpis, Mark, SectionTitle, Spec, Specs, Table, Twist } from "../components/ui";
 import { clock, span } from "../lib/format";
-import { runPlace, checkpointPlace } from "../lib/places";
+import { basePlace, runPlace, checkpointPlace } from "../lib/places";
 import { useFolds } from "../lib/stored";
 
 const LANE = 78, COLUMN = 62, PAD = 34;
@@ -20,7 +20,7 @@ const short = (name: string | null | undefined) => (name ? String(name).split("/
 const lifeKind = (state: string) => ({ serving: "good", resharding: "violet", resharded: "accent" } as Record<string, string>)[state] ?? "";
 const ago = (lineage: Lineage, at: number | null | undefined) => (at ? span(Math.max(0, lineage.now - at)) : "–");
 
-interface Index {
+export interface Index {
   checkpoints: Map<string, LineageCheckpoint>;
   runs: Map<string, LineageRun>;
   shortOf: (id: string | null | undefined) => string;
@@ -28,7 +28,7 @@ interface Index {
 }
 
 /** What each checkpoint is, wherever it is drawn: where it came from, the run that made it. */
-function indexOf(lineage: Lineage): Index {
+export function indexOf(lineage: Lineage): Index {
   const checkpoints = new Map(lineage.checkpoints.map(checkpoint => [checkpoint.id, checkpoint])), runs = new Map(lineage.runs.map(run => [run.run, run]));
   return {
     checkpoints, runs,
@@ -37,7 +37,7 @@ function indexOf(lineage: Lineage): Index {
   };
 }
 
-interface Lane {
+export interface Lane {
   key: string;
   base?: string;
   outside?: string[];
@@ -49,7 +49,7 @@ interface Lane {
 /** The lanes, in order: a lane for each base model (its root), and under it each run whose first checkpoint was trained
  * from it; under a run, each run that starts from one of its checkpoints (a fork). Checkpoints
  * this ledger does not have, but that something here starts from, are in a lane of their own at the top. */
-function lanesOf(lineage: Lineage, index: Index): Lane[] {
+export function lanesOf(lineage: Lineage, index: Index): Lane[] {
   const byRun = new Map<string, LineageCheckpoint[]>();
   for (const checkpoint of lineage.checkpoints) {
     const key = checkpoint.by?.run ?? OUTSIDE;
@@ -123,6 +123,12 @@ function said(edge: Lineage["edges"][number], index: Index): string {
 const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, inLedger }: { lineage: Lineage; index: Index; lanes: Lane[]; room: number; inLedger: Set<string> }) {
   const navigate = useNavigate();
   const [folds, fold] = useFolds();
+  // (a node that opens a place: by a click, or by Enter or Space once it has the focus)
+  const opens = (place: string, label: string) => ({
+    role: "link", tabIndex: 0, "aria-label": label,
+    onClick: () => navigate(place),
+    onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); navigate(place); } },
+  });
   // (what an edge between lanes points at; an edge along a lane, from a checkpoint to the next its run made, pins nothing)
   const anchors = new Set<string>(lineage.edges.filter(edge => edge.kind !== "trained").flatMap(edge => [edge.from, edge.kind === "learned" || edge.kind === "base" ? edge.to : null]).filter((each): each is string => Boolean(each)));
   for (const edge of lineage.edges) {
@@ -162,7 +168,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             return <div key={lane.key} className="lane-label"><span /><b className="muted">Outside this ledger</b><small>{lane.outside.length} checkpoint{lane.outside.length === 1 ? "" : "s"}</small></div>;
           }
           if (lane.base) {
-            return <div key={lane.key} className="lane-label base-label"><span /><b title={lane.base}>{short(lane.base)}</b><small>base model</small></div>;
+            return <div key={lane.key} className="lane-label base-label"><span /><b title={lane.base}><Link to={basePlace(lane.base)}>{short(lane.base)}</Link></b><small>base model</small></div>;
           }
           const run = lane.run, first = lane.checkpoints[0], from = first?.parents[0];
           const says = from && index.checkpoints.get(from)?.by?.run !== lane.key
@@ -202,7 +208,9 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             if (item.kind === "base") {
               return (
                 <g key={id}>
-                  <g className="base"><rect x={cx - 8} y={cy - 8} width={16} height={16} rx={3} className="f-quiet" /><title>{`the base model ${item.name}: every line here grows from it`}</title></g>
+                  <g className="base link" {...opens(basePlace(item.name), `the base model ${item.name}`)}>
+                    <rect x={cx - 8} y={cy - 8} width={16} height={16} rx={3} className="f-quiet" /><title>{`the base model ${item.name}: every line here grows from it`}</title>
+                  </g>
                 </g>
               );
             }
@@ -230,7 +238,7 @@ const LineageGraph = memo(function LineageGraph({ lineage, index, lanes, room, i
             return (
               <g key={id}>
                 {first && lane.run ? <text x={cx - 6} y={cy - 26} className="stretch">{lane.run.name}</text> : null}
-                <g className={`checkpoint${real ? " link" : ""}`} onClick={() => { if (real) navigate(checkpointPlace(checkpoint.id)); }}>
+                <g className={`checkpoint${real ? " link" : ""}`} {...(real ? opens(checkpointPlace(checkpoint.id), `the checkpoint ${checkpoint.short}`) : {})}>
                   {["serving", "resharding"].includes(life.state) ? <circle cx={cx} cy={cy} r={10.5} className={`ring ring-${lifeKind(life.state)}`} /> : null}
                   <circle cx={cx} cy={cy} r={6} className={checkpoint.kept ? "dot-accent" : "dot-released"} />
                   <text x={cx} y={cy + 22} textAnchor="middle" className="v">{checkpoint.by?.step != null ? `S${checkpoint.by.step}` : checkpoint.short}</text>

@@ -45,6 +45,7 @@ spec:
             - {{ $launcher.gpus | quote }}
             - --name
             - {{ $name }}
+            - --cluster
           env:
             {{- include "rollout.env" $ | nindent 12 }}
             {{- include "rollout.rayClientEnv" $ | nindent 12 }}

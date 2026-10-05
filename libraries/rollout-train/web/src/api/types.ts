@@ -223,6 +223,9 @@ export interface OfferedProfile {
   profile: string;
   path: string;
   model: string;
+  /** The base models an eval may play with it: its channel's model first, then those the cluster's inference providers
+   * of its engine's kind serve. */
+  models?: string[];
   /** What its trainer makes: `lora` (adapters) or `full` weights; none where the launcher cannot tell. */
   weights?: string | null;
   settings: Record<string, unknown>;
@@ -389,6 +392,8 @@ export interface LaunchAsked {
   suite?: string | null;
   /** An eval's episodes of each start; none: the suite's own. */
   episodes?: number | null;
+  /** The base model that plays an eval no checkpoint plays; none: the profile's. */
+  model?: string | null;
   /** Every other environment it plays: an eval's suite's, a training run's evals' suite's. */
   environments?: string[];
   /** The run it starts again, for a launch that resumes one, and that run's directory, where it runs. */

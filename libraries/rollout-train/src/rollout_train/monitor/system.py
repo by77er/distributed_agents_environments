@@ -48,7 +48,7 @@ from rollout_train.evals import (
 )
 from rollout_train.gateway.turns import TurnStore
 from rollout_train.inference.remote import ENGINES
-from rollout_train.launcher import LAUNCHER
+from rollout_train.launcher import LAUNCHER, offers
 from rollout_train.launches import (
     ASKED,
     CLAIMED,
@@ -302,10 +302,12 @@ class System:
     async def launch(self, body: Mapping[str, Any]) -> Launch:
         """Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
         and its environment starts it. An eval names a suite (whose environment it plays; a suite not made yet, the
-        environment whose eval data it is) and the checkpoint that plays it: a suite by name plays the version its name
-        points to now, which the launch then names by id. A training run says the evals it makes (`_checked_evals`).
-        Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have, no
-        word of the evals), `KeyError` for what no launcher offers or a checkpoint no reference says."""
+        environment whose eval data it is) and the checkpoint that plays it, or the base model (`model`, one a launcher
+        alive offers with the profile; none: the profile's): a suite by name plays the version its name points to now,
+        which the launch then names by id. A training run says the evals it makes (`_checked_evals`). Raises `Taken`
+        for what cannot be asked for (a name taken or no name, a setting the profile does not have, no word of the
+        evals, a checkpoint and a base model both), `KeyError` for what no launcher offers or a checkpoint no reference
+        says."""
         launches, registry = launches_of(self._ledger), self._registry()
         if launches is None:
             raise KeyError("this ledger keeps no launches")
@@ -327,6 +329,10 @@ class System:
             raise Taken(f"a launch is a {TRAINING} or an {EVAL}, not {asked.kind!r}")
         if asked.kind == EVAL and asked.episodes is not None and asked.episodes < 1:
             raise Taken("an eval plays one episode of each start at least")
+        if asked.model and asked.kind != EVAL:
+            raise Taken("only an eval names a base model to play it")
+        if asked.model and asked.start:
+            raise Taken("an eval is played by a checkpoint or by a base model, not both")
         offered = [each for each in (await self.launches())["launchers"] if each.get("playing", 0) is not None]
         profiles = [
             profile for each in offered for profile in each.get("profiles", []) if profile["profile"] == asked.profile
@@ -352,6 +358,13 @@ class System:
             missing = sorted(asked.plays() - {name for each in offered for name in each.get("environments", [])})
             said = ", ".join(missing) if missing else ", ".join(sorted(asked.plays()))
             raise KeyError(f"no launcher alive offers the profile {asked.profile!r} and the environments {said}")
+        if asked.model and not any(
+            offers(profile, asked.model)
+            for each in able for profile in each.get("profiles", []) if profile["profile"] == asked.profile
+        ):  # fmt: skip
+            raise KeyError(
+                f"no launcher alive offers the base model {asked.model!r} with the profile {asked.profile!r}"
+            )
         if asked.start:
             await resolved(self._ledger, registry, asked.start)  # (raises KeyError for a reference to nothing)
         return await launches.ask(asked)

@@ -108,7 +108,7 @@ def test_every_version_grows_from_its_base_model_along_its_parents() -> None:
     no_parent = {each["id"] for each in graph["checkpoints"] if not each["parents"]}
     assert roots == no_parent == {"minerone", "freshone"}
     assert {("base", "base:small", "minerone"), ("base", "base:small", "freshone")} <= edges
-    assert graph["bases"] == ["small"]
+    assert graph["bases"] == ["small", "big"]  # (big has had an eval, and nothing was trained from it: after)
     assert {
         ("trained", "minerone", "minertwo"),
         ("trained", "minertwo", "diggerone"),  # (the run `dig` forks at minertwo)

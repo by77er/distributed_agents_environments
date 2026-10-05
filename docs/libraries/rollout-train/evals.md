@@ -92,7 +92,8 @@ training run's start says it) and description. A start that does not say `suite_
 its subject's record says.
 `--checkpoint` takes any [reference](checkpoints.md#references): a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id.
 A bookmark is read once, when the eval starts. Without `--checkpoint`, the base model of the profile's trained channel
-(or its first channel) plays.
+(or its first channel) plays: the profile's, or the one `--model` names. The eval records it as its subject (`kind:
+model`).
 
 `rollout eval` finds the version, and loads each entry's environment, before it opens the profile. An entry's sampling
 limits travel in its episodes' binding (`SamplingParameters.thinking_tokens` and `answer_tokens` of each recorded
@@ -173,19 +174,24 @@ the forms; the form says "does not load here" for one it cannot), makes the vers
 and answers 409 for what they refuse, an environment that does not load on its machine, or seeds that are no whole
 numbers.
 
-The **Run this suite** form takes the checkpoint (the base model, a bookmark, or any checkpoint whose weights are kept,
-by where it came from and its short id), the version (the newest by default), the episodes a start (the version's by
-default), the profile, and the eval's name. It posts a launch of kind `eval` (`POST /api/launches`, `{"kind": "eval",
-"suite", "profile", "name", "start", "episodes"}`). The monitor fills in the suite's environments (`environment`, the
-first entry's, and `environments`, the others') and names the version by id (a suite named by its name plays the
-version the name points to then; a suite not made yet is an environment's eval data, and the launch says the
-`environment`), checks the launch as it checks a run's, and refuses an unknown suite or version (404), no launcher alive
-that offers the profile and every environment (404), or fewer than one episode a start (409). A launcher that offers the
-profile and every environment the launch plays claims it and starts
+The **Run this suite** form takes who plays (a base model the launchers alive offer, the first by default; a bookmark;
+or any checkpoint whose weights are kept, by where it came from and its short id), the version (the newest by default),
+the episodes a start (the version's by default), the profile (for a base model, one that offers it), and the eval's
+name. It posts a launch of kind `eval` (`POST /api/launches`, `{"kind": "eval", "suite", "profile", "name", "start",
+"model", "episodes"}`: `start` the checkpoint, or `model` the base model). A launcher offers, with each profile, the
+base models an eval may play with it (`models`: the profile's channel's model, and with `--cluster` the models the
+cluster's inference providers of its engine's kind serve, [launchers](../../guide/deploying.md#launchers)). The monitor
+fills in the suite's environments (`environment`, the first entry's, and `environments`, the others') and names the
+version by id (a suite named by its name plays the version the name points to then; a suite not made yet is an
+environment's eval data, and the launch says the `environment`), checks the launch as it checks a run's, and refuses an
+unknown suite or version (404), no launcher alive that offers the profile and every environment (404), a base model no
+launcher alive offers with the profile (404), a checkpoint and a base model both (409), or fewer than one episode a
+start (409). A launcher that offers the profile, every environment the launch plays and its base model claims it and
+starts
 
 ```bash
 python -m rollout_train.cli eval PROFILE SUITE@N --directory RUNS/NAME-ID --name NAME --episodes N --environment E \
-    --checkpoint REF
+    --checkpoint REF     # or, for a base model: --model MODEL
 ```
 
 as a process of its own, or as a Ray job with `--ray` ([launchers](../../guide/deploying.md#launchers)). The suite's
@@ -199,6 +205,10 @@ version, the version played; the share solved where its episodes say, the mean r
 and when), each opening the eval's own page (`#/eval/RUN`: who played, the suite and version, who asked, its score,
 and how it did at each start of that version), and charts each version's score along its line from the base model
 ([scores along a line](monitor.md#scores-along-a-line)).
+
+A base model's page (`#/base/NAME`, a root of the checkpoints' graph) has the same **Run an eval** form: it posts the
+launch with the base model as `model`, and offers only the profiles whose launchers offer that model (none: the form
+says no launcher alive offers it). The launches of evals of it follow, with how each goes.
 
 The **Evals** page lists every checkpoint and base model that has had an eval, the one evaluated last first, and each
 opens its history (`#/evals/checkpoint/ID`, `#/evals/model/NAME`; a checkpoint's page links to it): every eval it has

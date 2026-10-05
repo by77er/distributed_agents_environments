@@ -432,8 +432,11 @@ uv run rollout launcher --ledger "sqlite:///~/.cache/rollout/ledger.db" \
 | `--gpus` | with `--ray`, the accelerators each run's Ray job asks for (1) |
 | `--as-job` | with `--ray`, submit the launcher itself as a Ray job, and return |
 | `--name` | what it beats as besides its host (`launcher/HOST/NAME`), where a machine has several launchers: one per project environment, say |
+| `--cluster` | the cluster config ([cluster](cluster.md)) whose inference providers' models it offers evals; alone, found as every `--cluster` is |
 
-It beats like a runner, saying what it offers: each profile, with the base model it trains and the settings a launch
+It beats like a runner, saying what it offers: each profile, with the base model it trains, the base models an eval may
+play with it (`models`: that model, then, with `--cluster`, each model the cluster's inference providers serve whose
+kind's implementation is the profile's channel's engine, played with the profile's renderer) and the settings a launch
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
 `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
 `evals.episodes`, which the monitor's **New run** form asks for as the run's evals); its environments; and how many runs
@@ -453,11 +456,12 @@ python -m rollout_train.cli train PROFILE ENVIRONMENT --directory RUNS/NAME-ID -
 
 with its output in the run's `train.log` (a launch that says no evals passes `--set evals.suite=""`, so the profile's
 `[evals]` is not used). A launch of kind `eval` names a version of a suite (`NAME@N`), the checkpoint that plays it
-(`start`) and its episodes a start (none: the version's), and is started as
+(`start`) or the base model (`model`, one the launcher offers with the profile; neither: the profile's), and its
+episodes a start (none: the version's), and is started as
 
 ```bash
 python -m rollout_train.cli eval PROFILE SUITE@N --directory RUNS/NAME-ID --name NAME --episodes N \
-    --checkpoint REF --set KEY=VALUE ...
+    --checkpoint REF --set KEY=VALUE ...     # or, for a base model: --model MODEL
 ```
 
 ([evals](../libraries/rollout-train/evals.md#made-edited-and-asked-for-from-the-page)). It notes how the launch goes: `claimed`, `running` (with the process),

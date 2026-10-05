@@ -23,6 +23,7 @@ function watched(place: Place, system: System | undefined): Topic[] {
     const id = system?.checkpoints.find(each => each.id === place.id || each.id.startsWith(place.id))?.id ?? place.id;
     found.push(topics.checkpointEvals(id), topics.path(id), topics.launches());
   }
+  if (place.kind === "base") found.push(topics.checkpoints(), topics.history("model", place.model), topics.launches(), topics.evals());
   if (place.kind === "launch") found.push(topics.evals());
   if (place.kind === "group") found.push(topics.group(place.run, place.number));
   if (place.kind === "episode") found.push(topics.episode(place.id));
@@ -139,6 +140,7 @@ function Crumbs({ place }: { place: Place }) {
   } else if (place.kind === "outside") crumbs.push(["Episodes outside a run", ""]);
   else if (place.kind === "launch") crumbs.push(["New run", ""]);
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
+  else if (place.kind === "base") crumbs.push([`Base model ${place.model}`, ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);
   else if (place.kind === "subject") crumbs.push([place.subject === "checkpoint" ? `Checkpoint ${known.short(place.id)}` : `Base model ${place.id}`, ""]);
   else if (place.kind === "host") crumbs.push([place.host, ""]);

@@ -2,15 +2,17 @@
 
 Every checkpoint grows from a base model, along its parents (`rollout_train.checkpoints`): its first parent is what it
 was trained from, any others what it learned from beside (a merge's). A checkpoint with no parent was trained from its
-base model, which is the root its line hangs from. Each checkpoint was made by a step of some run, and says which. A
+base model, which is the root its line hangs from; a base model that has had an eval is a root too, whether or not
+anything was trained from it. Each checkpoint was made by a step of some run, and says which. A
 run that starts from another run's checkpoint forks there. Beside the graph stand each run's trainer with its queue of
 steps, and the engines and what each serves.
 
 What is read: the checkpoints (each says what its weights are: an adapter, or full weights, which a bridge makes into
 the engines' files), the runs' steps (which stand for their trainer's queue: a run takes one step at a time; its own
 trainer makes what the run's checkpoints are), bookmarks, each checkpoint's bridges (`checkpoints/resharding`,
-`checkpoints/resharded`, keyed `CHECKPOINT@BRIDGE`, which `rollout_train.bridges` writes), the `published` notes read
-from the runners' heartbeats (which stand for what the run's engines serve).
+`checkpoints/resharded`, keyed `CHECKPOINT@BRIDGE`, which `rollout_train.bridges` writes), the evals' subjects (for the
+base models evaluated), the `published` notes read from the runners' heartbeats (which stand for what the run's engines
+serve).
 """
 
 import time
@@ -22,6 +24,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout_train.bridges import BRIDGED, BRIDGING, checkpoint_of
 from rollout_train.checkpoints import CHECKPOINTS, RELEASED, Checkpoint, short
+from rollout_train.evals import EVALUATIONS
 from rollout_train.ledger import between
 from rollout_train.record import newest_record
 
@@ -86,7 +89,10 @@ class _Reading:
         loads = self.loads()
         checkpoints = self.shown(made, runs, loads)
         edges, outside = self.edges(made)
-        bases = sorted({checkpoint.base or "the base model" for checkpoint in made.values() if not checkpoint.parents})
+        trained = sorted(
+            {checkpoint.base or "the base model" for checkpoint in made.values() if not checkpoint.parents}
+        )
+        bases = trained + [each for each in self.evaluated() if each not in trained]
         return {
             "now": round(self.now, 1),
             "bases": bases,
@@ -98,6 +104,16 @@ class _Reading:
             "trainers": self.trainers(runs, made),
             "workers": self.workers(loads),
         }
+
+    def evaluated(self) -> list[str]:
+        """The base models that have had an eval (`rollout_train.evals`: an eval's subject of kind `model`), by name."""
+        found: set[str] = set()
+        for name, records in self.tables.items():
+            if name.startswith(EVALUATIONS) and name.endswith("/subject"):
+                about = records.get("subject")
+                if isinstance(about, dict) and about.get("kind") == "model" and about.get("model"):
+                    found.add(str(about["model"]))
+        return sorted(found)
 
     def checkpoints(self) -> dict[str, Checkpoint]:
         """Every checkpoint, by id, oldest first."""

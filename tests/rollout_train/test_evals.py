@@ -500,3 +500,98 @@ async def test_a_scheduled_eval_names_its_environments_eval_data_frozen_on_first
     (run,) = [name.split("/")[1] for name in await ledger.tables() if name.endswith(f"/{EVALS}")]
     evaluated: Any = await ledger.read(table(run, EVALS))
     assert evaluated and all(each["suite"] == "words-held-out" and each["played"] == 6 for each in evaluated.values())
+
+
+def test_the_command_plays_a_suite_with_a_base_model_it_names_and_records_it_as_the_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from rollout_train.cli import main
+
+    shared, _ = asyncio.run(a_ledger(tmp_path))
+    asyncio.run(
+        make_suite(FileLedger(tmp_path / "ledger"), "words-v1", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[1])])
+    )
+    profile = a_profile(tmp_path, shared, "Unmade", "plain")
+    profile.write_text(profile.read_text().replace("test_full_weights:Unmade", "test_evals:Unmade"))
+    support.STARTED.clear()
+    arguments = [str(profile), "words-v1", "--model", "org/another-base", "--directory", str(tmp_path / "eval")]
+    monkeypatch.setattr("sys.argv", ["rollout", "eval", *arguments, "--name", "words on another base"])
+    with pytest.raises(SystemExit) as exited:
+        main()
+    assert exited.value.code == 0 and capsys.readouterr().out.startswith(f"words-v1@1 {ENVIRONMENT}: solved ")
+    assert support.STARTED[0].told[0].startswith("started org/another-base")  # (not the profile's model)
+    system = System(ledger=FileLedger(tmp_path / "ledger"))
+    history = asyncio.run(system.history("model", "org/another-base"))
+    assert history is not None and [each["name"] for each in history["evals"]] == ["words on another base"]
+    assert asyncio.run(system.lineage())["bases"] == ["a-checkpoint", "org/another-base"]  # (a root of the graph)
+
+
+CLUSTER = """
+name = "here"
+[ledger]
+url = "sqlite:///~/ledger.db"
+[inference.local]
+kind = "vllm"
+[inference.local.models."org/base-a"]
+context = 4096
+[inference.local.models."org/base-b"]
+context = 4096
+[inference.tinker]
+kind = "tinker"
+[inference.tinker.models."org/elsewhere"]
+context = 4096
+"""
+
+
+async def test_an_eval_on_a_base_model_goes_from_the_page_to_the_launchers_ray_job(tmp_path: Path) -> None:
+    import shlex
+    import tomllib
+
+    from rollout_train.cluster import parsed
+    from rollout_train.launches import ASKED, ENDED
+    from tests.rollout_train.support import PROFILE
+    from tests.rollout_train.test_ray_launcher import Jobs, until_state
+
+    ledger = FileLedger(tmp_path / "ledger")
+    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
+    launches, heartbeats = launches_of(ledger), presence_of(ledger)
+    assert launches is not None and heartbeats is not None
+    offering = tmp_path / "profiles"
+    offering.mkdir()
+    served = PROFILE.replace("rollout_train.testing:scripted_engine", "rollout_vllm:VllmEngine", 1)  # (the policy's)
+    (offering / "vllm.toml").write_text(served.format(directory=tmp_path / "run"))
+    jobs = Jobs(steps=0)
+    found = Launcher(
+        "launcher/here", launches, heartbeats, offering, [ENVIRONMENT], tmp_path / "runs",
+        ray="http://127.0.0.1:8265", every=0.01, cluster=parsed(tomllib.loads(CLUSTER)),
+    )  # fmt: skip
+    found._client = lambda: jobs  # type: ignore[method-assign]  # (no Ray cluster: the stand-in)
+    await found._beat()  # pyright: ignore[reportPrivateUsage]  (it says what it offers)
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
+        (launcher,) = (await client.get("/api/launches")).json()["launchers"]
+        assert launcher["profiles"][0]["models"] == ["a-checkpoint", "org/base-a", "org/base-b"]  # (not Tinker's)
+        body = {"kind": EVAL, "suite": "words-v1", "profile": "vllm", "name": "words on b", "model": "org/base-b"}
+        answer = await client.post("/api/launches", json=body)
+        assert answer.status_code == 200, answer.text
+        made = answer.json()["launch"]
+        asked = made["asked"]
+        assert (asked["model"], asked["start"], asked["environment"]) == ("org/base-b", None, ENVIRONMENT)
+        unoffered = await client.post("/api/launches", json=body | {"model": "org/elsewhere", "name": "elsewhere"})
+        assert unoffered.status_code == 404
+        said = "no launcher alive offers the base model 'org/elsewhere' with the profile 'vllm'"
+        assert unoffered.json()["error"] == said
+        both = await client.post("/api/launches", json=body | {"start": "best", "name": "both"})
+        assert both.status_code == 409 and "not both" in both.json()["error"]
+        training = {"profile": "vllm", "environment": ENVIRONMENT, "name": "trained", "model": "org/base-a"}
+        trained = await client.post("/api/launches", json=training | {"settings": {"evals.suite": None}})
+        assert trained.status_code == 409 and "only an eval" in trained.json()["error"]
+    other = Asked("vllm", ENVIRONMENT, "unoffered", kind=EVAL, suite="words-v1", model="org/elsewhere")
+    elsewhere = await launches.ask(other)
+    await found._step()  # pyright: ignore[reportPrivateUsage]
+    (submitted,) = jobs.submitted  # (the launch whose base model it offers, and not the other)
+    assert submitted["submission_id"] == f"run-{made['id']}"
+    command = shlex.split(submitted["entrypoint"].split(" && exec ", 1)[1])
+    assert command[2:4] == ["rollout_train.cli", "eval"] and command[command.index("--model") + 1] == "org/base-b"
+    assert "--checkpoint" not in command and command[command.index("--name") + 1] == "words on b"
+    assert (await until_state(launches, made["id"], ENDED)).state == ENDED
+    assert next(each for each in await launches.all() if each.id == elsewhere.id).state == ASKED

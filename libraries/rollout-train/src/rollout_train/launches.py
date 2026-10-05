@@ -2,7 +2,7 @@
 
 Whoever wants a run (the monitor's page, say) asks for it: a `Launch` names a profile and an environment, what the run
 is called, the checkpoint it starts from, and the settings it changes (`rollout train --set`); or, for an eval, the
-suite it plays, the checkpoint that plays it and how many episodes of each start (`rollout eval`,
+suite it plays, the checkpoint or base model that plays it and how many episodes of each start (`rollout eval`,
 `rollout_train.evals`). A launch names every environment it plays. A launcher (`rollout_train.launcher`) on a training
 machine says in its heartbeat which profiles and environments it can run, claims a launch asked for one of its profiles
 whose environments it offers, starts `rollout train` (or `rollout eval`), and notes how it goes:
@@ -55,7 +55,7 @@ RUN, EVAL = "run", "eval"
 
 @dataclass(frozen=True)
 class Asked:
-    """What a run is asked to be: a training run, or (`kind` `eval`) a suite played by a checkpoint."""
+    """What a run is asked to be: a training run, or (`kind` `eval`) a suite played by a checkpoint or a base model."""
 
     profile: str
     """The profile, by the name a launcher offers it under."""
@@ -74,12 +74,16 @@ class Asked:
     """What it changes of its profile, by dotted key: `trainer.learning_rate`, `episodes_at_once`, say. A training run
     says the evals it makes (`evals.suite`: a suite, or null for none), unless its profile's `[evals]` says them."""
     kind: str = RUN
-    """`run` (a training run) or `eval` (a suite played by `start`, the checkpoint; none: the base model)."""
+    """`run` (a training run) or `eval` (a suite played by `start`, the checkpoint; none: the base model, `model`)."""
     suite: str | None = None
     """For an eval: the suite it plays, by name (the version its name points to) or a version's id (its environment is
     the suite's)."""
     episodes: int | None = None
     """For an eval: episodes of each of the suite's starts; none: the suite's own."""
+    model: str | None = None
+    """For an eval no checkpoint plays: the base model that plays it, one its launcher offers with its profile (the
+    profile's channel's model, or a model the cluster's inference providers of its engine's kind serve); none: the
+    profile's."""
     environments: Sequence[str] = ()
     """Every environment it plays, as `module:name`, where they are more than `environment`: an eval's suite's entries'
     environments, a training run's and its evals' suite's. A launcher claims it only where it offers each."""

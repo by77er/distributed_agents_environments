@@ -8,6 +8,7 @@ import { GroupView, StepView } from "./pages/Group";
 import { Run } from "./pages/Run";
 import { Outside, Runs } from "./pages/Runs";
 import { Statistics } from "./pages/Statistics";
+import { Base } from "./pages/Base";
 import { Checkpoint } from "./pages/Checkpoint";
 import { Checkpoints } from "./pages/Checkpoints";
 import { Evals } from "./pages/Evals";
@@ -29,6 +30,7 @@ function View() {
     case "launch": return <NewRun />;
     case "checkpoints": return <Checkpoints />;
     case "checkpoint": return <Checkpoint id={place.id} />;
+    case "base": return <Base key={place.model} model={place.model} />;
     case "evals": return <Evals />;
     case "suite": return <Suite name={place.suite} />;
     case "eval": return <EvalRun run={place.run} />;

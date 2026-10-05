@@ -50,7 +50,7 @@ function AskedBy({ each }: { each: CheckpointEval }) {
 }
 
 /** The evals of one version of a suite, newest first, with each environment's score over time above them. */
-function VersionCard({ group }: { group: HistoryGroup }) {
+export function VersionCard({ group }: { group: HistoryGroup }) {
   const { data: evals } = useEvals();
   const suite = evals?.suites.find(each => each.suite === group.suite);
   const tagged = (suite ? versionsOf(suite).length : group.number) > 1;

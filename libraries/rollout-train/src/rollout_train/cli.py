@@ -877,6 +877,7 @@ async def _launcher(
     ray: str | None,
     gpus: float,
     name: str | None = None,
+    cluster: str | None = None,
 ) -> None:
     from rollout_train.launcher import Launcher, name_of
     from rollout_train.launches import launches_of
@@ -888,8 +889,9 @@ async def _launcher(
         raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
     profiles, runs = await asyncio.to_thread(profiles.expanduser), await asyncio.to_thread(runs.expanduser)
     found = Launcher(
-        name_of(name), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus
-    )
+        name_of(name), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus,
+        cluster=_cluster_of(cluster) if cluster is not None else None,
+    )  # fmt: skip
     await found.serve()
 
 
@@ -1237,6 +1239,8 @@ def main() -> None:
     launching.add_argument("--gpus", type=float, default=1.0, help="accelerators each run's Ray job asks for (1)")
     launching.add_argument("--as-job", action="store_true", help="submit the launcher itself as a Ray job (with --ray)")
     launching.add_argument("--name", help="what it beats as besides its host, where a machine has several launchers")
+    offering = _cluster_option("the cluster config whose inference providers' models it offers evals")
+    launching.add_argument("--cluster", **offering)
     merging = commands.add_parser("merge", help="fold a LoRA checkpoint into its base: a full checkpoint of its own")
     merging.add_argument("checkpoint", help="the LoRA checkpoint: a bookmark, RUN:STEP, RUN, or an id or its start")
     merging.add_argument("--base", help="the model to merge into (by default the one it was trained over)")
@@ -1424,7 +1428,7 @@ def main() -> None:
             return
         work = _launcher(
             arguments.ledger, arguments.profiles, arguments.environment, arguments.runs, arguments.at_once,
-            arguments.ray, arguments.gpus, arguments.name,
+            arguments.ray, arguments.gpus, arguments.name, arguments.cluster,
         )  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command in ("engines", "runner"):

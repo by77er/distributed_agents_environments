@@ -134,8 +134,8 @@ folding open to the groups toward its next step (in flight, or recorded and wait
 newest first, each with the groups that went into it (a square for each episode); then the episodes outside a run.
 A step's groups need not be consecutive. A group that gave nothing to train on is listed with the step decided after
 it, marked skipped. Runs, steps, groups and episodes fold open and closed: an open step lists its groups, an open
-group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph, the checkpoints bookmarks
-name, and each run's newest. On **Evals**, the suites, each folding open to the
+group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph, the base models checkpoints were
+trained from, the checkpoints bookmarks name, and each run's newest. On **Evals**, the suites, each folding open to the
 evals that played it (each marked with the version it played, where a suite's evals played more than one), and the
 eval shown; then the checkpoints (and base models) that have had an eval, the one evaluated last first, each opening
 its history and folding open to its evals. An eval's run is on Evals, not among the runs, nor in the statistics: its
@@ -154,8 +154,9 @@ so a reload stays there.
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
 | Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below ([an episode's rollouts](#an-episodes-rollouts)) |
 | Runs | Episodes outside a run | `#/episodes` | episodes in the feeds that no run asked for: tests, programs run by hand |
-| Checkpoints | Every checkpoint, as a graph | `#/checkpoints` | each base model a root, and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; each run's trainer and its queue over time; each checkpoint's way to the engines and the run engines that serve it; the runs ([the checkpoints view](#the-checkpoints-view)) |
+| Checkpoints | Every checkpoint, as a graph | `#/checkpoints` | each base model a root (one checkpoints were trained from, or one that has had an eval), and under it a lane for each run with its checkpoints, a run that starts from another's checkpoint hanging under it; each run's trainer and its queue over time; each checkpoint's way to the engines and the run engines that serve it; the runs ([the checkpoints view](#the-checkpoints-view)) |
 | Checkpoints | Checkpoint | `#/checkpoint/ID` (or the start of one) | where it came from (its parents, run and step), what its weights are (a LoRA adapter, or full) and what they build on (a base model, or the full checkpoint an adapter is over), its bookmarks (with controls to make one, move one here, or take one away), how far it moved and what is kept of it, its line back to the base model, what grew from it, each version of a suite's score along its line, each environment's apart for a suite of several ([scores along a line](#scores-along-a-line)), every eval it had (by hand or by its run's schedule: the suite and, for a suite of more than one version, the version played, the share solved where its episodes say, the mean reward, each environment's apart for a suite of several, episodes, who asked for it, when; each opening the eval; and **history**, opening its history on Evals), a **Run an eval** form (a suite, its version, newest by default, episodes per start, a profile and a name: it posts the same launch as a suite's **Run this suite** form), and the evals of it asked for so, with how each goes |
+| Checkpoints | Base model | `#/base/NAME` | its name; the runs trained from it and those forked from theirs (each run with what it started from, its checkpoints and its newest, opening the run); every eval it has had, a card for each version of a suite it played ([a subject's history](#a-subjects-history)); a **Run an eval** form that posts the launch with the base model as `model`, offering the profiles whose launchers offer it ([evals](evals.md#made-edited-and-asked-for-from-the-page)), and the evals of it asked for so, with how each goes |
 | Evals | Every suite and eval | `#/evals` | a **New suite** form ([made, edited and asked for from the page](evals.md#made-edited-and-asked-for-from-the-page)); the evals asked for from the page; each suite (the version its name points to, where it has more than one, its environments, starts, subjects, and, for a suite of one environment, the subject that did best at that version); every checkpoint and base model that has had an eval, the one evaluated last first (where it came from, its evals counted and those playing, the suites they played, when the newest began), each opening its history; every eval, newest first (its suite and, for a suite of more than one version, the version it played, who played, episodes played of those asked for, the share solved, each environment's for a suite of several, whether it is done), each opening its page |
 | Evals | Eval | `#/eval/RUN` | the buttons its state allows, while it is not done ([pausing, resuming and stopping](#pausing-resuming-and-stopping)); who played (a checkpoint, or the base model), the suite and the version it played, who asked for it (by hand, or a run's schedule at a step), when it started; its share solved and mean reward (each environment's, for a suite of several), episodes played of those asked for, how long it took; and at each start of that version (by environment, for a suite of several), its episodes, how many solved and their mean reward. A run that plays one environment of an eval (`part_of`) shows its eval |
 | Evals | A checkpoint's or base model's evals | `#/evals/checkpoint/ID` (or the start of one), `#/evals/model/NAME` | what it is (a checkpoint's shortest id and bookmarks, its id opening its page, the run and step that made it; or the base model's name), its evals and suites counted; for a checkpoint, each version of a suite's score along its line ([scores along a line](#scores-along-a-line)); then every eval it has had ([a subject's history](#a-subjects-history)), a card for each version of a suite it played (suites by name, a suite's versions newest first, a suite's name opening its page): each environment's share solved where its episodes say (else its mean reward) over time, and its evals, newest first, each with its share solved and mean reward at each environment, episodes, who asked for it (by hand, or a run's schedule at a step), when it started and whether it is done, each opening the eval |
@@ -288,7 +289,9 @@ and its dot in the sidebar are drawn in violet. Every page open on the monitor h
 A **launcher** on a training machine (`rollout launcher --ledger URL --profiles DIR --environment module:name --runs DIR
 [--at-once N] [--ray URL]`, `rollout_train.launcher`, [launchers](../../guide/deploying.md#launchers)) beats every 15 seconds, saying what it offers: each profile under
 `--profiles` that names a trainer, with what its trainer makes (`weights`: `lora` or `full`, where the trainer's class
-says, as `rollout_lora`'s do) and the settings a launch may change and their values in the profile (the trainer's
+says, as `rollout_lora`'s do), the base models an eval may play with it (`models`: its channel's model, and with
+`--cluster` the models the cluster's inference providers of its engine's kind serve) and the settings a launch may
+change and their values in the profile (the trainer's
 settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
 `answer_tokens`, and the `evals.` settings), the environments, and how many runs it plays of how many it may.
 
@@ -315,7 +318,8 @@ monitor's machine, its eval data of that name) and appends it to the launches; a
 refusal (409 or 404) is said under the button. With no launcher alive, the form says so and gives the command that
 starts one.
 
-A launcher claims only a launch whose every environment it offers (one that names no environments offers any). It
+A launcher claims only a launch whose every environment it offers (one that names no environments offers any), and,
+for an eval that names a base model (`model`), whose profile it offers that model with. It
 makes the run's directory under `--runs` (`NAME-ID`), and starts `rollout train` there with
 `--name` and each setting as `--set KEY=VALUE` (no evals as `--set evals.suite=""`, so that the profile's `[evals]` is
 not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job. The launch's state
@@ -425,11 +429,14 @@ the step that covers it, if one does; a recorded group that no step covers waits
 ## The checkpoints view
 
 Every checkpoint grows from a base model along its first parents ([checkpoints](checkpoints.md#checkpoints)). Each base model is a
-root, with a lane of its own; under it a lane for each run whose first checkpoint was trained from it, the run's checkpoints
+root, with a lane of its own (a base model that has had an eval is one too, whether or not anything was trained from
+it); under it a lane for each run whose first checkpoint was trained from it, the run's checkpoints
 from the left; and under a run's lane, each run that starts from one of its checkpoints: a fork. A lane is folded to the
 checkpoints something points at (its first and newest, a checkpoint another run starts from, another checkpoint's other
 parent, a bookmarked checkpoint, one on its way to the engines), with a gap for the rest; a click on its
-label opens it (what is open is remembered in the browser). A checkpoint opens its page. Between lanes:
+label opens it (what is open is remembered in the browser). A base model opens its page (`#/base/NAME`), as a checkpoint
+opens its own, by a click, or by Enter or Space once it has the focus (Tab moves it from one to the next). Between
+lanes:
 
 - from a **base model** to the first checkpoint of each line trained from it;
 - a **fork**: a checkpoint trained from another run's checkpoint;

@@ -292,6 +292,9 @@
   .ring { fill: none; stroke-width: 2; } .ring-good { stroke: var(--good); }
   .ring-violet { stroke: var(--violet); stroke-dasharray: 3 2.5; } .ring-accent { stroke: var(--accent); }
   .checkpoint.link { cursor: pointer; } .checkpoint.link:hover circle:not(.ring) { stroke: var(--ink); }
+  .base.link { cursor: pointer; } .base.link:hover rect { stroke: var(--ink); stroke-width: 1.5; }
+  .dag-drawing g.link { outline: none; }
+  .dag-drawing g.link:focus-visible circle:not(.ring), .dag-drawing g.link:focus-visible rect { stroke: var(--accent); stroke-width: 2.5; }
   .gap { cursor: pointer; } .gap rect { fill: var(--panel); stroke: var(--line-strong); } .gap:hover rect { stroke: var(--accent); }
   .gap text { fill: var(--quiet); font-weight: 600; }
   .dag-legend { padding: 10px 18px 12px; margin: 0; border-top: 1px solid var(--line); }

@@ -2,9 +2,11 @@
 
 `rollout launcher --ledger WHERE --profiles DIRECTORY --environment module:name … --runs DIRECTORY` beats like a runner
 (`rollout_train.presence`), saying what it offers: each profile it can run (every `*.toml` under `--profiles` that loads
-and names a trainer), with what its trainer makes (`lora` or `full` weights) and the settings a launch may change and
-their values in the profile; the environments; and whether it has room. It claims the oldest launch asked for one of its
-profiles, whose environments it offers each of, while it plays fewer than `--at-once`, starts `rollout train` for it in
+and names a trainer), with what its trainer makes (`lora` or `full` weights), the base models an eval may play with it
+(its channel's model, and with `--cluster` the models the cluster's inference providers of its engine's kind serve) and
+the settings a launch may change and their values in the profile; the environments; and whether it has room. It claims
+the oldest launch asked for one of its profiles, whose environments it offers each of (and the base model, for an eval
+that names one), while it plays fewer than `--at-once`, starts `rollout train` (or `rollout eval`) for it in
 a directory of its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said
 so, as `evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch that resumes a
 run is started in that run's own directory, which names the run: it goes on from the ledger. A launch asked to stop is
@@ -25,10 +27,10 @@ import shlex
 import signal
 import socket
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rollout_train.launches import (
     ASKED,
@@ -48,6 +50,9 @@ from rollout_train.presence import Presence
 from rollout_train.ray_cluster import prepare
 from rollout_train.settings import EVALS_SUITE
 
+if TYPE_CHECKING:
+    from rollout_train.cluster import Cluster
+
 LAUNCHER = "launcher"
 """What a launcher's heartbeat says it is (`about["kind"]`)."""
 OUTPUT = "train.log"
@@ -56,10 +61,12 @@ TAIL = 2000
 """Characters of a failed run's output kept as why it failed."""
 
 
-def offered(directory: Path) -> list[dict[str, Any]]:
+def offered(directory: Path, cluster: "Cluster | None" = None) -> list[dict[str, Any]]:
     """The profiles under `directory` that a launch can name: each by its name (its file's, without `.toml`), with
-    its path, what its trainer makes (`weights`: `lora`, `full`, or None where its trainer cannot be read here) and the
-    settings a launch may change, with their values in the profile."""
+    its path, what its trainer makes (`weights`: `lora`, `full`, or None where its trainer cannot be read here), the
+    base models an eval may play with it (`models`: its channel's model first, then those `cluster`'s inference
+    providers serve whose kind its channel's engine is) and the settings a launch may change, with their values in the
+    profile."""
     from rollout_train.profile import Profile
 
     found: list[dict[str, Any]] = []
@@ -82,17 +89,36 @@ def offered(directory: Path) -> list[dict[str, Any]]:
         evals = profile.evals
         settings |= {"evals.suite": evals.suite if evals else None, "evals.every": evals.every if evals else None}
         settings |= {"evals.episodes": evals.episodes if evals else None}
-        model = profile.channels[profile.trainer.channel].model
+        channel = profile.channels[profile.trainer.channel]
         found.append(
             {
                 "profile": path.stem,
                 "path": str(path),
-                "model": model,
+                "model": channel.model,
+                "models": _models(channel.model, channel.engine, cluster),
                 "weights": _weights(profile.trainer.kind),
                 "settings": settings,
             }
         )
     return found
+
+
+def _models(model: str, engine: str, cluster: "Cluster | None") -> list[str]:
+    """The base models a profile's channel may serve: its own, then those the cluster's inference providers serve whose
+    kind's implementation is the channel's engine (`module:name`)."""
+    from rollout_train.providers import INFERENCE_KINDS
+
+    found = [model]
+    for provider in cluster.inference.values() if cluster is not None else ():
+        kind = INFERENCE_KINDS.get(provider.kind)
+        if kind is not None and kind.implementation == engine:
+            found += [each for each in provider.models if each not in found]
+    return found
+
+
+def offers(profile: Mapping[str, Any], model: str) -> bool:
+    """Whether an offered profile (`offered`) may play `model` as an eval's base model."""
+    return model in (profile.get("models") or [profile.get("model")])
 
 
 def _weights(trainer: str) -> str | None:
@@ -124,6 +150,8 @@ class Launcher:
     """A Ray cluster's job server (`http://127.0.0.1:8265`): each run is then a Ray job, placed and supervised by Ray,
     asking for `gpus` accelerators; without, a process of this launcher's."""
     gpus: float = 1.0
+    cluster: "Cluster | None" = None
+    """The cluster config whose inference providers' models it offers to evals (`offered`)."""
     every: float = 2.0
     beating: float = 15.0
     _playing: dict[str, asyncio.subprocess.Process] = field(default_factory=dict[str, asyncio.subprocess.Process])
@@ -134,7 +162,7 @@ class Launcher:
 
     async def serve(self) -> None:
         """Beat, claim, start and watch runs until cancelled; the runs it started go on."""
-        self._offered = await asyncio.to_thread(offered, self.profiles)
+        self._offered = await asyncio.to_thread(offered, self.profiles, self.cluster)
         await self._adopt()
         await self._beat()
         beating = asyncio.create_task(self._beats())
@@ -154,11 +182,15 @@ class Launcher:
             if launch.id in self._jobs and launch.state == STOPPING:
                 with contextlib.suppress(Exception):  # (a job that already ended)
                     await asyncio.to_thread(self._client().stop_job, self._jobs[launch.id])
-        mine = {each["profile"] for each in self._offered}
+        mine = {each["profile"]: each for each in self._offered}
         asked = sorted(
-            (each for each in launches if each.state == ASKED and each.asked.profile in mine and self._plays(each)),
+            (
+                each for each in launches
+                if each.state == ASKED and each.asked.profile in mine and self._plays(each)
+                and (not each.asked.model or offers(mine[each.asked.profile], each.asked.model))
+            ),
             key=lambda each: each.at,
-        )
+        )  # fmt: skip
         for launch in asked[: max(0, self.at_once - len(self._playing) - len(self._jobs))]:
             claimed = await self.launches.claim(launch.id, self.name)
             if claimed is not None:
@@ -190,7 +222,8 @@ class Launcher:
                 "--directory", str(directory), "--name", asked.name,
                 *(["--episodes", str(asked.episodes)] if asked.episodes else []),
                 *(["--environment", asked.environment] if asked.environment else []),
-                *(["--checkpoint", asked.start] if asked.start else []), *changed,
+                *(["--checkpoint", asked.start] if asked.start else []),
+                *(["--model", asked.model] if asked.model else []), *changed,
             ]  # fmt: skip
         else:
             command = [
@@ -314,7 +347,8 @@ class Launcher:
                 await self._beat()
 
     async def _beat(self) -> None:
-        self._offered = await asyncio.to_thread(offered, self.profiles)  # (a profile added or changed is offered)
+        # (a profile added or changed is offered)
+        self._offered = await asyncio.to_thread(offered, self.profiles, self.cluster)
         about: dict[str, Any] = {
             "kind": LAUNCHER,
             "host": socket.gethostname(),

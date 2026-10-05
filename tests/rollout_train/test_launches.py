@@ -106,7 +106,7 @@ async def test_concurrent_stops_and_starts_leave_a_launch_stopping_or_stopped_ne
 
 def test_a_launcher_offers_the_profiles_that_train_with_the_settings_a_launch_may_change(tmp_path: Path) -> None:
     (small,) = offered(profiles(tmp_path))  # (not one that is no profile, nor one that trains nothing)
-    assert small["profile"] == "small" and small["model"] == "a-checkpoint"
+    assert small["profile"] == "small" and small["model"] == "a-checkpoint" and small["models"] == ["a-checkpoint"]
     settings = small["settings"]
     assert settings["trainer.segment_tokens"] == 900 and settings["trainer.bookmark"] == "best"
     assert settings["episodes_at_once"] == 6 and settings["channels.policy.thinking_tokens"] == 64

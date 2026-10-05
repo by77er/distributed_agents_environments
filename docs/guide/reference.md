@@ -4767,10 +4767,12 @@ class System
   beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
 - `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
   and its environment starts it. An eval names a suite (whose environment it plays; a suite not made yet, the
-  environment whose eval data it is) and the checkpoint that plays it: a suite by name plays the version its name
-  points to now, which the launch then names by id. A training run says the evals it makes (`_checked_evals`).
-  Raises `Taken` for what cannot be asked for (a name taken or no name, a setting the profile does not have, no
-  word of the evals), `KeyError` for what no launcher offers or a checkpoint no reference says.
+  environment whose eval data it is) and the checkpoint that plays it, or the base model (`model`, one a launcher
+  alive offers with the profile; none: the profile's): a suite by name plays the version its name points to now,
+  which the launch then names by id. A training run says the evals it makes (`_checked_evals`). Raises `Taken`
+  for what cannot be asked for (a name taken or no name, a setting the profile does not have, no word of the
+  evals, a checkpoint and a base model both), `KeyError` for what no launcher offers or a checkpoint no reference
+  says.
 - `async def environments(self) -> dict[str, Any]` — Every environment the system knows of, by `module:name` (`rollout_train.monitor.environments.listed`): those
   the launchers alive offer, those runs were started on and those suites' versions play; each with a readable
   `name`, the versions of it seen (in runs' starts and suites' entries), whether a launcher alive offers it
