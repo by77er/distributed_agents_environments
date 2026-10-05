@@ -124,7 +124,8 @@ tile says what it waits for.
 **Why, and what to check:**
 
 - **Kueue has not admitted it** (`waits for admission by Kueue`). The queue's quota is held by runs already admitted;
-  the tile gives Kueue's reason (the quota it waits for). The queue and the run's Workload:
+  the tile gives its place in the queue and what it waits for, and the Machines tab's Queue section which runs hold
+  the quota ([the queue](../libraries/rollout-train/monitor.md#the-queue)). The queue and the run's Workload:
 
     ```bash
     kubectl get clusterqueue rollout

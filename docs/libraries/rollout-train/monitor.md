@@ -19,8 +19,9 @@ on whichever machines they run. Its pages are switched along the top:
 - **Checkpoints**: every checkpoint, each alone and all of them as a graph growing from their base models;
 - **Evals**: the suites, every eval, and each checkpoint's or base model's evals over time;
 - **Statistics**: figures across the training runs, a series for each, what each channel serves, and the ledger;
-- **Machines**: every machine that beats and the roles on it (runners, runs waiting for their resources, sandbox
-  pools, engine hosts and gateways), with what each holds and how full it is ([the machines](#the-machines)).
+- **Machines**: the queue (what the cluster gives runs, what each run holds and which runs wait: [the
+  queue](#the-queue)), and every machine that beats and the roles on it (runners, runs waiting for their resources,
+  sandbox pools, engine hosts and gateways), with what each holds and how full it is ([the machines](#the-machines)).
 
 ```bash
 rollout monitor --cluster                             # http://localhost:8765: the cluster's ledger; it asks for runs
@@ -52,7 +53,7 @@ package (`rollout_train/monitor/static`), and the monitor serves it as files: `r
 page draws each view from what it has read, and reads again only what the monitor says changed.
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
-  `feeds`, `machines`, `launches`, `statistics`, `checkpoints`, `checkpoint-evals/ID`, `path/ID`, `environments`,
+  `feeds`, `machines`, `queue`, `launches`, `statistics`, `checkpoints`, `checkpoint-evals/ID`, `path/ID`, `environments`,
   `environment/MODULE:NAME` (a published one's `environment/NAME@VERSION`), `environment-versions`,
   `environment-version/VERSION`, `imports`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
   `settings/RUN`, `group/RUN/N`, `episode/RUN_ID`. The monitor reads a topic at most once a beat (1.5 seconds), whoever
@@ -61,7 +62,7 @@ page draws each view from what it has read, and reads again only what the monito
   for every topic watched (`System.one_reading`; a database ledger in one query, `read_all`).
 - **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the version of each topic asked for at
   once, then a `version` event each time one changes. The page watches the topics of the place shown (always
-  `system` and `feeds`; the launches on Runs and New run; a group, an episode, the statistics, the machines, the
+  `system` and `feeds`; the launches on Runs and New run; the queue on Runs, Machines and a run's page; a group, an episode, the statistics, the machines, the
   environments (with the imports on their list) and an environment, or the graph, as they are shown), and opens a new
   stream
   when it moves elsewhere. While nobody watches, the monitor reads nothing.
@@ -432,6 +433,57 @@ use over its recent beats (the last hour, at one beat every 15 seconds), then it
 `channels`. Each host has `alive`, `at`, its newest measurements (`machine`), their `history`, and its `roles`
 (`{"kind", "name", "alive"}`).
 
+## The queue
+
+The Machines page opens with the queue: how the runs share what the cluster gives them (`rollout_train.monitor.queue`,
+the `queue` topic). Its **Held** card has a bar for each resource (CPU, memory, GPU) as long as its capacity, split into
+a segment for each admitted run's share, in the run's color and linked to its page (a segment's tooltip names the run
+and what it holds); what is used beyond the runs the queue names is hatched. Its **Waiting** card lists the runs that
+wait, in the queue's order: each one's place, its name (linked), what it asks for, how long it has waited and why
+(`waits for 1 GPU: in use by run alpha` where what it lacks is held by admitted runs, `asks for 2 GPUs; the queue
+holds 1 GPU` where it asks for more than the capacity, else its source's reason, shortened). On a narrow page each
+waiting run is a block of its own. With nothing to say (no Kueue, no run that beats its demand, no Ray to read) the
+section is left out.
+
+A run that waits says its place and why in its state line (`waiting · 2nd in the queue · …`), on its page and on its
+launch's tile; a run's page opened before its run has started shows its launch's state.
+
+Where it reads from:
+
+- **Kueue**, where the cluster config names a queue (`[kubernetes] queue`): through the API server, with the monitor's
+  account ([what the monitor shows](../../deploy/helm.md#what-the-monitor-shows)). The capacity is the ClusterQueue's quota
+  (`nominalQuota`, summed over its flavors) and what is used its `flavorsReservation`; each Workload of the queue that
+  has not finished is admitted while it holds quota and pending otherwise, its run found by its RayJob's launch. The
+  pending order is Kueue's, from its visibility API (the ClusterQueue's `pendingworkloads`), or by when each Workload
+  was made where that API is not served or not readable.
+- **Ray**, otherwise: each run's driver beats its demand (the driver's and its placement group's resources), when it
+  asked Ray for them and when Ray reserved them ([heartbeats](rollouts.md#heartbeats)). A run whose group is
+  reserved is admitted; one whose driver waits for it is pending, in the order they asked. The capacity and what is
+  used are the Ray cluster's where the monitor's process is connected to Ray (`ray.cluster_resources()`); else they are
+  not known, and the Held card lists what each run holds.
+
+`/api/queue` answers:
+
+```json
+{"source": "kueue", "order": "kueue", "queue": "runs", "cluster_queue": "rollout",
+ "capacity": {"cpu": 12.0, "memory": 17179869184.0, "gpu": 1.0},
+ "used": {"cpu": 6.5, "memory": 9873391616.0, "gpu": 1.0},
+ "admitted": [{"run": "01m4…", "name": "words-4b", "requests": {"cpu": 6.5, "memory": 9873391616.0, "gpu": 1.0},
+               "since": 1791220201.0, "job": "run-01m4…", "workload": "rayjob-run-01m4…-3f2c1"}],
+ "pending": [{"run": "01m5…", "name": "gsm8k-lora", "requests": {"cpu": 3.5, "memory": 6652166144.0, "gpu": 1.0},
+              "since": 1791220330.0, "position": 1,
+              "reason": "couldn't assign flavors to pod set head: insufficient unused quota for nvidia.com/gpu in flavor rollout, 1 more needed",
+              "lacks": {"gpu": 1.0}, "held_by": ["01m4…"], "job": "run-01m5…", "workload": "rayjob-run-01m5…-9ab07"}]}
+```
+
+`source` is `kueue`, `ray` or none (nothing to say). Resources are `cpu` (CPUs), `memory` (bytes) and `gpu`. `run` is
+the run's id (none for a Workload no launch of this ledger made) and `name` what the registry calls it; `requests` what
+it asks for in all (with Kueue, what its admission gave each pod set, or what Kueue counted of a pending one); `since`
+when it was admitted or began to wait. A pending run's `position` is its place (1 first), `reason` why it waits as its
+source says, `lacks` what of its requests the free capacity does not hold, and `held_by` the admitted runs that hold
+it, those that would free most of it first. With Kueue, `order` says how the pending runs are ordered (`kueue`, or
+`created` where the visibility API is not read), and `error` why Kueue could not be read.
+
 ## An episode's rollouts
 
 Each agent's rollout is its samples in order, its slots in their numbers' order (`agent-2` before `agent-10`), each in
@@ -459,7 +511,7 @@ the ledger, live and once it ended.
 (where every run stands), `group(run, number)`, `episode(run_id)`, `feeds()` (the episodes in the feeds), `lineage()`
 (the checkpoints view), `evals()` (every suite, its versions, and every eval), `checkpoint_evals(id)`, `path(id)`,
 `eval_subjects()`, `history(kind, reference)`, `statistics()` (with each run's name), `machines()` (every machine that
-beats and the roles on it), `environments()` (every environment the system knows), `environment(name)` (an
+beats and the roles on it), `queue()` ([the queue](#the-queue)), `environments()` (every environment the system knows), `environment(name)` (an
 environment's page: [environments](#environments)), `settings(run)` and `want(run, settings)`, `pause(run)`,
 `resume(run)`, `launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, checkpoint)`,
 `unbookmark(name)`, `save_suite(name, body)`, `environment_versions()`, `environment_version(reference)`,

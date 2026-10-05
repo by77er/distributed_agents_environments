@@ -35,7 +35,9 @@ By role, in the namespace it is installed into (these pages use `rollout`):
 - **Kueue's queue** (with `kueue.enabled`): a ResourceFlavor, a ClusterQueue with `kueue.quota` and a LocalQueue in the
   namespace (`templates/kueue.yaml`), [below](#kueue).
 - **The monitors' account.** A ServiceAccount `monitor` with a Role that may create, get, list, watch and delete
-  `rayjobs`, and with Kueue get, list and watch `workloads` (`templates/rbac.yaml`).
+  `rayjobs`; with Kueue, also get, list and watch `workloads` and get the chart's LocalQueue, and a ClusterRole
+  (`NAMESPACE-monitor`) that may get the chart's ClusterQueue and its pending Workloads through Kueue's visibility API
+  (`templates/rbac.yaml`, [what the monitor shows](#what-the-monitor-shows)).
 - **The presets.** A hook Job, `presets`, saves `files/presets/*.toml` beside the ledger after every install and
   upgrade (`rollout preset load /etc/rollout/presets --cluster`), a new version only where a preset's newest says
   otherwise.
@@ -111,6 +113,31 @@ kueue:
 
 The long-lived RayCluster `ray` is not in the queue: its GPU worker, when the autoscaler starts it, holds a card Kueue
 does not count, and a run admitted meanwhile waits for that card as a pending pod.
+
+### What the monitor shows
+
+The Machines tab's Queue section ([the queue](../libraries/rollout-train/monitor.md#the-queue)) reads Kueue through the
+API server with the monitor's account: the quota and what is reserved of it as a bar for each of CPU, memory and GPU,
+split into each admitted run's share, and the runs that wait in Kueue's order, each with what it asks for, how long it
+has waited and why. A waiting run's page and launch tile say its place in the queue. What the account may read, all of
+it get only, and the ClusterQueue rules limited to the chart's ClusterQueue by name:
+
+| Rule | API group | Resource | Scope | What the monitor reads |
+|---|---|---|---|---|
+| Role `monitor` | `kueue.x-k8s.io` | `workloads` (get, list, watch) | the namespace | each run's Workload: its RayJob, what it asks for, whether it is admitted and why it waits |
+| Role `monitor` | `kueue.x-k8s.io` | `localqueues` (`kueue.queue`) | the namespace | which ClusterQueue the queue feeds |
+| ClusterRole `NAMESPACE-monitor` | `kueue.x-k8s.io` | `clusterqueues` (`kueue.clusterQueue`) | the cluster | the quota and what is reserved of it |
+| ClusterRole `NAMESPACE-monitor` | `visibility.kueue.x-k8s.io` | `clusterqueues/pendingworkloads` (`kueue.clusterQueue`) | the cluster | the order of the pending Workloads |
+
+Kueue serves its visibility API by default (the `kueue-visibility-server` APIService, `v1beta2`). Where it is not
+served, or not readable, the pending runs are listed in the order their Workloads were made, and `/api/queue` says so
+(`"order": "created"`). To see what the account may read:
+
+```bash
+kubectl auth can-i get clusterqueues.kueue.x-k8s.io/rollout --as system:serviceaccount:rollout:monitor
+kubectl get --raw /apis/visibility.kueue.x-k8s.io/v1beta2/clusterqueues/rollout/pendingworkloads \
+  --as system:serviceaccount:rollout:monitor
+```
 
 ## Make the Secrets
 

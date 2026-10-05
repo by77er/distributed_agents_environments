@@ -4938,6 +4938,8 @@ A run being built from its settings, and what it started: everything the loop of
 | `sandboxes` | `frozenset[str]` | `frozenset()` | The kinds of sandbox its environment's programs declare. |
 | `demand` | `Demand \| None` | `None` | What its scheduled parts need (`rollout_train.demand`). |
 | `group` | `Any` | `None` | The placement group that reserves them. |
+| `asked_at` | `float \| None` | `None` | When it asked Ray for its placement group. |
+| `reserved_at` | `float \| None` | `None` | When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own). |
 
 **Methods**
 
@@ -5523,8 +5525,8 @@ How a job goes, in a launch's states (`submitted`, `running`, `ended`, `failed`,
 class KubernetesApi
 ```
 
-What makes, reads and deletes RayJobs: the API server at `base`, with the service account's token and CA (by
-default the pod's own), over `transport` where given (a test's).
+What makes, reads and deletes RayJobs, and reads Kueue's objects: the API server at `base`, with the service
+account's token and CA (by default the pod's own), over `transport` where given (a test's).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -5536,6 +5538,8 @@ default the pod's own), over `transport` where given (a test's).
 - `async def create(self, namespace: str, resource: Mapping[str, Any]) -> dict[str, Any]`
 - `async def get(self, namespace: str, name: str) -> dict[str, Any] | None`
 - `async def workloads(self, namespace: str, uid: str) -> list[dict[str, Any]]` — Kueue's Workloads of a job, by the job's uid (none where Kueue is not installed).
+- `async def read(self, path: str) -> dict[str, Any] | None` — What the API server answers at `path` (`/apis/GROUP/VERSION/...`): none where it is not found. Raises
+  `RuntimeError` for any other refusal (a resource the account may not read, an API that is not served).
 - `async def delete(self, namespace: str, name: str) -> None`
 
 ### `RayJobResources`
@@ -5980,6 +5984,9 @@ class System
   (`rollout_train.monitor.machines`): the runners and the episodes their claims hold, the sandbox pools and
   their leases, the engine hosts and how far behind what their run wants each engine is, the drivers that wait
   for what they asked Ray for, and the gateways.
+- `async def queue(self) -> dict[str, Any]` — How the runs share what the cluster gives them (`rollout_train.monitor.queue`): as Kueue says, where the
+  cluster config names a queue (`[kubernetes] queue`), read with the API server the config names; else as the
+  runs' drivers say in their beats, with the Ray cluster's totals where this process is connected to Ray.
 - `async def one_reading(self) -> AsyncGenerator[None]` — Within the block, the ledger's tables, the registry's names, the checkpoints and the beats are read once,
   whatever reads them (the hub reads every topic it watches so, once a beat).
 - `def read_afresh(self) -> None` — Read the ledger again within a reading (after the monitor itself changed something).

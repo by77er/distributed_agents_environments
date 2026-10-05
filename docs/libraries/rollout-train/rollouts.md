@@ -171,9 +171,11 @@ A run's runner (`run/RUN`) says, in each beat: its host, the run it serves, the 
 (`rollout_train.machine`: memory, each GPU's memory and how busy, the disk the directory is on), and what each channel
 serves (adapter and version) with what passed through it since the beat before (requests, tokens, tokens a second,
 requests at once); for a routed channel, by its name within each run (`RUN/NAME`), what each of its servers would sample
-from and how far behind that is. The [monitor](monitor.md) shows machines, inference throughput and what is served from
-these beats. Before it plays, while Ray has not given the run what it asked for, its driver beats under the same name
-(kind `run`) with what it waits for. An engine host (kind `engines`) beats with the run it follows, its machine, and
+from and how far behind that is; and what the run holds of Ray: its demand in all (`demand`: the driver's and its
+placement group's CPUs, memory and GPUs), when it asked for it (`asked`) and when Ray reserved it (`reserved`). The
+[monitor](monitor.md) shows machines, inference throughput, what is served and the queue from these beats. Before it
+plays, while Ray has not given the run what it asked for, its driver beats under the same name (kind `run`) with what
+it waits for, and its `demand` and `asked` (`reserved` none until its placement group is reserved). An engine host (kind `engines`) beats with the run it follows, its machine, and
 what each channel's engines serve ([what a channel should serve](channels.md#what-a-channel-should-serve)); a gateway
 replica (kind `gateway`) with where it listens, its machine and its channels ([the gateway](gateway.md#running-it)); a
 pool on a machine of its own (kind `pool`) with how full it is. The
