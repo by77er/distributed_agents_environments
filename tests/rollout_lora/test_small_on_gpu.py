@@ -37,7 +37,7 @@ def segments(score: object, count: int = 4, length: int = 600, sampled: int = 20
 
 def test_an_adapter_trains_over_a_text_model() -> None:
     from rollout_lora.policy import Policy
-    from rollout_lora.step import PolicyStep
+    from rollout_objectives.step import PolicyStep
 
     settings = LoraSettings(rank=8, tokens_per_step=400, max_kl=None)
     policy = Policy.load(MODEL, rank=settings.rank, alpha=settings.alpha)
@@ -102,7 +102,7 @@ def test_an_adapter_folded_in_gives_what_the_adapter_gave(tmp_path: Path) -> Non
     from rollout_lora.full import FullPolicy
     from rollout_lora.merge import merge
     from rollout_lora.policy import Policy
-    from rollout_lora.step import PolicyStep
+    from rollout_objectives.step import PolicyStep
 
     settings = LoraSettings(rank=8, tokens_per_step=400, max_kl=None, learning_rate=1e-3)
     policy = Policy.load(MODEL, rank=settings.rank, alpha=settings.alpha)

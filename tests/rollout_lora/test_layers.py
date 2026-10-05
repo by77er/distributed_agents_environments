@@ -8,7 +8,7 @@ import pytest
 import torch
 from torch import nn
 
-from rollout_lora.layers import LoraLinear, add_lora, load_adapter, lora_parameters, save_adapter
+from rollout_lora.layers import LoraLinear, adapter_off, add_lora, load_adapter, lora_parameters, save_adapter
 
 
 class Block(nn.Module):
@@ -26,6 +26,18 @@ def model() -> nn.Sequential:
     network = nn.Sequential(Block(), Block())
     add_lora(network, ["q_proj"], rank=2, alpha=4.0, dtype=torch.float32)
     return network
+
+
+def test_an_adapter_switched_off_gives_the_model_it_was_added_to() -> None:
+    trained = model()
+    torch.manual_seed(0)
+    base = nn.Sequential(Block(), Block())  # (the same weights, without the adapter)
+    for parameter in lora_parameters(trained):
+        parameter.data.normal_()
+    inputs = torch.randn(3, 8)
+    with adapter_off(trained):
+        torch.testing.assert_close(trained(inputs), base(inputs), rtol=0, atol=0)
+    assert not torch.allclose(trained(inputs), base(inputs))  # (and on again after)
 
 
 def test_an_adapter_round_trips_and_changes_only_its_layers(tmp_path: Path) -> None:

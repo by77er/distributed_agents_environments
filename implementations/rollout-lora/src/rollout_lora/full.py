@@ -8,7 +8,9 @@ their own dtype when they load them. A checkpoint keeps the model's configuratio
 so that it can also be served, or trained from, as a model of its own.
 
 Its memory: the weights, their gradients and Adam's two moments, four copies in float32 (16 bytes a weight), and the
-activations of one segment with gradient checkpointing. Qwen3-0.6B takes about 10 GiB.
+activations of one segment with gradient checkpointing. Qwen3-0.6B takes about 10 GiB. An objective that reads the
+reference needs a frozen copy of the model trained over beside it, in bfloat16 (2 bytes a weight more), which it holds
+only when asked (`LoraSettings.frozen_reference`).
 """
 
 import json
@@ -22,7 +24,7 @@ import torch
 from torch import nn
 
 from rollout_lora.models import COPIED, local, multimodal
-from rollout_lora.policy import body, scored
+from rollout_lora.policy import body, scored_with_entropy
 
 
 @dataclass
@@ -30,9 +32,14 @@ class FullPolicy:
     model: nn.Module
     checkpoint: str
     """Where it was loaded from: a model's name or directory, or a full checkpoint's files."""
+    frozen: nn.Module | None = None
+    """The reference, if it holds one: a frozen copy of the model trained over, in bfloat16."""
 
     @classmethod
-    def load(cls, checkpoint: str, *, gradient_checkpointing: bool = True) -> "FullPolicy":
+    def load(
+        cls, checkpoint: str, *, gradient_checkpointing: bool = True, reference: str | None = None
+    ) -> "FullPolicy":
+        """The policy from `checkpoint`, and with `reference` (a model's name or directory) a frozen copy of it."""
         from transformers import AutoModelForCausalLM
 
         if multimodal(checkpoint):
@@ -45,18 +52,45 @@ class FullPolicy:
             parameter.requires_grad_(True)
         if gradient_checkpointing:
             cast(Any, model).gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        return cls(model, checkpoint)
+        frozen: nn.Module | None = None
+        if reference is not None:
+            frozen = cast(
+                nn.Module,
+                AutoModelForCausalLM.from_pretrained(
+                    str(local(reference)), dtype=torch.bfloat16, device_map={"": "cuda"}
+                ),
+            )
+            frozen.eval()
+            for parameter in frozen.parameters():
+                parameter.requires_grad_(False)
+        return cls(model, checkpoint, frozen)
 
     def parameters(self) -> list[nn.Parameter]:
         return [parameter for parameter in self.model.parameters() if parameter.requires_grad]
 
     def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         """Logprobs of `tokens[p]` given `tokens[:p]`, for each p in `positions` (all at least 1)."""
+        return self.logprobs_and_entropy(tokens, positions, entropy=False)[0]
+
+    def logprobs_and_entropy(
+        self, tokens: Sequence[int], positions: Sequence[int], *, entropy: bool = True
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """`logprobs`, and the entropy of the policy's distribution at each of `positions`."""
         device = next(iter(self.model.parameters())).device
         ids = torch.tensor([list(tokens)], device=device)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             hidden = body(self.model)(input_ids=ids).last_hidden_state[0]
-            return scored(self.model, hidden, ids, positions)
+            return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+
+    def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
+        """`logprobs` under the frozen copy of the model trained over (no gradient)."""
+        if self.frozen is None:
+            raise ValueError("this full-weight policy holds no reference (LoraSettings.frozen_reference)")
+        device = next(iter(self.frozen.parameters())).device
+        ids = torch.tensor([list(tokens)], device=device)
+        with torch.no_grad():
+            hidden = body(self.frozen)(input_ids=ids).last_hidden_state[0]
+            return scored_with_entropy(self.frozen, hidden, ids, positions, entropy=False)[0]
 
     def save(self, directory: Path) -> Path:
         """The weights (float32, in safetensors) and the model's configuration and tokenizer."""

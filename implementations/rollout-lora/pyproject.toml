@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "rollout",
     "rollout-train",
+    "rollout-objectives",
     "torch>=2.5",
     "numpy>=2",
     "safetensors>=0.5",
@@ -18,6 +19,7 @@ dependencies = [
 [tool.uv.sources]
 rollout = { workspace = true }
 rollout-train = { workspace = true }
+rollout-objectives = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

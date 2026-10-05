@@ -94,11 +94,24 @@ def peft_adapter(archive: Path, into: Path, base_model: str) -> None:
     (into / "adapter_config.json").write_text(json.dumps(made, indent=2) + "\n")
 
 
+def local(model: str) -> Path:
+    """A model's directory: `model` itself if it is one, else its snapshot in the Hugging Face cache (as the cache's
+    `refs/main` names it). Raises `FileNotFoundError` where it is neither."""
+    directory = Path(model).expanduser()
+    if directory.is_dir():
+        return directory
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    cached = Path(HF_HUB_CACHE) / f"models--{model.replace('/', '--')}"
+    reference = cached / "refs" / "main"
+    if not reference.exists():
+        raise FileNotFoundError(f"{model} is neither a directory nor in the Hugging Face cache")
+    return cached / "snapshots" / reference.read_text().strip()
+
+
 def model_names(base_model: str) -> tuple[dict[str, Any], set[str]]:
     """A model's configuration and the names of its weights: from its directory, or its snapshot in the Hugging Face
     cache, or else the Hub (its configuration and its safetensors' headers, not its weights)."""
-    from rollout_lora.models import local
-
     try:
         directory = local(base_model)
     except FileNotFoundError:

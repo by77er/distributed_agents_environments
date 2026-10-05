@@ -32,6 +32,7 @@ rollout = { workspace = true }
 rollout-train = { workspace = true }
 rollout-vllm = { workspace = true }
 rollout-lora = { workspace = true }
+rollout-objectives = { workspace = true }
 rollout-qwen = { workspace = true }
 rollout-gemma = { workspace = true }
 rollout-openai = { workspace = true }
@@ -84,6 +85,7 @@ extraPaths = [
     "libraries/rollout-train/src",
     "implementations/rollout-vllm/src",
     "implementations/rollout-lora/src",
+    "implementations/rollout-objectives/src",
     "implementations/rollout-qwen/src",
     "implementations/rollout-gemma/src",
     "implementations/rollout-openai/src",

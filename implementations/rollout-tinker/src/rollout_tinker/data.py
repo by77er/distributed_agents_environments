@@ -10,18 +10,18 @@ from collections.abc import Mapping, Sequence
 
 from tinker import Datum, ModelInput, TensorData
 
-from rollout_lora.step import sampled
-from rollout_train.trainer import Weighted
+from rollout_objectives.step import positions
+from rollout_train.recorder import Segment
 
 __all__ = ["datum", "rows"]
 
 
-def rows(weighted: Weighted) -> list[int]:
+def rows(segment: Segment) -> list[int]:
     """The rows of a segment's datum that predict the tokens the policy sampled, in order."""
-    positions = sampled(weighted)
-    if positions and positions[0] < 1:
+    sampled = positions(segment)
+    if sampled and sampled[0] < 1:
         raise ValueError("a segment's first token cannot have been sampled: nothing came before it")
-    return [position - 1 for position in positions]
+    return [position - 1 for position in sampled]
 
 
 def datum(tokens: Sequence[int], at: Sequence[int], values: Mapping[str, Sequence[float]]) -> Datum:

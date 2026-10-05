@@ -6,7 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "rollout",
     "rollout-train",
-    "rollout-lora",  # the step's settings, objective, plan and metrics, where a model's files are, and the merge (no GPU code)
+    "rollout-objectives",  # the step's settings, objective, plan and metrics (torch, no GPU code)
     "tinker==0.32.0",
     "torch>=2.10",
     "safetensors>=0.5",
@@ -16,7 +16,7 @@ dependencies = [
 [tool.uv.sources]
 rollout = { workspace = true }
 rollout-train = { workspace = true }
-rollout-lora = { workspace = true }
+rollout-objectives = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

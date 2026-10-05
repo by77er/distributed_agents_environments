@@ -6,12 +6,11 @@ import torch
 from rollout_tinker.data import datum, rows
 from rollout_tinker.testing import FakeService
 from rollout_train.recorder import Segment, Span
-from rollout_train.trainer import Weighted
 
 # A prompt (0-2), a turn the policy sampled (3-4), a token the recorder forced (5), a tool's result (6), a second turn
 # (7-8).
 TOKENS = [10, 11, 12, 13, 14, 15, 16, 17, 18]
-SEGMENT = Weighted(Segment(TOKENS, [Span(3, 5, 1), Span(7, 9, 2)], [-0.1, -0.2, -0.3, -0.4]), 0.5)
+SEGMENT = Segment(TOKENS, [Span(3, 5, 1), Span(7, 9, 2)], [-0.1, -0.2, -0.3, -0.4])
 
 
 def test_row_t_minus_one_predicts_sampled_token_t() -> None:
@@ -41,4 +40,4 @@ def test_numbers_for_rows_must_match_them() -> None:
     with pytest.raises(ValueError, match="3 numbers for 4 rows"):
         datum(TOKENS, rows(SEGMENT), {"weights": [1.0] * 3})
     with pytest.raises(ValueError, match="first token"):
-        rows(Weighted(Segment([1, 2], [Span(0, 1, 1)], [-1.0]), 1.0))
+        rows(Segment([1, 2], [Span(0, 1, 1)], [-1.0]))

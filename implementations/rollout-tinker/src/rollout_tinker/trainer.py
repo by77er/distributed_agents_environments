@@ -3,28 +3,41 @@
 """`TinkerTrainer`: a `Trainer` whose weights live at Thinking Machines.
 
 A step resumes its parent's training state there (or starts a LoRA run on the model), takes the minibatches of
-`rollout_lora.step.PolicyStep` (its `Plan`: the same filter, shuffle and cut), sends each as Tinker's loss, saves a
-training state and a sampler checkpoint named after the version, and leaves pointers to them (`rollout_tinker.weights`).
+`rollout_objectives.step.PolicyStep` (its `Plan`: the same filter, shuffle and cut), sends each as a Tinker loss, saves
+a training state and a sampler checkpoint named after the version, and leaves pointers to them
+(`rollout_tinker.weights`).
 
-**The objective, exactly.** Tinker's built-in losses take one reference logprob per token; ours (`rollout_lora.
-objectives`) has two, the logprob at the step's start (`old`) and the one it was sampled at (`behavior`). Folding the
-importance weight and the minibatch's units into the advantages makes each loss ours, in value and gradient:
+**The objective, exactly** (`rollout_objectives.terms`). Tinker's built-in losses are faster than a custom one, and
+each takes one logprob per token to compare with. Where the objective, with the importance weight, the aggregation's
+scale and the minibatch's units folded into the advantages, is one of them in value and gradient, that loss is sent
+(`route`):
 
-| Objective, ratio | Optimizer steps | Tinker | Reference, advantage |
+| Objective | Updates | Tinker | Compared with; advantage |
 |---|---|---|---|
-| `policy_gradient`, `token` | one | `cispo`, clipped to 0 .. `truncate` | behaviour; A/U |
-| `policy_gradient`, `token` | several | a forward pass for `old`, then `ppo`, clipped to 1 ± clip | old; A·w/U |
-| `policy_gradient`, `segment` | any | (a forward pass for `old` if several) then a custom loss: `terms` itself | — |
-| `likelihood` | any | `cross_entropy`, weights A/U | — |
+| likelihood | any | `cross_entropy` | weights A·s/U |
+| no ratio (REINFORCE), no correction | any | `cross_entropy` | weights A·s/U |
+| no ratio, a weight | several | a forward pass for `old`, then `cross_entropy` | weights A·w·s/U |
+| token ratio, no correction | one | `cross_entropy` | weights A·s/U |
+| token ratio or none, a weight (truncated or not) | one | `cispo`, clipped to 0 .. the cap | behaviour; A·s/U |
+| token ratio, clipped (PPO) | several | a forward pass for `old`, then `ppo` | old; A·w·s/U |
+| token ratio, weight clipped (CISPO) | several | a forward pass for `old`, then `cispo` | old; A·w·s/U |
+| token ratio, unclipped | several | a forward pass for `old`, then `importance_sampling` | old; A·w·s/U |
+| anything else | any | (a forward pass for `old` if several) then a custom loss | — |
 
-With one optimizer step `old` is the logprob now, so the forward-backward's own output is `old`, and no forward pass is
-needed. The custom loss (Tinker computes logprobs, we compute the loss and its gradient here, and Tinker takes a pass
-on a linear stand-in with that gradient) costs a forward pass more than a built-in loss.
+Anything else is a segment ratio, dual clipping, a mask, a KL penalty or a preference loss, and its custom loss is the
+objective itself. `ppo` and `cispo` are clipped to 1 - `clip.low` .. 1 + `clip.high`. `w` is the importance weight, `s`
+the aggregation's scale of each token (1 for a token mean or a sum, one over the segment's tokens for a segment mean,
+one over `constant_tokens` for `constant`) and `U` the minibatch's units. With one update `old` is the logprob now: a
+ratio is 1 and unclipped, so every clipped surrogate's gradient is the weighted advantage's, the forward-backward's own
+output is `old`, and no forward pass is needed. The custom loss (Tinker computes logprobs, the objective is computed
+here with its gradient, and Tinker takes a pass on a linear stand-in with that gradient) costs a forward pass more than
+a built-in loss. Tinker gives no reference logprobs and no entropies here, so an objective that reads either is refused
+(validation says so before a run starts).
 
-Each minibatch's statistics are `terms` of the logprobs the forward-backward returns (the policy before that update),
-so a step's metrics are `PolicyStep`'s (`rollout_lora.step.metrics`). A minibatch that finds the policy further than
-`max_kl` from where the step began stops the pass; its gradient has been accumulated where no call clears it, so that
-client is not used again.
+Each minibatch's statistics are the objective's terms of the logprobs the forward-backward returns (the policy before
+that update), so a step's metrics are `PolicyStep`'s (`rollout_objectives.step.metrics`). A minibatch that finds the
+policy further than `max_kl` from where the step began stops the pass; its gradient has been accumulated where no call
+clears it, so that client is not used again.
 """
 
 import asyncio
@@ -39,25 +52,49 @@ import torch
 from pydantic import JsonValue
 from tinker import AdamParams, Datum, ForwardBackwardOutput
 
-from rollout_lora.objectives import SUMS, tally, terms
-from rollout_lora.step import MINIBATCHES, Plan, line, metrics
+from rollout_objectives.step import MINIBATCHES, Plan, line, metrics, preference_terms
+from rollout_objectives.terms import SUMS, tally, terms, units
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
 from rollout_tinker.settings import TinkerSettings
 from rollout_tinker.weights import checkpoint_name, pointer, write_pointer
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
+from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
+from rollout_train.recorder import Segment
+from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed, Weighted, segments_of
 
-__all__ = ["TinkerTrainer"]
+__all__ = ["TinkerTrainer", "route"]
 
+CUSTOM = "custom"
+"""The route of a loss Tinker has not built in: the objective, computed here."""
+BEHAVIOUR_CISPO = "cispo against the behaviour"
+"""`cispo` compared with the behaviour logprobs, clipped to 0 .. the cap (`UNTRUNCATED` for none): the importance
+weight, truncated."""
 UNTRUNCATED = 1e9
 """`cispo`'s upper clip when the importance weight is not truncated."""
+
+
+def route(objective: Objective, single: bool) -> str:
+    """How a minibatch of `objective` is sent to Tinker (`single`: the step makes one optimizer update): one of
+    Tinker's losses (`cross_entropy`, `importance_sampling`, `ppo`, `cispo`), `BEHAVIOUR_CISPO`, or `CUSTOM`."""
+    if objective.family == LIKELIHOOD:
+        return "cross_entropy"
+    if objective.family == PREFERENCE or objective.kl.target != "none" or objective.entropy.coefficient != 0.0:
+        return CUSTOM
+    correction = objective.importance.correction
+    if objective.ratio == "segment" or objective.clip.kind == "dual" or correction == "mask":
+        return CUSTOM
+    if objective.ratio == "none" or single:  # the gradient is the weighted advantage's: a ratio of 1 is not clipped
+        if correction in ("truncate", "untruncated") and single:
+            return BEHAVIOUR_CISPO
+        return "cross_entropy"
+    return {"ratio": "ppo", "weight": "cispo", "none": "importance_sampling"}[objective.clip.kind]
 
 
 @dataclass
 class _Segment:
     """A segment of the step, as Tinker sees it."""
 
-    weighted: Weighted
+    segment: Segment
     rows: list[int]
     behavior: torch.Tensor
     old: torch.Tensor | None = None
@@ -69,13 +106,15 @@ class TinkerTrainer:
     checkpoints (which Tinker's bridge, `rollout_tinker.bridges`, turns into an adapter engines here load). A client
     from the step before is used again when the parent is the state it saved. `service` is what calls Tinker: by
     default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
-    one so). `settings` are `TinkerSettings`'; those in `CHANGEABLE` it takes between steps
-    (`rollout_train.trainer.Changeable`)."""
+    one so). `settings` are `TinkerSettings`' (its `objective` among them); those in `CHANGEABLE`, and the changeable
+    components of its objective, it takes between steps (`rollout_train.trainer.Changeable`). Raises `ValueError` for
+    an objective that reads the reference or the entropy, which Tinker does not give here."""
 
     weights = "lora"
 
     def __init__(self, model: str, *, service: "Service | str | None" = None, **settings: Any) -> None:
         self.settings = TinkerSettings(**settings)
+        refused(self.settings.loss)
         self.budget = Budget(self.settings.segment_tokens, self.settings.segments_per_step)
         self.model = model
         self._service = service_of(service, self.settings.project)
@@ -84,13 +123,17 @@ class TinkerTrainer:
         self._lock = asyncio.Lock()
 
     @property
+    def objective(self) -> Objective:
+        return self.settings.loss
+
+    @property
     def changeable(self) -> Mapping[str, JsonValue]:
         return self.settings.changeable()
 
     def change(self, settings: Mapping[str, JsonValue]) -> None:
         self.settings = self.settings.changed(settings)  # (the live client goes on)
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         async with self._lock:
             started = time.monotonic()
             try:
@@ -137,30 +180,31 @@ class TinkerTrainer:
         return await self._service.create_training_client_from_state_async(weights), True
 
     async def _passes(
-        self, client: Trainable, batch: Sequence[Weighted], seed: int, fresh: bool
+        self, client: Trainable, batch: Sequence[Item], seed: int, fresh: bool
     ) -> tuple[dict[str, float], list[dict[str, float]], bool]:
-        """The step's passes over its segments on `client`: its metrics, each minibatch's line, and whether the
-        client is clean (no gradient left behind) to go on with."""
+        """The step's passes over its items on `client`: its metrics, each minibatch's line, and whether the client
+        is clean (no gradient left behind) to go on with."""
         started = time.monotonic()
         settings, objective = self.settings, self.settings.loss
         plan = Plan.of(batch, settings, seed)
         segments: dict[int, _Segment] = {}
-        for weighted in plan.segments:
-            behavior = torch.tensor(weighted.segment.logprobs, dtype=torch.float64)
-            if objective.reads_old and not bool(torch.isfinite(behavior).all()):
+        for segment in plan.segments:
+            behavior = torch.tensor(segment.logprobs, dtype=torch.float64)
+            if objective.needs_behaviour and not bool(torch.isfinite(behavior).all()):
                 raise ValueError("a sampled token has no behavior logprob")
-            segments[id(weighted)] = _Segment(weighted, rows(weighted), behavior)
+            segments[id(segment)] = _Segment(segment, rows(segment), behavior)
         updates = plan.minibatches(settings)
         single = len(updates) == 1
+        way = route(objective, single)
         billed = 0.0
 
         # Where the step starts, when more than one update needs it: each sampled token's logprob on these weights.
-        if objective.reads_old and not single and plan.segments:
-            data = [datum(each.segment.tokens, [], {"weights": []}) for each in plan.segments]
+        if objective.family != LIKELIHOOD and not single and segments:
+            parts = list(segments.values())
+            data = [datum(part.segment.tokens, [], {"weights": []}) for part in parts]
             out = await (await client.forward_async(data, "cross_entropy"))
-            billed += sum(len(each.segment.tokens) - 1 for each in plan.segments)
-            for weighted, found in zip(plan.segments, out.loss_fn_outputs, strict=True):
-                part = segments[id(weighted)]
+            billed += sum(len(part.segment.tokens) - 1 for part in parts)
+            for part, found in zip(parts, out.loss_fn_outputs, strict=True):
                 part.old = _logprobs(found)[part.rows]
         started_pass = time.monotonic()
 
@@ -169,23 +213,25 @@ class TinkerTrainer:
         optimizer: dict[str, list[float]] = {}
         lines: list[dict[str, float]] = []
         stopped = False
+        stops = objective.family != LIKELIHOOD and settings.max_kl is not None
         for update, minibatch in enumerate(updates):
-            parts = [segments[id(weighted)] for weighted in minibatch]
-            units = sum(objective.units(part.weighted.segment.sampled) for part in parts)
+            parts = [segments[id(each)] for each in _segments(minibatch)]
+            if objective.family == PREFERENCE:
+                count = float(len(minibatch))
+            else:
+                count = sum(units(objective, item.segment.sampled) for item in minibatch if isinstance(item, Weighted))
             rate = settings.rate(len(lines), fresh=fresh)
-            pending = await self._sent(client, parts, units, single)
-            billed += sum(len(part.weighted.segment.tokens) - 1 for part in parts) * (
-                2 if objective.kind == "policy_gradient" and objective.ratio == "segment" else 1
-            )
-            if objective.reads_old and settings.max_kl is not None and update > 0:  # the distance, before the update
-                sums = self._measured(parts, await pending)
-                if sums["moved"] / max(sums["tokens"], 1.0) > settings.max_kl:
+            pending = await self._sent(client, minibatch, parts, count, way)
+            billed += sum(len(part.segment.tokens) - 1 for part in parts) * (2 if way == CUSTOM else 1)
+            if stops and update > 0:  # the distance, before the update
+                sums = self._measured(minibatch, parts, await pending)
+                if sums["moved"] / max(sums["tokens"], 1.0) > (settings.max_kl or 0.0):
                     stopped = True
                     break
                 stepped = await (await client.optim_step_async(self._adam(rate)))
             else:  # the update sent at once, beside the forward-backward
                 optimizing = await client.optim_step_async(self._adam(rate))
-                sums = self._measured(parts, await pending)
+                sums = self._measured(minibatch, parts, await pending)
                 stepped = await optimizing
             moved = sums["moved"] / max(sums["tokens"], 1.0)
             for key, value in sums.items():
@@ -193,9 +239,9 @@ class TinkerTrainer:
             reported = {key: float(value) for key, value in (stepped.metrics or {}).items()}
             for key, value in reported.items():
                 optimizer.setdefault(key, []).append(value)
-            lines.append({**line(sums, units, rate), **{f"optimizer_{key}": value for key, value in reported.items()}})
+            lines.append({**line(sums, count, rate), **{f"optimizer_{key}": value for key, value in reported.items()}})
 
-        said = metrics(
+        found = metrics(
             totals,
             [(part.behavior, part.old) for part in segments.values() if part.old is not None],
             plan=plan,
@@ -207,77 +253,99 @@ class TinkerTrainer:
             stopped=stopped,
             start_seconds=started_pass - started,
         )
-        said["billed_tokens"] = billed
+        found["billed_tokens"] = billed
         norms = next((values for key, values in optimizer.items() if "grad" in key and "norm" in key), None)
         if norms:  # (if Tinker reports it: before clipping, mean over the updates)
-            said["gradient_norm"] = sum(norms) / len(norms)
-        return said, lines, not stopped
+            found["gradient_norm"] = sum(norms) / len(norms)
+        return found, lines, not stopped
 
-    async def _sent(self, client: Trainable, parts: list[_Segment], units: float, single: bool) -> Any:
+    async def _sent(
+        self, client: Trainable, minibatch: list[Item], parts: list[_Segment], count: float, way: str
+    ) -> Any:
         """A minibatch's forward-backward, sent: what awaits its output."""
         objective = self.settings.loss
-        if objective.kind == "likelihood":
-            data = [self._datum(part, weights=[part.weighted.advantage / units] * len(part.rows)) for part in parts]
-            return await client.forward_backward_async(data, "cross_entropy")
-        if objective.ratio == "segment":
+        if way == CUSTOM:
             return await client.forward_backward_custom_async(
-                [self._datum(part) for part in parts], self._custom(parts, units)
+                [self._datum(part) for part in parts], self._custom(minibatch, parts, count)
             )
-        if single:  # cispo, against the behaviour: its clipped ratio is our truncated weight, at the step's start
+        weighted = [item for item in minibatch if isinstance(item, Weighted)]
+        if objective.family == LIKELIHOOD:
             data = [
-                self._datum(
-                    part,
-                    logprobs=part.behavior.tolist(),
-                    advantages=[part.weighted.advantage / units] * len(part.rows),
-                )
-                for part in parts
+                self._datum(part, weights=[item.advantage * _scale(objective, part) / count] * len(part.rows))
+                for item, part in zip(weighted, parts, strict=True)
             ]
-            ceiling = objective.truncate if objective.truncate is not None else UNTRUNCATED
-            config = {"clip_low_threshold": 0.0, "clip_high_threshold": ceiling}
-            return await client.forward_backward_async(data, "cispo", config)
+            return await client.forward_backward_async(data, "cross_entropy")
         data: list[Datum] = []
-        for part in parts:
-            assert part.old is not None
-            weight = torch.exp(part.old - part.behavior)
-            if objective.truncate is not None:
-                weight = weight.clamp(max=objective.truncate)
-            data.append(
-                self._datum(
-                    part, logprobs=part.old.tolist(), advantages=(weight * part.weighted.advantage / units).tolist()
-                )
-            )
-        config = {"clip_low_threshold": 1 - objective.clip_low, "clip_high_threshold": 1 + objective.clip_high}
-        return await client.forward_backward_async(data, "ppo", config)
+        for item, part in zip(weighted, parts, strict=True):
+            scale = item.advantage * _scale(objective, part) / count
+            if way == BEHAVIOUR_CISPO:  # its clipped ratio is the truncated weight, at the step's start
+                data.append(self._datum(part, logprobs=part.behavior.tolist(), advantages=[scale] * len(part.rows)))
+                continue
+            weight = _weight(objective, part)
+            if way == "cross_entropy":
+                data.append(self._datum(part, weights=(weight * scale).tolist()))
+            else:
+                assert part.old is not None
+                data.append(self._datum(part, logprobs=part.old.tolist(), advantages=(weight * scale).tolist()))
+        if way == "cross_entropy":
+            return await client.forward_backward_async(data, "cross_entropy")
+        if way == BEHAVIOUR_CISPO:
+            config = {"clip_low_threshold": 0.0, "clip_high_threshold": _cap(objective)}
+            return await client.forward_backward_async(data, "cispo", config)
+        if way == "importance_sampling":
+            return await client.forward_backward_async(data, "importance_sampling")
+        clip = objective.clip
+        config = {"clip_low_threshold": 1 - clip.low, "clip_high_threshold": 1 + clip.high}
+        return await client.forward_backward_async(data, way, config)
 
-    def _custom(self, parts: list[_Segment], units: float) -> Any:
-        """The loss of a minibatch of segment ratios, as Tinker's custom loss takes it: `terms` of each datum's
-        sampled rows (the logprob at the step's start being, with one update, the logprob now)."""
+    def _custom(self, minibatch: list[Item], parts: list[_Segment], count: float) -> Any:
+        """The loss of a minibatch, as Tinker's custom loss takes it: the objective's terms of each datum's sampled
+        rows (the logprob at the step's start being, with one update, the logprob now)."""
         objective = self.settings.loss
 
         def loss(data: list[Datum], logprobs: list[torch.Tensor]) -> tuple[torch.Tensor, dict[str, float]]:
+            now = {
+                id(part.segment): found[part.rows].to(torch.float64)
+                for part, found in zip(parts, logprobs, strict=True)
+            }
+            if objective.family == PREFERENCE:
+                found_terms = preference_terms(objective, minibatch, now, {})
+                return torch.stack([each.loss for _, each in found_terms]).sum() / count, {}
             total = torch.zeros((), dtype=torch.float64)
-            for part, found in zip(parts, logprobs, strict=True):
-                now = found[part.rows].to(torch.float64)
-                old = part.old if part.old is not None else now.detach()
-                total = total + terms(objective, now, part.weighted.advantage, old, part.behavior).loss / units
+            for item, part in zip([each for each in minibatch if isinstance(each, Weighted)], parts, strict=True):
+                logprob = now[id(part.segment)]
+                old = part.old if part.old is not None else logprob.detach()
+                total = total + terms(objective, logprob, item.advantage, old, part.behavior).loss / count
             return total, {}
 
         return loss
 
-    def _measured(self, parts: list[_Segment], out: ForwardBackwardOutput) -> dict[str, float]:
+    def _measured(self, minibatch: list[Item], parts: list[_Segment], out: ForwardBackwardOutput) -> dict[str, float]:
         """A minibatch's `SUMS`, from the logprobs its forward-backward returned (the policy before its update)."""
         objective = self.settings.loss
         sums = dict.fromkeys(SUMS, 0.0)
+        now: dict[int, torch.Tensor] = {}
         for part, found in zip(parts, out.loss_fn_outputs, strict=True):
-            now = _logprobs(found)[part.rows]
-            if part.old is None and objective.reads_old:
-                part.old = now.clone()  # (one update: where the step starts is what the first pass found)
-            with torch.no_grad():
-                tally(sums, terms(objective, now, part.weighted.advantage, part.old, part.behavior), objective)
+            logprob = _logprobs(found)[part.rows]
+            if part.old is None and objective.family != LIKELIHOOD:
+                part.old = logprob.clone()  # (one update: where the step starts is what the first pass found)
+            now[id(part.segment)] = logprob
+        with torch.no_grad():
+            if objective.family == PREFERENCE:
+                for item, found in preference_terms(objective, minibatch, now, {}):
+                    tally(sums, found, objective, segments=float(len(segments_of(item))))
+                sums["moved"] = sum(
+                    float((part.old - now[id(part.segment)]).sum()) for part in parts if part.old is not None
+                )
+                sums["tokens"] = sum(float(now[id(part.segment)].numel()) for part in parts)
+                return sums
+            for item, part in zip([each for each in minibatch if isinstance(each, Weighted)], parts, strict=True):
+                logprob = now[id(part.segment)]
+                tally(sums, terms(objective, logprob, item.advantage, part.old, part.behavior), objective)
         return sums
 
     def _datum(self, part: _Segment, **values: Sequence[float]) -> Datum:
-        return datum(part.weighted.segment.tokens, part.rows, values)
+        return datum(part.segment.tokens, part.rows, values)
 
     def _adam(self, rate: float) -> AdamParams:
         """Adam as torch's AdamW is in the LoRA step (Tinker's own defaults are 0.95 and 1e-12)."""
@@ -296,6 +364,51 @@ class TinkerTrainer:
         write_pointer(into / WEIGHTS, said)
         write_pointer(into / STATE, {"state": state, "sampler": sampler, "sdk": _sdk()})
         (into / STATE / MINIBATCHES).write_text("".join(json.dumps(each) + "\n" for each in lines))
+
+
+def refused(objective: Objective) -> None:
+    """Raises `ValueError` for an objective Tinker cannot take here: one that reads the reference (Tinker's SDK offers
+    prompt logprobs from a sampler of the base model, not yet confirmed by a live test) or the entropy (Tinker returns
+    the sampled tokens' logprobs only)."""
+    if objective.needs_reference:
+        raise ValueError(
+            "Tinker gives no reference logprobs here (its SDK's prompt logprobs from a sampler of the base model are "
+            "not yet confirmed by a live test): reference = none"
+        )
+    if objective.needs_entropy:
+        raise ValueError("Tinker returns the sampled tokens' logprobs only, not the entropy: entropy.coefficient = 0")
+
+
+def _segments(minibatch: Sequence[Item]) -> list[Segment]:
+    """A minibatch's segments, each once, in order."""
+    return list({id(each): each for item in minibatch for each in segments_of(item)}.values())
+
+
+def _scale(objective: Objective, part: _Segment) -> float:
+    """What the aggregation scales each of a segment's tokens by, before the minibatch's units."""
+    if objective.aggregate == "segment_mean":
+        return 1.0 / max(len(part.rows), 1)
+    if objective.aggregate == "constant":
+        return 1.0 / objective.constant_tokens
+    return 1.0
+
+
+def _cap(objective: Objective) -> float:
+    """The importance weight's cap, as `cispo`'s upper clip."""
+    return UNTRUNCATED if objective.importance.correction == "untruncated" else objective.importance.cap
+
+
+def _weight(objective: Objective, part: _Segment) -> torch.Tensor:
+    """A segment's importance weights, each a constant, as the objective's correction makes them (ones for none)."""
+    importance = objective.importance
+    if importance.correction == "none":
+        return torch.ones(len(part.rows), dtype=torch.float64)
+    assert part.old is not None
+    log_weight = part.old - part.behavior
+    if importance.level == "segment":
+        log_weight = log_weight.mean().expand_as(part.old)
+    raw = torch.exp(log_weight)
+    return raw if importance.correction == "untruncated" else raw.clamp(max=importance.cap)
 
 
 def _logprobs(found: Any) -> torch.Tensor:

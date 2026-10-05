@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.live, pytest.mark.skipif(not torch.cuda.is_available()
 
 def test_a_step_starts_where_its_policy_is_and_weighs_where_the_tokens_were_sampled() -> None:
     from rollout_lora.policy import Policy
-    from rollout_lora.step import PolicyStep, sampled
+    from rollout_objectives.step import PolicyStep, sampled
 
     settings = LoraSettings(tokens_per_step=2_000, max_kl=None)  # (an update moves random tokens' logprobs a lot)
     policy = Policy.load(MODEL, rank=settings.rank, alpha=settings.alpha)

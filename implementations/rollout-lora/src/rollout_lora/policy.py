@@ -5,6 +5,8 @@ LoRA on its linear layers.
 
 `Policy.logprobs` computes the logprobs of sampled tokens. It runs the transformer over the whole sequence but the
 output layer (the vocabulary projection, the largest activation by far) only at the positions being scored.
+`Policy.logprobs_and_entropy` adds each position's entropy; `Policy.reference` gives the logprobs of the model trained
+over, the adapter switched off.
 
 Only what training text needs is kept on the GPU: a vision tower is dropped, and the token embedding table (as
 large as the output layer, and used only to look up a sequence's rows) is read from the checkpoint file as needed.
@@ -23,7 +25,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from rollout_lora.layers import add_lora, lora_parameters, save_adapter
+from rollout_lora.layers import adapter_off, add_lora, lora_parameters, save_adapter
 from rollout_lora.models import config, local, multimodal, quantized
 from rollout_lora.quantized import replace_compressed_linears
 
@@ -81,26 +83,37 @@ def body(model: nn.Module) -> Any:
 def scored(model: nn.Module, hidden: torch.Tensor, ids: torch.Tensor, positions: Sequence[int]) -> torch.Tensor:
     """Logprobs of `ids[p]` from the hidden state before it, for each p in `positions`, the output layer run a chunk
     of rows at a time (each recomputed for the backward pass, so the peak is one chunk's logits)."""
+    return scored_with_entropy(model, hidden, ids, positions, entropy=False)[0]
+
+
+def scored_with_entropy(
+    model: nn.Module, hidden: torch.Tensor, ids: torch.Tensor, positions: Sequence[int], *, entropy: bool = True
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """`scored`, and the entropy of the distribution at each of `positions` (with `entropy`; else zeros)."""
     device = hidden.device
     index = torch.tensor([position - 1 for position in positions], device=device)
     rows = hidden.index_select(0, index)
     targets = ids[0].index_select(0, torch.tensor(list(positions), device=device))
     head = cast(Any, model).lm_head
 
-    def chunk(rows: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def chunk(rows: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         logits = head(rows).float()
-        return -torch.nn.functional.cross_entropy(logits, targets, reduction="none")
+        found = -torch.nn.functional.cross_entropy(logits, targets, reduction="none")
+        if not entropy:
+            return found, torch.zeros_like(found)
+        logged = torch.log_softmax(logits, dim=-1)
+        return found, -(logged.exp() * logged).sum(-1)
 
     parts = [
         cast(
-            torch.Tensor,
+            tuple[torch.Tensor, torch.Tensor],
             checkpoint(
                 chunk, rows[start : start + LOGIT_ROWS], targets[start : start + LOGIT_ROWS], use_reentrant=False
             ),
         )
         for start in range(0, len(positions), LOGIT_ROWS)
     ]
-    return torch.cat(parts)
+    return torch.cat([part[0] for part in parts]), torch.cat([part[1] for part in parts])
 
 
 @dataclass
@@ -158,6 +171,12 @@ class Policy:
 
     def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         """Logprobs of `tokens[p]` given `tokens[:p]`, for each p in `positions` (all at least 1)."""
+        return self.logprobs_and_entropy(tokens, positions, entropy=False)[0]
+
+    def logprobs_and_entropy(
+        self, tokens: Sequence[int], positions: Sequence[int], *, entropy: bool = True
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """`logprobs`, and the entropy of the policy's distribution at each of `positions`."""
         device = next(iter(self.model.buffers())).device
         ids = torch.tensor([list(tokens)], device=device)
         if self.embedding is None:
@@ -165,7 +184,12 @@ class Policy:
         else:
             embedded = self.embedding(tokens, device).unsqueeze(0).requires_grad_(True)  # (for checkpointing)
             hidden = body(self.model)(inputs_embeds=embedded).last_hidden_state[0]
-        return scored(self.model, hidden, ids, positions)
+        return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+
+    def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
+        """`logprobs` under the reference: the model trained over, the adapter switched off (no gradient)."""
+        with torch.no_grad(), adapter_off(self.model):
+            return self.logprobs(tokens, positions)
 
     def save(self, directory: Path) -> Path:
         return save_adapter(self.model, directory, base_model=self.checkpoint, rank=self.rank, alpha=self.alpha)

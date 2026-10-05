@@ -9,12 +9,12 @@ from typing import Any
 import pytest
 import torch
 
-from rollout_lora.settings import LoraSettings
-from rollout_lora.step import PolicyStep
+from rollout_objectives.settings import StepSettings
+from rollout_objectives.step import PolicyStep
 from rollout_tinker import TinkerTrainer
 from rollout_tinker.testing import FakeService
 from rollout_tinker.weights import pointer
-from rollout_train.trainer import STATE, WEIGHTS, Files
+from rollout_train.trainer import STATE, WEIGHTS, Files, Labelled, Pair
 from tests.rollout_tinker.support import Bigram, segments
 
 SAME = ("loss", "clip_fraction", "mean_ratio", "kl_floor", "mean_mismatch", "mean_weight", "truncated_fraction",
@@ -56,7 +56,7 @@ async def test_a_step_on_tinker_moves_the_model_as_the_lora_step_does(case: str,
     service = FakeService(vocabulary=24, seed=3)
     taken, into = await stepped(service, settings, tmp_path)
     policy = Bigram(service)
-    expected = PolicyStep(policy, LoraSettings(**ours(settings))).step(segments(service, 12), seed=7)
+    expected = PolicyStep(policy, StepSettings(**ours(settings))).step(segments(service, 12), seed=7)
 
     state = pointer(into / WEIGHTS, "state")
     assert state is not None and pointer(into / STATE, "state") == state
@@ -84,7 +84,7 @@ async def test_a_stop_at_max_kl_comes_where_the_lora_step_stops_and_leaves_the_c
     into = tmp_path / "first"
     taken = await trainer.step(segments(service, 12), seed=7, parent=None, into=into)
     policy = Bigram(service)
-    expected = PolicyStep(policy, LoraSettings(**ours(settings))).step(segments(service, 12), seed=7)
+    expected = PolicyStep(policy, StepSettings(**ours(settings))).step(segments(service, 12), seed=7)
     assert taken.metrics["stopped_at_max_kl"] == expected["stopped_at_max_kl"] == 1.0
     assert taken.metrics["optimizer_steps"] == expected["optimizer_steps"] > 0
     state = pointer(into / WEIGHTS, "state")
@@ -109,9 +109,9 @@ async def test_a_step_from_its_parent_goes_on_with_its_optimizer_on_the_client_t
 
     # The same as the LoRA step going on with its optimizer's state:
     policy = Bigram(service)
-    before = PolicyStep(policy, LoraSettings(**settings))
+    before = PolicyStep(policy, StepSettings(**settings))
     before.step(segments(service, 8), seed=1)
-    after = PolicyStep(policy, LoraSettings(**settings), fresh=False)
+    after = PolicyStep(policy, StepSettings(**settings), fresh=False)
     after.optimizer.load_state_dict(before.optimizer.state_dict())
     after.step(segments(service, 8, seed=5), seed=2)
     state = pointer(second / WEIGHTS, "state")
@@ -142,7 +142,7 @@ async def test_a_parent_given_without_its_state_starts_a_fresh_optimizer_from_it
     assert service.calls[0] == f"state {parent_state}" and taken.metrics["warmup_updates"] == 2.0
 
     policy = Bigram(service, service.table(parent_state))
-    PolicyStep(policy, LoraSettings(**settings), fresh=True).step(segments(service, 8, seed=5), seed=2)
+    PolicyStep(policy, StepSettings(**settings), fresh=True).step(segments(service, 8, seed=5), seed=2)
     state = pointer(tmp_path / "b" / WEIGHTS, "state")
     assert state is not None
     torch.testing.assert_close(service.table(state), policy.table.detach(), rtol=1e-6, atol=1e-9)
@@ -201,3 +201,105 @@ async def test_it_takes_some_settings_between_steps_and_goes_on_with_its_client(
     assert taken.metrics["learning_rate"] == 0.01 and trainer.changeable["max_kl"] == 0.5
     assert not any(call.startswith(("lora", "state")) for call in service.calls)  # (the live client went on)
     assert '"learning_rate": 0.01' in (second / STATE / "minibatches.jsonl").read_text()
+
+
+RTOL, ATOL = 1e-5, 1e-8
+"""How close two paths' weights are after several updates: Tinker takes what it is sent in float32 (the logprobs a
+built-in loss compares with, its advantages, a custom loss's gradient), and Adam moves a weight whose gradient is near
+zero by about the rate whatever its size, so a rounding there shows in the eighth decimal."""
+
+BUILT_IN = {
+    # name: settings, and the built-in loss a step sends
+    "default, one update": ({"tokens_per_step": 10**6}, "forward_backward cispo"),
+    "default, several": ({"tokens_per_step": 40}, "forward_backward ppo"),
+    "ppo_clip": ({"objective": "ppo_clip", "tokens_per_step": 40}, "forward_backward ppo"),
+    "cispo": ({"objective": "cispo", "tokens_per_step": 40}, "forward_backward cispo"),
+    "unclipped": (
+        {"objective": {"preset": "dapo", "clip.kind": "none"}, "tokens_per_step": 40},
+        "forward_backward importance_sampling",
+    ),
+    "reinforce": ({"objective": "reinforce", "tokens_per_step": 40}, "forward_backward cross_entropy"),
+    "reinforce, truncated, one update": (
+        {"objective": {"preset": "reinforce", "importance.correction": "truncate"}, "tokens_per_step": 10**6},
+        "forward_backward cispo",
+    ),
+    "a segment mean, one update": (
+        {"objective": {"preset": "dr_grpo", "aggregate": "segment_mean"}, "tokens_per_step": 10**6},
+        "forward_backward cross_entropy",
+    ),
+    "dr_grpo": ({"objective": "dr_grpo", "tokens_per_step": 40}, "forward_backward ppo"),
+    "sft": ({"objective": "sft", "tokens_per_step": 40}, "forward_backward cross_entropy"),
+}
+
+
+def custom_route(objective: object, single: bool) -> str:
+    """Every objective sent as a custom loss."""
+    import rollout_tinker.trainer
+
+    return rollout_tinker.trainer.CUSTOM
+
+
+@pytest.mark.parametrize("case", list(BUILT_IN))
+async def test_a_built_in_loss_moves_the_model_as_the_custom_loss_and_the_lora_step_do(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import rollout_tinker.trainer
+
+    settings, call = BUILT_IN[case]
+    built_in = FakeService(vocabulary=24, seed=3)
+    taken, into = await stepped(built_in, settings, tmp_path / "built-in")
+    assert call in built_in.calls and "custom" not in built_in.calls, built_in.calls
+
+    monkeypatch.setattr(rollout_tinker.trainer, "route", custom_route)
+    custom = FakeService(vocabulary=24, seed=3)
+    by_hand, again = await stepped(custom, settings, tmp_path / "custom")
+    assert "custom" in custom.calls
+
+    policy = Bigram(built_in)
+    expected = PolicyStep(policy, StepSettings(**ours(settings))).step(segments(built_in, 12), seed=7)
+    moved = built_in.table(str(pointer(into / WEIGHTS, "state")))
+    assert float(moved.abs().max()) > 0.01
+    torch.testing.assert_close(moved, custom.table(str(pointer(again / WEIGHTS, "state"))), rtol=RTOL, atol=ATOL)
+    torch.testing.assert_close(moved, policy.table.detach(), rtol=RTOL, atol=ATOL)
+    for key in SAME:
+        assert taken.metrics[key] == pytest.approx(by_hand.metrics[key], rel=1e-6, abs=1e-7), key
+        assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
+
+
+def preferences(service: FakeService, count: int, *, labelled: bool = False) -> list[Pair | Labelled]:
+    """Pairs (or labelled examples) of the fake's segments, a side of one or two."""
+    made = [weighted.segment for weighted in segments(service, 2 * count)]
+    if labelled:
+        return [Labelled((segment,), index % 3 != 0) for index, segment in enumerate(made)]
+    return [Pair(tuple(made[2 * index : 2 * index + 1 + index % 2]), (made[2 * index + 1],)) for index in range(count)]
+
+
+@pytest.mark.parametrize("preset", ["simpo", "orpo"])
+@pytest.mark.parametrize("tokens_per_step", [10**6, 40])
+async def test_a_preference_loss_without_a_reference_trains_on_tinker_as_the_lora_step_does(
+    preset: str, tokens_per_step: int, tmp_path: Path
+) -> None:
+    service = FakeService(vocabulary=24, seed=3)
+    settings = ours({"objective": preset, "tokens_per_step": tokens_per_step})
+    trainer = TinkerTrainer("tiny", service=service, **settings)
+    taken = await trainer.step(preferences(service, 6), seed=7, parent=None, into=tmp_path / "made")
+    assert "custom" in service.calls and ("forward" in service.calls) == (tokens_per_step == 40)
+    policy = Bigram(service)
+    expected = PolicyStep(policy, StepSettings(**settings)).step(preferences(service, 6), seed=7)
+    state = pointer(tmp_path / "made" / WEIGHTS, "state")
+    assert state is not None
+    torch.testing.assert_close(service.table(state), policy.table.detach(), rtol=RTOL, atol=ATOL)
+    for key in ("loss", "items", "preference_accuracy", "preference_margin", "chosen_log_ratio", "kl_moved",
+                "optimizer_steps", "segments", "tokens"):  # fmt: skip
+        assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
+
+
+def test_tinker_refuses_an_objective_that_reads_the_reference_or_the_entropy() -> None:
+    with pytest.raises(ValueError, match="no reference logprobs"):
+        TinkerTrainer("tiny", service=FakeService(vocabulary=24), objective="dpo")
+    with pytest.raises(ValueError, match="no reference logprobs"):
+        TinkerTrainer("tiny", service=FakeService(vocabulary=24), objective="grpo")
+    with pytest.raises(ValueError, match="entropy"):
+        TinkerTrainer(
+            "tiny", service=FakeService(vocabulary=24), objective={"preset": "dapo", "entropy.coefficient": 0.01}
+        )

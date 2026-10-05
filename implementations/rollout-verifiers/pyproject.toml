@@ -32,6 +32,7 @@ rollout = { path = "../../libraries/rollout", editable = true }
 rollout-train = { path = "../../libraries/rollout-train", editable = true }
 rollout-vllm = { path = "../rollout-vllm", editable = true }
 rollout-lora = { path = "../rollout-lora", editable = true }
+rollout-objectives = { path = "../rollout-objectives", editable = true }
 rollout-qwen = { path = "../rollout-qwen", editable = true }
 rollout-s3 = { path = "../rollout-s3", editable = true }
 

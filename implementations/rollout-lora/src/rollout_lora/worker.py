@@ -23,7 +23,7 @@ from typing import Any
 
 from rollout.processes import end_with_parent
 from rollout_lora.settings import LoraSettings
-from rollout_train.trainer import STATE, WEIGHTS, Files, StepFailed, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Files, Item, StepFailed
 
 
 class TrainerProcess:
@@ -35,9 +35,7 @@ class TrainerProcess:
         self._lock = asyncio.Lock()
         self._process: BaseProcess | None = None
 
-    async def step(
-        self, segments: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path
-    ) -> dict[str, float]:
+    async def step(self, segments: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> dict[str, float]:
         """Train one step on the GPU (the engine must have freed it) from `parent`, and leave the weights it trains
         (the adapter, or the full weights) in `into/weights` and the optimizer's state in `into/state`."""
         async with self._lock:
@@ -48,7 +46,7 @@ class TrainerProcess:
                     self._process.terminate()
                 raise
 
-    def _run(self, segments: list[Weighted], seed: int, parent: Files | None, into: Path) -> dict[str, float]:
+    def _run(self, segments: list[Item], seed: int, parent: Files | None, into: Path) -> dict[str, float]:
         context = multiprocessing.get_context("spawn")
         ours, child = context.Pipe()
         arguments = (child, self.checkpoint, self.settings, self.weights, segments, seed, parent, into)
@@ -78,7 +76,7 @@ def _step(
     checkpoint: str,
     settings: LoraSettings,
     weights: str,
-    segments: list[Weighted],
+    segments: list[Item],
     seed: int,
     parent: Files | None,
     into: Path,
@@ -98,11 +96,12 @@ def _step(
         from rollout_lora.full import FullPolicy
         from rollout_lora.layers import load_adapter
         from rollout_lora.policy import Policy
-        from rollout_lora.step import MINIBATCHES, PolicyStep
+        from rollout_objectives.step import MINIBATCHES, PolicyStep
 
         policy: Policy | FullPolicy
-        if weights == "full":  # every weight, from the parent's (or the model's own)
-            policy = FullPolicy.load(str(parent.weights) if parent is not None else checkpoint)
+        if weights == "full":  # every weight, from the parent's (or the model's own), and the reference if asked for
+            reference = checkpoint if settings.frozen_reference and settings.loss.needs_reference else None
+            policy = FullPolicy.load(str(parent.weights) if parent is not None else checkpoint, reference=reference)
         else:
             policy = Policy.load(
                 checkpoint,

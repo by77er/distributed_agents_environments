@@ -1,7 +1,7 @@
 """Training and sampling at Thinking Machines (Tinker): implementations of `rollout_train.Trainer` and of `Engine`.
 
-- `TinkerTrainer`: LoRA steps on Tinker, with `rollout_lora`'s objective as Tinker's losses; a version's files point
-  at its Tinker checkpoints. `TinkerSettings`: its settings.
+- `TinkerTrainer`: LoRA steps on Tinker, the objective (`rollout_objectives`) sent as Tinker's losses; a version's
+  files point at its Tinker checkpoints. `TinkerSettings`: its settings.
 - `TinkerEngine`: token-in sampling at Tinker, of the base model or of a version's sampler checkpoint.
 - `service`: what they ask of Tinker's SDK, and the session they open by default (the SDK finds the key).
   `testing`: a fake service for tests. `weights`: pointers, and adapters in PEFT's layout. `bridges`: a checkpoint's

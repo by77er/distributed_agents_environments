@@ -17,7 +17,7 @@ from rollout_train.trainer import Weighted
 
 
 class Bigram:
-    """The fake's model, as `rollout_lora.step.PolicyStep` trains a policy: the learnable table is its one
+    """The fake's model, as `rollout_objectives.step.PolicyStep` trains a policy: the learnable table is its one
     parameter."""
 
     def __init__(self, service: FakeService, table: torch.Tensor | None = None) -> None:

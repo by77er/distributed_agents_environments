@@ -2,10 +2,11 @@
 # (torch's annotations leave module iteration and autograd functions partly untyped.)
 """LoRA adapters over frozen layers, saved in PEFT's format so engines (vLLM) load them as they are."""
 
+import contextlib
 import json
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,8 +26,12 @@ class LoraLinear(nn.Module):
         nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B.weight)
         self.scaling = alpha / rank
+        self.enabled = True
+        """Switched off (`adapter_off`), the layer is its base."""
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        if not self.enabled:
+            return cast(torch.Tensor, self.base(inputs))
         return (
             cast(torch.Tensor, self.base(inputs))
             + self.lora_B(self.lora_A(inputs.to(self.lora_A.weight.dtype))).to(inputs.dtype) * self.scaling
@@ -53,6 +58,19 @@ def add_lora(
         setattr(model.get_submodule(parent_name), child, lora)
         wrapped.append(name)
     return wrapped
+
+
+@contextlib.contextmanager
+def adapter_off(model: nn.Module) -> Generator[None]:
+    """The model with every LoRA layer switched off while the block runs: the model it was added to."""
+    layers = [module for module in model.modules() if isinstance(module, LoraLinear)]
+    for layer in layers:
+        layer.enabled = False
+    try:
+        yield
+    finally:
+        for layer in layers:
+            layer.enabled = True
 
 
 def lora_parameters(model: nn.Module) -> list[nn.Parameter]:

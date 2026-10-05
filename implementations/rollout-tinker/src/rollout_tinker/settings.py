@@ -1,9 +1,9 @@
-"""The Tinker trainer's settings: a policy step's (`rollout_lora.settings.StepSettings`, the ones `LoraTrainer` takes
-too, so a profile switches trainers by changing `kind`), with Tinker's defaults, and a project."""
+"""The Tinker trainer's settings: a policy step's (`rollout_objectives.settings.StepSettings`, the ones `LoraTrainer`
+takes too, so a profile switches trainers by changing `kind`), with Tinker's defaults, and a project."""
 
 from dataclasses import dataclass
 
-from rollout_lora.settings import CHANGEABLE, StepSettings
+from rollout_objectives.settings import CHANGEABLE, StepSettings
 
 __all__ = ["CHANGEABLE", "TinkerSettings"]
 

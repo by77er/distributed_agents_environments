@@ -3899,6 +3899,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "rollout" },
+    { name = "rollout-objectives" },
     { name = "rollout-train" },
     { name = "safetensors" },
     { name = "torch" },
@@ -3912,10 +3913,26 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.30" },
     { name = "numpy", specifier = ">=2" },
     { name = "rollout", editable = "../../libraries/rollout" },
+    { name = "rollout-objectives", editable = "../rollout-objectives" },
     { name = "rollout-train", editable = "../../libraries/rollout-train" },
     { name = "safetensors", specifier = ">=0.5" },
     { name = "torch", specifier = ">=2.5" },
     { name = "transformers", specifier = ">=4.57" },
+]
+
+[[package]]
+name = "rollout-objectives"
+version = "0.0.0"
+source = { editable = "../rollout-objectives" }
+dependencies = [
+    { name = "rollout-train" },
+    { name = "torch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rollout-train", editable = "../../libraries/rollout-train" },
+    { name = "torch", specifier = ">=2.5" },
 ]
 
 [[package]]
