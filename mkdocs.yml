@@ -7,12 +7,17 @@ use_directory_urls: false  # the built site also works when opened straight from
 
 theme:
   name: material
+  language: en
   features:
     - navigation.sections
     - navigation.indexes
+    - navigation.path
     - navigation.top
     - navigation.footer
+    - navigation.tracking
+    - search.suggest
     - search.highlight
+    - search.share
     - content.code.copy
     - toc.follow
   palette:
@@ -37,60 +42,85 @@ markdown_extensions:
       permalink: true
       slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}  # GitHub-compatible anchors
   - pymdownx.highlight
-  - pymdownx.superfences
   - pymdownx.inlinehilite
+  - pymdownx.superfences
 
 plugins:
-  - search
+  - search:
+      lang: en
+      # Split words at punctuation, dots and underscores, and before capitals, so that `rollout_train.cluster`,
+      # `EpisodeRunner` and `max_lag` are found by their parts.
+      separator: '[\s​\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
 
-# Every page under docs/ appears here once, in the order of docs/README.md.
+validation:
+  links:
+    absolute_links: warn
+    unrecognized_links: warn
+
+# Every page under docs/ appears here once. docs/README.md and each section's index page list the same pages, in this
+# order.
 nav:
   - Home: README.md
-  - Developer guide:
-      - guide/README.md
+  - Start here:
+      - start/README.md
       - "Three ways in": guide/perspectives.md
-      - "Getting started": guide/getting-started.md
-      - "Tasks": guide/tasks.md
-      - "Tools": guide/tools.md
-      - "Agents": guide/agents.md
-      - "Content": guide/content.md
-      - "Runs and events": guide/runs-and-events.md
-      - "Models": guide/models.md
-      - "Testing": guide/testing.md
-      - "Deploying": guide/deploying.md
-      - "The cluster config and run settings": guide/cluster.md
-      - "Writing an environment others can import": guide/publishing.md
-      - "API reference": guide/reference.md
-  - Architecture:
-      - "Overview": architecture/overview.md
-      - "Glossary": architecture/glossary.md
-  - Libraries:
-      - rollout:
+      - "Architecture": architecture/overview.md
+  - Write an environment:
+      - guide/README.md
+      - "Run a first episode": guide/getting-started.md
+      - "Write a task": guide/tasks.md
+      - "Give the model tools": guide/tools.md
+      - "Choose what the model sees": guide/agents.md
+      - "Messages, files and digests": guide/content.md
+      - "What a run records": guide/runs-and-events.md
+      - "Use a hosted model": guide/models.md
+      - "Test with a scripted model": guide/testing.md
+      - "Import an environment from git": guide/publishing.md
+      - The harness in depth:
           - libraries/rollout/README.md
           - "Sandboxes": libraries/rollout/sandboxes.md
           - "Determinism": libraries/rollout/determinism.md
           - "Hooks": libraries/rollout/hooks.md
-          - "Memory": libraries/rollout/memory.md
-          - Contracts:
-              - libraries/rollout/contracts/README.md
-              - "Identifiers": libraries/rollout/contracts/identifiers.md
-              - "Canonical content": libraries/rollout/contracts/canonical-content.md
-              - "Run events": libraries/rollout/contracts/run-events.md
-              - "Effects": libraries/rollout/contracts/effects.md
-              - "Model endpoint contract": libraries/rollout/contracts/model-endpoint.md
-      - rollout-train:
-          - "Rollouts": libraries/rollout-train/rollouts.md
-          - "Checkpoints and the ledger": libraries/rollout-train/checkpoints.md
-          - "Episodes": libraries/rollout-train/episodes.md
-          - "Training": libraries/rollout-train/training.md
-          - "Evals": libraries/rollout-train/evals.md
-          - "Datasets and supervised steps": libraries/rollout-train/datasets.md
-          - "Channels": libraries/rollout-train/channels.md
-          - "Recording": libraries/rollout-train/recorder.md
-          - "Harnesses over HTTP": libraries/rollout-train/harness-endpoint.md
-          - "The gateway": libraries/rollout-train/gateway.md
-          - "Monitor": libraries/rollout-train/monitor.md
-  - Implementations:
+          - "Memory for long episodes": libraries/rollout/memory.md
+      - Example environments:
+          - "Minecraft team": products/minecraft-team.md
+          - "Gridworld": products/gridworld.md
+          - "Judging": products/judging.md
+  - Train a model:
+      - train/README.md
+      - "Episode runners": libraries/rollout-train/rollouts.md
+      - "Episodes": libraries/rollout-train/episodes.md
+      - "The training loop and objectives": libraries/rollout-train/training.md
+      - "Checkpoints, runs and the ledger": libraries/rollout-train/checkpoints.md
+      - "Datasets and supervised steps": libraries/rollout-train/datasets.md
+      - "Channels and engines": libraries/rollout-train/channels.md
+      - "Record turns for training": libraries/rollout-train/recorder.md
+      - "The gateway": libraries/rollout-train/gateway.md
+      - "Train any harness over HTTP": libraries/rollout-train/harness-endpoint.md
+  - Evaluate a model:
+      - evaluate/README.md
+      - "Suites and evals": libraries/rollout-train/evals.md
+  - Deploy the platform:
+      - deploy/README.md
+      - "What runs where": deploy/roles.md
+      - "Choose a setup": deploy/setups.md
+      - "Prepare a Kubernetes cluster": deploy/kubernetes.md
+      - "Build the platform image": deploy/image.md
+      - "Install the Helm chart": deploy/helm.md
+      - "Share GPUs": deploy/gpus.md
+      - "Postgres and S3": deploy/stores.md
+      - "Volumes and backups": deploy/backups.md
+      - "Ingress, TLS and sign-in": deploy/access.md
+      - "Remote providers": deploy/providers.md
+      - "Start runs and evals": deploy/runs.md
+      - "Troubleshooting": deploy/troubleshooting.md
+      - "Local Postgres and S3 for development": development/local-services.md
+      - "Deploying with the rollout command": guide/deploying.md
+  - Operate the platform:
+      - operate/README.md
+      - "The monitor": libraries/rollout-train/monitor.md
+  - Extend the platform:
+      - extend/README.md
       - "vLLM engine": implementations/rollout-vllm.md
       - "LoRA trainer": implementations/rollout-lora.md
       - "Objectives in torch": implementations/rollout-objectives.md
@@ -98,20 +128,27 @@ nav:
       - "Qwen renderers": implementations/rollout-qwen.md
       - "Gemma renderers": implementations/rollout-gemma.md
       - "verifiers environments": implementations/rollout-verifiers.md
-  - Environments:
-      - "Minecraft team": products/minecraft-team.md
-      - "Gridworld": products/gridworld.md
-      - "Judging": products/judging.md
-  - Development:
-      - "Local services": development/local-services.md
-  - Research:
-      - "The policy graph": research/policy-dag.md
-      - "Curricula": research/curricula.md
-      - "Thinking Machines' API": research/thinking-machines.md
-      - "Prime Intellect's verifiers": research/prime-compat.md
-      - "SFT datasets": research/sft-datasets.md
-      - "Ledger guarantees": research/ledger-guarantees.md
-      - "Cleanup inventory": research/cleanup-inventory.md
+      - Contracts:
+          - libraries/rollout/contracts/README.md
+          - "Identifiers": libraries/rollout/contracts/identifiers.md
+          - "Canonical content": libraries/rollout/contracts/canonical-content.md
+          - "Run events": libraries/rollout/contracts/run-events.md
+          - "Effects": libraries/rollout/contracts/effects.md
+          - "Model endpoint": libraries/rollout/contracts/model-endpoint.md
+  - Reference:
+      - reference/README.md
+      - "API reference": guide/reference.md
+      - "Cluster config and run settings": guide/cluster.md
+      - "Glossary": architecture/glossary.md
+  - Design notes:
+      - research/README.md
       - "Runtime design": research/runtime-design.md
       - "Objectives design": research/objectives-design.md
       - "RunPod pods as providers": research/runpod-providers.md
+      - "Ledger guarantees": research/ledger-guarantees.md
+      - "The checkpoint graph": research/policy-dag.md
+      - "Curricula": research/curricula.md
+      - "SFT datasets": research/sft-datasets.md
+      - "Thinking Machines' API": research/thinking-machines.md
+      - "Prime Intellect's verifiers": research/prime-compat.md
+      - "Cleanup inventory": research/cleanup-inventory.md

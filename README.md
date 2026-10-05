@@ -86,10 +86,11 @@ uv sync --all-extras     # with vLLM, the trainers, Tinker and the model familie
 uv run pytest            # the tests, including every example in the docs
 ```
 
-- [Getting started](docs/guide/getting-started.md): write a task and run an episode
-- [Three ways in](docs/guide/perspectives.md): building an environment, designing training, deploying
-- [Deploying](docs/guide/deploying.md) on one machine or on Kubernetes ([K3s with a GPU](deploy/k3s/README.md))
-- [All documentation](docs/README.md) and the [API reference](docs/guide/reference.md)
+- [Start here](docs/start/README.md): what rollout does and the ideas it is built on, in five minutes
+- [Run a first episode](docs/guide/getting-started.md): write a task and play one episode against a scripted model
+- [Deploy the platform](docs/deploy/README.md): on one machine, or on Kubernetes with the Helm chart
+  ([K3s with a GPU](deploy/k3s/README.md))
+- [All documentation](docs/README.md), by what you want to do, and the [API reference](docs/guide/reference.md)
 
 ## Repository
 
