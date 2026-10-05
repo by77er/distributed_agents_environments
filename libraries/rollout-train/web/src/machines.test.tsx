@@ -37,7 +37,6 @@ const machines = (): MachinesData => ({
       leases: [{ key: "train/3/1/1/world", kind: "minecraft", sandbox: "world", run: "train", group: 3, episode: 1, attempt: 1, run_id: "r_1", holds: true, at: 80, seconds: 600, lost: false }] },
   ],
   engines: [],
-  launchers: [],
   gateways: [],
 });
 
@@ -65,7 +64,7 @@ describe("machines", () => {
   it("call a role by its name on its machine", () => {
     expect(shortName("runners", "gpu-1/train", "gpu-1")).toBe("train");
     expect(shortName("pools", "minecraft@gpu-1/train", "gpu-1")).toBe("minecraft");
-    expect(shortName("launchers", "launcher/gpu-1", "gpu-1")).toBe("");
+    expect(shortName("gateways", "gateway/gpu-1", "gpu-1")).toBe("");
     expect(shortName("engines", "gpu-2", "gpu-2")).toBe("");
     expect(shortName("gateways", "gateway/edge/0.0.0.0:8443", "edge")).toBe("0.0.0.0:8443");
   });

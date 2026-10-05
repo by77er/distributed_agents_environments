@@ -35,6 +35,8 @@ export const episodePlace = (id: string, slot?: string | null) =>
 export const launchPlace = "/runs/new";
 /** The new run's form, with an environment chosen. */
 export const launchOn = (environment: string) => `${launchPlace}?environment=${encodeURIComponent(environment)}`;
+/** The New run form with a base model chosen. */
+export const launchFor = (model: string) => `${launchPlace}?model=${encodeURIComponent(model)}`;
 export const checkpointPlace = (id: string) => `/checkpoint/${encodeURIComponent(id)}`;
 /** A base model, a root of the checkpoints' graph, by name. */
 export const basePlace = (model: string) => `/base/${encodeURIComponent(model)}`;

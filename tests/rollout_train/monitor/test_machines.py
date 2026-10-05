@@ -1,7 +1,7 @@
 """The Machines page's endpoint: every machine that beats and the roles on it, from fake heartbeats and the ledger: the
 runners and the episodes their claims hold, the pools and their leases, an engine host and how far behind its run's
-wanted checkpoint each engine is, a launcher and its launches going, a gateway; each alive or gone by the store's
-clock."""
+wanted checkpoint each engine is, a run's driver that waits for what it asked Ray for, a gateway; each alive or gone by
+the store's clock."""
 
 import time
 from collections.abc import Mapping
@@ -14,8 +14,6 @@ from pydantic import JsonValue
 from rollout.harness.sandboxes import Lease
 from rollout_train.gateway.beats import GATEWAY
 from rollout_train.inference.remote import ENGINES
-from rollout_train.launcher import LAUNCHER
-from rollout_train.launches import Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.machines import machines
 from rollout_train.monitor.system import System
@@ -33,9 +31,8 @@ MACHINE: dict[str, Any] = {"memory": {"available": 2**33, "total": 2**34}, "acce
 
 
 async def scratch(tmp_path: Path) -> FileLedger:
-    """A ledger with a run whose episodes a runner claimed, a pool's leases, what its channel should serve, a
-    launch going, and the beats of a runner, a pool on a machine of its own, an engine host, a launcher and a
-    gateway."""
+    """A ledger with a run whose episodes a runner claimed, a pool's leases, what its channel should serve, and the
+    beats of a runner, a pool on a machine of its own, an engine host, a run's driver that waits, and a gateway."""
     ledger = FileLedger(tmp_path / "ledger")
     fence = await ledger.take(scope("train"))
     await ledger.append(table("train", STARTS), "1", {"started": time.time(), "host": "gpu-1"}, fence)
@@ -51,11 +48,6 @@ async def scratch(tmp_path: Path) -> FileLedger:
     await leases.put(Lease(key="train/1/1/1/world", kind="minecraft", pool=pool, handle="s-1", at=now, seconds=600))
     await leases.put(Lease(key="train/1/9/1/world", kind="minecraft", pool=pool, handle="s-2", at=now, lost=True))
     await leases.put(Lease(key="by-hand/world", kind="docker", pool="docker@far", handle="s-3", at=time.time()))
-    launches = launches_of(ledger)
-    assert launches is not None
-    going = await launches.ask(Asked(profile="one-gpu", environment="c:c", name="diamonds"))
-    await launches.claim(going.id, "launcher/gpu-1")
-    await launches.ask(Asked(profile="one-gpu", environment="c:c", name="not claimed"))
 
     beats = presence_of(ledger)
     assert beats is not None
@@ -69,9 +61,9 @@ async def scratch(tmp_path: Path) -> FileLedger:
                           "tokens_per_second": 90.0, "mean_concurrency": 2.0, "engines": engines}  # fmt: skip
     await beats.beat("gpu-2", {"kind": ENGINES, "host": "gpu-2", "follows": "train", "machine": MACHINE,
                                "channels": [channel]})  # fmt: skip
-    offered: JsonValue = [{"profile": "one-gpu", "path": "one.toml", "model": "m", "weights": "lora", "settings": {}}]
-    await beats.beat("launcher/gpu-1", {"kind": LAUNCHER, "host": "gpu-1", "machine": MACHINE, "profiles": offered,
-                                        "environments": ["c:c"], "at_once": 1, "playing": 1})  # fmt: skip
+    waiting: JsonValue = ["run/next/trainer (1 GPU: pending creation)"]
+    await beats.beat("run/next", {"kind": "run", "host": "gpu-1", "run": "next", "machine": MACHINE,
+                                  "waiting": waiting})  # fmt: skip
     await beats.beat("gateway/edge/0.0.0.0:8443", {"kind": GATEWAY, "host": "edge", "listen": "0.0.0.0:8443",
                                                    "channels": []})  # fmt: skip
     return ledger
@@ -85,10 +77,12 @@ async def test_every_role_on_every_machine_with_what_it_holds(tmp_path: Path) ->
     gpu_1 = next(host for host in shown["hosts"] if host["host"] == "gpu-1")
     assert gpu_1["alive"] and gpu_1["machine"]["accelerators"] == [GPU] and len(gpu_1["history"]) == 1
     assert sorted((role["kind"], role["name"]) for role in gpu_1["roles"]) == [
-        ("launchers", "launcher/gpu-1"), ("pools", "minecraft@gpu-1/train"), ("runners", "gpu-1/train"),
+        ("pools", "minecraft@gpu-1/train"), ("runners", "gpu-1/train"), ("runners", "run/next"),
     ]  # fmt: skip
 
-    (runner,) = shown["runners"]
+    runner, driver = shown["runners"]
+    assert driver == driver | {"name": "run/next", "run": "next", "places": 0, "claims": [], "alive": True}
+    assert driver["waiting"] == ["run/next/trainer (1 GPU: pending creation)"]
     assert runner == runner | {"name": "gpu-1/train", "host": "gpu-1", "alive": True, "run": "train"}
     assert (runner["places"], runner["playing"], runner["free"]) == (6, 2, 4)
     assert [(claim["run"], claim["group"], claim["episode"], claim["run_id"]) for claim in runner["claims"]] == [
@@ -118,16 +112,17 @@ async def test_every_role_on_every_machine_with_what_it_holds(tmp_path: Path) ->
         {"address": "http://gpu-2:8000", "serving": "ck-1", "version": 1, "behind": 1}
     ]
 
-    (launcher,) = shown["launchers"]
-    assert launcher["profiles"] == [{"profile": "one-gpu", "model": "m", "weights": "lora"}]
-    assert launcher["environments"] == ["c:c"] and [each["name"] for each in launcher["launches"]] == ["diamonds"]
+    assert "launchers" not in shown
 
     (gateway,) = shown["gateways"]
     assert gateway == gateway | {"name": "gateway/edge/0.0.0.0:8443", "host": "edge", "listen": "0.0.0.0:8443"}
 
     async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
         answer = await client.get("/api/machines")
-        assert answer.status_code == 200 and [each["name"] for each in answer.json()["runners"]] == ["gpu-1/train"]
+        assert answer.status_code == 200 and [each["name"] for each in answer.json()["runners"]] == [
+            "gpu-1/train",
+            "run/next",
+        ]
         again = await client.get("/api/machines", headers={"If-None-Match": answer.headers["ETag"]})
         assert again.status_code == 304  # (nothing changed: when it was read is not part of its version)
 
@@ -153,5 +148,5 @@ def test_alive_or_gone_is_judged_by_the_stores_clock() -> None:
     hosts = {host["host"]: host["alive"] for host in shown["hosts"]}
     assert hosts == {"gpu-1": True, "gpu-2": False}
     assert machines([], now=now) == {
-        "now": now, "hosts": [], "runners": [], "pools": [], "engines": [], "launchers": [], "gateways": [],
+        "now": now, "hosts": [], "runners": [], "pools": [], "engines": [], "gateways": [],
     }  # fmt: skip

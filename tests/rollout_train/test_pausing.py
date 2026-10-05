@@ -1,6 +1,6 @@
 """Pausing a run and resuming it: a paused loop decides nothing and runners claim none of its episodes while what plays
-plays out; resumed, it goes on, in place while its process beats, or launched again in its own directory once it is
-gone, going on from the ledger."""
+plays out; resumed, it goes on, in place while its driver beats, or submitted again with the settings its start
+recorded once it is gone, going on from the ledger."""
 
 import asyncio
 import contextlib
@@ -17,8 +17,8 @@ from rollout.harness.blobs import FileBlobStore
 from rollout.testing import until
 from rollout_train import Checkpoints, Files, Step, train
 from rollout_train import loop as loop_module
-from rollout_train.cli import _train  # pyright: ignore[reportPrivateUsage]
-from rollout_train.launcher import LAUNCHER, Launcher
+from rollout_train.cluster import Cluster
+from rollout_train.jobs import driven
 from rollout_train.launches import ENDED, launches_of
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import FilePresence, presence_of
@@ -26,11 +26,16 @@ from rollout_train.record import ENDS, FINISHED, GROUPS, RESULTS, STARTS, STEPS,
 from rollout_train.registry import registry_of
 from rollout_train.resuming import IN_PLACE, LAUNCHED, pause, resume
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES
+from rollout_train.run_settings import RunSettings
 from rollout_train.settings import PAUSED, desired_settings_of, paused
+from rollout_train.stores import Stores
+from rollout_train.submitting import RayJobs, submit
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
 from rollout_train.trainer import Item
+from tests.local_ray import LocalRay
+from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
 from tests.rollout_train.rollouts.games import GATES, Gated, Words
-from tests.rollout_train.support import ENVIRONMENT, Counting, Notes, Running, Steps, ask, here, runner, served
+from tests.rollout_train.support import Counting, Notes, Running, Steps, ask, here, runner, served
 
 
 def wanted_of(ledger: Ledger, run: str = "train") -> Callable[[], Awaitable[Mapping[str, JsonValue]]]:
@@ -148,7 +153,7 @@ async def a_start(ledger: Ledger, run: str, **said: JsonValue) -> None:
 
 async def test_a_run_beating_is_resumed_in_place_if_paused_and_not_launched_again(tmp_path: Path) -> None:
     ledger = FileLedger(tmp_path / "ledger")
-    await a_start(ledger, "train", directory=str(tmp_path / "run"), profile=str(tmp_path / "small.toml"))
+    await a_start(ledger, "train", directory=str(tmp_path / "run"))
     heartbeats, store = presence_of(ledger), desired_settings_of(ledger)
     assert heartbeats is not None and store is not None
     await heartbeats.beat("here/run", {"run": "train"})
@@ -170,22 +175,6 @@ async def test_a_run_beating_is_resumed_in_place_if_paused_and_not_launched_agai
         await resume(ledger, "train")  # (its process beat a moment ago, and said it finished)
 
 
-RESUMABLE = """
-directory = "{directory}"
-
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-
-[trainer]
-kind = "tests.rollout_train.test_pausing:Slow"
-channel = "policy"
-segment_tokens = 900
-segments_per_step = 3
-"""
-
-
 class Slow(Steps):
     """Steps that take a while, so that a run can be stopped between two."""
 
@@ -194,82 +183,74 @@ class Slow(Steps):
         return await super().step(batch, seed=seed, parent=parent, into=into)
 
 
-class Started:
-    """A launched `rollout train`, played in this process: it ends when the run ends, or on an interrupt."""
-
-    def __init__(self, work: asyncio.Task[None]) -> None:
-        self.pid, self.work = 4343, work
-
-    def send_signal(self, number: int) -> None:
-        self.work.cancel()
-
-    async def wait(self) -> int:
-        try:
-            await self.work
-        except BaseException:
-            return 1
-        return 0
+SLOW = """
+[trainers.slow]
+kind = "lora"
+implementation = "tests.rollout_train.test_pausing:Slow"
+gpus = 0.5
+colocate_with = "local"
+models = ["tiny"]
+"""
 
 
-async def test_a_stopped_run_resumed_is_launched_again_into_itself_and_goes_on_from_the_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+class Here:
+    """A stand-in for Ray's job server that plays each job's driver in this process (on the loop it was made on: the
+    job server is asked from a thread)."""
+
+    def __init__(self, cluster: Cluster, stores: Stores) -> None:
+        self.cluster, self.stores = cluster, stores
+        self.loop = asyncio.get_running_loop()
+        self.playing: list[asyncio.Future[None]] = []
+
+    def submit_job(self, **given: Any) -> str:
+        launch = str(given["entrypoint"]).rsplit(" ", 1)[-1]
+        work = asyncio.run_coroutine_threadsafe(driven(launch, self.cluster, self.stores), self.loop)
+        self.playing.append(asyncio.wrap_future(work, loop=self.loop))
+        return str(given["submission_id"])
+
+    def stop_job(self, job: str) -> bool:
+        return True
+
+
+async def test_a_stopped_run_resumed_is_submitted_again_and_goes_on_from_the_ledger(
+    tmp_path: Path, local_ray: LocalRay
 ) -> None:
-    profiles = tmp_path / "profiles"
-    profiles.mkdir()
-    (profiles / "resumable.toml").write_text(RESUMABLE.format(directory=tmp_path / "run"))
-    ledger = FileLedger(tmp_path / "run" / "ledger")
-    checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / "run" / "blobs"))
-    first = asyncio.create_task(_train(profiles / "resumable.toml", None, ENVIRONMENT, groups=8, groups_per_step=1,
-                                       seed=1))  # fmt: skip
-    await until(lambda: _counted(checkpoints.all(), 2), seconds=30)
-    first.cancel()  # (an interrupt: the run says it stopped)
-    with contextlib.suppress(asyncio.CancelledError):
-        await first
-    (run,) = {each.run for each in await checkpoints.all()}
+    cluster = a_cluster(tmp_path, more=SLOW)
+    stores = Stores.open(cluster)
+    ledger, checkpoints = stores.ledger, stores.checkpoints
+    here = Here(cluster, stores)
+    settings = RunSettings({
+        **POLICY, "kind": "train", "name": "resumable", "environment": WORDS, "trainer.provider": "slow",
+        "groups": 8, "seed": 1, "trainer.segment_tokens": 900,
+    })  # fmt: skip
+    first = await submit(settings, cluster, ledger, backend=RayJobs("x", here))
+    run = first.run
     assert run is not None
+    await until(lambda: _counted(checkpoints.all(), 2), seconds=60)
+    (playing,) = here.playing
+    playing.cancel()  # (an interrupt: the run says it stopped)
+    with contextlib.suppress(asyncio.CancelledError):
+        await playing
+    launches = launches_of(ledger)
+    assert launches is not None
+    await until(lambda: _state(launches, first.id, STOPPED), seconds=30, message="not stopped")  # (its driver says so)
     ends: Any = await ledger.read(table(run, ENDS))
     assert [each["how"] for each in ends.values()] == [STOPPED]
     episodes, claims = await ledger.read(table(run, EPISODES)), await ledger.read(table(run, CLAIMS))
     made = {each.id for each in await checkpoints.all()}
     played = len(await ledger.read(table(run, RESULTS)))
     assert 0 < played < 8  # (stopped part of the way)
-    with pytest.raises(KeyError, match="no launcher alive"):
-        await resume(ledger, run)  # (it beat a moment ago, but said it stopped: no launcher offers its profile)
+    with pytest.raises(KeyError, match="cluster config"):
+        await resume(ledger, run)  # (submitting it again takes the cluster config)
 
-    spawned: list[list[str]] = []
-
-    async def spawn(*command: str, **_: Any) -> Started:
-        spawned.append(list(command))
-
-        def after(flag: str) -> str:
-            return command[command.index(flag) + 1]
-
-        work = _train(
-            Path(command[4]), Path(after("--directory")), command[5], int(after("--groups")),
-            int(after("--groups-per-step")), int(after("--seed")), name=after("--name"),
-        )  # fmt: skip
-        return Started(asyncio.create_task(work))
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
-    launches, heartbeats = launches_of(ledger), presence_of(ledger)
-    assert launches is not None and heartbeats is not None
-    launcher = Launcher("launcher/here", launches, heartbeats, profiles, [], tmp_path / "runs", every=0.01)
-    serving = asyncio.create_task(launcher.serve())
-    try:
-        await until(lambda: _launcher_beats(heartbeats))
-        resumed = await resume(ledger, run)
-        launch = resumed.launch
-        assert resumed.how == LAUNCHED and launch is not None
-        asked = launch.asked
-        assert (asked.resumes, asked.directory, asked.profile) == (run, str(tmp_path / "run"), "resumable")
-        assert asked.groups == 8 - played  # (the groups it had left)
-        with pytest.raises(ValueError, match="being launched"):
-            await resume(ledger, run)
-        await until(lambda: _state(launches, launch.id, ENDED), seconds=30)
-    finally:
-        serving.cancel()
-    (command,) = spawned
-    assert command[command.index("--directory") + 1] == str(tmp_path / "run")  # (its own directory: the same run)
+    resumed = await resume(ledger, run, cluster=cluster, backend=RayJobs("x", here))
+    launch = resumed.launch
+    assert resumed.how == LAUNCHED and launch is not None and launch.run == run and launch.asked.resumes == run
+    assert launch.asked.settings["groups"] == 8 - played  # (the groups it had left)
+    assert launch.asked.settings["trainer.provider"] == "slow"  # (its own settings, as its start recorded them)
+    with pytest.raises(ValueError, match="being launched"):
+        await resume(ledger, run, cluster=cluster, backend=RayJobs("x", here))
+    await until(lambda: _state(launches, launch.id, ENDED), seconds=60, message="not ended")
     assert {each.run for each in await checkpoints.all()} == {run}
     ends = await ledger.read(table(run, ENDS))
     assert [ends[key]["how"] for key in sorted(ends, key=int)] == [STOPPED, FINISHED]
@@ -284,10 +265,6 @@ async def test_a_stopped_run_resumed_is_launched_again_into_itself_and_goes_on_f
     covered: Any = await ledger.read(table(run, STEPS))
     trained = [group for step in covered.values() for group in step["groups"]]
     assert len(trained) == len(set(trained))  # (no group trained on twice)
-
-
-async def _launcher_beats(heartbeats: Any) -> bool:
-    return any(beat.about.get("kind") == LAUNCHER for beat in await heartbeats.beats())
 
 
 async def _state(launches: Any, id: str, state: str) -> bool:

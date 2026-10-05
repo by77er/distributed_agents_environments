@@ -1,16 +1,17 @@
-"""Training runs asked for from anywhere, and started by a launcher on a machine that can run them.
+"""Runs asked for from anywhere, the jobs they became, and how each goes.
 
-Whoever wants a run (the monitor's page, say) asks for it: a `Launch` names a profile and an environment, what the run
-is called, the checkpoint it starts from, and the settings it changes (`rollout train --set`); or, for an eval, the
-suite it plays, the checkpoint or base model that plays it and how many episodes of each start (`rollout eval`,
-`rollout_train.evals`). A launch names every environment it plays. A launcher (`rollout_train.launcher`) on a training
-machine says in its heartbeat which profiles and environments it can run, claims a launch asked for one of its profiles
-whose environments it offers, starts `rollout train` (or `rollout eval`), and notes how it goes:
-claimed, running (with the process), ended or failed (with why). A launch asked to stop is stopped by its launcher.
-A launch may resume a run whose process is gone: it names the run (`resumes`) and the run's own directory, and the
-launcher starts it there again (`rollout_train.resuming`).
-Every change of a launch's state compares and sets: it is made only if the launch is where its writer expects, and may
-go where it is sent (`MOVES`), so a stop is never overwritten by a launcher that started the run meanwhile.
+Whoever wants a run (the monitor's New run form, `rollout train`) asks for it with its run settings
+(`rollout_train.run_settings`): a `Launch` records what was asked (`Asked`: the kind of run, its name, its settings, the
+preset they came from, and the run it resumes, if it resumes one), the run it is (`run`, its id in the registry), the
+job it became (`job`: a Ray job's submission id, or a RayJob's name) and its state. `rollout_train.submitting.submit`
+records a launch and starts its job; the job's driver (`rollout_train.jobs`) notes when it runs and how it ends, and
+whoever reads a launch that is going reads its job's status too (`rollout_train.submitting.followed`), so a job that
+died without saying so is noted failed.
+
+A launch goes asked (recorded), submitted (its job was created: it may wait for its resources), running (its driver
+started), stopping (a stop was asked for), and ends ended, failed (with why) or stopped. Every change of a launch's
+state compares and sets: it is made only if the launch is where its writer expects, and may go where it is sent
+(`MOVES`), so a stop is never overwritten by a driver that started meanwhile.
 
 This is ordinary state, changed in place, not part of the ledger's append-only record: a file beside a ledger of
 files (`FileLaunches`), a table in a database ledger's database (`rollout_train.database.DatabaseLaunches`).
@@ -19,83 +20,73 @@ files (`FileLaunches`), a table in a database ledger's database (`rollout_train.
 import asyncio
 import json
 import time
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
 
 from rollout.contracts import new_ulid
 from rollout_train.ledger import FileLedger, Ledger, locked
 
-ASKED, CLAIMED, RUNNING, STOPPING, ENDED, FAILED, STOPPED = (
+__all__ = [
+    "MOVES",
+    "OPEN",
+    "Asked",
+    "FileLaunches",
+    "Launch",
+    "Launches",
+    "as_launch",
+    "changed",
+    "launch_of",
+    "launches_of",
+    "new_launch",
+    "stored",
+]
+
+ASKED, SUBMITTED, RUNNING, STOPPING, ENDED, FAILED, STOPPED = (
     "asked",
-    "claimed",
+    "submitted",
     "running",
     "stopping",
     "ended",
     "failed",
     "stopped",
 )
-"""Where a launch is: asked for; claimed by a launcher; its run going; asked to stop; and how it finished."""
-OPEN = (ASKED, CLAIMED, RUNNING, STOPPING)
+"""Where a launch is: recorded; its job created; its driver running; asked to stop; and how it finished."""
+OPEN = (ASKED, SUBMITTED, RUNNING, STOPPING)
 MOVES: Mapping[str, frozenset[str]] = {
-    ASKED: frozenset({CLAIMED, STOPPED}),
-    CLAIMED: frozenset({RUNNING, STOPPING, STOPPED, ENDED, FAILED}),
+    ASKED: frozenset({SUBMITTED, RUNNING, FAILED, STOPPED}),
+    SUBMITTED: frozenset({RUNNING, STOPPING, STOPPED, ENDED, FAILED}),
     RUNNING: frozenset({STOPPING, STOPPED, ENDED, FAILED}),
     STOPPING: frozenset({STOPPED, ENDED, FAILED}),
 }
 """Where a launch may go from where it is. A launch that finished (ended, failed, stopped) goes nowhere, nothing goes
-back, and a launch asked to stop is not running again: a stop asked for while its launcher starts the run stays, and
-the launcher signals the run it started. A state may also be noted again (its details changed)."""
-RUN, EVAL = "run", "eval"
-"""What a launch starts: a training run (`rollout train`), or an eval (`rollout eval`)."""
+back, and a launch asked to stop is not running again: a stop asked for while its job starts stays, and its job is
+stopped. A driver may start before its submitter has noted its job (asked to running). A state may also be noted again
+(its details changed)."""
+TRAIN, EVAL, IMITATE, CHECK = "train", "eval", "imitate", "check"
+"""What a launch starts: a training run, an eval of one subject, supervised steps on a dataset, an environment's
+check (`rollout_train.run_settings.KINDS`)."""
 
 
 @dataclass(frozen=True)
 class Asked:
-    """What a run is asked to be: a training run, or (`kind` `eval`) a suite played by a checkpoint or a base model."""
+    """What a run is asked to be: its kind, its name, its run settings (as given: the schema's defaults are not
+    written), the preset they came from (`NAME@N`), and, for a launch that resumes a run, that run's id."""
 
-    profile: str
-    """The profile, by the name a launcher offers it under."""
-    environment: str
-    """The environment, as `module:name` (a published one as `NAME@VERSION`, `rollout_train.published`)."""
-    name: str
-    """What the run is called."""
-    start: str | None = None
-    """The checkpoint it trains from (a reference, `rollout_train.registry.resolved`); None: the base model."""
-    bookmark: str | None = None
-    """A bookmark the run carries forward."""
-    groups: int = 100
-    groups_per_step: int = 4
-    seed: int = 0
+    kind: str = TRAIN
+    name: str = ""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """What it changes of its profile, by dotted key: `trainer.learning_rate`, `episodes_at_once`, say. A training run
-    says the evals it makes (`evals.suite`: a suite, or null for none), unless its profile's `[evals]` says them."""
-    kind: str = RUN
-    """`run` (a training run) or `eval` (a suite played by `start`, the checkpoint; none: the base model, `model`)."""
-    suite: str | None = None
-    """For an eval: the suite it plays, by name (the version its name points to) or a version's id (its environment is
-    the suite's)."""
-    episodes: int | None = None
-    """For an eval: episodes of each of the suite's starts; none: the suite's own."""
-    model: str | None = None
-    """For an eval no checkpoint plays: the base model that plays it, one its launcher offers with its profile (the
-    profile's channel's model, or a model the cluster's inference providers of its engine's kind serve); none: the
-    profile's."""
-    environments: Sequence[str] = ()
-    """Every environment it plays, as `module:name` or `NAME@VERSION`, where they are more than `environment`: an
-    eval's suite's entries' environments, a training run's and its evals' suite's. A launcher claims it only where it
-    offers each."""
+    preset: str | None = None
     resumes: str | None = None
-    """The run it starts again (by id), for a launch that resumes one (`rollout_train.resuming`)."""
-    directory: str | None = None
-    """The directory it runs in: a resumed run's own. None: a new one under the launcher's `--runs`."""
 
-    def plays(self) -> set[str]:
-        """Every environment it plays."""
-        return {each for each in (self.environment, *self.environments) if each}
+    @property
+    def environment(self) -> str | None:
+        """The environment it plays (`module:name`, or a published one as `NAME@VERSION`), if it plays one."""
+        said = self.settings.get("environment")
+        return str(said) if said else None
 
 
 @dataclass(frozen=True)
@@ -105,43 +96,69 @@ class Launch:
     at: float
     """When it was asked for."""
     state: str = ASKED
-    launcher: str | None = None
-    directory: str | None = None
-    """The run's directory, once a launcher has chosen it."""
-    pid: int | None = None
-    """The process playing it, when its launcher started it itself."""
+    run: str | None = None
+    """The run it is, by id: registered when it was asked for, or the run it resumes."""
     job: str | None = None
-    """The Ray job playing it, when its launcher submitted it to Ray."""
+    """Its job: a Ray job's submission id, or a RayJob's name."""
+    backend: str | None = None
+    """Where its job is: `ray` (Ray's job API) or `kubernetes` (a RayJob)."""
     detail: str | None = None
-    """Why it failed, or how it ended."""
+    """Why it failed, how it ended, or what its run waits for."""
     updated: float = 0.0
 
 
 def as_launch(data: Mapping[str, Any]) -> Launch:
+    """A launch as it was stored. A launch asked for a profile (its `asked` names one) is read as its run settings:
+    its environment, start, bookmark, groups, groups a step and seed among them, and an eval's suite and episodes."""
     fields: dict[str, Any] = dict(data)
-    fields["asked"] = Asked(**fields["asked"])
-    return Launch(**fields)
+    asked = dict(cast(Mapping[str, Any], fields["asked"]))
+    if "profile" in asked:
+        asked = _settled(asked)
+    fields["asked"] = Asked(**asked)
+    if fields.get("state") == "claimed":
+        fields["state"] = SUBMITTED
+    known = set(Launch.__dataclass_fields__)
+    return Launch(**{key: value for key, value in fields.items() if key in known})
+
+
+def _settled(asked: Mapping[str, Any]) -> dict[str, Any]:
+    """The run settings a launch of a profile asked for."""
+    kind = EVAL if asked.get("kind") == EVAL else TRAIN
+    settings: dict[str, JsonValue] = {"environment": asked.get("environment")}
+    for key in ("start", "bookmark") if kind == TRAIN else ("start",):
+        if asked.get(key) is not None:
+            settings[key] = asked[key]
+    if kind == TRAIN:
+        settings |= {key: asked[key] for key in ("groups", "groups_per_step", "seed") if key in asked}
+    else:
+        settings |= {"eval.suite": asked.get("suite"), "eval.episodes": asked.get("episodes")}
+    settings |= dict(cast(Mapping[str, JsonValue], asked.get("settings") or {}))
+    return {"kind": kind, "name": str(asked.get("name") or ""), "settings": settings, "resumes": asked.get("resumes")}
 
 
 class Launches(Protocol):
-    async def ask(self, asked: Asked) -> Launch:
-        """Ask for a run; the launch, as asked."""
+    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
+        """Record a launch, as asked, of the run `run` (by id); the launch."""
         ...
 
     async def all(self) -> list[Launch]:
         """Every launch, newest first."""
         ...
 
-    async def claim(self, id: str, launcher: str) -> Launch | None:
-        """Claim a launch that is asked for: the launch, claimed, or None if another launcher claimed it first."""
+    async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
+        """Note how a launch goes (its state, job, detail), in one step that compares and sets: the changes are written
+        only if the launch is in a state of `expect` (any, if None) and may go to the state they name (`MOVES`).
+        Returns the launch as it is then, changed or not: whoever moves it compares the state it gets with the state
+        it asked for. Raises `KeyError` when there is no such launch."""
         ...
 
-    async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
-        """Note how a launch goes (its state, directory, process, detail), in one step that compares and sets: the
-        changes are written only if the launch is in a state of `expect` (any, if None) and may go to the state they
-        name (`MOVES`). Returns the launch as it is then, changed or not: whoever moves it compares the state it gets
-        with the state it asked for. Raises `KeyError` when there is no such launch."""
-        ...
+
+async def launch_of(launches: Launches, id: str) -> Launch:
+    """A launch by id. Raises `KeyError` when there is none."""
+    found = next((each for each in await launches.all() if each.id == id), None)
+    if found is None:
+        raise KeyError(f"there is no launch {id}")
+    return found
 
 
 def changed(launch: Launch, expect: Collection[str] | None, changes: Mapping[str, Any]) -> Launch | None:
@@ -161,9 +178,14 @@ def launches_of(ledger: Ledger) -> Launches | None:
     return getattr(ledger, "launches", None)
 
 
-def new_launch(asked: Asked) -> Launch:
+def new_launch(asked: Asked, run: str | None = None) -> Launch:
     at = time.time()  # (unrounded: launches asked for at once still list newest first)
-    return Launch(f"launch_{new_ulid()}", asked, at, updated=round(at, 1))
+    return Launch(f"launch_{new_ulid()}", asked, at, run=run, updated=round(at, 1))
+
+
+def stored(launch: Launch) -> str:
+    """A launch as JSON, as it is stored."""
+    return json.dumps(asdict(launch))
 
 
 class FileLaunches:
@@ -173,8 +195,8 @@ class FileLaunches:
         self.directory = directory
         self.path = directory / "launches.json"
 
-    async def ask(self, asked: Asked) -> Launch:
-        made = new_launch(asked)
+    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
+        made = new_launch(asked, run)
 
         def change(launches: dict[str, Launch]) -> dict[str, Launch]:
             return {**launches, made.id: made}
@@ -184,18 +206,6 @@ class FileLaunches:
 
     async def all(self) -> list[Launch]:
         return await asyncio.to_thread(lambda: sorted(self._read().values(), key=lambda each: -each.at))
-
-    async def claim(self, id: str, launcher: str) -> Launch | None:
-        claimed: list[Launch] = []
-
-        def change(launches: dict[str, Launch]) -> dict[str, Launch]:
-            if launches[id].state != ASKED:
-                return launches
-            claimed.append(replace(launches[id], state=CLAIMED, launcher=launcher, updated=round(time.time(), 1)))
-            return {**launches, id: claimed[0]}
-
-        await asyncio.to_thread(self._change, change)
-        return claimed[0] if claimed else None
 
     async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
         noted: list[Launch] = []

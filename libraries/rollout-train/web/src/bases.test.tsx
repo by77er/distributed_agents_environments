@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Checkpoint, EvalSuite, Launcher, Launches, Lineage, LineageCheckpoint, OfferedProfile, SubjectHistory, SuiteVersion, System } from "./api/types";
-import { offeredFor, playsWith } from "./components/play";
+import type { Checkpoint, EvalSuite, Launches, Lineage, LineageCheckpoint, OfferedProvider, Offers, Preset, SubjectHistory, SuiteVersion, System } from "./api/types";
+import { baseModelsOf, evalSettingsOf, playedBy } from "./components/play";
 import { basePlace, placeOf } from "./lib/places";
 import { Base } from "./pages/Base";
 import { Checkpoints } from "./pages/Checkpoints";
@@ -44,12 +44,21 @@ const version: SuiteVersion = {
 };
 const suite: EvalSuite = { suite: "words-v1", version: version.id, number: 1, environments: ["games:words"], made: 1, starts: version.starts, versions: [version], subjects: [] };
 
-const offered = (profile: string, model: string, models?: string[]): OfferedProfile => ({ profile, path: `/profiles/${profile}.toml`, kinds: ["run", "eval"], model, models, settings: {} });
-const launcher: Launcher = {
-  launcher: "launcher/far", at: 99, environments: ["games:words"], at_once: 1, playing: 0,
-  profiles: [offered("vllm", "org/base-a", ["org/base-a", "org/base-b"]), offered("tinker", "org/elsewhere")],
+const provider = (name: string, models: string[], renderers: string[] = []): OfferedProvider => ({
+  name, kind: "vllm", gpus: 1, replicas: 1, shared: false, capabilities: {},
+  models: models.map(model => ({ model, context: 4096, base: null, max_lora_rank: 32, cost: {}, renderers, families: [] })),
+});
+const preset = (name: string, provider: string, model: string): Preset => ({
+  name, version: 1, id: `${name}@1`, note: "", saved: 1,
+  settings: { "trainer.provider": "lora", "trainer.rank": 32, "channels.policy.provider": provider, "channels.policy.model": model,
+    "channels.policy.renderer": "rollout_qwen:qwen3" },
+});
+const offers: Offers = {
+  cluster: "here", kinds: ["train", "eval"], environments: [{ environment: "games:words", published: false }], trainers: [], pairs: [],
+  inference: [provider("local", ["org/base-a", "org/base-b"]), provider("far", ["org/elsewhere"], ["rollout_qwen:qwen35"])],
+  sandboxes: {}, presets: [preset("vllm", "local", "org/base-a"), preset("tinker", "far", "org/elsewhere")], capacity: null,
 };
-const launches: Launches = { launches: [], launchers: [launcher] };
+const launches: Launches = { launches: [], submits: true };
 
 function Where() {
   return <output data-testid="where">{useLocation().pathname}</output>;
@@ -66,6 +75,7 @@ function shown(children: React.ReactNode, at: string, more: (client: ReturnType<
   client.setQueryData(topics.system().key, system);
   client.setQueryData(topics.checkpoints().key, lineage);
   client.setQueryData(topics.launches().key, launches);
+  client.setQueryData(topics.offers().key, offers);
   client.setQueryData(topics.evals().key, { suites: [suite], evals: [] });
   more(client);
   return render(
@@ -122,60 +132,68 @@ describe("a base model's page", () => {
     evals: [],
   };
 
-  it("lists the runs trained from it, and asks for an eval it plays with a profile that offers it", async () => {
+  it("lists the runs trained from it, and asks for an eval of it with a preset's channel settings", async () => {
     shown(<Base model="org/base-b" />, basePlace("org/base-b"), client => client.setQueryData(topics.history("model", "org/base-b").key, history));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("org/base-b");
     const runs = screen.getByRole("heading", { name: "Runs" }).closest("section")!;
     expect(runs.textContent).toContain("second");
     expect(runs.textContent).not.toContain("first");
     const form = screen.getByRole("button", { name: "Run an eval" }).closest("form")!;
-    const profiles = [...form.querySelectorAll("option")].filter(option => option.closest("select")?.value === "vllm").map(option => option.textContent);
-    expect(profiles).toEqual(["vllm · org/base-a"]);  // (not tinker's: it does not offer org/base-b)
     expect(form.querySelector<HTMLInputElement>("input[placeholder='words-v1 on base-b']")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Train from org/base-b" }).getAttribute("href")).toBe("/runs/new?model=org%2Fbase-b");
     fireEvent.click(screen.getByRole("button", { name: "Run an eval" }));
     await waitFor(() => expect(fetched).toHaveBeenCalledWith("api/launches", expect.objectContaining({ method: "POST" })));
     const body = JSON.parse(String(fetched.mock.calls.find(([path]) => path === "api/launches")![1]!.body));
-    expect(body).toMatchObject({ kind: "eval", suite: "words-v1@1", profile: "vllm", model: "org/base-b", start: null, name: "words-v1 on base-b" });
+    expect(body).toEqual({
+      kind: "eval", name: "words-v1 on base-b", environment: "games:words", preset: null,
+      settings: { "eval.suite": "words-v1@1", "channels.policy.provider": "local", "channels.policy.model": "org/base-b",
+        "channels.policy.renderer": "rollout_qwen:qwen3" },
+    });  // (the preset's trainer settings left out: an eval trains nothing)
   });
 
-  it("says when no launcher alive offers it", () => {
+  it("says when the cluster offers no provider of it", () => {
     shown(<Base model="org/nowhere" />, basePlace("org/nowhere"));
-    expect(screen.getByText("no launcher alive offers org/nowhere")).toBeTruthy();
+    expect(screen.getByText("the cluster offers no provider of org/nowhere")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Run an eval" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("is a root with no lanes when the cluster offers it and nothing has used it, and asks for its first eval", () => {
+    const offered = { ...lineage, bases: [...lineage.bases, "org/unused"] };
+    shown(<Base model="org/unused" />, basePlace("org/unused"), client => {
+      client.setQueryData(topics.checkpoints().key, offered);
+      client.setQueryData(topics.offers().key, { ...offers, inference: [...offers.inference, provider("more", ["org/unused"])] });
+    });
+    expect(screen.getByRole("heading", { name: "Runs" }).closest("section")!.textContent).toContain("None.");
+    expect((screen.getByRole("button", { name: "Run an eval" }) as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+    shown(<Tree place={{ page: "checkpoints", kind: "checkpoints" }} />, "/checkpoints", client => client.setQueryData(topics.checkpoints().key, offered));
+    const rows = [...screen.getByText("Base models").parentElement!.querySelectorAll(".node")].filter(row => row.querySelector(".tag") === null);
+    expect(rows.map(row => row.textContent)).toEqual(["base-a", "base-b", "unused"]);
   });
 });
 
 describe("a suite's eval form", () => {
-  it("offers the launchers' base models to play it, and the profiles that offer the one chosen", () => {
+  it("offers the cluster's base models to play it, and a preset whose model is the one chosen", () => {
     const { container } = shown(<Suite name="words-v1" />, "/evals/words-v1");
     const group = screen.getByRole("group", { name: "Base models" });
     expect([...group.querySelectorAll("option")].map(option => option.textContent)).toEqual(["org/base-a", "org/base-b", "org/elsewhere"]);
-    const [played, , profile] = [...container.querySelectorAll("form select")] as HTMLSelectElement[];
+    const [played, , chosen] = [...container.querySelectorAll("form select")] as HTMLSelectElement[];
     expect(played.value).toBe("base:org/base-a");
+    expect(chosen.value).toBe("vllm@1");
     fireEvent.change(played, { target: { value: "base:org/elsewhere" } });
-    expect([...profile.options].map(option => option.value)).toEqual(["tinker"]);
-    fireEvent.change(played, { target: { value: A } });
-    expect([...profile.options].map(option => option.value)).toEqual(["vllm", "tinker"]);
+    expect(chosen.value).toBe("tinker@1");
   });
 });
 
-describe("the eval forms' profiles", () => {
-  const evalsOnly: OfferedProfile = { ...offered("gsm8k", "org/base-a"), kinds: ["eval"] };
-  const published = `words@${"0".repeat(64)}`;
-
-  it("are those whose launcher plays every environment of the suite with them, one without a trainer too", () => {
-    const boxed: OfferedProfile = { ...offered("boxed", "org/base-a"), published: [published] };
-    const far: Launcher = { ...launcher, environments: ["games:words", published], profiles: [evalsOnly, boxed] };
-    expect(offeredFor(suite, [far]).map(each => each.profile)).toEqual(["gsm8k", "boxed"]);
-    expect(offeredFor(suite, [far], { ...version, environments: [published] }).map(each => each.profile)).toEqual(["boxed"]);
-    expect(playsWith({ ...far, environments: [] }, evalsOnly, ["games:anything"])).toBe(true);  // (one that names none plays any)
-    expect(playsWith({ ...far, environments: [] }, evalsOnly, [published])).toBe(false);
-  });
-
-  it("list a profile without a trainer on a suite's page", () => {
-    const only: Launches = { launches: [], launchers: [{ ...launcher, profiles: [evalsOnly] }] };
-    const { container } = shown(<Suite name="words-v1" />, "/evals/words-v1", client => client.setQueryData(topics.launches().key, only));
-    const [, , profile] = [...container.querySelectorAll("form select")] as HTMLSelectElement[];
-    expect([...profile.options].map(option => option.value)).toEqual(["gsm8k"]);
+describe("an eval's settings", () => {
+  it("are a preset's channel settings, with the base model played and a provider that serves it", () => {
+    expect(baseModelsOf(offers)).toEqual(["org/base-a", "org/base-b", "org/elsewhere"]);
+    expect(evalSettingsOf(offers.presets[0])).toEqual({
+      "channels.policy.provider": "local", "channels.policy.model": "org/base-a", "channels.policy.renderer": "rollout_qwen:qwen3",
+    });
+    expect(playedBy(offers, offers.presets[0], "org/elsewhere")).toEqual({
+      "channels.policy.provider": "far", "channels.policy.model": "org/elsewhere", "channels.policy.renderer": "rollout_qwen:qwen35",
+    });
+    expect(playedBy(offers, undefined, undefined)).toEqual({});
   });
 });

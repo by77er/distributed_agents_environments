@@ -3,7 +3,7 @@
 """A run built from its settings and the cluster config, on the session's Ray, with scripted engines and a trainer
 that trains nothing: its engine hosts and its trainer are actors it asks Ray for, the trainer colocated with the
 trained channel's hosts; its gateway samples every channel its settings name; its start records them. A judging run
-built from its settings binds its judge's slot to a channel of its own; settings the cluster refuses end the run with
+launched by its settings binds its judge's slot to a channel of its own; settings the cluster refuses end the run with
 the reasons; a run that cannot have its GPUs yet waits, and says what for."""
 
 import asyncio
@@ -14,7 +14,8 @@ import pytest
 from pydantic import JsonValue
 
 from rollout_train.cluster import Cluster
-from rollout_train.jobs import Run, ran
+from rollout_train.jobs import Run, driven, ran
+from rollout_train.launches import ENDED, launch_of, launches_of
 from rollout_train.launching import Refused
 from rollout_train.record import ENDS, RESULTS, STARTS, newest_record, table
 from rollout_train.rollouts import Record
@@ -22,6 +23,7 @@ from rollout_train.rollouts.scheduler import EPISODES, PLANS
 from rollout_train.run_settings import RunSettings
 from rollout_train.serving import SERVING
 from rollout_train.stores import Stores
+from rollout_train.submitting import ask
 from tests.local_ray import LocalRay
 from tests.rollout_train.clusters import JUDGED, POLICY, WORDS, a_cluster
 
@@ -84,23 +86,29 @@ async def test_an_eval_built_from_its_settings_plays_a_suite_with_a_checkpoint_o
     assert newest_record(await ledger.read(table(run, ENDS)))["how"] == "finished"
 
 
-async def test_a_judging_run_built_from_its_settings_samples_its_judge_on_the_channel_they_bind_it_to(
+async def test_a_judging_run_launched_by_its_settings_samples_its_judge_on_the_channel_they_bind_it_to(
     tmp_path: Path, local_ray: LocalRay
 ) -> None:
     cluster = a_cluster(tmp_path)
+    stores = Stores.open(cluster)
     judge: dict[str, JsonValue] = {
         "channels.judge.provider": "local", "channels.judge.model": "tiny", "channels.judge.mode": "fixed",
         "channels.judge.renderer": "rollout_train.testing:plain_renderer", "slots.judge": "judge",
     }  # fmt: skip
-    run = await a_run(cluster, {**POLICY, **judge, "kind": "train", "environment": JUDGED}, "judged")
-    await ran(run)
-    ledger = run.ledger
-    binding = newest_record(await ledger.read(table(run.run.id, PLANS)))["binding"]["models"]
+    settings = RunSettings({**POLICY, **judge, "kind": "train", "name": "judged", "environment": JUDGED})
+    launch = await ask(settings, stores.ledger)
+    await driven(launch.id, cluster, stores)
+    launches = launches_of(stores.ledger)
+    assert launches is not None and launch.run is not None
+    assert (await launch_of(launches, launch.id)).state == ENDED
+    ledger, run = stores.ledger, launch.run
+    binding = newest_record(await ledger.read(table(run, PLANS)))["binding"]["models"]
     assert binding["judge"]["recorded"]["channel"] == "judge" and binding["judge"]["recorded"]["trained"] is False
-    records = [Record.from_json(each) for each in (await ledger.read(table(run.run.id, EPISODES))).values()]  # type: ignore[arg-type]
+    records = [Record.from_json(each) for each in (await ledger.read(table(run, EPISODES))).values()]  # type: ignore[arg-type]
     assert records and all(not each.episode.trajectories["judge"].trained for each in records)
     assert all(each.sampled["judge"] > 0 for each in records)
-    assert set(run.hosts) == {"policy", "judge"}
+    start = newest_record(await ledger.read(table(run, STARTS)))
+    assert start["launch"] == launch.id and start["run_settings"]["fixed"]["slots.judge"] == "judge"
 
 
 @pytest.mark.parametrize(

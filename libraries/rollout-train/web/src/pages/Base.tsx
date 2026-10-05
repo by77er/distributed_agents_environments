@@ -2,16 +2,16 @@
 // had by the version of a suite each played, and the form that asks for another.
 
 import { useMemo } from "react";
-import { useEvals, useHistory, useLaunches, useLineage, useSystem } from "../api/queries";
+import { Link } from "react-router-dom";
+import { useEvals, useHistory, useLaunches, useLineage, useOffers, useSystem } from "../api/queries";
 import type { System } from "../api/types";
 import { LaunchList } from "../components/launches";
 import { PlayForm } from "../components/play";
 import { Card, Empty, Head, Spec, Specs, Table } from "../components/ui";
 import { historyOf } from "../lib/history";
-import { runPlace } from "../lib/places";
+import { launchFor, runPlace } from "../lib/places";
 import { indexOf, type Lane, lanesOf } from "./Checkpoints";
 import { MakeSuite } from "./Evals";
-import { NoLauncher } from "./NewRun";
 import { VersionCard } from "./Subject";
 
 /** The lanes of runs that hang under a base model's lane: those trained from it, and those forked from theirs. */
@@ -63,17 +63,19 @@ export function Base({ model }: { model: string }) {
   );
 }
 
-/** Ask a launcher to play a suite with the base model, and the evals of it asked for so. */
+/** Ask for an eval of a suite by the base model, or a training run from it; and the evals of it asked for so. */
 function PlayIt({ model, system }: { model: string; system: System }) {
   const { data: evals } = useEvals();
   const { data: launched } = useLaunches();
-  if (!evals || !launched) return null;
-  const launches = launched.launches.filter(each => each.asked.kind === "eval" && !each.asked.start && each.asked.model === model);
+  const { data: offers } = useOffers();
+  if (!evals || !launched || !offers) return null;
+  const launches = launched.launches.filter(each =>
+    each.asked.kind === "eval" && !each.asked.settings.start && each.asked.settings["channels.policy.model"] === model);
   return (
     <>
       {!evals.suites.length ? <MakeSuite ledger={system.ledger_at} />
-        : launched.launchers.length ? <PlayForm model={model} suites={evals.suites} launchers={launched.launchers} system={system} title="Run an eval" />
-          : <NoLauncher ledger={system.ledger_at} />}
+        : <PlayForm model={model} suites={evals.suites} offers={offers} system={system} title="Run an eval" />}
+      {offers.cluster ? <p><Link to={launchFor(model)} className="linkish">Train from {model}</Link></p> : null}
       {launches.length ? <LaunchList launches={launches} system={system} /> : null}
     </>
   );

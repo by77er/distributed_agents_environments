@@ -3,7 +3,7 @@
 A ledger (`rollout_train.ledger`) may be shared by many runs. It holds what each training loop decided and what happened
 (`rollout_train.record`), where and when each run was started, the checkpoints and the fences. Each run's
 episodes are in the ledger too, as runners claim, play and record them (`rollout_train.rollouts.scheduler`). Each run
-keeps the rest in its own directory, as an open profile lays it out (`rollout_train.layout`): the feed (what is
+keeps the rest in its own directory, as a run's driver lays it out (`rollout_train.layout`): the feed (what is
 happening now) and the episodes' events. A run's `starts` record says where its directory is and where the monitor on
 its machine serves: `System` reads the directory where it is on this machine, asks that monitor otherwise
 (`System._source` decides which), and else shows what the ledger alone has. It asks nothing of any run's process: it
@@ -19,9 +19,9 @@ import random
 import socket
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 import httpx
@@ -48,21 +48,10 @@ from rollout_train.evals import (
 )
 from rollout_train.gateway.turns import TurnStore
 from rollout_train.inference.remote import ENGINES
-from rollout_train.launcher import LAUNCHER, launches_kind, offers, offers_environments
-from rollout_train.launches import (
-    ASKED,
-    CLAIMED,
-    OPEN,
-    STOPPED,
-    STOPPING,
-    Asked,
-    Launch,
-    launches_of,
-)
-from rollout_train.launches import RUN as TRAINING
-from rollout_train.launches import (
-    RUNNING as GOING,
-)
+from rollout_train.launches import OPEN, TRAIN, Launch, launch_of, launches_of
+from rollout_train.launching import Refused as LaunchRefused
+from rollout_train.launching import checked as findings_of
+from rollout_train.launching import offers, settled
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.environments import Read, described, listed, page_of
@@ -72,6 +61,7 @@ from rollout_train.monitor.machines import kind_of, machines
 from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in, suites_in
 from rollout_train.monitor.statistics import newest, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
+from rollout_train.presets import presets_of
 from rollout_train.published import EnvironmentVersion, environment_versions_of, is_published
 from rollout_train.publishing import Importer, Refused, Source, publish
 from rollout_train.record import (
@@ -95,7 +85,6 @@ from rollout_train.registry import (
     Entry,
     Registry,
     Taken,
-    checked,
     names,
     registry_of,
     resolved,
@@ -104,12 +93,18 @@ from rollout_train.registry import (
 from rollout_train.resuming import Resumed, pause, resume
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, Claims, of_episode
+from rollout_train.run_settings import RunSettings
 from rollout_train.sandboxes import leases_of
 from rollout_train.serving import SERVING
-from rollout_train.settings import CHANGEABLE, EVALS_SUITE, TRAINER, Desired, desired_settings_of
+from rollout_train.settings import EVALS_SUITE, TRAINER, Desired, desired_settings_of
 from rollout_train.settings import PAUSED as PAUSE
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
+from rollout_train.submitting import backend_of, followed, stopped, submit
+
+if TYPE_CHECKING:
+    from rollout_train.cluster import Cluster
+    from rollout_train.submitting import Backend
 
 WAITING = "waiting"
 """Asked for; no runner has claimed any of its episodes."""
@@ -127,7 +122,7 @@ COMMITTED = "committed"
 FAILED = "failed"
 
 LOST = "lost"
-"""How a launch is shown when its launcher stopped beating before it finished."""
+"""How a run is shown whose runners beat once and stopped with no word of how it ended."""
 RUN_TABLES = (GROUPS, RESULTS, STEPS, FAILURES, EPISODES, CLAIMS, INTERRUPTED, ADOPTED, ENDS)
 """A run's tables, as the page reads them."""
 ARCHIVED = 8
@@ -155,6 +150,8 @@ UNANSWERED = 30.0
 """Seconds a monitor elsewhere that did not answer is left before it is asked again."""
 IMPORTS = 20
 """Imports a monitor keeps word of, the newest."""
+NO_CLUSTER = "this monitor asks for no runs: start it with the cluster config (`rollout monitor WHERE --cluster`)"
+"""Why a monitor started without a cluster config refuses to launch."""
 RELAYED = "x-rollout-monitor-relayed"
 """A header on what one monitor asks another: the one asked answers from its own machine only (so two monitors that
 each take a run to be the other's never ask each other in turn)."""
@@ -169,6 +166,8 @@ class System:
         ledger: Ledger | None = None,
         client: httpx.Client | None = None,
         importer: Importer | None = None,
+        cluster: "Cluster | None" = None,
+        backends: "Mapping[str, Backend] | None" = None,
     ) -> None:
         """Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
         it), or over a `ledger` alone. `feed` reads the directory's feed (by default its `feed`). `client` asks the
@@ -203,6 +202,12 @@ class System:
         self._reading: dict[str, asyncio.Future[Any]] | None = None
         """What was read within a reading (`one_reading`), by what it is."""
         self._importer = importer
+        self._cluster = cluster
+        """The cluster config runs are asked for on (`launch`), and their jobs started and read with; none: this
+        monitor asks for none."""
+        own = {_backend_name(cluster): backend_of(cluster)} if cluster is not None else None
+        self._backends = dict(backends) if backends is not None else own
+        """Where runs' jobs go, by `Launch.backend`: the cluster config's (made once), or those given (a test's)."""
         self._versions = environment_versions_of(self._ledger)
         self._imports: list[dict[str, Any]] = []
         """The imports this monitor made since it started, newest first (the newest `IMPORTS`): each with its stage."""
@@ -263,10 +268,15 @@ class System:
         return await pause(self._ledger, run)
 
     async def resume(self, run: str) -> Resumed:
-        """Resume a run: in place, or by a launch (`rollout_train.resuming.resume`). Raises `Taken` for a run that
-        cannot be resumed, `KeyError` where there is no such run or no launcher alive offers what it needs."""
+        """Resume a run: in place, or by a launch of its recorded settings (`rollout_train.resuming.resume`).
+        Raises `Taken` for a run that cannot be resumed,
+        `KeyError` where there is no such run or this monitor has no cluster config to submit on,
+        `rollout_train.launching.Refused` for settings the cluster refuses."""
+        backend = self._backends.get(_backend_name(self._cluster)) if self._backends and self._cluster else None
         try:
-            return await resume(self._ledger, run)
+            return await resume(self._ledger, run, cluster=self._cluster, backend=backend)
+        except LaunchRefused:
+            raise
         except ValueError as error:
             raise Taken(str(error)) from None
 
@@ -290,135 +300,76 @@ class System:
         await self._registry().unbookmark(name)
 
     async def launches(self) -> dict[str, Any]:
-        """The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
-        settings a launch may change, its environments, and whether it has room). A launch whose launcher stopped
-        beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known."""
+        """The runs asked for, newest first, each with the job it became and its state: a launch that is going is
+        read with its job's status too (`rollout_train.submitting.followed`), so a job that waits says why, and one
+        that died without its driver saying so is failed."""
         found = launches_of(self._ledger)
         listed = await found.all() if found is not None and await asyncio.to_thread(present, self._ledger) else []
-        launchers = [
-            {"launcher": beat.runner, "at": beat.at, **beat.about}
-            for beat in await self._beats()
-            if beat.about.get("kind") == LAUNCHER and alive(beat)
-        ]
-        beating = {str(each["launcher"]) for each in launchers}
-        shown = [
-            asdict(each) | {"state": LOST, "detail": "its launcher stopped beating"}
-            if each.state in OPEN and each.state != ASKED and each.launcher not in beating
-            else asdict(each)
-            for each in listed
-        ]
-        return {"launches": shown, "launchers": launchers}
+        if found is not None:
+            listed = [
+                await followed(each, found, self._cluster, backends=self._backends) if each.state in OPEN else each
+                for each in listed
+            ]
+        return {"launches": [asdict(each) for each in listed], "submits": self._cluster is not None}
 
-    async def launch(self, body: Mapping[str, Any]) -> Launch:
-        """Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
-        and its environment starts it. An eval names a suite (whose environment it plays; a suite not made yet, the
-        environment whose eval data it is) and the checkpoint that plays it, or the base model (`model`, one a launcher
-        alive offers with the profile; none: the profile's): a suite by name plays the version its name points to now,
-        which the launch then names by id. A training run says the evals it makes (`_checked_evals`). Raises `Taken`
-        for what cannot be asked for (a name taken or no name, a training run of a profile that names no trainer, a
-        setting the profile does not have, no word of the evals, a checkpoint and a base model both), `KeyError` for
-        what no launcher offers (a published environment is offered with the profiles that play it) or a checkpoint no
-        reference says."""
-        launches, registry = launches_of(self._ledger), self._registry()
-        if launches is None:
-            raise KeyError("this ledger keeps no launches")
-        given = dict(body)
-        if given.get("kind") == EVAL:  # (an eval plays its suite's environments)
-            named_suite = str(given.get("suite") or "")
-            found = await suite_of(self._ledger, named_suite)
-            if found is not None:
-                given |= {"environment": found.environments[0], "suite": found.id}
-                given["environments"] = found.environments[1:]
-            elif not given.get("environment") or parsed(named_suite)[1] not in (None, 1):
-                raise KeyError(f"there is no suite {named_suite!r}")  # (else its eval data, frozen when first played)
-        try:
-            fields = set(Asked.__dataclass_fields__) - {"resumes", "directory"}  # (a resume's own: `resume`)
-            asked = Asked(**{key: value for key, value in given.items() if key in fields})
-        except TypeError as error:
-            raise Taken(f"a launch says its profile, its environment and its name ({error})") from None
-        if asked.kind not in (TRAINING, EVAL):
-            raise Taken(f"a launch is a {TRAINING} or an {EVAL}, not {asked.kind!r}")
-        if asked.kind == EVAL and asked.episodes is not None and asked.episodes < 1:
-            raise Taken("an eval plays one episode of each start at least")
-        if asked.model and asked.kind != EVAL:
-            raise Taken("only an eval names a base model to play it")
-        if asked.model and asked.start:
-            raise Taken("an eval is played by a checkpoint or by a base model, not both")
-        offered = [each for each in (await self.launches())["launchers"] if each.get("playing", 0) is not None]
-        profiles = [
-            profile for each in offered for profile in each.get("profiles", []) if profile["profile"] == asked.profile
-        ]
-        if not profiles:
-            raise KeyError(f"no launcher alive offers the profile {asked.profile!r}")
-        if not any(launches_kind(each, asked.kind) for each in profiles):
-            raise Taken(f"the profile {asked.profile!r} names no trainer: it launches evals only")
-        checked(asked.name, "", await registry.runs())  # (a name another run has, or no name)
-        unknown = [
-            key for key in asked.settings
-            if key not in profiles[0]["settings"] and not key.startswith(TRAINER) and key not in CHANGEABLE
-        ]  # fmt: skip
-        if unknown:
-            raise Taken(f"the profile {asked.profile!r} has no setting {', '.join(unknown)}")
-        if asked.kind == TRAINING:  # (and the environments of the suite of its evals, which it plays too)
-            evaluated = await self._checked_evals(asked, profiles[0]["settings"])
-            asked = replace(asked, environments=sorted(set(evaluated) - {asked.environment}))
-        able = [
-            (each, profile) for each in offered for profile in each.get("profiles", [])
-            if profile["profile"] == asked.profile and launches_kind(profile, asked.kind)
-            and offers_environments(each, profile, asked.plays())
-        ]  # fmt: skip
-        if not able:
-            mine = [(each, profile) for each in offered for profile in each.get("profiles", []) if profile in profiles]
-            missing = sorted(
-                environment for environment in asked.plays()
-                if not any(offers_environments(each, profile, {environment}) for each, profile in mine)
-            )  # fmt: skip
-            said = ", ".join(missing) if missing else ", ".join(sorted(asked.plays()))
-            raise KeyError(f"no launcher alive offers the profile {asked.profile!r} and the environments {said}")
-        if asked.model and not any(offers(profile, asked.model) for _, profile in able):
-            raise KeyError(
-                f"no launcher alive offers the base model {asked.model!r} with the profile {asked.profile!r}"
-            )
-        if asked.start:
-            await resolved(self._ledger, registry, asked.start)  # (raises KeyError for a reference to nothing)
-        return await launches.ask(asked)
+    async def offers(self) -> dict[str, Any]:
+        """What a run can be asked for here (`rollout_train.launching.offers`); nothing where this monitor was started
+        without a cluster config."""
+        if self._cluster is None:
+            return {"cluster": None, "environments": [], "trainers": [], "inference": [], "pairs": [], "presets": [],
+                    "sandboxes": {}, "kinds": [], "capacity": None}  # fmt: skip
+        return await offers(self._cluster, self._ledger, await self._beats())
 
-    async def _checked_evals(self, asked: Asked, offered: Mapping[str, Any]) -> list[str]:
-        """That a training run says the evals it makes, in the launch (`evals.suite`: a suite, or null for none) or in
-        its profile's `[evals]` (`offered`: the settings its launcher offers, with their values in the profile); and
-        that the suite is one it can name: a suite in the ledger (by name, or a version by id), or the run's
-        environment's eval data of that name, where the environment loads here. Returns the environments the suite
-        plays (each played on the run's channel). Raises `Taken` otherwise."""
-        said = asked.settings[EVALS_SUITE] if EVALS_SUITE in asked.settings else offered.get(EVALS_SUITE)
-        if EVALS_SUITE not in asked.settings and not said:
-            raise Taken(f"a run says the evals it makes: a suite ({EVALS_SUITE}), or none ({EVALS_SUITE} null)")
-        if not said:
-            return []
-        if not isinstance(said, str):
-            raise Taken(f"{EVALS_SUITE} names a suite, or is null for none (not {said!r})")
-        suite = await suite_of(self._ledger, said)
-        if suite is not None:
-            return suite.environments
-        name, number = parsed(said)
-        if number not in (None, 1):
-            raise Taken(f"there is no version {said!r} of a suite")
-        try:
-            data = await self._eval_data(asked.environment)
-        except KeyError:  # (an environment that does not load here: its launcher's run finds out)
-            return [asked.environment]
-        if name not in data:
-            raise Taken(f"there is no suite {name!r}, and {asked.environment} has no eval data of that name")
-        return [asked.environment]
+    async def _asked(self, body: Mapping[str, Any]) -> tuple[RunSettings, str | None]:
+        """A run's settings as a launch's body says them (`kind`, `name`, `environment`, `settings`, `preset`): the
+        preset's, then those given. An eval names its suite (`eval.suite`), whose environment it plays. Raises `Taken`
+        for settings that are not a table, `KeyError` for a preset or a suite there is none of."""
+        kind = str(body.get("kind") or TRAIN)
+        name = str(body.get("name") or "").strip()
+        given: Any = body.get("settings") or {}
+        if not isinstance(given, dict):
+            raise Taken("a launch's settings are a table of run settings, by dotted key")
+        settings: dict[str, JsonValue] = dict(cast(dict[str, JsonValue], given))
+        if body.get("environment"):
+            settings["environment"] = str(body["environment"])
+        preset = str(body["preset"]) if body.get("preset") else None
+        said, chosen = await settled(kind, name or None, settings, preset=preset, presets=presets_of(self._ledger))
+        if kind == EVAL and said.get("environment") is None and isinstance(said.get("eval.suite"), str):
+            suite = await suite_of(self._ledger, str(said["eval.suite"]))
+            if suite is None:
+                raise KeyError(f"there is no suite {said['eval.suite']!r}")
+            said = RunSettings({**said.values, "environment": suite.environments[0]})
+        return said, chosen
 
-    async def _eval_data(self, environment: str) -> Mapping[str, Any]:
-        """An environment's eval data, by name: a published one's as its version recorded it, a built-in one's where
-        it loads here. Raises `KeyError` where it does neither."""
-        if is_published(environment):
-            version = await self._version(environment)
-            if version is None:
-                raise KeyError(f"there is no published environment {environment}")
-            return cast(Mapping[str, Any], version.description.get("evals") or {})
-        return (await self._loaded(environment)).evals()
+    async def check(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        """What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
+        this monitor's cluster (`rollout_train.launching.checked`), and the settings it would run with. Raises `Taken`
+        where this monitor has no cluster config, or for a body it cannot read."""
+        if self._cluster is None:
+            raise Taken(NO_CLUSTER)
+        settings, preset = await self._asked(body)
+        findings = await findings_of(settings, self._cluster, self._ledger)
+        return {
+            "refusals": [asdict(each) for each in findings if each.refuses],
+            "notes": [asdict(each) for each in findings if not each.refuses],
+            "settings": dict(settings.values), "preset": preset,
+        }  # fmt: skip
+
+    async def launch(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Ask for a run (`check`'s body), and start its job if nothing refuses it (`rollout_train.submitting
+        .submit`): the launch, and the notes beside. Raises `rollout_train.launching.Refused` with the findings that
+        refuse it, `Taken` where this monitor has no cluster config or the body says no name."""
+        if self._cluster is None:
+            raise Taken(NO_CLUSTER)
+        settings, preset = await self._asked(body)
+        if not settings["name"]:
+            raise Taken("a launch says the run's name")
+        findings = await findings_of(settings, self._cluster, self._ledger)
+        if any(each.refuses for each in findings):
+            raise LaunchRefused(findings)
+        backend = self._backends.get(_backend_name(self._cluster)) if self._backends else None
+        made = await submit(settings, self._cluster, self._ledger, preset=preset, backend=backend)
+        return {"launch": asdict(made), "notes": [asdict(each) for each in findings if not each.refuses]}
 
     async def _version(self, reference: str) -> EnvironmentVersion | None:
         return await self._versions.get(reference) if self._versions is not None else None
@@ -434,8 +385,8 @@ class System:
 
     async def environments(self) -> dict[str, Any]:
         """Every environment the system knows of, by `module:name` (`rollout_train.monitor.environments.listed`): those
-        the launchers alive offer, those runs were started on and those suites' versions play; each with a readable
-        `name`, the versions of it seen (in runs' starts and suites' entries), whether a launcher alive offers it
+        the cluster offers, those runs were started on and those suites' versions play; each with a readable
+        `name`, the versions of it seen (in runs' starts and suites' entries), whether the cluster offers it
         (`offered`), its training runs and suites, and when a run last started on it (`used`)."""
         return {"environments": await asyncio.to_thread(listed, await self._environments_read())}
 
@@ -509,13 +460,11 @@ class System:
         return {"version": made.version.to_json(), "existing": made.existing}
 
     async def _environments_read(self) -> Read:
-        """What the environments' sources read: the tables, what the launchers alive offer, the registry's names, and
+        """What the environments' sources read: the tables, what the cluster offers, the registry's names, and
         the published versions."""
-        offered = {
-            str(each) for beat in await self._beats() if beat.about.get("kind") == LAUNCHER and alive(beat)
-            for each in cast(list[Any], beat.about.get("environments") or [])
-        }  # fmt: skip
         published = await self._versions.all() if self._versions is not None else []
+        offered = set(self._cluster.environments) if self._cluster is not None else set[str]()
+        offered |= {each.reference for each in published} if self._cluster is not None else set[str]()
         return Read(await self._tables(), frozenset(offered), await self._names(), tuple(published))
 
     async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite:
@@ -593,20 +542,14 @@ class System:
             raise Taken(str(error.args[0]) if error.args else str(error)) from None
 
     async def stop(self, id: str) -> Launch:
-        """Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
-        group boundary. Raises `KeyError` when there is no such launch going."""
+        """Ask a launch to stop (`rollout_train.submitting.stopped`): one whose job was not made yet stops at once; a
+        job going is asked to stop, and its run stops at a group boundary. Raises `KeyError` when there is no such
+        launch going."""
         launches = launches_of(self._ledger)
-        found = next((each for each in await launches.all() if each.id == id), None) if launches else None
-        if launches is None or found is None or found.state not in OPEN:
+        if launches is None:
             raise KeyError(f"there is no launch {id} going")
-        if found.state == ASKED:  # (stopped at once, unless a launcher claims it first: then as a run going)
-            noted = await launches.note(id, expect=(ASKED,), state=STOPPED)
-            if noted.state == STOPPED:
-                return noted
-        noted = await launches.note(id, expect=(CLAIMED, GOING, STOPPING), state=STOPPING)
-        if noted.state != STOPPING:
-            raise KeyError(f"there is no launch {id} going")
-        return noted
+        found = await launch_of(launches, id)
+        return await stopped(found, launches, self._cluster, backends=self._backends)
 
     async def settings(self, run: str) -> dict[str, Any] | None:
         """A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
@@ -618,7 +561,7 @@ class System:
         if not starts:
             return None
         latest = newest_record(starts)
-        said: Mapping[str, Any] = latest.get("settings") or {}
+        said: Mapping[str, Any] = latest.get("run_settings") or latest.get("settings") or {}
         changeable: dict[str, Any] = dict(said.get("changeable") or {})
         steps: Any = await self._ledger.read(table(run, STEPS))
         changes: list[dict[str, Any]] = []
@@ -751,12 +694,21 @@ class System:
         return {"suites": suites, "evals": evals}
 
     async def lineage(self) -> dict[str, Any]:
-        """The checkpoints as a graph, with what trains and serves them (`rollout_train.monitor.lineage`)."""
+        """The checkpoints as a graph, with what trains and serves them (`rollout_train.monitor.lineage`), from every
+        base model that has history and every one the cluster offers."""
         tables = await self._tables()
         notes = _noted(await self._beats())
         every = [note for each in notes.values() for note in each]
         called = await self._names()
-        return await asyncio.to_thread(lineage, tables, every, names=called)
+        return await asyncio.to_thread(lineage, tables, every, names=called, offered=self.offered_models())
+
+    def offered_models(self) -> list[str]:
+        """The base models the cluster offers, each once: its inference providers' models and its trainers'."""
+        if self._cluster is None:
+            return []
+        found = [model for each in self._cluster.inference.values() for model in each.models]
+        found += [model for each in self._cluster.trainers.values() for model in each.models]
+        return list(dict.fromkeys(found))
 
     async def statistics(self) -> dict[str, Any]:
         """Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
@@ -770,20 +722,19 @@ class System:
     async def machines(self) -> dict[str, Any]:
         """Every machine that beats and the roles on it, as the heartbeats and the ledger say
         (`rollout_train.monitor.machines`): the runners and the episodes their claims hold, the sandbox pools and
-        their leases, the engine hosts and how far behind what their run wants each engine is, the launchers and their
-        launches going, and the gateways."""
+        their leases, the engine hosts and how far behind what their run wants each engine is, the drivers that wait
+        for what they asked Ray for, and the gateways."""
         beats = await self._beats()
         if not await asyncio.to_thread(present, self._ledger):
             return machines(beats, now=time.time())
         fences = await self._ledger.fences()
         claims = {run: await Claims.read(self._ledger, run) for run in await runs_in(self._ledger)}
         held = leases_of(self._ledger)
-        asked = launches_of(self._ledger)
         followed = {str(beat.about.get("follows")) for beat in beats if kind_of(beat) == ENGINES}
         serving = {run: await self._ledger.read(table(run, SERVING)) for run in followed}
         return machines(
             beats, now=time.time(), claims=claims, fences=fences, leases=await held.all() if held else [],
-            launches=await asked.all() if asked else [], serving=serving,
+            serving=serving,
         )  # fmt: skip
 
     @contextlib.asynccontextmanager
@@ -1413,6 +1364,11 @@ def _outcome(number: str, group: Mapping[str, Any], line: Mapping[str, Any], uns
     joined = asdict(Result.from_json(line, int(number), group))
     failures = list(dict.fromkeys(str(failure)[:300] for failure in joined["failures"]))
     return {**joined, "failures": failures, "solved": solved_of(joined["solved"], unsaid)}
+
+
+def _backend_name(cluster: "Cluster") -> str:
+    """Where a cluster's runs' jobs go, by name (`rollout_train.submitting.backend_of`)."""
+    return "kubernetes" if cluster.kubernetes is not None else "ray"
 
 
 def _whole(value: Any, what: str, *, optional: bool = False, least: int = 1) -> Any:

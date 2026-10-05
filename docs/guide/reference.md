@@ -32,7 +32,7 @@ do not edit by hand.
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
 - **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`ledger_at`](#ledger_at), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
-- **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`offered_json`](#offered_json), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
+- **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
@@ -5089,7 +5089,7 @@ class System
 
 **Methods**
 
-- `def __init__(self, directory: Path | None = None, feed: FeedReader | None = None, *, ledger: Ledger | None = None, client: httpx.Client | None = None, importer: Importer | None = None) -> None` — Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
+- `def __init__(self, directory: Path | None = None, feed: FeedReader | None = None, *, ledger: Ledger | None = None, client: httpx.Client | None = None, importer: Importer | None = None, cluster: 'Cluster | None' = None, backends: 'Mapping[str, Backend] | None' = None) -> None` — Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
   it), or over a `ledger` alone. `feed` reads the directory's feed (by default its `feed`). `client` asks the
   monitors on other machines for their runs' episodes. `importer` is where environments imported from git go
   (`import_environment`); none: this monitor imports none.
@@ -5098,29 +5098,30 @@ class System
   done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
   the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
 - `async def pause(self, run: str) -> Desired` — Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run.
-- `async def resume(self, run: str) -> Resumed` — Resume a run: in place, or by a launch (`rollout_train.resuming.resume`). Raises `Taken` for a run that
-  cannot be resumed, `KeyError` where there is no such run or no launcher alive offers what it needs.
+- `async def resume(self, run: str) -> Resumed` — Resume a run: in place, or by a launch of its recorded settings (`rollout_train.resuming.resume`).
+  Raises `Taken` for a run that cannot be resumed,
+  `KeyError` where there is no such run or this monitor has no cluster config to submit on,
+  `rollout_train.launching.Refused` for settings the cluster refuses.
 - `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger.
   Raises `Taken` for a name it cannot have, `KeyError` when there is no such run (or no registry).
 - `async def bookmark(self, name: str, checkpoint: str) -> Bookmark` — Make a bookmark name the checkpoint `checkpoint` says (its id, the start of one, `RUN:STEP`, `RUN` or another
   bookmark), or move it there. Raises `Taken` for a name that cannot be one, `KeyError` for a reference that
   says no checkpoint (or no registry).
 - `async def unbookmark(self, name: str) -> None` — Take a bookmark away (the checkpoint stays). Raises `KeyError` when there is no such bookmark.
-- `async def launches(self) -> dict[str, Any]` — The runs asked for, newest first, and the launchers alive with what each offers (its profiles, with the
-  settings a launch may change, its environments, and whether it has room). A launch whose launcher stopped
-  beating while it was claimed, running or stopping is shown as `lost`: what became of its run is not known.
-- `async def launch(self, body: Mapping[str, Any]) -> Launch` — Ask for a run or an eval (`rollout_train.launches.Asked`'s fields): a launcher alive that offers its profile
-  and its environment starts it. An eval names a suite (whose environment it plays; a suite not made yet, the
-  environment whose eval data it is) and the checkpoint that plays it, or the base model (`model`, one a launcher
-  alive offers with the profile; none: the profile's): a suite by name plays the version its name points to now,
-  which the launch then names by id. A training run says the evals it makes (`_checked_evals`). Raises `Taken`
-  for what cannot be asked for (a name taken or no name, a training run of a profile that names no trainer, a
-  setting the profile does not have, no word of the evals, a checkpoint and a base model both), `KeyError` for
-  what no launcher offers (a published environment is offered with the profiles that play it) or a checkpoint no
-  reference says.
+- `async def launches(self) -> dict[str, Any]` — The runs asked for, newest first, each with the job it became and its state: a launch that is going is
+  read with its job's status too (`rollout_train.submitting.followed`), so a job that waits says why, and one
+  that died without its driver saying so is failed.
+- `async def offers(self) -> dict[str, Any]` — What a run can be asked for here (`rollout_train.launching.offers`); nothing where this monitor was started
+  without a cluster config.
+- `async def check(self, body: Mapping[str, Any]) -> dict[str, Any]` — What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
+  this monitor's cluster (`rollout_train.launching.checked`), and the settings it would run with. Raises `Taken`
+  where this monitor has no cluster config, or for a body it cannot read.
+- `async def launch(self, body: Mapping[str, Any]) -> dict[str, Any]` — Ask for a run (`check`'s body), and start its job if nothing refuses it (`rollout_train.submitting
+  .submit`): the launch, and the notes beside. Raises `rollout_train.launching.Refused` with the findings that
+  refuse it, `Taken` where this monitor has no cluster config or the body says no name.
 - `async def environments(self) -> dict[str, Any]` — Every environment the system knows of, by `module:name` (`rollout_train.monitor.environments.listed`): those
-  the launchers alive offer, those runs were started on and those suites' versions play; each with a readable
-  `name`, the versions of it seen (in runs' starts and suites' entries), whether a launcher alive offers it
+  the cluster offers, those runs were started on and those suites' versions play; each with a readable
+  `name`, the versions of it seen (in runs' starts and suites' entries), whether the cluster offers it
   (`offered`), its training runs and suites, and when a run last started on it (`used`).
 - `async def environment(self, environment: str) -> dict[str, Any] | None` — An environment's page (`rollout_train.monitor.environments.page_of`): what it says of itself where it loads
   in this process (its version, rows, eval data, description and curriculum; else why it does not load) and what
@@ -5146,8 +5147,9 @@ class System
   name, no entries, an environment that does not load here or is in two entries, eval data or a row an
   environment does not have, seeds that are no whole numbers, counts below 1, an edit made from another version
   than the newest, or one that changes nothing.
-- `async def stop(self, id: str) -> Launch` — Ask a launch to stop: one not started yet is stopped at once; a run going is stopped by its launcher, at a
-  group boundary. Raises `KeyError` when there is no such launch going.
+- `async def stop(self, id: str) -> Launch` — Ask a launch to stop (`rollout_train.submitting.stopped`): one whose job was not made yet stops at once; a
+  job going is asked to stop, and its run stops at a group boundary. Raises `KeyError` when there is no such
+  launch going.
 - `async def settings(self, run: str) -> dict[str, Any] | None` — A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
   start says, what is wanted of them now, those its newest step used, and each step that used other settings than
   the one before, with what changed. None where there is no such run.
@@ -5167,13 +5169,15 @@ class System
 - `async def evals(self) -> dict[str, Any]` — Every suite (the version its name points to, with its environment and starts; every version; and each
   subject that played it, with the version it played and how it did at each start) and every eval (its suite, the
   version it played, its checkpoint, how far it has got), newest first (`rollout_train.monitor.scores`).
-- `async def lineage(self) -> dict[str, Any]` — The checkpoints as a graph, with what trains and serves them (`rollout_train.monitor.lineage`).
+- `async def lineage(self) -> dict[str, Any]` — The checkpoints as a graph, with what trains and serves them (`rollout_train.monitor.lineage`), from every
+  base model that has history and every one the cluster offers.
+- `def offered_models(self) -> list[str]` — The base models the cluster offers, each once: its inference providers' models and its trainers'.
 - `async def statistics(self) -> dict[str, Any]` — Every run of the ledger in figures (`rollout_train.monitor.statistics`), with each run's engines'
   throughput from its runners' heartbeats, and what the runs are called.
 - `async def machines(self) -> dict[str, Any]` — Every machine that beats and the roles on it, as the heartbeats and the ledger say
   (`rollout_train.monitor.machines`): the runners and the episodes their claims hold, the sandbox pools and
-  their leases, the engine hosts and how far behind what their run wants each engine is, the launchers and their
-  launches going, and the gateways.
+  their leases, the engine hosts and how far behind what their run wants each engine is, the drivers that wait
+  for what they asked Ray for, and the gateways.
 - `async def one_reading(self) -> AsyncGenerator[None]` — Within the block, the ledger's tables, the registry's names, the checkpoints and the beats are read once,
   whatever reads them (the hub reads every topic it watches so, once a beat).
 - `def read_afresh(self) -> None` — Read the ledger again within a reading (after the monitor itself changed something).
@@ -7071,16 +7075,6 @@ An environment by its name, imported here: a built-in one by `module:name`; a pu
 its version's entry point, which imports where this process runs in the version's runtime environment (a Ray job
 given its `runtime_env`), with the version. Raises `KeyError` for a published version the ledger does not keep,
 and whatever importing raises.
-
-### `offered_json`
-
-*function* · `libraries/rollout-train/src/rollout_train/published.py`
-
-```python
-def offered_json(versions: Sequence[EnvironmentVersion]) -> list[dict[str, JsonValue]]
-```
-
-What a launcher says of the published versions it offers: each one's reference, name, source and commit.
 
 ### `parsed` {#rollout_trainpublishedparsed}
 

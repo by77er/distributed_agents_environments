@@ -1,17 +1,16 @@
 """The machines that run things, and what each holds and how full it is: the monitor's Machines page.
 
 Every process that beats (`rollout_train.presence`) says what it is in its beat's `kind`: an episode runner says
-nothing (its places, how many it plays and how full its pools are), an engine host `engines` (the run it follows, and
-what each channel's engines serve), a launcher `launcher` (the profiles and environments it offers), a pool served from
-a machine of its own `pool` (how full it is) and a gateway `gateway` (the channels it samples). `machines` puts those
-beside what the ledger says of them: the episodes each runner's claims hold, each pool's leases in the `sandboxes`
-table, what each followed run's channels should serve, and each launcher's launches going. A process is alive while
-its newest beat is younger than `STALE` seconds by the store's clock (`rollout_train.presence.alive`); a pool within a
-runner is alive while its runner is.
+nothing (its places, how many it plays and how full its pools are), a run's driver that waits for what it asked Ray
+for `run` (what it waits for: its runner beats under the same name once it plays), an engine host `engines` (the run it
+follows, and what each channel's engines serve), a pool served from a machine of its own `pool` (how full it is) and a
+gateway `gateway` (the channels it samples). `machines` puts those beside what the ledger says of them: the episodes
+each runner's claims hold, each pool's leases in the `sandboxes` table, and what each followed run's channels should
+serve. A process is alive while its newest beat is younger than `STALE` seconds by the store's clock
+(`rollout_train.presence.alive`); a pool within a runner is alive while its runner is.
 """
 
 from collections.abc import Collection, Mapping
-from dataclasses import asdict
 from typing import Any, cast
 
 from pydantic import JsonValue
@@ -19,18 +18,14 @@ from pydantic import JsonValue
 from rollout.harness.sandboxes import Lease
 from rollout_train.gateway.beats import GATEWAY
 from rollout_train.inference.remote import ENGINES
-from rollout_train.launcher import LAUNCHER
-from rollout_train.launches import CLAIMED, RUNNING, STOPPING, Launch
 from rollout_train.presence import Beat, alive
 from rollout_train.rollouts.scheduler import Claims
 from rollout_train.sandboxes import POOL
 
 RUNNER = "runner"
 """The kind of an episode runner, whose beat says none."""
-GOING = (CLAIMED, RUNNING, STOPPING)
-"""The states of a launch its launcher is playing."""
-OFFERED = ("profile", "model", "weights")
-"""What the page shows of each profile a launcher offers."""
+WAITING = "run"
+"""The kind of a run's driver that waits for what it asked Ray for."""
 THROUGHPUT = ("tokens_per_second", "mean_concurrency")
 """What the page shows of what a channel's beat says passed through it since the beat before."""
 
@@ -42,18 +37,16 @@ def machines(
     claims: Mapping[str, Claims] | None = None,
     fences: Mapping[str, int] | None = None,
     leases: Collection[Lease] = (),
-    launches: Collection[Launch] = (),
     serving: Mapping[str, Mapping[str, JsonValue]] | None = None,
 ) -> dict[str, Any]:
     """Every machine that beats and every role on it, as the beats and the ledger say: `claims` by run (with `fences`,
-    which say whether each holds), the pools' `leases`, the `launches`, and each followed run's `serving` table.
+    which say whether each holds), the pools' `leases`, and each followed run's `serving` table.
     A beat's time (`at`) is given by `now`'s clock (the monitor's): `now` less its age by the store's clock."""
     by_name = {beat.runner: beat for beat in beats}
     playing = _playing(claims or {}, fences or {}, by_name)
     runners: list[dict[str, Any]] = []
     pools: dict[str, dict[str, Any]] = {}
     engines: list[dict[str, Any]] = []
-    launchers: list[dict[str, Any]] = []
     gateways: list[dict[str, Any]] = []
     for beat in beats:
         kind = kind_of(beat)
@@ -70,6 +63,12 @@ def machines(
             )
             for name, capacity in dict(held).items():
                 pools[f"{name}@{beat.runner}"] = _pool(shown, f"{name}@{beat.runner}", name, capacity, beat.runner)
+        elif kind == WAITING:
+            runners.append(
+                shown
+                | {"run": said.get("run"), "places": 0, "playing": 0, "free": 0, "claims": [], "pools": []}
+                | {"channels": [], "waiting": said.get("waiting") or []}
+            )
         elif kind == POOL:
             name = str(said.get("pool") or beat.runner)
             pools[name] = _pool(shown, name, str(said.get("sandboxes") or name), said, None)
@@ -78,14 +77,6 @@ def machines(
             wanted = _wanted((serving or {}).get(follows, {}))
             served = [_served(each, wanted) for each in _list(said.get("channels"))]
             engines.append(shown | {"follows": follows or None, "channels": served})
-        elif kind == LAUNCHER:
-            offered = [{key: each.get(key) for key in OFFERED} for each in _list(said.get("profiles"))]
-            going = [_launch(each) for each in launches if each.launcher == beat.runner and each.state in GOING]
-            launchers.append(
-                shown
-                | {"profiles": offered, "environments": said.get("environments") or [], "launches": going}
-                | {key: said.get(key) for key in ("at_once", "playing", "backend")}
-            )
         elif kind == GATEWAY:
             gateways.append(shown | {"listen": said.get("listen"), "channels": _channels(said.get("channels"))})
     for lease in leases:
@@ -95,7 +86,7 @@ def machines(
         pools[lease.pool].setdefault("leases", []).append(_lease(lease, claims or {}, fences or {}, by_name))
     listed = [pool | {"leases": sorted(pool.get("leases", []), key=_newest)} for pool in pools.values()]
     roles: dict[str, list[dict[str, Any]]] = {
-        "runners": runners, "pools": listed, "engines": engines, "launchers": launchers, "gateways": gateways,
+        "runners": runners, "pools": listed, "engines": engines, "gateways": gateways,
     }  # fmt: skip
     for found in roles.values():
         found.sort(key=_order)
@@ -227,13 +218,6 @@ def _channel(channel: Mapping[str, Any]) -> dict[str, Any]:
     if "servers" in channel:
         shown["servers"] = channel["servers"]
     return shown
-
-
-def _launch(launch: Launch) -> dict[str, Any]:
-    asked = asdict(launch.asked)
-    return {"id": launch.id, "state": launch.state, "at": launch.at, "updated": launch.updated} | {
-        key: asked.get(key) for key in ("name", "kind", "profile", "environment", "suite")
-    }
 
 
 def _list(value: Any) -> list[Mapping[str, Any]]:

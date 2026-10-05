@@ -3,7 +3,9 @@
 Every checkpoint grows from a base model, along its parents (`rollout_train.checkpoints`): its first parent is what it
 was trained from, any others what it learned from beside (a merge's). A checkpoint with no parent was trained from its
 base model, which is the root its line hangs from; a base model that has had an eval is a root too, whether or not
-anything was trained from it. Each checkpoint was made by a step of some run, and says which. A
+anything was trained from it, and so is each base model the cluster offers (`offered`), with no lane until something
+is trained from it or evaluates it. The roots with history come first, the most recently used first; then the others,
+by name. Each checkpoint was made by a step of some run, and says which. A
 run that starts from another run's checkpoint forks there. Beside the graph stand each run's trainer with its queue of
 steps, and the engines and what each serves.
 
@@ -43,12 +45,14 @@ def lineage(
     *,
     names: Mapping[str, Any] | None = None,
     now: float | None = None,
+    offered: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """The graph a ledger's tables (by name) describe, with the feed's notes (`notes`) and the registry's `names`
-    (`rollout_train.registry.names`: the runs' names and the bookmarks)."""
+    """The graph a ledger's tables (by name) describe, with the feed's notes (`notes`), the registry's `names`
+    (`rollout_train.registry.names`: the runs' names and the bookmarks), and the base models the cluster offers
+    (`offered`), each a root."""
     now = time.time() if now is None else now
     names = dict(names or {"runs": {}, "bookmarks": {}})
-    return _Reading(tables, notes, names, now).payload()
+    return _Reading(tables, notes, names, now).payload(offered)
 
 
 class _Reading:
@@ -83,16 +87,21 @@ class _Reading:
                     found = said
         return found
 
-    def payload(self) -> dict[str, Any]:
+    def payload(self, offered: Sequence[str] = ()) -> dict[str, Any]:
         made = self.checkpoints()
         runs = self.runs(made)
         loads = self.loads()
         checkpoints = self.shown(made, runs, loads)
         edges, outside = self.edges(made)
-        trained = sorted(
-            {checkpoint.base or "the base model" for checkpoint in made.values() if not checkpoint.parents}
-        )
-        bases = trained + [each for each in self.evaluated() if each not in trained]
+        used: dict[str, float] = {}
+        for checkpoint in made.values():
+            if not checkpoint.parents:
+                base = checkpoint.base or "the base model"
+                used[base] = max(used.get(base, 0.0), checkpoint.made)
+        for model, at in self.evaluated().items():
+            used[model] = max(used.get(model, 0.0), at)
+        history = sorted(used, key=lambda each: (-used[each], each))
+        bases = history + sorted({each for each in offered if each not in used})
         return {
             "now": round(self.now, 1),
             "bases": bases,
@@ -105,15 +114,18 @@ class _Reading:
             "workers": self.workers(loads),
         }
 
-    def evaluated(self) -> list[str]:
-        """The base models that have had an eval (`rollout_train.evals`: an eval's subject of kind `model`), by name."""
-        found: set[str] = set()
+    def evaluated(self) -> dict[str, float]:
+        """The base models that have had an eval (`rollout_train.evals`: an eval's subject of kind `model`), each with
+        when it was last asked for."""
+        found: dict[str, float] = {}
         for name, records in self.tables.items():
             if name.startswith(EVALUATIONS) and name.endswith("/subject"):
                 about = records.get("subject")
                 if isinstance(about, dict) and about.get("kind") == "model" and about.get("model"):
-                    found.add(str(about["model"]))
-        return sorted(found)
+                    said = cast(dict[str, Any], about)
+                    model, at = str(said["model"]), float(said.get("decided") or 0.0)
+                    found[model] = max(found.get(model, 0.0), at)
+        return found
 
     def checkpoints(self) -> dict[str, Checkpoint]:
         """Every checkpoint, by id, oldest first."""

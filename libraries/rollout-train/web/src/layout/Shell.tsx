@@ -21,18 +21,18 @@ function watched(place: Place, system: System | undefined): Topic[] {
   }
   if (place.kind === "checkpoint") {
     const id = system?.checkpoints.find(each => each.id === place.id || each.id.startsWith(place.id))?.id ?? place.id;
-    found.push(topics.checkpointEvals(id), topics.path(id), topics.launches());
+    found.push(topics.checkpointEvals(id), topics.path(id), topics.launches(), topics.offers());
   }
-  if (place.kind === "base") found.push(topics.checkpoints(), topics.history("model", place.model), topics.launches(), topics.evals());
+  if (place.kind === "base") found.push(topics.checkpoints(), topics.history("model", place.model), topics.launches(), topics.offers(), topics.evals());
   if (place.kind === "launch") found.push(topics.evals());
   if (place.kind === "group") found.push(topics.group(place.run, place.number));
   if (place.kind === "episode") found.push(topics.episode(place.id));
   if (place.kind === "statistics") found.push(topics.statistics());
   if (place.page === "machines") found.push(topics.machines());
-  if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches());
+  if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches(), topics.offers());
   if (place.kind === "checkpoints") found.push(topics.checkpoints());
   if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());
-  if (place.page === "evals") found.push(topics.launches(), topics.evalSubjects());
+  if (place.page === "evals") found.push(topics.launches(), topics.offers(), topics.evalSubjects());
   if (place.kind === "subject") {
     const id = place.subject === "checkpoint" ? system?.checkpoints.find(each => each.id === place.id || each.id.startsWith(place.id))?.id ?? place.id : place.id;
     found.push(topics.history(place.subject, place.id), ...(place.subject === "checkpoint" ? [topics.path(id)] : []));

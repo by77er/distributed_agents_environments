@@ -1,16 +1,16 @@
 // Pause, resume and stop a run from its page, the buttons shown by where it is: a run going can be paused, one paused
-// resumed in place, one stopped, failed or lost launched again into its directory, and one its launch started stopped.
+// resumed in place, one stopped, failed or lost submitted again with its settings, and one a launch plays stopped.
 
 import { useLaunches, useRunControl, useStop } from "../api/queries";
 import type { Launch, Run } from "../api/types";
+import { GOING as LAUNCHING } from "../lib/launches";
 
 const GOING = new Set(["running", "idle", "paused"]);
 const RESUMABLE = new Set(["stopped", "failed", "lost", "ended"]);
-const LAUNCHING = new Set(["asked", "claimed", "running", "stopping"]);
 
-/** The launch going that plays a run: started in its directory, or resuming it. */
+/** The launch going that plays a run. */
 const launchOf = (launches: Launch[] | undefined, run: Run): Launch | undefined =>
-  launches?.find(each => LAUNCHING.has(each.state) && ((run.directory != null && each.directory === run.directory) || each.asked.resumes === run.run));
+  launches?.find(each => LAUNCHING.has(each.state) && (each.run === run.run || each.asked.resumes === run.run));
 
 export function RunControls({ run }: { run: Run }) {
   const { data: launched } = useLaunches();

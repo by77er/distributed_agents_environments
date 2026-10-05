@@ -1,15 +1,14 @@
 """A suite of several environments: a version is a list of entries, each an environment once with its own starts,
 episodes and limits; an eval plays each entry in a run of its own (its parts) and scores each apart; a training run's
-schedule plays each on its channel and folds each into its curriculum, the entry named; launchers claim only what they
-offer every environment of; and the page makes, edits and lists such suites, and lists the environments it knows."""
+schedule plays each on its channel and folds each into its curriculum, the entry named; an eval is refused where the
+cluster does not offer every environment of its suite; and the page makes, edits and lists such suites, and lists the
+environments it knows."""
 
-import asyncio
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
 import pytest
-from pydantic import JsonValue
 
 from rollout.curriculum import Curriculum
 from rollout.harness.blobs import FileBlobStore
@@ -29,16 +28,18 @@ from rollout_train.evals import (
     suite_of,
     suite_table,
 )
-from rollout_train.launcher import LAUNCHER, Launcher
-from rollout_train.launches import EVAL, Asked, launches_of
+from rollout_train.launches import EVAL
+from rollout_train.launching import checked
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.scores import evals_of, path_of
 from rollout_train.monitor.system import System
-from rollout_train.presence import presence_of
 from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, table
 from rollout_train.rollouts.scheduler import PLANS, Plan
+from rollout_train.run_settings import RunSettings
+from rollout_train.stores import Stores
+from tests.rollout_train.clusters import POLICY, a_cluster
 from tests.rollout_train.rollouts.games import guessing, words
-from tests.rollout_train.support import Counting, Process, answering, here, made_by, profiles
+from tests.rollout_train.support import Counting, answering, here, made_by
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -207,51 +208,28 @@ async def test_a_scheduled_eval_of_two_environments_plays_each_on_the_trained_ch
     assert line["suites"][0]["environments"] == [WORDS, GUESSING]
 
 
-async def test_a_launcher_claims_only_what_it_offers_every_environment_of(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_an_eval_is_refused_where_the_cluster_does_not_offer_every_environment_of_its_suite(
+    tmp_path: Path,
 ) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    launches, heartbeats = launches_of(ledger), presence_of(ledger)
-    assert launches is not None and heartbeats is not None
-    started: list[list[str]] = []
+    cluster = a_cluster(tmp_path)  # (it offers the words, and not the guessing game)
+    stores = Stores.open(cluster)
+    await make_suite(stores.ledger, "mixed", two_entries())
+    await make_suite(stores.ledger, "words", two_entries()[:1])
+    channel = {key: value for key, value in POLICY.items() if key.startswith("channels.")}
 
-    async def spawn(*command: str, stdout: Any, **_: Any) -> Process:
-        started.append(list(command))
-        process = Process(0)
-        process.done.set()
-        return process
+    async def refused(suite: str) -> list[str]:
+        settings = RunSettings({**channel, "kind": EVAL, "name": "an eval", "environment": WORDS, "eval.suite": suite})
+        return [each.reason for each in await checked(settings, cluster, stores.ledger) if each.refuses]
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
-    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [WORDS], tmp_path / "runs", every=0.01)
-    both = await launches.ask(Asked("small", WORDS, "both", kind=EVAL, suite="mixed@1", environments=[GUESSING]))
-    await launches.ask(Asked("small", WORDS, "words only", kind=EVAL, suite="words@1"))
-    serving = asyncio.create_task(found.serve())
-    try:
-        async with asyncio.timeout(5):
-            while not started:  # noqa: ASYNC110 (the launcher starts the one it can)
-                await asyncio.sleep(0.01)
-        await asyncio.sleep(0.1)
-    finally:
-        serving.cancel()
-        await asyncio.gather(serving, return_exceptions=True)
-    assert [command[command.index("--name") + 1] for command in started] == ["words only"]
-    assert next(each for each in await launches.all() if each.id == both.id).state == "asked"
+    assert any(GUESSING in each and "does not offer" in each for each in await refused("mixed@1"))
+    assert await refused("words@1") == []
 
 
 async def test_the_page_makes_and_edits_a_suite_of_entries_and_lists_the_environments_it_knows(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
+    cluster = a_cluster(tmp_path)  # (it offers the words, and not the guessing game)
+    ledger = Stores.open(cluster).ledger
     await ledger.take("suites/none")
-    heartbeats = presence_of(ledger)
-    assert heartbeats is not None
-    offered: JsonValue = {
-        "kind": LAUNCHER,
-        "profiles": [{"profile": "small", "path": "/p/small.toml", "kinds": ["eval"], "model": "m", "settings": {}}],
-        "environments": [WORDS],
-        "at_once": 1,
-        "playing": 0,
-    }
-    await heartbeats.beat("launcher/far", offered)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
+    transport = httpx.ASGITransport(app=create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster))
     words_entry = {"environment": WORDS, "chosen": DRAWN, "rows": ["say-yes"], "seeds": [5], "episodes": 2}
     guesses = {"environment": GUESSING, "chosen": GIVEN, "starts": [{"task": "guess-river", "seed": 3}]}
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
@@ -268,16 +246,16 @@ async def test_the_page_makes_and_edits_a_suite_of_entries_and_lists_the_environ
             assert answer.status_code == 409 and answer.json()["error"], why
         listed = (await client.get("/api/evals")).json()
         known = (await client.get("/api/environments")).json()["environments"]
+        channel = {key: value for key, value in POLICY.items() if key.startswith("channels.")}
         launched = await client.post(
-            "/api/launches", json={"kind": EVAL, "suite": "mixed@1", "profile": "small", "name": "on both"}
+            "/api/launches", json={"kind": EVAL, "name": "on both", "settings": {**channel, "eval.suite": "mixed@1"}}
         )
     (suite,) = listed["suites"]
     assert [each["environments"] for each in suite["versions"]] == [[WORDS, GUESSING], [WORDS]]
     assert suite["versions"][0]["entries"][1]["answer_tokens"] == 9
     found = await suite_of(ledger, "mixed@2")
     assert found is not None and found.entries[0].episodes == 3 and found.entries[0].chosen == DRAWN
-    assert {each["environment"]: (each["name"], each["offered"]) for each in known} == {
-        WORDS: ("words", True), GUESSING: ("guessing", False),
-    }  # fmt: skip
+    shown = {each["environment"]: (each["name"], each["offered"]) for each in known}
+    assert (shown[WORDS], shown[GUESSING]) == (("words", True), ("guessing", False))
     assert next(each for each in known if each["environment"] == WORDS)["versions"] == ["1"]
-    assert launched.status_code == 404 and GUESSING in launched.json()["error"]  # (no launcher offers it)
+    assert launched.status_code == 422 and GUESSING in launched.json()["error"]  # (the cluster does not offer it)

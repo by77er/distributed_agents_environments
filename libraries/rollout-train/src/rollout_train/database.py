@@ -25,7 +25,7 @@ import asyncio
 import json
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import asdict, astuple, replace
+from dataclasses import asdict, astuple
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,7 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease
-from rollout_train.launches import ASKED, CLAIMED, Asked, Launch, as_launch, changed, new_launch
+from rollout_train.launches import Asked, Launch, as_launch, changed, new_launch, stored
 from rollout_train.ledger import Appended, Fence, Fenced, Ledger
 from rollout_train.presence import Beat, kept
 from rollout_train.registry import (
@@ -381,12 +381,12 @@ class DatabaseLaunches:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    async def ask(self, asked: Asked) -> Launch:
-        made = new_launch(asked)
+    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
+        made = new_launch(asked, run)
 
         def added(connection: Connection) -> None:
             sql(connection, "INSERT INTO launches (id, at, state, launch) VALUES (:id, :at, :state, :launch)",
-                {"id": made.id, "at": made.at, "state": made.state, "launch": json.dumps(asdict(made))})  # fmt: skip
+                {"id": made.id, "at": made.at, "state": made.state, "launch": stored(made)})  # fmt: skip
 
         await asyncio.to_thread(self.database.write, added, exclusive="launches")
         return made
@@ -396,18 +396,6 @@ class DatabaseLaunches:
             return fetch_all(connection, "SELECT launch FROM launches ORDER BY at DESC")
 
         return [as_launch(json.loads(launch)) for (launch,) in await asyncio.to_thread(self.database.read, rows)]
-
-    async def claim(self, id: str, launcher: str) -> Launch | None:
-        def claimed(connection: Connection) -> Launch | None:
-            row = fetch_one(connection, "SELECT launch FROM launches WHERE id = :id AND state = :asked",
-                            {"id": id, "asked": ASKED})  # fmt: skip
-            if row is None:
-                return None
-            launch = replace(as_launch(json.loads(row[0])), state=CLAIMED, launcher=launcher, updated=time.time())
-            self._write(connection, launch, ASKED)
-            return launch
-
-        return await asyncio.to_thread(self.database.write, claimed, exclusive="launches")
 
     async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch:
         def noted(connection: Connection) -> Launch:
@@ -426,7 +414,7 @@ class DatabaseLaunches:
     @staticmethod
     def _write(connection: Connection, launch: Launch, was: str) -> None:
         sql(connection, "UPDATE launches SET state = :state, launch = :launch WHERE id = :id AND state = :was",
-            {"id": launch.id, "state": launch.state, "launch": json.dumps(asdict(launch)), "was": was})  # fmt: skip
+            {"id": launch.id, "state": launch.state, "launch": stored(launch), "was": was})  # fmt: skip
 
 
 class DatabasePresence:
@@ -525,7 +513,7 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
     newest fence (the fence a record was written under is not read back through a ledger). A fence already in the
     target is kept if it is newer. The runs, bookmarks and dataset names registered beside `source` are registered
     beside `target` too, and so are the suites' names and what is wanted of each run's settings. To move to Postgres:
-    copy, then point the profile's (or the cluster config's) `[ledger] url` at it."""
+    copy, then point the cluster config's `[ledger] url` at it."""
     tables = await source.tables()
     there = set(await target.tables())
     if clash := sorted(there & set(tables)):

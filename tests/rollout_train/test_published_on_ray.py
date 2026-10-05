@@ -1,6 +1,6 @@
 """An environment imported from git, on the session's own Ray: checked in a job in its runtime environment (its source
-fetched by Ray, its module imported from it, `rollout` and `rollout-train` the platform's), then trained on by a run a
-launcher submits as a job in that runtime environment, whose start records the version."""
+fetched by Ray, its module imported from it, `rollout` and `rollout-train` the platform's), then trained on by a run
+submitted by its settings as a Ray job in that runtime environment, whose start records the version."""
 
 import asyncio
 from pathlib import Path
@@ -8,49 +8,55 @@ from pathlib import Path
 import rollout
 import rollout_train
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.database import DatabaseLedger
-from rollout_train.launcher import Launcher
-from rollout_train.launches import ENDED, FAILED, Asked, launches_of
-from rollout_train.presence import presence_of
+from rollout_train.cluster import load
+from rollout_train.launches import ENDED, FAILED, STOPPED, TRAIN, launch_of, launches_of
 from rollout_train.published import environment_versions_of
 from rollout_train.publishing import Source, checked_on_ray, publish
 from rollout_train.record import RESULTS, STARTS, newest_record, table
-from rollout_train.registry import registry_of
+from rollout_train.run_settings import RunSettings
+from rollout_train.stores import Stores
+from rollout_train.submitting import followed, submit
 from tests.local_ray import LocalRay
 from tests.rollout_train.sources import repository, tiny
 
-PROFILE = """
-directory = "{directory}"
-
+CLUSTER = """
+name = "test"
+[ray]
+address = "{address}"
+jobs = "{jobs}"
 [ledger]
-kind = "rollout_train.database:DatabaseLedger"
-url = "sqlite:///{database}"
-
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
+url = "sqlite:///{root}/ledger.db"
+[blobs]
+directory = "{root}/blobs"
+[scratch]
+directory = "{root}/scratch"
+[inference.local]
+kind = "vllm"
 engine = "rollout_train.testing:scripted_engine"
-engines = [{{ device = 0 }}]
-
-[trainer]
-kind = "words:Steps"
-channel = "policy"
-colocated = true
-segment_tokens = 900
-segments_per_step = 3
+gpus = 0.5
+[inference.local.models.a-checkpoint]
+context = 4096
+[trainers.words]
+kind = "lora"
+implementation = "words:Steps"
+gpus = 0.5
+colocate_with = "local"
+models = ["a-checkpoint"]
 """
-"""A run on the imported environment: its trainer is the project's own (`words:Steps`), which only its runtime
-environment imports."""
-DONE = (ENDED, FAILED)
+"""A cluster whose trainer is the imported project's own (`words:Steps`), which only its runtime environment
+imports."""
+DONE = (ENDED, FAILED, STOPPED)
 
 
-async def test_an_imported_environment_is_checked_and_trained_on_in_its_runtime_environment(
+async def test_an_imported_environment_is_checked_and_trained_on_by_settings_in_its_runtime_environment(
     tmp_path: Path, local_ray: LocalRay
 ) -> None:
     source = repository(tmp_path / "source", tiny(src=True), under="environments/words")
-    database = tmp_path / "ledger.db"
-    ledger = DatabaseLedger(f"sqlite:///{database}")
-    versions = environment_versions_of(ledger)
+    path = tmp_path / "cluster.toml"
+    path.write_text(CLUSTER.format(root=tmp_path, address=local_ray.address, jobs=local_ray.dashboard))
+    cluster = load(path)
+    stores = Stores.open(cluster)
+    versions = environment_versions_of(stores.ledger)
     assert versions is not None
     made = await publish(
         Source(str(source), "main", "environments/words"), versions=versions, blobs=FileBlobStore(tmp_path / "blobs"),
@@ -64,34 +70,21 @@ async def test_an_imported_environment_is_checked_and_trained_on_in_its_runtime_
     said = await checked_on_ray(local_ray.dashboard, version.entry_point, version.runtime_env)
     assert said["platform"] == {"rollout": rollout.__file__, "rollout_train": rollout_train.__file__}
 
-    profiles = tmp_path / "profiles"
-    profiles.mkdir()
-    (profiles / "words.toml").write_text(PROFILE.format(directory=tmp_path / "run", database=database))
-    launches, heartbeats = launches_of(ledger), presence_of(ledger)
-    assert launches is not None and heartbeats is not None
-    launcher = Launcher(
-        "launcher/here", launches, heartbeats, profiles, [], tmp_path / "runs", ray=local_ray.dashboard, gpus=0,
-        versions=versions, every=0.2,
-    )  # fmt: skip
-    asked = await launches.ask(
-        Asked(
-            profile="words", environment=version.reference, name="on words", groups=2, groups_per_step=1,
-            settings={"evals.suite": None},
-        )
-    )  # fmt: skip
-    serving = asyncio.create_task(launcher.serve())
-    try:
-        async with asyncio.timeout(300):
-            while (launch := next(each for each in await launches.all() if each.id == asked.id)).state not in DONE:  # noqa: ASYNC110
-                await asyncio.sleep(0.5)
-    finally:
-        serving.cancel()
+    settings = RunSettings({
+        "kind": TRAIN, "name": "on words", "environment": version.reference, "trainer.provider": "words",
+        "channels.policy.provider": "local", "channels.policy.model": "a-checkpoint",
+        "channels.policy.renderer": "rollout_train.testing:plain_renderer", "groups": 2, "groups_per_step": 1,
+        "trainer.segment_tokens": 900, "trainer.segments_per_step": 3,
+    })  # fmt: skip
+    launch = await submit(settings, cluster, stores.ledger)
+    launches = launches_of(stores.ledger)
+    assert launches is not None and launch.job
+    async with asyncio.timeout(300):
+        while (launch := await followed(await launch_of(launches, launch.id), launches, cluster)).state not in DONE:  # noqa: ASYNC110
+            await asyncio.sleep(0.5)
     assert launch.state == ENDED, launch.detail
-    registry = registry_of(ledger)
-    assert registry is not None
-    run = next(each.id for each in await registry.runs() if each.name == "on words")
-    start = newest_record(await ledger.read(table(run, STARTS)))
-    assert start["environment"] == version.reference
+    assert launch.run is not None
+    start = newest_record(await stores.ledger.read(table(launch.run, STARTS)))
+    assert start["environment"] == version.reference and start["launch"] == launch.id
     assert start["published"]["version"] == version.version and start["published"]["commit"] == version.commit
-    assert len(await ledger.read(table(run, RESULTS))) == 2
-    ledger.close()
+    assert len(await stores.ledger.read(table(launch.run, RESULTS))) == 2

@@ -1,6 +1,6 @@
-"""Evaluations: a suite (an eval configuration, kept in versions), played by a checkpoint (or the base model) with
-nothing trained; asked for from the page and started by a launcher; and made by a training run of its own checkpoints,
-between its steps."""
+"""Evaluations: a suite (an eval configuration, kept in versions), played by a checkpoint (or a base model) with
+nothing trained; asked for from the page by its settings and submitted as a job; and made by a training run of its own
+checkpoints, between its steps."""
 
 import asyncio
 from pathlib import Path
@@ -12,9 +12,9 @@ from pydantic import JsonValue
 from rollout.curriculum import Curriculum
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import testing as support
 from rollout_train import train
 from rollout_train.checkpoints import Checkpoints, new_id
+from rollout_train.cluster import Cluster
 from rollout_train.evals import (
     DRAWN,
     EVAL,
@@ -29,30 +29,23 @@ from rollout_train.evals import (
     suite_of,
     suites_in,
 )
-from rollout_train.launcher import LAUNCHER, Launcher
-from rollout_train.launches import Asked, launches_of
+from rollout_train.jobs import Run, ran
+from rollout_train.launches import SUBMITTED
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.system import System
-from rollout_train.presence import presence_of
-from rollout_train.profile import Profile
 from rollout_train.record import EVALS, GROUPS, RESULTS, STARTS, STEPS, results, scope, table
-from rollout_train.registry import registry_of
-from rollout_train.resuming import _asked  # pyright: ignore[reportPrivateUsage]
+from rollout_train.resuming import _evaluated  # pyright: ignore[reportPrivateUsage]
 from rollout_train.rollouts import EpisodeRunner, Record, loaded, playing
 from rollout_train.rollouts.scheduler import EPISODES
+from rollout_train.run_settings import RunSettings, key_of
+from rollout_train.stores import Stores
+from rollout_train.submitting import RayJobs
+from tests.local_ray import LocalRay
+from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.support import (
-    OFFERED,
-    Counting,
-    Process,
-    a_ledger,
-    a_profile,
-    answering,
-    here,
-    made_by,
-    profiles,
-    write,
-)
+from tests.rollout_train.support import Counting, answering, here, made_by
+from tests.rollout_train.test_full_weights import seeded
+from tests.rollout_train.test_submitting import Jobs
 
 pytest.importorskip("starlette")
 from tests.rollout_train.support import ENVIRONMENT, a_schedule, monitor_client
@@ -192,8 +185,7 @@ async def test_an_eval_started_again_asks_for_the_version_it_played_whatever_its
     said: dict[str, Any] = {"kind": EVAL, "suite": "words-v1", "checkpoint": None, "environment": ENVIRONMENT}
     # (a start written before starts said their suite's version: its environment's version is under `version`)
     for start in ({**said, "version": "1"}, {**said, "version": "1", "suite_version": first.id}):
-        asked = await _asked(ledger, "eval-1", start, None)
-        assert (asked.kind, asked.suite, asked.episodes, asked.environment) == (EVAL, "words-v1@1", 2, ENVIRONMENT)
+        assert await _evaluated(ledger, "eval-1", start, {}) == {"eval.suite": "words-v1@1", "eval.episodes": 2}
 
 
 async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:
@@ -213,108 +205,60 @@ async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:
     assert (who["kind"], who["checkpoint"], who["model"]) == ("model", None, "tiny")
 
 
-async def test_a_launcher_starts_an_eval_launch_as_rollout_eval(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    launches, heartbeats = launches_of(ledger), presence_of(ledger)
-    assert launches is not None and heartbeats is not None
-    started: list[list[str]] = []
-
-    async def spawn(*command: str, stdout: Any, **_: Any) -> Process:
-        started.append(list(command))
-        process = Process(0)
-        process.done.set()
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
-    runs = tmp_path / "runs"
-    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [ENVIRONMENT], runs, every=0.01)
-    asked = Asked("small", ENVIRONMENT, "words, best", start="best", kind=EVAL, suite="words-v1", episodes=3)
-    await launches.ask(asked)
-    serving = asyncio.create_task(found.serve())
-    try:
-        async with asyncio.timeout(5):
-            while not started:  # noqa: ASYNC110 (the launcher starts it)
-                await asyncio.sleep(0.01)
-    finally:
-        serving.cancel()
-        await asyncio.gather(serving, return_exceptions=True)
-    (command,) = started
-    assert command[2:4] == ["rollout_train.cli", "eval"] and command[5] == "words-v1"
-    assert command[command.index("--episodes") + 1] == "3" and command[command.index("--checkpoint") + 1] == "best"
-    assert command[command.index("--environment") + 1] == ENVIRONMENT
-    assert "--groups" not in command and not any(each.startswith("trainer.start") for each in command)
+OTHER = """
+[inference.other]
+kind = "vllm"
+engine = "rollout_train.testing:scripted_engine"
+gpus = 0.25
+[inference.other.models."org/another-base"]
+context = 4096
+"""
+"""A provider of another base model, beside the test cluster's."""
+EVALUATED: dict[str, JsonValue] = {
+    key: value for key, value in POLICY.items() if key.startswith("channels.") or key == "episodes_at_once"
+}
+"""The channel an eval on the test cluster plays on."""
 
 
-async def test_an_eval_is_asked_for_from_the_page(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
-    heartbeats, registry = presence_of(ledger), registry_of(ledger)
-    assert heartbeats is not None and registry is not None
-    about: JsonValue = {
-        "kind": LAUNCHER,
-        "profiles": [OFFERED],
-        "environments": [ENVIRONMENT],
-        "at_once": 1,
-        "playing": 0,
-    }
-    await heartbeats.beat("launcher/far", about)
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
-        body = {"kind": EVAL, "suite": "words-v1", "profile": OFFERED["profile"], "name": "on words", "episodes": 2}
-        answer = await client.post("/api/launches", json=body)
+async def an_eval(cluster: Cluster, name: str, settings: dict[str, JsonValue]) -> Run:
+    stores = Stores.open(cluster)
+    given = RunSettings({**EVALUATED, "kind": EVAL, "name": name, "environment": WORDS, **settings})
+    return Run(cluster, stores, given, await stores.registry.create(name))
+
+
+async def test_an_eval_is_asked_for_from_the_page_by_its_settings(tmp_path: Path) -> None:
+    cluster, jobs = a_cluster(tmp_path, more=OTHER), Jobs()
+    stores = Stores.open(cluster)
+    await make_suite(stores.ledger, "words-v1", [suite_entry(WORDS, words, rows=["say-yes"], seeds=[1])])
+    given: dict[str, JsonValue] = {**EVALUATED, "eval.suite": "words-v1", "eval.episodes": 2}
+
+    def asked(name: str, **settings: JsonValue) -> dict[str, Any]:
+        return {"kind": EVAL, "name": name, "settings": {**given, **settings}}
+
+    another: dict[str, JsonValue] = {"channels.policy.provider": "other", "channels.policy.model": "org/another-base"}
+    backends = {"ray": RayJobs("x", jobs)}
+    where = f"sqlite:///{tmp_path}/ledger.db"
+    async with monitor_client(where, beat=0.0, cluster=cluster, backends=backends) as client:
+        answer = await client.post("/api/launches", json=asked("on words"))
         assert answer.status_code == 200, answer.text
         launch = answer.json()["launch"]
-        assert (
-            launch["asked"]["environment"] == ENVIRONMENT and launch["asked"]["kind"] == EVAL
-        )  # (the suite's environment)
-        missing = await client.post("/api/launches", json=body | {"suite": "no-such-suite", "name": "x"})
+        assert launch["state"] == SUBMITTED and launch["asked"]["kind"] == EVAL
+        assert launch["asked"]["settings"]["environment"] == WORDS  # (the suite's environment)
+        missing = await client.post("/api/launches", json=asked("x", **{"eval.suite": "none-such"}))
         assert missing.status_code == 404 and "no suite" in missing.json()["error"]
-        none = await client.post("/api/launches", json=body | {"episodes": 0, "name": "y"})
-        assert none.status_code == 409
-        unplayed = body | {"suite": "words-held-out", "environment": ENVIRONMENT, "name": "held out"}
-        answer = await client.post("/api/launches", json=unplayed)  # (frozen when it is first played)
-        assert answer.status_code == 200 and answer.json()["launch"]["asked"]["suite"] == "words-held-out"
+        none = await client.post("/api/launches", json=asked("y", **{"eval.episodes": 0}))
+        assert none.status_code == 422 and [each["key"] for each in none.json()["refusals"]] == ["eval.episodes"]
+        based = await client.post("/api/launches", json=asked("on another base", **another))
+        assert based.status_code == 200, based.text
+        elsewhere = {**another, "channels.policy.model": "org/elsewhere"}
+        refused = await client.post("/api/launches", json=asked("elsewhere", **elsewhere))
+        assert refused.status_code == 422
+        assert [each["key"] for each in refused.json()["refusals"]] == ["channels.policy.model"]
+        trained = await client.post("/api/launches", json=asked("z", **{"trainer.rank": 8}))
+        assert trained.status_code == 422 and "trains nothing" in trained.json()["refusals"][0]["reason"]
         listed = (await client.get("/api/evals")).json()
         assert [each["suite"] for each in listed["suites"]] == ["words-v1"] and listed["evals"] == []
-
-
-async def test_a_profile_without_a_trainer_is_asked_for_evals_only_and_a_published_environment_with_its_profiles(
-    tmp_path: Path,
-) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
-    heartbeats = presence_of(ledger)
-    assert heartbeats is not None
-    published = f"words@{'0' * 64}"
-    serving: dict[str, Any] = {
-        **OFFERED,
-        "profile": "serving",
-        "kinds": [EVAL],
-        "settings": {"episodes_at_once": 6},
-        "published": [],
-    }
-    boxed: dict[str, Any] = {**OFFERED, "profile": "boxed", "pools": ["box"], "published": [published]}
-    about: dict[str, Any] = {
-        "kind": LAUNCHER, "profiles": [serving, boxed], "environments": [ENVIRONMENT, published], "at_once": 1,
-        "playing": 0,
-    }  # fmt: skip
-    await heartbeats.beat("launcher/far", about)
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
-        evaluating = {"kind": EVAL, "suite": "words-v1", "profile": "serving", "name": "on words"}
-        answer = await client.post("/api/launches", json=evaluating)
-        assert answer.status_code == 200, answer.text
-        training: dict[str, Any] = {"profile": "serving", "environment": ENVIRONMENT, "name": "trained"}
-        training["settings"] = {"evals.suite": None}
-        refused = await client.post("/api/launches", json=training)
-        assert refused.status_code == 409 and "launches evals only" in refused.json()["error"]
-        unplayed = await client.post("/api/launches", json=training | {"environment": published})
-        assert unplayed.status_code == 409  # (evals only, whatever it plays)
-        elsewhere = training | {"profile": "boxed", "environment": published, "name": "boxed"}
-        assert (await client.post("/api/launches", json=elsewhere)).status_code == 200
-        on_serving = evaluating | {"suite": "words-held-out", "environment": published, "name": "unplayed"}
-        missing = await client.post("/api/launches", json=on_serving)
-        assert missing.status_code == 404 and published in missing.json()["error"]  # (not with that profile)
+    assert [each["entrypoint"].split()[-1] for each in jobs.submitted] == [launch["id"], based.json()["launch"]["id"]]
 
 
 def test_the_command_makes_and_lists_suites(
@@ -335,7 +279,17 @@ def test_the_command_makes_and_lists_suites(
     with pytest.raises(SystemExit, match="invalid literal"):
         run("make", "other", "--environment", ENVIRONMENT, "--seeds", "one")
     unplayed = run("list", "--environment", ENVIRONMENT).splitlines()
-    assert unplayed[-1].split() == ["words-held-out", "6", "starts", ENVIRONMENT, "(not", "played", "yet)"]
+    assert unplayed[-1].split() == [
+        "words-held-out",
+        "6",
+        "starts",
+        ENVIRONMENT,
+        "(eval",
+        "data,",
+        "not",
+        "a",
+        "suite)",
+    ]
     held = run("make", "words-held-out", "--environment", ENVIRONMENT)
     assert held == f"the suite words-held-out@1: 6 starts of {ENVIRONMENT}, held out of training\n"
     assert [line.split()[0] for line in run("list", "--environment", ENVIRONMENT).splitlines()] == [
@@ -358,47 +312,20 @@ def test_the_command_makes_and_lists_suites(
     assert dropped == f"the suite words-v1@5: 3 starts of {guessing}, held out of training\n"
 
 
-class Unmade:
-    """A trainer an eval must not make."""
-
-    weights = "lora"
-
-    def __init__(self, model: str, **settings: Any) -> None:
-        raise AssertionError("an eval makes no trainer")
-
-
-def test_the_command_plays_a_suite_with_an_adapter_over_full_weights_and_makes_no_trainer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+async def test_an_eval_by_its_settings_plays_a_suite_with_an_adapter_over_full_weights_and_makes_no_trainer(
+    tmp_path: Path, local_ray: LocalRay
 ) -> None:
-    from rollout_train.cli import main
-
-    shared, made = asyncio.run(a_ledger(tmp_path))
-    asyncio.run(
-        make_suite(FileLedger(tmp_path / "ledger"), "words-v1", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[1])])
-    )
-    profile = a_profile(tmp_path, shared, "Unmade", "plain")
-    profile.write_text(profile.read_text().replace("test_full_weights:Unmade", "test_evals:Unmade"))
-    support.STARTED.clear()
-    directory = tmp_path / "eval"
-    arguments = [str(profile), "words-v1", "--checkpoint", "stacked", "--episodes", "2", "--directory", str(directory)]
-    monkeypatch.setattr("sys.argv", ["rollout", "eval", *arguments, "--name", "stacked-on-words"])
-    with pytest.raises(SystemExit) as exited:
-        main()
-    assert exited.value.code == 0
-    assert capsys.readouterr().out.startswith(f"words-v1@1 {ENVIRONMENT}: solved ")
-    policy = support.STARTED[0]
-    assert policy.told[0].startswith(f"started {directory / 'bases' / made['merged']}")  # (what the adapter is over)
-    assert f"load {made['stacked']}" in policy.told
-    assert not (directory / "bases").exists() and not (directory / "checkpoints").exists()  # (deleted once it ended)
-    ledger = FileLedger(tmp_path / "ledger")
-    listed = asyncio.run(System(ledger=ledger).evals())["evals"]
+    cluster, made = await seeded(tmp_path)
+    stores = Stores.open(cluster)
+    await make_suite(stores.ledger, "words-v1", [suite_entry(WORDS, words, rows=None, seeds=[1])])
+    run = await an_eval(cluster, "stacked-on-words", {"eval.suite": "words-v1", "start": "stacked", "eval.episodes": 2})
+    await ran(run)
+    assert run.origin == made["stacked"] and run.trainer is None and run.trainer_handle is None
+    listed = (await System(ledger=stores.ledger).evals())["evals"]
     assert [(each["name"], each["checkpoint"], each["played"], each["done"]) for each in listed] == [
         ("stacked-on-words", made["stacked"], 6, True)
     ]
-    registry = registry_of(ledger)
-    assert registry is not None
-    (run,) = [each.id for each in asyncio.run(registry.runs()) if each.name == "stacked-on-words"]
-    (started,) = asyncio.run(ledger.read(table(run, STARTS))).values()
+    (started,) = (await stores.ledger.read(table(run.run.id, STARTS))).values()
     recorded: Any = started["run_settings"]  # type: ignore[index]
     assert recorded["fixed"]["start"] == "stacked" and recorded["fixed"]["eval.suite"] == "words-v1"
     assert recorded["fixed"]["eval.episodes"] == 2 and recorded["fixed"]["kind"] == "eval"
@@ -491,145 +418,51 @@ async def test_a_run_started_again_finishes_the_eval_it_left_before_it_steps_aga
     assert again.evaluations[("words-v1", ENVIRONMENT)] == curriculum.evaluations[("words-v1", ENVIRONMENT)]
 
 
-async def test_a_profile_says_what_its_run_evaluates_and_each_eval_is_a_run_its_runner_plays(tmp_path: Path) -> None:
-    path = write(tmp_path)
-    path.write_text(path.read_text() + '\n[evals]\nsuite = "words-v1"\nevery = 2\nepisodes = 3\n')
-    profile = Profile.load(path)
-    assert profile.evals is not None and (profile.evals.suite, profile.evals.every, profile.evals.episodes) == (
-        "words-v1", 2, 3,
-    )  # fmt: skip
-    async with profile.open() as platform:
-        assert platform.registry is not None
-        made = await platform.eval_run(2)
-        assert await platform.eval_run(2) == made and made in (platform.runner.runs or ())
-        names = {entry.id: entry.name for entry in await platform.registry.runs()}
-        assert names[made] == f"{platform.run.name}-eval-2"
-    with pytest.raises(ValueError, match="1 at least"):
-        Profile.load(path, settings={"evals.every": 0})
+async def test_each_eval_a_runs_schedule_asks_for_is_a_run_of_its_own_that_its_runner_plays(tmp_path: Path) -> None:
+    cluster = a_cluster(tmp_path)
+    stores = Stores.open(cluster)
+    settings = RunSettings({**POLICY, "kind": "train", "name": "scheduled", "environment": WORDS,
+                            "evals.suite": "words-v1", "evals.every": 2})  # fmt: skip
+    run = Run(cluster, stores, settings, await stores.registry.create("scheduled"))
+    made = await run.eval_run(2)
+    assert await run.eval_run(2) == made and made in run.runs and made == f"{run.run.id}-eval-2"
+    names = {entry.id: entry.name for entry in await stores.registry.runs()}
+    assert names[made] == "scheduled-eval-2" and await run.eval_run(2, 1) == f"{made}-1"
+    every = key_of("evals.every")
+    assert every is not None and "at least 1" in str(every.problem(0))
 
 
-SCHEDULED = """
-directory = "{directory}"
-
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-
-[trainer]
-kind = "tests.rollout_train.support:Steps"
-channel = "policy"
-segment_tokens = 900
-segments_per_step = 3
-
-[evals]
-suite = "words-held-out"
-"""
-
-
-async def test_a_scheduled_eval_names_its_environments_eval_data_frozen_on_first_use(tmp_path: Path) -> None:
-    from rollout_train.cli import _train  # pyright: ignore[reportPrivateUsage]
-
-    path = write(tmp_path, SCHEDULED)
-    await _train(path, None, ENVIRONMENT, groups=2, groups_per_step=1, seed=1)
-    ledger = FileLedger(tmp_path / "run" / "ledger")
-    suite = await suite_of(ledger, "words-held-out")
-    assert suite is not None and suite.held_out and suite.starts == list(words.evals()["words-held-out"])
-    (run,) = [name.split("/")[1] for name in await ledger.tables() if name.endswith(f"/{EVALS}")]
-    evaluated: Any = await ledger.read(table(run, EVALS))
-    assert evaluated and all(each["suite"] == "words-held-out" and each["played"] == 6 for each in evaluated.values())
-
-
-def test_the_command_plays_a_suite_with_a_base_model_it_names_and_records_it_as_the_subject(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+async def test_a_training_run_by_its_settings_evaluates_its_checkpoints_on_the_suite_they_name(
+    tmp_path: Path, local_ray: LocalRay
 ) -> None:
-    from rollout_train.cli import main
+    cluster = a_cluster(tmp_path)
+    stores = Stores.open(cluster)
+    await make_suite(stores.ledger, "words-v1", [suite_entry(WORDS, words, rows=["say-yes"], seeds=[1, 2])])
+    settings: dict[str, JsonValue] = {**POLICY, "kind": "train", "name": "scheduled", "environment": WORDS,
+                                      "groups": 4, "evals.suite": "words-v1", "evals.episodes": 3}  # fmt: skip
+    run = Run(cluster, stores, RunSettings(settings), await stores.registry.create("scheduled"))
+    await ran(run)
+    evaluated: Any = await stores.ledger.read(table(run.run.id, EVALS))
+    assert evaluated and all(each["suite"] == "words-v1" and each["played"] == 6 for each in evaluated.values())
+    unmade = Run(cluster, stores, RunSettings({**settings, "name": "unmade", "evals.suite": "words-held-out"}),
+                 await stores.registry.create("unmade"))  # fmt: skip
+    from rollout_train.launching import Refused
 
-    shared, _ = asyncio.run(a_ledger(tmp_path))
-    asyncio.run(
-        make_suite(FileLedger(tmp_path / "ledger"), "words-v1", [suite_entry(ENVIRONMENT, words, rows=None, seeds=[1])])
-    )
-    profile = a_profile(tmp_path, shared, "Unmade", "plain")
-    profile.write_text(profile.read_text().replace("test_full_weights:Unmade", "test_evals:Unmade"))
-    support.STARTED.clear()
-    arguments = [str(profile), "words-v1", "--model", "org/another-base", "--directory", str(tmp_path / "eval")]
-    monkeypatch.setattr("sys.argv", ["rollout", "eval", *arguments, "--name", "words on another base"])
-    with pytest.raises(SystemExit) as exited:
-        main()
-    assert exited.value.code == 0 and capsys.readouterr().out.startswith(f"words-v1@1 {ENVIRONMENT}: solved ")
-    assert support.STARTED[0].told[0].startswith("started org/another-base")  # (not the profile's model)
-    system = System(ledger=FileLedger(tmp_path / "ledger"))
-    history = asyncio.run(system.history("model", "org/another-base"))
+    with pytest.raises(Refused, match="there is no suite words-held-out"):  # (a name never becomes a suite by itself)
+        await ran(unmade)
+
+
+async def test_an_eval_by_its_settings_plays_a_base_model_they_name_and_records_it_as_the_subject(
+    tmp_path: Path, local_ray: LocalRay
+) -> None:
+    cluster = a_cluster(tmp_path, more=OTHER)
+    stores = Stores.open(cluster)
+    await make_suite(stores.ledger, "words-v1", [suite_entry(WORDS, words, rows=None, seeds=[1])])
+    another = {"channels.policy.provider": "other", "channels.policy.model": "org/another-base"}
+    run = await an_eval(cluster, "words on another base", {"eval.suite": "words-v1", **another})
+    await ran(run)
+    assert set(run.hosts) == {"policy"}
+    system = System(ledger=stores.ledger)
+    history = await system.history("model", "org/another-base")
     assert history is not None and [each["name"] for each in history["evals"]] == ["words on another base"]
-    assert asyncio.run(system.lineage())["bases"] == ["a-checkpoint", "org/another-base"]  # (a root of the graph)
-
-
-CLUSTER = """
-name = "here"
-[ledger]
-url = "sqlite:///~/ledger.db"
-[inference.local]
-kind = "vllm"
-[inference.local.models."org/base-a"]
-context = 4096
-[inference.local.models."org/base-b"]
-context = 4096
-[inference.tinker]
-kind = "tinker"
-[inference.tinker.models."org/elsewhere"]
-context = 4096
-"""
-
-
-async def test_an_eval_on_a_base_model_goes_from_the_page_to_the_launchers_ray_job(tmp_path: Path) -> None:
-    import shlex
-    import tomllib
-
-    from rollout_train.cluster import parsed
-    from rollout_train.launches import ASKED, ENDED
-    from tests.rollout_train.support import PROFILE
-    from tests.rollout_train.test_ray_launcher import Jobs, until_state
-
-    ledger = FileLedger(tmp_path / "ledger")
-    await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[1])])
-    launches, heartbeats = launches_of(ledger), presence_of(ledger)
-    assert launches is not None and heartbeats is not None
-    offering = tmp_path / "profiles"
-    offering.mkdir()
-    served = PROFILE.replace("rollout_train.testing:scripted_engine", "rollout_vllm:VllmEngine", 1)  # (the policy's)
-    (offering / "vllm.toml").write_text(served.format(directory=tmp_path / "run"))
-    jobs = Jobs(steps=0)
-    found = Launcher(
-        "launcher/here", launches, heartbeats, offering, [ENVIRONMENT], tmp_path / "runs",
-        ray="http://127.0.0.1:8265", every=0.01, cluster=parsed(tomllib.loads(CLUSTER)),
-    )  # fmt: skip
-    found._client = lambda: jobs  # type: ignore[method-assign]  # (no Ray cluster: the stand-in)
-    await found._beat()  # pyright: ignore[reportPrivateUsage]  (it says what it offers)
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
-        (launcher,) = (await client.get("/api/launches")).json()["launchers"]
-        assert launcher["profiles"][0]["models"] == ["a-checkpoint", "org/base-a", "org/base-b"]  # (not Tinker's)
-        body = {"kind": EVAL, "suite": "words-v1", "profile": "vllm", "name": "words on b", "model": "org/base-b"}
-        answer = await client.post("/api/launches", json=body)
-        assert answer.status_code == 200, answer.text
-        made = answer.json()["launch"]
-        asked = made["asked"]
-        assert (asked["model"], asked["start"], asked["environment"]) == ("org/base-b", None, ENVIRONMENT)
-        unoffered = await client.post("/api/launches", json=body | {"model": "org/elsewhere", "name": "elsewhere"})
-        assert unoffered.status_code == 404
-        said = "no launcher alive offers the base model 'org/elsewhere' with the profile 'vllm'"
-        assert unoffered.json()["error"] == said
-        both = await client.post("/api/launches", json=body | {"start": "best", "name": "both"})
-        assert both.status_code == 409 and "not both" in both.json()["error"]
-        training = {"profile": "vllm", "environment": ENVIRONMENT, "name": "trained", "model": "org/base-a"}
-        trained = await client.post("/api/launches", json=training | {"settings": {"evals.suite": None}})
-        assert trained.status_code == 409 and "only an eval" in trained.json()["error"]
-    other = Asked("vllm", ENVIRONMENT, "unoffered", kind=EVAL, suite="words-v1", model="org/elsewhere")
-    elsewhere = await launches.ask(other)
-    await found._step()  # pyright: ignore[reportPrivateUsage]
-    (submitted,) = jobs.submitted  # (the launch whose base model it offers, and not the other)
-    assert submitted["submission_id"] == f"run-{made['id']}"
-    command = shlex.split(submitted["entrypoint"].split(" && exec ", 1)[1])
-    assert command[2:4] == ["rollout_train.cli", "eval"] and command[command.index("--model") + 1] == "org/base-b"
-    assert "--checkpoint" not in command and command[command.index("--name") + 1] == "words on b"
-    assert (await until_state(launches, made["id"], ENDED)).state == ENDED
-    assert next(each for each in await launches.all() if each.id == elsewhere.id).state == ASKED
+    assert (await system.lineage())["bases"] == ["org/another-base"]  # (a root of the graph)

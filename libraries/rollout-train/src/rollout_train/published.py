@@ -39,7 +39,6 @@ __all__ = [
     "environment_versions_of",
     "is_published",
     "loaded",
-    "offered_json",
     "parsed",
     "provenance",
     "short",
@@ -300,14 +299,6 @@ def environment_versions_of(ledger: object) -> EnvironmentVersions | None:
 def short(version: str) -> str:
     """A version's id, in a few characters."""
     return version[:SHORT]
-
-
-def offered_json(versions: Sequence[EnvironmentVersion]) -> list[dict[str, JsonValue]]:
-    """What a launcher says of the published versions it offers: each one's reference, name, source and commit."""
-    return [
-        {"environment": each.reference, "name": each.name, "source": each.source, "commit": each.commit}
-        for each in versions
-    ]
 
 
 async def loaded(environment: str, ledger: object) -> tuple[Any, EnvironmentVersion | None]:

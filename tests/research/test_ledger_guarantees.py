@@ -12,7 +12,6 @@ call runs another writer's step first). Every step is the code's own.
 import asyncio
 import json
 import os
-import signal
 import subprocess
 import sys
 import threading
@@ -34,8 +33,7 @@ from rollout.testing import FakeSandboxes, until
 from rollout_train.checkpoints import Checkpoints, Retention, new_id
 from rollout_train.database import DatabaseLedger
 from rollout_train.evals import make_suite, suite_entry, suite_of
-from rollout_train.launcher import Launcher
-from rollout_train.launches import CLAIMED, STOPPED, STOPPING, Asked, FileLaunches, Launch
+from rollout_train.launches import ASKED, RUNNING, STOPPED, STOPPING, SUBMITTED, Asked, FileLaunches, Launch
 from rollout_train.ledger import Appended, Fence, Fenced, FileLedger, Ledger
 from rollout_train.presence import STALE, FilePresence, Presence
 from rollout_train.record import scope, table
@@ -642,93 +640,64 @@ async def test_thin_never_deletes_a_blob_a_concurrent_add_names(tmp_path: Path, 
 # --- Launches -------------------------------------------------------------------------------------------------------
 
 
-class Process:
-    """A launched run's process that runs until signalled."""
+class Jobs:
+    """Where launches' jobs go, for these tests: each job made is noted, and each stop. `while_starting` runs while a
+    job is being made (another party's step at that moment)."""
+
+    name = "ray"
 
     def __init__(self) -> None:
-        self.pid = os.getpid()
-        self.signals: list[int] = []
-        self._ended = asyncio.Event()
+        self.made: list[str] = []
+        self.stopped: list[str] = []
+        self.while_starting: Callable[[], Awaitable[object]] | None = None
 
-    def send_signal(self, number: int) -> None:
-        self.signals.append(number)
-        self._ended.set()
+    async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str:
+        if self.while_starting is not None:
+            await self.while_starting()
+        self.made.append(f"run-{launch.id}")
+        return self.made[-1]
 
-    async def wait(self) -> int:
-        await self._ended.wait()
-        return 0
+    async def status(self, job: str) -> Any:
+        raise NotImplementedError
 
-
-def launcher(tmp_path: Path, launches: FileLaunches) -> Launcher:
-    made = Launcher(
-        "launcher/here", launches, FilePresence(tmp_path / "ledger"), tmp_path / "profiles", [], tmp_path / "runs"
-    )
-    made._offered = [{"profile": "p", "path": str(tmp_path / "p.toml")}]  # pyright: ignore[reportPrivateUsage]
-    return made
+    async def stop(self, job: str) -> None:
+        self.stopped.append(job)
 
 
 async def _launch(launches: FileLaunches, id: str) -> Launch:
     return next(each for each in await launches.all() if each.id == id)
 
 
-async def test_a_stop_asked_for_while_a_run_starts_stops_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_stop_asked_for_while_a_job_is_made_stops_the_job(tmp_path: Path) -> None:
+    from rollout_train.cluster import parsed
+    from rollout_train.submitting import start
+
+    ledger = FileLedger(tmp_path / "ledger")
     launches = FileLaunches(tmp_path / "ledger")
-    asked = await launches.ask(Asked(profile="p", environment="e:e", name="run"))
-    starting = launcher(tmp_path, launches)
-    process = Process()
+    asked = await launches.ask(Asked("train", "run", {"environment": "e:e"}), "r")
+    jobs = Jobs()
 
-    async def started(*command: Any, **options: Any) -> Process:
-        await launches.note(asked.id, state=STOPPING)  # the monitor's stop, while the process starts
-        return process
+    async def stopping() -> None:
+        await launches.note(asked.id, expect=(ASKED,), state=STOPPED)  # the monitor's stop, while the job is made
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", started)
-    claimed = await launches.claim(asked.id, starting.name)
-    assert claimed is not None and claimed.state == CLAIMED
-    await starting._start(claimed)  # pyright: ignore[reportPrivateUsage]
-    await starting._step()  # pyright: ignore[reportPrivateUsage]  (a launch asked to stop is signalled here)
-    try:
-        state = (await _launch(launches, asked.id)).state
-        assert process.signals == [signal.SIGINT], f"never signalled: the launch is {state}"
-    finally:
-        process.send_signal(0)
-        await asyncio.gather(*starting._watching, return_exceptions=True)  # pyright: ignore[reportPrivateUsage]
+    jobs.while_starting = stopping
+    cluster = parsed({"name": "here", "ledger": {"url": "sqlite:///unused.db"}})
+    noted = await start(asked, cluster, ledger, jobs)
+    assert noted.state == STOPPED and jobs.stopped == jobs.made, f"the job runs on, unstopped: {noted.state}"
 
 
-async def test_a_stop_racing_a_claim_never_marks_a_running_launch_stopped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from rollout_train.monitor import system
+async def test_a_stop_racing_a_jobs_start_never_leaves_a_running_launch_stopped(tmp_path: Path) -> None:
+    from rollout_train.submitting import stopped
 
     launches = FileLaunches(tmp_path / "ledger")
-    asked = await launches.ask(Asked(profile="p", environment="e:e", name="run"))
-    starting = launcher(tmp_path, launches)
-    process = Process()
-
-    async def started(*command: Any, **options: Any) -> Process:
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", started)
-
-    class Racing(FileLaunches):
-        async def all(self) -> list[Launch]:
-            found = await super().all()  # the monitor has read the launch: asked for
-            claimed = await launches.claim(asked.id, starting.name)  # the launcher claims and starts it
-            assert claimed is not None
-            await starting._start(claimed)  # pyright: ignore[reportPrivateUsage]
-            return found
-
-    def racing(ledger: Ledger) -> Racing:
-        return Racing(tmp_path / "ledger")
-
-    monkeypatch.setattr(system, "launches_of", racing)
-    await system.System(ledger=FileLedger(tmp_path / "ledger")).stop(asked.id)
-    await starting._step()  # pyright: ignore[reportPrivateUsage]
+    asked = await launches.ask(Asked("train", "run", {"environment": "e:e"}), "r")
+    jobs = Jobs()
+    read = await _launch(launches, asked.id)  # the monitor has read the launch: asked for
+    await launches.note(asked.id, expect=(ASKED,), state=SUBMITTED, job="run-x", backend="ray")  # its job is made
+    await launches.note(asked.id, expect=(ASKED, SUBMITTED), state=RUNNING)  # and its driver runs
+    noted = await stopped(read, launches, backends={"ray": jobs})
     state = (await _launch(launches, asked.id)).state
-    try:
-        assert state != STOPPED or process.signals, f"the launch is {state} and its process runs on, unsignalled"
-    finally:
-        process.send_signal(0)
-        await asyncio.gather(*starting._watching, return_exceptions=True)  # pyright: ignore[reportPrivateUsage]
+    assert noted.state == state == STOPPING and jobs.stopped == ["run-x"], f"the launch is {state}, its job unstopped"
 
 
 # --- Suites ---------------------------------------------------------------------------------------------------------

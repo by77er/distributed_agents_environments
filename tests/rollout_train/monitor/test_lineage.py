@@ -123,6 +123,16 @@ def test_every_version_grows_from_its_base_model_along_its_parents() -> None:
     assert graph["bookmarks"] == NAMES["bookmarks"] and graph["outside"] == []
 
 
+def test_the_base_models_the_cluster_offers_are_roots_after_those_with_history() -> None:
+    said = tables()
+    evaluated: dict[str, JsonValue] = {"kind": "model", "model": "big", "version": "suite@1", "decided": 1000.0}
+    said["evaluations/suite/model.big/subject"] = {"subject": evaluated}
+    graph = lineage(said, names=NAMES, now=NOW, offered=["zeta", "small", "alpha", "zeta"])
+    # (big's eval, at 1000, is newer than small's newest root at 800; then the offered ones nothing used, by name)
+    assert graph["bases"] == ["big", "small", "alpha", "zeta"]
+    assert not {edge["from"] for edge in graph["edges"]} & {"base:alpha", "base:zeta"}  # (roots with no lane)
+
+
 def test_the_graph_has_each_runs_checkpoints_and_what_trains_and_serves_them() -> None:
     graph = lineage(tables(), NOTES, names=NAMES, now=NOW)
     runs = {run["run"]: run for run in graph["runs"]}

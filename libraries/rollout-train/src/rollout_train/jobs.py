@@ -31,15 +31,18 @@ Shared inference pools are not claimed here: a run's channel on a `vllm` provide
 (`Run.start`, `hosted`). That is the seam where a run will bind to a pool's hosts instead.
 """
 
+import argparse
 import asyncio
 import contextlib
 import dataclasses
 import inspect
 import json
 import math
+import os
 import secrets
 import shutil
 import socket
+import sys
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,7 +57,7 @@ from rollout.local import LocalRunner
 from rollout.names import named
 from rollout_train.bridges import AUTO, Bridge, NoBridge, format_of, on_ray, path
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
-from rollout_train.cluster import Cluster
+from rollout_train.cluster import Cluster, located
 from rollout_train.colocated import Colocated
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Limits, Route, Routes
@@ -81,7 +84,9 @@ __all__ = [
     "Run",
     "TrainerActor",
     "TrainerClient",
+    "driven",
     "imitated",
+    "main",
     "ran",
     "run_directory",
     "taken_by",
@@ -969,3 +974,84 @@ async def _check(run: Run) -> None:
         print(each, flush=True)
     if not all(each.passed for each in found):
         raise ValueError("the check found what does not hold together")
+
+
+async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) -> None:
+    """Run a launch's run, noting on the launch that it runs, what it waits for, and how it ended: ended, failed (with
+    why: its settings' refusals among them) or stopped (cancelled)."""
+    from rollout_train.launches import ASKED, RUNNING, STOPPED, STOPPING, SUBMITTED, launch_of, launches_of
+
+    stores = stores or Stores.open(cluster)
+    launches = launches_of(stores.ledger)
+    if launches is None:
+        raise KeyError("this ledger keeps no launches")
+    found = await launch_of(launches, launch)
+    if found.run is None:
+        raise ValueError(f"launch {launch} names no run")
+    noted = await launches.note(launch, expect=(ASKED, SUBMITTED), state=RUNNING, detail="running")
+    if noted.state != RUNNING:
+        if noted.state == STOPPING:
+            await launches.note(launch, expect=(STOPPING,), state=STOPPED, detail="stopped before it started")
+        return
+    registry = registry_of(stores.ledger)
+    entry = next((each for each in await registry.runs() if each.id == found.run), None) if registry else None
+    asked = found.asked
+    settings = RunSettings({**asked.settings, "kind": asked.kind, "name": entry.name if entry else asked.name})
+
+    async def said(detail: str) -> None:
+        from rollout_train.launches import OPEN
+
+        with contextlib.suppress(KeyError):
+            await launches.note(launch, expect=OPEN, detail=detail)
+
+    run = Run(
+        cluster, stores, settings, entry or Entry(found.run, asked.name, 0.0), preset=asked.preset,
+        resumes=asked.resumes is not None, noted=said,
+    )  # fmt: skip
+    run.started |= {"cluster": cluster.name, "launch": found.id}
+    if found.job:
+        run.started["job"] = found.job
+    await _driven(launches, found.id, ran(run))
+
+
+async def _driven(launches: Any, id: str, work: Coroutine[Any, Any, None]) -> None:
+    """Do `work`, and note on the launch how it ended."""
+    from rollout_train.launches import ENDED, FAILED, OPEN, STOPPED
+
+    try:
+        await work
+    except asyncio.CancelledError:
+        await asyncio.shield(launches.note(id, expect=OPEN, state=STOPPED, detail="stopped"))
+        raise
+    except Refused as refused:
+        await launches.note(id, expect=OPEN, state=FAILED, detail=f"refused: {refused}")
+        raise
+    except BaseException as error:
+        await launches.note(id, expect=OPEN, state=FAILED, detail=f"{type(error).__name__}: {error}"[-4000:])
+        raise
+    else:
+        await launches.note(id, expect=OPEN, state=ENDED, detail="ended")
+
+
+def main(arguments: Sequence[str] | None = None) -> None:
+    """`python -m rollout_train.jobs LAUNCH`: a run's job."""
+    from rollout_train.cli import until_signalled
+    from rollout_train.ray_cluster import connect
+
+    parser = argparse.ArgumentParser(prog="python -m rollout_train.jobs", description="A run's job.")
+    parser.add_argument("launch", help="the launch whose run it runs")
+    parser.add_argument("--cluster", help="the cluster config (by default the one handed to the job, else found)")
+    given = parser.parse_args(arguments)
+    cluster = located(given.cluster)
+    said = cluster.ray.address
+    connect(said if said != "auto" else os.environ.get("RAY_ADDRESS") or said)  # (a job: the cluster it was given)
+    try:
+        code = asyncio.run(until_signalled(driven(given.launch, cluster)))
+    except Refused as refused:
+        print(f"refused: {refused}", file=sys.stderr, flush=True)
+        code = 2
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()

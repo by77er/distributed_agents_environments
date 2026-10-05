@@ -8,7 +8,6 @@ export const KINDS: [RoleKind, string, string][] = [
   ["runners", "Runners", "runner"],
   ["pools", "Sandbox pools", "pool"],
   ["engines", "Engine hosts", "engines"],
-  ["launchers", "Launchers", "launcher"],
   ["gateways", "Gateways", "gateway"],
 ];
 
@@ -18,8 +17,7 @@ export type Roles = Pick<Machines, RoleKind>;
 export function rolesOn(machines: Roles, host: string): Roles {
   const on = <T extends Role>(roles: T[]) => roles.filter(role => role.host === host);
   return {
-    runners: on(machines.runners), pools: on(machines.pools), engines: on(machines.engines),
-    launchers: on(machines.launchers), gateways: on(machines.gateways),
+    runners: on(machines.runners), pools: on(machines.pools), engines: on(machines.engines), gateways: on(machines.gateways),
   };
 }
 
@@ -54,11 +52,11 @@ export function sandboxesOf(pools: PoolRole[]): { kind: string; pools: number; s
   return [...found.values()].sort((a, b) => a.kind.localeCompare(b.kind));
 }
 
-/** What a role is called on its machine: its name without the host's (`gpu-1/train` on gpu-1 is `train`; `launcher/gpu-1`
- * on gpu-1 is nothing more than a launcher). */
+/** What a role is called on its machine: its name without the host's (`gpu-1/train` on gpu-1 is `train`; `gateway/gpu-1`
+ * on gpu-1 is nothing more than a gateway). */
 export function shortName(kind: RoleKind, name: string, host: string): string {
   if (kind === "pools") return name.split("@")[0];
-  const parts = name.split("/").filter(part => part !== host && part !== "launcher" && part !== "gateway" && part !== "pools");
+  const parts = name.split("/").filter(part => part !== host && part !== "gateway" && part !== "pools");
   return parts.join("/");
 }
 

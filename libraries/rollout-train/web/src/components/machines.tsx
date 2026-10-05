@@ -1,10 +1,10 @@
 // The machines and the roles on them: a machine's meters and its measurements over the last hour, and a card for each
-// runner, sandbox pool, engine host, launcher and gateway, with what it holds and how full it is.
+// runner (and a run's driver waiting for Ray), sandbox pool, engine host and gateway, with what it holds and how full it is.
 
 import { memo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useKnown } from "../api/queries";
-import type { EngineRole, GatewayRole, Host, LauncherRole, Measurement, PoolRole, Role, RoleChannel, RoleKind, RunnerRole } from "../api/types";
+import type { EngineRole, GatewayRole, Host, Measurement, PoolRole, Role, RoleChannel, RoleKind, RunnerRole } from "../api/types";
 import { Ago } from "../layout/runs";
 import { bytes, figure, percent, plural, span, tick } from "../lib/format";
 import { leftOf, seriesOf } from "../lib/machines";
@@ -89,6 +89,7 @@ const RunnerCard = memo(function RunnerCard({ runner, host, onHost }: { runner: 
   const known = useKnown();
   return (
     <RoleCard role={runner} title={runner.name} onHost={onHost}>
+      {runner.waiting?.length ? <div className="small t-warm" title={runner.waiting.join("; ")}>waits for {runner.waiting.join(", ")}</div> : null}
       <Meter name="places" warns={false} used={Math.min(runner.playing, runner.places)} total={runner.places} says={`${runner.playing} of ${runner.places} playing · ${runner.free} free`} />
       {onHost ? null : <Meters machine={host?.machine} />}
       {runner.claims.length ? (
@@ -156,23 +157,6 @@ const EngineCard = memo(function EngineCard({ engines, host, onHost }: { engines
   );
 });
 
-const LauncherCard = memo(function LauncherCard({ launcher, onHost }: { launcher: LauncherRole; onHost: boolean }) {
-  const atOnce = launcher.at_once ?? 1, playing = launcher.playing ?? launcher.launches.length;
-  return (
-    <RoleCard role={launcher} title={launcher.name} onHost={onHost}>
-      <Meter name="launches" warns={false} used={Math.min(playing, atOnce)} total={atOnce} says={`${playing} of ${atOnce} playing${launcher.backend === "ray" ? " · on Ray" : ""}`} />
-      <div className="facts-line">
-        {launcher.profiles.map(profile => <span key={profile.profile} className="chip" title={profile.model}>{profile.profile}</span>)}
-        {launcher.environments.map(each => <span key={each} className="chip mono">{each}</span>)}
-      </div>
-      {launcher.launches.length ? (
-        <Table heads={[["launch"], ["profile"], ["state"], ["since", "n"]]} keys={launcher.launches.map(each => each.id)}
-          rows={launcher.launches.map(each => [each.kind === "eval" ? `${each.name} (eval)` : each.name, each.profile, each.state, <Ago at={each.updated || each.at} />])} />
-      ) : null}
-    </RoleCard>
-  );
-});
-
 const GatewayCard = memo(function GatewayCard({ gateway, onHost }: { gateway: GatewayRole; onHost: boolean }) {
   const known = useKnown();
   return (
@@ -189,7 +173,7 @@ const GatewayCard = memo(function GatewayCard({ gateway, onHost }: { gateway: Ga
 /** Each role of one kind as its card. */
 export function RoleCards({ kind, roles, hosts, onHost }: {
   kind: RoleKind;
-  roles: (RunnerRole | PoolRole | EngineRole | LauncherRole | GatewayRole)[];
+  roles: (RunnerRole | PoolRole | EngineRole | GatewayRole)[];
   hosts: Map<string, Host>;
   onHost: boolean;
 }) {
@@ -200,7 +184,6 @@ export function RoleCards({ kind, roles, hosts, onHost }: {
         if (kind === "runners") return <RunnerCard key={role.name} runner={role as RunnerRole} host={hostOf(role)} onHost={onHost} />;
         if (kind === "pools") return <PoolCard key={role.name} pool={role as PoolRole} onHost={onHost} />;
         if (kind === "engines") return <EngineCard key={role.name} engines={role as EngineRole} host={hostOf(role)} onHost={onHost} />;
-        if (kind === "launchers") return <LauncherCard key={role.name} launcher={role as LauncherRole} onHost={onHost} />;
         return <GatewayCard key={role.name} gateway={role as GatewayRole} onHost={onHost} />;
       })}
     </div>

@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useBookmark, useEvals, useKnown, useLaunches, useSystem, useUnbookmark } from "../api/queries";
+import { useBookmark, useEvals, useKnown, useLaunches, useOffers, useSystem, useUnbookmark } from "../api/queries";
 import type { Checkpoint as CheckpointData, System } from "../api/types";
 import { BarChart, Sized } from "../components/charts";
 import { BaseName, Marks } from "../components/checkpoints";
@@ -16,7 +16,6 @@ import { bytes, clock, figure, span } from "../lib/format";
 import { lineOf } from "../lib/model";
 import { runPlace, stepPlace, checkpointPlace } from "../lib/places";
 import { MakeSuite } from "./Evals";
-import { NoLauncher } from "./NewRun";
 
 export function Checkpoint({ id }: { id: string }) {
   const { data: system } = useSystem();
@@ -82,19 +81,19 @@ export function Checkpoint({ id }: { id: string }) {
   );
 }
 
-/** Ask a launcher to play a suite with the checkpoint, and the evals of it asked for so. */
+/** Ask for an eval of a suite by the checkpoint, and the evals of it asked for so. */
 function PlayIt({ checkpoint, system }: { checkpoint: CheckpointData; system: System }) {
   const { data: evals } = useEvals();
   const { data: launched } = useLaunches();
-  if (!evals || !launched) return null;
+  const { data: offers } = useOffers();
+  if (!evals || !launched || !offers) return null;
   const ours = (start: string | null | undefined) =>
     Boolean(start) && (start === checkpoint.id || system.bookmarks[start!] === checkpoint.id || checkpoint.id.startsWith(start!));
-  const launches = launched.launches.filter(each => each.asked.kind === "eval" && ours(each.asked.start));
+  const launches = launched.launches.filter(each => each.asked.kind === "eval" && ours(typeof each.asked.settings.start === "string" ? each.asked.settings.start : null));
   return (
     <>
       {!evals.suites.length ? <MakeSuite ledger={system.ledger_at} />
-        : launched.launchers.length ? <PlayForm subject={checkpoint.id} suites={evals.suites} launchers={launched.launchers} system={system} title="Run an eval" />
-          : <NoLauncher ledger={system.ledger_at} />}
+        : <PlayForm subject={checkpoint.id} suites={evals.suites} offers={offers} system={system} title="Run an eval" />}
       {launches.length ? <LaunchList launches={launches} system={system} /> : null}
     </>
   );

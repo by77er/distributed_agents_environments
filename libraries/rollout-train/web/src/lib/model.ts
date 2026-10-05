@@ -41,7 +41,7 @@ export const range = (numbers: number[]): string =>
 
 const KINDS: Record<string, string> = {
   running: "accent", completed: "good", done: "good", failed: "bad", cancelled: "bad", playing: "accent", queued: "warm",
-  stepping: "violet", committed: "good", asked: "warm", claimed: "accent", stopping: "warm", ended: "good", stopped: "",
+  stepping: "violet", committed: "good", asked: "warm", submitted: "accent", stopping: "warm", ended: "good", stopped: "",
 };
 /** The color a state is drawn in. */
 export const stateKind = (name: string | null | undefined): string => (name ? KINDS[name] ?? "" : "");

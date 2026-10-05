@@ -1,4 +1,4 @@
-// The environments: every one the system knows of (offered by a launcher alive, trained on, played by a suite, or
+// The environments: every one the system knows of (offered by the cluster, trained on, played by a suite, or
 // imported from git, with its source and what its check found), with the form that imports one; and one environment's
 // page: what it says of itself where it loads on the monitor's machine (its version, description, rows, eval data and
 // curriculum; a published one's as its import's check recorded it, with its source), each row with what the training
@@ -64,7 +64,7 @@ export function Environments() {
           to={known.map(each => environmentPlace(each.environment))}
         />
         </Card>
-      ) : <Empty>No environment yet: none is offered by a launcher, trained on, played by a suite, or imported.</Empty>}
+      ) : <Empty>No environment yet: none is offered by the cluster, trained on, played by a suite, or imported.</Empty>}
     </>
   );
 }
@@ -95,7 +95,7 @@ export function Environment({ name }: { name: string }) {
               <Spec label="imported"><Ago at={published.imported} /> ago</Spec>
             </>
           ) : <Spec label="module:name"><span className="mono">{found.environment}</span></Spec>}
-          <Spec label="offered" kind={found.offered ? "good" : ""}>{found.offered ? "yes" : "no launcher alive offers it"}</Spec>
+          <Spec label="offered" kind={found.offered ? "good" : ""}>{found.offered ? "yes" : "the cluster does not offer it"}</Spec>
           {found.loads ? null : <Spec label="here" kind="warm"><span title={found.error ?? undefined}>does not load</span></Spec>}
           <Spec label={found.loads ? "version" : "versions seen"}>{versionsText(found).map((version, index) => (
             <Fragment key={version}>{index ? ", " : ""}{index === 0 && found.version ? <b>{version}</b> : version}</Fragment>

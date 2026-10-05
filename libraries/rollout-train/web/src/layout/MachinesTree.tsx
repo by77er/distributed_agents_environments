@@ -9,19 +9,15 @@ import { hostPlace, type Place } from "../lib/places";
 import { useFolds } from "../lib/stored";
 import { Node } from "./Tree";
 
-/** How full a role is, as its row's tag: a runner's places playing, a pool's sandboxes leased, a launcher's launches. */
+/** How full a role is, as its row's tag: a runner's places playing (or that it waits), a pool's sandboxes leased. */
 function fullness(machines: Machines, kind: RoleKind, name: string): string {
   if (kind === "runners") {
     const runner = machines.runners.find(each => each.name === name);
-    return runner ? `${runner.playing}/${runner.places}` : "";
+    return runner ? (runner.waiting?.length ? "waits" : `${runner.playing}/${runner.places}`) : "";
   }
   if (kind === "pools") {
     const pool = machines.pools.find(each => each.name === name);
     return pool?.size != null ? `${pool.leased}/${pool.size}` : "";
-  }
-  if (kind === "launchers") {
-    const launcher = machines.launchers.find(each => each.name === name);
-    return launcher ? `${launcher.playing ?? 0}/${launcher.at_once ?? 1}` : "";
   }
   return "";
 }

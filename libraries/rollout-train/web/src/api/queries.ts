@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, SubjectHistory, SubjectKind, System } from "./types";
+import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsking, Launches, Lineage, Machines, Offers, Path, RunSettings, SettingFinding, Statistics, SubjectHistory, SubjectKind, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -20,6 +20,7 @@ export const topics = {
   feeds: (): Topic => ({ topic: "feeds", key: ["feeds"], path: "api/runs" }),
   machines: (): Topic => ({ topic: "machines", key: ["machines"], path: "api/machines" }),
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
+  offers: (): Topic => ({ topic: "offers", key: ["offers"], path: "api/offers" }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
   evals: (): Topic => ({ topic: "evals", key: ["evals"], path: "api/evals" }),
   evalSubjects: (): Topic => ({ topic: "eval-subjects", key: ["eval-subjects"], path: "api/evals/subjects" }),
@@ -87,9 +88,18 @@ function useWrite<Asked, Answer>(write: (asked: Asked) => Promise<Answer>, chang
   });
 }
 
+/** A launch the monitor refused: why, and the findings that refuse it, each with the setting it is about. */
+export class Refused extends Error {
+  constructor(message: string, readonly refusals: SettingFinding[], readonly notes: SettingFinding[]) {
+    super(message);
+    this.name = "Refused";
+  }
+}
+
 async function asked<T>(path: string, method: string, body?: unknown): Promise<T> {
   const answer = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
-  const said = (await answer.json()) as T & { error?: string };
+  const said = (await answer.json()) as T & { error?: string; refusals?: SettingFinding[]; notes?: SettingFinding[] };
+  if (said.refusals && answer.status === 422) throw new Refused(said.error ?? "refused", said.refusals, said.notes ?? []);
   if (!answer.ok) throw new Error(said.error ?? `the monitor answered ${answer.status}`);
   return said;
 }
@@ -113,6 +123,9 @@ export const useMachines = () => useTopic<Machines>(topics.machines());
 
 export const useLaunches = () => useTopic<Launches>(topics.launches());
 
+/** What a run can be asked for on the monitor's cluster. */
+export const useOffers = () => useTopic<Offers>(topics.offers());
+
 export const useEvals = (enabled = true) => useTopic<Evals>(topics.evals(), enabled);
 
 /** What the suites' forms and the new run's form need of an environment: its version, rows and eval data (an error where
@@ -134,8 +147,8 @@ export const useEnvironment = (name: string) =>
 /** An environment's page: what it says of itself and what was done with it. */
 export const useEnvironmentPage = (name: string) => useTopic<EnvironmentInfo>(topics.environment(name));
 
-/** Every environment the system knows of: offered by a launcher alive, started on, or played by a suite (read again now
- * and then besides, for the pickers on pages that do not watch it: launchers come and go). */
+/** Every environment the system knows of: offered by the cluster, started on, or played by a suite (read again now and
+ * then besides, for the pickers on pages that do not watch it: imports come and go). */
 export const useEnvironments = () =>
   useQuery({
     queryKey: topics.environments().key,
@@ -157,7 +170,7 @@ export const useImports = (watching = false) =>
 export const useImport = () =>
   useWrite(
     async (body: ImportAsked) => asked<{ version: EnvironmentVersion; existing: boolean }>("api/environments/import", "POST", body),
-    [topics.environments(), topics.imports(), topics.launches()],
+    [topics.environments(), topics.imports(), topics.offers()],
   );
 
 /** Make a suite, or its next version (which its name then points to). */
@@ -165,15 +178,16 @@ export const useSaveSuite = (name: string) =>
   useWrite(async (body: Record<string, unknown>) =>
     asked<{ suite: string; version: string; number: number }>(`api/suites/${encodeURIComponent(name)}`, "POST", body), [topics.evals()]);
 
-/** Ask for a run or an eval: a launcher alive that offers its profile starts it. */
+/** Ask for a run or an eval: the monitor checks its settings against the cluster and submits its job (a `Refused` error
+ * holds the findings that refuse it). */
 export const useLaunch = () =>
-  useWrite(async (launch: LaunchAsked) => (await asked<{ launch: Launch }>("api/launches", "POST", launch)).launch, [topics.launches()]);
+  useWrite(async (launch: LaunchAsking) => (await asked<{ launch: Launch }>("api/launches", "POST", launch)).launch, [topics.launches()]);
 
-/** Ask a launch to stop: one not started is stopped at once; a run going is stopped by its launcher. */
+/** Ask a launch to stop: one whose job was not made is stopped at once; a job going is asked to stop. */
 export const useStop = () =>
   useWrite(async (id: string) => (await asked<{ launch: Launch }>(`api/launches/${encodeURIComponent(id)}/stop`, "POST")).launch, [topics.launches()]);
 
-/** Pause a run, or resume it: in place while its process is there, else launched again in its directory. */
+/** Pause a run, or resume it: in place while its driver is there, else its job submitted again with its settings. */
 export const useRunControl = (run: string) =>
   useWrite(async (action: "pause" | "resume") => asked<unknown>(`api/runs/${encodeURIComponent(run)}/${action}`, "POST"), [topics.system(), topics.launches()]);
 

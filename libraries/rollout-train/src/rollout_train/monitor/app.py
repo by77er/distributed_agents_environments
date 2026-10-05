@@ -1,4 +1,4 @@
-"""The monitor's web page over a ledger and every run in it: `rollout monitor WHERE [--port 8765]`."""
+"""The monitor's web page over a ledger and every run in it: `rollout monitor WHERE [--cluster] [--port 8765]`."""
 
 import asyncio
 import contextlib
@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -16,6 +16,7 @@ from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingR
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from rollout_train.launching import Refused as LaunchRefused
 from rollout_train.layout import LEDGER
 from rollout_train.ledger import FENCES, LOCATION, FileLedger
 from rollout_train.monitor.stream import BEAT, MISSING, Hub, Reading
@@ -23,27 +24,47 @@ from rollout_train.monitor.system import RELAYED, System
 from rollout_train.publishing import Importer, Refused
 from rollout_train.registry import Taken
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from rollout_train.cluster import Cluster
+    from rollout_train.submitting import Backend
+
 STATIC = Path(__file__).with_name("static")
 """The page, built from libraries/rollout-train/web (`npm run build` there writes it here)."""
 KEEPALIVE = 15.0
 """Seconds between the stream's keep-alive comments while nothing changes."""
 
 
-def watched(where: str | Path, importer: Importer | None = None) -> System:
+def watched(
+    where: str | Path,
+    importer: Importer | None = None,
+    cluster: "Cluster | None" = None,
+    backends: "Mapping[str, Backend] | None" = None,
+) -> System:
     """What a monitor over `where` reads: a database's URL (`sqlite:///…`, `postgresql://…`) or a ledger's directory of
     files, every run in it; or a run's directory (`rollout_train.layout`), its ledger and every run that shares it,
-    with the directory's own logs and feed. `importer`: where environments imported from git go."""
+    with the directory's own logs and feed. `importer`: where environments imported from git go. `cluster`: the
+    cluster config runs are asked for on (none: this monitor asks for none), and `backends` where their jobs go in
+    place of its own (a test's)."""
     if "://" in str(where):
         from rollout_train.database import DatabaseLedger
 
-        return System(ledger=DatabaseLedger(str(where)), importer=importer)
+        return System(ledger=DatabaseLedger(str(where)), importer=importer, cluster=cluster, backends=backends)
     path = Path(where).expanduser()
     if (path / FENCES).exists() and not (path / LOCATION).exists() and not (path / LEDGER).is_dir():
-        return System(ledger=FileLedger(path), importer=importer)
-    return System(path, importer=importer)
+        return System(ledger=FileLedger(path), importer=importer, cluster=cluster, backends=backends)
+    return System(path, importer=importer, cluster=cluster, backends=backends)
 
 
-def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | None = None) -> Starlette:
+def create_app(
+    where: str | Path,
+    *,
+    beat: float = BEAT,
+    importer: Importer | None = None,
+    cluster: "Cluster | None" = None,
+    backends: "Mapping[str, Backend] | None" = None,
+) -> Starlette:
     """Serves the page and what it asks for, over a ledger or a run's directory (`watched`):
 
     - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
@@ -55,7 +76,7 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
     - `/api/evals/subjects`: every subject (a checkpoint or a base model) that has had an eval
       (`System.eval_subjects`); `/api/evals/checkpoint/{id}` and `/api/evals/model/{name}` a subject's history, every
       eval it has had (`System.history`);
-    - `/api/environments`: every environment the system knows of, with the versions seen, whether a launcher alive
+    - `/api/environments`: every environment the system knows of, with the versions seen, whether the cluster
       offers it, its training runs and suites, and when a run last started on it (`System.environments`); and
       `/api/environments/{name}` one environment's page: its rows, eval data and curriculum where it loads here, what
       was played of each row, its runs, suites, evals and newest check (`System.environment`; 404 for one neither
@@ -66,8 +87,12 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
       importer (`importer`, from its cluster config) making it, and answers with the version once it is recorded, or
       422 with why it was refused (`System.import_environment`); `/api/environments/imports` the imports this monitor
       made, each with its stage (`System.imports`);
-    - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run or an eval
-      (`System.launch`), `POST /api/launches/{id}/stop` stops one;
+    - `/api/offers`: what a run can be asked for on the monitor's cluster: environments, trainers, inference
+      providers and their models, the pairs that bridge, sandbox pools, presets and free GPUs (`System.offers`);
+    - `/api/launches`: the runs asked for, each with its job and state (GET); `POST` (`{"kind", "name",
+      "environment", "settings", "preset"}`) asks for a run and starts its job (`System.launch`), answering 422 with
+      the refusals (each with the setting it is about) where its settings are refused; `POST /api/launches/check`
+      says the refusals and notes without asking (`System.check`); `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
@@ -79,7 +104,7 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
       (`System.settings`); `POST` (`{"settings": {KEY: VALUE}}`) wants changeable ones from its next step on
       (`System.want`);
     - `POST /api/runs/{run}/pause`: pauses a run (`System.pause`); `POST /api/runs/{run}/resume` resumes it, in place
-      while its process beats, else by a launch that starts it again in its directory (`System.resume`);
+      while its process beats, else by a launch of its recorded settings (`System.resume`);
     - `/api/statistics`: every run of the ledger in figures and the engines' throughput (`System.statistics`);
     - `/api/runs`: every episode in the runs' feeds, summarised;
     - `/api/stream?topic=...`: server-sent events, a `version` event (`{"topic", "version"}`) for each topic at once
@@ -94,7 +119,7 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
     names (`System._source`); what one monitor asks another, the other answers from its own machine (`RELAYED`),
     directly and in full. It reads, and writes names (a run's, bookmarks, suites') and suites' versions; the runs' own
     processes write the rest."""
-    system = watched(where, importer)
+    system = watched(where, importer, cluster, backends)
     hub = Hub(system, beat)
 
     def answered(request: Request, reading: Reading) -> Response:
@@ -205,6 +230,10 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
         """Make one change to the registry, and have every page read what it shows afresh."""
         try:
             done = await change()
+        except LaunchRefused as error:
+            refusals = [asdict(each) for each in error.refusals]
+            notes = [asdict(each) for each in error.findings if not each.refuses]
+            return JSONResponse({"error": str(error), "refusals": refusals, "notes": notes}, status_code=422)
         except Refused as error:
             return JSONResponse({"error": str(error)}, status_code=422)
         except Taken as error:
@@ -306,9 +335,26 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
             return JSONResponse({"error": "say the run to launch, as JSON"}, status_code=400)
 
         async def change() -> Any:
-            return {"launch": asdict(await system.launch(cast(dict[str, Any], body)))}
+            return await system.launch(cast(dict[str, Any], body))
 
         return await written(change)
+
+    async def check(request: Request) -> Response:
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "say the run to check, as JSON"}, status_code=400)
+        try:
+            return JSONResponse(await system.check(cast(dict[str, Any], body)))
+        except Taken as error:
+            return JSONResponse({"error": str(error)}, status_code=409)
+        except KeyError as error:
+            return JSONResponse({"error": str(error.args[0]) if error.args else "no such thing"}, status_code=404)
+
+    async def offered(request: Request) -> Response:
+        return answered(request, await hub.read("offers"))
 
     async def stop(request: Request) -> Response:
         id = request.path_params["id"]
@@ -356,7 +402,9 @@ def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | No
         Route("/favicon.svg", icon),
         Route("/api/system", state),
         Route("/api/machines", machines),
+        Route("/api/offers", offered),
         Route("/api/launches", launches, methods=["GET", "POST"]),
+        Route("/api/launches/check", check, methods=["POST"]),
         Route("/api/evals", evals),
         Route("/api/evals/subjects", eval_subjects),
         Route("/api/evals/{kind:str}/{reference:path}", history),

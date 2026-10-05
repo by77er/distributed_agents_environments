@@ -218,23 +218,6 @@ export interface Measurement {
   disk: { free: number; total: number } | null;
 }
 
-/** A profile a launcher can run: by its name, with the settings a launch may change and their values in it. */
-export interface OfferedProfile {
-  profile: string;
-  path: string;
-  /** What it launches: `run` and `eval` with a trainer, `eval` alone without. */
-  kinds?: ("run" | "eval")[];
-  model: string;
-  /** The base models an eval may play with it: its channel's model first, then those the cluster's inference providers
-   * of its engine's kind serve. */
-  models?: string[];
-  /** What its trainer makes: `lora` (adapters) or `full` weights; none where the launcher cannot tell. */
-  weights?: string | null;
-  /** The published environments it plays: those whose every kind of sandbox it has a pool of. */
-  published?: string[];
-  settings: Record<string, unknown>;
-}
-
 /** What every role on a machine shares: its name among the beats, its machine, whether it beats (within 90 s by the
  * store's clock) and when it last did, by the monitor's clock. */
 export interface Role {
@@ -275,6 +258,8 @@ export interface RunnerRole extends Role {
   /** Its pools, by name. */
   pools: string[];
   channels: RoleChannel[];
+  /** What a run's driver waits for from Ray, before it plays. */
+  waiting?: string[];
 }
 
 /** A sandbox held under a key, as the `sandboxes` table says. */
@@ -329,34 +314,12 @@ export interface EngineRole extends Role {
   channels: EngineChannel[];
 }
 
-/** A launch its launcher is playing. */
-export interface LaunchGoing {
-  id: string;
-  state: string;
-  at: number;
-  updated: number;
-  name: string;
-  kind: string;
-  profile: string;
-  environment: string;
-  suite: string | null;
-}
-
-export interface LauncherRole extends Role {
-  profiles: { profile: string; model: string; weights: string | null }[];
-  environments: string[];
-  launches: LaunchGoing[];
-  at_once: number | null;
-  playing: number | null;
-  backend: string | null;
-}
-
 export interface GatewayRole extends Role {
   listen: string | null;
   channels: RoleChannel[];
 }
 
-export type RoleKind = "runners" | "pools" | "engines" | "launchers" | "gateways";
+export type RoleKind = "runners" | "pools" | "engines" | "gateways";
 
 /** A machine: alive while any of its roles is, its newest measurements and their history, and its roles. */
 export interface Host {
@@ -375,64 +338,137 @@ export interface Machines {
   runners: RunnerRole[];
   pools: PoolRole[];
   engines: EngineRole[];
-  launchers: LauncherRole[];
   gateways: GatewayRole[];
 }
 
-/** What a run is asked to be (`rollout_train.launches.Asked`). */
+export type RunKind = "train" | "eval" | "imitate" | "check";
+
+/** What a run is asked to be (`rollout_train.launches.Asked`): its kind, its name, its run settings as given, the preset
+ * they came from (`NAME@N`), and the run it resumes. */
 export interface LaunchAsked {
-  profile: string;
-  environment: string;
+  kind: RunKind;
   name: string;
-  start?: string | null;
-  bookmark?: string | null;
-  groups?: number;
-  groups_per_step?: number;
-  seed?: number;
-  settings?: Record<string, unknown>;
-  /** A training run (`run`, the default) or an eval (`eval`): one suite played by `start` (none: the base model). */
-  kind?: "run" | "eval";
-  /** An eval's suite: by name (the version its name points to), or a version by id (`NAME@N`). */
-  suite?: string | null;
-  /** An eval's episodes of each start; none: the suite's own. */
-  episodes?: number | null;
-  /** The base model that plays an eval no checkpoint plays; none: the profile's. */
-  model?: string | null;
-  /** Every other environment it plays: an eval's suite's, a training run's evals' suite's. */
-  environments?: string[];
-  /** The run it starts again, for a launch that resumes one, and that run's directory, where it runs. */
+  settings: Record<string, unknown>;
+  preset?: string | null;
   resumes?: string | null;
-  directory?: string | null;
 }
 
-export type LaunchState = "asked" | "claimed" | "running" | "stopping" | "ended" | "failed" | "stopped";
+/** What the page asks for (`POST /api/launches`): a run's kind, name, environment, settings and preset. */
+export interface LaunchAsking {
+  kind: RunKind;
+  name: string;
+  environment?: string | null;
+  settings: Record<string, unknown>;
+  preset?: string | null;
+}
+
+export type LaunchState = "asked" | "submitted" | "running" | "stopping" | "ended" | "failed" | "stopped";
 
 export interface Launch {
   id: string;
   asked: LaunchAsked;
   at: number;
   state: LaunchState;
-  launcher: string | null;
-  directory: string | null;
-  pid: number | null;
+  /** The run it is, by id. */
+  run: string | null;
+  /** Its job: a Ray job's submission id, or a RayJob's name. */
+  job: string | null;
+  backend: "ray" | "kubernetes" | null;
+  /** Why it failed, how it ended, or what its run waits for. */
   detail: string | null;
   updated: number;
 }
 
-/** A launcher alive: what it offers, and whether it has room. */
-export interface Launcher {
-  launcher: string;
-  at: number;
-  host?: string;
-  profiles: OfferedProfile[];
-  environments: string[];
-  at_once: number;
-  playing: number;
-}
-
 export interface Launches {
   launches: Launch[];
-  launchers: Launcher[];
+  /** Whether the monitor asks for runs (it has a cluster config). */
+  submits: boolean;
+}
+
+/** One thing a run's settings break, or a note beside them (`rollout_train.validation.Finding`). */
+export interface SettingFinding {
+  rule: string;
+  key: string;
+  reason: string;
+  refuses: boolean;
+}
+
+/** A setting a trainer takes, with its default. */
+export interface OfferedSetting {
+  key: string;
+  types: string[];
+  default: unknown;
+  changeable: boolean;
+}
+
+export interface OfferedEnvironment {
+  environment: string;
+  published: boolean;
+  python?: string;
+  name?: string;
+  source?: string;
+  commit?: string;
+  imported?: number;
+  sandboxes?: string[];
+}
+
+export interface OfferedTrainer {
+  name: string;
+  kind: string;
+  produces: "lora" | "full";
+  format: string;
+  models: string[];
+  gpus: number;
+  colocate_with: string | null;
+  segment_tokens: number | null;
+  cost: Record<string, number>;
+  families: string[];
+  settings: OfferedSetting[];
+}
+
+export interface OfferedModel {
+  model: string;
+  context: number;
+  base: string | null;
+  max_lora_rank: number | null;
+  cost: Record<string, number>;
+  renderers: string[];
+  families: string[];
+}
+
+export interface OfferedProvider {
+  name: string;
+  kind: string;
+  gpus: number;
+  replicas: number;
+  shared: boolean;
+  capabilities: Record<string, unknown>;
+  models: OfferedModel[];
+}
+
+export interface Preset {
+  name: string;
+  version: number;
+  /** `NAME@N`. */
+  id: string;
+  settings: Record<string, unknown>;
+  note: string;
+  saved: number;
+}
+
+/** What a run can be asked for on the monitor's cluster (`/api/offers`); `cluster` none where it has no cluster
+ * config. */
+export interface Offers {
+  cluster: string | null;
+  kinds: RunKind[];
+  submits?: string;
+  environments: OfferedEnvironment[];
+  trainers: OfferedTrainer[];
+  inference: OfferedProvider[];
+  pairs: { trainer: string; inference: string; bridge: string[] | null; refused?: string }[];
+  sandboxes: Record<string, { size: number; provider: string }>;
+  presets: Preset[];
+  capacity: { gpus: number; gpus_free: number; machines: Record<string, number> } | null;
 }
 
 /** An episode in a feed, summarised. */
@@ -905,7 +941,7 @@ export interface Imports {
   importing: boolean;
 }
 
-/** An environment the system knows of: offered by a launcher alive, started on by a run, played by a suite, or
+/** An environment the system knows of: offered by the cluster, started on by a run, played by a suite, or
  * imported from git. */
 export interface KnownEnvironment {
   /** As `module:name`; a published one as `NAME@VERSION`. */
@@ -914,7 +950,7 @@ export interface KnownEnvironment {
   name: string;
   /** Its versions seen, in runs' starts and suites' entries. */
   versions: string[];
-  /** Whether a launcher alive offers it. */
+  /** Whether the cluster offers it. */
   offered: boolean;
   /** Its training runs (by id), and the suites with a version that plays it. */
   runs?: string[];

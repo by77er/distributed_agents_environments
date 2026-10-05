@@ -3,7 +3,7 @@ was done with it (`page_of`).
 
 An environment is known by `module:name` (a published one by `NAME@VERSION`, `rollout_train.published`) from several
 sources (`SOURCES`), each a function from what the monitor read (`Read`) to what it saw of environments
-(`Sighting`s): the launchers alive that offer one (`offered`), the runs started on one (`started`: training runs,
+(`Sighting`s): the cluster config that offers one (`offered`), the runs started on one (`started`: training runs,
 evals' runs and checks), the suites whose versions play one (`in_suites`), and the published versions the ledger keeps
 (`published`). `listed` folds every sighting of an environment into one line of the list, a published one's with where
 its source came from and what its check found (`source_of`); a new source is a function added to `SOURCES`.
@@ -12,8 +12,8 @@ An environment's page (`page_of`) is what it says of itself where it loads in th
 version, description, rows, eval data and curriculum; a published one's as its check recorded it) beside what the
 ledger has of it: each row's groups and episodes in the training runs on it (matched by the row's key), those runs, the
 suites with a version that plays it, every eval of such a version with its score at this environment's entry, and its
-newest check (`rollout env check` with a profile: a run of its own, whose groups each say whether every episode scored
-the same).
+newest check (`rollout env check` with a model's settings: a run of its own, whose groups each say whether every
+episode scored the same).
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -48,7 +48,7 @@ def readable(environment: str) -> str:
 
 @dataclass(frozen=True)
 class Read:
-    """What the sources read: the ledger's tables, by name; the environments the launchers alive offer; and the
+    """What the sources read: the ledger's tables, by name; the environments the cluster offers; and the
     registry's names (the version each suite's name points to, under `suites`)."""
 
     tables: Mapping[str, Mapping[str, JsonValue]]
@@ -59,7 +59,7 @@ class Read:
 
 @dataclass(frozen=True)
 class Sighting:
-    """One source's word of an environment: a version of it, whether a launcher alive offers it, a training run on it,
+    """One source's word of an environment: a version of it, whether the cluster offers it, a training run on it,
     a suite that plays it, and when something last played it."""
 
     environment: str
@@ -74,7 +74,7 @@ Source = Callable[[Read], Iterable[Sighting]]
 
 
 def offered(read: Read) -> Iterable[Sighting]:
-    """The environments the launchers alive offer."""
+    """The environments the cluster offers."""
     return [Sighting(each, offered=True) for each in read.offered]
 
 
@@ -138,9 +138,9 @@ def source_of(version: EnvironmentVersion) -> dict[str, Any]:
 
 
 def listed(read: Read, sources: Iterable[Source] = SOURCES) -> list[dict[str, Any]]:
-    """Every environment the sources saw, by readable name: its `module:name`, the versions of it seen, whether a
-    launcher alive offers it, its training runs (by id) and the suites with a version that plays it, and when
-    a run last started on it (`used`)."""
+    """Every environment the sources saw, by readable name: its `module:name`, the versions of it seen, whether the
+    cluster offers it, its training runs (by id) and the suites with a version that plays it, and when a run last
+    started on it (`used`)."""
     seen: dict[str, list[Sighting]] = {}
     for source in sources:
         for sighting in source(read):

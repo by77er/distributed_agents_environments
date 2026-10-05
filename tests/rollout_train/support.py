@@ -1,7 +1,7 @@
 """Helpers the tests of rollout-train share: trainers that train nothing (`Counting`, `Steps`); a runner playing what
 runs ask for in a ledger (`here`, `runner`, `episode_runner`) and asking it for groups (`ask`, `ask_boxed`); hooks that
-take notes (`Notes`, `Running`, `Seen`); profiles (`PROFILE`, `write`, `profiles`, `a_profile`) and a ledger runs share
-(`a_ledger`); a launched process (`Process`); and what a launcher offers (`OFFERED`)."""
+take notes (`Notes`, `Running`, `Seen`); a profile (`PROFILE`, `write`); a cluster config that offers some
+environments (`offering`); and a monitor served in this process (`monitor_client`)."""
 
 import asyncio
 import contextlib
@@ -40,12 +40,12 @@ from rollout_train import (
     Step,
     StepFailed,
 )
+from rollout_train.cluster import Cluster
 from rollout_train.evals import (
     Schedule,
     Suite,
 )
 from rollout_train.gateway import GatewayEndpoints
-from rollout_train.profile import Profile
 from rollout_train.record import GROUPS, scope, table
 from rollout_train.rollouts import (
     EpisodeRunner,
@@ -54,7 +54,6 @@ from rollout_train.rollouts import (
     plan,
     playing,
 )
-from rollout_train.stores import FILES
 from rollout_train.testing import PlainRenderer, Policy, gateway_endpoints, plain_channel
 from rollout_train.trainer import STATE, WEIGHTS, Item
 from tests.rollout_train.rollouts.games import Guess
@@ -167,8 +166,14 @@ segments_per_step = 3
 """
 
 
+def write(tmp_path: Path, text: str = PROFILE) -> Path:
+    path = tmp_path / "profile.toml"
+    path.write_text(text.format(directory=tmp_path / "run"))
+    return path
+
+
 class Steps:
-    """A trainer that trains nothing: what a profile's `[trainer]` names."""
+    """A trainer that trains nothing, made with a model and its budget's settings."""
 
     def __init__(self, model: str, *, segment_tokens: int, segments_per_step: int) -> None:
         self.model = model
@@ -179,38 +184,6 @@ class Steps:
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
         return Step({"segments": float(len(batch))})
-
-
-def write(tmp_path: Path, text: str = PROFILE) -> Path:
-    path = tmp_path / "profile.toml"
-    path.write_text(text.format(directory=tmp_path / "run"))
-    return path
-
-
-def profiles(tmp_path: Path) -> Path:
-    directory = tmp_path / "profiles"
-    directory.mkdir()
-    (directory / "small.toml").write_text(PROFILE.format(directory=tmp_path / "run"))
-    (directory / "not-a-profile.toml").write_text("nonsense = [")
-    without = PROFILE.format(directory=tmp_path / "run").split("[trainer]")[0]
-    (directory / "serving-only.toml").write_text(without)
-    return directory
-
-
-class Process:
-    """A started `rollout train`, as the launcher sees it: it ends with `code` once told to, or on an interrupt."""
-
-    def __init__(self, code: int) -> None:
-        self.pid, self.code, self.signals = 4242, code, list[int]()
-        self.done = asyncio.Event()
-
-    def send_signal(self, number: int) -> None:
-        self.signals.append(number)
-        self.done.set()
-
-    async def wait(self) -> int:
-        await self.done.wait()
-        return self.code
 
 
 BOX = SandboxSpec(kind="fake")
@@ -339,41 +312,6 @@ def files(tmp_path: Path, name: str) -> Path:
     return directory
 
 
-async def a_ledger(tmp_path: Path) -> tuple[str, dict[str, str]]:
-    """A ledger and blob store runs share (as a profile says them), holding a merged checkpoint ("merged"), an
-    adapter over the model ("plain") and one over the merged weights ("stacked"), each bookmarked by that name."""
-    shared = f'ledger = "{tmp_path / "ledger"}"\nblobs = {{ kind = "{FILES}", directory = "{tmp_path / "blobs"}" }}\n'
-    (tmp_path / "setup.toml").write_text(shared + PROFILE.format(directory=tmp_path / "setup"))
-    async with Profile.load(tmp_path / "setup.toml").open() as setup:
-        assert setup.registry is not None
-        fence = await setup.ledger.take(scope("elsewhere"))
-        add = setup.checkpoints.add
-        plain = await add(fence, "pppp" * 4, weights=files(tmp_path, "p"), run="elsewhere", base="a-checkpoint")
-        merged = await add(fence, "mmmm" * 4, weights=files(tmp_path, "m"), run=None, kind="full", parents=[plain.id])
-        stacked = await add(fence, "ssss" * 4, weights=files(tmp_path, "s"), run="elsewhere", parents=[merged.id])
-        made = {"plain": plain.id, "merged": merged.id, "stacked": stacked.id}
-        for name, id in made.items():
-            await setup.registry.bookmark(name, id)
-    return shared, made
-
-
-def a_profile(tmp_path: Path, shared: str, trainer: str, start: str) -> Path:
-    text = PROFILE.replace("tests.rollout_train.support:Steps", f"tests.rollout_train.test_full_weights:{trainer}")
-    path = tmp_path / f"{trainer}-{start}.toml"
-    directory = tmp_path / f"{trainer}-{start}"
-    path.write_text(shared + text.replace('bookmark = "best"', f'start = "{start}"').format(directory=directory))
-    return path
-
-
-OFFERED: dict[str, Any] = {
-    "profile": "one-gpu",
-    "path": "/profiles/one-gpu.toml",
-    "kinds": ["run", "eval"],
-    "model": "m",
-    "settings": {"trainer.learning_rate": 5e-5, "episodes_at_once": 6, "trainer.start": None},
-}
-
-
 class ThinkingRenderer(PlainRenderer):
     """The plain format, with reasoning written before a `~`: `assistant: thought~answer`."""
 
@@ -406,3 +344,12 @@ async def monitor_client(where: str | Path, **options: Any) -> AsyncGenerator[ht
     transport = httpx.ASGITransport(app=create_app(where, **options))
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
         yield client
+
+
+def offering(*environments: str) -> Cluster:
+    """A cluster config that offers `environments` (each in the platform's Python) and nothing else: what a monitor
+    is given to say which environments are offered."""
+    from rollout_train.cluster import parsed
+
+    listed: dict[str, Any] = {name: {"python": "platform"} for name in environments}
+    return parsed({"name": "offering", "ledger": {"url": "sqlite:///unused.db"}, "environments": listed})

@@ -15,22 +15,21 @@ from rollout_train.checkpoints import Checkpoints
 from rollout_train.colocated import Colocated
 from rollout_train.evals import Schedule, make_suite, suite_entry
 from rollout_train.ledger import FileLedger, Ledger
-from rollout_train.profile import EvalsSpec, Profile
+from rollout_train.providers import TRAINER_KINDS, settings_of
 from rollout_train.record import EVALS, STEPS, table
+from rollout_train.run_settings import RunSettings
 from rollout_train.settings import (
     CHANGEABLE,
     EVALS_EVERY,
     EVALS_SUITE,
     GROUPS_PER_STEP,
     applied,
-    changeable,
     checked,
     desired_settings_of,
-    fixed,
 )
 from rollout_train.trainer import Changeable, Files, Item, Step
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.support import ENVIRONMENT, Counting, a_schedule, answering, here, made_by, write
+from tests.rollout_train.support import ENVIRONMENT, Counting, a_schedule, answering, here, made_by
 
 
 class Rated(Counting):
@@ -99,18 +98,12 @@ def test_only_a_changeable_setting_is_taken_and_only_with_a_value_it_can_have() 
             checked(key, value)
 
 
-def test_a_runs_settings_are_its_profiles_split_into_fixed_and_changeable(tmp_path: Path) -> None:
-    profile = Profile.load(write(tmp_path), settings={"trainer.learning_rate": 3e-5})
+def test_a_runs_settings_split_into_fixed_and_changeable_and_a_colocated_trainer_takes_its_own(tmp_path: Path) -> None:
+    given = RunSettings({"kind": "train", "trainer.learning_rate": 3e-5, "trainer.rank": 16, "groups": 40})
+    fixed, changeable = given.split(settings_of(TRAINER_KINDS["lora"]))
+    assert fixed["trainer.rank"] == 16 and fixed["groups"] == 40 and "trainer.learning_rate" not in fixed
+    assert changeable["trainer.learning_rate"] == 3e-5 and set(CHANGEABLE) <= set(changeable)
     trainer = Rated()
-    said = fixed(profile, trainer, groups=40, seed=1)
-    assert said["model"] == "a-checkpoint" and said["weights"] == "lora" and said["trainer.segment_tokens"] == 900
-    assert said["channels.policy.engines"] == 2 and said["episodes_at_once"] == 6 and said["groups"] == 40
-    assert "trainer.learning_rate" not in said  # (the trainer takes it between steps)
-    assert changeable(trainer, groups_per_step=4, max_lag=1, evals=EvalsSpec("words-v1", every=2)) == {
-        GROUPS_PER_STEP: 4, "max_lag": 1, EVALS_SUITE: "words-v1", EVALS_EVERY: 2, "evals.episodes": None,
-        "trainer.learning_rate": 1e-4,
-    }  # fmt: skip
-    assert set(changeable(Counting(), groups_per_step=4, max_lag=1)) == set(CHANGEABLE)
     wrapped = Colocated(trainer, [])
     assert isinstance(wrapped, Changeable) and wrapped.changeable == {"learning_rate": 1e-4}
     wrapped.change({"learning_rate": 5e-5})

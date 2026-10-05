@@ -1,10 +1,10 @@
 // A suite: the version its name points to (an eval configuration of one or more environments, its entries), every subject
 // that played any of its versions start by start, two subjects of one version compared, the form that edits it (a new
-// version), and the form that asks a launcher to play it with a checkpoint (an eval: nothing trained).
+// version), and the form that asks for an eval of it by a checkpoint or a base model (nothing trained).
 
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useEvals, useKnown, useLaunches, useSystem } from "../api/queries";
+import { useEvals, useKnown, useLaunches, useOffers, useSystem } from "../api/queries";
 import type { EvalSuite, SuiteEntry, SuiteVersion } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
 import { anySolved, Played, shareOf, shareText, startName, startShare, type Subject, subjectText, SuiteMatrix } from "../components/evals";
@@ -17,12 +17,12 @@ import { clock, figure } from "../lib/format";
 import { readable } from "../lib/environments";
 import { evalPlace, evalsPlace } from "../lib/places";
 import { ALL, chosenText, currentOf, entryStarts, limitsText, playedVersion, suiteName, versionsOf, versionTag } from "../lib/suites";
-import { NoLauncher } from "./NewRun";
 
 export function Suite({ name }: { name: string }) {
   const { data: evals } = useEvals();
   const { data: system } = useSystem();
   const { data: launched } = useLaunches();
+  const { data: offers } = useOffers();
   const [picked, setPicked] = useState(ALL);
   const [editing, setEditing] = useState(false);
   if (!evals || !system) return <Empty>Reading the suite…</Empty>;
@@ -31,7 +31,7 @@ export function Suite({ name }: { name: string }) {
   const versions = versionsOf(suite), current = currentOf(suite);
   const shown = versions.find(each => each.id === picked) ?? current;
   const playing = evals.evals.filter(each => each.suite === name && !each.done);
-  const launches = (launched?.launches ?? []).filter(each => each.asked.kind === "eval" && suiteName(each.asked.suite ?? "") === name);
+  const launches = (launched?.launches ?? []).filter(each => each.asked.kind === "eval" && suiteName(String(each.asked.settings["eval.suite"] ?? "")) === name);
   const said = anySolved(suite.subjects), score = (subject: Subject) => (said ? shareOf(subject) : subject.reward ?? null);
   const ranked = [...suite.subjects].sort((a, b) => (score(b) ?? -Infinity) - (score(a) ?? -Infinity));
   const compared = ranked.filter(subject => playedVersion(subject) === shown.id);  // (subjects compare within a version)
@@ -56,7 +56,7 @@ export function Suite({ name }: { name: string }) {
         {one ? <Kpi label="Best" value={compared[0] ? (said ? shareText(shareOf(compared[0])) : figure(compared[0].reward)) : "–"} note={compared[0] ? <SubjectLabel subject={compared[0]} /> : versionTag(shown.id)} /> : null}
         <Kpi label="Playing" value={String(playing.length)} note={playing.map(each => each.name).join(", ")} />
       </Kpis>
-      {launched ? (launched.launchers.length ? <PlayForm suite={suite} suites={evals.suites} launchers={launched.launchers} system={system} title="Run this suite" /> : <NoLauncher ledger={system.ledger_at} />) : null}
+      {offers ? <PlayForm suite={suite} suites={evals.suites} offers={offers} system={system} title="Run this suite" /> : null}
       {launches.length ? <LaunchList launches={launches} system={system} /> : null}
       {playing.length ? (
         <Card title="Playing now">

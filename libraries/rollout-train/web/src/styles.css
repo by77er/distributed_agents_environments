@@ -455,8 +455,7 @@
   .card .launch-submit { margin-top: 16px; }
   .card .launch-submit + .table { margin-top: 16px; }
   pre.command { background: var(--code); border: 1px solid var(--line); padding: 10px 12px; overflow-x: auto; white-space: pre; }
-  .launches .launch-directory { overflow-wrap: anywhere; }
-  .launches .tile header .mark { margin-left: auto; }
+  .refusals { margin: 0; padding-left: 18px; }
   .tile .facts.wraps span { overflow-wrap: anywhere; min-width: 0; }
   .launch-detail summary { cursor: pointer; color: var(--bad); font-size: 12px; }
   .launch-detail pre { background: var(--code); border: 1px solid var(--line); padding: 8px 10px; margin-top: 6px; max-height: 260px; overflow: auto; }
@@ -465,7 +464,7 @@
                             border: 1px solid var(--bad); border-radius: 2px; padding: 4px 10px; cursor: pointer; }
   .launch-actions .danger:hover { background: var(--bad-soft); }
   .launch-actions .danger:disabled { opacity: .5; cursor: default; }
-  .settings-changed span b { color: var(--accent); }
+  .settings-changed span { color: var(--accent); }
   .more { margin-top: -6px; justify-self: start; }
 
   /* A machine, as its heartbeats say */

@@ -1,5 +1,5 @@
-// The machines that run things, as their heartbeats and the ledger say: every runner, sandbox pool, engine host,
-// launcher and gateway alive, a section of each kind, with what each holds and how full it is; and one machine with
+// The machines that run things, as their heartbeats and the ledger say: every runner, sandbox pool, engine host and
+// gateway alive, a section of each kind, with what each holds and how full it is; and one machine with
 // everything on it.
 
 import { Fragment } from "react";
@@ -20,7 +20,7 @@ export function Machines() {
   const hosts = new Map(data.hosts.map(host => [host.host, host]));
   const alive: Roles = {
     runners: data.runners.filter(role => role.alive), pools: data.pools.filter(role => role.alive), engines: data.engines.filter(role => role.alive),
-    launchers: data.launchers.filter(role => role.alive), gateways: data.gateways.filter(role => role.alive),
+    gateways: data.gateways.filter(role => role.alive),
   };
   const gone = KINDS.flatMap(([kind, , word]) => (data[kind] as Role[]).filter(role => !role.alive).map(role => ({ role, word })));
   const places = placesOf(data.runners);

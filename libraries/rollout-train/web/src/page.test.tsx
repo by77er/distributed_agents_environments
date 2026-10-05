@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
-import type { Launch, Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteEntry, SuiteVersion } from "./api/types";
+import type { Launch, Offers, Run, System, Checkpoint, Evals, EvalSuite, Path, PathPoint, PlainMessage, SampleLine, SuiteEntry, SuiteVersion } from "./api/types";
 import { scale, sparkPoints } from "./components/charts";
 import { RunControls } from "./components/control";
 import { columnsOf, type Subject } from "./components/evals";
@@ -216,6 +216,11 @@ describe("a page read again", () => {
   });
 });
 
+const noOffers: Offers = {
+  cluster: "here", kinds: ["train", "eval"], environments: [{ environment: "games:words", published: false }], trainers: [], inference: [],
+  pairs: [], sandboxes: {}, presets: [], capacity: null,
+};
+
 describe("a run's controls", () => {
   const fetched = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>(
     async () => new Response("{}", { headers: { "Content-Type": "application/json" } }),
@@ -228,13 +233,13 @@ describe("a run's controls", () => {
   });
 
   const launch = (state: Launch["state"], resumes: string | null): Launch => ({
-    id: "launch_1", asked: { profile: "one-gpu", environment: "c:c", name: "alpha", resumes }, at: 1, state, launcher: "launcher/far",
-    directory: "/elsewhere", pid: null, detail: null, updated: 1,
+    id: "launch_1", asked: { kind: "train", name: "alpha", settings: { environment: "c:c" }, resumes }, at: 1, state, run: resumes,
+    job: "run-1", backend: "ray", detail: null, updated: 1,
   });
 
   function shown(given: Run, launches: Launch[] = []): string[] {
     const client = newQueryClient();
-    client.setQueryData(topics.launches().key, { launches, launchers: [] });
+    client.setQueryData(topics.launches().key, { launches, submits: true });
     render(<QueryClientProvider client={client}><RunControls run={given} /></QueryClientProvider>);
     const said = screen.queryAllByRole("button").map(button => button.textContent ?? "");
     cleanup();
@@ -256,7 +261,8 @@ describe("a run's controls", () => {
 
   it("ask the monitor to pause the run", async () => {
     const client = newQueryClient();
-    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    client.setQueryData(topics.launches().key, { launches: [], submits: true });
+    client.setQueryData(topics.offers().key, noOffers);
     render(<QueryClientProvider client={client}><RunControls run={{ ...run("a/b", 1), state: "idle" }} /></QueryClientProvider>);
     act(() => { screen.getByRole("button", { name: "pause" }).click(); });
     await waitFor(() => expect(fetched).toHaveBeenCalledWith("api/runs/a%2Fb/pause", expect.objectContaining({ method: "POST" })));
@@ -283,7 +289,8 @@ describe("a suite", () => {
     const client = newQueryClient();
     const checkpoints = [checkpoint("kpqxlmnoprstuvwx", "kpqx", "run_1", 3)];
     client.setQueryData(topics.system().key, { ...system([run("run_1", 1)]), checkpoints });
-    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    client.setQueryData(topics.launches().key, { launches: [], submits: true });
+    client.setQueryData(topics.offers().key, noOffers);
     const only = version(1, [["games:words", [["say-yes", 1], ["say-no", 1]]]], "words-v1");
     const evals: Evals = {
       suites: [{
@@ -308,7 +315,7 @@ describe("a suite", () => {
     expect(screen.getAllByText("say-no · 1").length).toBe(2);
     expect(screen.getByText(/At the 2 starts both played/).textContent).toMatch(/solved more at 1,\s*less at 0, and as much at 1/);
     expect(screen.getByText("+100%")).toBeTruthy();
-    expect(screen.getByText("No launcher is alive")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run this suite" })).toBeTruthy();
   });
 });
 
@@ -483,7 +490,8 @@ describe("a suite's versions", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
     const client = newQueryClient();
     client.setQueryData(topics.system().key, system([]));
-    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    client.setQueryData(topics.launches().key, { launches: [], submits: true });
+    client.setQueryData(topics.offers().key, noOffers);
     const evals: Evals = { suites: [versioned()], evals: [] };
     client.setQueryData(topics.evals().key, evals);
     const { container } = render(
@@ -578,7 +586,8 @@ describe("a suite of several environments", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
     const client = newQueryClient();
     client.setQueryData(topics.system().key, system([]));
-    client.setQueryData(topics.launches().key, { launches: [], launchers: [] });
+    client.setQueryData(topics.launches().key, { launches: [], submits: true });
+    client.setQueryData(topics.offers().key, noOffers);
     client.setQueryData(topics.evals().key, { suites: [suite], evals: [] } satisfies Evals);
     const { container } = render(
       <QueryClientProvider client={client}>

@@ -321,7 +321,7 @@ function EnvironmentsTree({ place, system }: { place: Place; system: System }) {
           <div key={each.environment}>
             <Node to={environmentPlace(each.environment)} current={each.environment === shown}>
               <Twist open={open} has={runs.length + suites.length > 0} onToggle={() => fold(key, !open)} />
-              <span className={`dot${each.offered ? " alive" : ""}`} title={each.offered ? "offered by a launcher alive" : "no launcher alive offers it"} />
+              <span className={`dot${each.offered ? " alive" : ""}`} title={each.offered ? "offered by the cluster" : "not offered by the cluster"} />
               <span className="name" title={each.environment}>{each.name}</span>
               <span className="tag">{runs.length || ""}</span>
             </Node>

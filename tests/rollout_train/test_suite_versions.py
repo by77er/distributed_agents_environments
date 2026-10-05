@@ -1,9 +1,8 @@
 """A suite's versions: an edit makes a new version and moves the suite's name to it, every eval keeps the version it
 played, a suite made before versions reads as its version 1, and a training run plays the version its suite's name
-points to when each step is decided. The page makes and edits suites, and a training run is launched only once it says
-the evals it makes."""
+points to when each step is decided. The page makes and edits suites, and checks the evals a training run asked for
+says: a suite the ledger has, of environments the cluster offers."""
 
-import asyncio
 import random
 from pathlib import Path
 from typing import Any
@@ -30,15 +29,14 @@ from rollout_train.evals import (
     suite_table,
     versions_of,
 )
-from rollout_train.launcher import LAUNCHER, Launcher
-from rollout_train.launches import Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.system import System
-from rollout_train.presence import presence_of
 from rollout_train.record import EVALS, STEPS, table
 from rollout_train.registry import Taken, registry_of
+from rollout_train.stores import Stores
+from tests.rollout_train.clusters import POLICY, a_cluster
 from tests.rollout_train.rollouts.games import guessing, words
-from tests.rollout_train.support import Counting, Process, answering, here, profiles
+from tests.rollout_train.support import Counting, answering, here
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -262,76 +260,27 @@ async def test_the_page_makes_and_edits_suites_and_refuses_what_cannot_be(tmp_pa
     assert suites["words-held"]["versions"][0]["held_out"] is True
 
 
-OFFERED: dict[str, Any] = {
-    "profile": "small",
-    "path": "/profiles/small.toml",
-    "kinds": ["run", "eval"],
-    "model": "m",
-    "settings": {"trainer.learning_rate": 5e-5, "evals.suite": None, "evals.every": None, "evals.episodes": None},
-}
-
-
-async def test_a_training_run_is_launched_only_once_it_says_the_evals_it_makes(tmp_path: Path) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
+async def test_the_evals_a_training_run_asked_for_says_are_checked(tmp_path: Path) -> None:
+    cluster = a_cluster(tmp_path)  # (it offers the words, and not the guessing game)
+    ledger = Stores.open(cluster).ledger
     await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-yes"], seeds=[5])])
     await make_suite(ledger, "guesses", [suite_entry(GUESSING, guessing, rows=["guess-apple"], seeds=[5])])
-    heartbeats = presence_of(ledger)
-    assert heartbeats is not None
-    with_evals = {**OFFERED, "profile": "evaluating", "settings": {**OFFERED["settings"], "evals.suite": "words-v1"}}
-    about: JsonValue = {"kind": LAUNCHER, "profiles": [OFFERED, with_evals], "environments": [ENVIRONMENT],
-                        "at_once": 1, "playing": 0}  # fmt: skip
-    await heartbeats.beat("launcher/far", about)
-    transport = httpx.ASGITransport(app=create_app(str(tmp_path / "ledger"), beat=0.0))
-    asked: dict[str, Any] = {"profile": "small", "environment": ENVIRONMENT, "groups": 4}
-    cases: dict[str, tuple[dict[str, Any], int]] = {
-        "no word of its evals": ({}, 409),
-        "none, said so": ({"evals.suite": None}, 200),
-        "a suite of its environment": ({"evals.suite": "words-v1", "evals.every": 2}, 200),
-        "one version of it": ({"evals.suite": "words-v1@1"}, 200),
-        "a version it does not have": ({"evals.suite": "words-v1@4"}, 409),
-        "its environment's eval data, not played yet": ({"evals.suite": "words-held-out"}, 200),
-        "a suite neither has": ({"evals.suite": "words-v9"}, 409),
-        "a suite of an environment no launcher offers": ({"evals.suite": "guesses"}, 404),
-        "a suite named by no name": ({"evals.suite": 3}, 409),
+    transport = httpx.ASGITransport(app=create_app(f"sqlite:///{tmp_path}/ledger.db", beat=0.0, cluster=cluster))
+    asked: dict[str, Any] = {"kind": "train", "name": "a run", "environment": ENVIRONMENT}
+    cases: dict[str, tuple[dict[str, Any], str | None]] = {
+        "none": ({}, None),
+        "none, said so": ({"evals.suite": None}, None),
+        "a suite of its environment": ({"evals.suite": "words-v1", "evals.every": 2}, None),
+        "one version of it": ({"evals.suite": "words-v1@1"}, None),
+        "a version it does not have": ({"evals.suite": "words-v1@4"}, "has versions 1 to 1"),
+        "its environment's eval data, which is no suite": ({"evals.suite": "words-held-out"}, "there is no suite"),
+        "a suite the ledger does not have": ({"evals.suite": "words-v9"}, "there is no suite"),
+        "a suite of an environment the cluster does not offer": ({"evals.suite": "guesses"}, "does not offer"),
+        "a suite named by no name": ({"evals.suite": 3}, "is text or null"),
     }
     async with httpx.AsyncClient(transport=transport, base_url="http://monitor") as client:
-        for number, (why, (settings, status)) in enumerate(cases.items()):
-            body: dict[str, Any] = {**asked, "name": f"run {number}", "settings": settings}
-            answer = await client.post("/api/launches", json=body)
-            assert answer.status_code == status, (why, answer.text)
-        refused = await client.post("/api/launches", json={**asked, "name": "silent"})
-        assert "says the evals it makes" in refused.json()["error"]
-        answer = await client.post("/api/launches", json=asked | {"profile": "evaluating", "name": "by its profile"})
-        assert answer.status_code == 200, answer.text  # (its profile's `[evals]` says them)
-
-
-async def test_a_launcher_tells_a_run_launched_with_no_evals_to_make_none(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ledger = FileLedger(tmp_path / "ledger")
-    launches, heartbeats = launches_of(ledger), presence_of(ledger)
-    assert launches is not None and heartbeats is not None
-    started: list[list[str]] = []
-
-    async def spawn(*command: str, stdout: Any, **_: Any) -> Process:
-        started.append(list(command))
-        process = Process(0)
-        process.done.set()
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
-    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [ENVIRONMENT], tmp_path / "runs")
-    found.every = 0.01
-    await launches.ask(Asked("small", ENVIRONMENT, "no evals", settings={"evals.suite": None}))
-    await launches.ask(Asked("small", ENVIRONMENT, "evals", settings={"evals.suite": "words-v1", "evals.every": 2}))
-    serving = asyncio.create_task(found.serve())
-    try:
-        async with asyncio.timeout(5):
-            while len(started) < 2:  # noqa: ASYNC110 (the launcher starts them, one after the other)
-                await asyncio.sleep(0.01)
-    finally:
-        serving.cancel()
-        await asyncio.gather(serving, return_exceptions=True)
-    none, some = sorted(started, key=lambda command: command[command.index("--name") + 1] != "no evals")
-    assert "evals.suite=null" in none  # (so a profile's `[evals]` is not used)
-    assert 'evals.suite="words-v1"' in some and "evals.every=2" in some
+        for why, (settings, refused) in cases.items():
+            body: dict[str, Any] = {**asked, "settings": {**POLICY, **settings}}
+            said = (await client.post("/api/launches/check", json=body)).json()
+            reasons = [each["reason"] for each in said["refusals"] if each["key"] == "evals.suite"]
+            assert any(refused in each for each in reasons) if refused else reasons == [], (why, said)

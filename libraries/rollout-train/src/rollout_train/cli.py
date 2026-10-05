@@ -14,7 +14,6 @@ rollout checkpoints                 every checkpoint, newest first: where it cam
 rollout bookmark NAME CHECKPOINT    name a checkpoint, or move a bookmark there (--delete takes it away)
 rollout rename WHO NAME             call a run something else (its id stays)
 rollout merge CHECKPOINT            fold a LoRA checkpoint into its base: a full checkpoint of its own
-rollout launcher                    start the runs and evals asked for that this machine can run
 rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`
@@ -445,10 +444,10 @@ async def _suite(
         count = len(await versions_of(ledger, each))
         more = f"  ({count} versions)" if count > 1 else ""
         print(f"{found.id:<24} {len(found.starts):>4} starts  {', '.join(found.environments)}{more}")
-    if environment is not None:  # (its eval data, frozen as a suite the first time it is played)
+    if environment is not None:  # (its eval data, which `rollout suite make NAME --environment …` makes a suite of)
         for each, starts in named(environment).evals().items():
             if each not in listed:
-                print(f"{each:<24} {len(starts):>4} starts  {environment}  (not played yet)")
+                print(f"{each:<24} {len(starts):>4} starts  {environment}  (eval data, not a suite)")
 
 
 async def _check(
@@ -997,59 +996,6 @@ def _registry_at(where: "str | Stores") -> "tuple[Ledger, Registry]":
     return ledger, registry
 
 
-async def _launcher(
-    where: str,
-    profiles: Path,
-    environments: list[str],
-    runs: Path,
-    at_once: int,
-    ray: str | None,
-    gpus: float,
-    name: str | None = None,
-    cluster: str | None = None,
-) -> None:
-    from rollout_train.launcher import Launcher, name_of
-    from rollout_train.launches import launches_of
-    from rollout_train.presence import presence_of
-
-    ledger = _ledger_at(where)
-    launches, presence = launches_of(ledger), presence_of(ledger)
-    if launches is None or presence is None:
-        raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
-    from rollout_train.published import environment_versions_of
-
-    def absolute(path: Path) -> Path:  # (a run started in a published environment's source names its paths in full)
-        return path.expanduser().absolute()
-
-    profiles, runs = await asyncio.to_thread(absolute, profiles), await asyncio.to_thread(absolute, runs)
-    found = Launcher(
-        name_of(name), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus,
-        cluster=_cluster_of(cluster) if cluster is not None else None, versions=environment_versions_of(ledger),
-    )  # fmt: skip
-    await found.serve()
-
-
-def _as_job(ray: str, given: list[str]) -> None:
-    """Submit this launcher (the command as given, without `--as-job`) as a Ray job, unless one already runs here."""
-    import shlex
-    import socket
-
-    from rollout_train.ray_cluster import prepare
-
-    prepare()
-    from ray.job_submission import JobSubmissionClient
-
-    client, host = JobSubmissionClient(ray), socket.gethostname()
-    for job in client.list_jobs():
-        said: Any = job.metadata or {}
-        if said.get("kind") == "launcher" and said.get("host") == host and not job.status.is_terminal():
-            raise SystemExit(f"a launcher already runs here as Ray job {job.submission_id}: `ray job stop` it first")
-    command = [sys.executable, "-m", "rollout_train.cli", *(each for each in given if each != "--as-job")]
-    entrypoint = f"cd {shlex.quote(os.getcwd())} && exec {shlex.join(command)}"
-    job = client.submit_job(entrypoint=entrypoint, metadata={"kind": "launcher", "host": host}, entrypoint_num_cpus=0)
-    print(f"the launcher runs as Ray job {job}: `ray job logs {job} --follow` shows its output")
-
-
 @_user_errors
 async def _merge(who: str, where: "str | Stores", base: str | None, merger: str, bookmark: str | None) -> None:
     from rollout.harness.blobs import Blobs, FileBlobStore
@@ -1159,7 +1105,7 @@ async def _pause_or_resume(command: str, who: str, where: "str | Stores") -> Non
         print(f"{who} goes on")
     else:
         assert resumed.launch is not None
-        print(f"{who} is asked to start again in {resumed.launch.asked.directory} ({resumed.launch.id})")
+        print(f"{who} is launched again: launch {resumed.launch.id}, job {resumed.launch.job}")
 
 
 @_user_errors
@@ -1370,18 +1316,6 @@ def main() -> None:
     marking.add_argument("checkpoint", nargs="?", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id or its start")
     marking.add_argument("--delete", action="store_true", help="take the bookmark away (the checkpoint stays)")
     _over_a_ledger(marking)
-    launching = commands.add_parser("launcher", help="start the training runs asked for that this machine can run")
-    launching.add_argument("--ledger", required=True, help="the database's URL (or a ledger's directory)")
-    launching.add_argument("--profiles", type=Path, required=True, help="a directory of profiles it offers")
-    launching.add_argument("--environment", action="append", default=[], help="an environment it offers (repeatable)")
-    launching.add_argument("--runs", type=Path, required=True, help="where it makes each run's directory")
-    launching.add_argument("--at-once", type=int, default=1, help="runs it plays at once (1: one GPU)")
-    launching.add_argument("--ray", help="a Ray cluster's job server (http://127.0.0.1:8265): each run is a Ray job")
-    launching.add_argument("--gpus", type=float, default=1.0, help="accelerators each run's Ray job asks for (1)")
-    launching.add_argument("--as-job", action="store_true", help="submit the launcher itself as a Ray job (with --ray)")
-    launching.add_argument("--name", help="what it beats as besides its host, where a machine has several launchers")
-    offering = _cluster_option("the cluster config whose inference providers' models it offers evals")
-    launching.add_argument("--cluster", **offering)
     merging = commands.add_parser("merge", help="fold a LoRA checkpoint into its base: a full checkpoint of its own")
     merging.add_argument("checkpoint", help="the LoRA checkpoint: a bookmark, RUN:STEP, RUN, or an id or its start")
     merging.add_argument("--base", help="the model to merge into (by default the one it was trained over)")
@@ -1562,17 +1496,6 @@ def main() -> None:
             parser.error("bookmark: name a checkpoint, or --delete")
         asyncio.run(_bookmark(arguments.name, arguments.checkpoint, arguments.delete, _ledger_of(arguments)))
         return
-    if arguments.command == "launcher":
-        if arguments.as_job:
-            if not arguments.ray:
-                parser.error("launcher --as-job: say the Ray cluster with --ray")
-            _as_job(arguments.ray, sys.argv[1:])
-            return
-        work = _launcher(
-            arguments.ledger, arguments.profiles, arguments.environment, arguments.runs, arguments.at_once,
-            arguments.ray, arguments.gpus, arguments.name, arguments.cluster,
-        )  # fmt: skip
-        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command in ("engines", "runner"):
         from rollout_train.hosting import host_engines, run_episodes
         from rollout_train.profile import Profile

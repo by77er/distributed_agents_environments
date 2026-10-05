@@ -68,7 +68,8 @@ async def test_a_ledgers_records_and_launches_are_rewritten_once(tmp_path: Path)
     await ledger.append("runs/eval/starts", "1", start, fence)
     await ledger.append("runs/eval/episodes", "1/1", {"events": reference(CACHE / "gateway" / "blobs")}, fence)
     await ledger.append("runs/eval/groups", "1", {"episodes": 1}, fence)
-    launch = await ledger.launches.ask(Asked("one", "e:e", "eval", directory=str(CACHE / "runs" / "eval")))
+    launch = await ledger.launches.ask(Asked("eval", "eval", {"eval.suite": "s"}), "eval")
+    await ledger.launches.note(launch.id, detail=str(CACHE / "runs" / "eval" / "output.log"))  # (a path it names)
     ledger.close()
     assert relocated(url, relocation()) == {"ledger_records": 2, "launches": 1, "run_settings": 0}
     assert relocated(url, relocation()) == {"ledger_records": 0, "launches": 0, "run_settings": 0}
@@ -81,7 +82,7 @@ async def test_a_ledgers_records_and_launches_are_rewritten_once(tmp_path: Path)
         "events": reference(CACHE / "gateway" / "blobs") | {"uri": f"s3://blobs/blobs/ab/{DIGEST}"}
     }
     (asked,) = await ledger.launches.all()
-    assert asked.id == launch.id and asked.asked.directory == "/root/.cache/rollout/runs/eval"
+    assert asked.id == launch.id and asked.detail == "/root/.cache/rollout/runs/eval/output.log"
     ledger.close()
 
 

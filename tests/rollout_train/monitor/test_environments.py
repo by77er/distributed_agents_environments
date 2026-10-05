@@ -14,26 +14,25 @@ from rollout_train import train
 from rollout_train.check import NOTHING_TAUGHT, played
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.evals import evaluate, make_suite, suite_entry
-from rollout_train.launcher import LAUNCHER
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.environments import Read, Sighting, listed
-from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
 from rollout_train.registry import registry_of
 from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.support import Counting, answering, here, made_by
+from tests.rollout_train.support import Counting, answering, here, made_by, offering
 
 pytest.importorskip("starlette")
 from tests.rollout_train.support import monitor_client
 
 WORDS = "tests.rollout_train.rollouts.games:words"
 GUESSING = "tests.rollout_train.rollouts.games:guessing"
+CLUSTER = offering(WORDS, GUESSING)
+"""The cluster config the monitors of these tests are given: it offers the words and the guessing game."""
 
 
 async def scratch(directory: Path, groups: int = 4) -> FileLedger:
     """A ledger with two training runs on the words (`first`, then `second` from its newest checkpoint), a suite of
-    two of its rows, an eval of `first`'s newest checkpoint on it, a check of the words, and a launcher alive that
-    offers the words."""
+    two of its rows, an eval of `first`'s newest checkpoint on it, and a check of the words."""
     ledger, blobs = FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs")
     checkpoints, recorder = Checkpoints(ledger, blobs), answering()
     started: Any = {"environment": WORDS}
@@ -56,16 +55,15 @@ async def scratch(directory: Path, groups: int = 4) -> FileLedger:
         )  # fmt: skip
         binding = binding_for(words, "policy")
         await played(words, ledger, blobs, run="check-1", binding=binding, groups=3, episodes=4, started=started)
-    registry, heartbeats = registry_of(ledger), presence_of(ledger)
-    assert registry is not None and heartbeats is not None
+    registry = registry_of(ledger)
+    assert registry is not None
     await registry.create("first words", "first")
-    await heartbeats.beat("launcher/far", {"kind": LAUNCHER, "profiles": [], "environments": [WORDS, GUESSING]})
     return ledger
 
 
 async def test_the_list_and_an_environments_page_say_what_was_done_with_it(tmp_path: Path) -> None:
     await scratch(tmp_path)
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0, cluster=CLUSTER) as client:
         known = (await client.get("/api/environments")).json()["environments"]
         answer = await client.get(f"/api/environments/{WORDS}")
         assert answer.status_code == 200, answer.text
@@ -133,7 +131,7 @@ async def test_an_environment_that_does_not_load_here_is_shown_from_its_runs(tmp
         await ledger.append(table("walk", GROUPS), str(number), {"task": task, "title": f"the {task}"}, fence)
         line: Any = {"time": time.time(), "rewards": rewards, "solved": [False] * len(rewards), "failed": 1}
         await ledger.append(table("walk", RESULTS), str(number), line, fence)
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0, cluster=CLUSTER) as client:
         page = (await client.get(f"/api/environments/{gone}")).json()
     assert (page["loads"], page["version"], page["versions"], page["curriculum"]) == (False, None, ["7"], None)
     assert "does not load here" in page["error"]
@@ -148,20 +146,17 @@ async def test_an_environment_that_does_not_load_here_is_shown_from_its_runs(tmp
     assert (run["run"], run["groups"], run["played"], run["solved"]) == ("walk", 3, 7, None)
 
 
-async def test_an_environment_of_another_project_is_listed_from_its_launchers_offer_and_its_runs(
+async def test_an_environment_of_another_project_is_listed_from_the_clusters_offer_and_its_runs(
     tmp_path: Path,
 ) -> None:
-    """GSM8K lives in rollout-verifiers' own environment, which the monitor's cannot import: a launcher started there
+    """GSM8K lives in rollout-verifiers' own environment, which the monitor's cannot import: the cluster config
     offers it, and an eval there names it in its start."""
     ledger, gsm8k = FileLedger(tmp_path / "ledger"), "rollout_verifiers.environments:gsm8k"
     fence = await ledger.take(scope("gsm8k-base"))
     start: Any = {"kind": "eval", "suite": "math", "suite_version": "math@1", "environment": gsm8k}
     start |= {"version": "gsm8k 0.1.4", "started": time.time()}
     await ledger.append(table("gsm8k-base", STARTS), str(fence.number), start, fence)
-    heartbeats = presence_of(ledger)
-    assert heartbeats is not None
-    await heartbeats.beat("launcher/verifiers", {"kind": LAUNCHER, "profiles": [], "environments": [gsm8k]})
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0) as client:
+    async with monitor_client(str(tmp_path / "ledger"), beat=0.0, cluster=offering(gsm8k)) as client:
         (line,) = (await client.get("/api/environments")).json()["environments"]
         page = (await client.get(f"/api/environments/{gsm8k}")).json()
     assert (line["environment"], line["name"], line["offered"], line["runs"]) == (gsm8k, "gsm8k", True, [])

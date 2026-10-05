@@ -1,6 +1,6 @@
 """Importing an environment from git through the monitor: `POST /api/environments/import` imports it (the version, or
 why it was refused), the published versions are listed and read one by one, the import's stages are said as they go,
-and a published environment is in the environments' list and has a page, from what its check recorded."""
+and a published environment is offered, in the environments' list and has a page, from what its check recorded."""
 
 import asyncio
 from pathlib import Path
@@ -10,15 +10,13 @@ import pytest
 
 from rollout.harness.blobs import FileBlobStore
 from rollout_train import publishing
-from rollout_train.launcher import LAUNCHER
 from rollout_train.ledger import FileLedger
-from rollout_train.presence import presence_of
 from rollout_train.publishing import Importer
 from rollout_train.record import scope
 from tests.rollout_train.sources import TINY, git, repository
 
 pytest.importorskip("starlette")
-from tests.rollout_train.support import OFFERED, monitor_client
+from tests.rollout_train.support import monitor_client, offering
 
 
 @pytest.fixture
@@ -42,7 +40,8 @@ async def test_an_import_makes_a_version_listed_read_and_shown_as_an_environment
     ledger = FileLedger(tmp_path / "ledger")
     await ledger.take(scope("elsewhere"))  # (a ledger of files, with a fence)
     importer = Importer(FileBlobStore(tmp_path / "blobs"), "http://ray:8265", tmp_path / "scratch")
-    async with monitor_client(str(tmp_path / "ledger"), beat=0.0, importer=importer) as client:
+    where = str(tmp_path / "ledger")
+    async with monitor_client(where, beat=0.0, importer=importer, cluster=offering()) as client:
         answer = await client.post("/api/environments/import", json={"url": str(source), "ref": "main"})
         assert answer.status_code == 200, answer.text
         made = answer.json()
@@ -60,16 +59,10 @@ async def test_an_import_makes_a_version_listed_read_and_shown_as_an_environment
         imports = (await client.get("/api/environments/imports")).json()["imports"]
         assert [(each["stage"], each["version"]) for each in imports] == [("done", version["reference"])] * 2
 
-        heartbeats = presence_of(ledger)
-        assert heartbeats is not None
-        offered = {**OFFERED, "published": [version["reference"]]}  # (the profile plays it)
-        offer: dict[str, Any] = {"kind": LAUNCHER, "profiles": [offered], "environments": [version["reference"]]}
-        await heartbeats.beat("launcher/far", offer)
-        asked = {"profile": "one-gpu", "environment": version["reference"], "name": "on words"}
-        refused = await client.post("/api/launches", json={**asked, "settings": {"evals.suite": "other"}})
-        assert refused.status_code == 409 and "no eval data of that name" in refused.json()["error"]
-        launched = await client.post("/api/launches", json={**asked, "settings": {"evals.suite": "words-eval"}})
-        assert launched.status_code == 200 and launched.json()["launch"]["asked"]["environment"] == version["reference"]
+        asked = {"kind": "train", "environment": version["reference"], "name": "on words"}
+        said = (await client.post("/api/launches/check", json={**asked, "settings": {"evals.suite": "other"}})).json()
+        refused = {each["key"]: each["reason"] for each in said["refusals"]}
+        assert "environment" not in refused and "there is no suite other" in refused["evals.suite"]  # (it is offered)
         (line,) = (await client.get("/api/environments")).json()["environments"]
         assert (line["environment"], line["name"], line["offered"]) == (
             version["reference"], f"words@{version['version'][:12]}", True,
