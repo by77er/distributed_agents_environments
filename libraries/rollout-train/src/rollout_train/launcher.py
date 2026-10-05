@@ -9,10 +9,10 @@ renderer renders), the kinds of sandbox its pools serve and the settings a launc
 profile; the environments; and whether it has room. It claims the oldest launch asked for one of its profiles that
 the profile launches, whose environments it offers each of with the profile (and the base model, for an eval that
 names one), while it plays fewer than `--at-once`, starts `rollout train` (or `rollout eval`) for it in a directory of
-its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE` (no evals, said so, as
-`evals.suite=""`, so that the profile's `[evals]` is not used), and notes how it goes. A launch that resumes a run is
-started in that run's own directory, which names the run: it goes on from the ledger. A launch asked to stop is sent
-an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
+its own under `--runs` (`NAME-ID`), each setting the launch changes as `--set KEY=VALUE`, the value as JSON (no evals,
+said so, as `evals.suite=null`, so that the profile's `[evals]` is not used), and notes how it goes. A launch that
+resumes a run is started in that run's own directory, which names the run: it goes on from the ledger. A launch asked
+to stop is sent an interrupt: the run stops as it does on Ctrl-C, at a group boundary of the ledger.
 
 Without `--ray`, it starts each run as a process of its own, on its own machine. With `--ray ADDRESS` (a Ray
 cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
@@ -59,7 +59,6 @@ from rollout_train.machine import alive, measured
 from rollout_train.presence import Presence
 from rollout_train.published import EnvironmentVersion, EnvironmentVersions, is_published, offered_json
 from rollout_train.ray_cluster import prepare
-from rollout_train.settings import EVALS_SUITE
 
 if TYPE_CHECKING:
     from rollout_train.cluster import Cluster
@@ -293,11 +292,8 @@ class Launcher:
         if asked.kind != EVAL:  # (an eval's checkpoint is what plays, not where training starts)
             settings |= {"trainer.start": asked.start} if asked.start else {}
             settings |= {"trainer.bookmark": asked.bookmark} if asked.bookmark else {}
-        if asked.kind != EVAL and EVALS_SUITE in settings and not settings[EVALS_SUITE]:
-            settings[EVALS_SUITE] = ""  # (no evals, said so: the profile's `[evals]` is not used)
-        changed = [
-            argument for key, value in settings.items() if value is not None
-            for argument in ("--set", f"{key}={json.dumps(value)}")
+        changed = [  # (as JSON, which `--set` reads: null stays null, so `evals.suite` null is no evals)
+            argument for key, value in settings.items() for argument in ("--set", f"{key}={json.dumps(value)}")
         ]  # fmt: skip
         if asked.kind == EVAL:
             command = [

@@ -364,8 +364,8 @@ A launcher claims only a launch its profile launches (an eval, for a profile wit
 environment it plays with that profile (each built-in one it names, where it names any; each published one the profile
 plays), and, for an eval that names a base model (`model`), whose profile it offers that model with. It
 makes the run's directory under `--runs` (`NAME-ID`), and starts `rollout train` there with
-`--name` and each setting as `--set KEY=VALUE` (no evals as `--set evals.suite=""`, so that the profile's `[evals]` is
-not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job;
+`--name` and each setting as `--set KEY=VALUE`, the value as JSON (no evals as `--set evals.suite=null`, so that the
+profile's `[evals]` is not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job;
 a run on a published environment is a Ray job in that version's runtime environment, whose start records the version
 (`published`: its name, id, source, ref, commit, subdirectory and entry point). The launch's state
 follows: `asked`, `claimed`, `running` (with the process), and `ended`, `failed` (with the end of its output) or

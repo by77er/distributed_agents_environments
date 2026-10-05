@@ -236,7 +236,7 @@ every = 2               # the checkpoint of every second step (1 unless it says 
 episodes = 1            # episodes of each start (by default the version's)
 ```
 
-`suite = ""` (as `--set evals.suite=""`) is no evals. `rollout train` finds the suite with `suite_for`: the ledger's
+`suite = ""` (as `--set evals.suite=""`, or `--set evals.suite=null`) is no evals. `rollout train` finds the suite with `suite_for`: the ledger's
 version, or else the environment's eval data of that name, frozen now (a name neither has stops it before it starts),
 and loads each entry's environment (one that does not load stops it too). A suite may play other environments than the
 one trained on: the policy is the same, so each entry is played on the trained channel. It passes the loop a

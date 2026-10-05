@@ -333,5 +333,5 @@ async def test_a_launcher_tells_a_run_launched_with_no_evals_to_make_none(
         serving.cancel()
         await asyncio.gather(serving, return_exceptions=True)
     none, some = sorted(started, key=lambda command: command[command.index("--name") + 1] != "no evals")
-    assert 'evals.suite=""' in none  # (so a profile's `[evals]` is not used)
+    assert "evals.suite=null" in none  # (so a profile's `[evals]` is not used)
     assert 'evals.suite="words-v1"' in some and "evals.every=2" in some

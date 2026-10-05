@@ -215,6 +215,40 @@ def test_a_launcher_says_what_a_profiles_trainer_makes_where_the_trainer_says() 
     assert launching._weights("no_such_module:Trainer") is None  # pyright: ignore[reportPrivateUsage]
 
 
+async def test_a_launchs_settings_reach_its_run_as_they_were_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rollout_train.cli import _layered  # pyright: ignore[reportPrivateUsage]
+    from rollout_train.run_settings import from_flags
+
+    ledger = FileLedger(tmp_path / "ledger")
+    launches, heartbeats = launches_of(ledger), presence_of(ledger)
+    assert launches is not None and heartbeats is not None
+    started: list[list[str]] = []
+
+    async def spawn(*command: str, **_: Any) -> Process:
+        started.append(list(command))
+        process = Process(0)
+        process.done.set()
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    settings: dict[str, Any] = {
+        "evals.suite": None, "trainer.segment_tokens": 500, "trainer.learning_rate": 3e-5, "trainer.colocated": False,
+        "channels.policy.thinking_tokens": "none", "trainer.layers": [1, "two"], "trainer.options": {"a": None},
+        "trainer.quoted": 'say "yes"',
+    }  # fmt: skip
+    await launches.ask(Asked("small", "c:c", "as asked", settings=settings))
+    found = Launcher("launcher/here", launches, heartbeats, profiles(tmp_path), [], tmp_path / "runs")
+    found._offered = launching.offered(found.profiles)  # pyright: ignore[reportPrivateUsage]
+    await found._step()  # pyright: ignore[reportPrivateUsage]
+    (command,) = started
+    sets = [command[at + 1] for at, each in enumerate(command) if each == "--set"]
+    assert "evals.suite=null" in sets and from_flags(sets) == settings  # (null is null; each value as it was)
+    layers = await _layered(profiles_dir(tmp_path) / "small.toml", tmp_path / "run", "train", None, None, sets[:1], {})
+    assert layers.settings["evals.suite"] is None and layers.profile["evals.suite"] == ""  # (no evals)
+
+
 def test_a_run_changes_settings_of_its_profile_by_dotted_key(tmp_path: Path) -> None:
     path = profiles(tmp_path) / "small.toml"
     changed = Profile.load(path, settings={"trainer.segment_tokens": 500, "episodes_at_once": 2, "trainer.start": "x"})

@@ -466,8 +466,8 @@ python -m rollout_train.cli train PROFILE ENVIRONMENT --directory RUNS/NAME-ID -
     --groups-per-step K --seed S --set KEY=VALUE ...
 ```
 
-with its output in the run's `train.log` (a launch that says no evals passes `--set evals.suite=""`, so the profile's
-`[evals]` is not used). A launch of kind `eval` names a version of a suite (`NAME@N`), the checkpoint that plays it
+with its output in the run's `train.log` (each setting's value as JSON: a launch that says no evals passes
+`--set evals.suite=null`, so the profile's `[evals]` is not used). A launch of kind `eval` names a version of a suite (`NAME@N`), the checkpoint that plays it
 (`start`) or the base model (`model`, one the launcher offers with the profile; neither: the profile's), and its
 episodes a start (none: the version's), and is started as
 
