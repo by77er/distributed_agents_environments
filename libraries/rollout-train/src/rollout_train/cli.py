@@ -648,7 +648,7 @@ async def _pause_or_resume(command: str, who: str, where: "str | Stores", argume
         return
     cluster = _cluster_of(arguments.cluster) if arguments.cluster is not None else None
     try:
-        resumed = await resume(ledger, run, cluster=cluster)
+        resumed = await resume(ledger, run, cluster=cluster, preset=arguments.preset)
     except Refused as refused:
         raise SystemExit("; ".join(f"{each.key}: {each.reason}" for each in refused.refusals)) from None
     if resumed.how == IN_PLACE:
@@ -926,6 +926,9 @@ def main() -> None:
         "resume", help="resume a run: a paused one goes on; a stopped, failed or lost one is submitted again"
     )
     resuming.add_argument("who", help="the run, by its name or its id")
+    resuming.add_argument(
+        "--preset", metavar="NAME[@N]", help="for a run whose start records no providers: a preset that matches it"
+    )
     _over_a_ledger(resuming)
     marking = commands.add_parser("bookmark", help="name a checkpoint, move a bookmark, or take one away")
     marking.add_argument("name")
@@ -1055,6 +1058,8 @@ def main() -> None:
         asyncio.run(_rename(arguments.who, arguments.name, _ledger_of(arguments)))
         return
     if arguments.command in ("pause", "resume"):
+        if arguments.command == "pause":
+            arguments.preset = None
         asyncio.run(_pause_or_resume(arguments.command, arguments.who, _ledger_of(arguments), arguments))
         return
     if arguments.command == "bookmark":

@@ -5098,8 +5098,8 @@ class System
   done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
   the runners and what they play, what each channel serves and how fast, the machine, and what is kept.
 - `async def pause(self, run: str) -> Desired` — Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run.
-- `async def resume(self, run: str) -> Resumed` — Resume a run: in place, or by a launch of its recorded settings (`rollout_train.resuming.resume`).
-  Raises `Taken` for a run that cannot be resumed,
+- `async def resume(self, run: str, preset: str | None = None) -> Resumed` — Resume a run: in place, or by a launch of its recorded settings (over `preset`'s, for a run whose start
+  records no providers: `rollout_train.resuming.resume`). Raises `Taken` for a run that cannot be resumed,
   `KeyError` where there is no such run or this monitor has no cluster config to submit on,
   `rollout_train.launching.Refused` for settings the cluster refuses.
 - `async def rename(self, who: str, name: str) -> Entry` — Call the run that `who` is (its id or its name) `name` from now on, in the registry beside the ledger.

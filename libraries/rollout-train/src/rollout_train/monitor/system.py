@@ -267,14 +267,14 @@ class System:
         """Pause a run (`rollout_train.resuming.pause`). Raises `KeyError` where there is no such run."""
         return await pause(self._ledger, run)
 
-    async def resume(self, run: str) -> Resumed:
-        """Resume a run: in place, or by a launch of its recorded settings (`rollout_train.resuming.resume`).
-        Raises `Taken` for a run that cannot be resumed,
+    async def resume(self, run: str, preset: str | None = None) -> Resumed:
+        """Resume a run: in place, or by a launch of its recorded settings (over `preset`'s, for a run whose start
+        records no providers: `rollout_train.resuming.resume`). Raises `Taken` for a run that cannot be resumed,
         `KeyError` where there is no such run or this monitor has no cluster config to submit on,
         `rollout_train.launching.Refused` for settings the cluster refuses."""
         backend = self._backends.get(_backend_name(self._cluster)) if self._backends and self._cluster else None
         try:
-            return await resume(self._ledger, run, cluster=self._cluster, backend=backend)
+            return await resume(self._ledger, run, cluster=self._cluster, preset=preset, backend=backend)
         except LaunchRefused:
             raise
         except ValueError as error:

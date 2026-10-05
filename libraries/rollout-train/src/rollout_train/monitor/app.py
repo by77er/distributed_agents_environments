@@ -104,7 +104,8 @@ def create_app(
       (`System.settings`); `POST` (`{"settings": {KEY: VALUE}}`) wants changeable ones from its next step on
       (`System.want`);
     - `POST /api/runs/{run}/pause`: pauses a run (`System.pause`); `POST /api/runs/{run}/resume` resumes it, in place
-      while its process beats, else by a launch of its recorded settings (`System.resume`);
+      while its process beats, else by a launch of its recorded settings (`{"preset"}` for a run whose start has none:
+      `System.resume`);
     - `/api/statistics`: every run of the ledger in figures and the engines' throughput (`System.statistics`);
     - `/api/runs`: every episode in the runs' feeds, summarised;
     - `/api/stream?topic=...`: server-sent events, a `version` event (`{"topic", "version"}`) for each topic at once
@@ -374,9 +375,15 @@ def create_app(
 
     async def resume(request: Request) -> Response:
         run = request.path_params["run"]
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        said = cast(dict[str, Any], body) if isinstance(body, dict) else {}
+        preset = str(said["preset"]) if said.get("preset") else None
 
         async def change() -> Any:
-            return {"resumed": asdict(await system.resume(run))}
+            return {"resumed": asdict(await system.resume(run, preset))}
 
         return await written(change)
 

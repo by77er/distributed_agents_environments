@@ -1,12 +1,14 @@
 """Pausing a run and resuming it: a paused loop decides nothing and runners claim none of its episodes while what plays
 plays out; resumed, it goes on, in place while its driver beats, or submitted again with the settings its start
-recorded once it is gone, going on from the ledger."""
+recorded once it is gone, going on from the ledger; a run whose start recorded no providers resumes only with a preset
+that matches what it recorded."""
 
 import asyncio
 import contextlib
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -36,6 +38,7 @@ from tests.local_ray import LocalRay
 from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
 from tests.rollout_train.rollouts.games import GATES, Gated, Words
 from tests.rollout_train.support import Counting, Notes, Running, Steps, ask, here, runner, served
+from tests.rollout_train.test_submitting import Jobs
 
 
 def wanted_of(ledger: Ledger, run: str = "train") -> Callable[[], Awaitable[Mapping[str, JsonValue]]]:
@@ -265,6 +268,56 @@ async def test_a_stopped_run_resumed_is_submitted_again_and_goes_on_from_the_led
     covered: Any = await ledger.read(table(run, STEPS))
     trained = [group for step in covered.values() for group in step["groups"]]
     assert len(trained) == len(set(trained))  # (no group trained on twice)
+
+
+PROFILED: dict[str, JsonValue] = {
+    "fixed": {
+        "model": "tiny", "weights": "lora", "trainer.kind": "rollout_train.testing:ScriptedTrainer",
+        "trainer.channel": "policy", "trainer.colocated": True, "trainer.segment_tokens": 900,
+        "trainer.segments_per_step": 3, "channels.policy.model": "tiny",
+        "channels.policy.engine": "rollout_train.testing:scripted_engine", "channels.policy.engines": 1,
+        "channels.policy.renderer": "rollout_train.testing:plain_renderer", "channels.policy.thinking_tokens": 64,
+        "channels.policy.answer_tokens": None, "channels.policy.reshard": "verbatim", "episodes_at_once": 4,
+        "groups": 10, "seed": 3,
+    },
+    "changeable": {"groups_per_step": 2, "max_lag": 1, "trainer.learning_rate": 3e-5},
+}  # fmt: skip
+"""What a start recorded of its settings before runs recorded their providers."""
+
+
+async def test_a_run_whose_start_says_no_providers_resumes_only_with_a_preset_that_matches_it(tmp_path: Path) -> None:
+    cluster = a_cluster(tmp_path)
+    stores = Stores.open(cluster)
+    ledger, jobs = stores.ledger, Jobs()
+    entry = await stores.registry.create("curriculum")
+    await a_start(ledger, entry.id, environment=WORDS, settings=PROFILED, profile="/profiles/one-gpu.toml")
+    fence = await ledger.take(scope(entry.id))
+    await ledger.append(table(entry.id, STARTS), str(fence.number), {"started": time.time(), "environment": WORDS,
+                                                                      "settings": PROFILED}, fence)  # fmt: skip
+    await ledger.append(table(entry.id, ENDS), str(fence.number), {"how": STOPPED, "at": time.time()}, fence)
+    with pytest.raises(ValueError, match="says no channel's provider: resume it with a preset"):
+        await resume(ledger, entry.id, cluster=cluster, backend=RayJobs("x", jobs))
+    matching = {key: value for key, value in POLICY.items() if key not in ("groups", "groups_per_step")}
+    await stores.presets.save("one-gpu", matching)
+    await stores.presets.save("other", {**matching, "channels.policy.thinking_tokens": 128})
+    with pytest.raises(ValueError, match=r"channels.policy.thinking_tokens: the run has 64, the preset 128"):
+        await resume(ledger, entry.id, cluster=cluster, preset="other", backend=RayJobs("x", jobs))
+    trainer = cluster.trainers["steps"]
+    swapped = replace(cluster, trainers={"steps": replace(trainer, settings={"implementation": "a:Trainer"})})
+    with pytest.raises(ValueError, match=r"trainer\.kind"):
+        await resume(ledger, entry.id, cluster=swapped, preset="one-gpu", backend=RayJobs("x", jobs))
+    assert jobs.submitted == []
+    resumed = await resume(ledger, entry.id, cluster=cluster, preset="one-gpu", backend=RayJobs("x", jobs))
+    launch = resumed.launch
+    assert resumed.how == LAUNCHED and launch is not None and launch.asked.preset == "one-gpu@1"
+    given = launch.asked.settings
+    assert given["channels.policy.provider"] == "local" and given["trainer.provider"] == "steps"  # (the preset's)
+    assert (given["environment"], given["seed"], given["groups_per_step"]) == (WORDS, 3, 2)  # (the run's own)
+    assert given["groups"] == 10 and given["trainer.learning_rate"] == 3e-5
+    assert "trainer.kind" not in given and "channels.policy.engine" not in given
+    assert len(jobs.submitted) == 1 and launch.run == entry.id
+    with pytest.raises(ValueError, match="being launched"):
+        await resume(ledger, entry.id, cluster=cluster, preset="one-gpu", backend=RayJobs("x", jobs))
 
 
 async def _state(launches: Any, id: str, state: str) -> bool:
