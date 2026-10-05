@@ -106,8 +106,10 @@ def test_the_command_checks_an_environment(
 ) -> None:
     from rollout_train.cli import main
 
+    monkeypatch.setenv("HOME", str(tmp_path))  # (its scratch files go under ~/.cache/rollout/checks)
+
     def run(*arguments: str) -> tuple[int, str]:
-        monkeypatch.setattr("sys.argv", ["rollout", "env", "check", *arguments, "--directory", str(tmp_path)])
+        monkeypatch.setattr("sys.argv", ["rollout", "env", "check", *arguments])
         with pytest.raises(SystemExit) as ended:
             main()
         return int(ended.value.code or 0), capsys.readouterr().out

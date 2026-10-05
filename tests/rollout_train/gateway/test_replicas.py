@@ -1,6 +1,7 @@
-"""Two replicas of the gateway, each its own process started by `rollout gateway PROFILE`, sharing a ledger and a
-blob store, behind a pass-through proxy that sends requests to each in turn: one is killed in the middle of a turn,
-and the session still records exactly the segments a single gateway records when nothing fails."""
+"""Two replicas of the gateway, each its own process started by `rollout gateway --cluster`, sharing the cluster's
+ledger and blob store and sampling the channel a run's start names on vLLM servers elsewhere (a fake one over an echo
+engine), behind a pass-through proxy that sends requests to each in turn: one is killed in the middle of a turn, and
+the session still records exactly the segments a single gateway records when nothing fails."""
 
 import asyncio
 import contextlib
@@ -14,12 +15,15 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
+from rollout_train.database import DatabaseLedger
 from rollout_train.gateway import TurnStore
-from rollout_train.ledger import FileLedger
+from rollout_train.record import STARTS, scope, table
 from rollout_train.testing import SECRETS, keyring
-from tests.rollout_train.gateway.support import converse, grant, recorded_undisturbed
+from tests.rollout_train.gateway.support import EchoEngine, converse, grant, recorded_undisturbed
+from tests.rollout_train.machines import fake_vllm, served
 
 pytest.importorskip("uvicorn")
 import uvicorn
@@ -31,19 +35,27 @@ from starlette.routing import Route
 ROOT = Path(__file__).resolve().parents[3]
 REPLICAS = [8831, 8832]
 PROXY = 8833
-PROFILE = """
-directory = "{directory}/run"
-ledger = "{directory}/ledger"
-
-[channels.policy]
-model = "echo"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "tests.rollout_train.gateway.support:echo_engine"
-engines = [{{ delay = 0.4 }}]
-
+CLUSTER = """
+name = "replicas"
+[ledger]
+url = "sqlite:///{directory}/ledger.db"
+[blobs]
+directory = "{directory}/blobs"
 [gateway]
-keys = "{directory}/keys"
+keys_file = "{directory}/keys"
+[inference.lab]
+kind = "vllm-servers"
+auth = "none"
+addresses = ["{server}"]
+[inference.lab.models.base]
+context = 32768
 """
+"""A cluster whose provider `lab` is the fake vLLM server, at an address on this machine."""
+SETTINGS: dict[str, JsonValue] = {
+    "kind": "train", "trainer.channel": "policy", "channels.policy.provider": "lab", "channels.policy.model": "base",
+    "channels.policy.renderer": "rollout_train.testing:plain_renderer",
+}  # fmt: skip
+"""What the run's start records of its settings: its channel `policy`, on `lab`."""
 
 
 def proxy(upstreams: list[str], failed: list[str]) -> Starlette:
@@ -75,10 +87,19 @@ def proxy(upstreams: list[str], failed: list[str]) -> Starlette:
 
 
 @contextlib.contextmanager
-def replicas(profile: Path) -> Generator[list[subprocess.Popen[bytes]]]:
+def replicas(cluster: Path) -> Generator[list[subprocess.Popen[bytes]]]:
     started = [
         subprocess.Popen(
-            [sys.executable, "-m", "rollout_train.cli", "gateway", str(profile), "--listen", f"127.0.0.1:{port}"],
+            [
+                sys.executable,
+                "-m",
+                "rollout_train.cli",
+                "gateway",
+                "--cluster",
+                str(cluster),
+                "--listen",
+                f"127.0.0.1:{port}",
+            ],
             cwd=ROOT,
             env={**os.environ, "PYTHONPATH": str(ROOT)},
         )
@@ -115,12 +136,25 @@ async def serving(app: Starlette, port: int) -> AsyncGenerator[None]:
 
 
 async def test_replicas_behind_a_proxy_one_killed_mid_turn_record_what_one_undisturbed_records(tmp_path: Path) -> None:
-    profile = tmp_path / "profile.toml"
-    profile.write_text(PROFILE.format(directory=tmp_path))
     (tmp_path / "keys").write_text("".join(f"{name} {secret}\n" for name, secret in SECRETS))
-    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "run" / "blobs")
+    ledger, blobs = DatabaseLedger(f"sqlite:///{tmp_path}/ledger.db"), FileBlobStore(tmp_path / "blobs")
+    fence = await ledger.take(scope("train"))
+    start: JsonValue = {"run_settings": {"fixed": SETTINGS, "changeable": {"max_lag": 1}}}
+    await ledger.append(table("train", STARTS), str(fence.number), start, fence)
     key = keyring().mint(await grant(ledger))
-    with replicas(profile) as started:
+    async with served(fake_vllm(EchoEngine(0.4), model="base")) as (server, _):  # type: ignore[arg-type]
+        cluster = tmp_path / "cluster.toml"
+        cluster.write_text(CLUSTER.format(directory=tmp_path, server=server))
+        await replicated(cluster, key)
+    segments = (await TurnStore(ledger, blobs).sessions("train", "r_1"))["policy"]
+    assert segments == await recorded_undisturbed(tmp_path / "undisturbed")
+    turns = await TurnStore(ledger, blobs).turns("train", "r_1")
+    assert [turn.effect_id for turn in turns] == ["e0", "e1", "e2", "e3", "e4", "e-again", "e-again-later"]
+
+
+async def replicated(cluster: Path, key: str) -> None:
+    """The conversation through the proxy in front of both replicas, the first killed while it samples a turn."""
+    with replicas(cluster) as started:
         first = started[0]
 
         async def kill_the_first(number: int) -> None:
@@ -134,7 +168,3 @@ async def test_replicas_behind_a_proxy_one_killed_mid_turn_record_what_one_undis
             await converse(http, key, prefix=f"http://127.0.0.1:{PROXY}/gw", during=kill_the_first)
         assert first.poll() is not None and started[1].poll() is None
         assert failed == [upstreams[0]]  # (the turn the first was sampling when it died was asked again of the other)
-    segments = (await TurnStore(ledger, blobs).sessions("train", "r_1"))["policy"]
-    assert segments == await recorded_undisturbed(tmp_path / "undisturbed")
-    turns = await TurnStore(ledger, blobs).turns("train", "r_1")
-    assert [turn.effect_id for turn in turns] == ["e0", "e1", "e2", "e3", "e4", "e-again", "e-again-later"]

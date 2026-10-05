@@ -6,9 +6,10 @@ each time it is asked for; that training draws no eval start (and how often a dr
 one episode plays to its end on the local runner with a scripted model, with a reward in the range the description
 gives and a result that says what it says it does.
 
-With a profile (`--profile P --groups N`), it plays N groups on the profile's channel, served by its base model with
-nothing trained, as a run of its own, and says how each went. A group whose episodes all scored the same teaches a
-group-relative update nothing; a run all of whose groups are so takes no step at all. That is said plainly.
+As a run of kind `check` (`rollout env check ENVIRONMENT` with a model's settings: a preset, `--provider`), it plays
+N groups on the run's channel, served by its base model with nothing trained, and says how each went. A group whose
+episodes all scored the same teaches a group-relative update nothing; a run all of whose groups are so takes no step at
+all. That is said plainly.
 """
 
 import asyncio

@@ -1,14 +1,15 @@
 #!/bin/bash
-# Run `rollout train` with a memory log on disk, so a machine that runs out of memory leaves evidence.
+# Run `rollout train --here` (the run's job in this process, on the cluster config's Ray) with a memory log on disk,
+# so a machine that runs out of memory leaves evidence.
 #
-#   train-with-memory-log.sh RUN_DIRECTORY PROFILE ENVIRONMENT [train options...]
+#   train-with-memory-log.sh LOG_DIRECTORY ENVIRONMENT [train options: --preset, --name, --set, ...]
 #
-# Writes RUN_DIRECTORY/train.log, memory.log (available system memory and GPU memory every 2 s) and, under WSL,
+# Writes LOG_DIRECTORY/train.log, memory.log (available system memory and GPU memory every 2 s) and, under WSL,
 # host-memory.log (every 15 s: Windows' free memory, and GPU memory spilled into system memory, which should be 0), and
 # serves the monitor (where the run stands, and each episode and agent, live) on http://localhost:${MONITOR_PORT:-8765} while it runs.
 set -u
-run="$1"; profile="$2"; environment="$3"; shift 3
-mkdir -p "$run/feed"
+run="$1"; environment="$2"; shift 2
+mkdir -p "$run"
 (
   while true; do
     available=$(awk '/MemAvailable/ {printf "%.1f", $2 / 1048576}' /proc/meminfo)
@@ -33,10 +34,10 @@ else
   host=
 fi
 cd "$(dirname "$0")/.." || exit 1
-uv run rollout monitor "$run" --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
+uv run rollout monitor --cluster --port "${MONITOR_PORT:-8765}" > "$run/monitor.log" 2>&1 &
 monitor=$!
 trap 'kill "$logger" "$monitor" $host 2>/dev/null' EXIT
-uv run rollout train "$profile" "$environment" --directory "$run" --monitor "http://$(hostname):${MONITOR_PORT:-8765}" "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
+uv run rollout train "$environment" --here "$@" >> "$run/train.log" 2>&1 &  # (a run started again goes on in the same log)
 trainer=$!
 # A signal to this script goes on to the trainer, and the script waits for it to end: otherwise the trainer would
 # run on alone, with nothing logging its memory.

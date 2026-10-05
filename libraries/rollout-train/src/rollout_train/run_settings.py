@@ -2,12 +2,12 @@
 or changeable from its next step on, and which kinds of run take it.
 
 A run's settings are a flat mapping of dotted keys (`trainer.provider`, `channels.policy.model`, `evals.suite`).
-Keys a profile's settings have too are named as there (`groups_per_step`, `max_lag`, `evals.*`,
-`channels.NAME.thinking_tokens`), so a start recorded under a profile compares key by key. A key may have a part
-that names something (`channels.NAME.provider`, `slots.SLOT`), written `*` in the schema (`KEYS`). Keys under
-`trainer.` other than `trainer.provider`, `trainer.model` and `trainer.channel` are the trainer's own settings, which
-its settings dataclass declares (`rollout_train.providers.settings_of`): fixed (`trainer.rank`) or changeable
-(`trainer.learning_rate`).
+Keys that starts recorded before runs recorded their providers have too are named as there (`groups_per_step`,
+`max_lag`, `evals.*`, `channels.NAME.thinking_tokens`), so such a start compares key by key (`rollout_train.resuming`).
+A key may have a part that names something (`channels.NAME.provider`, `slots.SLOT`), written `*` in the schema
+(`KEYS`). Keys under `trainer.` other than `trainer.provider`, `trainer.model` and `trainer.channel` are the trainer's
+own settings, which its settings dataclass declares (`rollout_train.providers.settings_of`): fixed (`trainer.rank`) or
+changeable (`trainer.learning_rate`).
 
 The objective is `objective.preset` and a key for each component (`objective.clip.low`, `rollout_train.objectives
 .COMPONENTS`), none by default (the preset's value); `objective_in` resolves them. A component that shapes the loss is
@@ -58,6 +58,8 @@ KINDS = ("train", "eval", "imitate", "check")
 TRAINED = frozenset({"train"})
 TRAINING = frozenset({"train", "imitate"})
 SAMPLING = frozenset({"train", "eval", "check"})
+RENDERING = SAMPLING | {"imitate"}
+"""The kinds that render a channel's turns: those that sample, and imitation, which renders a dataset's examples."""
 EVERY = frozenset(KINDS)
 
 
@@ -143,8 +145,8 @@ KEYS: tuple[Key, ...] = (
     Key("channels.*.providers", ("list", "null"), None, False, SAMPLING, "Several providers serving it, in order"),
     Key("channels.*.routing", _S, "spill", False, SAMPLING, "How turns are shared among them", choices=ROUTING),
     Key("channels.*.weights", ("table", "null"), None, False, SAMPLING, "Each provider's weight, for `weighted`"),
-    Key("channels.*.model", _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"),
-    Key("channels.*.renderer", _S + _N, None, False, SAMPLING, "The renderer, `module:name`"),
+    Key("channels.*.model", _S + _N, None, False, RENDERING, "The model it serves, among its providers'"),
+    Key("channels.*.renderer", _S + _N, None, False, RENDERING, "The renderer, `module:name`"),
     Key("channels.*.thinking_tokens", _I + _N, None, False, SAMPLING, "Thinking budget per turn", least=1),
     Key("channels.*.answer_tokens", _I + _N, None, False, SAMPLING, "Room for the answer after it", least=1),
     Key("channels.*.replicas", _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1),
@@ -165,7 +167,15 @@ KEYS: tuple[Key, ...] = (
     Key("self_judging", _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"),
     Key("eval.suite", _S + _N, None, False, frozenset({"eval"}), "The suite an eval plays, by name or `NAME@N`"),
     Key("eval.episodes", _I + _N, None, False, frozenset({"eval"}), "Episodes of each start", least=1),
-    Key("check.episodes", _I, 1, False, frozenset({"check"}), "Scripted episodes a check plays", least=1),
+    Key(
+        "check.episodes",
+        _I + _N,
+        None,
+        False,
+        frozenset({"check"}),
+        "Episodes of each group; none: a group's size",
+        least=1,
+    ),
     Key("imitation.dataset", _S + _N, None, False, frozenset({"imitate"}), "The dataset, by name or id"),
     Key("imitation.limit", _I + _N, None, False, frozenset({"imitate"}), "At most this many segments", least=1),
     Key("imitation.passes", _I, 1, False, frozenset({"imitate"}), "Passes over the dataset", least=1),

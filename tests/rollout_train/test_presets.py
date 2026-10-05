@@ -163,74 +163,30 @@ def test_a_preset_is_saved_from_what_a_runs_start_records(
     saved = asyncio.run(FilePresets(tmp_path / "ledger" / "presets").get("like-8"))
     assert saved is not None and saved.settings["groups"] == 24 and saved.settings["trainer.rank"] == 16
     assert "name" not in saved.settings and saved.settings["kind"] == "train"  # (the full copy, less its name)
-    asyncio.run(registry.create("profile-era"))
-    status, said = run(monkeypatch, capsys, "preset", "save", "x", "--from-run", "profile-era", *where)
+    asyncio.run(registry.create("unrecorded"))
+    status, said = run(monkeypatch, capsys, "preset", "save", "x", "--from-run", "unrecorded", *where)
     assert status == 1 and "records no run settings" in said
 
 
-PROFILE = """
-directory = "{directory}"
+async def test_a_runs_settings_layer_over_a_preset_which_gives_only_what_its_kind_takes(tmp_path: Path) -> None:
+    from rollout_train.launching import settled
+    from rollout_train.run_settings import from_file, from_flags, layered
 
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-thinking_tokens = 64
-max_lag = 2
-
-[evals]
-suite = "words-v1"
-every = 2
-
-[trainer]
-kind = "rollout_lora:LoraTrainer"
-channel = "policy"
-start = "first"
-rank = 8
-learning_rate = 5e-5
-"""
-
-
-async def test_a_runs_settings_layer_over_its_profile(tmp_path: Path) -> None:
-    from rollout_train.cli import _layered, _recorded  # pyright: ignore[reportPrivateUsage]
-    from rollout_train.profile import Profile
-
-    path = tmp_path / "profile.toml"
-    path.write_text(PROFILE.format(directory=tmp_path / "run"))
-    kept = presets_of(FileLedger(tmp_path / "run" / "ledger"))
+    kept = presets_of(FileLedger(tmp_path / "ledger"))
     assert kept is not None
-    await kept.save("faster", {"trainer.learning_rate": 1e-4, "groups_per_step": 8, "trainer.rank": 16})
+    await kept.save("faster", {"trainer.learning_rate": 1e-4, "groups_per_step": 8, "trainer.rank": 16,
+                               "channels.policy.model": "m", "channels.policy.thinking_tokens": 64})  # fmt: skip
     (tmp_path / "run.toml").write_text("[trainer]\nrank = 32\n[channels.policy]\nanswer_tokens = 128\n")
-    sets = ["trainer.start=diamonds", "max_lag=3", "evals.suite=", "channels.policy.thinking_tokens=none",
-            "memory.runs_gib=2"]  # fmt: skip
-    layers = await _layered(path, None, "train", "faster", tmp_path / "run.toml", sets, {"groups": 12, "seed": None})
-    assert layers.preset == "faster@1"
-    # What the profile is loaded with: the run settings it keeps, in its own keys, and its own keys as given.
-    assert layers.profile == {
-        "trainer.learning_rate": 1e-4, "trainer.rank": 32, "channels.policy.answer_tokens": 128,
-        "trainer.start": "diamonds", "channels.policy.max_lag": 3, "evals.suite": "",
-        "channels.policy.thinking_tokens": "none", "memory.runs_gib": 2,
-    }  # fmt: skip
-    described = Profile.load(path, settings=layers.profile)
-    assert described.evals is None and described.channels["policy"].thinking_tokens is None
-    assert described.trainer is not None and described.trainer.settings["rank"] == 32
-    # The run's settings: the profile's, then the preset's, the file's, the flags'.
-    settings = layers.settings
-    assert settings["start"] == "diamonds" and settings["max_lag"] == 3 and settings["groups"] == 12
-    assert settings["groups_per_step"] == 8 and settings["seed"] == 0 and settings["evals.suite"] is None
-    assert settings["channels.policy.model"] == "a-checkpoint" and settings["channels.policy.answer_tokens"] == 128
-    assert settings["channels.policy.thinking_tokens"] is None and "memory.runs_gib" not in settings.values
-    started = _recorded(layers, described)
-    assert started["preset"] == "faster@1" and started["fixed"]["trainer.rank"] == 32
-    assert started["changeable"]["trainer.learning_rate"] == 1e-4 and started["changeable"]["max_lag"] == 3
-    with pytest.raises(SystemExit, match=r"cannot take trainer.provider, limits.spend: those need the cluster config"):
-        await _layered(path, None, "train", None, None, ["trainer.provider=tinker-lora", "limits.spend=2"], {})
-    with pytest.raises(SystemExit, match="no preset 'slower'"):
-        await _layered(path, None, "train", "slower", None, [], {})
-    evaluated = await _layered(path, None, "eval", None, None, [], {"start": None, "eval.suite": "words-v1"})
-    assert "start" not in evaluated.given and evaluated.settings["eval.suite"] == "words-v1"
-    shortened = await _layered(path, None, "train", None, None, ["channels.policy.model=x"], {}, model="small")
-    assert shortened.profile == {"channels.policy.model": "small"}  # (--model of the trained channel, over --set)
-    checked = await _layered(path, None, "check", None, None, ["groups=2"], {"environment": "e:e"})
-    assert checked.given["groups"] == 2 and "trainer.rank" not in checked.settings.values  # (a check trains nothing)
-    assert checked.settings["channels.policy.thinking_tokens"] == 64
+    given = layered(from_file(tmp_path / "run.toml"), from_flags(["start=diamonds", "max_lag=3"]), {"groups": 12})
+    settings, preset = await settled("train", "fast", given.values, preset="faster", presets=kept)
+    assert preset == "faster@1" and (settings.kind, settings["name"]) == ("train", "fast")
+    assert (
+        settings["trainer.rank"] == 32 and settings["trainer.learning_rate"] == 1e-4
+    )  # (the file's over the preset's)
+    assert settings["groups_per_step"] == 8 and settings["groups"] == 12 and settings["max_lag"] == 3
+    assert settings["start"] == "diamonds" and settings["channels.policy.answer_tokens"] == 128
+    evaluated, _ = await settled("eval", "on words", {"eval.suite": "words-v1"}, preset="faster@1", presets=kept)
+    assert evaluated["channels.policy.model"] == "m" and evaluated["channels.policy.thinking_tokens"] == 64
+    assert not any(key.startswith("trainer.") or key == "groups_per_step" for key in evaluated.values)
+    with pytest.raises(KeyError, match="no preset 'slower'"):
+        await settled("train", "slow", {}, preset="slower", presets=kept)

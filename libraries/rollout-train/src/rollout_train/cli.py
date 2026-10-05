@@ -1,36 +1,36 @@
-"""`rollout`: train on an environment under a deployment profile, and watch.
+"""`rollout`: ask for runs on a cluster, train, evaluate, and watch.
 
-rollout train PROFILE ENVIRONMENT   the training loop: PROFILE is a TOML file (`rollout_train.profile`), ENVIRONMENT
-                                    names an environment as `module:name`
-rollout eval PROFILE SUITE          play a suite with a checkpoint (or the base model), training nothing
+rollout train ENVIRONMENT           a training run: its settings in layers (below), its job submitted and followed
+rollout eval SUITE                  play a suite with a checkpoint (--checkpoint) or a base model, training nothing
+rollout imitate --dataset DATASET   a supervised step on a dataset (`rollout dataset make`)
+rollout env check ENVIRONMENT       whether an environment holds together; with a model's settings, groups it plays
+rollout resume RUN, rollout pause RUN
+                                    resume a run (in place, or its job submitted again with its recorded settings), or
+                                    pause it
 rollout suite make|edit|list        evaluation suites, kept in versions (`rollout_train.evals`)
 rollout report DIRECTORY ENVIRONMENT
                                     chart a run's progress and summarise it; post both to a Discord webhook
-rollout env check ENVIRONMENT       whether an environment holds together; with --profile, groups played by a model
-rollout imitate PROFILE             a supervised step on a dataset (--dataset), or on the run's solved episodes
-                                    without their guidance
 rollout dataset make RULE           make a dataset: examples chosen from runs' episodes (`rollout_train.datasets`)
 rollout checkpoints                 every checkpoint, newest first: where it came from
 rollout bookmark NAME CHECKPOINT    name a checkpoint, or move a bookmark there (--delete takes it away)
 rollout rename WHO NAME             call a run something else (its id stays)
 rollout merge CHECKPOINT            fold a LoRA checkpoint into its base: a full checkpoint of its own
-rollout monitor WHERE               the web page over a ledger and every run in it (WHERE: a run's directory, a ledger)
+rollout monitor [WHERE]             the web page over a ledger and every run in it; with --cluster, it asks for runs
 rollout ledger copy FROM TO         copy a ledger (a run's, files, or a database) into a database: SQLite or Postgres
 rollout tools FACTORY               serve an environment's tool set over HTTP: FACTORY is `module:name`
 rollout pool FACTORY                serve a pool of an environment's sandboxes over HTTP: FACTORY makes their provider
-rollout engines PROFILE --run RUN   keep a profile's engines (vLLM servers) serving what the run says
-rollout runner PROFILE              play runs' episodes, and nothing else
-rollout pause RUN, rollout resume RUN
-                                    pause a run, and resume it (in place, or launched again in its directory)
-rollout gateway PROFILE             serve a replica of the gateway: it samples PROFILE's channels and records every turn
-                                    (with --cluster, also every channel a run's start names)
+rollout gateway                     serve a replica of the gateway: every channel a run's start names on the cluster's
+                                    providers, and every turn recorded
 rollout cluster check               read the cluster config (`rollout_train.cluster`) and say what does not resolve here
-rollout preset list|show|save|delete
+rollout preset list|show|save|load|delete
                                     presets: named, versioned run settings beside the ledger (`rollout_train.presets`)
 
-A command that starts a run (`train`, `eval`, `imitate`, `env check --profile`) takes its run settings
-(`rollout_train.run_settings`) in layers over what its profile gives: `--preset NAME[@N]` (beside the profile's
-ledger), `--settings FILE`, `--set KEY=VALUE`, then its own flags. Its start records them (`run_settings`).
+A command that asks for a run (`train`, `eval`, `imitate`, `env check`) takes its run settings
+(`rollout_train.run_settings`) in layers: `--preset NAME[@N]`, then `--settings FILE`, then `--set KEY=VALUE`, then
+its own flags (`--model`, `--provider`, `--renderer` of `--channel`, `--trainer` among them). It checks them against the
+cluster config (`--cluster`, as `rollout_train.cluster.find` finds it) and submits the run's job
+(`rollout_train.submitting.submit`), following it until it ends; `--check` says what would be refused and stops,
+`--detach` returns once the job is submitted, and `--here` runs the job in this process, on the cluster's Ray.
 
 A command over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`, `suite`, `dataset`, `merge`,
 `preset`) takes it as `--ledger WHERE`, or as the cluster config's with `--cluster [PATH or NAME]` (alone:
@@ -41,13 +41,13 @@ A command over a ledger (`rename`, `bookmark`, `pause`, `resume`, `checkpoints`,
 
 import argparse
 import asyncio
+import contextlib
 import functools
 import json
 import os
 import signal
 import sys
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -57,18 +57,17 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from rollout_train.cluster import Cluster
+    from rollout_train.launches import Launch
     from rollout_train.ledger import Ledger
-    from rollout_train.objectives import Objective
-    from rollout_train.profile import Profile
     from rollout_train.registry import Registry
     from rollout_train.run_settings import RunSettings
     from rollout_train.stores import Stores
 
 
-async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
+async def until_signalled(work: Coroutine[Any, Any, object]) -> int:
     """Run `work`, and cancel it on an interrupt, a termination or a hang-up, so that it stops what it started on
-    the way out; returns the exit status. (A process started in the background of a script inherits "ignore" for
-    interrupts, and Python then installs no handler of its own.)"""
+    the way out; returns the exit status: what `work` returns, where that is a number, else 0. (A process started in
+    the background of a script inherits "ignore" for interrupts, and Python then installs no handler of its own.)"""
     task = asyncio.ensure_future(work)
     received: list[int] = []
 
@@ -80,12 +79,12 @@ async def until_signalled(work: Coroutine[Any, Any, None]) -> int:
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         loop.add_signal_handler(number, stop, number)
     try:
-        await task
+        result = await task
     except asyncio.CancelledError:
         if not received:
             raise
         return 128 + received[0]
-    return 0
+    return result if isinstance(result, int) and not isinstance(result, bool) else 0
 
 
 def _user_errors[**P](work: Callable[P, Coroutine[Any, Any, None]]) -> Callable[P, Coroutine[Any, Any, None]]:
@@ -101,215 +100,176 @@ def _user_errors[**P](work: Callable[P, Coroutine[Any, Any, None]]) -> Callable[
     return said
 
 
-async def _train(
-    profile: Path,
-    directory: Path | None,
-    environment: str,
-    groups: int | None,
-    groups_per_step: int | None,
-    seed: int | None,
-    monitor: str | None = None,
-    name: str | None = None,
-    sets: list[str] | None = None,
-    preset: str | None = None,
-    file: Path | None = None,
-    chosen: dict[str, str | None] | None = None,
-) -> None:
-    import dataclasses
-    from collections.abc import Mapping
-
-    from pydantic import JsonValue
-
-    from rollout.environment import binding_for
-    from rollout_train import train
-    from rollout_train.evals import Schedule, environments_of, suite_for
-    from rollout_train.profile import Profile
-    from rollout_train.record import ending
-    from rollout_train.settings import changeable, desired_settings_of, fixed
-
-    flags = {"environment": environment, "name": name, "groups": groups, "groups_per_step": groups_per_step}
-    layers = await _layered(
-        profile, directory, "train", preset, file, sets or [], flags | {"seed": seed}, **chosen or {}
-    )
-    groups, groups_per_step, seed = (_whole(layers.settings, each) for each in ("groups", "groups_per_step", "seed"))
-    called = cast(str | None, layers.settings["name"])
-    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=layers.profile), name=called)
-    if described.trainer is None:
-        raise SystemExit(f"{profile} describes no trainer")
-    channel = described.trainer.channel
-    offered, published = await _environment(described, environment)
-    slots = _slots(layers, offered, described, channel)
-    where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
-    started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (its `starts`)
-    started["environment"] = environment
-    if published is not None:
-        started["published"] = published
-    async with described.open() as platform:
-        assert platform.trainer is not None
-        started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
-        binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings, slots)
-        wanting = desired_settings_of(platform.ledger)
-        pinned = await _pinned(layers, platform.ledger, platform.registry)
-
-        def bound(played: Any) -> Any:
-            """How an entry's environment's episodes are played: each slot from the channel the run binds it to (the
-            trained channel unless said), each import and pool where the profile serves it."""
-            return binding_for(played, channel, platform.tool_bindings, platform.pool_bindings, slots)
-
-        async def scheduled(name: str, every: int, episodes: int | None) -> Schedule | None:
-            """The evals of a suite, by its name (the version it points to now) or a version's id: the ledger's, or the
-            environment's eval data of that name, frozen on first use (`suite_for`); none for a suite neither has, or
-            one whose environments do not all load here."""
-            try:
-                suite = await suite_for(platform.ledger, name, environment, offered)
-                played = environments_of(suite, {environment: offered})
-            except (KeyError, ValueError):
-                return None
-            return Schedule(suite, platform.eval_run, every, episodes, played, bound)
-
-        async def desired() -> Mapping[str, JsonValue]:
-            found = await wanting.desired(platform.run.id) if wanting is not None else None
-            return found.settings if found is not None else {}
-
-        schedule: Schedule | None = None
-        if (asked := described.evals) is not None:  # (a suite not made yet is the environment's eval data of the name)
-            try:
-                suite = await suite_for(platform.ledger, asked.suite, environment, offered)
-                played = environments_of(suite, {environment: offered})
-            except (KeyError, ValueError) as error:
-                raise SystemExit(error.args[0]) from None
-            schedule = Schedule(suite, platform.eval_run, asked.every, asked.episodes, played, bound, asked.suite)
-        started["settings"] = {
-            "fixed": fixed(described, platform.trainer, groups=groups, seed=seed),
-            "changeable": changeable(
-                platform.trainer,
-                groups_per_step=groups_per_step,
-                max_lag=described.channels[channel].max_lag,
-                evals=described.evals,
-            ),
-        }
-        started["run_settings"] = _recorded(layers, described, pinned)  # (beside what the profile gave)
-        async with ending(platform.ledger, platform.run.id):
-            await train(
-            offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
-            base=described.channels[channel].model,
-            directory=described.directory / "checkpoints", publish=platform.publish, groups=groups,
-            groups_per_step=groups_per_step, max_lag=described.channels[channel].max_lag, seed=seed,
-            episodes_at_once=described.episodes_at_once, binding=binding,
-            run=platform.run.id, started=started, hooks=[platform.feed], kept=platform.bookmarked, made=platform.made,
-            reshard=platform.reshard if platform.layout else None, evals=schedule, desired=desired,
-            scheduled=scheduled,
-        )  # fmt: skip
+FOLLOWING = 2.0
+"""Seconds between a followed launch's looks at its job."""
+DONE = {"ended": 0, "failed": 1, "stopped": 130}
+"""A followed launch's exit status, by how it finished."""
 
 
-async def _environment(described: "Profile", environment: str) -> tuple[Any, "dict[str, JsonValue] | None"]:
-    """An environment a run plays, imported here, and what its start records of the published version it is (none
-    for a built-in one): a published one by its version beside the profile's ledger (`rollout_train.published`). Exits
-    saying why it does not load."""
-    from rollout_train.hosting import ledger_of
-    from rollout_train.published import is_published, loaded, provenance
+async def _asked(
+    arguments: argparse.Namespace,
+    kind: str,
+    flags: "dict[str, JsonValue]",
+    *,
+    named_as: Callable[["RunSettings"], str],
+    under: "dict[str, JsonValue] | None" = None,
+) -> int:
+    """Ask for a run of `kind` with its settings in layers (`under`, then `--preset`, `--settings`, `--set`, the
+    shortcuts and `flags`), checked against the cluster config; then, as the arguments say, stop there (`--check`),
+    run its job here (`--here`), or submit it and follow it (unless `--detach`). Returns the exit status."""
+    from rollout_train.launching import checked, free_name, ray_capacity, settled
+    from rollout_train.run_settings import from_file, from_flags, layered, shortcuts
+    from rollout_train.stores import Stores
+    from rollout_train.submitting import ask, submit
 
-    if not is_published(environment):
-        return named(environment), None
-    ledger = ledger_of(described)
+    cluster = _cluster_of(arguments.cluster)
+    stores = Stores.open(cluster)
+    channel = getattr(arguments, "channel", None) or "policy"
+    said = shortcuts(
+        model=getattr(arguments, "model", None), provider=getattr(arguments, "provider", None),
+        renderer=getattr(arguments, "renderer", None), trainer=getattr(arguments, "trainer", None), channel=channel,
+    )  # fmt: skip
     try:
-        found, version = await loaded(environment, ledger)
+        given = layered(
+            from_file(arguments.settings) if arguments.settings else None, from_flags(arguments.set), said,
+            {key: value for key, value in flags.items() if value is not None},
+        )  # fmt: skip
+        settings, preset = await settled(kind, arguments.name, {**(under or {}), **given.values},
+                                         preset=arguments.preset, presets=stores.presets)  # fmt: skip
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit(str(error.args[0]) if error.args else str(error)) from None
+    if kind == "eval" and settings["environment"] is None and isinstance(settings["eval.suite"], str):
+        from rollout_train.evals import suite_of
+
+        suite = await suite_of(stores.ledger, str(settings["eval.suite"]))
+        if suite is None:
+            raise SystemExit(f"there is no suite {settings['eval.suite']!r}: make it with `rollout suite make`")
+        settings = layered(settings.values, {"environment": suite.environments[0]})
+    if not settings["name"]:
+        taken = {each.name for each in await stores.registry.runs()}
+        settings = layered(settings.values, {"name": free_name(named_as(settings), taken)})
+    _, free = await asyncio.to_thread(ray_capacity) if arguments.here else (None, None)
+    findings = await checked(settings, cluster, stores.ledger, gpus_free=free)
+    for each in findings:
+        print(f"{'refused' if each.refuses else 'note'}: {each.key}: {each.reason}", flush=True)
+    if any(each.refuses for each in findings):
+        return 2
+    if arguments.check:
+        print(f"{settings['name']}: a {kind} run that may be asked for, with {len(settings.values)} settings given")
+        return 0
+    if arguments.here:
+        import ray
+
+        from rollout_train.jobs import driven
+        from rollout_train.ray_cluster import connect
+
+        if not ray.is_initialized():
+            await asyncio.to_thread(connect, cluster.ray.address)
+        launch = await ask(settings, stores.ledger, preset=preset)
+        print(f"{settings['name']} ({launch.run}): launch {launch.id}, run here", flush=True)
+        await driven(launch.id, cluster, stores)
+        return 0
+    launch = await submit(settings, cluster, stores.ledger, preset=preset)
+    print(f"{settings['name']} ({launch.run}): launch {launch.id}, job {launch.job} ({launch.state})", flush=True)
+    if launch.state == "failed":
+        print(launch.detail, flush=True)
+        return 1
+    if arguments.detach:
+        return 0
+    return await _followed(launch, cluster, stores)
+
+
+async def _followed(launch: "Launch", cluster: "Cluster", stores: "Stores") -> int:
+    """Say how a launch goes until it finishes; an interrupt asks it to stop. Returns its exit status."""
+    from rollout_train.launches import launch_of, launches_of
+    from rollout_train.submitting import followed, stopped
+
+    launches = launches_of(stores.ledger)
+    assert launches is not None
+    said = (launch.state, launch.detail)
+    try:
+        while launch.state not in DONE:
+            await asyncio.sleep(FOLLOWING)
+            launch = await followed(await launch_of(launches, launch.id), launches, cluster)
+            if (launch.state, launch.detail) != said:
+                said = (launch.state, launch.detail)
+                detail = f": {launch.detail}" if launch.detail and launch.detail != launch.state else ""
+                print(f"{launch.state}{detail}", flush=True)
+    except asyncio.CancelledError:
+        with contextlib.suppress(KeyError):
+            await asyncio.shield(stopped(await launch_of(launches, launch.id), launches, cluster))
+        raise
+    return DONE[launch.state]
+
+
+def _named_after(environment: "JsonValue") -> str:
+    """A run's name after its environment: the name of a published one; a built-in one's attribute (`words`), or its
+    module's first part where the attribute says nothing (`environment`)."""
+    said = str(environment or "run")
+    if "@" in said:
+        return said.partition("@")[0]
+    module, _, attribute = said.partition(":")
+    return attribute if attribute and attribute not in ("environment", "environments") else module.partition(".")[0]
+
+
+async def _train(arguments: argparse.Namespace) -> int:
+    flags: dict[str, JsonValue] = {
+        "environment": arguments.environment, "groups": arguments.groups,
+        "groups_per_step": arguments.groups_per_step, "seed": arguments.seed,
+    }  # fmt: skip
+    return await _asked(arguments, "train", flags, named_as=lambda said: _named_after(said["environment"]))
+
+
+async def _evaluate(arguments: argparse.Namespace) -> int:
+    """An eval of a suite: by a checkpoint (`--checkpoint`, its channel's model, renderer and provider those of the run
+    that made it, unless the settings say others), or by a base model the settings name."""
+    flags: dict[str, JsonValue] = {
+        "eval.suite": arguments.suite, "start": arguments.checkpoint, "eval.episodes": arguments.episodes,
+    }  # fmt: skip
+    under = await _made_by(arguments) if arguments.checkpoint else None
+
+    def named_as(said: "RunSettings") -> str:
+        subject = said["start"] or said.get(f"channels.{arguments.channel or 'policy'}.model") or "the base model"
+        return f"{arguments.suite} on {str(subject).split('/')[-1]}"
+
+    return await _asked(arguments, "eval", flags, named_as=named_as, under=under)
+
+
+async def _made_by(arguments: argparse.Namespace) -> "dict[str, JsonValue]":
+    """The channel settings of the run that made the checkpoint an eval plays (its trained channel's model, renderer,
+    providers and budgets), as the eval's channel's."""
+    from rollout_train.record import recorded_settings
+    from rollout_train.registry import resolved
+    from rollout_train.stores import Stores
+
+    stores = Stores.open(_cluster_of(arguments.cluster))
+    try:
+        id = await resolved(stores.ledger, stores.registry, arguments.checkpoint)
     except KeyError as error:
         raise SystemExit(error.args[0]) from None
-    finally:
-        if (closing := getattr(ledger, "close", None)) is not None:
-            closing()
-    assert version is not None
-    return found, provenance(version)
+    if id is None:
+        return {}
+    made = await stores.checkpoints.checkpoint(id)
+    recorded = await recorded_settings(stores.ledger, made.run) if made.run else None
+    if not recorded:
+        return {}
+    trained = str(recorded.get("trainer.channel") or "policy")
+    channel = arguments.channel or "policy"
+    keys = ("model", "renderer", "provider", "providers", "thinking_tokens", "answer_tokens")
+    return {
+        f"channels.{channel}.{key}": recorded[f"channels.{trained}.{key}"]
+        for key in keys if recorded.get(f"channels.{trained}.{key}") is not None
+    }  # fmt: skip
 
 
-async def _evaluate(
-    profile: Path,
-    suite_name: str,
-    reference: str | None,
-    episodes: int | None,
-    directory: Path | None,
-    monitor: str | None = None,
-    name: str | None = None,
-    sets: list[str] | None = None,
-    environment: str | None = None,
-    preset: str | None = None,
-    file: Path | None = None,
-    chosen: dict[str, str | None] | None = None,
-) -> None:
-    import dataclasses
-    import shutil
-
-    from rollout.environment import binding_for
-    from rollout_train.evals import Suite, environments_of, evaluate, suite_for, suite_of
-    from rollout_train.hosting import ledger_of
-    from rollout_train.profile import Profile
-    from rollout_train.published import is_published, loaded, provenance
-    from rollout_train.record import ending
-    from rollout_train.registry import resolved
-
-    flags = {"name": name, "start": reference, "eval.suite": suite_name, "eval.episodes": episodes}
-    layers = await _layered(profile, directory, "eval", preset, file, sets or [], flags, **chosen or {})
-    reference = cast(str | None, layers.given.get("start"))  # (none: the base model, whatever the profile starts from)
-    episodes = cast(int | None, layers.settings["eval.episodes"])
-    called = cast(str | None, layers.settings["name"])
-    described = dataclasses.replace(Profile.load(profile, directory=directory, settings=layers.profile), name=called)
-    if described.trainer is not None:  # (so the engines hold what the checkpoint is served over: full weights, say)
-        trainer = dataclasses.replace(described.trainer, start=reference, bookmark=None)
-        described = dataclasses.replace(described, trainer=trainer)
-    channel = described.trainer.channel if described.trainer else next(iter(described.channels))
-    slots = {key.removeprefix("slots."): str(value) for key, value in layers.given.items() if key.startswith("slots.")}
-    ledger = ledger_of(described)
-    published: dict[str, Any] = {}
-    try:  # (the suite, and its environments, before the engines)
-        found: Suite | None
-        if environment is not None:  # (its eval data of that name is frozen as the suite, if it is not yet)
-            found = await suite_for(ledger, suite_name, environment, (await loaded(environment, ledger))[0])
-        elif (found := await suite_of(ledger, suite_name)) is None:
-            raise KeyError(f"there is no suite {suite_name!r}: name its environment (--environment), or make one")
-        suite: Suite = found
-        imported = {each: await loaded(each, ledger) for each in suite.environments if is_published(each)}
-        published = {each: provenance(version) for each, (_, version) in imported.items() if version is not None}
-        played = environments_of(suite, {each: environment for each, (environment, _) in imported.items()})
-    except (KeyError, ValueError) as error:
-        raise SystemExit(error.args[0]) from None
-    finally:
-        if (closing := getattr(ledger, "close", None)) is not None:
-            closing()
-    where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
-    started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
-    try:
-        async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
-            try:
-                subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
-                pinned = await _pinned(layers, platform.ledger, platform.registry)
-            except (KeyError, ValueError) as error:
-                raise SystemExit(error.args[0]) from None
-            started["run_settings"] = _recorded(layers, described, {"start": reference, **pinned})
-            started |= {"blobs": platform.blobs_at, "environment": suite.environments[0]}
-            if suite.environments[0] in published:
-                started["published"] = published[suite.environments[0]]
-
-            def bound(environment: Any) -> Any:
-                return binding_for(environment, channel, platform.tool_bindings, platform.pool_bindings, slots)
-
-            async def part(number: int) -> str:
-                return await platform.eval_run(part=number)
-
-            async with ending(platform.ledger, platform.run.id):
-                said = await evaluate(
-                    platform.checkpoints, run=platform.run.id, suite=suite, subject=subject,
-                    base=described.channels[channel].model, channel=channel,
-                    directory=described.directory / "checkpoints", publish=platform.publish, environments=played,
-                    binding=bound, parts=part, episodes=episodes, started=started,
-                    reshard=platform.reshard if platform.layout else None, hooks=[platform.feed],
-                )  # fmt: skip
-    finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
-        for fetched in ("bases", "checkpoints", "resharding"):
-            await asyncio.to_thread(shutil.rmtree, described.directory / fetched, ignore_errors=True)
-    for each in said["entries"]:
-        solved = f"solved {each['solved']} of {each['played']}" if each["solved"] is not None else str(each["played"])
-        print(f"{suite.id} {each['environment']}: {solved} episodes (mean reward {each['reward']})")
+async def _imitate(arguments: argparse.Namespace) -> int:
+    flags: dict[str, JsonValue] = {
+        "start": arguments.start, "seed": arguments.seed, "trainer.learning_rate": arguments.learning_rate,
+        "imitation.dataset": arguments.dataset, "imitation.limit": arguments.limit,
+        "imitation.warmup": arguments.warmup, "imitation.passes": arguments.passes,
+        "imitation.resume_optimizer": arguments.resume_optimizer or None,
+    }  # fmt: skip
+    return await _asked(arguments, "imitate", flags, named_as=lambda said: f"imitate {said['imitation.dataset']}")
 
 
 async def _pool(factory: str, directory: Path, where: str | None, name: str | None, host: str, port: int) -> None:
@@ -340,49 +300,6 @@ async def _pool(factory: str, directory: Path, where: str | None, name: str | No
             keeping.cancel()
             await asyncio.gather(keeping, return_exceptions=True)
         await pool.close()
-
-
-async def _gateway(
-    profile: Path,
-    directory: Path | None,
-    listen: str | None,
-    certificate: Path | None,
-    private_key: Path | None,
-    proxied: str,
-    cluster: str | None = None,
-) -> None:
-    import contextlib
-
-    import uvicorn
-
-    from rollout_train.gateway import create_app, deployed
-    from rollout_train.gateway.beats import about, name_of
-    from rollout_train.hosting import ledger_of
-    from rollout_train.presence import beating, presence_of
-    from rollout_train.profile import GatewaySpec, Profile
-
-    described = Profile.load(profile, directory=directory)
-    listening = listen or (described.gateway or GatewaySpec()).listen
-    host, _, port = listening.rpartition(":")
-    async with contextlib.AsyncExitStack() as stack:
-        gateway = await deployed(described, stack, _cluster_of(cluster) if cluster is not None else None)
-        app = create_app(gateway)
-        presence = presence_of(ledger_of(described))
-        if presence is not None:  # (the monitor shows the replicas alive)
-            said = lambda: about(gateway, listening, described.directory)  # noqa: E731
-            beats = asyncio.ensure_future(beating(presence, name_of(listening), said))
-            stack.callback(beats.cancel)
-        config = uvicorn.Config(
-            app,
-            host=host,
-            port=int(port),
-            log_level="warning",
-            proxy_headers=True,
-            forwarded_allow_ips=proxied,
-            ssl_certfile=str(certificate) if certificate else None,
-            ssl_keyfile=str(private_key) if private_key else None,
-        )
-        await uvicorn.Server(config).serve()
 
 
 @_user_errors
@@ -450,45 +367,24 @@ async def _suite(
                 print(f"{each:<24} {len(starts):>4} starts  {environment}  (eval data, not a suite)")
 
 
-async def _check(
-    environment: str,
-    row: str | None,
-    reply: str,
-    tools: list[str],
-    profile: Path | None,
-    groups: int | None,
-    episodes: int | None,
-    directory: Path | None,
-    name: str | None,
-    seed: int | None,
-    sets: list[str] | None = None,
-    pools: list[str] | None = None,
-    preset: str | None = None,
-    file: Path | None = None,
-    chosen: dict[str, str | None] | None = None,
-) -> int:
-    import dataclasses
-
-    from rollout.environment import binding_for
+async def _check(arguments: argparse.Namespace) -> int:
+    """Whether an environment holds together, here: its checks, and an episode answered by a scripted model with the
+    tool sets and pools given; then, where the settings name a model's channel (a preset, `--provider`), groups played
+    by it as a check run on the cluster."""
     from rollout.harness.imports import ToolBinding
     from rollout.harness.sandboxes import Pool, SandboxPool
-    from rollout_train.algorithm import Grpo
-    from rollout_train.check import checked, played, scripted
-    from rollout_train.profile import Profile
-    from rollout_train.record import ending
+    from rollout_train.check import checked, scripted
 
+    environment: str = arguments.environment
     offered = named(environment)
     found = checked(offered)
     for each in found:
         print(each, flush=True)
     if not found[0].passed:  # (with no rows, there is nothing to play)
         return 1
-    scratch = directory or Path.home() / ".cache" / "rollout" / "checks" / (name or environment.replace(":", "-"))
-    given = dict(_setting(each) for each in tools)  # (NAME=module:factory, or NAME=URL)
-    kinds: dict[str, Any] = dict(_setting(each) for each in pools or [])  # (KIND=module:factory, or KIND=URL)
-    if profile is not None:
-        given = {**Profile.load(profile).tools, **given}
-        kinds = {**Profile.load(profile).pools, **kinds}
+    scratch = Path.home() / ".cache" / "rollout" / "checks" / (arguments.name or environment.replace(":", "-"))
+    given = dict(_setting(each) for each in arguments.tools)  # (NAME=module:factory, or NAME=URL)
+    kinds: dict[str, Any] = dict(_setting(each) for each in arguments.pools)  # (KIND=module:factory, or KIND=URL)
     urls = {key: ToolBinding(url=str(where)) for key, where in given.items() if str(where).startswith("http")}
     await asyncio.to_thread(scratch.mkdir, parents=True, exist_ok=True)
     local = {key: named(str(where))(scratch) for key, where in given.items() if key not in urls}
@@ -500,149 +396,25 @@ async def _check(
             local_pools[kind] = SandboxPool(named(str(options.pop("kind")))(scratch, **options))
     try:
         episode = await scripted(
-            offered, row=row, reply=reply, tool_sets=local, tools=urls, pools=local_pools, pool_urls=pool_urls
-        )
+            offered, row=arguments.row, reply=arguments.reply, tool_sets=local, tools=urls, pools=local_pools,
+            pool_urls=pool_urls,
+        )  # fmt: skip
     finally:
-        for each in [*local.values(), *local_pools.values()]:  # (as a profile closes its tool sets and pools)
+        for each in [*local.values(), *local_pools.values()]:
             close = getattr(each, "close", None)
             if close is not None and asyncio.iscoroutine(closing := close()):
                 await closing
     print(episode, flush=True)
     found.append(episode)
-    flags = {"environment": environment, "name": name, "groups": groups, "seed": seed}
-    layers = (
-        await _layered(profile, scratch, "check", preset, file, sets or [], flags, **chosen or {}) if profile else None
-    )
-    groups = int(cast(int, layers.given.get("groups", 4))) if layers else 0  # (4 groups unless said otherwise)
-    if profile is not None and layers is not None and groups > 0:
-        loaded = Profile.load(profile, directory=scratch, settings=layers.profile)
-        called = cast(str | None, layers.settings["name"]) or scratch.name
-        described = dataclasses.replace(loaded, trainer=None, name=called)  # (the base model, untrained)
-        channel = loaded.trainer.channel if loaded.trainer else next(iter(loaded.channels))
-        slots = _slots(layers, offered, loaded, channel)
-        seed = _whole(layers.settings, "seed")
-        async with described.open() as platform:
-            binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings, slots)
-            started: dict[str, Any] = {"environment": environment, "profile": str(profile), "blobs": platform.blobs_at}
-            started["directory"] = str(await asyncio.to_thread(scratch.absolute))
-            started["run_settings"] = _recorded(layers, described, {"groups": groups})
-            async with ending(platform.ledger, platform.run.id):
-                groups_found = await played(
-                    offered, platform.ledger, platform.blobs, run=platform.run.id, binding=binding, groups=groups,
-                    episodes=episodes or Grpo().group_size, seed=seed, started=started,
-                )  # fmt: skip
-            for each in groups_found:
-                print(each, flush=True)
-                found.append(each)
-    return 0 if all(each.passed for each in found) else 1
-
-
-async def _imitate(
-    profile: Path,
-    directory: Path | None,
-    kinds: list[str],
-    limit: int | None,
-    seed: int | None,
-    dataset: str | None = None,
-    start_at: str | None = None,
-    name: str | None = None,
-    resume_optimizer: bool = False,
-    learning_rate: float | None = None,
-    warmup: int | None = None,
-    passes: int | None = None,
-    sets: list[str] | None = None,
-    preset: str | None = None,
-    file: Path | None = None,
-) -> None:
-    import socket
-    import time
-
-    from rollout_train.checkpoints import Checkpoints
-    from rollout_train.datasets import dataset_of, resolved_dataset
-    from rollout_train.datasets import examples as dataset_examples
-    from rollout_train.hosting import blobs_of, ledger_of
-    from rollout_train.imitation import IMITATION, RATES, WARMUP, examples, imitate, passes_for
-    from rollout_train.layout import BLOBS
-    from rollout_train.profile import Profile
-    from rollout_train.record import PROCESS, STARTS, ending, scope, table
-    from rollout_train.registry import registry_of, resolved, run_of
-    from rollout_train.stores import location
-
-    flags: dict[str, Any] = {
-        "name": name, "start": start_at, "seed": seed, "trainer.learning_rate": learning_rate,
-        "imitation.dataset": dataset, "imitation.limit": limit, "imitation.warmup": warmup, "imitation.passes": passes,
-        "imitation.resume_optimizer": resume_optimizer or None,
+    passed = all(each.passed for each in found)
+    if not (arguments.preset or arguments.provider or arguments.settings or arguments.set):
+        return 0 if passed else 1
+    flags: dict[str, JsonValue] = {
+        "environment": environment, "groups": arguments.groups or 4, "check.episodes": arguments.episodes,
+        "seed": arguments.seed,
     }  # fmt: skip
-    layers = await _layered(profile, directory, "imitate", preset, file, sets or [], flags)
-    given, said = layers.given, layers.settings
-    name, dataset = cast(str | None, said["name"]), cast(str | None, said["imitation.dataset"])
-    limit, seed = cast(int | None, said["imitation.limit"]), _whole(said, "seed")
-    learning_rate, warmup = given.get("trainer.learning_rate"), given.get("imitation.warmup")  # (not the profile's)
-    passes, resume_optimizer = given.get("imitation.passes"), bool(said["imitation.resume_optimizer"])
-    described = Profile.load(profile, directory=directory, settings=layers.profile)
-    if described.trainer is None:
-        raise SystemExit(f"{profile} describes no trainer")
-    spec = described.channels[described.trainer.channel]
-    renderer = named(spec.renderer)(spec.model)
-    blobs, ledger = blobs_of(described), ledger_of(described)
-    checkpoints, registry = Checkpoints(ledger, blobs), registry_of(ledger)
-    run = await run_of(described.directory, ledger, registry, name)
-    try:
-        reference = cast(str | None, said["start"])  # (the profile's, unless said otherwise)
-        start = await resolved(ledger, registry, reference) if reference else None
-        made = await dataset_of(ledger, await resolved_dataset(ledger, registry, dataset)) if dataset else None
-    except KeyError as error:
-        raise SystemExit(error.args[0]) from None
-    if made is not None:
-        taught = await dataset_examples(ledger, made, renderer)
-    else:
-        taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
-    if not taught.items:
-        raise SystemExit("no solved episode of the run carried that guidance" if made is None else "no examples")
-    shown = f"{len(taught.segments)} segments" if taught.segments else f"{len(taught.preferences)} {made and made.kind}"
-    print(f"{shown} of {taught.episodes} episodes ({taught.left_out} left out), {taught.supervision}",
-          flush=True)  # fmt: skip
-    head = await checkpoints.head(run.id) or (await checkpoints.checkpoint(start) if start else None)
-    model = spec.model  # (an adapter from full weights is trained over them)
-    under = await checkpoints.under(head) if head is not None else None
-    kind = named(described.trainer.kind)
-    if under is not None and under.weights is not None and getattr(kind, "weights", "lora") == "lora":
-        model = str(await checkpoints.files(under.weights, described.directory / "bases" / under.id))
-    objective = _imitated(layers.settings, made.kind if made is not None else "examples")
-    settings: dict[str, Any] = {**described.trainer.settings, "objective": objective.to_json()}
-    chosen = taught.items if limit is None else taught.items[:limit]  # (as many as the step takes)
-    weights = str(getattr(kind, "weights", "lora"))
-    settings["learning_rate"] = learning_rate if learning_rate is not None else RATES.get(weights, 1e-6)
-    settings["warmup_updates"] = WARMUP if warmup is None else warmup
-    settings["passes"] = passes or passes_for(chosen, int(settings.get("tokens_per_step", 4096)))
-    print(f"{settings['passes']} passes at {settings['learning_rate']:g}, warmed up over "
-          f"{settings['warmup_updates']} updates", flush=True)  # fmt: skip
-    trainer = kind(model, **settings)
-    fence = await ledger.take(scope(run.id))  # (the run is stopped: imitation writes as it)
-    where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
-    started: Any = {
-        "kind": IMITATION, "from": head.id if head else None, "dataset": made.id if made else None,
-        "supervision": taught.supervision, "host": socket.gethostname(), "process": PROCESS,
-        "started": round(time.time(), 1), "directory": str(where), "profile": str(profiled),
-        "blobs": location(described.blobs, described.directory / BLOBS),
-        "run_settings": _recorded(layers, described, {
-            "objective.preset": objective.preset, "trainer.learning_rate": settings["learning_rate"],
-            "imitation.warmup": settings["warmup_updates"], "imitation.passes": settings["passes"],
-        }),
-    }  # fmt: skip
-    await ledger.append(table(run.id, STARTS), str(fence.number), started, fence)
-    try:
-        async with ending(ledger, run.id):
-            checkpoint = await imitate(
-                checkpoints, trainer, taught, fence=fence, run=run.id, start=start, base=spec.model,
-                directory=described.directory / "checkpoints",
-                limit=limit, seed=seed, resume_optimizer=resume_optimizer,
-            )  # fmt: skip
-    except ValueError as error:
-        raise SystemExit(str(error)) from None
-    parents = ", ".join(checkpoint.parents) or "the base model"
-    print(f"made {checkpoint.id} (from {parents}): "
-          f"{json.dumps({key: round(value, 4) for key, value in checkpoint.metrics.items()})}")  # fmt: skip
+    played = await _asked(arguments, "check", flags, named_as=lambda said: f"check {_named_after(environment)}")
+    return played or (0 if passed else 1)
 
 
 @_user_errors
@@ -713,246 +485,6 @@ def _setting(given: str) -> tuple[str, Any]:
         return key.strip(), value
 
 
-_ALIASES = {"trainer.start": "start", "trainer.bookmark": "bookmark"}
-"""Profile keys that are run settings by another name (as a launch passes them)."""
-_COMMANDS = ("kind", "name", "environment", "groups", "groups_per_step", "seed", "eval.", "check.", "imitation.")
-"""Run settings a command over a profile applies itself, not through the profile."""
-_BUDGETS = ("thinking_tokens", "answer_tokens")
-_BINDINGS = ("slots.", "self_judging")
-"""Run settings that bind a program's slots to the profile's channels (`_slots`)."""
-_MODES = ("mode", "follows", "lag", "checkpoint")
-"""A channel's run settings that say whose records it serves (`rollout_train.serving.source_of`)."""
-
-
-@dataclass(frozen=True)
-class _Layered:
-    """A run's settings over a profile: the keys the profile is loaded with (`profile`), the run's settings as it runs
-    them (`settings`: the profile's, then a preset's, a file's and the flags'), what was given over the profile
-    (`given`), and the preset they came from (`NAME@N`)."""
-
-    profile: dict[str, Any]
-    settings: "RunSettings"
-    given: dict[str, Any]
-    preset: str | None
-
-
-async def _layered(
-    path: Path,
-    directory: Path | None,
-    kind: str,
-    preset: str | None,
-    file: Path | None,
-    sets: list[str],
-    flags: dict[str, Any],
-    *,
-    model: str | None = None,
-    renderer: str | None = None,
-    channel: str | None = None,
-) -> _Layered:
-    """A run's settings in layers over what its profile gives (`_given_by`): a preset (`NAME` or `NAME@N`, kept beside
-    the profile's ledger), a settings file, `--set` flags, then the command's own flags (those not `None`), `--model`
-    and `--renderer` among them (of `--channel`, by default the trained one). The slots' bindings (`slots.SLOT`,
-    `self_judging`) and the channels' modes (`channels.NAME.mode`, `.follows`, `.lag`, `.checkpoint`) are run settings
-    only, recorded in the run's start. A run setting the profile has no place for (a provider, a spend limit) is
-    refused; a key that is no run setting is the profile's own, as `--set` takes it."""
-    from rollout_train.hosting import ledger_of
-    from rollout_train.presets import presets_of
-    from rollout_train.profile import Profile
-    from rollout_train.run_settings import from_file, from_flags, is_trainers, key_of, layered, shortcuts
-
-    plain = Profile.load(path, directory=directory)
-    channel = channel or (plain.trainer.channel if plain.trainer else next(iter(plain.channels), "policy"))
-    flags = {**flags, **shortcuts(model=model, renderer=renderer, channel=channel)}
-    chosen = None
-    if preset is not None:
-        kept = presets_of(ledger_of(plain))
-        chosen = await kept.get(preset) if kept is not None else None
-        if chosen is None:
-            raise SystemExit(f"there is no preset {preset!r} beside the profile's ledger")
-    try:
-        said = layered(chosen.settings if chosen else None, from_file(file) if file else None, from_flags(sets))
-    except (OSError, ValueError) as error:
-        raise SystemExit(str(error)) from None
-    given: dict[str, Any] = {}
-    profile: dict[str, Any] = {}
-    for key, value in [*said.values.items(), *((key, value) for key, value in flags.items() if value is not None)]:
-        key = _ALIASES.get(key, key)
-        if key_of(key) is None and not is_trainers(key):
-            profile[key] = value  # (the profile's own)
-            continue
-        if (key == "evals.suite" and value == "") or (key.rpartition(".")[2] in _BUDGETS and value == "none"):
-            value = None  # (no evals, no budget: as a launch says them)
-        given[key] = value
-    trained = plain.trainer.channel if plain.trainer else None
-    refused: list[str] = []
-    for key, value in given.items():
-        last = key.rpartition(".")[2]
-        if key.startswith(_COMMANDS) or key.startswith(_BINDINGS):
-            continue
-        if key.startswith("channels.") and key.count(".") == 2 and last in _MODES:
-            continue  # (whose records a channel serves: read from the run's start by whatever serves it)
-        if key in ("start", "bookmark"):
-            profile[f"trainer.{key}"] = value
-        elif key == "max_lag" and trained is not None:
-            profile[f"channels.{trained}.max_lag"] = value
-        elif key == "evals.suite":
-            profile[key] = "" if value is None else value
-        elif key in ("episodes_at_once", "trainer.channel") or key.startswith("evals.") or is_trainers(key):
-            profile[key] = value
-        elif key.startswith("objective."):
-            continue  # (the trainer's objective, below)
-        elif key.startswith("channels.") and key.count(".") == 2 and last in ("model", "renderer", *_BUDGETS):
-            profile[key] = "none" if value is None and last in _BUDGETS else value
-        else:
-            refused.append(key)
-    if refused:
-        raise SystemExit(f"a run over a profile cannot take {', '.join(refused)}: those need the cluster config")
-    settings = layered(_given_by(plain, kind), given, {"kind": kind})
-    if any(key.startswith("objective.") for key in settings.values):  # (the trainer takes them as its objective)
-        table: dict[str, Any] = {"preset": settings["objective.preset"]}
-        table |= {key.removeprefix("objective."): value for key, value in settings.values.items()
-                  if key.startswith("objective.") and key != "objective.preset" and value is not None}  # fmt: skip
-        profile["trainer.objective"] = table
-    return _Layered(profile, settings, given, chosen.id if chosen else None)
-
-
-def _imitated(settings: "RunSettings", kind: str) -> "Objective":
-    """The objective an imitate run trains with: the likelihood or preference preset its settings name (as the
-    dataset's `kind` holds examples, or pairs and labelled examples), else `sft` with those of their components a
-    likelihood takes. A policy-gradient preset named is refused."""
-    from rollout_train.objectives import DEFAULT, LIKELIHOOD, POLICY_GRADIENT, PREFERENCE, PRESETS, component
-    from rollout_train.run_settings import RunSettings, objective_in
-
-    preset = str(settings["objective.preset"])
-    asked = PRESETS.get(preset)
-    if asked is not None and asked.objective.family == POLICY_GRADIENT:
-        if preset != DEFAULT.preset:
-            raise SystemExit(f"an imitate run trains on a dataset's examples, which have no advantages: a likelihood "
-                             f"or preference preset, not {preset}")  # fmt: skip
-
-        def taken(key: str) -> bool:
-            found = component(key.removeprefix("objective."))
-            return not key.startswith("objective.") or (found is not None and LIKELIHOOD in found.families)
-
-        values = {key: value for key, value in settings.values.items() if taken(key)}
-        settings = RunSettings({**values, "objective.preset": "sft"})
-    try:
-        objective = objective_in(settings)
-    except ValueError as error:
-        raise SystemExit(str(error)) from None
-    if (objective.family == PREFERENCE) != (kind != "examples"):
-        wanted = "a preference preset" if kind != "examples" else "a likelihood preset (sft)"
-        raise SystemExit(f"a dataset of {kind} is trained on by {wanted}, not {objective.preset}")
-    return objective
-
-
-def _whole(settings: "RunSettings", key: str) -> int:
-    return int(cast(int, settings[key]))
-
-
-def _given_by(profile: "Profile", kind: str) -> dict[str, Any]:
-    """The run settings a profile gives a run of `kind`: its trainer's, its channels', its evals'."""
-
-    said: dict[str, Any] = {"episodes_at_once": profile.episodes_at_once}
-    if (trainer := profile.trainer) is not None:
-        said |= {"trainer.channel": trainer.channel, "start": trainer.start, "bookmark": trainer.bookmark}
-        said |= {f"trainer.{key}": value for key, value in trainer.settings.items()}
-        said["max_lag"] = profile.channels[trainer.channel].max_lag
-    for name, channel in profile.channels.items():
-        said |= {f"channels.{name}.model": channel.model, f"channels.{name}.renderer": channel.renderer}
-        said |= {f"channels.{name}.{budget}": getattr(channel, budget) for budget in _BUDGETS}
-    if (evals := profile.evals) is not None:
-        said |= {"evals.suite": evals.suite, "evals.every": evals.every, "evals.episodes": evals.episodes}
-    return {key: json.loads(json.dumps(value)) for key, value in said.items() if _takes(kind, key)}
-
-
-def _takes(kind: str, key: str) -> bool:
-    """Whether a run of `kind` takes the run setting `key` (a trainer's own: a run that trains)."""
-    from rollout_train.run_settings import is_trainers, key_of
-
-    found = key_of(key)
-    return kind in found.kinds if found is not None else is_trainers(key) and kind in ("train", "imitate")
-
-
-def _recorded(layers: _Layered, profile: "Profile", ran: dict[str, Any] | None = None) -> dict[str, Any]:
-    """What a run's start records of its run settings (`rollout_train.run_settings.recorded`): what ran (with `ran`,
-    what the command decided beyond its layers), the settings its trainer declares, and the preset."""
-    from rollout_train.providers import TRAINER_KINDS, settings_of
-    from rollout_train.run_settings import layered, recorded
-
-    trainer = profile.trainer.kind if profile.trainer else None
-    kinds = [each for each in TRAINER_KINDS.values() if each.implementation == trainer]
-    try:
-        specs = settings_of(kinds[0]) if kinds else ()
-    except ImportError:  # (a trainer whose package is not installed here: its settings as given)
-        specs = ()
-    return recorded(layered(layers.settings.values, ran), specs, layers.preset)
-
-
-def _slots(layers: _Layered, environment: Any, profile: "Profile", trained: str) -> dict[str, str]:
-    """The channels a run over a profile binds its program's slots to by name (`slots.SLOT`; every other slot samples
-    `trained`), refusing a binding `rollout_train.slots` refuses, a channel the profile does not describe, and a mode
-    on the trained channel or one that follows a channel the profile lacks."""
-    from rollout.environment import first_program
-    from rollout.harness import instantiate
-    from rollout_train.run_settings import layered
-    from rollout_train.slots import Declared, problems
-
-    settings = layered(layers.settings.values, {"trainer.channel": trained})
-    declared = Declared.of(instantiate(first_program(environment)).model_slots())
-    refused = [f"{key}: {reason}" for key, reason in problems(settings, declared)]
-    named = {
-        key.removeprefix("slots."): str(value) for key, value in settings.values.items() if key.startswith("slots.")
-    }
-    refused += [
-        f"slots.{slot}: channel {channel} is not one of the profile's ({', '.join(profile.channels)})"
-        for slot, channel in named.items()
-        if channel not in profile.channels
-    ]
-    for channel in profile.channels:
-        mode, follows = settings.get(f"channels.{channel}.mode"), settings.get(f"channels.{channel}.follows")
-        if channel == trained and mode is not None:
-            refused.append(f"channels.{channel}.mode: {channel} is the trained channel: it serves what the run trains")
-        elif mode == "follows" and follows not in profile.channels:
-            refused.append(f"channels.{channel}.follows: channel {channel} follows another channel of the profile")
-    if refused:
-        raise SystemExit("; ".join(refused))
-    return named
-
-
-async def _pinned(layers: _Layered, ledger: "Ledger", registry: "Registry | None") -> dict[str, Any]:
-    """The checkpoints the run's fixed channels serve (`channels.NAME.checkpoint`), each resolved to its id, as the
-    run's start records them."""
-    from rollout_train.registry import resolved
-
-    return {
-        key: await resolved(ledger, registry, value)
-        for key, value in layers.settings.values.items()
-        if key.startswith("channels.") and key.endswith(".checkpoint") and isinstance(value, str)
-    }
-
-
-def _chosen(arguments: argparse.Namespace) -> dict[str, str | None]:
-    """What `--model`, `--renderer` and `--channel` said."""
-    return {"model": arguments.model, "renderer": arguments.renderer, "channel": arguments.channel}
-
-
-def _layers_of(command: argparse.ArgumentParser, *, channels: bool = True) -> None:
-    """A command that starts a run takes its settings in layers: `--preset`, then `--settings`, then `--set`, then
-    (with `channels`) `--model` and `--renderer` of `--channel`."""
-    if channels:
-        command.add_argument("--model", help="the channel's model: channels.CHANNEL.model")
-        command.add_argument("--renderer", help="the channel's renderer, module:name: channels.CHANNEL.renderer")
-        command.add_argument("--channel", help="the channel --model and --renderer are of (by default the trained one)")
-    command.add_argument("--preset", metavar="NAME[@N]", help="start from a preset's settings (`rollout preset`)")
-    command.add_argument("--settings", type=Path, metavar="FILE", help="run settings: TOML or JSON, dotted keys")
-    command.add_argument(
-        "--set", action="append", default=[], metavar="KEY=VALUE",
-        help="a run setting (trainer.learning_rate=3e-5) or a profile's key, the value read as JSON, then TOML, then "
-        "as text (repeatable; over the preset and the file)",
-    )  # fmt: skip
-
-
 def _ledger_at(where: "str | Stores") -> "Ledger":
     """A ledger by where it is: a cluster's stores, a database's URL, a run's directory (as its `ledger.json` says),
     or a directory of files."""
@@ -977,7 +509,7 @@ async def _copy_ledger(source: str, target: str, point: bool) -> None:
         raise SystemExit(f"{target} is not a database (a URL: sqlite:///… or postgresql://…)")
     count = await copy(_ledger_at(source), into)
     print(f"{count} records copied from {source} into {into.url}")
-    if point:  # the run's directory now says its ledger is the copy (the profile should say so too)
+    if point:  # the run's directory now says its ledger is the copy (the cluster config should say so too)
         location = {"kind": "rollout_train.database:DatabaseLedger", "url": target}
 
         def pointed() -> None:
@@ -1036,8 +568,10 @@ async def _preset(
     file: Path | None = None,
     sets: list[str] | None = None,
     note: str = "",
+    directory: Path | None = None,
 ) -> None:
-    """`rollout preset`: list the presets, show one (`NAME` or `NAME@N`), save a version, or delete one."""
+    """`rollout preset`: list the presets, show one (`NAME` or `NAME@N`), save a version, load a directory of them
+    (each `NAME.toml` saved as preset `NAME`, where its newest version holds other settings), or delete one."""
     import time
 
     from rollout_train.presets import presets_of
@@ -1054,6 +588,17 @@ async def _preset(
             saved = time.strftime("%Y-%m-%d %H:%M", time.localtime(each.saved))
             noted = f"  {each.note}" if each.note else ""
             print(f"{each.id:<32} {len(each.settings):>3} settings  saved {saved}{noted}")
+        return
+    if command == "load":
+        assert directory is not None
+        for path in sorted(await asyncio.to_thread(lambda: list(directory.glob("*.toml")))):
+            said = from_file(path)
+            newest = await presets.get(path.stem)
+            if newest is not None and dict(newest.settings) == said:
+                print(f"{newest.id}: as {path.name} says")
+                continue
+            saved = await presets.save(path.stem, said, f"loaded from {path.name}")
+            print(f"saved {saved.id}: {len(saved.settings)} settings from {path.name}")
         return
     assert reference is not None
     if command == "show":
@@ -1090,7 +635,8 @@ async def _rename(who: str, name: str, where: "str | Stores") -> None:
 
 
 @_user_errors
-async def _pause_or_resume(command: str, who: str, where: "str | Stores") -> None:
+async def _pause_or_resume(command: str, who: str, where: "str | Stores", arguments: argparse.Namespace) -> None:
+    from rollout_train.launching import Refused
     from rollout_train.registry import registry_of, run_id
     from rollout_train.resuming import IN_PLACE, pause, resume
 
@@ -1100,12 +646,17 @@ async def _pause_or_resume(command: str, who: str, where: "str | Stores") -> Non
         await pause(ledger, run)
         print(f"{who} is paused: what is playing plays out, and nothing new starts")
         return
-    resumed = await resume(ledger, run)
+    cluster = _cluster_of(arguments.cluster) if arguments.cluster is not None else None
+    try:
+        resumed = await resume(ledger, run, cluster=cluster)
+    except Refused as refused:
+        raise SystemExit("; ".join(f"{each.key}: {each.reason}" for each in refused.refusals)) from None
     if resumed.how == IN_PLACE:
         print(f"{who} goes on")
     else:
         assert resumed.launch is not None
-        print(f"{who} is launched again: launch {resumed.launch.id}, job {resumed.launch.job}")
+        print(f"{who} is launched again: launch {resumed.launch.id}, job {resumed.launch.job} "
+              f"({resumed.launch.state})")  # fmt: skip
 
 
 @_user_errors
@@ -1161,12 +712,12 @@ def _cluster_option(what: str) -> dict[str, Any]:
 
 
 def _cluster_of(given: str | None) -> "Cluster":
-    """The cluster config `--cluster` says (`""`: found as `rollout_train.cluster.find` finds it), read and checked;
-    exits saying what is wrong."""
-    from rollout_train.cluster import ClusterError, find, load
+    """The cluster config `--cluster` says (none or `""`: the one this process was handed, else the one
+    `rollout_train.cluster.find` finds), read and checked; exits saying what is wrong."""
+    from rollout_train.cluster import ClusterError, located
 
     try:
-        return load(find(given or None))
+        return located(given or None)
     except ClusterError as error:
         raise SystemExit(str(error)) from None
 
@@ -1206,35 +757,92 @@ def _check_cluster(given: str | None) -> int:
     return 1 if problems else 0
 
 
+async def _gateway(
+    cluster_given: str | None, listen: str | None, certificate: Path | None, private_key: Path | None, proxied: str
+) -> None:
+    """A replica of the cluster's gateway (`rollout_train.gateway.ChannelDirectory.of`): every channel a run's start
+    names on the cluster's providers whose servers it reaches, sampled and recorded, with the keys `[gateway]` names."""
+    import contextlib
+
+    import uvicorn
+
+    from rollout_train.gateway import ChannelDirectory, Gateway, Keyring, TurnStore, create_app
+    from rollout_train.gateway.beats import about, name_of
+    from rollout_train.presence import beating, presence_of
+    from rollout_train.stores import Stores
+
+    cluster = _cluster_of(cluster_given)
+    stores = Stores.open(cluster)
+    listening = listen or cluster.gateway.listen
+    host, _, port = listening.rpartition(":")
+    keys = cluster.gateway.keys
+    if keys is not None and keys.file is not None:
+        keyring = Keyring.load(Path(keys.file).expanduser())  # noqa: ASYNC240 (before it serves)
+    elif keys is not None and keys.env is not None:
+        keyring = Keyring.from_environment({"ROLLOUT_GATEWAY_KEYS": os.environ.get(keys.env, "")})
+    else:
+        keyring = Keyring.from_environment()
+    async with contextlib.AsyncExitStack() as stack:
+        directory = ChannelDirectory.of(cluster, stores.ledger)
+        stack.callback(directory.close)
+        gateway = Gateway(TurnStore(stores.ledger, stores.blobs), keyring, directory=directory)
+        presence = presence_of(stores.ledger)
+        if presence is not None:  # (the monitor shows the replicas alive)
+            scratch = Path(cluster.scratch).expanduser()  # noqa: ASYNC240 (a path, read nothing)
+            said_of = lambda: about(gateway, listening, scratch)  # noqa: E731
+            beats = asyncio.ensure_future(beating(presence, name_of(listening), said_of))
+            stack.callback(beats.cancel)
+        config = uvicorn.Config(
+            create_app(gateway), host=host, port=int(port), log_level="warning", proxy_headers=True,
+            forwarded_allow_ips=proxied, ssl_certfile=str(certificate) if certificate else None,
+            ssl_keyfile=str(private_key) if private_key else None,
+        )  # fmt: skip
+        await uvicorn.Server(config).serve()
+
+
+def _asks(command: argparse.ArgumentParser, *, channels: bool = True, trains: bool = True) -> None:
+    """A command that asks for a run takes its settings in layers: `--preset`, then `--settings`, then `--set`, then
+    its flags (with `channels`, `--model`, `--provider` and `--renderer` of `--channel`; with `trains`, `--trainer`);
+    the cluster config; and what to do once they are checked."""
+    command.add_argument("--name", help="what the run is called (by default a free name after what it plays)")
+    if channels:
+        command.add_argument("--model", help="the channel's model: channels.CHANNEL.model")
+        command.add_argument("--provider", help="the inference provider that samples it: channels.CHANNEL.provider")
+        command.add_argument("--renderer", help="the channel's renderer, module:name: channels.CHANNEL.renderer")
+        command.add_argument("--channel", help="the channel the flags above are of (policy)")
+    if trains:
+        command.add_argument("--trainer", help="the trainer, a [trainers.NAME] of the cluster: trainer.provider")
+    command.add_argument("--preset", metavar="NAME[@N]", help="start from a preset's settings (`rollout preset`)")
+    command.add_argument("--settings", type=Path, metavar="FILE", help="run settings: TOML or JSON, dotted keys")
+    command.add_argument(
+        "--set", action="append", default=[], metavar="KEY=VALUE",
+        help="a run setting (trainer.learning_rate=3e-5), the value read as JSON, then TOML, then as text (repeatable; "
+        "over the preset and the file)",
+    )  # fmt: skip
+    command.add_argument("--cluster", **_cluster_option("the cluster config the run is asked for on"))
+    doing = command.add_mutually_exclusive_group()
+    doing.add_argument("--check", action="store_true", help="say what would be refused, and ask for nothing")
+    doing.add_argument("--detach", action="store_true", help="return once the run's job is submitted")
+    doing.add_argument("--here", action="store_true", help="run the job in this process, on the cluster's Ray")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="rollout", description="Train on an environment under a deployment profile.")
+    parser = argparse.ArgumentParser(prog="rollout", description="Ask for runs on a cluster, train, and watch.")
     commands = parser.add_subparsers(dest="command", required=True)
-    training = commands.add_parser("train", help="run the training loop")
-    training.add_argument("profile", type=Path)
-    training.add_argument("environment")
-    training.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
+    training = commands.add_parser("train", help="a training run, submitted and followed")
+    training.add_argument("environment", help="module:name, or a published one as NAME@VERSION")
     training.add_argument("--groups", type=int, help="groups it plays (100)")
     training.add_argument("--groups-per-step", type=int, help="groups a step waits for (4)")
     training.add_argument("--seed", type=int, help="(0)")
-    training.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
-    training.add_argument("--name", help="what a new run is called (by default its directory's name)")
-    _layers_of(training)
+    _asks(training)
     reporting = commands.add_parser("report", help="chart a run's progress, and post it to a Discord webhook")
     reporting.add_argument("directory", type=Path)
     reporting.add_argument("environment")
     reporting.add_argument("--watch", action="store_true", help="report again after every group, until interrupted")
     reporting.add_argument("--webhook", help="a Discord webhook (default: the environment's DISCORD_WEBHOOK_URL)")
-    imitating = commands.add_parser(
-        "imitate", help="a supervised step on a dataset, or on the run's solved episodes without their guidance"
-    )
-    imitating.add_argument("profile", type=Path)
-    imitating.add_argument("--directory", type=Path, help="the run's directory (instead of the profile's)")
-    imitating.add_argument("--dataset", help="a dataset to train on, by its name or id (`rollout dataset make`)")
-    imitating.add_argument(
-        "--start", help="the checkpoint to train from, if the run made none (instead of the profile's)"
-    )
-    imitating.add_argument("--name", help="what a new run is called (by default its directory's name)")
-    imitating.add_argument("--without", nargs="+", default=["way"], help="the kinds of guidance to take out")
+    imitating = commands.add_parser("imitate", help="a supervised step on a dataset")
+    imitating.add_argument("--dataset", help="the dataset to train on, by its name or id (`rollout dataset make`)")
+    imitating.add_argument("--start", help="the checkpoint to train from, if the run made none")
     imitating.add_argument("--limit", type=int, help="at most this many segments, drawn at random")
     imitating.add_argument("--seed", type=int, help="(0)")
     imitating.add_argument("--learning-rate", type=float, help="the step's rate (by default 1e-6 full, 1e-4 LoRA)")
@@ -1244,8 +852,8 @@ def main() -> None:
         "--resume-optimizer", action="store_true",
         help="go on from the trainer state of the checkpoint it trains from (by default the optimizer starts afresh)",
     )  # fmt: skip
-    _layers_of(imitating, channels=False)
-    presets = commands.add_parser("preset", help="list, show, save or delete presets: named, versioned run settings")
+    _asks(imitating, channels=False)
+    presets = commands.add_parser("preset", help="list, show, save, load or delete presets: named, versioned settings")
     preset_commands = presets.add_subparsers(dest="preset_command", required=True)
     _over_a_ledger(preset_commands.add_parser("list", help="every preset's newest version"))
     preset_showing = preset_commands.add_parser("show", help="a preset's settings: its newest version, or NAME@N")
@@ -1260,6 +868,11 @@ def main() -> None:
     preset_saving.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="a run setting")
     preset_saving.add_argument("--note", default="", help="what this version is for, or what it changed")
     _over_a_ledger(preset_saving)
+    preset_loading = preset_commands.add_parser(
+        "load", help="save each NAME.toml of a directory as preset NAME, where its newest version says otherwise"
+    )
+    preset_loading.add_argument("directory", type=Path)
+    _over_a_ledger(preset_loading)
     preset_deleting = preset_commands.add_parser("delete", help="delete a preset (its versions stay readable)")
     preset_deleting.add_argument("preset", metavar="NAME")
     _over_a_ledger(preset_deleting)
@@ -1287,11 +900,14 @@ def main() -> None:
     dataset_listing = dataset_commands.add_parser("list", help="every dataset, newest first")
     _over_a_ledger(dataset_listing)
     monitoring = commands.add_parser("monitor", help="serve the monitor's page over a ledger and every run in it")
-    monitoring.add_argument("where", help="a run's directory, a ledger's directory, or a database's URL")
+    monitoring.add_argument(
+        "where", nargs="?", help="a run's directory, a ledger's directory, or a database's URL (by default the cluster "
+        "config's ledger)",
+    )  # fmt: skip
     monitoring.add_argument("--host", default="127.0.0.1")
     monitoring.add_argument("--port", type=int, default=8765)
     monitoring.add_argument(
-        "--cluster", **_cluster_option("import environments from git with this cluster config's Ray and blob store")
+        "--cluster", **_cluster_option("ask for runs on this cluster config, and import environments from git with it")
     )
     ledgers = commands.add_parser("ledger", help="work with ledgers")
     ledger_commands = ledgers.add_subparsers(dest="ledger_command", required=True)
@@ -1307,7 +923,7 @@ def main() -> None:
     pausing.add_argument("who", help="the run, by its name or its id")
     _over_a_ledger(pausing)
     resuming = commands.add_parser(
-        "resume", help="resume a run: a paused one goes on; a stopped, failed or lost one is launched again"
+        "resume", help="resume a run: a paused one goes on; a stopped, failed or lost one is submitted again"
     )
     resuming.add_argument("who", help="the run, by its name or its id")
     _over_a_ledger(resuming)
@@ -1322,22 +938,13 @@ def main() -> None:
     merging.add_argument("--merger", default="rollout_lora.merge:merge", help="what folds the adapter in (module:name)")
     merging.add_argument("--bookmark", help="a bookmark to name the merged checkpoint")
     _over_a_ledger(merging)
-    evaluating = commands.add_parser(
-        "eval", help="play a suite with a checkpoint (or the base model), training nothing"
-    )
-    evaluating.add_argument("profile", type=Path)
-    evaluating.add_argument("suite")
+    evaluating = commands.add_parser("eval", help="play a suite with a checkpoint (or a base model), training nothing")
+    evaluating.add_argument("suite", help="the suite, by name (its newest version) or NAME@N")
     evaluating.add_argument(
-        "--checkpoint", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id (none: the base model)"
+        "--checkpoint", help="a bookmark, RUN:STEP, RUN, or a checkpoint's id (none: the base model the settings name)"
     )
     evaluating.add_argument("--episodes", type=int, help="episodes of each start (by default the suite's)")
-    evaluating.add_argument(
-        "--environment", help="module:name: a suite not made yet is its eval data of that name, frozen now"
-    )
-    evaluating.add_argument("--directory", type=Path, help="the eval's directory (instead of the profile's)")
-    evaluating.add_argument("--name", help="what the eval is called (by default its directory's name)")
-    evaluating.add_argument("--monitor", help="where the monitor on this machine serves, as other machines reach it")
-    _layers_of(evaluating)
+    _asks(evaluating, trains=False)
     suites = commands.add_parser("suite", help="make, edit or list evaluation suites")
     suite_commands = suites.add_subparsers(dest="suite_command", required=True)
     making = suite_commands.add_parser("make", help="make a suite: its eval data, or a start of each row for each seed")
@@ -1361,7 +968,7 @@ def main() -> None:
     editing.add_argument("--drop", metavar="ENVIRONMENT", help="module:name: the entry left out of the next version")
     suite_listing = suite_commands.add_parser("list", help="every suite")
     _over_a_ledger(suite_listing)
-    suite_listing.add_argument("--environment", help="module:name: its eval data not played yet too")
+    suite_listing.add_argument("--environment", help="module:name: its eval data not made into a suite yet too")
     environments = commands.add_parser("env", help="work with environments")
     environment_commands = environments.add_subparsers(dest="env_command", required=True)
     checking = environment_commands.add_parser("check", help="whether an environment holds together")
@@ -1370,33 +977,18 @@ def main() -> None:
     checking.add_argument("--reply", default="hello", help="what the scripted model says each turn")
     checking.add_argument(
         "--tools", action="append", default=[], metavar="NAME=WHERE",
-        help="a tool set its program imports: module:factory, or a URL (repeatable; a profile's are used too)",
+        help="a tool set its program imports: module:factory, or a URL (repeatable)",
     )  # fmt: skip
     checking.add_argument(
         "--pools", action="append", default=[], metavar="KIND=WHERE",
-        help="a pool of the sandboxes its program declares: module:factory of their provider, or a URL (repeatable; a "
-        "profile's are used too)",
+        help="a pool of the sandboxes its program declares: module:factory of their provider, or a URL (repeatable)",
     )  # fmt: skip
-    checking.add_argument("--profile", type=Path, help="play groups on this profile's channel, with its base model")
-    checking.add_argument("--groups", type=int, help="groups played with --profile (4)")
+    checking.add_argument("--groups", type=int, help="groups played by the model the settings name (4)")
     checking.add_argument("--episodes", type=int, help="episodes of each group (by default the algorithm's group size)")
-    checking.add_argument("--directory", type=Path, help="the check's directory (~/.cache/rollout/checks/NAME)")
-    checking.add_argument("--name", help="what the check's run is called")
     checking.add_argument("--seed", type=int, help="(0)")
-    _layers_of(checking)
+    _asks(checking, trains=False)
     listing = commands.add_parser("checkpoints", help="every checkpoint, newest first: where it came from")
     _over_a_ledger(listing)
-    hosting = commands.add_parser("engines", help="keep a profile's engines serving what a run says, and nothing else")
-    hosting.add_argument("profile", type=Path)
-    hosting.add_argument("--run", required=True, help="the run whose channels they serve, by its name or its id")
-    hosting.add_argument("--directory", type=Path, help="where fetched checkpoints are kept (instead of the profile's)")
-    hosting.add_argument("--name", help="what it beats as (by default this machine's name)")
-    playing = commands.add_parser("runner", help="play runs' episodes, and nothing else")
-    playing.add_argument("profile", type=Path)
-    playing.add_argument(
-        "--run", action="append", default=[], help="a run it plays, by name or id (repeatable; none: all it reaches)"
-    )
-    playing.add_argument("--directory", type=Path, help="the runner's directory (instead of the profile's)")
     serving = commands.add_parser("tools", help="serve a tool set over HTTP")
     serving.add_argument("factory")
     serving.add_argument("--directory", type=Path, default=Path("."))
@@ -1414,9 +1006,8 @@ def main() -> None:
     pooling.add_argument("--host", default="127.0.0.1")
     pooling.add_argument("--port", type=int, default=8710)
     gateway = commands.add_parser("gateway", help="serve a replica of the gateway, which records every turn")
-    gateway.add_argument("profile", type=Path, help="a profile: its channels, ledger, blobs and [gateway] table")
-    gateway.add_argument("--directory", type=Path, help="in place of the profile's own")
-    gateway.add_argument("--listen", help="host:port, in place of the profile's [gateway] listen")
+    gateway.add_argument("--cluster", **_cluster_option("the cluster config: its stores, keys and providers"))
+    gateway.add_argument("--listen", help="host:port, in place of the cluster config's [gateway] listen")
     gateway.add_argument(
         "--certificate", type=Path, help="serve TLS with this certificate (else a proxy terminates it)"
     )
@@ -1424,7 +1015,6 @@ def main() -> None:
     gateway.add_argument(
         "--proxied", default="127.0.0.1", help="addresses of proxies whose X-Forwarded-* headers are trusted ('*': any)"
     )
-    gateway.add_argument("--cluster", **_cluster_option("also every channel a run's start names, over its providers"))
     clusters = commands.add_parser("cluster", help="work with the cluster config")
     cluster_commands = clusters.add_subparsers(dest="cluster_command", required=True)
     cluster_checking = cluster_commands.add_parser(
@@ -1434,34 +1024,14 @@ def main() -> None:
     arguments = parser.parse_args()
     if arguments.command == "cluster":
         sys.exit(_check_cluster(arguments.cluster))
-    if arguments.command == "train":
-        work = _train(
-            arguments.profile,
-            arguments.directory,
-            arguments.environment,
-            arguments.groups,
-            arguments.groups_per_step,
-            arguments.seed,
-            arguments.monitor,
-            arguments.name,
-            arguments.set,
-            arguments.preset,
-            arguments.settings,
-            _chosen(arguments),
-        )
-        sys.exit(asyncio.run(until_signalled(work)))
+    asking = {"train": _train, "eval": _evaluate, "imitate": _imitate}
+    if arguments.command in asking:
+        sys.exit(asyncio.run(until_signalled(asking[arguments.command](arguments))))
     if arguments.command == "merge":
         asyncio.run(
             _merge(arguments.checkpoint, _ledger_of(arguments), arguments.base, arguments.merger, arguments.bookmark)
         )
         return
-    if arguments.command == "eval":
-        work = _evaluate(
-            arguments.profile, arguments.suite, arguments.checkpoint, arguments.episodes, arguments.directory,
-            arguments.monitor, arguments.name, arguments.set, arguments.environment, arguments.preset,
-            arguments.settings, _chosen(arguments),
-        )  # fmt: skip
-        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "suite":
         if arguments.suite_command == "list":
             asyncio.run(_suite("list", _ledger_of(arguments), None, arguments.environment, None, ""))
@@ -1473,44 +1043,31 @@ def main() -> None:
         ))  # fmt: skip
         return
     if arguments.command == "env":
-        sys.exit(asyncio.run(_check(
-            arguments.environment, arguments.row, arguments.reply, arguments.tools, arguments.profile,
-            arguments.groups, arguments.episodes, arguments.directory, arguments.name, arguments.seed,
-            arguments.set, arguments.pools, arguments.preset, arguments.settings, _chosen(arguments),
-        )))  # fmt: skip
+        sys.exit(asyncio.run(until_signalled(_check(arguments))))
     if arguments.command == "preset":
         asyncio.run(_preset(
             arguments.preset_command, _ledger_of(arguments), getattr(arguments, "preset", None),
             getattr(arguments, "from_run", None), getattr(arguments, "settings", None), getattr(arguments, "set", None),
-            getattr(arguments, "note", ""),
+            getattr(arguments, "note", ""), getattr(arguments, "directory", None),
         ))  # fmt: skip
         return
     if arguments.command == "rename":
         asyncio.run(_rename(arguments.who, arguments.name, _ledger_of(arguments)))
         return
     if arguments.command in ("pause", "resume"):
-        asyncio.run(_pause_or_resume(arguments.command, arguments.who, _ledger_of(arguments)))
+        asyncio.run(_pause_or_resume(arguments.command, arguments.who, _ledger_of(arguments), arguments))
         return
     if arguments.command == "bookmark":
         if arguments.checkpoint is None and not arguments.delete:
             parser.error("bookmark: name a checkpoint, or --delete")
         asyncio.run(_bookmark(arguments.name, arguments.checkpoint, arguments.delete, _ledger_of(arguments)))
         return
-    if arguments.command in ("engines", "runner"):
-        from rollout_train.hosting import host_engines, run_episodes
-        from rollout_train.profile import Profile
-
-        described = Profile.load(arguments.profile, directory=arguments.directory)
-        if arguments.command == "runner":
-            sys.exit(asyncio.run(until_signalled(run_episodes(described, arguments.run))))
-        work = host_engines(described, arguments.run, name=arguments.name)
-        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "checkpoints":
         asyncio.run(_checkpoints(_ledger_of(arguments)))
         return
     if arguments.command == "gateway":
-        work = _gateway(arguments.profile, arguments.directory, arguments.listen, arguments.certificate,
-                        arguments.private_key, arguments.proxied, arguments.cluster)  # fmt: skip
+        work = _gateway(arguments.cluster, arguments.listen, arguments.certificate, arguments.private_key,
+                        arguments.proxied)  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "pool":
         work = _pool(arguments.factory, arguments.directory, arguments.ledger, arguments.name, arguments.host,
@@ -1519,14 +1076,6 @@ def main() -> None:
     if arguments.command == "ledger":
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))
         return
-    if arguments.command == "imitate":
-        work = _imitate(
-            arguments.profile, arguments.directory, arguments.without, arguments.limit, arguments.seed,
-            arguments.dataset, arguments.start, arguments.name, arguments.resume_optimizer,
-            arguments.learning_rate, arguments.warmup, arguments.passes, arguments.set, arguments.preset,
-            arguments.settings,
-        )  # fmt: skip
-        sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "dataset":
         if arguments.dataset_command == "list":
             asyncio.run(_dataset("list", _ledger_of(arguments)))
@@ -1548,8 +1097,16 @@ def main() -> None:
             from rollout_train.monitor.app import create_app
             from rollout_train.publishing import Importer
 
-            importer = Importer.of(_cluster_of(arguments.cluster)) if arguments.cluster is not None else None
-            app = create_app(arguments.where, importer=importer)
+            cluster = _cluster_of(arguments.cluster) if arguments.cluster is not None else None
+            where = arguments.where
+            if where is None:
+                if cluster is None:
+                    parser.error("monitor: say WHERE, or --cluster for the cluster config's ledger")
+                from rollout_train.stores import ledger_url
+
+                where = ledger_url(cluster)
+            importer = Importer.of(cluster) if cluster is not None else None
+            app = create_app(where, importer=importer, cluster=cluster)
         else:
             from rollout.harness.remote import serve
 

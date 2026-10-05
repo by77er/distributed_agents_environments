@@ -113,8 +113,8 @@ def test_the_command_checks_it(
 ) -> None:
     from rollout_train.cli import main
 
-    command = ["rollout", "env", "check", "judging.environment:twice", "--directory", str(tmp_path)]
-    monkeypatch.setattr("sys.argv", command)
+    monkeypatch.setenv("HOME", str(tmp_path))  # (its scratch files go under ~/.cache/rollout/checks)
+    monkeypatch.setattr("sys.argv", ["rollout", "env", "check", "judging.environment:twice"])
     with pytest.raises(SystemExit) as ended:
         main()
     out = capsys.readouterr().out

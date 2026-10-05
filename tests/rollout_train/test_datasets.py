@@ -5,14 +5,14 @@ import dataclasses
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 import pytest
 from pydantic import JsonValue
 
 from rollout.contracts import RunEvent
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Checkpoints, FileLedger, Files, Step, Weighted
+from rollout_train import Checkpoints, FileLedger, Files, Ledger, Step, Weighted
 from rollout_train.checkpoints import new_id
 from rollout_train.datasets import (
     LEFT_OUT,
@@ -35,6 +35,8 @@ from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.stores import FILES
 from rollout_train.testing import plain_renderer
 from rollout_train.trainer import Distilled, Item, Labelled, Pair
+from tests.local_ray import LocalRay
+from tests.rollout_train.clusters import a_cluster
 from tests.rollout_train.support import Counting
 
 WAY = "How to get there. Place the table."
@@ -49,8 +51,8 @@ def segment(prompt: str, sampled: str, version: int, sampled_with: tuple[str, ..
 class Played:
     """A run's episodes in a ledger of files, as runners leave them."""
 
-    def __init__(self, tmp_path: Path, run: str = "train") -> None:
-        self.ledger = FileLedger(tmp_path / "ledger")
+    def __init__(self, tmp_path: Path, run: str = "train", ledger: Ledger | None = None) -> None:
+        self.ledger = ledger if ledger is not None else FileLedger(tmp_path / "ledger")
         self.blobs = FileBlobStore(tmp_path / "blobs")
         self.run = run
         self.at: dict[str, JsonValue] = {"kind": FILES, "directory": str(tmp_path / "blobs")}
@@ -131,6 +133,8 @@ async def test_a_dataset_is_a_record_and_a_manifest_that_read_back(tmp_path: Pat
     fence = await played.ledger.take(scope("train"))
     (tmp_path / "weights").mkdir()
     (tmp_path / "weights" / "adapter.bin").write_text("weights")
+    (tmp_path / "weights" / "adapter_config.json").write_text("{}")  # (an adapter, as PEFT names its files)
+    (tmp_path / "weights" / "adapter_model.safetensors").write_text("weights")
     first = await checkpoints.add(fence, new_id(), weights=tmp_path / "weights", run="train", step=1)
     second = await checkpoints.add(fence, new_id(), weights=tmp_path / "weights", run="train", step=2,
                                    parents=[first.id])  # fmt: skip
@@ -167,6 +171,8 @@ async def guesses(played: Played, tmp_path: Path) -> tuple[Checkpoints, list[str
     fence = await played.ledger.take(scope("train"))
     (tmp_path / "weights").mkdir(exist_ok=True)
     (tmp_path / "weights" / "adapter.bin").write_text("weights")
+    (tmp_path / "weights" / "adapter_config.json").write_text("{}")  # (an adapter, as PEFT names its files)
+    (tmp_path / "weights" / "adapter_model.safetensors").write_text("weights")
     first = await checkpoints.add(fence, new_id(), weights=tmp_path / "weights", run="train", base="qwen", step=1)
     second = await checkpoints.add(fence, new_id(), weights=tmp_path / "weights", run="train", step=2,
                                    parents=[first.id])  # fmt: skip
@@ -244,10 +250,9 @@ async def test_a_step_starts_its_optimizer_afresh_unless_told_to_resume_it(tmp_p
 
 
 class Trains:
-    """A trainer a profile names, that trains nothing (and keeps what each step was given)."""
+    """A trainer that trains nothing, made with the objective its run resolved."""
 
     weights = "lora"
-    given: ClassVar[list[list[Any]]] = []
 
     def __init__(self, model: str, **settings: Any) -> None:
         from rollout_train import Budget
@@ -260,36 +265,51 @@ class Trains:
         from rollout_train.trainer import WEIGHTS
 
         assert self.settings["objective"]["family"] in ("likelihood", "preference")  # (resolved)
-        Trains.given.append(list(batch))
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
         return Step({"segments": float(len(batch))})
 
 
-PROFILE = """
-directory = "{directory}"
-
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-
-[trainer]
-kind = "tests.rollout_train.test_datasets:Trains"
-channel = "policy"
+TRAINS = """
+[trainers.trains]
+kind = "lora"
+implementation = "tests.rollout_train.test_datasets:Trains"
+models = ["qwen"]
 """
+"""A trainer of adapters over `qwen` that trains nothing, beside the test cluster's."""
 
 
-def test_the_commands_make_list_and_train_on_a_dataset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def imitating(dataset: str, **more: JsonValue) -> dict[str, JsonValue]:
+    """An imitate run's settings on the test cluster: its trainer, its renderer, its dataset."""
+    return {
+        "kind": "imitate", "trainer.provider": "trains", "channels.policy.model": "qwen",
+        "channels.policy.renderer": "rollout_train.testing:plain_renderer", "imitation.dataset": dataset, **more,
+    }  # fmt: skip
+
+
+async def an_imitate_run(cluster: Any, name: str, settings: dict[str, JsonValue]) -> Any:
+    from rollout_train.jobs import Run
+    from rollout_train.run_settings import RunSettings
+    from rollout_train.stores import Stores
+
+    stores = Stores.open(cluster)
+    return Run(cluster, stores, RunSettings({**settings, "name": name}), await stores.registry.create(name))
+
+
+def test_the_commands_make_and_list_a_dataset_and_a_run_by_its_settings_trains_on_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], local_ray: LocalRay
 ) -> None:
     import asyncio
 
     from rollout_train.cli import main
+    from rollout_train.jobs import ran
+    from rollout_train.stores import Stores
 
-    played = Played(tmp_path / "played")
+    cluster = a_cluster(tmp_path, more=TRAINS)
+    stores = Stores.open(cluster)
+    played = Played(tmp_path, ledger=stores.ledger)  # (its blobs the cluster's)
     checkpoints, (first, second) = asyncio.run(guesses(played, tmp_path))
-    where = str(tmp_path / "played" / "ledger")
+    where = f"sqlite:///{tmp_path}/ledger.db"
     registry = registry_of(played.ledger)
     assert registry is not None
     asyncio.run(registry.create("train", "train"))  # (a run is found by the registry)
@@ -310,75 +330,62 @@ def test_the_commands_make_list_and_train_on_a_dataset(
     with pytest.raises(SystemExit, match="another dataset"):
         run("dataset", "make", "solved-all", "--run", "train", "--name", "guesses", "--ledger", where)
 
-    profile = tmp_path / "profile.toml"
-    profile.write_text(PROFILE.format(directory=tmp_path / "played"))
-    monkeypatch.setattr("sys.argv", ["rollout", "imitate", str(profile), "--dataset", "guesses", "--start",
-                                     second, "--name", "sft-guesses", "--set", "imitation.passes=2"])  # fmt: skip
-    with pytest.raises(SystemExit) as exited:
-        main()
-    assert exited.value.code == 0
-    out = capsys.readouterr().out
-    assert (
-        "3 segments of 1 episodes (0 left out), importance" in out
-        and "2 passes at" in out
-        and f"(from {second}, {first})" in out
+    imitated = asyncio.run(
+        an_imitate_run(cluster, "sft-guesses", imitating("guesses", start=second, **{"imitation.passes": 2}))
     )
+    asyncio.run(ran(imitated))
+    out = capsys.readouterr().out
+    assert "3 segments of 1 episodes (0 left out), importance" in out and "2 passes at" in out
+    assert f"(from {second}, {first})" in out
     (made_by,) = [each for each in asyncio.run(checkpoints.all()) if each.dataset is not None]
-    assert made_by.parents == (second, first) and made_by.dataset == made.id
-
-    async def started() -> dict[str, Any]:
-        registry = registry_of(played.ledger)
-        assert registry is not None
-        (entry,) = [each for each in await registry.runs() if each.name == "sft-guesses"]
-        assert made_by.run == entry.id
-        return dict(await played.ledger.read(table(entry.id, STARTS)))
-
-    (start,) = asyncio.run(started()).values()
+    assert made_by.parents == (second, first) and made_by.dataset == made.id and made_by.run == imitated.run.id
+    (start,) = asyncio.run(played.ledger.read(table(imitated.run.id, STARTS))).values()
     assert isinstance(start, dict) and start["kind"] == "imitation" and start["dataset"] == made.id
     assert start["from"] == second and start["supervision"] == "importance"
-    fixed = cast(dict[str, Any], start["run_settings"])[
-        "fixed"
-    ]  # (its run settings: the profile's, with what was said over them)
+    recorded = cast(dict[str, Any], start["run_settings"])  # (its run settings, as the run was given them)
+    fixed = recorded["fixed"]
     assert fixed["kind"] == "imitate" and fixed["imitation.dataset"] == "guesses" and fixed["start"] == second
-    assert fixed["imitation.passes"] == 2 and fixed["objective.preset"] == "sft"
-    assert start["run_settings"]["objective"]["family"] == "likelihood"
-    assert start["run_settings"]["preset"] is None
+    assert fixed["imitation.passes"] == 2 and fixed["objective.preset"] == "default"
+    assert recorded["objective"]["family"] == "likelihood" and recorded["preset"] is None  # (`sft`)
 
 
 def test_a_dataset_of_pairs_is_trained_on_by_the_preference_preset_a_run_names(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], local_ray: LocalRay
 ) -> None:
     import asyncio
 
     from rollout_train.cli import main
+    from rollout_train.jobs import ran
+    from rollout_train.stores import Stores
 
-    played = Played(tmp_path / "played")
+    cluster = a_cluster(tmp_path, more=TRAINS)
+    stores = Stores.open(cluster)
+    played = Played(tmp_path, ledger=stores.ledger)  # (its blobs the cluster's)
     asyncio.run(played.group(1, "t1", {"reward": 1.0}, {"reward": 0.0}, {"reward": 0.5}))
     registry = registry_of(played.ledger)
     assert registry is not None
     asyncio.run(registry.create("train", "train"))
-    where = str(tmp_path / "played" / "ledger")
+    where = f"sqlite:///{tmp_path}/ledger.db"
     monkeypatch.setattr("sys.argv", ["rollout", "dataset", "make", "best-and-worst", "--run", "train", "--name",
                                      "pairs", "--ledger", where])  # fmt: skip
     main()
     assert "1 episodes" not in capsys.readouterr().out  # (two: the best and the worst)
-    profile = tmp_path / "profile.toml"
-    profile.write_text(PROFILE.format(directory=tmp_path / "played"))
 
-    def imitate(*more: str) -> None:
-        monkeypatch.setattr("sys.argv", ["rollout", "imitate", str(profile), "--dataset", "pairs", *more])
-        main()
+    def imitate(name: str, **more: JsonValue) -> Any:
+        made = asyncio.run(an_imitate_run(cluster, name, imitating("pairs", **more)))
+        asyncio.run(ran(made))
+        return made
 
-    with pytest.raises(SystemExit, match="a dataset of pairs is trained on by a preference preset, not sft"):
-        imitate("--name", "nothing-named")
-    with pytest.raises(SystemExit, match="a likelihood or preference preset, not dapo"):
-        imitate("--name", "a-policy-gradient", "--set", "objective.preset=dapo")
-    Trains.given.clear()
-    with pytest.raises(SystemExit) as exited:
-        imitate("--name", "simpo-pairs", "--set", "objective.preset=simpo")
-    assert exited.value.code == 0 and "1 pairs of 2 episodes" in capsys.readouterr().out
-    ((pair,),) = Trains.given
-    assert isinstance(pair, Pair) and pair.source == "train/1/1>2"
+    with pytest.raises(ValueError, match="a dataset of pairs is trained on by a preference preset, not sft"):
+        imitate("nothing-named")
+    with pytest.raises(ValueError, match="a likelihood or preference preset, not dapo"):
+        imitate("a-policy-gradient", **{"objective.preset": "dapo"})
+    made = imitate("simpo-pairs", **{"objective.preset": "simpo"})
+    assert "1 pairs of 2 episodes" in capsys.readouterr().out
+    (checkpoint,) = [each for each in asyncio.run(stores.checkpoints.all()) if each.run == made.run.id]
+    assert checkpoint.batch is not None
+    trained = json.loads(asyncio.run(stores.blobs.read(checkpoint.batch)))
+    assert trained == [["train/1/1>2", 1.0]]  # (the pair: the best episode over the worst)
 
 
 @pytest.mark.parametrize("kind", ["files", "database"])
