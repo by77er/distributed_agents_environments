@@ -1356,44 +1356,21 @@ The user settled the design's open questions on 2026-10-04:
   at the same precision. Each provider follows the same serving record and loads the same bridged files; each turn
   records the provider and checkpoint that served it, and the importance weight corrects small numeric differences
   between providers as it corrects staleness.
-- **Inference providers are shared pools across runs.** A pool serves one base model; every run whose trained (or
-  fixed) channel is a LoRA over that base may bind to it, and the pool's followers load each bound run's checkpoints
-  as named adapters side by side (vLLM batches requests for several adapters together). A run joins only if its rank
-  fits the pool's highest rank and the pool has adapter slots for its live checkpoints (`max_lag + 1`); full-weight
-  runs need servers of their own. The gateway balances a pool between its runs by weighted fair shares (equal by
-  default, a changeable run setting), with optional caps and a priority for evals asked for by hand, and the launcher
-  admits a run to a pool only when slots and share allow, else queues the launch or offers another provider. The
-  Machines tab shows each pool's use by run (requests, tokens per second, queue, adapters loaded); a run's page shows
-  its pools and share. This replaces starting engines per run as the default for LoRA runs.
 - **On Kubernetes, each run is a RayJob with a Ray cluster of its own.** The launcher starts a run's job through one
   interface: on one machine it submits to the local Ray through the job API; on Kubernetes it creates a RayJob custom
   resource, whose Ray cluster holds the run's trainer, runners and environment worker and goes when the job ends.
   Within that cluster Ray restarts actors whose pod died; when the driver or the head is lost, the RayJob's
   `backoffLimit` starts the job again on a new Ray cluster (the old one's state went with its head), which resumes
-  the run from the ledger and blob store under a new fence. A shared inference pool is a long-lived Ray cluster of
-  its own (a RayCluster custom resource) whose engine hosts serve every run bound to it, its GPU workers added and
-  removed by the autoscaler; the gateway reaches its engines over HTTP and its followers read runs' serving records,
-  so a run's retry does not reload models. On a one-GPU node the run's trainer pod and a pool's
-  engine pod share the card by time-slicing into two, with the engine's memory share capped to leave the trainer room.
-- **A follower follows a pool, and is told only where things are.** It starts with three things: where the ledger
-  is, with a token limited to reading serving records and writing beats; where the blob store is, with read-only
-  credentials; and its pool's name (`ROLLOUT_POOL`). The ledger keeps each pool's bindings (the runs bound to it and
-  the adapter slots each holds), and the follower loads every bound run's serving checkpoints, so runs join and leave
-  a pool without restarting it. A follower in the cluster reads these from the cluster config (a ConfigMap and a
-  Secret, naming internal addresses); a pod outside the cluster gets them as environment variables from the launcher
-  when it is created, with step-ca's one-time token. So the cluster config declares, for the ledger and the blob
-  store, a public address beside the internal one, and the launcher hands each provider the address for where it
-  runs. Outside the cluster the ledger is the HTTP ledger service, never the database itself. The gateway finds
-  followers by their beats (address and certificate identity), as before.
-- **A pool hands out adapter slots.** A slot is one of vLLM's GPU LoRA slots (`--max-loras`), sized at the pool's
-  `max_lora_rank`, so every slot costs the same whatever a run's rank; every engine of a pool holds the same set, and
-  `--max-cpu-loras` is a cache above it, not allocated. A trained channel holds `max_lag + 1` slots, a channel that
-  follows another some steps behind holds 2 (what it serves and the next), a channel on a pinned checkpoint holds 1,
-  an eval of a checkpoint holds 1 while it runs, and a channel on the base model holds none. The launcher binds a run
-  to a pool only when the pool has free slots for all its channels, else queues the launch or offers another
-  provider; raising `max_lag` on a running run is checked the same way, and lowering it frees slots once the follower
-  has unloaded the adapters. Slots decide whether a run is served at all; the gateway's weighted fair shares decide
-  how much throughput each bound run gets.
+  the run from the ledger and blob store under a new fence. On a one-GPU node a run's trainer and engines share the
+  card, with each process capping its own memory.
+- **A follower is told only where things are.** It starts with three things: where the ledger is, with a token
+  limited to reading serving records and writing beats; where the blob store is, with read-only credentials; and the
+  run and channels it serves. Everything else (which checkpoints, how far behind) comes from the serving records. A
+  follower in the cluster reads these from the cluster config (a ConfigMap and a Secret, naming internal addresses); a
+  pod outside the cluster gets them as environment variables from the run that starts it, with step-ca's one-time
+  token. So the cluster config declares, for the ledger and the blob store, a public address beside the internal one,
+  and each provider gets the address for where it runs. Outside the cluster the ledger is the HTTP ledger service,
+  never the database itself. The gateway finds followers by their beats (address and certificate identity).
 - **Every role reaches the ledger through the ledger API.** In a cluster, the launcher, monitor, gateway, run jobs,
   runners, followers and sandbox pools all use `HttpLedger(url, token)` against the ledger service, which alone holds
   the database's credentials and connections; on one machine and in tests the same interfaces are a database ledger
@@ -1410,12 +1387,37 @@ The user settled the design's open questions on 2026-10-04:
 - **There is no launcher service; a run claims what it needs.** The monitor's API and the CLI start a run through one
   function that submits its job directly: a RayJob custom resource on Kubernetes (the monitor's service account may
   create them), the Ray job API on one machine. The run's driver is the authority over its resources: it resolves its
-  settings against the cluster config, validates them again, claims adapter slots in shared pools by compare-and-set
-  on the pool's bindings in the ledger, asks Ray for its trainer, runners and engines (the autoscaler adds workers),
+  settings against the cluster config, validates them again, asks Ray for its trainer, runners and engines (the
+  autoscaler adds workers),
   and starts what lives outside Ray (RunPod pods) through the provider's API. A run that cannot get what it needs yet
-  waits, its reason shown (pending resources, a full pool), or fails with the reason recorded. What the form offers
-  comes from the cluster config and live heartbeats (pools' free slots, free GPUs), and validation at ask time
-  refuses what can never run. The launches table is the record of what was asked and the job it became. Shared
-  pools stay long-lived, declared in the cluster config and deployed with the chart. Quotas and fair share across
-  users, when needed, come from Kueue on Kubernetes rather than a service of ours.
+  waits, its reason shown, or fails with the reason recorded. What the form offers comes from the cluster config
+  and live heartbeats (free GPUs), and validation at ask time
+  refuses what can never run. The launches table is the record of what was asked and the job it became.
+- **A run says whether it trains a LoRA or full weights.** `weights = "lora"` or `"full"` is one of a run's first
+  settings, and it decides the rest: which trainers (LoRA or full-weight kinds; Tinker trains LoRAs only), which
+  inference providers (for a LoRA, those that load adapters at the run's rank; for full weights, those that reload
+  full weights in place, never Tinker's sampler), which bridges, and how much memory its engines need. The New run
+  form asks it first and offers only what fits.
+- **Resources are metered or scheduled.** Each provider declares its allocation. A metered provider (Tinker, hosted
+  APIs) is a commodity with nothing to place: a run is bounded by its spend limit (`limits.spend`, from the
+  catalog's prices), the provider's rate limits and an optional concurrency cap, and the form treats it as always
+  available. A scheduled provider (local GPUs, RunPod pods, cluster nodes) is finite capacity a run must be placed
+  on, and a run gets its scheduled parts together or not at all: its trainer and its engines are one gang, reserved
+  at once by a Ray placement group inside the run's Ray cluster, and admitted whole by Kueue on Kubernetes, which
+  queues a RayJob until its total request fits. So two runs never deadlock holding half of what each needs.
+- **A run's engines are its own.** Engines serve one run: its trained channel's window of `max_lag + 1` adapters, its
+  channels that follow its own snapshots, and evals of its own checkpoints. Runs never share an inference server's
+  throughput, so one run's speed, staleness and failures never depend on another's, and a run is the unit of
+  scheduling. When the GPUs are taken, a run waits in the queue rather than squeezing in. A read-only service for
+  untrained channels (a fixed judge, a base model for evals) may later be shared across runs, since contention there
+  costs only speed.
 
+### Later directions
+
+- **An elastic pool of RunPod pods.** Pods become scheduled capacity that grows and shrinks: a node pool whose size
+  follows the queue of runs waiting for GPUs, each pod joining as a Ray worker (or a Kubernetes node) over mutual TLS
+  and stopped when idle, with the gang rule unchanged.
+- **A trainer across several pods or nodes.** For models too large for one card, pipeline- and tensor-parallel
+  training: the trainer becomes a group of actors placed together across nodes with fast interconnect (a placement
+  group spreading over nodes; topology-aware admission in Kueue; RunPod's multi-node clusters), its checkpoints
+  sharded, and bridges resharding them into what the engines load.
