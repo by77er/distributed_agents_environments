@@ -207,3 +207,62 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
    rankings.
 4. **Distillation**: prompt logprobs in `VllmEngine` (built: scoring through the engines and the gateway), then
    on-policy distillation, then off-policy distillation with teacher datasets.
+
+## Checked on Qwen3-0.6B
+
+On 2026-10-04, at commit `94146d7` (the code of this branch, run before it was rebased onto main's scoring and
+untrained-slot changes), every preset took a short real run on one RTX 5080 (16 GB): `rollout train` over GSM8K
+(`rollout_verifiers.environments:gsm8k`), sampled by local vLLM (`gpu_memory_utilization` 0.35, sleeping while the
+trainer steps) and trained by the local LoRA trainer on the same card, with the scratch SQLite ledger and file blobs.
+GSM8K because its reward is verifiable (`math-verify` compares the final number) and Qwen3-0.6B solves part of it:
+57.5% of the 480 episodes, so most groups' outcomes vary.
+
+Each run: 8 groups of 4 episodes, a step every 2 groups that have something to train on, 384 thinking and 256 answer
+tokens a turn, LoRA rank 16 at a rate of 1e-4, `tokens_per_step` 1,024 (two to four updates a step), `max_kl` 0.5 (no
+step stopped at it), gradients clipped to norm 1. Groups whose scores are all equal give nothing for a policy gradient
+with a baseline and no pair; `reinforce` (no baseline) trains on every group. Per step, `/` between steps:
+
+| Preset | Groups (trained) | Steps | Loss finite | Loss | KL moved | Mean ratio | Clip fraction | Truncated | Preference accuracy, margin | Step s (trainer; with sleep and wake) | Peak GPU GiB (trainer; card) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `default` | 8 (4) | 2 | yes | -0.0285 / 0.0117 | 0.014 / 0.017 | 0.9998 / 0.9976 | 0.029 / 0.041 | 0 / 0.0011 | — | 6.3 / 6.2 (14 / 13) | 1.67; 8.7 |
+| `reinforce` | 8 (8) | 4 | yes | 166 / 215 / 122 / 186 | 0.0035 / 0.013 / 0 / 0 | 1 / 0.9997 / 1 / 1 | 0 | 0 | — | 3.5 / 4.8 / 3.2 / 2.8 (11 / 13 / 12 / 9) | 1.68; 8.8 |
+| `rloo` | 8 (3) | 2 | yes | 2.9 / -6.12 | 0.029 / 0.0058 | 1.005 / 0.9991 | 0 | 0 | — | 5.3 / 3.2 (11 / 9.9) | 1.67; 9.0 |
+| `ppo_clip` | 8 (6) | 3 | yes | 0.00963 / 0.013 / -0.0036 | 0.012 / 0.005 / 0.0059 | 0.9979 / 0.9988 / 0.9994 | 0.04 / 0.029 / 0.023 | 0 | — | 5.4 / 5.3 / 4.4 (14 / 14 / 10) | 1.67; 9.1 |
+| `grpo` | 8 (5) | 3 | yes | 0.00511 / 0.00337 / 0.00123 | 0.017 / 0.0031 / 0.00044 | 1.002 / 1.003 / 1.001 | 0.054 / 0.026 / 0.011 | 0 | — | 6.2 / 5.4 / 3.7 (17 / 15 / 10) | 1.68; 9.3 |
+| `dr_grpo` | 8 (5) | 3 | yes | 0.000715 / -0.00249 / -0.00816 | 0.011 / 0.0077 / 0.0055 | 1 / 1 / 0.9994 | 0.057 / 0.045 / 0.0066 | 0 | — | 4.5 / 4.5 / 3.3 (12 / 11 / 9.6) | 1.68; 9.0 |
+| `dapo` | 8 (5) | 3 | yes | 0.0322 / -0.0111 / -0.00181 | 0.023 / 0.0074 / 0.0022 | 0.9989 / 1 / 0.9998 | 0.055 / 0.012 / 0.0055 | 0 | — | 4.9 / 4.5 / 2.8 (12 / 13 / 8.7) | 1.67; 8.7 |
+| `gspo` | 8 (5) | 3 | yes | 0.0108 / 0.000374 / 0.00145 | 0.034 / 0.011 / 0.0086 | 0.9856 / 0.9964 / 0.9958 | **0.63 / 0.6 / 0.49** | 0 | — | 4.4 / 4.6 / 3 (12 / 13 / 9.3) | 1.67; 8.7 |
+| `cispo` | 8 (7) | 4 | yes | -0.00225 / -0.0752 / -0.0744 / -0.0277 | 0.016 / 0.036 / 0.0052 / 0.021 | 0.9995 / 0.9917 / 0.9991 / 0.9949 | 0.00025 / 0 / 0.00026 / 0 | 0 | — | 4.6 / 4.7 / 4.6 / 2.7 (13 / 13 / 12 / 8.8) | 1.68; 8.8 |
+| `sft` | 8 (6) | 3 | yes | -0.0169 / -0.00348 / 0.00121 | n/a | n/a | n/a | n/a | — | 4.8 / 4 / 4.4 (12 / 11 / 11) | 1.67; 8.7 |
+| `dpo` | 8 (5) | 3 | yes | 0.761 / 0.434 / 1.44 | 0.0038 / 0 / 0 | n/a | n/a | n/a | 0.00, -1.27 / 1.00, 6.19 / 0.00, -11.7 | 2.9 / 2.8 / 1.8 (9.6 / 9.5 / 7.5) | 1.73; 8.7 |
+| `ipo` | 8 (5) | 3 | yes | **25 / 25 / 25.1** | -0.0024 / 0 / 0 | n/a | n/a | n/a | 0.00, -0.0015 / 1.00, 0.0033 / 0.00, -0.0139 | 3 / 3 / 2.1 (10 / 10 / 8.1) | 1.67; 8.8 |
+| `simpo` | 8 (7) | 4 | yes | 1.27 / 1.33 / 1.09 / 1.12 | 0.0011 / 0 / 0.0077 / 0 | n/a | n/a | n/a | 1.00, 0.028 / 0.50, -0.0076 / 1.00, 0.163 / 1.00, 0.139 | 2.7 / 2.6 / 2.8 / 1.7 (9.4 / 10 / 9.5 / 7.5) | 1.67; 8.8 |
+| `kto` | 8 (6) | 3 | yes | 0.525 / 0.615 / 0.384 | 0.037 / 0.015 / 0.034 | n/a | n/a | n/a | 0.25, -1.06 / 0.38, -7.12 / 0.62, 5.93 | 5.4 / 7.2 / 6.3 (13 / 18 / 19) | 1.75; 8.7 |
+| `orpo` | 8 (6) | 3 | yes | 0.493 / 0.504 / 0.594 | 0.0012 / 0 / 0.0042 | n/a | n/a | n/a | 0.50, -0.033 / 0.00, -0.019 / 0.50, 0.091 | 3.7 / 4.5 / 3.1 (13 / 15 / 9.2) | 1.67; 8.8 |
+
+Nothing failed: every run played its groups, every loss was finite, and the policy moved in every run that measures
+it. *KL moved* is KL(start ‖ now) as a step's last stepped minibatch found it; a step of one minibatch reads 0 there
+by construction (a preference step of one or two pairs, a REINFORCE step whose groups are few), and such runs moved
+between steps instead: `grpo`'s KL penalty to the reference grew from 0.011 to 0.016 nats a token, `dpo`'s chosen side
+left the reference by 0.75 nats by its second step, and `simpo`'s and `orpo`'s margins rose. A likelihood reads no
+`old`, so `sft` has none of the ratio's numbers (n/a). The trainer's peak is its process's on the card while the engine
+sleeps; the card's is everything nvidia-smi saw (the desktop's 2.3 GiB and the engine's 5.6 GiB among it). The engine's
+sleep and wake add 6 to 12 seconds to each step.
+
+What looks wrong, and is reported rather than tuned away:
+
+- **`gspo` clips half its tokens or more** (0.49 to 0.63). Its bounds hold a segment's mean log ratio within
+  -3e-4 .. 4e-4 nats a token, and a rate of 1e-4 moves a segment past them in one update; the paper reports GSPO
+  clipping far more tokens than GRPO, so the direction is the paper's, the size this rate's.
+- **`ipo`'s loss sits at 25.** With tau 0.1 and token-mean log ratios its target margin is 1/(2·tau) = 5 nats a token,
+  while three steps move the margin by thousandths: the loss is (h - 5)² ≈ 25 by the formula, not a fault, but the
+  preset's tau (TRL's) asks far more than a few steps give.
+- **Gradient norms before clipping** are 276 to 588 for `reinforce` and `rloo` (raw rewards times summed logprobs),
+  22 to 110 for `dpo` (sums over hundreds of tokens), 13 to 22 for `ipo`, about 10 for `kto`, and 0.06 for `dr_grpo`
+  (divided by 3,000): clipping at 1 makes the summed presets' updates normalized steps here, and `dr_grpo`'s small
+  gradient is taken up by Adam.
+- **`dpo`'s margins swing from -11.7 to 6.2** across steps: each step's pairs are new episodes, and a log ratio summed
+  over a few hundred tokens moves by many nats under an adapter that has trained two steps. Accuracy on one or two
+  fresh pairs a step says little.
+- **`kl_moved` can be negative** (`ipo`, -0.0024): it is the k1 estimate on the sampled tokens, which is unbiased but
+  not bounded below.
