@@ -203,3 +203,8 @@ def test_every_variable_a_pod_reads_is_documented(role: str) -> None:
     )
     missing = sorted(name for name in read if f"`{name}`" not in documented and not name.startswith("RUNPOD_TCP_PORT"))
     assert missing == []
+
+
+def test_no_image_is_built_with_this_machines_files_or_keys() -> None:
+    ignored = {line.strip() for line in (ROOT / ".dockerignore").read_text().splitlines()}
+    assert {"local", "**/*.env", ".claude"} <= ignored  # (local/ holds keys: the platform image copies the tree)
