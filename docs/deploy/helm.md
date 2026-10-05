@@ -74,6 +74,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `runpod.reaper` | `false` | The CronJob that deletes the pods no run holds |
 | `stepCa.enabled`, `stepCa.passwordSecret`, `stepCa.dnsNames` | `false`, `step-ca-password`, none | The chart's step-ca, its password's Secret, more names for its certificate |
 | `tunnel.enabled`, `tunnel.secret`, `tunnel.hostnames` | `false`, `tunnel`, none | A Cloudflare Tunnel to the ledger service and step-ca, its token's Secret, and its hostnames |
+| `clusterExtra` | none | TOML appended to the cluster config: this deployment's own tables, such as `[stores.r2]`, `[tls]` and RunPod providers (`files/cluster.toml` has a commented example of each) |
 | `stores.postgres.storage`, `stores.s3.storage` | `20Gi`, `200Gi` | The stores' volumes; cannot change once made |
 | `stores.bucket`, `stores.prefix` | `rollout-blobs`, `blobs/` | Where blobs are kept in the S3 store |
 | `ray.version` | `2.59.0` | Ray's version, which must be the image's |

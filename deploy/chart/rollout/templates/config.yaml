@@ -21,6 +21,9 @@ metadata:
 data:
   cluster.toml: |
     {{- tpl (.Files.Get "files/cluster.toml") . | nindent 4 }}
+    {{- with .Values.clusterExtra }}
+    {{- . | nindent 4 }}
+    {{- end }}
   rayjob.yaml: |
     {{- tpl (.Files.Get "files/rayjob.yaml") . | nindent 4 }}
   {{- range $path, $_ := .Files.Glob "files/presets/*.toml" }}

@@ -36,6 +36,10 @@ secrets:
                               # WRITER_SECRET_ACCESS_KEY (read and write: the platform, trainer pods), READER_ACCESS_KEY_ID,
                               # READER_SECRET_ACCESS_KEY (read only: inference pods)
 
+# TOML appended to the cluster config (files/cluster.toml): this deployment's own tables, such as a second blob store
+# ([stores.NAME]), [tls], and RunPod providers (files/cluster.toml has a commented example of each).
+clusterExtra: ""
+
 # The ledger and the blob store.
 stores:
   postgres:
