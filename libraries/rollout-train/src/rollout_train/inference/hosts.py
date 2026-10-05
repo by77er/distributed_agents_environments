@@ -17,9 +17,10 @@ then refused unless what it named is still held, so it is sampled again from the
 over an actor handle, for a `RemoteChannel` in the same Ray cluster; `HostPausable` holds its requests back and puts
 its engines to sleep for a colocated trainer (`rollout_train.colocated`).
 
-It asks Ray for GPUs (`host_spec`): a replica's share of its provider's, half of it where the run's trainer shares the
-card. On Kubernetes, a share no node has free makes KubeRay's autoscaler start a GPU worker for it. Ray starts it again
-when it dies (`max_restarts=-1`): its engines start afresh, and its follower loads what the serving records say again.
+It asks Ray for one CPU and GPUs (`host_spec`): a replica's share of its provider's, half of it where the run's trainer
+shares the card. A run's own host is placed in its bundle of the run's placement group (`rollout_train.demand`). Ray
+starts it again when it dies (`max_restarts=-1`): its engines start afresh, and its follower loads what the serving
+records say again.
 """
 
 import asyncio
@@ -228,6 +229,8 @@ class HostSpec:
     """GPUs it asks for: a fraction shares a card."""
     resources: Mapping[str, float] = field(default_factory=dict[str, float])
     """Custom resources it asks for (`[placement.engines]`), which steer it to the nodes that have them."""
+    cpus: float = 1.0
+    """CPUs it asks for (what a run's demand counts for it: `rollout_train.demand`)."""
 
 
 def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSettings | None" = None) -> HostSpec:
@@ -267,15 +270,17 @@ def started(
     directory: str = SCRATCH,
     every: float = 2.0,
     beating: float = 15.0,
+    placement: Mapping[str, Any] | None = None,
 ) -> Any:
     """An engine host started as a Ray actor named `name` on the cluster this process is connected to, asking for
-    what `spec` says and started again whenever it dies; its handle. A run's own host goes with the job that started it;
-    a pool's is `detached`, and lives until it is ended."""
+    what `spec` says and started again whenever it dies; its handle. A run's own host goes with the job that started it,
+    in its bundle of the run's placement group (`placement`: the options `rollout_train.demand.placed` gives); a pool's
+    is `detached`, and lives until it is ended."""
     import ray
 
     options: dict[str, Any] = {
-        "name": name, "num_gpus": spec.gpus, "resources": dict(spec.resources), "max_restarts": -1,
-        "max_concurrency": 1000,
+        "name": name, "num_cpus": spec.cpus, "num_gpus": spec.gpus, "resources": dict(spec.resources),
+        "max_restarts": -1, "max_concurrency": 1000, **dict(placement or {}),
     }  # fmt: skip
     if namespace is not None:
         options["namespace"] = namespace

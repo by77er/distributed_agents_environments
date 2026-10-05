@@ -4,8 +4,8 @@ It says where the ledger and the blob store are, the node-local scratch director
 authority, the Ray cluster runs' jobs are submitted to (or, with `[kubernetes]`, the RayJob each run's job is made
 from), the gateway, the monitor, the runners and the memory guards; the inference providers and trainers it offers
 (`rollout_train.providers`); its sandbox pools, tool sets served elsewhere, the environments it offers and the Python
-each runs in; and where roles run (placement) and what bridges need. Nothing about a run is in it: that is the run's
-settings (`rollout_train.run_settings`).
+each runs in; where roles run (placement), what bridges need, and the most it schedules for one run (capacity).
+Nothing about a run is in it: that is the run's settings (`rollout_train.run_settings`).
 
 A process finds the file (`find`) by `--cluster PATH` or `--cluster NAME` (`~/.config/rollout/clusters/NAME.toml`),
 else the `ROLLOUT_CLUSTER` environment variable (a path or a name), else `~/.config/rollout/cluster.toml`. A run's job
@@ -49,6 +49,7 @@ from rollout_train.providers import (
 __all__ = [
     "BlobsSection",
     "BridgeSection",
+    "CapacitySection",
     "Cluster",
     "ClusterError",
     "EnvironmentSection",
@@ -111,6 +112,9 @@ class KubernetesSection:
     namespace: str
     rayjob: str
     api: str = "https://kubernetes.default.svc"
+    queue: str | None = None
+    """The Kueue LocalQueue in `namespace` that admits runs' RayJobs: each is made suspended, with the label
+    `kueue.x-k8s.io/queue-name`, and starts when Kueue admits it whole. None: each starts when it is made."""
 
 
 @dataclass(frozen=True)
@@ -221,6 +225,16 @@ class BridgeSection:
 
 
 @dataclass(frozen=True)
+class CapacitySection:
+    """The most the cluster can schedule for one run (`[capacity]`): on Kubernetes with Kueue, its queue's quota. A run
+    whose demand exceeds it is refused (`rollout_train.demand`). Each is unbounded where it is not said."""
+
+    cpus: float | None = None
+    memory_gib: float | None = None
+    gpus: float | None = None
+
+
+@dataclass(frozen=True)
 class Cluster:
     """A cluster, as its config describes it. It holds no secret, only references to secrets."""
 
@@ -245,6 +259,7 @@ class Cluster:
     placement: Mapping[str, Mapping[str, float]] = field(default_factory=dict[str, Mapping[str, float]])
     """Custom resources each role asks for, by role."""
     bridges: Mapping[str, BridgeSection] = field(default_factory=dict[str, BridgeSection])
+    capacity: CapacitySection | None = None
     described: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue], repr=False, compare=False)
     """The config as it was read (relative paths made absolute): what is handed on as JSON, and `parsed` reads back."""
 
@@ -365,7 +380,17 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         if not template.is_absolute() and relative_to is not None:
             template = relative_to / template
         kubernetes = KubernetesSection(
-            namespace=said.text("namespace"), rayjob=str(template), api=said.text("api", KubernetesSection.api)
+            namespace=said.text("namespace"),
+            rayjob=str(template),
+            api=said.text("api", KubernetesSection.api),
+            queue=said.text("queue", None),
+        )
+        said.done()
+    capacity: CapacitySection | None = None
+    if "capacity" in table.table:
+        said = table.section("capacity")
+        capacity = CapacitySection(
+            said.number("cpus", None), said.number("memory_gib", None), said.number("gpus", None)
         )
         said.done()
     tls: Tls | None = None
@@ -466,6 +491,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         environments=environments,
         placement=placement,
         bridges=bridges,
+        capacity=capacity,
         described=_handed_on(described, environments, kubernetes),
     )
 

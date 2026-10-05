@@ -5,7 +5,7 @@ rule it breaks, the key it is about and a reason a person can act on), or nothin
 connection and starts nothing: what it needs to know beyond the settings and the cluster is gathered beforehand, as
 facts: the environment's (`EnvironmentFacts`: whether it loads, the sandboxes and tool sets it needs, its slots, how
 long its episodes run) and the ledger's (`LedgerFacts`: the checkpoints the settings name and their formats, the
-suites, the names taken, the cluster's capacity).
+suites, the names taken, the GPUs the cluster has and what it has free).
 
 A finding refuses the run unless it says it does not (`refuses`): a run that only waits (for a GPU) is told so and
 not refused. `RULES` lists the rules in the order findings are reported (docs/guide/cluster.md says
@@ -21,6 +21,7 @@ from pydantic import JsonValue
 from rollout_train.algorithm import algorithm_for, needs_of
 from rollout_train.bridges import AUTO, Bridge, NoBridge, path, rank_factor
 from rollout_train.cluster import Cluster, auth_problem
+from rollout_train.demand import HEADROOM, Demand, Resources, demand, played_channel, requested
 from rollout_train.distillation import routes_of
 from rollout_train.objectives import DEFAULT, POLICY_GRADIENT, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
@@ -98,7 +99,11 @@ RULES: tuple[Rule, ...] = (
         "whose logprobs are unchecked, or of another renderer family",
     ),
     Rule("environment", "not offered, does not load, or needs sandboxes or tool sets the cluster lacks"),
-    Rule("capacity", "more GPUs than the cluster has, counting the run's scheduled parts"),
+    Rule(
+        "capacity",
+        "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting "
+        "the run's scheduled parts",
+    ),
     Rule("spend", "a spend limit below one step's estimated cost"),
     Rule("name", "not a name, or taken"),
 )
@@ -161,7 +166,8 @@ class LedgerFacts:
     names_taken: frozenset[str] = frozenset()
     gpus: float | None = None
     """GPUs the cluster has in all (none: not known)."""
-    gpus_free: float | None = None
+    free: Resources | None = None
+    """What the cluster has free now (none: not known)."""
 
 
 def refusals(findings: list[Finding]) -> list[Finding]:
@@ -815,28 +821,56 @@ def _environment(run: _Run) -> None:
 
 
 def _capacity(run: _Run) -> None:
-    total, free = run.ledger.gpus, run.ledger.gpus_free
-    if total is None:
-        return
-    engines: dict[str, float] = {}
+    sandboxes = run.environment.sandboxes if run.environment is not None else ()
+    asked = demand(run.settings, run.cluster, sandboxes=sandboxes)
+    needs = asked.total
+    key = "trainer.provider" if run.kind in TRAINING else f"channels.{played_channel(run.settings)}.provider"
+    capacity = run.cluster.capacity
+    if capacity is not None:
+        known = [name for name in ("cpus", "memory_gib", "gpus") if getattr(capacity, name) is not None]
+        room = Resources(capacity.cpus or 0.0, capacity.memory_gib or 0.0, capacity.gpus or 0.0)
+        pods = requested(asked, kubernetes=run.cluster.kubernetes is not None)
+        if over := pods.beyond(room, known=known):
+            most = Resources(capacity.cpus or 0.0, capacity.memory_gib or 0.0, capacity.gpus or 0.0).said()
+            run.refuse("capacity", key, f"the run needs {pods.said()} ({_parts(asked)}, and room for Ray's own "
+                       f"processes, {HEADROOM.said()}); the cluster schedules at most {most} for one run "
+                       f"([capacity]): it asks for more {', '.join(over)}, and would never start")  # fmt: skip
+    total, free = run.ledger.gpus, run.ledger.free
+    gpus = needs.gpus + _elsewhere(run)
+    if total is not None and gpus > total:
+        run.refuse("capacity", key, f"the run needs {gpus:g} GPUs, and the cluster has {total:g}: it would never "
+                   "start")  # fmt: skip
+    elif free is not None and (short := _short(needs, free)):
+        run.note("capacity", key, f"the run needs {short}: it waits")
+
+
+def _elsewhere(run: _Run) -> float:
+    """The GPUs of the run's scheduled providers whose servers are outside its Ray cluster (`vllm-servers`, RunPod),
+    by provider: those a channel's replicas take."""
+    taken: dict[str, float] = {}
     for channel in run.settings.channels:
         for name, provider in run.providers(channel):
-            if provider.allocation != "scheduled":
-                continue
-            replicas = run.settings[f"channels.{channel}.replicas"]
-            count = replicas if isinstance(replicas, int) else provider.replicas
-            engines[name] = max(engines.get(name, 0.0), count * provider.gpus)
-    trainer = run.trainer.gpus if run.trainer is not None and run.trainer.allocation == "scheduled" else 0.0
-    shared = run.trainer.colocate_with if run.trainer is not None else None
-    if shared in engines:
-        engines[shared] = max(engines[shared], trainer)
-        trainer = 0.0
-    needs = trainer + sum(engines.values())
-    if needs > total:
-        run.refuse("capacity", "trainer.provider", f"the run needs {needs:g} GPUs, and the cluster has {total:g}: it "
-                   "would never start")  # fmt: skip
-    elif free is not None and needs > free:
-        run.note("capacity", "trainer.provider", f"the run needs {needs:g} GPUs, and {free:g} are free: it waits")
+            if provider.allocation == "scheduled" and provider.kind != "vllm":
+                replicas = run.settings[f"channels.{channel}.replicas"]
+                count = replicas if isinstance(replicas, int) else provider.replicas
+                taken[name] = max(taken.get(name, 0.0), count * provider.gpus)
+    return sum(taken.values())
+
+
+def _parts(asked: Demand) -> str:
+    """Each part of a run's demand, in words: `its driver (2 CPUs, 2 GiB), trainer (1 CPU), …`."""
+    said = [f"its driver ({asked.driver.said()})"]
+    said += [f"{part.name} ({part.asks.said()})" for bundle in asked.bundles for part in bundle.parts]
+    return ", ".join(said)
+
+
+def _short(needs: Resources, free: Resources) -> str:
+    """What of `needs` the cluster does not have free, each as `N GPUs, and M are free`; empty where it has it all."""
+    units = (("gpus", "GPUs"), ("cpus", "CPUs"), ("memory_gib", "GiB of memory"))
+    return "; ".join(
+        f"{getattr(needs, name):g} {unit}, and {getattr(free, name):g} are free" for name, unit in units
+        if getattr(needs, name) > getattr(free, name) + 1e-9
+    )  # fmt: skip
 
 
 @dataclass(frozen=True)

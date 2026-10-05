@@ -10,11 +10,12 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
 
 1. checks the run's settings again against the cluster config, with what it finds now (`rollout_train.launching
    .checked`): a refusal ends the run, the reasons recorded as its end and on its launch;
-2. asks Ray for what the run needs (`Run.start`): an engine host actor of its own for each replica of a channel on a
-   `vllm` provider (`rollout_train.inference.hosts`), the trainer as an actor with its share of a GPU (half of the
-   card where it is colocated with the trained channel's engines, which then sleep while it steps), on the driver's
-   node, since a step's files are handed to it by path. While something waits for Ray, the driver beats as
-   `run/RUN` saying what it waits for, and notes it on its launch;
+2. reserves what the run needs as one placement group (`Run.start`, `rollout_train.demand`), then starts it there: an
+   engine host actor of its own for each replica of a channel on a `vllm` provider (`rollout_train.inference.hosts`),
+   the trainer as an actor with its share of a GPU (half of the card where it is colocated with the trained channel's
+   engines, which then sleep while it steps), on the driver's node, since a step's files are handed to it by path, and
+   a bundle for the bridges' tasks. While the group or an actor waits for Ray, the driver beats as `run/RUN` saying
+   what it waits for, and notes it on its launch;
 3. samples every channel its settings name through a gateway in its own process (`rollout_train.gateway.Gateway`):
    a channel on engine hosts or on servers elsewhere (`vllm-servers`, RunPod pods) is a routed channel, sampled by
    checkpoint name from what the run's serving records say (`rollout_train.inference.Routes`); a channel on Tinker is
@@ -23,8 +24,9 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
 4. plays its episodes with a runner in its own process (`rollout_train.rollouts.EpisodeRunner` over
    `rollout.local.LocalRunner`), with the sandbox pools of the cluster's `[sandboxes]` its environment's programs
    declare, the tool sets of its `[tools]`, and the gateway, served on this node for harnesses;
-5. runs the loop of its kind (`train`, `evaluate`, `imitate`, `check`), with bridges as Ray tasks
-   (`rollout_train.bridges.on_ray`) where the trained channel's provider loads another format than the trainer makes;
+5. runs the loop of its kind (`train`, `evaluate`, `imitate`, `check`), with bridges as Ray tasks in the group's
+   bridge bundle (`rollout_train.bridges.on_ray`) where the trained channel's provider loads another format than the
+   trainer makes;
 6. on the way out, ends what it started (Ray ends the actors with the job in any case), and notes how it ended.
 
 A run's channel on a `vllm` provider gets engine hosts of its own (`Run.start`, `hosted`).
@@ -58,10 +60,11 @@ from rollout_train.bridges import AUTO, Bridge, NoBridge, format_of, on_ray, pat
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.cluster import Cluster, located
 from rollout_train.colocated import Colocated
+from rollout_train.demand import BRIDGE, TRAINER, Demand, Resources, colocating, demand, placed, played_channel, reserve
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Limits, Route, Routes
 from rollout_train.inference.channel import MAX_LAG
-from rollout_train.launching import Refused, checked, declared, ray_capacity
+from rollout_train.launching import Refused, checked, declared, ray_free
 from rollout_train.ledger import Fence
 from rollout_train.machine import measured
 from rollout_train.presence import presence_of
@@ -274,6 +277,13 @@ class Run:
     """The objective its trainer is made with, where the run's settings do not say it all (an imitate run's)."""
     waiting: Waiting = field(default_factory=Waiting)
     trainer_handle: Any = None
+    sandboxes: frozenset[str] = frozenset()
+    """The kinds of sandbox its environment's programs declare."""
+    demand: Demand | None = None
+    """What its scheduled parts need (`rollout_train.demand`)."""
+    group: Any = None
+    """The placement group that reserves them."""
+    _said: str | None = field(default=None, init=False, repr=False)
 
     @property
     def ledger(self) -> Any:
@@ -290,20 +300,21 @@ class Run:
     @property
     def channel(self) -> str:
         """The channel the run trains or plays: the trained one, else the first its settings name."""
-        trained = self.settings["trainer.channel"]
-        channels = self.settings.channels
-        return str(trained) if trained in channels or not channels else channels[0]
+        return played_channel(self.settings)
 
     async def start(self, stack: contextlib.AsyncExitStack, *, training: bool) -> None:
-        """Start what the run needs, registering with `stack` how each is stopped: the environment, the trainer (with
-        `training`), each channel's engines, the gateway, the pools and the runner; then wait for what Ray has yet to
-        give."""
+        """Start what the run needs, registering with `stack` how each is stopped: its placement group, reserved
+        before anything is started in it; the trainer (with `training`), each channel's engines, the gateway, the
+        pools and the runner; then wait for what Ray has yet to give."""
         self.directory = run_directory(self.cluster, self.run.id)
         await asyncio.to_thread(self.directory.mkdir, parents=True, exist_ok=True)
         self.runs.add(self.run.id)
         start = self.settings["start"]
         if isinstance(start, str):
             self.origin = await resolved(self.ledger, registry_of(self.ledger), start)
+        if self.environment is not None and self.kind in (TRAIN, EVAL, CHECK):
+            self.sandboxes, _ = await asyncio.to_thread(declared, self.environment)
+        await self._reserved()
         if training:
             await self._trainer()
         self._channels()
@@ -313,9 +324,41 @@ class Run:
         if self.kind in (TRAIN, EVAL, CHECK):
             await self._played(stack)
 
+    async def _reserved(self) -> None:
+        """The run's placement group (`rollout_train.demand.reserve`), waited for until Ray has reserved all of it."""
+        import ray
+
+        asked = self.demand = demand(self.settings, self.cluster, sandboxes=self.sandboxes)
+        self.group = reserve(asked, f"run/{self.run.id}")
+        if self.group is None:
+            return
+        wants = [f"run/{self.run.id}/{part.name} ({part.asks.said()})" for each in asked.bundles for part in each.parts]
+        ready = self.group.ready()
+        said = False
+        while not (await asyncio.to_thread(ray.wait, [ready], timeout=LOOK))[0]:
+            said = True
+            await self._told(wants)
+        if said and self.noted is not None:
+            await self.noted("running")
+
+    async def _told(self, waits: Sequence[str]) -> None:
+        """Say what the run waits for: in a beat as `run/RUN`, then on its launch (once for each change)."""
+        presence = presence_of(self.ledger)
+        if presence is not None:
+            about: dict[str, JsonValue] = {"kind": "run", "run": self.run.id, "host": socket.gethostname(),
+                                           "waiting": cast(JsonValue, list(waits))}  # fmt: skip
+            with contextlib.suppress(Exception):
+                await presence.beat(f"run/{self.run.id}", about)
+        now = "waits for " + ", ".join(waits)
+        if now != self._said:
+            self._said = now
+            if self.noted is not None:
+                await self.noted(now)
+
     async def _trainer(self) -> None:
-        """The trainer, as an actor on this node asking for its GPUs (half of the card, where the trained channel's
-        engine hosts share it)."""
+        """The trainer, as an actor on this node: a scheduled one in its bundle, asking for its GPUs (half of the card,
+        where the trained channel's engine hosts share it) and its CPU, as the run's demand counted them; a metered one
+        (Tinker's) asking for nothing."""
         import ray
         from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
@@ -336,25 +379,24 @@ class Run:
                     given["objective"] = self.objective or objective or objective_in(self.settings).to_json()
         if (project := provider.secrets.get("project")) is not None and (said := project.resolve()) is not None:
             given["project"] = said
-        gpus = provider.gpus / 2 if self._colocating(provider) else provider.gpus
+        asks = self.demand.asks(TRAINER) if self.demand is not None else None
         name = f"run/{self.run.id}/trainer"
-        node = ray.get_runtime_context().get_node_id()
+        if asks is not None:
+            placement = placed(self.group, self.demand, TRAINER)
+        else:  # (metered: not in the run's demand)
+            asks = Resources()
+            node = ray.get_runtime_context().get_node_id()
+            placement = {"scheduling_strategy": NodeAffinitySchedulingStrategy(node, soft=False)}
         actor = ray.remote(TrainerActor).options(
-            name=name, num_gpus=gpus, num_cpus=1, max_concurrency=4,
-            scheduling_strategy=NodeAffinitySchedulingStrategy(node, soft=False),
-        )  # fmt: skip
+            name=name, num_gpus=asks.gpus, num_cpus=asks.cpus, max_concurrency=4, **placement
+        )
         with contextlib.suppress(ImportError, ValueError):  # (one this process cannot import is told everything)
             given = taken_by(named(making), given)
         handle = actor.remote(making, model, given)
-        self.waiting.add(name, handle, f"{gpus:g} GPU and 1 CPU on the driver's node" if gpus else "1 CPU")
+        self.waiting.add(
+            name, handle, f"{asks.said()} on the driver's node" if asks.cpus or asks.gpus else "the driver's node"
+        )
         self.trainer_handle = handle
-
-    def _colocating(self, provider: TrainerProvider) -> bool:
-        """Whether the trainer shares the GPU of the trained channel's engine hosts."""
-        trained = self.settings.trained
-        if trained is None or provider.colocate_with is None:
-            return False
-        return provider.colocate_with in self.settings.providers(trained)
 
     async def _over(self, provider: TrainerProvider, model: str) -> str:
         """What the trainer is made over: the model; for a run that starts from a full checkpoint (or an adapter over
@@ -421,7 +463,7 @@ class Run:
 
     def hosted(self, channel: str, provider: str, model: str) -> list[Any]:
         """The servers of a channel on a `vllm` provider: engine hosts of the run's own, one per replica, each bound to
-        the run's channel and asking Ray for its share of a GPU."""
+        the run's channel, asking Ray for its share of a GPU and its CPU in its bundle of the run's placement group."""
         from rollout_train.inference.hosts import HostServer, host_spec, started
 
         offered = self.cluster.inference[provider]
@@ -430,13 +472,15 @@ class Run:
         spec = host_spec(self.cluster, provider, model, settings=self.settings)
         servers: list[Any] = []
         for index in range(count):
-            name = f"run/{self.run.id}/engine/{channel}/{index}"
+            part = f"engine/{channel}/{index}"
+            name = f"run/{self.run.id}/{part}"
             handle = started(
                 name, spec, ledger_at(self.cluster), blobs_at(self.cluster), bound=[(self.run.id, channel)],
-                replica=(index, count), directory=self.cluster.scratch,
+                replica=(index, count), directory=self.cluster.scratch, placement=placed(self.group, self.demand, part),
             )  # fmt: skip
             self.hosts.setdefault(channel, []).append(handle)
-            self.waiting.add(name, handle, f"{spec.gpus:g} GPU" if spec.gpus else "its engine")
+            asks = Resources(cpus=spec.cpus, gpus=spec.gpus, custom=dict(spec.resources))
+            self.waiting.add(name, handle, asks.said())
             servers.append(HostServer(handle, name))
         return servers
 
@@ -458,9 +502,8 @@ class Run:
         pending = dict(self.waiting.actors)
         if not pending:
             return
-        presence = presence_of(self.ledger)
         readies = {name: handle.__ray_ready__.remote() for name, (handle, _) in pending.items()}
-        said: str | None = None
+        said = False
         while readies:
             done, _ = await asyncio.to_thread(ray.wait, list(readies.values()), num_returns=len(readies), timeout=LOOK)
             for name in [name for name, ready in readies.items() if ready in done]:
@@ -470,18 +513,9 @@ class Run:
                     raise RuntimeError(f"{name} did not start: {_cause(error)}") from None
             if not readies:
                 break
-            waits = [f"{name} ({pending[name][1]}{_state(pending[name][0])})" for name in sorted(readies)]
-            now = "waits for " + ", ".join(waits)
-            if now != said:
-                said = now
-                if self.noted is not None:
-                    await self.noted(now)
-            if presence is not None:
-                about: dict[str, JsonValue] = {"kind": "run", "run": self.run.id, "host": socket.gethostname(),
-                                               "waiting": cast(JsonValue, waits)}  # fmt: skip
-                with contextlib.suppress(Exception):
-                    await presence.beat(f"run/{self.run.id}", about)
-        if said is not None and self.noted is not None:
+            said = True
+            await self._told([f"{name} ({pending[name][1]}{_state(pending[name][0])})" for name in sorted(readies)])
+        if said and self.noted is not None:
             await self.noted("running")
         handle = self.trainer_handle
         if handle is not None:
@@ -492,9 +526,8 @@ class Run:
         """The trainer, taking turns with the trained channel's engine hosts where it shares their GPU."""
         from rollout_train.inference.hosts import HostPausable
 
-        provider = self.cluster.trainers[str(self.settings["trainer.provider"])]
         trained = self.settings.trained
-        if self.trainer is None or trained is None or not self._colocating(provider):
+        if self.trainer is None or trained is None or not colocating(self.settings, self.cluster):
             return
         hosts = [HostPausable(each) for each in self.hosts.get(trained, [])]
         if hosts:
@@ -539,10 +572,7 @@ class Run:
         """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`, with
         its keeper; its leases are kept beside the ledger."""
         pools: dict[str, Pool] = {}
-        if self.environment is None:
-            return pools
-        kinds, _ = await asyncio.to_thread(declared, self.environment)
-        for kind in sorted(kinds):
+        for kind in sorted(self.sandboxes):
             section = self.cluster.sandboxes.get(kind)
             if section is None:
                 continue  # (validation refused a run whose environment needs it)
@@ -602,6 +632,7 @@ class Run:
         return await on_ray(
             ledger_at(self.cluster), blobs_at(self.cluster), fence, checkpoint.id, chain,
             target=str(model) if model is not None else None, settings=cast(Any, told), scratch=self.cluster.scratch,
+            placement=placed(self.group, self.demand, BRIDGE),
         )  # fmt: skip
 
     def chosen(self, formats: frozenset[str]) -> tuple[Bridge, ...]:
@@ -698,14 +729,18 @@ async def started(run: Run, *, training: bool) -> AsyncGenerator[Run]:
 
 
 def _ended(run: Run) -> None:
-    """End the actors a run started (Ray ends them with the job in any case; a run in a process that goes on, such as
-    `--here`, ends them now)."""
+    """End the actors a run started and remove its placement group (Ray ends them with the job in any case; a run in
+    a process that goes on, such as `--here`, ends them now)."""
     import ray
+    from ray.util.placement_group import remove_placement_group
 
     for handle in [*(each for listed in run.hosts.values() for each in listed), run.trainer_handle]:
         if handle is not None:
             with contextlib.suppress(Exception):
                 ray.kill(handle, no_restart=True)
+    if run.group is not None:
+        with contextlib.suppress(Exception):
+            remove_placement_group(run.group)
 
 
 async def _environment(run: Run) -> tuple[Environment, dict[str, JsonValue] | None]:
@@ -754,8 +789,11 @@ async def ran(run: Run) -> None:
         run.started["environment"] = str(run.settings["environment"])
         if published is not None:
             run.started["published"] = published
-    _, free = ray_capacity()
-    findings = await checked(run.settings, run.cluster, run.ledger, loaded=loaded, own=run.run.id, gpus_free=free)
+    free = ray_free()
+    if free is not None:  # (the driver holds its own share already: as its job's entrypoint, or as this process)
+        kinds = (await asyncio.to_thread(declared, loaded))[0] if loaded is not None else frozenset[str]()
+        free = free + demand(run.settings, run.cluster, sandboxes=kinds).driver
+    findings = await checked(run.settings, run.cluster, run.ledger, loaded=loaded, own=run.run.id, free=free)
     refusing = [each for each in findings if each.refuses]
     if refusing:
         await _refused(run, refusing)

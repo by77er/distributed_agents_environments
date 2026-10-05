@@ -39,7 +39,7 @@ import time
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import JsonValue, TypeAdapter
 
@@ -388,21 +388,25 @@ async def on_ray(
     target: str | None = None,
     settings: Mapping[str, Mapping[str, JsonValue]] | None = None,
     scratch: str = SCRATCH,
+    placement: Mapping[str, Any] | None = None,
 ) -> Manifest:
     """`bridged`, with each bridge of `chain` a Ray task of its own on the cluster this process is connected to
-    (`ray.init`), asking for the CPUs and memory the bridge declares. `ledger_at` and `blobs_at` say where a worker
-    finds the ledger and the blob store; `scratch` is where it works, on its own machine. A chain whose bridges write
-    nothing (`none`) serves the checkpoint's own files."""
+    (`ray.init`), asking for the CPUs and memory the bridge declares, or those its `settings` say (`cpus`,
+    `memory_gib`: the cluster's `[bridges."NAME"]`). `placement` places each task (a run's: in the bridge's bundle of
+    its placement group, `rollout_train.demand.placed`). `ledger_at` and `blobs_at` say where a worker finds the ledger
+    and the blob store; `scratch` is where it works, on its own machine. A chain whose bridges write nothing (`none`)
+    serves the checkpoint's own files."""
     import ray
 
     files: dict[str, Any] | None = None
     for bridge in chain:
         if bridge.task is None:
             continue
-        task = ray.remote(_on_worker).options(  # pyright: ignore[reportUnknownMemberType]
-            num_cpus=bridge.cpus, memory=int(bridge.memory_gib * 2**30)
-        )
         told = dict((settings or {}).get(bridge.name, {}))
+        cpus, memory = told.get("cpus", bridge.cpus), told.get("memory_gib", bridge.memory_gib)
+        task = ray.remote(_on_worker).options(  # pyright: ignore[reportUnknownMemberType]
+            num_cpus=float(cast(float, cpus)), memory=int(float(cast(float, memory)) * 2**30), **dict(placement or {})
+        )
         reference = task.remote(
             dict(ledger_at), dict(blobs_at), (fence.scope, fence.number), checkpoint, bridge, files, target, told,
             scratch,

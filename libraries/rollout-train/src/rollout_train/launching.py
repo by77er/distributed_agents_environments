@@ -6,8 +6,8 @@ the preset's settings, then those given). Before it is recorded, and again by it
 its settings are checked against the cluster config (`checked`, over `rollout_train.validation.check`) with the facts
 gathered here: the environment's (`environment_facts`: whether it loads, the sandboxes and slots its programs declare;
 a published one's from its version's record) and the ledger's (`ledger_facts`: the checkpoints the settings name, the
-suites, the names taken, and the GPUs the caller knows of). A finding that refuses names the setting it is about; one
-that does not is a note (the run waits for something).
+suites, the names taken, the GPUs the caller knows of, and what Ray has free: `ray_free`). A finding that refuses names
+the setting it is about; one that does not is a note (the run waits for something).
 
 `offers` is what the New run form chooses from: the cluster config's environments (built-in, and every published
 version beside the ledger), trainers with their settings, inference providers with their capabilities and models (each
@@ -29,6 +29,7 @@ from pydantic import JsonValue
 
 from rollout_train.bridges import NoBridge, format_of, path
 from rollout_train.cluster import Cluster
+from rollout_train.demand import Resources
 from rollout_train.ledger import Ledger
 from rollout_train.presence import Beat, alive
 from rollout_train.presets import Presets
@@ -63,7 +64,7 @@ __all__ = [
     "free_name",
     "ledger_facts",
     "offers",
-    "ray_capacity",
+    "ray_free",
     "settled",
 ]
 
@@ -172,11 +173,11 @@ async def ledger_facts(
     *,
     own: str | None = None,
     gpus: float | None = None,
-    gpus_free: float | None = None,
+    free: Resources | None = None,
 ) -> LedgerFacts:
     """What validation reads of the ledger: each checkpoint the settings name (the start, a fixed channel's), the
-    suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs the caller
-    knows of."""
+    suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs and free
+    resources the caller knows of."""
     from rollout_train.evals import suite_of, versions_of
 
     registry = registry_of(ledger)
@@ -221,7 +222,7 @@ async def ledger_facts(
             suites[name] = SuiteFacts(name, max(version.number for version in versions), environments)
     runs = await registry.runs() if registry is not None else []
     taken = frozenset(each.name for each in runs if each.id != own)
-    return LedgerFacts(checkpoints=checkpoints, suites=suites, names_taken=taken, gpus=gpus, gpus_free=gpus_free)
+    return LedgerFacts(checkpoints=checkpoints, suites=suites, names_taken=taken, gpus=gpus, free=free)
 
 
 async def checked(
@@ -232,11 +233,11 @@ async def checked(
     loaded: "Environment | None" = None,
     own: str | None = None,
     gpus: float | None = None,
-    gpus_free: float | None = None,
+    free: Resources | None = None,
 ) -> list[Finding]:
     """Everything wrong with a run's settings on this cluster (`rollout_train.validation.check`), with the facts
     gathered now."""
-    return (await examined(settings, cluster, ledger, loaded=loaded, own=own, gpus=gpus, gpus_free=gpus_free)).findings
+    return (await examined(settings, cluster, ledger, loaded=loaded, own=own, gpus=gpus, free=free)).findings
 
 
 @dataclass(frozen=True)
@@ -258,27 +259,30 @@ async def examined(
     loaded: "Environment | None" = None,
     own: str | None = None,
     gpus: float | None = None,
-    gpus_free: float | None = None,
+    free: Resources | None = None,
 ) -> Examined:
     """A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
     one step's estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`)."""
     environment = settings.get("environment")
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
-    known = await ledger_facts(settings, ledger, own=own, gpus=gpus, gpus_free=gpus_free)
+    known = await ledger_facts(settings, ledger, own=own, gpus=gpus, free=free)
     return Examined(
         check(settings, cluster, facts, known), facts, spend_of(settings, cluster, facts), weights_of(settings, cluster)
     )
 
 
-def ray_capacity() -> tuple[float | None, float | None]:
-    """The GPUs the Ray cluster this process is connected to has free (none: not connected). Its total is not said:
-    an autoscaled cluster has more than its nodes now."""
+def ray_free() -> Resources | None:
+    """What the Ray cluster this process is connected to has free now: CPUs, memory, GPUs and custom resources (none:
+    not connected). Its total is not said: an autoscaled cluster has more than its nodes now."""
     import ray
 
     if not ray.is_initialized():
-        return None, None
-    free = ray.available_resources().get("GPU", 0.0)  # pyright: ignore[reportUnknownMemberType]
-    return None, float(free)
+        return None
+    said = cast(dict[str, float], ray.available_resources())  # pyright: ignore[reportUnknownMemberType]
+    custom = {key: float(value) for key, value in said.items() if key not in ("CPU", "GPU", "memory",
+              "object_store_memory") and not key.startswith("node:") and not key.startswith("bundle_")}  # fmt: skip
+    return Resources(float(said.get("CPU", 0.0)), float(said.get("memory", 0.0)) / 2**30, float(said.get("GPU", 0.0)),
+                     custom)  # fmt: skip
 
 
 def capacity_of(beats: Sequence[Beat]) -> dict[str, JsonValue] | None:

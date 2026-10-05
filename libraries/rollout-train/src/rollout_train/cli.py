@@ -117,7 +117,7 @@ async def _asked(
     """Ask for a run of `kind` with its settings in layers (`under`, then `--preset`, `--settings`, `--set`, the
     shortcuts and `flags`), checked against the cluster config; then, as the arguments say, stop there (`--check`),
     run its job here (`--here`), or submit it and follow it (unless `--detach`). Returns the exit status."""
-    from rollout_train.launching import checked, free_name, ray_capacity, settled
+    from rollout_train.launching import checked, free_name, ray_free, settled
     from rollout_train.run_settings import from_file, from_flags, layered, shortcuts
     from rollout_train.stores import Stores
     from rollout_train.submitting import ask, submit
@@ -148,8 +148,8 @@ async def _asked(
     if not settings["name"]:
         taken = {each.name for each in await stores.registry.runs()}
         settings = layered(settings.values, {"name": free_name(named_as(settings), taken)})
-    _, free = await asyncio.to_thread(ray_capacity) if arguments.here else (None, None)
-    findings = await checked(settings, cluster, stores.ledger, gpus_free=free)
+    free = await asyncio.to_thread(ray_free) if arguments.here else None
+    findings = await checked(settings, cluster, stores.ledger, free=free)
     for each in findings:
         print(f"{'refused' if each.refuses else 'note'}: {each.key}: {each.reason}", flush=True)
     if any(each.refuses for each in findings):
