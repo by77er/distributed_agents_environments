@@ -7,6 +7,8 @@ A topic is a thing the page shows, by name:
 - `machines`: every machine that beats and the roles on it (`System.machines`);
 - `launches`: the runs asked for, each with its job and state (`System.launches`);
 - `offers`: what a run can be asked for on the monitor's cluster (`System.offers`);
+- `presets`, `preset/NAME`: every preset's newest version, and one preset's versions (`System.presets`,
+  `System.preset`);
 - `evals`: the suites and the evals that played them (`System.evals`);
 - `environments`: every environment the system knows of (`System.environments`);
 - `environment/MODULE:NAME`: one environment's page (`System.environment`; a published one's is
@@ -121,6 +123,10 @@ class Hub:
             return await system.launches()
         if topic == "offers":
             return await system.offers()
+        if topic == "presets":
+            return await system.presets()
+        if topic.startswith("preset/"):
+            return await system.preset(topic.removeprefix("preset/"))
         if topic == "evals":
             return await system.evals()
         if topic == "environments":

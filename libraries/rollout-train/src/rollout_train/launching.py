@@ -13,14 +13,16 @@ that does not is a note (the run waits for something).
 version beside the ledger), trainers with their settings, inference providers with their capabilities and models (each
 with the renderer families that render it, among those named so far), each trainer's and provider's allocation and the
 weights it takes (`lora`, `full`), each trainer and provider pair's bridge or why there is none, sandbox pools, presets,
-and the GPUs the heartbeats say are free.
+the GPUs the heartbeats say are free, the objective's families, presets and components, and the keys a training run
+takes (the schema). Each environment carries the renderer families runs and presets on it named for their trained
+channel (its model family, as far as is known).
 """
 
 import asyncio
 import contextlib
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import JsonValue
@@ -34,17 +36,30 @@ from rollout_train.providers import settings_of
 from rollout_train.published import environment_versions_of, is_published
 from rollout_train.registry import registry_of, resolved
 from rollout_train.run_settings import WEIGHTS, RunSettings, layered
-from rollout_train.validation import CheckpointFacts, EnvironmentFacts, Finding, LedgerFacts, SuiteFacts, check, serves
+from rollout_train.validation import (
+    CheckpointFacts,
+    EnvironmentFacts,
+    Finding,
+    LedgerFacts,
+    Spend,
+    SuiteFacts,
+    check,
+    serves,
+    spend_of,
+    weights_of,
+)
 
 if TYPE_CHECKING:
     from rollout.environment import Environment
 
 __all__ = [
+    "Examined",
     "Refused",
     "capacity_of",
     "checked",
     "declared",
     "environment_facts",
+    "examined",
     "free_name",
     "ledger_facts",
     "offers",
@@ -221,10 +236,38 @@ async def checked(
 ) -> list[Finding]:
     """Everything wrong with a run's settings on this cluster (`rollout_train.validation.check`), with the facts
     gathered now."""
+    return (await examined(settings, cluster, ledger, loaded=loaded, own=own, gpus=gpus, gpus_free=gpus_free)).findings
+
+
+@dataclass(frozen=True)
+class Examined:
+    """A run's settings, checked: the findings, what is known of its environment, one step's estimated spend and what
+    it trains."""
+
+    findings: list[Finding]
+    environment: EnvironmentFacts | None
+    spend: Spend
+    weights: str | None
+
+
+async def examined(
+    settings: RunSettings,
+    cluster: Cluster,
+    ledger: Ledger,
+    *,
+    loaded: "Environment | None" = None,
+    own: str | None = None,
+    gpus: float | None = None,
+    gpus_free: float | None = None,
+) -> Examined:
+    """A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
+    one step's estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`)."""
     environment = settings.get("environment")
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
     known = await ledger_facts(settings, ledger, own=own, gpus=gpus, gpus_free=gpus_free)
-    return check(settings, cluster, facts, known)
+    return Examined(
+        check(settings, cluster, facts, known), facts, spend_of(settings, cluster, facts), weights_of(settings, cluster)
+    )
 
 
 def ray_capacity() -> tuple[float | None, float | None]:
@@ -292,7 +335,9 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "commit": version.commit, "imported": version.imported,
             "sandboxes": cast(JsonValue, listed if isinstance(listed, list) else []),
         })  # fmt: skip
-    renderers = await _renderers(ledger)
+    renderers, families = await _renderers(ledger)
+    for each in environments:
+        each["families"] = cast(JsonValue, families.get(str(each["environment"]), []))
     trainers: list[dict[str, Any]] = []
     for name, trainer in cluster.trainers.items():
         try:
@@ -352,15 +397,53 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         "sandboxes": {kind: {"size": each.size, "provider": each.provider} for kind, each in cluster.sandboxes.items()},
         "presets": kept,
         "capacity": capacity_of(beats),
+        "objectives": _objectives(),
+        "schema": _schema(),
     }
 
 
-async def _renderers(ledger: Ledger) -> dict[str, list[str]]:
-    """The renderers runs and presets named for each model so far, by model."""
+def _objectives() -> dict[str, Any]:
+    """The objective's families, its presets (each with its family, source and components) and the components, each
+    with the families that accept it (`rollout_train.objectives`)."""
+    from rollout_train.objectives import COMPONENTS, FAMILIES, PRESETS
+
+    return {
+        "families": list(FAMILIES),
+        "presets": [
+            {"name": name, "family": each.objective.family, "source": each.source, "says": each.says,
+             "components": each.objective.components()}
+            for name, each in PRESETS.items()
+        ],
+        "components": [
+            {"key": each.key, "types": list(each.types), "families": sorted(each.families),
+             "changeable": each.changeable, "says": each.says, "choices": list(each.choices), "least": each.least,
+             "above": each.above}
+            for each in COMPONENTS
+        ],
+    }  # fmt: skip
+
+
+def _schema() -> list[dict[str, Any]]:
+    """The keys a training run takes (`rollout_train.run_settings.KEYS`), each with its types, default and whether it
+    is changeable."""
+    from rollout_train.run_settings import KEYS
+
+    return [
+        {"key": each.pattern, "types": list(each.types), "default": each.default, "changeable": each.changeable,
+         "says": each.says, "choices": list(each.choices), "least": each.least}
+        for each in KEYS
+        if "train" in each.kinds and not each.pattern.startswith("objective.")
+    ]  # fmt: skip
+
+
+async def _renderers(ledger: Ledger) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """The renderers runs and presets named for each model so far, by model; and the renderer families they named for
+    each environment's trained channel, by environment."""
     from rollout_train.presets import presets_of
     from rollout_train.record import recorded_settings, runs_in
 
     found: dict[str, set[str]] = {}
+    played: dict[str, set[str]] = {}
 
     def note(said: Mapping[str, Any]) -> None:
         for key, value in said.items():
@@ -368,6 +451,10 @@ async def _renderers(ledger: Ledger) -> dict[str, list[str]]:
                 renderer = said.get(key.removesuffix(".model") + ".renderer")
                 if isinstance(renderer, str):
                     found.setdefault(value, set()).add(renderer)
+        environment = said.get("environment")
+        trained = said.get(f"channels.{said.get('trainer.channel') or 'policy'}.renderer")
+        if isinstance(environment, str) and isinstance(trained, str):
+            played.setdefault(environment, set()).add(_family(trained))
 
     presets = presets_of(ledger)
     for each in await presets.all() if presets is not None else []:
@@ -377,4 +464,5 @@ async def _renderers(ledger: Ledger) -> dict[str, list[str]]:
             recorded = await recorded_settings(ledger, run)
             if recorded is not None:
                 note(recorded)
-    return {model: sorted(each) for model, each in found.items()}
+    by_model = {model: sorted(each) for model, each in found.items()}
+    return by_model, {environment: sorted(each) for environment, each in played.items()}

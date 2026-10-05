@@ -130,6 +130,16 @@ async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(t
     assert offers["pairs"] == [{"trainer": "steps", "inference": "local", "bridge": ["verbatim"]}]
     (preset,) = offers["presets"]
     assert preset["id"] == "small@1" and preset["settings"]["trainer.provider"] == "steps"
+    assert offers["environments"][0]["families"] == ["rollout_train.testing"]  # (the preset's renderer on it)
+    objectives = offers["objectives"]
+    assert objectives["families"] == ["policy_gradient", "preference", "likelihood", "distillation"]
+    dpo = next(each for each in objectives["presets"] if each["name"] == "dpo")
+    assert dpo["family"] == "preference" and dpo["components"]["preference.loss"] == "sigmoid"
+    clip = next(each for each in objectives["components"] if each["key"] == "clip.low")
+    assert clip["families"] == ["policy_gradient"] and clip["changeable"]
+    schema = {each["key"]: each for each in offers["schema"]}
+    assert schema["groups"]["default"] == 100 and schema["max_lag"]["changeable"]
+    assert schema["weights"]["choices"] == ["lora", "full"] and "eval.suite" not in schema
     plain = httpx.ASGITransport(app=create_app(str(tmp_path / "files"), beat=0.0))
     async with httpx.AsyncClient(transport=plain, base_url="http://monitor") as without:
         assert (await without.get("/api/offers")).json()["cluster"] is None  # (a monitor with no cluster config)
@@ -147,7 +157,9 @@ async def test_a_run_is_checked_asked_for_from_the_page_and_stopped(tmp_path: Pa
     wrong = {**asked, "settings": {"channels.policy.provider": "elsewhere", "trainer.rank": "big"}}
     async with client:
         checked = (await client.post("/api/launches/check", json=asked)).json()
-        assert checked["refusals"] == [] and checked["preset"] == "small@1"
+        assert checked["refusals"] == [] and checked["preset"] == "small@1" and checked["weights"] == "lora"
+        assert checked["spend"] == {"dollars": 0.0, "parts": {}, "why": ""}  # (nothing metered)
+        assert checked["environment"] == {"slots": ["policy"], "untrained": [], "judges": []}
         assert checked["settings"]["trainer.learning_rate"] == 3e-5 and checked["settings"]["groups"] == 2
         refusals = (await client.post("/api/launches/check", json=wrong)).json()["refusals"]
         assert {each["key"] for each in refusals} >= {"channels.policy.provider", "trainer.rank"}
@@ -221,3 +233,27 @@ async def test_a_run_is_paused_resumed_in_place_and_once_stopped_submitted_again
         assert (await client.post(f"/api/runs/{entry.id}/resume")).status_code == 409  # (being launched already)
         eval_refused = await client.post(f"/api/runs/{entry.id}-eval-2/resume")
         assert eval_refused.status_code == 409 and "resume that run" in eval_refused.json()["error"]
+
+
+async def test_presets_are_listed_shown_saved_as_new_versions_and_deleted_from_the_page(tmp_path: Path) -> None:
+    _, client = await launching(tmp_path, Jobs())
+    async with client:
+        listed = (await client.get("/api/presets")).json()
+        assert [(each["id"], each["versions"]) for each in listed["presets"]] == [("small@1", 1)] and listed["keeps"]
+        changed = {**POLICY, "environment": WORDS, "groups": 5}
+        saved = await client.post("/api/presets/small", json={"settings": changed, "note": "fewer groups"})
+        assert saved.status_code == 200 and saved.json()["preset"]["id"] == "small@2"
+        versions = (await client.get("/api/presets/small")).json()["versions"]
+        assert [(each["id"], each["note"], each["settings"]["groups"]) for each in versions] == [
+            ("small@1", "the test's", 2), ("small@2", "fewer groups", 5),
+        ]  # fmt: skip
+        offered = (await client.get("/api/offers")).json()["presets"]
+        assert [each["id"] for each in offered] == ["small@2"]
+        refused = await client.post("/api/presets/small", json={"settings": {"name": "x"}})
+        assert refused.status_code == 409 and "no run's name" in refused.json()["error"]
+        assert (await client.post("/api/presets/a@b", json={"settings": {}})).status_code == 409
+        assert (await client.post("/api/presets/small", json=["not", "a", "table"])).status_code == 400
+        assert (await client.delete("/api/presets/small")).json() == {"deleted": "small"}
+        assert (await client.get("/api/presets/small")).status_code == 404
+        assert (await client.get("/api/presets")).json()["presets"] == []
+        assert (await client.delete("/api/presets/small")).status_code == 404

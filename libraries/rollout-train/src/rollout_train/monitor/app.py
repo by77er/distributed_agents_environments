@@ -92,7 +92,11 @@ def create_app(
     - `/api/launches`: the runs asked for, each with its job and state (GET); `POST` (`{"kind", "name",
       "environment", "settings", "preset"}`) asks for a run and starts its job (`System.launch`), answering 422 with
       the refusals (each with the setting it is about) where its settings are refused; `POST /api/launches/check`
-      says the refusals and notes without asking (`System.check`); `POST /api/launches/{id}/stop` stops one;
+      says the refusals and notes without asking, with what the run trains, one step's estimated spend and its
+      environment's slots (`System.check`); `POST /api/launches/{id}/stop` stops one;
+    - `/api/presets`: every preset's newest version (`System.presets`); `/api/presets/{name}` one preset's versions
+      (`System.preset`); `POST /api/presets/{name}` (`{"settings", "note"}`) saves its next version
+      (`System.save_preset`), and `DELETE` deletes it (`System.delete_preset`);
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
     - `/api/episodes/{run_id}?after=N`: one episode's lines from index N on (its rollouts, one per model slot), and
       what it reported (`System.episode`);
@@ -357,6 +361,31 @@ def create_app(
     async def offered(request: Request) -> Response:
         return answered(request, await hub.read("offers"))
 
+    async def presets(request: Request) -> Response:
+        return answered(request, await hub.read("presets"))
+
+    async def preset(request: Request) -> Response:
+        name = request.path_params["name"]
+        if request.method == "GET":
+            return answered(request, await hub.read(f"preset/{name}"))
+        if request.method == "DELETE":
+
+            async def deleted() -> Any:
+                return await system.delete_preset(name)
+
+            return await written(deleted)
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "say the preset's settings, as JSON"}, status_code=400)
+
+        async def saved() -> Any:
+            return await system.save_preset(name, cast(dict[str, Any], body))
+
+        return await written(saved)
+
     async def stop(request: Request) -> Response:
         id = request.path_params["id"]
 
@@ -412,6 +441,8 @@ def create_app(
         Route("/api/offers", offered),
         Route("/api/launches", launches, methods=["GET", "POST"]),
         Route("/api/launches/check", check, methods=["POST"]),
+        Route("/api/presets", presets),
+        Route("/api/presets/{name}", preset, methods=["GET", "POST", "DELETE"]),
         Route("/api/evals", evals),
         Route("/api/evals/subjects", eval_subjects),
         Route("/api/evals/{kind:str}/{reference:path}", history),

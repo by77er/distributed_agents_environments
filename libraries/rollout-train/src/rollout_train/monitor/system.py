@@ -51,7 +51,7 @@ from rollout_train.inference.remote import ENGINES
 from rollout_train.launches import OPEN, TRAIN, Launch, launch_of, launches_of
 from rollout_train.launching import Refused as LaunchRefused
 from rollout_train.launching import checked as findings_of
-from rollout_train.launching import offers, settled
+from rollout_train.launching import examined, offers, settled
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.environments import Read, described, listed, page_of
@@ -61,7 +61,7 @@ from rollout_train.monitor.machines import kind_of, machines
 from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in, suites_in
 from rollout_train.monitor.statistics import newest, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
-from rollout_train.presets import presets_of
+from rollout_train.presets import Preset, presets_of
 from rollout_train.published import EnvironmentVersion, environment_versions_of, is_published
 from rollout_train.publishing import Importer, Refused, Source, publish
 from rollout_train.record import (
@@ -344,17 +344,66 @@ class System:
 
     async def check(self, body: Mapping[str, Any]) -> dict[str, Any]:
         """What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
-        this monitor's cluster (`rollout_train.launching.checked`), and the settings it would run with. Raises `Taken`
-        where this monitor has no cluster config, or for a body it cannot read."""
+        this monitor's cluster (`rollout_train.launching.examined`); the settings it would run with, what it trains,
+        one step's estimated spend on its metered parts (or why it cannot be estimated yet), and the slots its
+        environment's programs declare, where they are known here. Raises `Taken` where this monitor has no cluster
+        config, or for a body it cannot read."""
         if self._cluster is None:
             raise Taken(NO_CLUSTER)
         settings, preset = await self._asked(body)
-        findings = await findings_of(settings, self._cluster, self._ledger)
+        found = await examined(settings, self._cluster, self._ledger)
+        facts = found.environment
+        slots = None
+        if facts is not None and facts.slots is not None:
+            slots = {"slots": sorted(facts.slots), "untrained": sorted(facts.untrained), "judges": sorted(facts.judges)}
         return {
-            "refusals": [asdict(each) for each in findings if each.refuses],
-            "notes": [asdict(each) for each in findings if not each.refuses],
-            "settings": dict(settings.values), "preset": preset,
+            "refusals": [asdict(each) for each in found.findings if each.refuses],
+            "notes": [asdict(each) for each in found.findings if not each.refuses],
+            "settings": dict(settings.values), "preset": preset, "weights": found.weights,
+            "spend": {"dollars": found.spend.dollars, "parts": dict(found.spend.parts), "why": found.spend.why},
+            "environment": slots,
         }  # fmt: skip
+
+    async def presets(self) -> dict[str, Any]:
+        """Every preset's newest version, each with how many versions it has (`rollout_train.presets`)."""
+        store = presets_of(self._ledger)
+        if store is None or not await asyncio.to_thread(present, self._ledger):
+            return {"presets": [], "keeps": store is not None}
+        listed: list[dict[str, Any]] = []
+        for each in await store.all():
+            listed.append({**_preset(each), "versions": len(await store.versions(each.name))})
+        return {"presets": listed, "keeps": True}
+
+    async def preset(self, name: str) -> dict[str, Any] | None:
+        """A preset's versions, oldest first; none where there is no such preset (or it was deleted)."""
+        store = presets_of(self._ledger)
+        if store is None or await store.get(name) is None:
+            return None
+        return {"name": name, "versions": [_preset(each) for each in await store.versions(name)]}
+
+    async def save_preset(self, name: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Save `body`'s settings (`{"settings": {KEY: VALUE}, "note"}`) as a preset's next version. Raises `Taken`
+        for a name that cannot be one, settings that are not a table of run settings, or a ledger that keeps no
+        presets."""
+        store = presets_of(self._ledger)
+        if store is None:
+            raise Taken("this ledger keeps no presets beside it")
+        settings: Any = body.get("settings")
+        if not isinstance(settings, dict):
+            raise Taken("a preset's settings are a table of run settings, by dotted key")
+        try:
+            saved = await store.save(name, cast(dict[str, JsonValue], settings), str(body.get("note") or ""))
+        except ValueError as error:
+            raise Taken(str(error)) from None
+        return {"preset": _preset(saved)}
+
+    async def delete_preset(self, name: str) -> dict[str, Any]:
+        """Delete a preset (its versions stay readable by number). Raises `KeyError` for one there is none of."""
+        store = presets_of(self._ledger)
+        if store is None:
+            raise KeyError(f"there is no preset {name!r}")
+        gone = await store.delete(name)
+        return {"deleted": gone.name}
 
     async def launch(self, body: Mapping[str, Any]) -> dict[str, Any]:
         """Ask for a run (`check`'s body), and start its job if nothing refuses it (`rollout_train.submitting
@@ -1370,6 +1419,11 @@ def _outcome(number: str, group: Mapping[str, Any], line: Mapping[str, Any], uns
     joined = asdict(Result.from_json(line, int(number), group))
     failures = list(dict.fromkeys(str(failure)[:300] for failure in joined["failures"]))
     return {**joined, "failures": failures, "solved": solved_of(joined["solved"], unsaid)}
+
+
+def _preset(preset: Preset) -> dict[str, Any]:
+    return {"name": preset.name, "version": preset.version, "id": preset.id, "settings": dict(preset.settings),
+            "note": preset.note, "saved": preset.saved}  # fmt: skip
 
 
 def _backend_name(cluster: "Cluster") -> str:
